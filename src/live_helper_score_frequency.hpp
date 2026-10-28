@@ -39,7 +39,8 @@ struct HelperScoreFrequencyHull {
     double lower_hz=0,upper_hz=0;
     HelperFrequencyDomainStamp stamp;
 };
-class HelperScoreFrequencyHistory {
+template<std::size_t BucketCapacity=512>
+class HelperScoreFrequencyHistoryT {
     struct Bucket {
         std::uint64_t first=0,end=0;
         double lower=0,upper=0;
@@ -47,16 +48,29 @@ class HelperScoreFrequencyHistory {
         bool unsupported=false,compatible=true,has_signal=false,single_second=true;
     };
 public:
-    static constexpr std::size_t capacity=512;
-    static constexpr std::size_t storage_required()noexcept{return sizeof(HelperScoreFrequencyHistory);}
+    static constexpr std::size_t capacity=BucketCapacity;
+    static_assert(capacity>=2);
+    static constexpr std::size_t storage_required()noexcept{return sizeof(HelperScoreFrequencyHistoryT);}
     bool configure(std::uint32_t rate)noexcept {
         if(!rate||rate_)return false;
         rate_=rate;return true;
     }
     std::uint32_t sample_rate()const noexcept{return rate_;}
     std::size_t size()const noexcept{return count_;}
+    std::uint64_t next_sample()const noexcept{return next_sample_;}
     void invalidate_model()noexcept {
         for(std::size_t i=0;i<count_;++i){buckets_[i].unsupported=true;buckets_[i].compatible=false;}
+    }
+    // Dated rejection is mandatory even when optional precision is reclaimed.
+    // A partially intersected conservative bucket is rejected whole.
+    void reject(std::uint64_t first,std::uint64_t end)noexcept {
+        if(first>=end)return;
+        for(std::size_t i=0;i<count_;++i)if(buckets_[i].first<end && first<buckets_[i].end)
+            buckets_[i].unsupported=true;
+    }
+    template<class F> void visit_unsupported(F&& visit)const noexcept {
+        for(std::size_t i=0;i<count_;++i)if(buckets_[i].unsupported || !buckets_[i].compatible || !buckets_[i].has_signal)
+            visit(buckets_[i].first,buckets_[i].end);
     }
     bool append(const HelperScoreFrequencyCertificate& c)noexcept {
         if(!rate_||c.first_sample>=c.end_sample||(have_dates_&&c.first_sample<next_sample_))return false;
@@ -146,7 +160,53 @@ private:
     std::uint32_t rate_=0;
     bool have_dates_=false;
 };
+using HelperScoreFrequencyHistory=HelperScoreFrequencyHistoryT<512>;
 static_assert(HelperScoreFrequencyHistory::storage_required()<=65536);
+
+// Required provenance for a chosen conditioned input, independent of optional
+// smoothing. Start only at the first supported span of this authority: an
+// unsupported startup prefix never becomes observed input. Once started, gaps
+// and unsupported spans remain explicit and conservative bucket coalescing may
+// decline a query; it never bridges them or grants phase/END authority.
+class HelperScoreMandatoryHistory {
+    HelperScoreFrequencyHistoryT<16> history_;
+    HelperFrequencyDomainStamp stamp_;
+    std::uint32_t rate_=0;
+    bool started_=false;
+public:
+    bool configure(std::uint32_t rate)noexcept {
+        if(!rate || rate_)return false;
+        rate_=rate;return history_.configure(rate);
+    }
+    std::uint32_t sample_rate()const noexcept{return rate_;}
+    std::uint64_t next_sample()const noexcept{return started_?history_.next_sample():0;}
+    HelperFrequencyDomainStamp stamp()const noexcept{return stamp_;}
+    void observe_authority(HelperFrequencyDomainStamp stamp)noexcept {
+        if(stamp==stamp_)return;
+        history_.invalidate_model();stamp_=stamp;started_=false;
+    }
+    void invalidate_model()noexcept{history_.invalidate_model();}
+    bool append(const HelperScoreFrequencyCertificate& c)noexcept {
+        if(!rate_ || !stamp_.valid() || c.stamp!=stamp_ || c.first_sample>=c.end_sample)return false;
+        const bool supported=c.signal_supported && std::isfinite(c.lower_hz) &&
+            std::isfinite(c.upper_hz) && c.lower_hz<=c.upper_hz;
+        if(!started_) {
+            if(!supported)return true;
+            // A genuinely new authority starts at its first actually supported
+            // input. Older generations remain invalid, never relabelled.
+            history_={};if(!history_.configure(rate_))return false;started_=true;
+        }
+        return history_.append(c);
+    }
+    HelperScoreFrequencyHull query(std::uint64_t first,std::uint64_t end)const noexcept {
+        if(!started_ || !stamp_.valid())return {};
+        const auto out=history_.query(first,end);
+        return out.valid && out.stamp==stamp_?out:HelperScoreFrequencyHull{};
+    }
+    void reject(std::uint64_t first,std::uint64_t end)noexcept{history_.reject(first,end);}
+    void discard_before(std::uint64_t proven_watermark)noexcept{history_.discard_before(proven_watermark);}
+};
+static_assert(sizeof(HelperScoreMandatoryHistory)<=1024);
 
 
 // Center/radius enclosure of an ASYMMETRIC corrected-M interval. The ordinary
@@ -314,6 +374,11 @@ public:
         }
         if(cursor!=end)return {};return out;
     }
+    template<class F> void visit_unsupported(F&& visit)const noexcept {
+        frozen_.visit_unsupported(visit);
+        for(std::size_t i=0;i<count_;++i)if(recent_[i].veto || !recent_[i].certificate.signal_supported)
+            visit(recent_[i].certificate.first_sample,recent_[i].certificate.end_sample);
+    }
     void discard_before(std::uint64_t watermark)noexcept {
         frozen_.discard_before(watermark);std::size_t n=0;while(n<count_&&recent_[n].certificate.end_sample<=watermark)++n;
         for(std::size_t i=n;i<count_;++i)recent_[i-n]=recent_[i];count_-=n;
@@ -326,6 +391,37 @@ struct HelperScoreFrequencyProducer {
     std::uint64_t view_generation=0,raw_captured_end=0;
     HelperFrequencyDomainStamp stamp(std::uint64_t provider)const noexcept{return {provider,view_generation};}
 };
+
+// Fixed minimum publication is part of the conditioned-input lifetime. Only
+// the separately funded refinement pointer may yield under ordinary growth.
+// No raw PCM, receiver ownership, timestamp, phase or END authority lives here.
+struct HelperScorePublication {
+    HelperScoreMandatoryHistory history;
+    std::unique_ptr<HelperScoreFrequencyProducer> refinement;
+    std::uint64_t snapshot_captured_end=0,last_trace_second=UINT64_MAX,last_trace_contradictions=0;
+    std::uint64_t model_rejection_first_sample=0;
+    std::shared_ptr<const HelperInputView> view;
+    std::uint64_t provider_generation=0,view_generation=0;
+    HelperFrequencyDomainStamp stamp()const noexcept{return {provider_generation,view_generation};}
+    void observe_authority(HelperFrequencyDomainStamp next,std::uint64_t rejection_first)noexcept {
+        history.observe_authority(next);provider_generation=next.provider_generation;
+        view_generation=next.model_generation;model_rejection_first_sample=rejection_first;
+    }
+    void observe_rejections(const HelperScoreRefinedHistory& source)noexcept {
+        source.visit_unsupported([&](std::uint64_t first,std::uint64_t end){history.reject(first,end);});
+    }
+    void release_refinement()noexcept{refinement.reset();}
+    HelperScoreFrequencyHull query(std::uint64_t first,std::uint64_t end)const noexcept {
+        const auto base=history.query(first,end);
+        if(!base.valid)return base;
+        if(refinement && refinement->view==view && refinement->view_generation==view_generation) {
+            const auto fine=refinement->history.query(first,end);
+            if(fine.valid && fine.stamp==stamp())return fine;
+        }
+        return base;
+    }
+};
+static_assert(sizeof(HelperScorePublication)<=1152);
 
 // No timestamp, phase, END, or physical filter authority. The stamp identifies
 // provider and frequency-authority generation; view identity is checked too.

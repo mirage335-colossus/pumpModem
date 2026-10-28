@@ -11,7 +11,7 @@ regulatory power limit or certify an installation's compliance.
 
 ## Current two-tone preview
 
-Human checkpoint `2466865` retains a **90/10 straight-tone power split**:
+Human checkpoint `61e66b3` retains a **90/10 straight-tone power split**:
 90% pure frequency/phase pilot and 10% auxiliary punctuation/optional metadata.
 The pilot is nine times stronger in power, three times in amplitude and 9.54 dB
 above the auxiliary. Only the auxiliary has intentional phase reversals or
@@ -20,8 +20,10 @@ Robust, with the pure pilot highest in the usable passband.
 
 The rebuilt GUI is `build/dev/datapump-gui`. It is available for manual testing;
 its headless self-check does not qualify physical display/audio hardware.
-The latest validated app includes the frequency-veto counter fix; the integrated
-R4 whole-score refinement awaits its main build and focused checks.
+The current additive-headroom app (core `85a53d89…`, GUI `d8e3be8d…`) passes its
+headless self-check, 64-bit continuity/loss, actual-RF targeted checks and the
+supplied full HF40 public-completion test.
+Manual display/radio testing and full regression qualification remain open.
 [Validation](validation.md#current-measured-status-and-remaining-failures) records
 the current build bindings, focused results and incomplete qualification.
 
@@ -38,10 +40,11 @@ qualification; its modulation is never applied to payload phase.
 One ordinary Robust bank receives upstream stabilized input before narrow
 filtering/downsampling. Folded real mono retains its frequency-origin-only path.
 Dated residual-frequency windows narrow existing and new RF catalogues while
-retaining unresolved clock/timing alternatives. **The last validated app's masks
-do not certify frequency support over the whole scored observation.** R4
-whole-score support is integrated in source with validation pending; the
-DATA-specific lease remains private. Every
+retaining unresolved clock/timing alternatives. Dated whole-score support now
+has funded minimum provenance even after optional refinement is reclaimed.
+Additive constructor headroom restores the previously blocked early owners in
+the targeted actual-RF case, without changing measured uncertainty or dropping
+unresolved LF alternatives. Every
 payload sample and date remains required; frequency knowledge cannot manufacture
 an earlier phase observation or advance the processed frontier.
 
@@ -66,7 +69,6 @@ Useful savings are measured in specific matched prefixes:
 
 | Change | Reported RF half-width or support | Executed FFT work | Process CPU |
 | --- | --- | --- | --- |
-| Fixed-lag frequency refinement, same HF cohort | ±0.07950→±0.06641 Hz; 125→109 pairs; all nine LF alternatives retained; phase off | 12,250→10,682 (−12.8%) | 26.425964→24.002513 s (−9.17%) |
 | R4 whole-score refinement versus R2, private matched prefix | 364→268 pairs; all nine unresolved LF alternatives retained | 35,672→26,264 (−26.37%) | 65.756964→49.005478 s (−25.47%) |
 | Filter/Hilbert index walks | Identical reference/support records, 785 detector bits and 260 GUI commits | 3,930 unchanged | 4.435823→2.610347 s (−41.15%) |
 
@@ -80,17 +82,75 @@ including five after loss without renewal/new phase, while retaining exact
 `001`, ID 2 and scored END. Its FFT work rises 8.16% and CPU does not improve;
 only an END-covering PCM prefix is hashed, not the entire tail.
 
-Qualification remains incomplete. Current strict HF40 public finish/replay
-still misses its deadline despite canonical trace bits/END. HF15k retains an
+The current supplied HF40 run passes exact eight-bit wire, public pending identity,
+scored END and replay: 194.956 source-audio seconds, 103,663 FFT jobs and
+869.479 process CPU/114.151 wall seconds on six physical cores. Cost increases
+over the preceding `f37/949` pass (66,192 FFT jobs/562.537 CPU seconds). The
+independent audit attributes 94.40% of the extra FFT work to 31 restored owners;
+the rest is wider dynamic masks. This is simulator acceptance, not CPU savings,
+hardware real-time or complete
+block-latency/backlog qualification. Earlier HF40 failures remain preserved.
+
+Qualification remains incomplete. HF15k retains an
 unfixed false-END/code-calendar-alias authority defect, rather than a duration
-shortfall. Full EME, current 1,024-byte completion and hardware retune testing
-remain unqualified; estimator coverage retains documented escapes. Framed-text,
+shortfall. The current Rate-360 Fake-FHSS case fails with zero owners despite a
+qualified pilot; folded-mono provenance admission is under repair, without an
+established physical precision cause. Full EME, current 1,024-byte completion,
+54–450 MHz coverage and hardware retune testing remain unqualified; estimator
+coverage retains documented escapes. Framed-text,
 attachment and bounded retune/loss passes retain their own scope. The full
 contract run has failed, with incomplete internal coverage and retained
-assertion failures; overall qualification remains incomplete. R4 source integration
-is not full receiver qualification; gate and terminal-join prototypes remain
+assertion failures and has not been rerun on this app; overall qualification
+remains incomplete. Gate and terminal-join prototypes remain
 private. See
 [validation](validation.md) for every failed case, command and exact binding.
+
+## Receiver architecture decision
+
+The bounded code/evidence review, including Astra, freezes estimator tuning:
+Q, lag/history, uncertainty multipliers and extra lead remain unchanged. The
+HF40 reference quality is accepted as useful on the stated six-physical-core/
+2 GiB simulator; matching GPSDO specifications or an ideal CRLB is not the
+acceptance criterion. Complete platform acceptance remains unproved. Minimum
+provenance is funded after optional-refinement reclamation;
+additive constructor headroom passes the targeted counterexample. A newest-only mask or unsupported broad shadow
+bank would discard the evidence obligation.
+
+The compact [error/work budget](../local-evidence/helper-two-tone/architecture-review-r1/reference-budget.json)
+separates executed costs and physical references. The RF-only GPSDO control
+retains the audio/UTC setup but has a different scored frontier, so supplies no
+exact cost ratio. Coupled RF/clock catalogues are not independent factors.
+
+A whole instantaneous-frequency hull is a conservative sufficient condition,
+not a proven necessary statistic for the detector; this conservative design is
+sufficient for the supplied HF40 simulator case. Scores depend on accumulated
+residual phase, complete FIR/support history and correlation. A later narrow
+average cannot replace that history without a score-level proof. Constant CFO
+can be searched with RF candidates; constant phase is absorbed by quadrature.
+Drift, random phase and correction modulation can reduce coherence, which extra
+constant-frequency lanes cannot restore. LF, UTC and key alternatives remain.
+Unknown hop phase needs qualified local phase correction or the ordinary
+sectioned mechanism; the RF/audio model carries frequency, not phase continuity.
+
+Offset, drift and random instability are different quantities; static ppm is
+not a drift rate. [NIST's oscillator characterization](https://tf.nist.gov/phase/Properties/three.htm)
+separates systematic behavior from random noise. Overlapping polls are not
+independent trials: [NIST SP 1065 §5.4](https://tsapps.nist.gov/publication/get_pdf.cfm?pub_id=50505)
+relates effective degrees of freedom to noise and correlation, rather than raw
+point count.
+
+[JPL 87-10](https://ntrs.nasa.gov/citations/19880010295) limits linear smoother
+predictions near PLL threshold. [DSN 810-005 207A §5.3.5](https://deepspace.jpl.nasa.gov/dsndocs/810-005/207/207A.pdf)
+models tracking loss through phase error under stated conditions. These support
+model-aware measurements, not transplanted DSN limits or a physical SNR floor.
+
+Funding-pressure continuity/loss and the actual-RF constructor-headroom
+counterexample and current full HF40 now pass. The next focused repair is
+folded-mono provenance admission. A matched RF-only GPSDO scoring cohort and
+stage CPU remain after integration stabilizes.
+Detailed failures and bindings remain in [validation](validation.md).
+EME's gating/template efficiency and receiver cost remain separate practical
+limits; an ideal CFO diagnostic does not establish a pilot-frequency-loss cause.
 
 ## Controls and use
 
@@ -282,7 +342,10 @@ standard-deviation scale is
 
 `S3(T) = 3 sqrt(3 / (2 pi² (C/N0) T³))`.
 
-It is a theoretical comparison, not an operational confidence guarantee; see
+It is a theoretical comparison, not an operational confidence guarantee. The
+pure-tone bound assumes unknown phase and known frequency rate; high-CNR and
+model assumptions matter, and nonlinear threshold behavior is not a general
+physical limit. See printed pp. 19–20 of
 [JPL Publication 88-21, A Comparison of Frequency Estimation Techniques for
 High-Dynamic Trajectories](https://ntrs.nasa.gov/api/citations/19890011016/downloads/19890011016.pdf).
 
@@ -299,8 +362,10 @@ High-Dynamic Trajectories](https://ntrs.nasa.gov/api/citations/19890011016/downl
 
 For a common constant frequency with an independent unknown phase per aperture,
 replace `(C/N0) T³` by `sum_i((C/N0)_i T_i³)`. Thus 25 ideal 400 ms apertures
-at 30 dB-Hz give about ±0.029 Hz, rather than the uninterrupted-ten-second
-±0.00117 Hz. Ramps, rejected contexts, drift, clock ambiguity, local model fits
+at 30 dB-Hz give ±0.02924 Hz; 25 × 384 ms gives ±0.03108 Hz, rather than the
+uninterrupted-ten-second ±0.0011695 Hz. For amplitude envelope `g(t)`, the
+information uses `g²`-weighted centered aperture moments, not elapsed time cubed.
+These are derived independent-phase references. Ramps, rejected contexts, drift, clock ambiguity, local model fits
 and estimator inefficiency need additional treatment. Practical measured
 intervals and their observed escapes remain separately reported in validation.
 The current adaptive-factory consumer passes 236 frequency fits, including

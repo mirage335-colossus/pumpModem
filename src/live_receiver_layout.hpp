@@ -4,6 +4,7 @@
 #include "datapump/pattern_correlator.hpp"
 #include "datapump/symbol_burst.hpp"
 #include "live_pattern_scores.hpp"
+#include "live_helper_data_parameter.hpp"
 #include "live_source_handoff.hpp"
 #include "live_helper_score_frequency.hpp"
 #include "native_point_workspace.hpp"
@@ -45,6 +46,7 @@ struct ReceiverState {
     std::size_t amplitude_fft_samples=0,amplitude_channel_count=0;
     // Actual selected passbands for coarse-frequency presentation arbitration.
     std::optional<modem::PatternAmplitudeGeometry> amplitude_geometry;
+    std::optional<DataParameterConstructor> data_parameter_constructor;
     double last_confident_at = 0;
     std::uint64_t last_confident_end = 0;
     std::uint64_t sample_origin = 0, family = 0;

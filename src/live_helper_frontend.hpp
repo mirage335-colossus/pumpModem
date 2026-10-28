@@ -1,3 +1,4 @@
+#include "live_helper_data_parameter.hpp"
 #pragma once
 
 #include "datapump/helper_frontend.hpp"
@@ -84,6 +85,9 @@ struct HelperViewBlock {
     // Exclusive ACTUAL raw ingress frontier. Frequency alone may condition
     // already retained PCM; this never advances a payload/phase/time frontier.
     std::uint64_t raw_captured_end=0;
+    // Required capture-side authority of THIS corrected block. These fixed
+    // numeric tags survive optional refinement reclamation and queued PCM.
+    std::uint64_t score_authority_generation=0,score_rejection_first_sample=0;
     std::optional<HelperFrequencyInterval> frequency_interval;
     bool frequency_model_rejected=false;
     // The upstream NCO has applied an independently fitted pilot phase to
@@ -92,6 +96,8 @@ struct HelperViewBlock {
     // Correction-domain RF uncertainty for the actual produced PCM. Raw
     // Reference remains independently dated and unchanged for clock mapping.
     std::optional<double> corrected_rf_uncertainty_hz;
+    DataParameterBound data_parameter;
+    bool data_parameter_domain=false;
     helper::CaptureBand applied_correction_hz{};
     // Translator OUTPUT dependency; carrier centers are these dates minus512.
     std::uint64_t corrected_dependency_first=0,corrected_dependency_end=0;
@@ -390,6 +396,7 @@ class HelperInputFrontend {
             std::uint64_t first=0,end=0;
             double radius=0,q_low=0,q_high=0;
             bool valid=false,phase=false;
+            DataParameterBound data;
             std::uint64_t dependency_first=UINT64_MAX,dependency_end=0;
         };
         struct Certificates {
@@ -402,11 +409,12 @@ class HelperInputFrontend {
             }
             Certificate summarize(std::uint64_t first,std::uint64_t end,bool all_phase)const noexcept {
                 Certificate out{first,end,0,0,0,true,all_phase};
-                auto cursor=first;bool have_q=false;
+                auto cursor=first;bool have_q=false,have_data=false;
                 for(std::size_t i=0;i<count && cursor<end;++i) {
                     const auto& r=records[(head+i)%records.size()];
                     if(r.end<=cursor)continue;
-                    if(r.first>cursor){out.valid=out.phase=false;return out;}
+                    if(r.first>cursor){out.valid=out.phase=false;out.data={};return out;}
+                    out.data=have_data?DataParameterBound::join(out.data,r.data):r.data;have_data=true;
                     out.valid=out.valid && r.valid;out.radius=std::max(out.radius,r.radius);
                     out.dependency_first=std::min(out.dependency_first,r.dependency_first);
                     out.dependency_end=std::max(out.dependency_end,r.dependency_end);
@@ -415,7 +423,7 @@ class HelperInputFrontend {
                     out.q_high=have_q?std::max(out.q_high,r.q_high):r.q_high;have_q=true;
                     cursor=std::min(end,r.end);
                 }
-                if(cursor!=end)out.valid=out.phase=false;
+                if(cursor!=end){out.valid=out.phase=false;out.data={};}
                 return out;
             }
             std::uint64_t homogeneous_end(std::uint64_t first,std::uint64_t end)const noexcept {
@@ -657,6 +665,16 @@ public:
     double last_notch_transition_l1()const noexcept {
         return branches_[0]?branches_[0]->last_notch_transition_l1:0;
     }
+    // Genuine frequency-model rejection revokes already produced as well as
+    // internal FIR/resampler frequency dependencies. PCM, dates, applied q and
+    // independent phase flags remain intact. No later summarize can revive an
+    // old row; new observed dependencies must replace it through normal push.
+    void invalidate_frequency_certificates()noexcept {
+        for(auto& branch:branches_)if(branch) {
+            for(auto& row:branch->raw_certificates.records)row.valid=false;
+            for(auto& row:branch->output_certificates.records)row.valid=false;
+        }
+    }
     void reset()noexcept {branches_={};}
     // Manually enabled reference mode has one upstream converter and one
     // ordinary receiver. Positive real-PCM capture is the supported image;
@@ -783,7 +801,7 @@ public:
         if(total>grant_)throw Error("conditional helper input views exceed their workspace grant");
         branches_=std::move(staged);
     }
-    void push(std::span<const float> input,std::uint64_t first_raw,std::optional<double> corrected_residual_hz={}) {
+    void push(std::span<const float> input,std::uint64_t first_raw,std::optional<double> corrected_residual_hz={},DataParameterBound data_parameter={}) {
         std::array<float,2048> translated{},converted{},filtered{};
         for(auto& owned:branches_)if(owned) {
             auto& branch=*owned;
@@ -794,7 +812,7 @@ public:
             branch.raw_certificates.append({cert_first,cert_end,corrected_residual_hz.value_or(0),
                 branch.current_correction_hz_,branch.current_correction_hz_,
                 corrected_residual_hz && std::isfinite(*corrected_residual_hz) && *corrected_residual_hz>=0,
-                branch.phase_support_first_<=cert_first && cert_end<=branch.phase_support_end_});
+                branch.phase_support_first_<=cert_first && cert_end<=branch.phase_support_end_,data_parameter});
             for(std::size_t at=static_cast<std::size_t>(skip);at<input.size();) {
                 const auto count=std::min(translated.size(),input.size()-at);
                 branch.translator.push(input.subspan(at,count),std::span(translated).first(count),first_raw+at);
@@ -885,6 +903,7 @@ public:
                 const auto correction=branch.output_certificates.summarize(block.first_sample,
                     block.first_sample+block.samples.size(),false);
                 if(correction.valid)block.corrected_rf_uncertainty_hz=correction.radius;
+                block.data_parameter=correction.data;
                 block.applied_correction_hz={correction.q_low,correction.q_high};
                 block.corrected_dependency_first=correction.dependency_first;
                 block.corrected_dependency_end=correction.dependency_end;

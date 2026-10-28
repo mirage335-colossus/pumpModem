@@ -4,6 +4,7 @@
 #include "datapump/symbol_schedule.hpp"
 #include "../src/live_simulation_clock.hpp"
 #include "../src/live_helper_frontend.hpp"
+#include "../src/live_helper_data_parameter.hpp"
 #include "../src/audio_trace.hpp"
 #include <algorithm>
 #include <array>
@@ -35,13 +36,21 @@ double real(const std::string& line,std::string_view key) {
     if(at==std::string::npos)throw Error("actual RF trace lacks "+std::string(key));
     return std::stod(line.substr(at+field.size()));
 }
+bool data_coordinate(const std::string& line) {
+    if(line.find("\"coordinate\":") == std::string::npos)return false;
+    const bool data=line.find("\"coordinate\":\"DATA\"")!=std::string::npos;
+    check(data || line.find("\"coordinate\":\"M\"")!=std::string::npos,
+        "actual RF trace has an unknown frequency coordinate");
+    return data;
+}
 bool filter(const char* name)noexcept {
     const std::string_view event{name};
     return event=="trace_begin" || event=="receiver_signal_commit" ||
         event=="receiver_acquisition_work" || event=="receiver_helper_raw_reference" ||
         event=="receiver_helper_actual_rf_segment" || event=="receiver_helper_pilot_phase" ||
         event=="receiver_helper_oscillator" || event=="receiver_helper_oscillator_correction" ||
-        event=="receiver_helper_corrected_interval" || event=="receiver_helper_constructor_frequency";
+        event=="receiver_helper_corrected_interval" || event=="receiver_helper_constructor_frequency" ||
+        event=="receiver_helper_DATA_parameter_window" || event=="receiver_helper_DATA_parameter_projection";
 }
 struct Laboratory {
     std::atomic<std::uint64_t> transmit_epoch=0,channels=0;
@@ -244,8 +253,65 @@ ConstructorGeometry corrected_constructor_geometry(const modem::Config& config,d
     }
     return {ordinary.hypotheses.size(),catalogue.hypotheses.size(),clocks.size(),clock_bound};
 }
+// DATA uses a rectangle with K=0, while M retains its H-D strip above.
+// Reconstruct only the frozen constructor geometry; executed Live work below
+// is the sole evidence for new/existing window installation and FFT savings.
+ConstructorGeometry data_constructor_geometry(const modem::Config& config,double lower,double upper,
+        double actual_lower,double actual_upper,double capture_low,double capture_high,
+        std::uint64_t provider,std::uint64_t epoch,std::size_t actual_pairs,
+        std::size_t actual_clock_rates,bool check_existing_component) {
+    const auto ordinary=modem::oscillator_pattern_search(config,0);
+    live::detail::DataParameterBound bound{lower,upper,{provider,epoch},
+        live::detail::DataParameterBound::Kind::bounded,false};
+    modem::PatternSearch search;
+    const auto receipt=live::detail::data_parameter_search(config,0,bound,search,capture_low,capture_high);
+    check(receipt && receipt->lower==actual_lower && receipt->upper==actual_upper &&
+        receipt->pair_count==actual_pairs && search.hypotheses.size()==actual_pairs &&
+        actual_lower<=lower && upper<=actual_upper && !search.qualified_clock_interval,
+        "actual DATA constructor trace differs from its typed rectangle");
+    const auto clock_bound=config.oscillator_search->lf.accuracy_ppm*config.oscillator_search->margin;
+    std::map<double,std::pair<double,double>> clocks;
+    for(const auto& pair:search.hypotheses) {
+        const auto [it,inserted]=clocks.emplace(pair.clock_error_ppm,std::pair{pair.frequency_offset_hz,pair.frequency_offset_hz});
+        if(!inserted){it->second.first=std::min(it->second.first,pair.frequency_offset_hz);
+            it->second.second=std::max(it->second.second,pair.frequency_offset_hz);}
+    }
+    check(clocks.size()==actual_clock_rates && clocks.size()>1 && clocks.begin()->first==-clock_bound &&
+        clocks.rbegin()->first==clock_bound && search.admitted_clock_half_width_ppm==clock_bound &&
+        search.admitted_clock_cell_half_width_ppm && actual_pairs<ordinary.hypotheses.size(),
+        "actual DATA constructor lost original LF coverage or failed to reduce RF work");
+    for(const auto& [clock,rf]:clocks) {
+        (void)clock;
+        check(rf.first==actual_lower && rf.second==actual_upper,
+            "DATA rectangle changed RF coverage with unresolved LF");
+    }
+    if(check_existing_component) {
+        modem::PatternSearchResolution resolution;resolution.clock_frequency_hz=0;
+        const auto original=modem::oscillator_pattern_search(config,0,resolution,
+            modem::PatternUtcClockGrid::complete_expanded_domain);
+        modem::PatternSearch existing;existing.hypotheses=original.hypotheses;
+        const auto center=std::midpoint(lower,upper);
+        for(auto& pair:existing.hypotheses)pair.frequency_offset_hz+=center;
+        existing.admitted_clock_half_width_ppm=original.requested_clock_half_width_ppm;
+        existing.admitted_clock_cell_half_width_ppm=original.clock_step_ppm/2;
+        modem::detail::PatternHelperFrequencySelector selector;
+        modem::PatternHelperFrequencyWindow window{center,original.frequency.requested_half_width_hz,0,
+            original.clock_step_ppm/2,{}};
+        check(selector.initialize(existing,window) && selector.selected==existing.hypotheses.size(),
+            "existing DATA rectangle did not begin with its complete original catalogue");
+        window.half_width_hz=live::detail::DataParameterBound::up(std::max(
+            static_cast<long double>(center)-lower,static_cast<long double>(upper)-center));
+        selector.update(window);
+        check(selector.selected && selector.selected<existing.hypotheses.size() &&
+            selector.original_clock_rates==selector.selected_clock_rates && selector.selected_clock_rates>1,
+            "DATA rectangle component lost LF alternatives while selecting actual observed bounds");
+        std::cout<<"actual_rf_existing_selector_component,coordinate=DATA,original_pairs="<<existing.hypotheses.size()
+            <<",selected_pairs="<<selector.selected<<",retained_original_clock_rates="<<selector.selected_clock_rates<<'\n';
+    }
+    return {ordinary.hypotheses.size(),actual_pairs,clocks.size(),clock_bound};
+}
 void run(const std::filesystem::path& path,bool independent_clock,bool require_oscillator_model=false,
-        std::optional<double> helper_end_seconds={},bool require_prior_frequency=false) {
+        std::optional<double> helper_end_seconds={},bool require_prior_frequency=false,bool require_data_coordinate=false) {
     const auto value=settings(independent_clock);const Bytes bits{0,0,1};
     const auto pilot=helper::plan(value.helper,helper::placement_band(value.transfer.modem),120000000,0,
         modem::outer_dsss_transmit_gain(value.transfer.modem)).frequency_hz;
@@ -285,8 +351,18 @@ void run(const std::filesystem::path& path,bool independent_clock,bool require_o
     struct OwnerWork {std::uint64_t jobs=0,fft=0,transforms=0;};
     std::map<std::tuple<std::uint64_t,std::uint64_t,std::uint64_t>,OwnerWork> owner_jobs;
     std::uint64_t first_qualified_capture=0,first_positive_fft_frontier=0,last_work_frontier=0,worker_slots_peak=0;
-    struct ConstructorInput {double uncertainty=0,center=0,expected=0;std::uint64_t pairs=0,epoch=0,family=0;};
+    struct ConstructorInput {
+        double uncertainty=0,center=0,expected=0,lower=0,upper=0,actual_lower=0,actual_upper=0,capture_low=0,capture_high=0;
+        std::uint64_t pairs=0,epoch=0,family=0,provider=0,model_epoch=0;bool data=false;
+        bool operator==(const ConstructorInput&)const=default;
+    };
     std::map<std::pair<std::uint64_t,std::uint64_t>,ConstructorInput> constructor_inputs;
+    struct DataWindow {std::uint64_t first=0,end=0,pairs=0,clocks=0;bool installed=false,first_audit=false;};
+    std::map<std::pair<std::uint64_t,std::uint64_t>,DataWindow> data_windows;
+    std::uint64_t data_projections=0,data_projection_escapes=0,data_windows_new=0,data_windows_existing=0;
+    std::uint64_t data_installed_windows=0,data_paused_windows=0,data_fft_jobs=0,data_existing_fft_jobs=0,data_new_fft_jobs=0;
+    double data_projection_error_max=0;
+    bool saw_trace_end=false;
     std::uint64_t model_updates=0,raw_only_updates=0,phase_unqualified_updates=0,phase_fit_unqualified_updates=0;
     std::uint64_t innovation_vetoes=0,model_epoch=0,model_epoch_changes=0;
     std::uint64_t model_corrections=0,raw_escapes=0,model_escapes=0,data_diagnostic_escapes=0,correction_escapes=0;
@@ -300,17 +376,33 @@ void run(const std::filesystem::path& path,bool independent_clock,bool require_o
     double model_uncertainty_max=0,model_uncertainty_min=INFINITY,correction_uncertainty_min=INFINITY;
     double maximum_error=0;std::uint64_t identity=0,revision=0,previous_bits=0;
     while(std::getline(input,line)) {
+        if(line.find("\"event\":\"trace_end\"")!=std::string::npos) {
+            check(!number(line,"dropped") && line.find("\"size_limited\":false")!=std::string::npos,
+                "actual RF trace exceeded its fixed quota or dropped evidence");saw_trace_end=true;
+        }
         if(line.find("\"event\":\"receiver_helper_constructor_frequency\"")!=std::string::npos) {
-            const ConstructorInput input{real(line,"helper_constructor_uncertainty_hz"),real(line,"helper_constructor_center_hz"),
-                real(line,"helper_constructor_expected_hz"),number(line,"pairs"),number(line,"epoch"),number(line,"family")};
-            check(std::isfinite(input.uncertainty) && input.uncertainty>0 && input.center==0 && input.expected==pilot &&
-                real(line,"clock_frequency_hz")==value.transfer.modem.carrier_hz-pilot && number(line,"factory_grant"),
+            ConstructorInput input;
+            input.uncertainty=real(line,"helper_constructor_uncertainty_hz");input.center=real(line,"helper_constructor_center_hz");
+            input.expected=real(line,"helper_constructor_expected_hz");input.pairs=number(line,"pairs");
+            input.epoch=number(line,"epoch");input.family=number(line,"family");input.data=data_coordinate(line);
+            check(std::isfinite(input.uncertainty) && input.uncertainty>0 && std::isfinite(input.center) &&
+                input.expected==pilot && number(line,"factory_grant"),
                 "actual RF constructor trace lacks its immutable search inputs");
+            if(input.data) {
+                input.lower=real(line,"requested_lower_hz");input.upper=real(line,"requested_upper_hz");
+                input.actual_lower=real(line,"constructor_lower_hz");input.actual_upper=real(line,"constructor_upper_hz");
+                input.capture_low=real(line,"capture_low_hz");input.capture_high=real(line,"capture_high_hz");
+                input.provider=number(line,"provider");input.model_epoch=number(line,"model_epoch");
+                check(input.provider && input.model_epoch && input.lower<=input.upper && input.actual_lower<=input.lower &&
+                    input.upper<=input.actual_upper && input.center==std::midpoint(input.lower,input.upper) &&
+                    input.uncertainty==live::detail::DataParameterBound::up(std::max(
+                        static_cast<long double>(input.center)-input.lower,static_cast<long double>(input.upper)-input.center)) &&
+                    real(line,"clock_frequency_hz")==0 && real(line,"clock_coefficient_hz")==0 && number(line,"all_original_LF_UTC_retained"),
+                    "actual DATA constructor mislabels requested/constructed bounds or clock coefficient");
+            } else check(input.center==0 && real(line,"clock_frequency_hz")==value.transfer.modem.carrier_hz-pilot,
+                "actual M constructor changed its original clock coefficient");
             const auto [found,inserted]=constructor_inputs.emplace(std::pair{number(line,"revision"),number(line,"instance_id")},input);
-            check(inserted || (found->second.uncertainty==input.uncertainty && found->second.center==input.center &&
-                found->second.expected==input.expected && found->second.pairs==input.pairs &&
-                found->second.epoch==input.epoch && found->second.family==input.family),
-                "actual RF factory retry changed its immutable search");
+            check(inserted || found->second==input,"actual RF factory retry changed its immutable search");
         }
         if(line.find("\"event\":\"receiver_helper_actual_rf_segment\"")!=std::string::npos) {
             const auto first=number(line,"first_sample"),settled=number(line,"settled_first_sample"),end=number(line,"end_sample");
@@ -437,6 +529,67 @@ void run(const std::filesystem::path& path,bool independent_clock,bool require_o
             }
             last_model_capture=std::max(last_model_capture,captured);++model_corrections;
         }
+        if(line.find("\"event\":\"receiver_helper_DATA_parameter_projection\"")!=std::string::npos) {
+            check(data_coordinate(line) && real(line,"clock_coefficient_hz")==0 &&
+                number(line,"all_original_LF_UTC_retained") && !number(line,"phase_UTC_authority"),
+                "DATA projection invented LF, phase or UTC authority");
+            if(number(line,"kind")==static_cast<unsigned>(live::detail::DataParameterBound::Kind::bounded)) {
+                const auto first=number(line,"first_center"),last=number(line,"last_center"),captured=number(line,"captured_end");
+                auto found=segments.upper_bound(first);check(found!=segments.begin(),"DATA projection lacks an actual RF segment");--found;
+                const auto& segment=found->second;
+                const auto lower=real(line,"lower_hz"),upper=real(line,"upper_hz"),q=real(line,"applied_correction_hz");
+                const auto evidence_first=number(line,"frequency_evidence_first"),evidence_end=number(line,"frequency_evidence_end");
+                const auto age=real(line,"frequency_witness_age_seconds");
+                check(first>=segment.settled && first<=last && last<segment.end && last<captured &&
+                    number(line,"phase_segment")==segment.phase && real(line,"actual_rf_shift_hz")==segment.rf &&
+                    number(line,"provider") && number(line,"model_epoch") &&
+                    std::isfinite(lower) && std::isfinite(upper) && lower<=upper && std::isfinite(q) &&
+                    evidence_first<evidence_end && evidence_end<=captured && number(line,"frequency_query_family")<=1 &&
+                    std::isfinite(age) && age>=0 && age<=.5,
+                    "DATA projection crossed RF/support dates or lacks an independent frequency witness");
+                const auto truth=value.transfer.modem.carrier_hz*value.simulation_clock_error_ppm*1e-6+
+                    value.simulation_frequency_offset_hz*segment.rf/7e6+q;
+                const auto error=std::max({0.,lower-truth,truth-upper});
+                data_projection_escapes+=error>0;data_projection_error_max=std::max(data_projection_error_max,error);++data_projections;
+            }
+        }
+        if(line.find("\"event\":\"receiver_helper_DATA_parameter_window\"")!=std::string::npos) {
+            const auto key=std::pair{number(line,"revision"),number(line,"instance_id")};
+            const auto birth=constructor_inputs.find(key);
+            check(data_coordinate(line) && birth!=constructor_inputs.end() && birth->second.data &&
+                birth->second.epoch==number(line,"epoch") && birth->second.family==number(line,"family") &&
+                birth->second.pairs==number(line,"constructor_pairs") && real(line,"clock_coefficient_hz")==0 &&
+                number(line,"all_original_LF_UTC_retained") && !number(line,"phase_UTC_authority"),
+                "DATA window lacks its canonical constructor owner or retained LF/UTC basis");
+            const bool installed=number(line,"window_installed"),contained=number(line,"contained");
+            const auto first=number(line,"requested_first_sample"),end=number(line,"requested_end_sample");
+            if(contained) {
+                check(number(line,"requested_support_valid") && number(line,"hull_supported") &&
+                    number(line,"hull_first")<=first && first<end && end<=number(line,"hull_end") &&
+                    number(line,"frequency_witness_available") &&
+                    number(line,"provider")==birth->second.provider && number(line,"model_epoch")==birth->second.model_epoch &&
+                    number(line,"hull_provider")==birth->second.provider && number(line,"hull_model_epoch")==birth->second.model_epoch &&
+                    number(line,"constructor_provider")==birth->second.provider && number(line,"constructor_model_epoch")==birth->second.model_epoch &&
+                    real(line,"constructor_lower_hz")==birth->second.actual_lower && real(line,"constructor_upper_hz")==birth->second.actual_upper &&
+                    birth->second.actual_lower<=real(line,"lower_hz") && real(line,"lower_hz")<=real(line,"upper_hz") &&
+                    real(line,"upper_hz")<=birth->second.actual_upper,
+                    "DATA window lacks complete dated support or escapes immutable constructor bounds");
+            }
+            if(installed) {
+                check(contained && number(line,"actual_window_active") && number(line,"actual_dispatch_permitted") &&
+                    number(line,"actual_original_pairs")==birth->second.pairs && number(line,"actual_selected_pairs") &&
+                    number(line,"actual_selected_pairs")<=birth->second.pairs && !number(line,"actual_clock_qualified") &&
+                    number(line,"actual_original_clock_rates")>0 &&
+                    (!independent_clock || number(line,"actual_original_clock_rates")>1) &&
+                    number(line,"actual_original_clock_rates")==number(line,"actual_selected_clock_rates"),
+                    "installed DATA window discarded LF alternatives or lacks actual ordinary dispatch");
+                ++data_installed_windows;
+            } else {check(!number(line,"actual_window_active") && !number(line,"actual_dispatch_permitted"),
+                "declined DATA window kept stale acquisition authority");++data_paused_windows;}
+            const bool first_audit=number(line,"first_window_audit");
+            data_windows_new+=first_audit;data_windows_existing+=!first_audit;
+            data_windows[key]={first,end,number(line,"actual_selected_pairs"),number(line,"actual_selected_clock_rates"),installed,first_audit};
+        }
         if(line.find("\"event\":\"receiver_helper_pilot_phase\"")!=std::string::npos) {
             const auto first=number(line,"first_sample"),end=number(line,"end_sample");auto found=segments.upper_bound(first);
             check(found!=segments.begin(),"actual RF phase lacks an actual segment");--found;
@@ -467,9 +620,23 @@ void run(const std::filesystem::path& path,bool independent_clock,bool require_o
                     check(birth!=constructor_inputs.end() && birth->second.pairs==number(line,"helper_window_original_pairs") &&
                         birth->second.epoch==number(line,"epoch") && birth->second.family==number(line,"family"),
                         "actual RF owner lacks its own immutable constructor frequency input");
-                    constructors=corrected_constructor_geometry(value.transfer.modem,pilot,birth->second.uncertainty,
-                        birth->second.pairs,number(line,"helper_window_original_clock_rates"),constructor_owners.size()==1);
+                    const auto& c=birth->second;
+                    constructors=c.data?data_constructor_geometry(value.transfer.modem,c.lower,c.upper,c.actual_lower,c.actual_upper,
+                        c.capture_low,c.capture_high,c.provider,c.model_epoch,c.pairs,number(line,"helper_window_original_clock_rates"),
+                        constructor_owners.size()==1):corrected_constructor_geometry(value.transfer.modem,pilot,c.uncertainty,
+                        c.pairs,number(line,"helper_window_original_clock_rates"),constructor_owners.size()==1);
                 }
+            }
+            const auto birth=constructor_inputs.find({number(line,"revision"),number(line,"instance_id")});
+            if(birth!=constructor_inputs.end() && birth->second.data && number(line,"fft_jobs")>previous.fft) {
+                const auto window=data_windows.find(birth->first);
+                check(window!=data_windows.end() && window->second.installed && window->second.end==number(line,"sample") &&
+                    number(line,"helper_window_active") && number(line,"dispatch_permitted") &&
+                    window->second.pairs==number(line,"helper_window_selected_pairs") &&
+                    window->second.clocks==number(line,"helper_window_selected_clock_rates"),
+                    "actual DATA FFT jobs lack an exact joined support/window/work audit");
+                const auto delta=number(line,"fft_jobs")-previous.fft;data_fft_jobs+=delta;
+                if(window->second.first_audit)data_new_fft_jobs+=delta;else data_existing_fft_jobs+=delta;
             }
             previous={current,number(line,"fft_jobs"),number(line,"input_transforms")};
         }
@@ -523,6 +690,12 @@ void run(const std::filesystem::path& path,bool independent_clock,bool require_o
         <<",constructor_catalogues_checked="<<constructor_owners.size()<<",ordinary_constructor_pairs="<<constructors.ordinary_pairs
         <<",assisted_constructor_pairs="<<constructors.assisted_pairs<<",constructor_clock_domain_low_ppm="<<-constructors.clock_bound_ppm
         <<",constructor_clock_domain_high_ppm="<<constructors.clock_bound_ppm
+        <<",DATA_coordinate_required="<<require_data_coordinate<<",DATA_projections="<<data_projections
+        <<",DATA_projection_escapes="<<data_projection_escapes<<",DATA_projection_outside_bound_max_hz="<<data_projection_error_max
+        <<",DATA_new_window_audits="<<data_windows_new<<",DATA_existing_window_audits="<<data_windows_existing
+        <<",DATA_installed_windows="<<data_installed_windows<<",DATA_paused_windows="<<data_paused_windows
+        <<",DATA_actual_FFT_jobs="<<data_fft_jobs<<",DATA_existing_window_FFT_jobs="<<data_existing_fft_jobs
+        <<",DATA_new_window_FFT_jobs="<<data_new_fft_jobs
         <<",existing_RF_mask_opportunities="<<existing_mask_opportunities
         <<",existing_RF_mask_narrowing_tested="<<bool(existing_mask_opportunities)
         <<",workspace_peak_bytes="<<peak_bytes<<",raw_stage_peak_samples="<<stage_peak
@@ -541,17 +714,25 @@ void run(const std::filesystem::path& path,bool independent_clock,bool require_o
     if(require_oscillator_model)check(model_updates>=4 && model_rf.size()>=2 && model_corrections &&
         !raw_escapes && !model_escapes && !data_diagnostic_escapes && !correction_escapes,
         "persistent actual RF/audio model lacked dated useful corrections or escaped its reported uncertainty");
+    check(saw_trace_end,"actual RF trace has no complete terminal record");
+    if(require_data_coordinate) {
+        check(!constructor_inputs.empty() && std::all_of(constructor_inputs.begin(),constructor_inputs.end(),
+            [](const auto& entry){return entry.second.data;}) && data_projections>=4 && !data_projection_escapes &&
+            data_windows_new && data_windows_existing && data_installed_windows && data_fft_jobs && data_existing_fft_jobs,
+            "actual DATA Live integration lacks bounded truth coverage, new/existing windows or joined FFT work");
+    }
     if(require_prior_frequency)check(prior_corrections && (!helper_end_seconds || prior_after_loss_corrections),
         "actual RF model did not use a dated prior frequency without a current-hop pilot");
 }
 }
 int main(int argc,char** argv)try {
-    bool independent_clock=false,require_oscillator_model=false,require_prior_frequency=false;
+    bool independent_clock=false,require_oscillator_model=false,require_prior_frequency=false,require_data_coordinate=false;
     std::optional<std::filesystem::path> requested_path;std::optional<double> helper_end_seconds;
     for(int i=1;i<argc;++i) {
         if(std::string_view(argv[i])=="--independent-clock")independent_clock=true;
         else if(std::string_view(argv[i])=="--require-oscillator-model")require_oscillator_model=true;
         else if(std::string_view(argv[i])=="--require-prior-frequency")require_prior_frequency=true;
+        else if(std::string_view(argv[i])=="--require-data-coordinate")require_data_coordinate=true;
         else if(std::string_view(argv[i])=="--helper-end-seconds") {
             check(++i<argc && !helper_end_seconds,"actual RF Helper loss requires one seconds value");
             std::size_t consumed=0;helper_end_seconds=std::stod(argv[i],&consumed);
@@ -565,5 +746,5 @@ int main(int argc,char** argv)try {
         ("datapump-helper-actual-rf-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".jsonl"));
     check(!require_oscillator_model || independent_clock,"oscillator-model fixture requires independent RF/audio clocks");
     frozen_source_band_declines_wide_retune();mixed_output_certificates_preserve_pcm();
-    run(path,independent_clock,require_oscillator_model,helper_end_seconds,require_prior_frequency);return 0;
+    run(path,independent_clock,require_oscillator_model,helper_end_seconds,require_prior_frequency,require_data_coordinate);return 0;
 }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}

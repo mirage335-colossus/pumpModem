@@ -270,7 +270,9 @@ Result run(bool lose_helper,bool require_phase=false) {
            number(line,"common_phase_corrected")) {
             const auto first=number(line,"first_sample"),end=number(line,"end_sample");
             const auto evidence=pilot_phases.find(number(line,"raw_reference_sample"));
-            check(first<end && number(line,"corrected_interval_valid") && number(line,"locked") &&
+            // Lock also requires whole-score RF authority. Already-applied
+            // phase remains accountable to its own observed dated certificate.
+            check(first<end && number(line,"corrected_interval_valid") &&
                   evidence!=pilot_phases.end() && evidence->second.sequence<number(line,"sequence"),
                   "normal helper corrected phase input lacked its matching observed pilot certificate");
             check(phase_inputs.emplace(end,PhaseInput{first,number(line,"sequence")}).second,

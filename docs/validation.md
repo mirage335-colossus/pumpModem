@@ -8,9 +8,19 @@ and use Git history for comparisons. Detailed studies remain in the
 
 ## Current two-tone Helper Carrier candidate
 
-The current human checkpoint is `2466865`, including the preceding documentation
-and counter-fix changes. The R4 whole-score overlay is integrated in source but
-its main build/focused tests remain pending.
+The current human checkpoint is `61e66b3` with the funded-provenance overlay:
+Live source `dce06cda…`, now with the accepted additive-headroom headers, core
+`85a53d89…`/GUI `d8e3be8d…`. Actual-RF/provenance, 64-bit continuity/loss and
+headless GUI checks pass. Current full HF40 also passes exact public completion;
+the preceding `f37/949` pass keeps its own binding.
+Current fully GPSDO-disciplined HF control passes, while Rate-360 Fake-FHSS fails
+with no owners despite qualified reference; its provenance-admission repair is
+private and pending.
+Measured HF40 reference quality is accepted as useful for that six-physical-core/
+2 GiB simulator; estimator tuning remains frozen rather than chasing GPSDO
+specifications or a CRLB target.
+The estimator-tuning freeze and short architecture discriminators
+are in the [operating guide](helper-carrier.md#receiver-architecture-decision).
 The completed contract binds the `65ee248` implementation/core `341b2b35…`;
 later focused builds have separate bindings. Documentation
 updates do not establish new runtime qualification. Earlier receipts retain
@@ -18,8 +28,8 @@ their own source/configure-version bindings. Final qualification remains
 pending. The preceding checkpoints `871a55a`, `aef6580`, `62db765` and `8355e64` and their
 source-bound evidence remain distinct from the superseded single-tone R16 source/binary.
 R17 measured retune-prefix FFT work falls with all LF alternatives retained,
-but total CPU rises. An earlier HF40 public reception passes, while the current
-strict HF40 run misses its public-delivery deadline. The current HF15k primary pass
+but total CPU rises. Earlier HF40 deadline failures remain preserved separately
+from the current pass. The current HF15k primary pass
 retains a strict secondary-row failure, and full EME fails. The rebuilt GUI is
 available; bounded probes now narrow the failed-decision mechanisms, while
 controlled diagnosis and full qualification remain open.
@@ -60,6 +70,117 @@ checks passed. Later source changes require their own focused results and final
 GUI/source hashes; the initial checkpoint does not bind those evolving inputs.
 
 ### Current measured status and remaining failures
+
+The [current additive build](../local-evidence/helper-two-tone/record-frequency-integration-r1/main-integration-r3-additive/build/terminal.json)
+passes in 144.180073 aggregate CPU seconds, binding core `85a53d89…`/GUI
+`d8e3be8d…`, accepted headers `20e5ff86…`/`1167dca8…` and regression `4fdaafbd…`.
+[Focused checks](../local-evidence/helper-two-tone/record-frequency-integration-r1/main-integration-r3-additive/focused/terminal.json)
+all pass with unchanged guards/all processes reaped: direct independent actual
+RF/per-hop-phase reception keeps exact `001`, ID 2 and scored END, 6,195 FFT
+jobs/42 transforms/13 owners in 2.440608 external CPU seconds. The four
+modes/provenance, 64-bit normal-loss and GUI self-check also pass.
+The [independent trace audit](../local-evidence/helper-two-tone/record-frequency-integration-r1/main-integration-r3-additive/focused/additive-trace-audit.json)
+shows the first four owners now execute 1,407/1,407/1,407/1,365 FFT jobs instead
+of zero each; outside-constructor pauses fall 252→0. Measured U stays
+1.114021028934 Hz while constructor bounds admit 45 pairs/all three LF rows.
+Every one of the 6,195 jobs joins dated current-witness support. This restores
+required work, without a CPU-saving or improved-precision claim.
+
+The [current additive full-HF40 terminal](../local-evidence/helper-two-tone/record-frequency-integration-r1/main-integration-r3-additive/qualification-hf40/terminal.json)
+passes/reaps with all source/binary/key guards unchanged. It retains exact eight
+source/full-wire bits, public pending identity, scored END and replay over
+1,193,132 samples/194.9562 audio seconds, 208 owners, 103,663 FFT jobs/82 transforms,
+720,167,794 peak DSP bytes within 2 GiB, and 687,268 KiB max RSS. External CPU is
+869.479448 seconds, wall 114.150555 seconds on six physical cores (about 4.46 CPU
+seconds/audio second). [Actual inputs](../local-evidence/helper-two-tone/record-frequency-integration-r1/main-integration-r3-additive/qualification-hf40/inputs.json)
+retain the same supplied settings and lab key; assistance is frequency-only
+(`ever_frequency=1`, phase/timing zero), without added lead or SNR changes.
+Cost increases over the preceding pass's 66,192 jobs/39 transforms and
+562.536933 CPU seconds; restored scoring/larger constructors are not savings.
+Both runtime-CPU observers
+have one invalid checkpoint join/seven unfinished reads; current uncommitted
+final read is one versus prior zero. Total external CPU remains valid, but
+complete block-latency/queue-backlog qualification does not follow. This is
+practical acceptance for the stated simulator profile, not hardware real-time.
+
+The [independent full-HF40 cost audit](../local-evidence/helper-two-tone/record-frequency-integration-r1/main-integration-r3-additive/focused/full-HF40-cost-audit.json)
+finds the same 208 owner keys and semantically identical raw references.
+Executing owners increase 18→49. Of **37,471 extra FFT jobs (+56.61%)**, 35,371
+(94.40%) restore 31 formerly zero-work owners and 2,100 widen existing dynamic
+masks. The 43 added transforms split 42 restored/one existing; external CPU
+rises 54.56%. Peak eleven scorer slots describe allocated workspaces, not
+measured concurrent utilization. `receiver_component_cpu` was filtered out of
+both traces, so thread/component CPU cannot be reconstructed; a future fixture
+filter edit recovers no historical counters. Primary ID 3/revision 2 exact
+`11010110` and secondary ID 2/revision 1 suffix `1010110` are identical in both
+runs, complete at physical end 727,789/feed frontier 858,958. The secondary stays
+separate; this maintained pass is not single-row/suffix-free strict cable
+qualification. This source-bound cost increase is not a general cheap-receiver
+or total-work-saving claim.
+
+The [current GPSDO/Fake-FHSS controls](../local-evidence/helper-two-tone/record-frequency-integration-r1/main-integration-r3-additive/fhss-gps-controls/terminal.json)
+are reaped with unchanged source/binary/key guards. Fully disciplined RF **and
+audio** HF control passes exact eight bits/END with Default/70 ms: 63.283963 CPU/
+16.188821 wall seconds, 5,103 FFT jobs/243 transforms/176 owners and 996,080
+samples. It is distinct from the RF-only control below, without a matched helper
+CPU ratio. The current Rate-360 Fake-FHSS case **fails** after 355,201 samples/
+24.667 audio seconds, 1.416671 CPU seconds, zero owners/bits/END despite qualified
+pilot U ≈0.0157 Hz. Bounded diagnosis identifies folded raw `q=0`/provenance
+admission lockout; no physical precision, phase or C/N0 cause is established.
+The fix remains private/pending; older Rate-360 passes retain their earlier
+bindings. [Actual commands and scope](../local-evidence/helper-two-tone/record-frequency-integration-r1/main-integration-r3-additive/fhss-gps-controls/inputs.json)
+preserve the fixed-physical-RF Fake-FHSS distinction. EME private work remains
+closure preparation, without a new full-correlator/Live result.
+
+The [preceding supplied HF40 qualification](../local-evidence/helper-two-tone/record-frequency-integration-r1/main-integration-r2/qualification-hf40-r1/results.json)
+passes (exit 0): all eight source/full-wire bits, public pending identity,
+prefixes, fully scored END and replay. It captures 194.956 source-audio seconds,
+executes 66,192 FFT jobs/39 transforms over 208 owners (allocated scorer-slot peak
+eleven; actual utilization unavailable), and
+uses 562.536933 external CPU/75.849834 wall seconds, 731,871,378 peak DSP bytes
+within 2 GiB, with zero drops/resets/search-limit flags. Affinity 0–11 supplies
+six physical cores/twelve logical CPUs. This is not a causal CPU gain over the
+older one-core R24 run or device real-time proof; simulated backlog zero does
+not certify the hardware pipeline. [Inputs](../local-evidence/helper-two-tone/record-frequency-integration-r1/main-integration-r2/qualification-hf40-r1/inputs.json)
+and the [terminal guard receipt](../local-evidence/helper-two-tone/record-frequency-integration-r1/main-integration-r2/qualification-hf40-r1/terminal.json)
+bind source/core/GUI/test/key hashes and the actual launch (the key is a lab key):
+
+```sh
+taskset -c 0-11 build/dev/test_helper_normal_acquisition --hf --helper on --helper-power-w 40 --workspace-bytes 2147483648 --runtime-metrics --work-trace --clock-sync default --audio-error 70ms --bit-count 8 --wall-seconds 360 --keyfile /tmp/datapump-helper-matched-r9.key --evidence-dir /home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/helper-two-tone/record-frequency-integration-r1/main-integration-r2/qualification-hf40-r1/full
+```
+
+The [main build/target receipt](../local-evidence/helper-two-tone/record-frequency-integration-r1/main-integration-r2/build/terminal.json)
+passes with 146.247762 aggregate CPU seconds and unchanged source guards.
+[Targeted continuity/loss and GUI checks](../local-evidence/helper-two-tone/record-frequency-integration-r1/main-integration-r2/focused/results.json)
+pass, GUI self-check using 8.98 CPU seconds. After the 63,784-byte optional
+producer is reclaimed, minimum publication (1,016 bytes) and essential DATA
+provenance (28,696 bytes) remain funded as mandatory state. The initial focused
+default-LF assertion failure remains preserved; its test-only one-LF expectation
+repair binds source `36eb0dd2…`/binary `2eadcfb5…`, while core/GUI stay unchanged.
+The full contract below has not been rerun on this app.
+
+The [preceding DATA trace audit](../local-evidence/helper-two-tone/record-frequency-integration-r1/main-integration-r2/qualification-hf40-r1/R6-current-trace-join.json)
+does **not** establish RF-work savings from its 609 FFTs. Four early owners do
+zero FFT work: `max(U,cell)` gives no headroom when U ≈1.114 Hz exceeds the
+0.097 Hz cell allowance, then 252 outside-constructor pauses suppress work.
+All later executed work is identical to the retained comparison. This remains
+a guarded availability defect in that binary; the targeted additive result above
+has a separate binding. Earlier R3/R4/R5/R6 failures remain retained.
+
+The [RF-only GPSDO source-window control](../local-evidence/helper-two-tone/architecture-review-r1/rf-only-control/runtime-r2/summary.json)
+preserves +100 ppm LF/audio and Default/70 ms settings. It uses 25.176393 CPU
+seconds, 5,775 FFT jobs/15 transforms: 55 coupled pairs × seven jobs × 15 executing
+owners, with two correct pending bits/no END. Its bank frontier 285,835 differs
+from assisted 283,313, so no exact CPU ratio follows; [actual argv/settings](../local-evidence/helper-two-tone/architecture-review-r1/rf-only-control/runtime-r2/inputs.json)
+retain the private RF-only override. The [link-output incident](../local-evidence/helper-two-tone/architecture-review-r1/rf-only-control/build-only/link-incident-r1.json)
+overwrote the old R4 `link.map`, which is invalid as R4 authority. Source/core/
+binary pins remain unchanged; the corrected control uses its own map without
+the redundant wrapper. No original map reconstruction is claimed.
+
+The [source-derived R24 tail budget](../local-evidence/helper-two-tone/architecture-review-r1/hf40-tail-budget.json)
+requires at least about 191.71 capture seconds versus 162.18 observed. Tail/stage/
+envelope runtime flags were unlogged, so this forecast is not proof of the exact
+runtime predicate or a deadlock. The original strict failure remains failed.
 
 The source-frozen contract stage is **FAILED: 299 invoked, 288 passed, 11 failed**
 (two timeouts and nine assertions), in 3,397.34 wall/10,019.79 CPU seconds.
@@ -165,10 +286,10 @@ model capacity, with no approval denial reported. The const native/compact
 earliest-future-frequency-scoring-support API passes its
 [focused test](../local-evidence/helper-two-tone/record-frequency-integration-r1/frequency-coast/support.log).
 It is a receiver-local support bound, not a processed/capture frontier, phase or
-END certificate. That validated app's RF mask windows are not whole-score
-frequency certificates; the R4 source overlay below awaits main validation and
-the DATA-specific lease remains private. Known-null settlement alone cannot replace history through Hilbert/
-FIR transients; that private history work remains held.
+END certificate. That preceding app's RF mask windows are not whole-score
+frequency certificates; R4's selected coverage and functional failures are
+recorded below, while the DATA-specific lease remains private. Known-null
+settlement alone cannot replace history through Hilbert/FIR transients.
 A private [whole-score/frontier experiment](../local-evidence/helper-two-tone/record-frequency-integration-r1/whole-score-r1/build-and-live/runtime-results.json)
 **fails its performance acceptance**. The baseline completes source/bank fence
 285,835/283,313 in 24.704222 CPU seconds. The new branch reaches its 75-second
@@ -240,16 +361,58 @@ retains the identical 14 positive-Q smoothed-query exclusions among 34,623 queri
 (maximum ratio 1.1231), 6.6–7.3 seconds after drift-rate onset, not immediate
 onset latency. Eight short seeded cases have zero exclusions in 1,582 correlated
 descriptors per arm; no known-truth precision claim follows for the matched Live prefix.
-These are conditional intervals, not calibrated confidence. R4's reviewed six-file
-source integration is pinned; main build, five focused targets and GUI check
-remain pending.
+These are conditional intervals, not calibrated confidence. R4's
+[main build](../local-evidence/helper-two-tone/record-frequency-integration-r1/whole-score-r1/refined-live-r4/main-integration/build/results.json)
+passes in 113.904 wall/113.649 CPU seconds. Its
+[focused receipt](../local-evidence/helper-two-tone/record-frequency-integration-r1/whole-score-r1/refined-live-r4/main-integration/focused/terminal.json)
+retains unchanged source/binary pins: **4/5 pass**, 69.378 wall/14.687 CPU seconds;
+`helper_normal_loss` fails at 60.02 seconds. GUI self-check passes in 11.092 wall/
+12.010 CPU seconds. [Bindings](../local-evidence/helper-two-tone/record-frequency-integration-r1/whole-score-r1/refined-live-r4/main-integration/focused/before.json)
+identify core `15673871…`/GUI `2630c59f…`; manual display/radio remains untested.
+
+The [normal-loss predicate diagnosis](../local-evidence/helper-two-tone/record-frequency-integration-r1/whole-score-r1/refined-live-r4/main-integration/focused/normal-loss-diagnosis/analysis.json)
+joins all 112 dated phase certificates correctly; 111 fail only the fixture's
+`locked` predicate, which instead describes whole-history RF authority. The
+reviewed sole-predicate repair `9695227a…` followed this failed run; the current
+funded-provenance checks above have their own binding. That repair alone does not
+repair the separate [zero-work failure](../local-evidence/helper-two-tone/record-frequency-integration-r1/whole-score-r1/refined-live-r4/main-integration/focused/normal-loss-diagnosis/no-progress-analysis.json):
+the 63,784-byte score producer yields at sequence 108 for mandatory birth,
+leaving 13 conditional owners with zero FFTs/no bits/END. Joined input reaches
+28.815 seconds versus nominal DATA 6–16.24 seconds plus six-second END support;
+elapsed input does not establish scored coverage. This is a provenance-funding
+failure, not a physical SNR limit. R4's matched-prefix stage CPU records generation
+1.061884 s, ordinary feed 47.115299 s and outside-feed 0.638406 s; isolated
+frontend/optional/kernel CPU is unavailable.
 
 The separate [private actual-DATA R3 experiment](../local-evidence/helper-two-tone/record-frequency-integration-r1/actual-data-lease-r3/runtime-results.json)
 fails with zero owners/FFT/exact payload/END despite 77 qualified outputs and
 504 covered raw projections. Diagnosis finds a funding/bootstrap-capacity
-initialization cycle. The [R4 initializer repair](../local-evidence/helper-two-tone/record-frequency-integration-r1/actual-data-lease-r4/source-freeze.json)
-is source-review accepted and building, without a runtime pass. No DATA-lease
-promotion or complete HF/128-second EME/native qualification follows.
+initialization cycle. The [R4 run](../local-evidence/helper-two-tone/record-frequency-integration-r1/actual-data-lease-r4/joined-runtime-audit.json)
+retains a separate one-ULP containment failure. The
+[R5 numeric component](../local-evidence/helper-two-tone/record-frequency-integration-r1/actual-data-lease-r5/checks/comparison.json)
+passes 197 cases: seven old declines recover, all 83 retained outputs stay
+bounded, strict guards and exact-zero behavior remain. Component correctness
+does not erase the [R5 Live failure](../local-evidence/helper-two-tone/record-frequency-integration-r1/actual-data-lease-r5/execution/joined-runtime-audit.json):
+no exact payload/END, 5,859 FFT jobs/27 transforms/13 owners and 2.338238 external
+CPU seconds, versus the retained passed R3 baseline's 2,226/50/14 and 1.803132 s.
+This is not qualified savings. Actual-TX owner 9 freezes constructor bounds
+[−0.1225269995,−0.0774867657] Hz; a later supported whole hull is about
+0.000071882 Hz wider at either edge, so this owner performs zero FFTs. This is
+immutable-constructor lockout, not a physical precision limit. All three DATA LF
+cells retain the full ±300 ppm domain without clock qualification; the R3
+M-coupled baseline has five or seven representatives (actual TX five), not three.
+Earlier funding, one-ULP and functional failures remain distinct. The current
+additive result above has a separate binding and measures restored work; it
+does not relabel these original failures.
+
+The strong actual-RF baseline measures about 55.20 dB-Hz. It is not the supplied
+HF40 case's configured total/pilot 30.02/29.56 dB-Hz, sampled pilot 23.54 dB-Hz
+or first measured 23.58669 dB-Hz. Existing `gpsdo_reference` controls improve both
+RF and audio oscillators while retaining Default/70 ms settings; the new RF-only
+control above retains audio but still lacks an identical scored frontier. HF40
+hardware throughput, HF15k wrong-calendar END, EME gated-template/memory/CPU and the
+1,024-byte cutoff remain separate failures; no physical floor or full
+HF/128-second EME/native qualification follows.
 
 The independently reviewed [matched actual-RF final-loss comparison](../local-evidence/helper-two-tone/record-frequency-integration-r1/frequency-coast/matched-final-loss/measured-comparison.json)
 holds physical PCM [0,900,000) equal (SHA `5398cc4c…`) and final media dates
@@ -953,6 +1116,11 @@ fails at its CPU limit (`SIGXCPU`, 145.868 process CPU seconds) before the
 canonical first-symbol checkpoint. Required PCM hash/fence and canonical gate
 score are unavailable. Its eight ordinary work frontiers remain at sample
 681,750, with 144 owners and about 91.31 MB additional optional projector storage.
+That prototype already uses eight active-lattice shared projectors, not one per
+arrival; new "sharing" is not an untested cure. The private alternative replacing
+33 × Moments prefixes with streaming segments has a limited private component
+acceptance (17.64% producer CPU and 60% storage reduction). The full correlator
+is uncompiled, with no Live acquisition or receiver-completion claim.
 The matching 5,640 frequency-trace records establish trace identity, not PCM
 identity or a matched whole-work CPU comparison. No complete eight-bit/END,
 physical SNR floor, production promotion or broad Live qualification follows.

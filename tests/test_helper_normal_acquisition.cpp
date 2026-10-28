@@ -859,7 +859,8 @@ bool trace_filter(const char* event) noexcept {
     const std::string_view name{event};
     if(name=="correlator_probe_decision" || name=="native_probe_continuation")
         return trace_receiver_probe.load(std::memory_order_relaxed);
-    if(trace_tx_diagnostics.load(std::memory_order_relaxed)&&name=="receiver_pattern_drain")return true;
+    if(trace_tx_diagnostics.load(std::memory_order_relaxed)&&
+       (name=="receiver_pattern_drain"||name=="receiver_component_cpu"))return true;
     if(trace_work.load(std::memory_order_relaxed)&&(name=="receiver_helper_raw_reference"||name=="receiver_helper_pilot_phase"||
             name=="receiver_acquisition_work"||
             name=="receiver_helper_compact_work"||name=="receiver_helper_cohort_dispatch"||
