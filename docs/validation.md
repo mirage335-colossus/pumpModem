@@ -8,11 +8,11 @@ and use Git history for comparisons. Detailed studies remain in the
 
 ## Current two-tone Helper Carrier candidate
 
-The current human checkpoint is `871a55a`, with a shared integration overlay.
-It was created by the user during diagnosis; builds begun before it may retain
-the earlier configure-version string; those receipts remain separate from the
-new coast/support-API app binding. Final qualification remains pending. The
-preceding checkpoints `aef6580`, `62db765` and `8355e64` and their
+The current human checkpoint is `65ee248`, committing the preceding shared
+overlay. Runtime remains frozen for the current contract run; documentation
+updates do not establish new runtime qualification. Earlier receipts retain
+their own source/configure-version bindings. Final qualification remains
+pending. The preceding checkpoints `871a55a`, `aef6580`, `62db765` and `8355e64` and their
 source-bound evidence remain distinct from the superseded single-tone R16 source/binary.
 R17 measured retune-prefix FFT work falls with all LF alternatives retained,
 but total CPU rises. An earlier HF40 public reception passes, while the current
@@ -58,6 +58,22 @@ GUI/source hashes; the initial checkpoint does not bind those evolving inputs.
 
 ### Current measured status and remaining failures
 
+The full **299-case contract run is RUNNING**, including differential calibration
+with four workers; no final runtime outcome is available. Prerequisites pass in
+[the current contract scope](../local-evidence/helper-two-tone/record-frequency-integration-r1/contract-coast-r1/result-partial.json),
+with [registered selection](../local-evidence/helper-two-tone/record-frequency-integration-r1/contract-coast-r1/registered-tests.json)
+and [frozen pretest binaries](../local-evidence/helper-two-tone/record-frequency-integration-r1/contract-coast-r1/runtime-pretest.json).
+An [attempted pretest hold](../local-evidence/helper-two-tone/record-frequency-integration-r1/contract-coast-r1/intentional-hold.json)
+was ineffective: the guard checked its original file set and ignored a newly
+created noncompiled sentinel, so CTest/calibration started. This is a **failure
+of the hold mechanism, not a contract failure**. The sentinel was removed; the
+[post-hold comparison](../local-evidence/helper-two-tone/record-frequency-integration-r1/contract-coast-r1/post-hold-binding-check.json)
+finds all 1,169 original source files and four runtime/app hashes unchanged.
+The coordinator directed the frozen run to continue. [Commands](../local-evidence/helper-two-tone/record-frequency-integration-r1/contract-coast-r1/commands.json)
+and [contract output](../local-evidence/helper-two-tone/record-frequency-integration-r1/contract-coast-r1/contract.log)
+retain the actual scope; private whole-score/gate/terminal prototypes remain
+unpromoted.
+
 The rebuilt GUI is `build/dev/datapump-gui`. The coast/support-API
 [app build](../local-evidence/helper-two-tone/record-frequency-integration-r1/frequency-coast/apps-result.json)
 passes in 162.506 wall/317.220 CPU seconds, with
@@ -83,7 +99,8 @@ model capacity, with no approval denial reported. The const native/compact
 earliest-future-frequency-scoring-support API passes its
 [focused test](../local-evidence/helper-two-tone/record-frequency-integration-r1/frequency-coast/support.log).
 It is a receiver-local support bound, not a processed/capture frontier, phase or
-END certificate. Whole-score DATA masks and Live rolling provenance are not
+END certificate. Current RF mask windows are not yet whole-score frequency
+certificates; the new DATA-specific mask and Live rolling provenance are not
 integrated. Known-null settlement alone cannot replace history through Hilbert/
 FIR transients; that private history work remains held.
 
@@ -711,6 +728,16 @@ and fractional shaped samples (correlation 1). The next rows address epochs
 This confirms a current-code address alias with correct six-second END duration. The
 component control replays no PCM/acquisition and changes no identity or END
 contract. The strict row failure remains open, without a receiver fix or pass.
+The accepted diagnosis of the retained native window is stronger than a
+presentation/source-row issue: the wrong calendar alias fully scores absent
+address `1800000074` while true address `1800000075` is strong in the same
+window. Scored duration is sufficient, but absence for the wrong code address
+does not establish physical END for the transmitted source. This is an
+**END-authority defect**, not a duration shortfall. The
+[retained native receipts](../local-evidence/helper-two-tone/hf15k-terminal-join-r1/retained-native-input.json)
+also support a private terminal-join component investigation; that prototype is
+not a Live receiver fix or strict acceptance pass. No source-identity/prefix
+guard, framing or six-second physical-END requirement is relaxed.
 
 The [R19 EME first-two-symbol probe](../local-evidence/helper-two-tone/eme-r19-probe/run.log)
 ends at its requested 300-second media window (exit 2), with
@@ -759,8 +786,14 @@ matches the scalar score to 5.85e−12, but this is truth-timed/generated PCM,
 not the original Live noise/filter/phase realization or an acquisition result.
 [Bindings](../local-evidence/helper-two-tone/eme-gate-template-discriminator/bindings.json)
 retain the concrete template-efficiency opportunity. No production gate edit,
-eight-bit/END or physical-floor claim follows. Further broad regressions remain
-held until this fundamental receiver-gate investigation is settled.
+eight-bit/END or physical-floor claim follows. The current frozen contract run
+above does not promote this private experiment.
+A private [shared-gate producer/selector component](../local-evidence/helper-two-tone/eme-gate-template-discriminator/shared-gate-r1/analysis.json)
+passes 12 numerical geometries, with maximum score error 7.59e−13 and quarter
+error 1.55e−12 against its scalar controls. Its repaired runtime uses 8.99483
+CPU seconds. The original setup and signed-shift audit failures remain retained.
+This is not full-correlator family integration, Live acquisition, physical END
+or a promoted production gate; its proposed integration remains private.
 
 An [actual auxiliary phase control](../local-evidence/helper-two-tone/hf-native-batch/auxiliary-phase-control/run.log)
 retains zero markers in the requested noisy pilot/auxiliary/DATA mixture. With
