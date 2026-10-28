@@ -5556,6 +5556,17 @@ std::optional<std::uint64_t> PatternReceiver::delayed_processing_frontier()const
     return impl_->deferred_acquisition_frontier==UINT64_MAX?std::nullopt:
         std::optional<std::uint64_t>(impl_->deferred_acquisition_frontier);
 }
+std::optional<std::uint64_t> PatternReceiver::earliest_future_frequency_scoring_sample()const noexcept {
+    if(!impl_)return {};
+    const auto& s=*impl_;
+    if(s.fallback)return s.fallback->earliest_future_frequency_scoring_sample();
+    if(s.calendar_symbols() || !s.bin_samples || s.partial>s.sample)return {};
+    // Every native raw_at() access is inside the retained bin ring. The
+    // unfinished raw bin is not in that ring yet and retains its own dates.
+    const auto oldest=s.bins-std::min<std::uint64_t>(s.bins,s.ring.size());
+    if(oldest>UINT64_MAX/s.bin_samples)return {};
+    return std::min(oldest*s.bin_samples,s.sample-s.partial);
+}
 std::vector<PatternEvidence> PatternReceiver::candidates()const{return impl_->fallback?impl_->fallback->candidates():impl_->history;}
 std::vector<PatternEvidence> PatternReceiver::candidates(std::size_t limit,std::stop_token stop)const {
     if(stop.stop_requested())throw Error("pattern diagnostic query cancelled");

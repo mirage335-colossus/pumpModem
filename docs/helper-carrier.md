@@ -18,9 +18,11 @@ straight-tone intervals, before ramps, metadata and channel response. The pilot
 is nine times stronger in power, three times in amplitude and 9.54 dB above the
 auxiliary. The pilot has no intentional phase reversals or metadata modulation.
 
-The rebuilt GUI is at `build/dev/datapump-gui`; the current fixed-lag build
-passes its headless self-check and seven of eight focused checks. The phase-
-update-count failure also reproduces on the preceding core. The preceding
+The rebuilt GUI is at `build/dev/datapump-gui`. At human checkpoint `871a55a`
+plus the current overlay, the coast/support-API app rebuild is bound in
+validation. Protocol/support and both default actual-RF controls pass. The latest
+full GUI group remains 38/39; the isolated geometry-repaired controller now
+passes on the preceding core, without a new full-group result. The preceding
 filter/translator index build passes 11/11 focused and 13/13 preservation checks.
 Its matched fixed-prefix Live run measures 41.15% lower process CPU with
 identical references/progress; current 1,024-byte completion remains untested.
@@ -29,7 +31,7 @@ attachment OFF/ON controls pass exact source/wire/pending/END. Implicit RF
 narrowing and frequency-only retune controls now reduce actual
 FFT work, without a qualified CPU-gain claim. Full contract remains incomplete;
 long-text deadlines, strict HF15k-row and full EME failures remain open. Human
-checkpoint `aef6580`, exact bindings and all failures are in
+checkpoint history, exact bindings and all failures are in
 [validation](validation.md). Metadata clock scaling/dedup is included, with seven
 unique dwells per ten component geometries and normal wide-offset reception.
 It grants no additional assistance or general phase/filter-delay certification.
@@ -82,6 +84,10 @@ LF alternatives remain. This is a bounded prefix result, not full END or
 hardware throughput qualification. The normal continuous test retains 14
 correlated smoothed-query escapes, passes refit/frozen-history support and uses
 776,400 bytes, 9,744 more than before, with no PCM history.
+The later independent-record fallback leaves this Live cohort's 10,682 FFT jobs
+and U 0.06640714 Hz unchanged, while CPU rises 3.37%. It publishes no independent
+records in that fixture, so it establishes no new Live fallback benefit. The
+repaired laboratory stage still retains 35 snapshot and four dated escapes.
 
 The frozen R15 Live retune adapter uses capture-effective RF and common-source
 clock/rate covariance, actual RF/sideband geometry and causal old-segment seeds.
@@ -95,6 +101,26 @@ proof now passes actual geometries with exact payload/END; the original failed
 proof remains retained. LF cells are clipped to their original physical domain
 even without a qualified clock measurement. Hardware and general uncertainty
 qualification remain open.
+The joint model can project a DATA-frequency marginal with RF/audio covariance.
+The explicit `data_frequency_valid` field is preparation only: direct Helper
+apertures grant no DATA certificate, and a consumer still needs dated support
+for the whole scored observation. No new DATA-frequency mask is applied.
+A bounded frequency coast no longer requires a current-hop full fit/presence
+bootstrap: availability lasts at most 0.5 seconds from independent frequency
+evidence, using integer dates. Retunes never renew that evidence. The three-
+second mathematical model history remains separate; explicit close/reset/veto
+and local phase-fit requirements remain. Normal actual-RF cases exercise no
+pre-fit coast events. The matched retune/loss case demonstrates 30 prior-only
+corrections, including five after final loss at witness ages 0.436–0.5 seconds,
+without witness renewal, new phase or escapes. Both keep exact `001`/ID 2/END,
+but FFT jobs rise 2,058→2,226 and CPU 3.074368→3.107025 seconds; no gain follows.
+Only an END-covering PCM prefix is hashed, not its entire tail.
+An engineered strong fixed-RF phase-gap test exercises 56 independent-aperture
+publications versus zero before, with no nominal-flank escapes and unchanged
+1,127 FFT jobs. Phase counts also change; only a wrong-epoch pending one-bit
+suffix is observed, so it grants no canonical payload/END acceptance.
+The const native/compact support API exposes earliest future frequency-scoring
+support, but whole-score DATA masking and Live rolling provenance remain open.
 
 Local phase observations and a separately funded raw staging FIFO remain bounded
 at 400 ms. Every committed sample and date must survive loss and staging.
@@ -130,8 +156,11 @@ It uses 145.115 audio seconds, 361.48 fixture CPU and 172,289 FFT jobs, with no
 health faults. Current positive-Q uncertainty is wider at dispatch than in R15
 (125 versus 49 selected pairs at first score); the earlier raw-median precision
 comparison did not measure that receiver cost. The strict run remains failed.
-The fixed-lag R24 HF40 run also misses its original deadline; its audit remains
-pending, without a new reception or full-run CPU-gain claim.
+The fixed-lag R24 HF40 run also misses its original deadline. Its fixture never
+observes the simulation-finish/replay conjunction or a completed exact public
+row. Public exact is accumulated with OR, so an earlier wrong row cannot veto
+it. Canonical eight-bit/END trace commits precede staging acceptance and do not
+prove public completion; the precise unmet tail/finish subcondition is unobserved.
 
 Actual random-phase RF Session controls retain exact `001`, same pending
 identity and END. The extended-arithmetic clock-cell proof passes all 32 physical
@@ -163,6 +192,20 @@ no physical SNR floor, Live gain or fine-arrival change follows. DATA C/N0 remai
 a modeled channel value. Optional auxiliary phase certification also fails its
 noisy-mixture/coarse and post-DATA residual checks; full-Live delay mapping is
 not certified.
+The matched EME first-symbol phase-ON/OFF comparison scores 30.1203/30.0786
+against threshold 31.0201 with the same covered raw PCM and frequency records.
+Phase gives a small benefit in that window; both fail, establishing neither an
+SNR floor nor eight-bit completion.
+A known-truth EME waveform component has no Interleaved V2 backoff (DSSS factor
+1): nominal DATA C/N0 is −4.9794 dB-Hz, actual keyed/gated C/N0 −6.4142 dB-Hz and
+symbol E/N0 29.2276 linear. Fake-FHSS gating costs 1.5918 dB relative to the
+actual ungated waveform. This is power/noise accounting, not an ordinary score,
+decode or physical-floor result.
+An ungated-template component opportunity remains: on the same generated PCM,
+including the known source gate in the template raises guarded score
+17.9804→20.9997. It is not actual Live acquisition or an eight-bit result, and
+no production gate change is applied. Full regressions remain held while the
+fundamental receiver-gate diagnosis is settled.
 
 The R15 rolling check now passes withdrawal, drain and dated post-loss joined
 work. R16 GPS, Default-clock and final-loss controls pass, preserving the same
@@ -210,6 +253,12 @@ normal eligible markers are missed, with no publications. The straight-tone
 competitor remains unconverged after two clipped steps. Zero false outputs in
 that matrix do not qualify detection; the private branch is not promoted and
 establishes no physical SNR limit.
+A subsequent private null-variable-projection matrix qualifies/covers 75/81
+normal markers and 77 boundaries, with six marker misses, no accepted-interval
+escapes and no straight-tone publications. Its fade/loss case covers 10/11
+eligible markers. The 14-capture run costs 30.095 CPU seconds; normal process
+cost averages 0.484 CPU/audio. This remains conditional component evidence with
+no Live timing authority or calibrated coverage claim.
 
 The retained realistic and calendar Live diagnostics fail with no bits/END, despite
 qualified pilot observations. The calendar check also rejects a clock flag even
@@ -255,8 +304,10 @@ and executes 4,940/9,652 joined FFT jobs with measured narrowing at timestamp ze
 
 Serial-cache exact-score checks, 128-second phase-component controls and
 full-dwell/model experiments retain their own source bindings and failures.
-The pre-lag GUI group passes 39/39; latest-source full GUI remains unrun, and
-earlier source-bound GUI failures remain.
+An earlier pre-lag GUI group passes 39/39; the later group is 38/39 with its
+original LPI-geometry fixture failure retained. The repaired full controller
+passes in 138.40 seconds on the preceding core; a latest-app full-group rerun
+and final qualification remain pending.
 Migrated
 R19 joint-clock/query/selector-cache checks pass, using dated pilot support and
 14 independent auxiliary markers; original fixture failures remain retained.
@@ -352,9 +403,10 @@ The two tones' possible voltage sum requires more peak headroom than the old
 single tone. At unchanged audio volume, the native calibrated data gain is lower
 by approximately 1.353 dB for 40 W Helper/4 W Robust and 1.989 dB for 15 kW/4 W.
 Recalibrate the physical RF chain to retain the configured powers. This is an
-audio-headroom change, not a requested payload-power reduction. Sampled simulation
-applies the same data gain to signal and noise, preserving payload SNR and the
-configured RF budget. Ramps/metadata and channel/filter gains are separate
+audio-headroom change, not a requested payload-power reduction. Headroom and
+physical-oversampling compensation scale sampled signal/noise together; they do
+not remove Interleaved V2's separate **−6.0206 dB sampled DATA gain** relative to
+the nominal RF budget. Ramps/metadata and channel/filter gains are separate
 received-power effects.
 
 Native and browser playback generate the helper after output resampling.
@@ -449,6 +501,10 @@ payload starts with achievable precision; elapsed airtime grants no runtime
 qualification. The ±0.1 Hz target is a lead-planning milestone, not a sufficient
 bin width for every configuration, including 128-second symbols. Tail duration
 never uses expected message length as completion authority.
+The independent-retune comparison assumes constant drift and configured Brownian
+phase noise. It excludes operational RF/audio acceleration, retune scatter and
+integrated-model precision; it selects neither TX lead nor receiver-cost
+precision. It is not a prediction of measured retune performance.
 
 For pilot C/N0 in linear Hz, the ideal uninterrupted noise-only three-times-CRLB
 standard-deviation scale is
@@ -510,7 +566,8 @@ or waive its actual measurement gates.
 
 Physical AWGN preserves the original in-data-band noise spectral density and
 the existing `modem::nominal_signal_power` convention. Interleaved V2 DSSS has a
-6.02 dB digital power backoff: data C/N0 is the nominal reference minus 6.02 dB,
+−6.0206 dB sampled digital power gain: DATA C/N0 is the nominal reference minus
+6.0206 dB,
 and the calibrated steady helper adds the requested helper/data ratio to that
 data reference. The simulator does not reduce noise or boost Robust PCM to
 make assistance succeed. Physical cable tests do not inject the configured RF

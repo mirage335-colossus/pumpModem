@@ -41,9 +41,13 @@ struct HelperOscillatorSeed {
     std::uint64_t epoch=0,raw_origin_generation=0,actual_first_sample=0,pilot_first_sample=0,pilot_end_sample=0;
 };
 struct HelperOscillatorQuery {
-    // valid is conditional frequency mathematics; available also needs an
-    // observed CURRENT-HOP pilot and captured input. Neither grants phase/time.
+    // valid is conditional frequency mathematics; available also needs captured
+    // input and a recent independent FREQUENCY witness. A confirmed retune does
+    // not erase that witness or renew its date. Neither grants phase/time.
     bool valid=false,available=false,direct_aperture=false;
+    // Direct Helper apertures carry no joint DATA projection. Consumers also
+    // require available before using this independently explicit certificate.
+    bool data_frequency_valid=false;
     double helper_residual_hz=0,helper_uncertainty_hz=0;
     double data_residual_hz=0,data_uncertainty_hz=0;
     helper::OscillatorFrequencyPrediction state;
@@ -57,6 +61,10 @@ struct HelperOscillatorUpdate {
 class LiveHelperOscillator {
 public:
     static constexpr std::size_t scratch_allowance=65536;
+    // Same short coast as the pilot's existing presence age, dated from a
+    // frequency aperture rather than a phase update or retune notification.
+    // The longer model history/maximum age remains available numerically.
+    static constexpr double frequency_witness_coast_seconds=.5;
     static constexpr std::size_t storage_required()noexcept{return sizeof(LiveHelperOscillator);}
     bool configure(const HelperOscillatorConfig& c,HelperOscillatorProvider p,std::size_t grant)noexcept {
         if(configured_||grant<sizeof(*this)||!provider_valid(p)||!c.common_effective_source||
@@ -139,13 +147,14 @@ public:
         // hop's already observed frequency support while bounded PCM drains.
         // A closed current reference grants no extrapolation past that dated
         // pilot. This transports frequency only; phase is reacquired per hop.
-        out.available=out.valid&&saved.pilot_end_sample&&saved.pilot_end_sample<=captured_end&&
-            at<captured_end&&(!closed_||at<saved.pilot_end_sample);return out;
+        out.available=out.valid&&frequency_witness(state,captured_end,saved.mapping.sample_rate)&&at<captured_end&&
+            (!closed_||(saved.pilot_end_sample&&at<saved.pilot_end_sample));return out;
     }
     HelperOscillatorQuery current(std::uint64_t at,std::uint64_t captured_end,double data_audio_hz)const noexcept {
         HelperOscillatorQuery out;if(!configured_||domain_blocked_||!have_segment_)return out;
         const auto state=model_.predict(seed_.mapping,at);if(!state.valid)return out;
-        out=project(state,seed_.mapping,data_audio_hz);out.available=out.valid&&!closed_&&seed_.pilot_end_sample&&seed_.pilot_end_sample<=captured_end&&at<captured_end;return out;
+        out=project(state,seed_.mapping,data_audio_hz);
+        out.available=out.valid&&!closed_&&frequency_witness(state,captured_end,seed_.mapping.sample_rate)&&at<captured_end;return out;
     }
     // A current full fit can support its OBSERVED aperture without backward
     // prediction. Keep deterministic slew as a separate additive interval.
@@ -164,6 +173,14 @@ public:
         out.valid=out.available=std::isfinite(out.helper_uncertainty_hz);out.direct_aperture=true;return out;
     }
 private:
+    static bool frequency_witness(const helper::OscillatorFrequencyPrediction& state,
+            std::uint64_t captured_end,std::uint32_t rate)noexcept {
+        return state.evidence_end_sample && state.evidence_end_sample<=captured_end&&
+            std::isfinite(state.observation_age_seconds)&&state.observation_age_seconds>=0&&
+            state.sample>=state.evidence_end_sample-1&&
+            state.sample-(state.evidence_end_sample-1)<=
+                static_cast<std::uint64_t>(rate*frequency_witness_coast_seconds);
+    }
     static bool provider_valid(HelperOscillatorProvider p)noexcept{return p.identity&&std::isfinite(p.phase_noise_radians_per_sqrt_second)&&p.phase_noise_radians_per_sqrt_second>=0;}
     bool same_provider(HelperOscillatorProvider p)const noexcept{return p.identity==provider_.identity&&p.phase_noise_radians_per_sqrt_second==provider_.phase_noise_radians_per_sqrt_second;}
     bool block()noexcept{domain_blocked_=closed_=true;return false;}
@@ -184,7 +201,8 @@ private:
         out.helper_residual_hz=rf*p.rf_fraction+m.helper_audio_hz*p.audio_fraction;out.data_residual_hz=rf*p.rf_fraction+data*p.audio_fraction;
         const auto vh=variance(m.helper_audio_hz),vd=variance(data);if(!std::isfinite(vh)||!std::isfinite(vd)||vh<0||vd<0)return out;
         out.helper_uncertainty_hz=3*std::sqrt(vh);out.data_uncertainty_hz=3*std::sqrt(vd);
-        out.valid=p.valid&&std::isfinite(data)&&std::isfinite(out.helper_residual_hz)&&std::isfinite(out.data_residual_hz)&&std::isfinite(out.helper_uncertainty_hz)&&std::isfinite(out.data_uncertainty_hz);return out;
+        out.valid=p.valid&&std::isfinite(data)&&std::isfinite(out.helper_residual_hz)&&std::isfinite(out.data_residual_hz)&&std::isfinite(out.helper_uncertainty_hz)&&std::isfinite(out.data_uncertainty_hz);
+        out.data_frequency_valid=out.valid;return out;
     }
     HelperOscillatorConfig config_;HelperOscillatorProvider provider_;helper::OscillatorFrequencyModel model_;
     HelperOscillatorSeed seed_;helper::OscillatorFrequencyPrediction last_state_;helper::ToneFrequencyObservation last_observation_;

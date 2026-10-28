@@ -388,7 +388,7 @@ inline TonePrecisionPrediction pilot_model_prediction(const TonePrecisionRequest
         continuous_process?
         "conditional uninterrupted pilot with unknown initial phase/frequency/rate and operational frequency-rate evolution; phase retained across publication windows and amplitude ramps":
         "conditional uninterrupted pilot with unknown constant frequency drift; phase retained across publication windows and amplitude ramps":
-        "conditional constant-drift/Brownian comparison from independently phased nominal settled retune apertures; compatible RF/audio mapping is assumed; excludes operational RF/audio acceleration, retune scatter and integrated-model precision; not a forecast of measured runtime precision or practical confidence";
+        "conditional constant-drift/Brownian comparison from independently phased nominal settled retune apertures; RF/audio mapping must be established; excludes operational RF/audio acceleration, retune scatter and integrated-model precision; not a forecast of measured runtime precision or practical confidence";
     model.reason+=continuous_process?"; configured Brownian phase noise and finite-Hann projection loss included":
         "; configured Brownian phase noise and stated projection efficiency included";
     model.reason+="; straight-power idealization, ramp/filter gains, abrupt drift changes, model-selection delay, fades, self-interference and coverage require measured qualification; earlier seeded interval escapes remain a coverage limitation; not calibrated confidence or a runtime lease";

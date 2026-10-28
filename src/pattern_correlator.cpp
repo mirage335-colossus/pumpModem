@@ -13528,6 +13528,24 @@ std::uint64_t PatternCorrelator::oldest_unresolved_diagnostic_event()const noexc
     const auto generation=diagnostic_history_generation();return generation==std::numeric_limits<std::uint64_t>::max()?generation:generation+1;
 }
 std::optional<std::uint64_t> PatternCorrelator::delayed_processing_frontier()const noexcept{return impl_->lazy_state()?std::optional<std::uint64_t>{impl_->lazy_state()->processed}:std::nullopt;}
+std::optional<std::uint64_t> PatternCorrelator::earliest_future_frequency_scoring_sample()const noexcept {
+    if(!impl_)return {};
+    const auto& s=*impl_;
+    // Scheduled carries, lazy/shadow owners and amplitude partial FFTs have
+    // additional retained support; an ordinary-lane scan cannot certify them.
+    if(s.scheduled || s.burst || s.options.amplitude_only || s.amplitude_geometry)return {};
+    auto first=s.sample;
+    // Empty/suppressed fits can become active again. Keep their original
+    // starts rather than treating current dispatch eligibility as retirement.
+    for(const auto& h:s.hypotheses)first=std::min(first,h.observed_start);
+    // Shared pulse observations can precede transfer into a hypothesis fit.
+    for(const auto& lattice:s.pulse_lattices) {
+        if(lattice.pending.count)first=std::min(first,lattice.pending.first);
+        if(lattice.segment_observed)first=std::min(first,lattice.segment_first);
+        for(const auto& cell:lattice.cells)if(cell.count)first=std::min(first,cell.first);
+    }
+    return first;
+}
 std::vector<PatternEvidence> PatternCorrelator::candidates()const {
     impl_->lazy_resolve_diagnostics({});return impl_->history;
 }

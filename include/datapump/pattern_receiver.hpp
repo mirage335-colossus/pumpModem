@@ -1082,6 +1082,12 @@ public:
     // Receiver-local original completion-event commit frontier. This does not
     // certify that uncompleted-symbol replay arithmetic has already executed.
     std::optional<std::uint64_t> delayed_processing_frontier() const noexcept;
+    // Joined query only. Conservative lower bound, in this receiver's local
+    // INPUT coordinates, on observations any future frequency scoring may
+    // reuse, including unfinished raw bins and numeric partial-symbol state.
+    // Zero may pin retained history; nullopt means unsupported/unknown. This
+    // grants no capture/processing frontier, timing, phase or END authority.
+    std::optional<std::uint64_t> earliest_future_frequency_scoring_sample() const noexcept;
     std::vector<PatternEvidence> candidates() const;
     // Latest retained hypotheses in append order, without copying older entries.
     std::vector<PatternEvidence> candidates(std::size_t limit) const;

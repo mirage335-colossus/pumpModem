@@ -419,6 +419,9 @@ std::uint64_t StreamingReceiver::diagnostic_history_resolved_through()const noex
 std::uint64_t StreamingReceiver::oldest_unresolved_diagnostic_event()const noexcept{return impl_->pattern.oldest_unresolved_diagnostic_event();}
 bool StreamingReceiver::deferred_pattern_history()const noexcept{return impl_->pattern.deferred_pattern_history();}
 std::optional<std::uint64_t> StreamingReceiver::delayed_processing_frontier()const noexcept{return impl_->pattern.delayed_processing_frontier();}
+std::optional<std::uint64_t> StreamingReceiver::earliest_future_frequency_scoring_sample()const noexcept {
+    return impl_?impl_->pattern.earliest_future_frequency_scoring_sample():std::nullopt;
+}
 std::vector<PatternEvidence> StreamingReceiver::pattern_candidates()const{return impl_->pattern.candidates();}
 std::vector<PatternEvidence> StreamingReceiver::pattern_candidates(std::size_t limit,std::stop_token stop)const {
     return impl_->pattern.candidates(limit,stop);

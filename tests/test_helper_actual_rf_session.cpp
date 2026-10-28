@@ -45,6 +45,9 @@ bool filter(const char* name)noexcept {
 }
 struct Laboratory {
     std::atomic<std::uint64_t> transmit_epoch=0,channels=0;
+    std::optional<double> helper_end_seconds;
+    std::uint64_t helper_end_sample=0;
+    std::uint32_t physical_rate=0;
     live::detail::SimulationHook hook{this,[](void* opaque,const live::detail::SimulationObservation& event) {
         if(event.phase==live::detail::SimulationPhase::transmit_epoch)
             static_cast<Laboratory*>(opaque)->transmit_epoch=static_cast<std::uint64_t>(event.epoch);
@@ -54,8 +57,15 @@ struct Laboratory {
         retunes.rf_shift_hz={7e6,7.7e6,8.4e6,9.1e6};
         retunes.dwell_seconds=.4;retunes.settling_seconds=.012;retunes.phase_seed=49273;
         channel.set_rf_retune_simulation(retunes);
+        self.physical_rate=channel.physical_sample_rate();
+        if(self.helper_end_seconds) {
+            const auto sample=static_cast<long double>(*self.helper_end_seconds)*self.physical_rate;
+            check(sample>=1 && sample<static_cast<long double>(UINT64_MAX),"actual RF Helper loss lies outside physical sample coordinates");
+            self.helper_end_sample=static_cast<std::uint64_t>(std::round(sample));
+            channel.set_lab_helper_end_sample(self.helper_end_sample);
+        }
     }};
-    Laboratory() {
+    explicit Laboratory(std::optional<double> end_seconds={}):helper_end_seconds(end_seconds) {
         live::detail::SimulationHook* empty=nullptr;
         check(live::detail::simulation_hook.compare_exchange_strong(empty,&hook),"actual RF laboratory hook already installed");
     }
@@ -234,13 +244,14 @@ ConstructorGeometry corrected_constructor_geometry(const modem::Config& config,d
     }
     return {ordinary.hypotheses.size(),catalogue.hypotheses.size(),clocks.size(),clock_bound};
 }
-void run(const std::filesystem::path& path,bool independent_clock,bool require_oscillator_model=false) {
+void run(const std::filesystem::path& path,bool independent_clock,bool require_oscillator_model=false,
+        std::optional<double> helper_end_seconds={},bool require_prior_frequency=false) {
     const auto value=settings(independent_clock);const Bytes bits{0,0,1};
     const auto pilot=helper::plan(value.helper,helper::placement_band(value.transfer.modem),120000000,0,
         modem::outer_dsss_transmit_gain(value.transfer.modem)).frequency_hz;
     std::atomic<std::int64_t> replay_ms{0};bool finished=false,exact=false,frequency=false,phase=false;
     std::uint64_t final_samples=0,peak_bytes=0;std::string status;
-    Laboratory laboratory;const auto start=std::chrono::steady_clock::now();const auto cpu=std::clock();
+    Laboratory laboratory(helper_end_seconds);const auto start=std::chrono::steady_clock::now();const auto cpu=std::clock();
     {
         audio::trace::Scope trace(path,false,&filter);
         live::Session session({},[&]{return std::chrono::steady_clock::time_point{}+
@@ -282,6 +293,9 @@ void run(const std::filesystem::path& path,bool independent_clock,bool require_o
     std::uint64_t last_model_capture=0,last_qualified_capture=0;
     std::set<double> model_rf;
     std::map<std::uint64_t,std::uint64_t> model_support_end;
+    std::set<std::uint64_t> model_support_first,model_evidence_ends;
+    std::uint64_t prior_corrections=0,prior_after_loss_corrections=0,postfit_corrections=0,old_schema_corrections=0;
+    double prior_witness_age_max=0;
     double raw_error_max=0,model_error_max=0,data_diagnostic_error_max=0,correction_error_max=0;
     double model_uncertainty_max=0,model_uncertainty_min=INFINITY,correction_uncertainty_min=INFINITY;
     double maximum_error=0;std::uint64_t identity=0,revision=0,previous_bits=0;
@@ -356,7 +370,7 @@ void run(const std::filesystem::path& path,bool independent_clock,bool require_o
             const auto epoch=number(line,"model_epoch");check(epoch>=model_epoch && epoch,"oscillator model epoch went backward");
             model_epoch_changes+=model_epoch && epoch!=model_epoch;model_epoch=epoch;
             check(!model_support_end.contains(segment.phase),"oscillator reused a full fit from the same independent hop");
-            model_support_end.emplace(segment.phase,end);model_rf.insert(segment.rf);
+            model_support_end.emplace(segment.phase,end);model_support_first.insert(first);model_evidence_ends.insert(end);model_rf.insert(segment.rf);
             raw_only_updates+=number(line,"raw_frequency_only");innovation_vetoes+=number(line,"innovation_veto");++model_updates;
             phase_unqualified_updates+=!number(line,"phase_correction_qualified");
             phase_fit_unqualified_updates+=!number(line,"phase_fit_qualified");
@@ -365,12 +379,39 @@ void run(const std::filesystem::path& path,bool independent_clock,bool require_o
             const auto first=number(line,"first_center"),last=number(line,"last_center"),captured=number(line,"captured_end");
             auto found=segments.upper_bound(first);check(found!=segments.begin(),"oscillator correction predates actual RF mapping");--found;
             const auto& segment=found->second;const auto pilot_end=number(line,"current_pilot_end");
-            check(first>=segment.settled && first<=last && last<segment.end && last<captured &&
-                number(line,"frequency_evidence_end")<=captured && pilot_end<=captured &&
-                model_support_end.contains(segment.phase) && model_support_end.at(segment.phase)==pilot_end &&
-                number(line,"phase_segment")==segment.phase && real(line,"actual_rf_shift_hz")==segment.rf &&
-                number(line,"original_LF_UTC_union_retained") && !number(line,"phase_UTC_authority"),
-                "oscillator correction lacked current dated evidence or escaped its actual RF segment");
+            const auto has_field=[&](std::string_view field){return line.find('"'+std::string(field)+"\":")!=std::string::npos;};
+            const auto fields=unsigned(has_field("prior_without_current_pilot"))+unsigned(has_field("frequency_query_family"))+
+                unsigned(has_field("frequency_evidence_first"))+unsigned(has_field("frequency_witness_age_seconds"));
+            check(fields==0 || fields==4,"oscillator correction has incomplete frequency provenance");
+            // Archived pre-coast Live has none of these fields. It may prove
+            // only the original post-fit path, never a fabricated prior query.
+            const bool prior=fields && number(line,"prior_without_current_pilot");
+            if(fields) {
+                const auto evidence_first=number(line,"frequency_evidence_first"),evidence_end=number(line,"frequency_evidence_end");
+                const auto family=number(line,"frequency_query_family");const auto age=real(line,"frequency_witness_age_seconds");
+                check(evidence_first<evidence_end && evidence_end<=captured && family<=2 && std::isfinite(age) && age>=0 &&
+                    (family==1 || age<=.5),"oscillator correction has invalid frequency witness dates or age");
+                if(prior) {
+                    check(first>=segment.settled && first<=last && last<segment.end && last<captured &&
+                        !pilot_end && !model_support_end.contains(segment.phase) && (family==0 || family==2) &&
+                        evidence_end<=segment.first && model_support_first.contains(evidence_first) && model_evidence_ends.contains(evidence_end) &&
+                        std::abs(age-static_cast<double>(last-(evidence_end-1))/segment.rate)<1e-12 &&
+                        number(line,"phase_segment")==segment.phase && real(line,"actual_rf_shift_hz")==segment.rf &&
+                        number(line,"original_LF_UTC_union_retained") && !number(line,"phase_UTC_authority"),
+                        "oscillator prior lacked an earlier independent frequency witness or invented current-hop phase");
+                    ++prior_corrections;prior_witness_age_max=std::max(prior_witness_age_max,age);
+                    prior_after_loss_corrections+=helper_end_seconds && segment.first>=laboratory.helper_end_sample;
+                }
+            } else ++old_schema_corrections;
+            if(!prior) {
+                check(first>=segment.settled && first<=last && last<segment.end && last<captured &&
+                    number(line,"frequency_evidence_end")<=captured && pilot_end<=captured &&
+                    model_support_end.contains(segment.phase) && model_support_end.at(segment.phase)==pilot_end &&
+                    number(line,"phase_segment")==segment.phase && real(line,"actual_rf_shift_hz")==segment.rf &&
+                    number(line,"original_LF_UTC_union_retained") && !number(line,"phase_UTC_authority"),
+                    "oscillator correction lacked current dated evidence or escaped its actual RF segment");
+                ++postfit_corrections;
+            }
             const auto q=real(line,"applied_correction_hz"),tracking=real(line,"tracking_frequency_hz");
             const auto uncertainty=real(line,"residual_uncertainty_hz"),coefficient=real(line,"ordinary_clock_coefficient_hz");
             check(std::isfinite(uncertainty) && uncertainty>0 && std::abs(q+tracking-pilot)<1e-9 &&
@@ -472,6 +513,10 @@ void run(const std::filesystem::path& path,bool independent_clock,bool require_o
         <<",oscillator_helper_U_min_hz="<<model_uncertainty_min<<",oscillator_helper_U_max_hz="<<model_uncertainty_max
         <<",oscillator_DATA_diagnostic_escapes="<<data_diagnostic_escapes<<",oscillator_DATA_diagnostic_error_max_hz="<<data_diagnostic_error_max
         <<",oscillator_corrections="<<model_corrections<<",oscillator_correction_escapes="<<correction_escapes
+        <<",oscillator_prior_without_current_pilot_corrections="<<prior_corrections
+        <<",oscillator_prior_after_loss_corrections="<<prior_after_loss_corrections
+        <<",oscillator_prior_witness_age_max_seconds="<<prior_witness_age_max
+        <<",oscillator_postfit_corrections="<<postfit_corrections<<",oscillator_old_schema_corrections="<<old_schema_corrections
         <<",oscillator_correction_error_max_hz="<<correction_error_max<<",oscillator_correction_U_min_hz="<<correction_uncertainty_min
         <<",last_oscillator_correction_capture="<<last_model_capture<<",last_qualified_capture="<<last_qualified_capture
         <<",local_reference_polls="<<local_references<<",retained_LF_masks="<<retained_clock_masks<<",narrowed_RF_masks="<<narrowed_masks
@@ -483,7 +528,9 @@ void run(const std::filesystem::path& path,bool independent_clock,bool require_o
         <<",workspace_peak_bytes="<<peak_bytes<<",raw_stage_peak_samples="<<stage_peak
         <<",process_cpu_seconds="<<static_cast<double>(std::clock()-cpu)/CLOCKS_PER_SEC
         <<",wall_seconds="<<std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count()
-        <<",tx_epoch_observed_only="<<laboratory.transmit_epoch<<",status="<<status<<",trace="<<path<<'\n';
+        <<",tx_epoch_observed_only="<<laboratory.transmit_epoch<<",lab_helper_end_seconds="<<helper_end_seconds.value_or(-1)
+        <<",lab_helper_end_physical_sample="<<laboratory.helper_end_sample<<",physical_sample_rate="<<laboratory.physical_rate
+        <<",status="<<status<<",trace="<<path<<'\n';
     check(laboratory.channels==1 && segments.size()>=12 && references>=4 && !escapes && phase_updates>=4,
         "actual RF Session did not causally re-acquire independent retuned pilot segments");
     check(finished && exact && pending && completed && jobs && phase_work_jobs && frequency && phase,
@@ -494,18 +541,29 @@ void run(const std::filesystem::path& path,bool independent_clock,bool require_o
     if(require_oscillator_model)check(model_updates>=4 && model_rf.size()>=2 && model_corrections &&
         !raw_escapes && !model_escapes && !data_diagnostic_escapes && !correction_escapes,
         "persistent actual RF/audio model lacked dated useful corrections or escaped its reported uncertainty");
+    if(require_prior_frequency)check(prior_corrections && (!helper_end_seconds || prior_after_loss_corrections),
+        "actual RF model did not use a dated prior frequency without a current-hop pilot");
 }
 }
 int main(int argc,char** argv)try {
-    bool independent_clock=false,require_oscillator_model=false;std::optional<std::filesystem::path> requested_path;
+    bool independent_clock=false,require_oscillator_model=false,require_prior_frequency=false;
+    std::optional<std::filesystem::path> requested_path;std::optional<double> helper_end_seconds;
     for(int i=1;i<argc;++i) {
         if(std::string_view(argv[i])=="--independent-clock")independent_clock=true;
         else if(std::string_view(argv[i])=="--require-oscillator-model")require_oscillator_model=true;
+        else if(std::string_view(argv[i])=="--require-prior-frequency")require_prior_frequency=true;
+        else if(std::string_view(argv[i])=="--helper-end-seconds") {
+            check(++i<argc && !helper_end_seconds,"actual RF Helper loss requires one seconds value");
+            std::size_t consumed=0;helper_end_seconds=std::stod(argv[i],&consumed);
+            check(consumed==std::string_view(argv[i]).size() && std::isfinite(*helper_end_seconds) && *helper_end_seconds>0,
+                "actual RF Helper loss requires finite positive seconds");
+        }
         else if(!requested_path)requested_path=argv[i];
         else throw Error("unexpected actual RF fixture argument");
     }
     const auto path=requested_path.value_or(std::filesystem::temp_directory_path()/
         ("datapump-helper-actual-rf-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".jsonl"));
     check(!require_oscillator_model || independent_clock,"oscillator-model fixture requires independent RF/audio clocks");
-    frozen_source_band_declines_wide_retune();mixed_output_certificates_preserve_pcm();run(path,independent_clock,require_oscillator_model);return 0;
+    frozen_source_band_declines_wide_retune();mixed_output_certificates_preserve_pcm();
+    run(path,independent_clock,require_oscillator_model,helper_end_seconds,require_prior_frequency);return 0;
 }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}

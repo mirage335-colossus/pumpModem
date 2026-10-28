@@ -748,6 +748,8 @@ void lpi_estimate_controls() {
     prepare(controller);
     controller.select(F::simulation,"3dBm -170dB");prepare(controller);
     const auto reference=controller.inspection();
+    const auto reference_oscillator=controller.field(F::simulation_oscillator).selected;
+    const auto reference_config=controller.settings().transfer.modem;
     check(reference->lpi_estimate.status==lpi::Status::available&&
           !reference->lpi_estimate.hypothetical_encryption&&text().find("hypothetical")==std::string::npos&&
           std::abs(reference->lpi_estimate.reference_cn0_db_hz-
@@ -769,6 +771,9 @@ void lpi_estimate_controls() {
         controller.select(F::simulation_oscillator,std::string(preset.id));prepare(controller);
         same_advisory(*reference);
     }
+    // Interactive target fitting depends on oscillator/clock/RAM geometry.
+    // Restore that input before comparing the original target's waveform.
+    controller.select(F::simulation_oscillator,reference_oscillator);prepare(controller);
     controller.edit(F::snr,"-3");
     check(text().ends_with("Calculating..."),"TX plan change left stale LPI numbers visible");
     prepare(controller);
@@ -776,7 +781,14 @@ void lpi_estimate_controls() {
           controller.inspection()->lpi_estimate.equivalent_symbols>reference->lpi_estimate.equivalent_symbols,
           "A longer automatic symbol failed to improve the relative observer-to-receiver ratio");
     advisory_context="restore TX target";
-    controller.edit(F::snr,"0");prepare(controller);same_advisory(*reference);
+    controller.edit(F::snr,"0");prepare(controller);
+    const auto& restored_config=controller.settings().transfer.modem;
+    check(modem::symbol_sample_count(restored_config)==modem::symbol_sample_count(reference_config)&&
+          restored_config.sample_rate==reference_config.sample_rate&&
+          modem::pattern_chip_samples(restored_config)==modem::pattern_chip_samples(reference_config)&&
+          restored_config.bandwidth_hz==reference_config.bandwidth_hz,
+          "Restored LPI target must retain the reference waveform geometry");
+    same_advisory(*reference);
     advisory_context="exact raw bits";
     controller.edit(F::short_bits,"001");prepare(controller);
     check(controller.estimate()->wire_bits==3,"Exact three-bit draft changed the wire endpoint");

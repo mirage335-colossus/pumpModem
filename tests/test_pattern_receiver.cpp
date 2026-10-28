@@ -62,6 +62,48 @@ struct Reception {
     std::vector<std::complex<double>> points;
     std::size_t peak_working=0;
 };
+void future_frequency_support_retains_observations() {
+    auto c=config(16,true);c.sample_rate=512;c.bandwidth_hz=32;c.carrier_hz=128;c.pulse_shaping=false;
+    modem::PatternSearch search;search.worker_threads=1;search.frequency_offsets_hz={0};
+    search.clock_errors_ppm={0};search.search_stream_phases=false;search.initial_stream_symbols=1;
+    search.candidate_limit=8;search.track_limit=2;search.bit_limit=32;
+    constexpr std::size_t budget=2*1024*1024;
+    modem::PatternReceiver native(c,budget,search);modem::StreamingReceiver proxy(c,budget,search);
+    const auto initial=native.initial_fft_input_samples();
+    check(initial && initial<65536,"frequency-support fixture did not select bounded native FFT input");
+    const auto bin=native.acquisition_state().bin_samples;
+    std::vector<float> prefix(bin+1);
+    native.push(prefix);proxy.push(prefix);
+    check(native.earliest_future_frequency_scoring_sample()==0 &&
+          proxy.earliest_future_frequency_scoring_sample()==native.earliest_future_frequency_scoring_sample(),
+          "native/proxy support discarded a retained first bin or raw partial bin");
+    std::vector<float> later(static_cast<std::size_t>(8*initial));native.push(later);proxy.push(later);
+    const auto before=native.fft_work();const auto support=native.earliest_future_frequency_scoring_sample();
+    check(support && *support>0 && *support<=prefix.size()+later.size() &&
+          proxy.earliest_future_frequency_scoring_sample()==support,
+          "expired native input pinned history or support advanced beyond observation");
+    const auto after=native.fft_work();
+    check(before.input_transforms==after.input_transforms && before.template_jobs==after.template_jobs,
+          "frequency-support query performed receiver scoring");
+
+    auto slow=config(64,true);slow.sample_rate=256;slow.carrier_hz=64;slow.bandwidth_hz=8;
+    slow.integration_seconds=128;slow.pulse_shaping=true;
+    check(modem::symbol_sample_count(slow)==128ULL*slow.sample_rate,"compact support fixture lost its128s symbol");
+    search.start_offset_seconds=0;search.start_uncertainty_seconds=0;search.compact_clock_search=true;
+    search.admitted_clock_half_width_ppm=0;search.admitted_clock_cell_half_width_ppm=0;
+    search.hypotheses={{-.03125,0},{0,0},{.03125,0}};
+    for(const bool raw:{false,true}) {
+        modem::PatternCorrelatorOptions options;options.raw_reference=raw;
+        modem::PatternCorrelator compact(slow,search,budget,options);std::array<float,17> partial{};
+        compact.push(partial);
+        check(compact.earliest_future_frequency_scoring_sample()==0,
+              "compact support forgot an unfinished long-symbol or pulse observation");
+        check(compact.set_helper_frequency_window(0,.00001,0),"compact support fixture did not install suppression");
+        compact.push(partial);
+        check(compact.earliest_future_frequency_scoring_sample()==0,
+              "frequency suppression discarded retained compact scoring support");
+    }
+}
 Reception receive(const std::vector<float>& samples,const modem::Config& c,
                   std::span<const std::size_t> chunks,modem::PatternSearch search={},std::size_t workspace=8*1024*1024) {
     modem::PatternReceiver receiver(c,workspace,search);Reception result;
@@ -3284,6 +3326,7 @@ int main(int argc,char** argv) {
     run("diagnostic history retention",diagnostic_history_retention);
     run("candidate quota health",candidate_quota_health);
     run("initial search coverage",initial_search_coverage);
+    run("future frequency scoring support",future_frequency_support_retains_observations);
     run("ordinary private initial search coverage",ordinary_private_initial_search_coverage);
     run("qualified private initial search coverage",qualified_private_initial_search_coverage);
     run("exact blind bits",exact_blind_bits);run("chunk invariance and late start",changing_chunks_and_late_start);

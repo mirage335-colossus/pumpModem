@@ -381,7 +381,8 @@ void fixed_lag_freezes_on_phase_loss_and_mapping_revokes_it() {
     check(changed.frequency_knowledge_valid && changed.frequency_covariance_valid &&
           changed.sample==before.sample && changed.first_sample==before.first_sample &&
           changed.frequency_hz==2200+(before.frequency_hz-2000)*1.5 && !changed.phase_fit_qualified &&
-          !remapped.smoothed,"explicit retune retained lag prediction or lost its dated compatible frequency marginal");
+          !remapped.smoothed && !remapped.independent_aperture,
+          "explicit retune retained raw-record/lag authority or lost its dated compatible frequency marginal");
     if(remapped.valid)interval_dates(remapped,query_first,query_end,4ULL*rate);
     tracker.reset(tracker.snapshot().captured_end_sample);
     check(!tracker.frequency_interval(query_first,query_end).valid && !tracker.snapshot().frequency_knowledge_valid,
@@ -427,5 +428,87 @@ void fixed_lag_survives_128_second_numeric_refit() {
         <<" bytes="<<tracker.workspace_bytes()<<" phase_authority_from_query=0\n";
 }
 
+void independent_frequency_records_remain_dated_and_disjoint() {
+    helper::ToneTrackerConfig config{rate,2000,1500,0,.5,true,true};
+    config.frequency_acceleration_psd_hz2_per_second3=9e-4;
+    helper::ToneTracker tracker(config,helper::ToneTracker::workspace_required(config));
+    std::array<float,80> pcm{};std::uint64_t next=0;double phase=.37;
+    const auto push=[&](bool gap,double phase_offset) {
+        for(auto& value:pcm) {phase+=tau*carrier/rate;value=gap?0:static_cast<float>(.6*std::cos(phase+phase_offset));}
+        tracker.push(pcm,next);next+=pcm.size();
+    };
+    helper::ToneFrequencyInterval saved;
+    while(next<rate && !saved.valid) {
+        push(false,0);const auto snapshot=tracker.snapshot();
+        if(snapshot.frequency_context_first_sample<snapshot.frequency_context_end_sample) {
+            const auto query=tracker.frequency_interval(snapshot.frequency_context_first_sample,snapshot.frequency_context_end_sample);
+            if(query.valid && query.independent_aperture)saved=query;
+        }
+    }
+    check(saved.valid && saved.independent_aperture && !saved.smoothed,
+          "independent-record fixture failed causal unseeded acquisition");
+    interval_dates(saved,saved.first_sample,saved.end_sample,next);
+    check(std::abs(saved.frequency_hz-carrier)<=saved.uncertainty_hz &&
+          saved.uncertainty_hz>=config.maximum_tracking_slew_hz_per_second*
+              (saved.evidence_end_sample-saved.evidence_first_sample)/rate,
+          "independent record omitted truth or its whole-support slew allowance");
+    // The first accepted record precedes continuous qualification. A short
+    // missing interval and new phase then prevent a global/lag model from
+    // supplying the boundary query; the older disjoint record must survive.
+    push(true,0);
+    helper::ToneTrackerSnapshot later;
+    while(next<saved.captured_end_sample+rate) {
+        push(false,.23*tau);later=tracker.snapshot();
+        if(later.frequency_context_first_sample>=saved.evidence_end_sample &&
+           later.frequency_context_end_sample>saved.evidence_end_sample)break;
+    }
+    const auto latest=tracker.frequency_interval(later.frequency_context_first_sample,later.frequency_context_end_sample);
+    check(latest.valid && latest.independent_aperture &&
+          latest.evidence_first_sample>=saved.evidence_end_sample && latest.evidence_end_sample>saved.evidence_end_sample,
+          "independent-record fixture did not retain another accepted context after the phase gap");
+    interval_dates(latest,latest.first_sample,latest.end_sample,next);
+    const auto fine_before=tracker.snapshot();
+    const auto retained=tracker.frequency_interval(saved.first_sample,saved.end_sample);
+    interval_dates(retained,saved.first_sample,saved.end_sample,next);
+    check(retained.independent_aperture && !retained.smoothed && retained.frequency_hz==saved.frequency_hz &&
+          retained.uncertainty_hz==saved.uncertainty_hz && retained.anchor_sample==saved.anchor_sample &&
+          retained.evidence_first_sample==saved.evidence_first_sample && retained.evidence_end_sample==saved.evidence_end_sample,
+          "new context replaced or redated an older independent frequency record");
+    const auto cross_first=saved.evidence_end_sample-1,cross_end=saved.evidence_end_sample+1;
+    check(!backward_interval(fine_before,cross_first,cross_end).valid &&
+          !tracker.frequency_interval(cross_first,cross_end).valid &&
+          !tracker.frequency_interval(next,next+1).valid,
+          "independent frequency lookup joined records or extrapolated beyond observed support");
+    const auto fine_after=tracker.snapshot();
+    check(fine_after.sample==fine_before.sample && fine_after.first_sample==fine_before.first_sample &&
+          fine_after.frequency_hz==fine_before.frequency_hz && fine_after.uncertainty_hz==fine_before.uncertainty_hz &&
+          fine_after.qualified==fine_before.qualified && fine_after.captured_end_sample==fine_before.captured_end_sample &&
+          fine_after.phase_fit_qualified==fine_before.phase_fit_qualified &&
+          fine_after.phase_fit_sample==fine_before.phase_fit_sample && fine_after.phase_fit_cycles==fine_before.phase_fit_cycles,
+          "independent-record query altered fine frequency, capture dates or phase authority");
+    std::cout<<"independent record history first="<<saved.evidence_first_sample
+        <<" end="<<saved.evidence_end_sample<<" later_first="<<latest.evidence_first_sample
+        <<" later_end="<<latest.evidence_end_sample<<" captured="<<next
+        <<" U="<<retained.uncertainty_hz<<" cross_record_declined=1 phase_authority_from_record=0\n";
+
+    for(const auto frequency:{190.,rate/2.-190.}) {
+        helper::ToneTrackerConfig margin{rate,frequency,100,0,.5,true,true};
+        margin.frequency_acceleration_psd_hz2_per_second3=9e-4;
+        helper::ToneTracker outside(margin,helper::ToneTracker::workspace_required(margin));double carrier_phase=.37;
+        bool accepted_context=false;
+        for(std::uint64_t first=0;first<rate;first+=pcm.size()) {
+            for(auto& value:pcm) {carrier_phase+=tau*frequency/rate;value=static_cast<float>(.6*std::cos(carrier_phase));}
+            outside.push(pcm,first);const auto snapshot=outside.snapshot();
+            if(snapshot.frequency_context_first_sample<snapshot.frequency_context_end_sample) {
+                accepted_context=true;
+                check(!outside.frequency_interval(snapshot.frequency_context_first_sample,snapshot.frequency_context_end_sample).valid,
+                      "independent raw frequency record bypassed the physical200Hz capture margin");
+            }
+            check(!snapshot.qualified,"out-of-margin tone acquired ordinary reference authority");
+        }
+        check(accepted_context,"capture-margin control never exercised an accepted numeric frequency context");
+    }
 }
-int main(){try{continuous_phase_survives_ramps_and_exceeds_old_history();model_change_restarts_numeric_fit_and_loss_withdraws();long_observation_gap_is_callback_independent();unknown_phase_return_keeps_frequency_marginal();local_frequency_does_not_require_phase_correction();frequency_process_dense_gaussian_oracle();const auto loss_failures=positive_frequency_process_ensemble();positive_process_phase_reset_and_zero_slew();fixed_lag_freezes_on_phase_loss_and_mapping_revokes_it();fixed_lag_survives_128_second_numeric_refit();check(loss_failures==0,"process model retained loss authority or discarded dated knowledge");return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+
+}
+int main(){try{continuous_phase_survives_ramps_and_exceeds_old_history();model_change_restarts_numeric_fit_and_loss_withdraws();long_observation_gap_is_callback_independent();unknown_phase_return_keeps_frequency_marginal();local_frequency_does_not_require_phase_correction();frequency_process_dense_gaussian_oracle();const auto loss_failures=positive_frequency_process_ensemble();positive_process_phase_reset_and_zero_slew();fixed_lag_freezes_on_phase_loss_and_mapping_revokes_it();fixed_lag_survives_128_second_numeric_refit();independent_frequency_records_remain_dated_and_disjoint();check(loss_failures==0,"process model retained loss authority or discarded dated knowledge");return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

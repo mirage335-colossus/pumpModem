@@ -7470,6 +7470,9 @@ struct Session::Impl {
                     }
                     const HelperWorkspace::RealtimeState::RfSegment* oscillator_segment=nullptr;
                     std::uint64_t oscillator_evidence_end=0;
+                    std::uint64_t oscillator_evidence_first=0;
+                    double oscillator_witness_age=0;
+                    unsigned oscillator_query_family=3;
                     // Keep the existing ordinary relation F'=M-Mhat+(D-H)*B:
                     // only M's measured uncertainty is replaced. The complete
                     // original B/UTC grid and its H-D coefficient stay intact.
@@ -7491,6 +7494,11 @@ struct Session::Impl {
                                     b.helper_uncertainty_hz+std::abs(b.helper_residual_hz-middle.helper_residual_hz)}),INFINITY);
                                 if(chosen.valid && width>=chosen.residual_uncertainty_hz)continue;
                                 chosen={true,work.expected+middle.helper_residual_hz,width};oscillator_segment=segment;
+                                oscillator_query_family=family;
+                                oscillator_witness_age=std::max({a.state.observation_age_seconds,
+                                    b.state.observation_age_seconds,middle.state.observation_age_seconds});
+                                oscillator_evidence_first=middle.direct_aperture?segment->raw_frequency.first_sample:
+                                    middle.state.evidence_first_sample;
                                 oscillator_evidence_end=std::max({a.direct_aperture?segment->raw_frequency.end_sample:a.state.evidence_end_sample,
                                     b.direct_aperture?segment->raw_frequency.end_sample:b.state.evidence_end_sample,
                                     middle.direct_aperture?segment->raw_frequency.end_sample:middle.state.evidence_end_sample});
@@ -7509,6 +7517,10 @@ struct Session::Impl {
                                 f.add("first_raw",at);f.add("end_raw",at+count);f.add("first_center",at-delay);f.add("last_center",at+count-1-delay);
                                 f.add("phase_segment",oscillator_segment->capture.phase_segment);f.add("actual_rf_shift_hz",oscillator_segment->capture.rf_shift_hz);
                                 f.add("captured_end",work.next_raw);f.add("frequency_evidence_end",oscillator_evidence_end);
+                                f.add("frequency_evidence_first",oscillator_evidence_first);
+                                f.add("frequency_witness_age_seconds",oscillator_witness_age);
+                                f.add("frequency_query_family",oscillator_query_family);
+                                f.add("prior_without_current_pilot",!oscillator_segment->raw_frequency.valid);
                                 f.add("current_pilot_end",oscillator_segment->raw_frequency.end_sample);f.add("model_epoch",oscillator_segment->oscillator_seed->epoch);
                                 f.add("tracking_frequency_hz",plan.tracking_frequency_hz);f.add("residual_uncertainty_hz",plan.residual_uncertainty_hz);
                                 f.add("applied_correction_hz",work.frontend->current_correction_hz());f.add("ordinary_clock_coefficient_hz",work.expected-realtime.config.carrier_hz);
@@ -7580,7 +7592,11 @@ struct Session::Impl {
                                 f.add("phase_UTC_authority",false);
                             });
                         }
-                        if(!tracked.present && !raw.valid)realtime.oscillator->close_reference();
+                        // A retune deliberately clears current pilot/phase
+                        // presence before its next fit. It is no evidence that
+                        // the dated frequency witness disappeared. Predictor
+                        // availability expires from that independent witness;
+                        // neither retune metadata nor bootstrap polls renew it.
                     }
                 }
                 publish_helper_presence(work,first,work.next_raw,rate,tracked.present,

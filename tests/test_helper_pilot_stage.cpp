@@ -283,11 +283,27 @@ void causal_mixed_pilot_corrects_ordinary_robust(double cn0_db_hz,unsigned seed,
                 dated_model.frequency_model_residual_scale=target_scale;
             }
             auto plan=helper_pilot_frequency_plan(dated_model,at,at+used);
-            // Match Live's fixed-RF selection. The explicit LAB RF calendar
-            // above retains its separate dated RF mapping and snapshot route.
+            // Match Live's fixed-RF selection. The LAB control additionally
+            // assumes zero independent audio-clock error, so its known RF
+            // ratio maps the interval's CURRENT geometry back to these actual
+            // input dates. Production actual RF uses the separate joint model.
             constexpr auto delay=Translator::group_delay;
-            if(!actual_rf_mapping && at>=delay) {
-                const auto buffered=tracker.frequency_interval(at-delay,at+used-delay);
+            if(at>=delay) {
+                auto buffered=tracker.frequency_interval(at-delay,at+used-delay);
+                if(actual_rf_mapping && buffered.valid) {
+                    if(buffered.independent_aperture) {
+                        // This fixture settles at each supplied retune date.
+                        // A new local record must belong wholly to the current
+                        // settled segment; its original dates never change.
+                        const auto settled_first=(frequency_model.captured_end_sample-1)/dwell*dwell;
+                        if(buffered.evidence_first_sample<settled_first ||
+                           buffered.evidence_end_sample>settled_first+dwell)buffered.valid=false;
+                    }
+                    const auto ratio=rf_scale(at-delay)/frequency_model.frequency_model_residual_scale;
+                    buffered.frequency_hz=pilot+(buffered.frequency_hz-
+                        frequency_model.frequency_model_expected_hz)*ratio;
+                    buffered.uncertainty_hz*=std::abs(ratio);
+                }
                 if(buffered.valid && buffered.evidence_end_sample<=frequency_model.captured_end_sample &&
                    (!plan.valid || buffered.uncertainty_hz<plan.residual_uncertainty_hz))
                     plan={true,buffered.frequency_hz,buffered.uncertainty_hz};

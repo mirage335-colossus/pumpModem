@@ -1,9 +1,10 @@
 # Helper Carrier implementation and qualification
 
-Updated 27 October 2026. Human checkpoint `aef6580` is committed. GUI
-`build/dev/datapump-gui` has a current fixed-lag build with headless self-check
-and seven of eight focused passes; the phase-count failure reproduces before
-lag. The preceding index build passes 11/11 focused
+Updated 27 October 2026. Human checkpoint `871a55a` is committed, with a shared
+overlay. GUI `build/dev/datapump-gui` is rebuilt with bounded coast/support API;
+protocol/support and default actual-RF checks pass. The latest full GUI group is
+38/39; its isolated repaired controller passes on the preceding core, without a
+new full-group result. The preceding index build passes 11/11 focused
 and 13/13 preservation checks. Its matched fixed-prefix Live run measures 41.15% less process CPU; current
 1,024-byte completion remains untested. Pre-lag full GUI is 39/39 in 217.89 seconds,
 and framed text/attachment OFF/ON source/wire/pending/END controls pass. Full contract
@@ -36,8 +37,10 @@ failures and qualification limits. The final snapshot remains provisional.
 
 Two-tone headroom changes native payload calibration by −1.353 dB at 40 W/4 W
 and −1.989 dB at 15 kW/4 W versus the old format at unchanged volume. Recalibrate
-physical RF output to retain configured power. Simulation scales signal/noise
-together; ramps, metadata and received gains are separate power effects.
+physical RF output to retain configured power. Headroom/oversampling compensation
+scales signal/noise together; Interleaved V2 retains its separate −6.0206 dB
+sampled DATA gain relative to nominal RF budget. Ramps/metadata/channel gains
+remain separate.
 
 ## Measured status and remaining acceptance
 
@@ -53,7 +56,10 @@ exact eight bits/scored END in the trace: 145.115 audio seconds, 361.48 fixture
 CPU and 172,289 FFT jobs. Current positive-Q dispatch is wider than R15's first
 score (125 versus 49 selected pairs); raw-median precision was not the relevant
 work comparison. The strict run remains failed.
-Fixed-lag R24 HF40 also misses its original deadline; audit remains pending.
+Fixed-lag R24 HF40 also misses its deadline: neither simulation-finish/replay nor
+completed exact public delivery is observed. Earlier wrong rows cannot veto the
+fixture's exact OR. Canonical trace commits precede staging acceptance; the
+unmet tail/finish subcondition remains unobserved.
 
 The strict R17 12-second retune prefix passes all ±300 ppm LF alternatives,
 with 174/419 existing-mask narrowings. At the same processed frontier, FFT jobs
@@ -76,6 +82,15 @@ support; score decomposition remains unobserved. Modeled DATA C/N0 is not cable
 or DATA-fit measurement. The exact-CFO/truth-timing laboratory ceiling also
 misses eight-bit thresholds, but lacks bitwise Live PCM/pipeline matching; no
 physical SNR floor, Live gain or fine-arrival change is established.
+Matched EME first-symbol phase ON/OFF scores 30.1203/30.0786, both below 31.0201:
+a small phase benefit, without eight-bit completion or a physical-floor claim.
+Known-truth EME power accounting has no Interleaved V2 backoff: nominal DATA
+C/N0 −4.9794 dB-Hz becomes actual keyed/gated −6.4142 dB-Hz, E/N0 29.2276 linear.
+Gate-only loss is 1.5918 dB relative to its actual ungated waveform; this is not
+ordinary scoring/decoding or a physical floor.
+Including the source gate in a known-template component raises guarded score
+17.9804→20.9997 on the same generated PCM. No production gate edit or Live
+acquisition/completion follows; full regressions remain held for this diagnosis.
 
 Pre-lag proper-Q process/Hann covariance, phase initialization and dated queries pass
 16 matched 30/40 dB-Hz constant/drift pairs: no post-startup current/backdated
@@ -96,6 +111,19 @@ same Live cohort narrows U 0.07950→0.06641 Hz and pairs 125→109, with FFT jo
 nine LF alternatives remain and phase is off; no full END/throughput result
 follows. Normal refit/frozen-history controls pass with 14 retained correlated
 lag escapes and 776,400-byte storage (+9,744), without PCM history.
+Later record fallback leaves matched work/U at 10,682 FFT/0.06640714 Hz with
+zero independent-record events and 3.37% higher CPU; no new Live benefit is
+proved. Repaired laboratory stage retains 35 snapshot/four dated escapes.
+The current coast removes the current-hop full-fit bootstrap gate, with at most
+0.5-second availability from independent frequency evidence; retunes never renew
+it. Three-second mathematical history and close/reset/veto/local-phase rules
+remain. The matched loss case has 30 prior-only corrections/five after loss
+without renewal/new phase/escapes, preserving exact `001`/ID 2/END. Work rises
+2,058→2,226 FFT and CPU 3.074368→3.107025 seconds, without gain; only an END-
+covering PCM prefix is hashed, not the entire tail. A strong engineered fixed-
+RF gap exercises 56 independent-aperture publications/no nominal escapes with
+unchanged 1,127 FFT jobs, but phase counts differ and only a wrong-epoch pending
+one-bit suffix is observed: no canonical payload/END acceptance.
 
 Normal wide metadata, retune/continuous coverage and independent-RF/loss checks
 pass. The implicit RF-only selector now passes existing/new 5→1 narrowing,
@@ -158,6 +186,9 @@ The guarded producer matrix fails with zero publications, all 178 candidates
 declined and all 81 normal eligible markers missed because the straight-tone
 competitor is unconverged. Zero false outputs do not qualify timing; the private
 branch remains unpromoted.
+A private null-variable-projection follow-up covers 75/81 normal markers and
+77 boundaries, with six misses/zero accepted escapes; 14 captures cost 30.095 CPU
+seconds. Conditional evidence remains unintegrated, without Live authority.
 
 Contract runtime is incomplete. Normal native has zero registered tests under
 this headless setup, not a pass.
@@ -168,6 +199,13 @@ unavailable and full sanitizer coverage is not passed.
 The 36-second lead cap and exact
 identity/END contracts remain; full contract, 1,024-byte/large-payload, cable,
 EME and intended-hardware qualification remain open.
+The independent-retune comparison excludes operational RF/audio acceleration,
+retune scatter and integrated-model precision; it selects neither lead nor CPU
+precision. The explicit DATA-frequency marginal validity is preparatory: whole-
+score dated support is required before any new DATA mask, which is not applied.
+The const native/compact future-frequency-support API passes focused checks;
+Live rolling provenance remains open, and known-null history alone is insufficient
+through Hilbert/FIR transients.
 
 Current preservation requirements are in the [development contract](development.md),
 [build/test stages](building.md#testing-stages) and [Helper reference](helper-carrier.md).
