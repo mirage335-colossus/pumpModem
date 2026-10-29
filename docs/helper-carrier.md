@@ -9,6 +9,78 @@ frequency, jurisdiction, license, station control and other authorizations.
 The software retains general-purpose power options; it does not impose a blanket
 regulatory power limit or certify an installation's compliance.
 
+## Development priority
+
+The primary development priority is useful frequency and phase search-space
+narrowing for the ordinary Robust receiver. Give particular priority to Helper
+Carrier as an HF GPSDO alternative, and also support its use supplementing a
+GPSDO at microwave frequencies. Assess work by its contribution to that ordinary
+receiver, including its actual acquisition and search costs and the limits of
+the evidence.
+
+The auxiliary APSK carries identification for a regulatory purpose. Its inability
+to decode except at point-blank conditions, perhaps around 40 dB total path loss
+or an even more extreme link budget, is of no consequence to this priority; that
+example is not a performance threshold or test target. Practical reception of
+weak-signal beacons has generally relied on unique frequency assignments for
+identification. Robust users should also transmit their callsigns appropriately
+in ordinary operation, casually as with SSB voice, for practical identification.
+Operators remain responsible for applicable identification requirements.
+
+Do not prioritize implementation or testing of successful APSK decoding ahead of
+ordinary Robust frequency and phase narrowing, or make APSK decode success or
+weak-signal sensitivity a dependency of that work. This prioritization does not
+remove existing identification behavior or applicable regression requirements:
+retain and report failed or unexecuted tests rather than treating them as passes.
+
+## Lead-in operating requirement
+
+When Helper Carrier is enabled, the ordinary Robust receiver should begin
+acquisition only after at least 36 seconds of Helper observation for frequency
+narrowing. The receiver observes the Helper during this interval; it does not
+start ordinary Robust acquisition merely because an earlier precision estimate
+looks useful. The Helper-only transmit lead is fixed at exactly 95 dwells of
+400 ms each, or 38 seconds, whether FHSS is enabled or disabled. It provides
+90 dwells (36 seconds) for observation and five dwells (two seconds) for initial
+Helper detection. In the intended use cases the Helper is well above the noise
+floor, and this detection margin is considered excellent.
+
+Plan operation around a listener being present for the full lead-in. The
+waveform has no mandatory cue identifying the start of that lead, so straight
+pilots alone cannot tell a late listener whether it is hearing lead-in or
+payload. Reception by a listener joining an ongoing transmission without the
+full lead-in is not an expected Helper Carrier use case. Do not prioritize
+implementation or testing of late joining for the ordinary Robust receiver, or
+add onset-identification machinery solely to support it. This does not waive
+applicable existing regression requirements or change how results are reported.
+The detailed admission and completion policy is in [Link Planner and lead time](#link-planner-and-lead-time).
+
+## Quiet-spectrum assumption
+
+Helper Carrier is intended primarily for experiments in selected, relatively
+quiet spectrum. Within the expected high-pilot frequency range derived from the
+applicable oscillator models and bounded by the actual capture geometry, the
+strongest tone may be assumed to be the correct high pilot. An unrelated constant
+tone close enough to be confused with it is assumed to be extremely rare in the
+intended operating environments. Identifying or rejecting such a competing tone
+is not a current high-pilot detection requirement.
+
+Examples include underutilized spectrum such as selected Part 15 frequencies,
+selected Earth–Moon–Earth spectrum at GHz frequencies, licensed spectrum such as
+amateur radio, and local line-of-sight links. These are choices of operating
+environment, not claims that every such band is free of interference. The
+experiments may demonstrate a GPSDO-equipped radio or the feasibility of an
+Earth–Moon–Earth link for a specialized system with a hardware Helper Carrier
+and equivalent frequency stability. Helper Carrier is not intended for important
+messages; if unexpected interference affects an experiment, it can be repeated.
+
+Do not implement more elaborate high-pilot identification or competing-tone
+discrimination, or add tests requiring rejection of unrelated tones, solely to
+handle interference excluded by this assumption. Such work needs an explicit
+change to the operating assumptions or requirements. Continue applicable tests
+of acquisition and tracking under noise, frequency offset, drift and other
+in-scope conditions, and preserve the existing regression requirements.
+
 ## Transmitter waveform and receiver scope
 
 The transmitter uses a fixed 550 Hz low pilot at −3 dB, a fixed 950 Hz
@@ -21,17 +93,31 @@ ratios describe the transmitted audio waveform; actual RF ratios depend on the
 radio and audio chain.
 
 This transmitter change is not a receiver qualification. Acquisition, tracking
-and decoding for the new waveform remain under development. The current Live
-baseline tracks the high pilot; it does not yet qualify a low-pilot runtime
-measurement. Earlier two-tone receiver measurements and binary bindings in
+and decoding for the new waveform remain under development. The Live high-pilot
+path reacquires phase within each supported actual-retune dwell. An in-progress,
+separately funded worker also measures the low pilot on matching high-pilot
+apertures and publishes conditional diagnostics; it does not yet use those
+measurements for ordinary receiver frequency or phase correction. Earlier
+two-tone receiver measurements and binary bindings in
 [validation](validation.md) apply only to their stated source and waveform, not
 to this transmitter. Physical display, audio and radio testing and full
 regression qualification remain open.
 
 The [29 October development checkpoint](validation.md#three-tone-helper-carrier-implementation-checkpoint)
-includes a rebuilt GUI and focused measurements. The latest focused retest
-passed 15/16 cases, including eight Live observation cases; the 24 dB-Hz
-frequency-only fallback failed, and a separate 5 ms fade-support problem remains.
+includes a rebuilt GUI and focused measurements. Its latest focused retest
+passed four of six cases; the 24 dB-Hz frequency-only fallback and the registered
+three-tone auxiliary decoder failed. A separately selected stress and Live
+observation run passed 15/15; full qualification remains open. The previous
+focused retest passed 15/16 cases, including eight Live observation cases, and
+a separate 5 ms fade-support problem remains.
+A private factory boundary test also found that a proposed grid heuristic could
+increase templates and workspace; it is not deployed or qualified. Its specific
+geometry and required guards are recorded in validation.
+A private truth-seeded prefilter-mixing probe also showed transition error and
+an image-crossing failure on synthetic tones; it has not qualified causal
+correction or payload reception. Its reference and measurements are in validation.
+A subsequent causal component probe recorded predicted uncertainty escapes in
+one signed-RF case; it does not qualify production correction.
 The strict rolling Live check
 and a three-tone frontend stopband check initially failed and passed in later
 focused reruns. The Live rerun was Helper-only and did not establish payload or
@@ -53,6 +139,67 @@ CLI batch WAV/device `rx`, `status-rx` and `simulate` are currently unavailable
 while their causal admission path is incomplete. Subsequent development code
 also defers Live Helper-assisted admission without an oscillator-search policy.
 These limits are distinct from the earlier two-tone results below.
+
+The low-pilot worker keeps only bounded recent raw samples and a separately
+funded current-aperture snapshot. It shares optional CPU credit with auxiliary
+work, yields to ordinary payload processing, and discards stale work after
+clear or provider changes. A conditional pair-only numeric model accepts matched
+completed apertures in date order; its output is diagnostic and does not grant
+phase, timing or ordinary-acquisition authority. A worker/model quantum can
+still overrun its time slice before the resulting debt is charged. The current
+actual-RF segment provider is the sampled simulation channel; test-only mock
+injection is not a hardware retune adapter. Fixed-RF repeated-window fusion,
+operation above the model's 54 MHz range, selected-tone ambiguity, and
+operational pair covariance remain unqualified.
+
+The existing auxiliary observer is optional and does not qualify either pure
+pilot. Its earlier decoder was designed around two tones. A focused current
+Generator test fails to decode the complete three-tone waveform, and scratch
+oracle and reversal experiments have not established causal acquisition or
+metadata reception across the Live retune lifecycle. The registered
+`helper_receiver_three_tone` regression failed in all eight fixture geometries;
+the production decoder remains unchanged. A later causal-bootstrap scratch
+experiment also produced no metadata at 30, 40 or 60 dB-Hz and selected false
+edges in noise-only controls; it did not change production. See the current
+[validation record](validation.md#three-tone-helper-carrier-implementation-checkpoint).
+
+A bounded [matched waveform study](../local-evidence/helper-three-tone/pair-waveform-continuation/v2/summary.txt)
+fed the same actual three-tone and Robust samples to high-only and conditional
+pair models. Without a near-low spur, pair estimates had no DATA or audio-scale
+interval escapes in the tested cases. At the nominal 40 dB-Hz label, the pair
+and high-only final bounds were similar; the nominal 30 dB-Hz pair result may
+refer to an earlier date and is not a matched endpoint comparison. Stronger
+tones only 0.4 or 1 Hz from the low pilot produced many pair interval escapes.
+The 30/40/60 labels are configured targets, not measured pilot C/N0. These correlated
+synthetic-channel observations do not qualify pair selection or ordinary
+acquisition; the low-pilot model remains diagnostic.
+
+An experimental [high-only predicted-low discriminator](../local-evidence/helper-three-tone/pair-waveform-continuation/guard/summary.txt)
+retained all tested clean 40/60-label paired queries, including both signs and
+±290 ppm audio error, without DATA or audio-scale interval escapes in those
+small ensembles. This conditional check does not authenticate a pilot or make
+the pair a receiver authority. Helper is manually enabled on quiet spectrum;
+the operator may accept the strongest plausible high pilot within the declared
+oscillator-derived range. The discriminator does not require auxiliary
+metadata or a known transmission start.
+
+A later experimental Live pair-authority trial failed strict reception with
+700 kHz RF steps when the settled FIR/NCO-frequency hull exceeded the
+constructor bound. In a separate full-support comparison with 10 kHz steps,
+both pair and high-only arms completed `001` with pending identity and scored
+END, but pair work was 1,806 versus 1,764 FFT jobs and Session CPU was nearly
+unchanged. Its strong cable simulation and non-cryptographic input witness do
+not qualify the supplied HF cases or hardware. Its source changed after the run
+and a complete source binding was not found; joined snapshots for 10 of 13
+owners were interrupted or incomplete, while scored END is a separate test
+assertion. The q/FIR/settled-support
+question also affects the earlier bare-nuisance high-only coverage claim. A
+subsequent large-step comparison used a hindsight envelope and completed in
+both arms, but showed no work reduction. That envelope is not a causal receiver
+solution, and incomplete final owner snapshots do not prove complete scored
+coverage. Pair-driven production authority remains off;
+[validation](validation.md#three-tone-helper-carrier-implementation-checkpoint)
+retains these outcomes and their limits.
 
 ## Manual reception
 
@@ -320,17 +467,13 @@ output gaps and other ordinary transmission errors retain their normal failures
 without starting a replacement transmission.
 
 WAV helper output uses at least 48 kHz and four times the logical rate, enlarged
-when the selected helper requires it. For helper WAV reception, specify the
-same logical modem geometry and helper profile with `--helper-power`: `rx` and
-`status-rx` observe metadata before conversion and payload scoring. Adjacent
-helpers inside the logical capture band remain real interference there. Capture
-anti-alias filtering rejects a helper outside that band when the geometry allows;
-it does not silently remove an in-band helper.
-CLI payload reception can try the same real adjacent-helper bandstop filter
-described below. Its first output keeps the original FIR-center sample coordinate;
-it changes neither the source epoch nor the capture date. The full ordinary
-receiver and original PCM remain the fallback when this optional attempt accepts
-no payload bits. EOF never flushes synthetic filter samples.
+when the selected helper requires it. Helper-enabled batch WAV/device `rx`,
+`status-rx` and `simulate` currently decline before capture or batch processing:
+their causal 36-second observation and narrowed admission are not implemented.
+The Live `listen` path remains separate. Adjacent helpers inside the logical
+capture band remain real interference. Capture anti-alias filtering rejects a
+helper outside that band when the geometry allows; it does not silently remove
+an in-band helper.
 
 ## Helper presence and receiver lock
 
@@ -431,21 +574,23 @@ short-window level gate is different from SNR in a 10 Hz presentation bandwidth.
 No calibrated acquisition probability or globally optimal estimator is claimed.
 
 The required assisted schedule is a fixed **38-second Helper-only transmit
-lead**: 36 seconds of precision lead plus the original two-second baseline,
-or 90 + 5 dwells at 400 ms each. The ordinary Robust waveform then begins on
-its unchanged calendar. A forecast or receiver uncertainty cannot shorten or
-extend this lead. The tail retains at least two seconds and any greater filter,
-initial-FFT, pulse-support and physical-absence obligations; expected message
-length never supplies completion authority.
+lead**: 90 dwells (36 seconds) for precision observation plus five dwells
+(two seconds) for detection, exactly 95 dwells at 400 ms each. This dwell count
+and duration are the same with FHSS enabled or disabled. The ordinary Robust
+waveform then begins on its unchanged calendar. A forecast or receiver
+uncertainty cannot shorten or extend this lead. The tail retains at least two
+seconds and any greater filter, initial-FFT, pulse-support and physical-absence
+obligations; expected message length never supplies completion authority.
 
 The receiver-local admission rule requires both a minimum **36 seconds after
 causal Helper presence detection and the beginning of reference observation**
 and actual measured precision sufficient for useful narrowed acquisition. The
 fixed transmit lead offers up to two seconds for initial detection before that
 observation interval. This margin still needs demonstration for the intended
-three-tone cases. A late listener must observe its own full interval and can
-miss part or all of a transmission; it cannot infer an earlier onset or use an
-early precision estimate to enter sooner. Brief fades do not restart the timer,
+three-tone cases. A listener without the full observation interval cannot infer
+an earlier onset or use an early precision estimate to enter sooner; supporting
+late joining is not a development priority, as described in the
+[lead-in operating requirement](#lead-in-operating-requirement). Brief fades do not restart the timer,
 but contribute no measurement support. Elapsed time and predicted C/N0 alone
 do not qualify a reference. If measured precision is inadequate, new ordinary
 acquisition remains gated, while established reception retains ordinary draining
@@ -651,21 +796,14 @@ compliance for every emission, band or radio installation.
 pump tx --text hello --carrier 2400 --output helper.wav --helper-power 1.5kW --helper-data-power 4W --helper-callsign N0CALL
 pump listen --bw 200 --carrier 1725 --helper-power 100W --helper-callsign N0CALL --helper-only --seconds 30
 pump listen --simulation '3dBm -60dB' --helper-power 100W --helper-only --seconds 30
-pump simulate --text hello --carrier 2400 --helper-power 100W --helper-callsign N0CALL --json
-pump rx --input helper.wav --carrier 2400 --helper-power 1.5kW --helper-data-power 4W --json
 ```
 
 `--helper-ratio-limit`, `--helper-frequency` and `--helper-callsign` are included
 in GUI command import/export. `--helper-only` is a CLI listen action and requires
-positive helper power and no outgoing message input. Helper-enabled CLI
-simulation can save actual physical-rate capture with `--output`. WAV RX and
-simulation JSON include a `helper_carrier` object with presence, frequency and
-optional metadata. When an admitted helper is present but one-shot Robust
-acquisition fails, `status-rx` and `rx --json` still emit helper diagnostics;
-the original payload error and failure exit status remain. Plain-text RX reports
-helper presence on stderr in that case. Live helper events include a display
-description. Generated WAV separation tails remain real quiet capture after both components end;
-simulated tails contain the configured physical channel noise.
+positive helper power and no outgoing message input. Helper-enabled batch
+reception and `simulate` currently decline as described above. Live helper
+events include a display description. Generated WAV separation tails remain
+real quiet capture after both components end.
 
 ## Evidence and remaining qualification
 

@@ -338,6 +338,9 @@ struct HelperOptionalCpuCredit {
     std::uint64_t captured=0,credit=0,debt=0,used=0,overrun=0;
     bool clock_valid=true;
     static constexpr std::uint64_t cap=200000000,following_payload_burst=2000000;
+    // Rebase a discontinuous raw clock without forgiving work already done or
+    // granting credit for the coordinate jump.
+    void rebase(std::uint64_t frontier)noexcept {captured=frontier;credit=0;}
     void earn(std::uint64_t frontier,std::uint32_t rate,double receiver_budget)noexcept {
         if(!clock_valid || !rate || frontier<captured || !std::isfinite(receiver_budget) || receiver_budget<=0)return;
         const auto frames=frontier-captured;captured=frontier;

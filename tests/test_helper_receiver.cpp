@@ -341,6 +341,49 @@ void two_tone_auxiliary_metadata() {
     }
 }
 
+// Production three-tone geometry; the low and high pure pilots remain present
+// during the auxiliary boundary gate. RF hop phase is independent per dwell.
+void three_tone_auxiliary_metadata() {
+    constexpr std::uint32_t rate=48000;
+    helper::Options options;options.power_w=100;options.callsign="N0CALL";options.timecode=false;
+    bool all_decoded=true;
+    for(const bool gated:{false,true}) for(const bool phase_jumps:{false,true}) for(const bool reset_each_hop:{false,true}) {
+        const helper::Plan plan{2400,.5,.1,100,950,550,gated};
+        helper::Generator generator(options,plan,1800000000,true);
+        helper::AuxiliaryMetadataReceiver receiver(rate,950,2400,{}, {},
+            helper::AuxiliaryMetadataReceiver::workspace_required(rate));
+        std::mt19937 random(8127);std::uniform_real_distribution<double> phase(-std::numbers::pi,std::numbers::pi);
+        std::array<double,16> phases{};for(auto& value:phases)value=phase(random);
+        std::array<float,137> input{};Result result;
+        const auto total=static_cast<std::uint64_t>(3.2*rate);
+        for(std::uint64_t first=0;first<total;) {
+            constexpr std::uint64_t hop=rate*2/5;
+            if(reset_each_hop&&first&&first%hop==0)receiver.reset(first);
+            const auto count=static_cast<std::size_t>(std::min({static_cast<std::uint64_t>(input.size()),total-first,hop-first%hop}));
+            for(std::size_t i=0;i<count;++i) {
+                const auto time=static_cast<long double>(first+i)/rate;
+                const auto dwell=static_cast<std::size_t>(std::floor(time/.4L));
+                input[i]=static_cast<float>(std::real(generator.mix_analytic({},time,rate)*
+                    std::polar(1.,phase_jumps?phases[dwell%phases.size()]:0.)));
+            }
+            receiver.push(std::span(input).first(count),first);receiver.advance();
+            if(auto update=receiver.take_update())result.updates.push_back(std::move(*update));
+            first+=count;
+        }
+        std::size_t decoded=0;
+        for(const auto& update:result.updates)if(update.metadata) {
+            check(update.metadata->kind==helper::MetadataKind::callsign);
+            check(update.metadata->callsign=="N0CALL"&&!update.metadata->authenticated);
+            check(!update.frequency_valid&&!update.phase_valid&&!update.timing_valid);
+            ++decoded;
+        }
+        std::cout<<"three-tone auxiliary gated="<<gated<<" phase_jumps="<<phase_jumps<<" reset_each_hop="<<reset_each_hop<<" references="<<result.updates.size()
+            <<" metadata="<<decoded<<'\n';
+        all_decoded=all_decoded&&decoded>0;metadata_has_no_timing_authority(result);
+    }
+    check(all_decoded);
+}
+
 void metadata_frozen_work() {
     constexpr std::uint32_t rate=48000;
     constexpr double auxiliary=5762.5,pilot=auxiliary+helper::auxiliary_pilot_spacing_hz;
@@ -812,6 +855,7 @@ int main(int argc,char** argv) {
             clean_precision();paired_marker_identity_and_missing_return();metadata();metadata_carrier_images();two_tone_auxiliary_metadata();metadata_frozen_work();auxiliary_punctuation_clock();timecodes_and_corruption();metadata_with_declared_process();clock_skew();frequency_drift();fallback_and_noise();chunks_and_gaps();
         } else if(which=="pair")paired_marker_identity_and_missing_return();
         else if(which=="two_tone"){two_tone_auxiliary_metadata();metadata_frozen_work();auxiliary_punctuation_clock();}
+        else if(which=="three_tone")three_tone_auxiliary_metadata();
         else if(which=="realistic")realistic_frequency();
         else if(which=="legacy30"||which=="legacy24") {
             const bool reduced=which=="legacy24";

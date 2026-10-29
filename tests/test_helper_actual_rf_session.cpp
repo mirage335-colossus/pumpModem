@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <bit>
 #include <chrono>
 #include <cmath>
 #include <ctime>
@@ -50,6 +51,9 @@ bool filter(const char* name)noexcept {
         event=="receiver_acquisition_work" || event=="receiver_helper_raw_reference" ||
         event=="receiver_helper_actual_rf_segment" || event=="receiver_helper_pilot_phase" ||
         event=="receiver_helper_oscillator" || event=="receiver_helper_oscillator_correction" ||
+        event=="receiver_helper_paired_pilot_diagnostic" ||
+        event=="receiver_helper_pair_low_guard" ||
+        event=="receiver_helper_pair_model_diagnostic" || event=="receiver_helper_pair_model_discarded" ||
         event=="receiver_helper_corrected_interval" || event=="receiver_helper_constructor_frequency" ||
         event=="receiver_helper_DATA_parameter_window" || event=="receiver_helper_DATA_parameter_projection";
 }
@@ -57,8 +61,12 @@ struct Laboratory {
     std::atomic<std::uint64_t> transmit_epoch=0,channels=0,bank_creations=0;
     std::atomic<std::uint64_t> bank_source_origin=UINT64_MAX;
     std::optional<double> helper_end_seconds;
+    double rf_hop_step_hz=700000;
     std::uint64_t helper_end_sample=0;
     std::uint32_t physical_rate=0;
+    std::uint64_t pcm_hash=14695981039346656037ULL,pcm_samples=0;
+    std::uint64_t pcm_prefix_hash=14695981039346656037ULL,pcm_prefix_samples=0;
+    bool pcm_contiguous=true;
     live::detail::SimulationHook hook{this,[](void* opaque,const live::detail::SimulationObservation& event) {
         auto& self=*static_cast<Laboratory*>(opaque);
         if(event.phase==live::detail::SimulationPhase::transmit_epoch)
@@ -70,7 +78,7 @@ struct Laboratory {
     },1800000000.125,nullptr,[](void* opaque,modem::SampledSimulationChannel& channel) {
         auto& self=*static_cast<Laboratory*>(opaque);++self.channels;
         modem::SampledSimulationChannel::RfRetuneSimulation retunes;
-        retunes.rf_shift_hz={7e6,7.7e6,8.4e6,9.1e6};
+        retunes.rf_shift_hz={7e6,7e6+self.rf_hop_step_hz,7e6+2*self.rf_hop_step_hz,7e6+3*self.rf_hop_step_hz};
         retunes.dwell_seconds=.4;retunes.settling_seconds=.012;retunes.phase_seed=49273;
         channel.set_rf_retune_simulation(retunes);
         self.physical_rate=channel.physical_sample_rate();
@@ -81,7 +89,22 @@ struct Laboratory {
             channel.set_lab_helper_end_sample(self.helper_end_sample);
         }
     }};
-    explicit Laboratory(std::optional<double> end_seconds={}):helper_end_seconds(end_seconds) {
+    explicit Laboratory(std::optional<double> end_seconds={},double hop_step_hz=700000):
+        helper_end_seconds(end_seconds),rf_hop_step_hz(hop_step_hz) {
+        hook.raw_pcm_witness=[](void* opaque,std::uint64_t first,std::span<const float> samples) noexcept {
+            auto& self=*static_cast<Laboratory*>(opaque);
+            const auto target=static_cast<std::uint64_t>(self.physical_rate)*60;
+            if(!target){self.pcm_contiguous=false;return;}
+            if(first!=self.pcm_samples){self.pcm_contiguous=false;return;}
+            for(std::uint64_t i=0;i<samples.size();++i) {
+                const auto word=std::bit_cast<std::uint32_t>(samples[i]);
+                for(unsigned byte=0;byte<4;++byte){
+                    const auto octet=(word>>(byte*8))&0xffU;self.pcm_hash^=octet;self.pcm_hash*=1099511628211ULL;
+                    if(self.pcm_samples+i<target){self.pcm_prefix_hash^=octet;self.pcm_prefix_hash*=1099511628211ULL;}
+                }
+            }
+            self.pcm_samples+=samples.size();self.pcm_prefix_samples=std::min(self.pcm_samples,target);
+        };
         live::detail::SimulationHook* empty=nullptr;
         check(live::detail::simulation_hook.compare_exchange_strong(empty,&hook),"actual RF laboratory hook already installed");
     }
@@ -318,13 +341,36 @@ ConstructorGeometry data_constructor_geometry(const modem::Config& config,double
     return {ordinary.hypotheses.size(),actual_pairs,clocks.size(),clock_bound};
 }
 void run(const std::filesystem::path& path,bool independent_clock,bool require_oscillator_model=false,
-        std::optional<double> helper_end_seconds={},bool require_prior_frequency=false,bool require_data_coordinate=false) {
-    const auto value=settings(independent_clock);const Bytes bits{0,0,1};
+        std::optional<double> helper_end_seconds={},bool require_prior_frequency=false,bool require_data_coordinate=false,
+        bool pair_control=false,bool require_pair_data=false,double snr_db=40,std::optional<double> sampled_high_cn0={},
+        double rf_hop_step_hz=700000,bool retrospective_envelope=false,bool quantized_grid=false) {
+    if(retrospective_envelope)check(independent_clock && (pair_control||require_pair_data) &&
+        helper_end_seconds && *helper_end_seconds==46.5 && !sampled_high_cn0 && snr_db==40 && rf_hop_step_hz==700000,
+        "retrospective constructor envelope is valid only for its exact matched R6 laboratory setup");
+    if(quantized_grid)check(independent_clock && (pair_control||require_pair_data) && !retrospective_envelope &&
+        helper_end_seconds && *helper_end_seconds==46.5 && !sampled_high_cn0 && snr_db==40 && rf_hop_step_hz==10000,
+        "quantized grid is valid only for the matched small-retune laboratory setup");
+    auto value=settings(independent_clock);
+    // Nominal sampled high-pilot target from the maintained preview power
+    // allocation. The actual time-keyed source reference can differ; the
+    // measured tracker value is reported separately and this changes only
+    // AWGN, not payload/helper powers or link path loss.
+    if(sampled_high_cn0) {
+        const auto preview=helper::reference_level(value.helper,0,modem::outer_dsss_transmit_gain(value.transfer.modem));
+        snr_db=*sampled_high_cn0-10*std::log10(value.transfer.modem.sample_rate/2.)-preview.pilot_straight_cn0_db_hz;
+    }
+    value.simulation_snr_db=snr_db;const Bytes bits{0,0,1};
     const auto pilot=helper::plan(value.helper,helper::placement_band(value.transfer.modem),120000000,0,
         modem::outer_dsss_transmit_gain(value.transfer.modem)).frequency_hz;
     std::atomic<std::int64_t> replay_ms{0};bool finished=false,exact=false,frequency=false,phase=false;
     std::uint64_t final_samples=0,peak_bytes=0;std::string status;
-    Laboratory laboratory(helper_end_seconds);const auto start=std::chrono::steady_clock::now();const auto cpu=std::clock();
+    std::uint64_t peak_queue_samples=0,peak_inflight_samples=0,peak_dropped=0,peak_overruns=0;
+    double peak_backlog_seconds=0,peak_oldest_seconds=0;bool saw_reset=false;
+    Laboratory laboratory(helper_end_seconds,rf_hop_step_hz);laboratory.hook.enable_pair_data_authority=require_pair_data && !pair_control;
+    laboratory.hook.enforce_retune_support_bounds=pair_control||require_pair_data;
+    if(retrospective_envelope)laboratory.hook.laboratory_constructor_envelope=std::array{-2.36,.58};
+    laboratory.hook.laboratory_quantized_grid=quantized_grid;
+    const auto start=std::chrono::steady_clock::now();const auto cpu=std::clock();
     {
         audio::trace::Scope trace(path,false,&filter);
         live::Session session({},[&]{return std::chrono::steady_clock::time_point{}+
@@ -336,6 +382,13 @@ void run(const std::filesystem::path& path,bool independent_clock,bool require_o
         while(std::chrono::steady_clock::now()<deadline) {
             const auto snapshot=session.snapshot();final_samples=snapshot.samples_received;status=snapshot.helper_status;
             peak_bytes=std::max<std::uint64_t>(peak_bytes,snapshot.dsp_buffered_bytes);
+            peak_queue_samples=std::max<std::uint64_t>(peak_queue_samples,snapshot.buffered_samples);
+            peak_inflight_samples=std::max<std::uint64_t>(peak_inflight_samples,snapshot.decoding_samples);
+            peak_backlog_seconds=std::max(peak_backlog_seconds,snapshot.receiver_backlog_seconds);
+            peak_oldest_seconds=std::max(peak_oldest_seconds,snapshot.receiver_oldest_input_seconds);
+            peak_dropped=std::max(peak_dropped,snapshot.receiver_health.dropped_samples);
+            peak_overruns=std::max(peak_overruns,snapshot.receiver_health.input_overruns);
+            saw_reset|=snapshot.receiver_health.receiver_reset;
             if(!snapshot.error.empty())throw Error("actual RF Session: "+snapshot.error);
             check(!snapshot.receiver_health.failed() && !snapshot.receiver_health.dropped_samples,
                 "actual RF Session lost ordinary capture health");
@@ -351,6 +404,8 @@ void run(const std::filesystem::path& path,bool independent_clock,bool require_o
         }
         session.stop();
     }
+    const auto session_cpu_seconds=static_cast<double>(std::clock()-cpu)/CLOCKS_PER_SEC;
+    const auto session_wall_seconds=std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count();
     struct Segment {std::uint64_t first,settled,end,phase,rate;double rf;};
     std::map<std::uint64_t,Segment> segments;std::ifstream input(path);std::string line;
     std::uint64_t references=0,escapes=0,phase_updates=0,jobs=0,phase_work_jobs=0,stage_peak=0,pending=0,completed=0;
@@ -362,18 +417,27 @@ void run(const std::filesystem::path& path,bool independent_clock,bool require_o
     std::uint64_t first_qualified_capture=0,first_positive_fft_frontier=0,last_work_frontier=0,worker_slots_peak=0;
     struct ConstructorInput {
         double uncertainty=0,center=0,expected=0,lower=0,upper=0,actual_lower=0,actual_upper=0,capture_low=0,capture_high=0;
-        std::uint64_t pairs=0,epoch=0,family=0,provider=0,model_epoch=0;bool data=false;
+        std::uint64_t pairs=0,epoch=0,family=0,provider=0,model_epoch=0;bool data=false,pair_derived=false;
         bool operator==(const ConstructorInput&)const=default;
     };
     std::map<std::pair<std::uint64_t,std::uint64_t>,ConstructorInput> constructor_inputs;
-    struct DataWindow {std::uint64_t first=0,end=0,pairs=0,clocks=0;bool installed=false,first_audit=false;};
+    struct DataWindow {std::uint64_t first=0,end=0,pairs=0,clocks=0;bool installed=false,first_audit=false,pair_derived=false,narrowed=false;};
     std::map<std::pair<std::uint64_t,std::uint64_t>,DataWindow> data_windows;
     std::uint64_t data_projections=0,data_projection_escapes=0,data_windows_new=0,data_windows_existing=0;
+    std::uint64_t pair_data_projections=0,pair_data_escapes=0,pair_guard_accept=0,pair_guard_reject=0;
+    std::uint64_t pair_data_installed_windows=0;
+    std::uint64_t pair_data_existing_windows=0,pair_data_new_windows=0;
+    std::uint64_t pair_data_constructors=0;
+    std::uint64_t pair_data_existing_narrowed=0,pair_data_existing_fft_jobs=0;
+    double pair_data_width_min=INFINITY,pair_data_width_max=0;
     std::uint64_t data_installed_windows=0,data_paused_windows=0,data_fft_jobs=0,data_existing_fft_jobs=0,data_new_fft_jobs=0;
     double data_projection_error_max=0;
     bool saw_trace_end=false,pending_before_loss=false;
     std::optional<std::uint64_t> observation_deadline;
     std::uint64_t model_updates=0,raw_only_updates=0,phase_unqualified_updates=0,phase_fit_unqualified_updates=0;
+    std::uint64_t pair_attempts=0,pair_fits=0,pair_escapes=0,pair_clock_escapes=0,pair_cpu_ns=0;
+    std::uint64_t pair_capture_cpu_ns=0,pair_model_cpu_ns=0,pair_model_max_cpu_ns=0,pair_model_max_wall_ns=0;
+    double pair_error_max=0,pair_clock_error_max=0;
     std::uint64_t innovation_vetoes=0,model_epoch=0,model_epoch_changes=0;
     std::uint64_t model_corrections=0,raw_escapes=0,model_escapes=0,data_diagnostic_escapes=0,correction_escapes=0;
     std::uint64_t last_model_capture=0,last_qualified_capture=0;
@@ -385,6 +449,7 @@ void run(const std::filesystem::path& path,bool independent_clock,bool require_o
     double raw_error_max=0,model_error_max=0,data_diagnostic_error_max=0,correction_error_max=0;
     double model_uncertainty_max=0,model_uncertainty_min=INFINITY,correction_uncertainty_min=INFINITY;
     double maximum_error=0;std::uint64_t identity=0,revision=0,previous_bits=0;
+    double measured_high_cn0_sum=0;std::uint64_t measured_high_cn0_count=0;
     while(std::getline(input,line)) {
         if(line.find("\"event\":\"trace_end\"")!=std::string::npos) {
             check(!number(line,"dropped") && line.find("\"size_limited\":false")!=std::string::npos,
@@ -411,6 +476,7 @@ void run(const std::filesystem::path& path,bool independent_clock,bool require_o
                 input.expected==pilot && number(line,"factory_grant"),
                 "actual RF constructor trace lacks its immutable search inputs");
             if(input.data) {
+                input.pair_derived=number(line,"pair_derived");
                 input.lower=real(line,"requested_lower_hz");input.upper=real(line,"requested_upper_hz");
                 input.actual_lower=real(line,"constructor_lower_hz");input.actual_upper=real(line,"constructor_upper_hz");
                 input.capture_low=real(line,"capture_low_hz");input.capture_high=real(line,"capture_high_hz");
@@ -425,6 +491,7 @@ void run(const std::filesystem::path& path,bool independent_clock,bool require_o
                 "actual M constructor changed its original clock coefficient");
             const auto [found,inserted]=constructor_inputs.emplace(std::pair{number(line,"revision"),number(line,"instance_id")},input);
             check(inserted || found->second==input,"actual RF factory retry changed its immutable search");
+            if(inserted && input.pair_derived)++pair_data_constructors;
         }
         if(line.find("\"event\":\"receiver_helper_actual_rf_segment\"")!=std::string::npos) {
             const auto first=number(line,"first_sample"),settled=number(line,"settled_first_sample"),end=number(line,"end_sample");
@@ -438,6 +505,8 @@ void run(const std::filesystem::path& path,bool independent_clock,bool require_o
             stage_peak=std::max(stage_peak,number(line,"raw_stage_samples"));
         }
         if(line.find("\"event\":\"receiver_helper_raw_reference\"")!=std::string::npos && number(line,"qualified")) {
+            const auto measured_cn0=real(line,"cn0_db_hz");
+            if(std::isfinite(measured_cn0)){measured_high_cn0_sum+=measured_cn0;++measured_high_cn0_count;}
             if(!first_qualified_capture)first_qualified_capture=number(line,"captured_end");
             last_qualified_capture=number(line,"captured_end");
             const auto date=number(line,"sample");auto found=segments.upper_bound(date);
@@ -488,6 +557,38 @@ void run(const std::filesystem::path& path,bool independent_clock,bool require_o
             raw_only_updates+=number(line,"raw_frequency_only");innovation_vetoes+=number(line,"innovation_veto");++model_updates;
             phase_unqualified_updates+=!number(line,"phase_correction_qualified");
             phase_fit_unqualified_updates+=!number(line,"phase_fit_qualified");
+        }
+        if(line.find("\"event\":\"receiver_helper_paired_pilot_diagnostic\"")!=std::string::npos) {
+            const auto first=number(line,"first_sample"),end=number(line,"end_sample");
+            auto found=segments.upper_bound(first);check(found!=segments.begin(),"paired observation predates RF mapping");--found;
+            const auto& segment=found->second;
+            check(first>=segment.settled && first<end && end<=segment.end && end<=number(line,"captured_end") &&
+                number(line,"phase_segment")==segment.phase && real(line,"actual_rf_shift_hz")==segment.rf &&
+                !number(line,"payload_frequency_authority") && !number(line,"payload_phase_authority"),
+                "paired diagnostic crossed its measured hop or gained payload authority");
+            ++pair_attempts;pair_cpu_ns+=number(line,"pair_cpu_ns");
+            pair_capture_cpu_ns=std::max(pair_capture_cpu_ns,number(line,"pair_capture_cpu_ns"));
+            if(number(line,"low_qualified")) {
+                const auto variance=real(line,"low_independent_variance_hz2")+real(line,"low_residual_variance_hz2");
+                const auto low_truth=550*(1+value.simulation_clock_error_ppm*1e-6)+
+                    value.simulation_frequency_offset_hz*segment.rf/7e6;
+                const auto error=std::abs(real(line,"low_frequency_hz")-low_truth);
+                check(std::isfinite(variance) && variance>0,"low diagnostic has invalid variance");
+                pair_escapes+=error>3*std::sqrt(variance);pair_error_max=std::max(pair_error_max,error);
+                const auto clock_error=std::abs(real(line,"conditional_audio_scale_ppm")-value.simulation_clock_error_ppm);
+                pair_clock_error_max=std::max(pair_clock_error_max,clock_error);
+                pair_clock_escapes+=clock_error>real(line,"conditional_audio_scale_U_ppm");
+                ++pair_fits;
+            }
+        }
+        if(line.find("\"event\":\"receiver_helper_pair_model_diagnostic\"")!=std::string::npos ||
+           line.find("\"event\":\"receiver_helper_pair_model_discarded\"")!=std::string::npos) {
+            pair_model_cpu_ns+=number(line,"worker_cpu_ns");
+            pair_model_max_cpu_ns=std::max(pair_model_max_cpu_ns,number(line,"max_model_quantum_cpu_ns"));
+            pair_model_max_wall_ns=std::max(pair_model_max_wall_ns,number(line,"max_model_quantum_wall_ns"));
+        }
+        if(line.find("\"event\":\"receiver_helper_pair_low_guard\"")!=std::string::npos) {
+            if(number(line,"accepted"))++pair_guard_accept;else ++pair_guard_reject;
         }
         if(line.find("\"event\":\"receiver_helper_oscillator_correction\"")!=std::string::npos) {
             const auto first=number(line,"first_center"),last=number(line,"last_center"),captured=number(line,"captured_end");
@@ -562,16 +663,45 @@ void run(const std::filesystem::path& path,bool independent_clock,bool require_o
                 const auto lower=real(line,"lower_hz"),upper=real(line,"upper_hz"),q=real(line,"applied_correction_hz");
                 const auto evidence_first=number(line,"frequency_evidence_first"),evidence_end=number(line,"frequency_evidence_end");
                 const auto age=real(line,"frequency_witness_age_seconds");
-                check(first>=segment.settled && first<=last && last<segment.end && last<captured &&
+                const auto family=number(line,"frequency_query_family");
+                const bool nuisance=number(line,"includes_nuisance");
+                check((nuisance || (first>=segment.settled && last<segment.end)) && first<=last && last<captured &&
                     number(line,"phase_segment")==segment.phase && real(line,"actual_rf_shift_hz")==segment.rf &&
                     number(line,"provider") && number(line,"model_epoch") &&
                     std::isfinite(lower) && std::isfinite(upper) && lower<=upper && std::isfinite(q) &&
-                    evidence_first<evidence_end && evidence_end<=captured && number(line,"frequency_query_family")<=1 &&
+                    evidence_first<evidence_end && evidence_end<=captured && family<=2 &&
                     std::isfinite(age) && age>=0 && age<=.5,
                     "DATA projection crossed RF/support dates or lacks an independent frequency witness");
-                const auto truth=value.transfer.modem.carrier_hz*value.simulation_clock_error_ppm*1e-6+
-                    value.simulation_frequency_offset_hz*segment.rf/7e6+q;
-                const auto error=std::max({0.,lower-truth,truth-upper});
+                auto error=0.;
+                if(nuisance) {
+                    const auto begin=number(line,"raw_support_first"),end=number(line,"raw_support_end");
+                    auto at=begin;bool saw_settled=false;
+                    while(at<end) {
+                        auto part=segments.upper_bound(at);check(part!=segments.begin(),"nuisance lacks actual RF mapping");--part;
+                        const auto& piece=part->second;check(at<piece.end,"nuisance crosses unknown RF mapping");
+                        const auto piece_end=std::min(end,piece.end);
+                        if(std::max(at,piece.settled)<piece_end) {
+                            const auto truth=value.transfer.modem.carrier_hz*value.simulation_clock_error_ppm*1e-6+
+                                value.simulation_frequency_offset_hz*piece.rf/7e6+q;
+                            error=std::max({error,lower-truth,truth-upper});saw_settled=true;
+                        }
+                        at=piece_end;
+                    }
+                    check(saw_settled,"bounded nuisance contains no settled frequency support");
+                } else {
+                    const auto truth=value.transfer.modem.carrier_hz*value.simulation_clock_error_ppm*1e-6+
+                        value.simulation_frequency_offset_hz*segment.rf/7e6+q;
+                    error=std::max({0.,lower-truth,truth-upper});
+                }
+                if(family==2) {
+                    check(!pair_control && number(line,"pair_activation_frontier")>=evidence_end &&
+                        number(line,"raw_support_first")>=number(line,"pair_activation_frontier") &&
+                        number(line,"raw_support_end")<=segment.end && number(line,"raw_support_first")>=segment.settled,
+                        "pair DATA bound backdated activation or crossed physical support");
+                    ++pair_data_projections;pair_data_escapes+=error>0;
+                    pair_data_width_min=std::min(pair_data_width_min,upper-lower);
+                    pair_data_width_max=std::max(pair_data_width_max,upper-lower);
+                }
                 data_projection_escapes+=error>0;data_projection_error_max=std::max(data_projection_error_max,error);++data_projections;
             }
         }
@@ -606,11 +736,19 @@ void run(const std::filesystem::path& path,bool independent_clock,bool require_o
                     number(line,"actual_original_clock_rates")==number(line,"actual_selected_clock_rates"),
                     "installed DATA window discarded LF alternatives or lacks actual ordinary dispatch");
                 ++data_installed_windows;
+                if(number(line,"pair_derived")) {
+                    ++pair_data_installed_windows;
+                    if(number(line,"first_window_audit"))++pair_data_new_windows;else {
+                        ++pair_data_existing_windows;
+                        if(number(line,"actual_selected_pairs")<number(line,"actual_original_pairs"))++pair_data_existing_narrowed;
+                    }
+                }
             } else {check(!number(line,"actual_window_active") && !number(line,"actual_dispatch_permitted"),
                 "declined DATA window kept stale acquisition authority");++data_paused_windows;}
             const bool first_audit=number(line,"first_window_audit");
             data_windows_new+=first_audit;data_windows_existing+=!first_audit;
-            data_windows[key]={first,end,number(line,"actual_selected_pairs"),number(line,"actual_selected_clock_rates"),installed,first_audit};
+            data_windows[key]={first,end,number(line,"actual_selected_pairs"),number(line,"actual_selected_clock_rates"),installed,first_audit,
+                bool(number(line,"pair_derived")),installed&&number(line,"actual_selected_pairs")<number(line,"actual_original_pairs")};
         }
         if(line.find("\"event\":\"receiver_helper_pilot_phase\"")!=std::string::npos) {
             const auto first=number(line,"first_sample"),end=number(line,"end_sample");auto found=segments.upper_bound(first);
@@ -659,6 +797,7 @@ void run(const std::filesystem::path& path,bool independent_clock,bool require_o
                     "actual DATA FFT jobs lack an exact joined support/window/work audit");
                 const auto delta=number(line,"fft_jobs")-previous.fft;data_fft_jobs+=delta;
                 if(window->second.first_audit)data_new_fft_jobs+=delta;else data_existing_fft_jobs+=delta;
+                if(!window->second.first_audit && window->second.pair_derived && window->second.narrowed)pair_data_existing_fft_jobs+=delta;
             }
             previous={current,number(line,"fft_jobs"),number(line,"input_transforms")};
         }
@@ -707,6 +846,11 @@ void run(const std::filesystem::path& path,bool independent_clock,bool require_o
         <<",ordinary_transforms_sum="<<total_transforms<<",worker_slots_peak="<<worker_slots_peak
         <<",first_qualified_raw_capture="<<first_qualified_capture<<",first_positive_fft_frontier="<<first_positive_fft_frontier
         <<",last_ordinary_frontier="<<last_work_frontier
+        <<",pair_attempts="<<pair_attempts<<",pair_fits="<<pair_fits<<",pair_escapes="<<pair_escapes
+        <<",pair_error_max_hz="<<pair_error_max<<",pair_clock_error_max_ppm="<<pair_clock_error_max
+        <<",pair_clock_escapes="<<pair_clock_escapes<<",pair_worker_cpu_ns_lower_bound="<<pair_cpu_ns
+        <<",pair_capture_cpu_ns_lower_bound="<<pair_capture_cpu_ns<<",pair_model_cpu_ns_lower_bound="<<pair_model_cpu_ns
+        <<",pair_model_max_cpu_ns="<<pair_model_max_cpu_ns<<",pair_model_max_wall_ns="<<pair_model_max_wall_ns
         <<",oscillator_updates="<<model_updates<<",oscillator_RF_values="<<model_rf.size()<<",oscillator_raw_only_updates="<<raw_only_updates
         <<",oscillator_phase_unqualified_frequency_updates="<<phase_unqualified_updates
         <<",oscillator_phase_fit_unqualified_frequency_updates="<<phase_fit_unqualified_updates
@@ -728,6 +872,19 @@ void run(const std::filesystem::path& path,bool independent_clock,bool require_o
         <<",constructor_clock_domain_high_ppm="<<constructors.clock_bound_ppm
         <<",DATA_coordinate_required="<<require_data_coordinate<<",DATA_projections="<<data_projections
         <<",DATA_projection_escapes="<<data_projection_escapes<<",DATA_projection_outside_bound_max_hz="<<data_projection_error_max
+        <<",pair_control="<<pair_control<<",simulation_snr_db="<<snr_db
+        <<",actual_rf_hop_step_hz="<<rf_hop_step_hz
+        <<",retrospective_lab_constructor_envelope="<<retrospective_envelope
+        <<",laboratory_quantized_grid="<<quantized_grid
+        <<",sampled_high_cn0_nominal_preview_db_hz="<<sampled_high_cn0.value_or(-1)
+        <<",measured_high_cn0_mean_db_hz="<<(measured_high_cn0_count?measured_high_cn0_sum/measured_high_cn0_count:0)
+        <<",pair_DATA_projections="<<pair_data_projections<<",pair_DATA_escapes="<<pair_data_escapes
+        <<",pair_DATA_width_min_hz="<<pair_data_width_min<<",pair_DATA_width_max_hz="<<pair_data_width_max
+        <<",pair_guard_accept="<<pair_guard_accept<<",pair_guard_reject="<<pair_guard_reject
+        <<",pair_DATA_installed_windows="<<pair_data_installed_windows
+        <<",pair_DATA_new_windows="<<pair_data_new_windows<<",pair_DATA_existing_windows="<<pair_data_existing_windows
+        <<",pair_touched_existing_narrowed="<<pair_data_existing_narrowed<<",pair_touched_existing_narrowed_fft_jobs="<<pair_data_existing_fft_jobs
+        <<",pair_DATA_constructors="<<pair_data_constructors
         <<",DATA_new_window_audits="<<data_windows_new<<",DATA_existing_window_audits="<<data_windows_existing
         <<",DATA_installed_windows="<<data_installed_windows<<",DATA_paused_windows="<<data_paused_windows
         <<",DATA_actual_FFT_jobs="<<data_fft_jobs<<",DATA_existing_window_FFT_jobs="<<data_existing_fft_jobs
@@ -737,12 +894,21 @@ void run(const std::filesystem::path& path,bool independent_clock,bool require_o
         <<",workspace_peak_bytes="<<peak_bytes<<",raw_stage_peak_samples="<<stage_peak
         <<",process_cpu_seconds="<<static_cast<double>(std::clock()-cpu)/CLOCKS_PER_SEC
         <<",wall_seconds="<<std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count()
+        <<",session_cpu_seconds="<<session_cpu_seconds<<",session_wall_seconds="<<session_wall_seconds
+        <<",raw_pcm_witness_samples="<<laboratory.pcm_samples<<",raw_pcm_witness_hash="<<laboratory.pcm_hash
+        <<",raw_pcm_prefix_samples="<<laboratory.pcm_prefix_samples<<",raw_pcm_prefix_hash="<<laboratory.pcm_prefix_hash
+        <<",raw_pcm_witness_contiguous="<<laboratory.pcm_contiguous
+        <<",peak_queue_samples="<<peak_queue_samples<<",peak_inflight_samples="<<peak_inflight_samples
+        <<",peak_backlog_seconds="<<peak_backlog_seconds<<",peak_oldest_input_seconds="<<peak_oldest_seconds
+        <<",dropped_samples="<<peak_dropped<<",input_overruns="<<peak_overruns<<",receiver_reset="<<saw_reset
         <<",tx_epoch_observed_only="<<laboratory.transmit_epoch<<",lab_helper_end_seconds="<<helper_end_seconds.value_or(-1)
         <<",lab_helper_end_physical_sample="<<laboratory.helper_end_sample<<",physical_sample_rate="<<laboratory.physical_rate
         <<",bank_creations="<<laboratory.bank_creations<<",bank_source_origin="<<laboratory.bank_source_origin
         <<",status="<<status<<",trace="<<path<<'\n';
     check(laboratory.channels==1 && laboratory.bank_creations==1 && laboratory.bank_source_origin==0,
         "actual RF fixture's Bank origin changed; local/global date comparisons are invalid");
+    check(laboratory.pcm_contiguous && laboratory.pcm_prefix_samples==std::uint64_t(laboratory.physical_rate)*60,
+        "actual RF fixture did not witness the complete contiguous 60-second raw physical prefix");
     check(segments.size()>=12 && references>=4 && !escapes && phase_updates>=4,
         "actual RF Session did not causally re-acquire independent retuned pilot segments");
     check(finished && exact && pending && completed && observation_deadline && jobs && phase_work_jobs && frequency && phase,
@@ -752,6 +918,9 @@ void run(const std::filesystem::path& path,bool independent_clock,bool require_o
     if(independent_clock)check(local_references && retained_clock_masks && !constructor_owners.empty() &&
         constructors.assisted_pairs<constructors.ordinary_pairs && (!existing_mask_opportunities || narrowed_masks),
         "independent RF/audio local frequency did not preserve LF while narrowing available actual RF work");
+    if(independent_clock && require_oscillator_model)
+        check(pair_attempts>=4 && pair_fits>=4 && !pair_escapes && !pair_clock_escapes,
+            "actual RF low-pilot diagnostics lacked matched support or covered frequency");
     if(require_oscillator_model)check(model_updates>=4 && model_rf.size()>=2 && model_corrections &&
         !raw_escapes && !model_escapes && !data_diagnostic_escapes && !correction_escapes,
         "persistent actual RF/audio model lacked dated useful corrections or escaped its reported uncertainty");
@@ -762,18 +931,41 @@ void run(const std::filesystem::path& path,bool independent_clock,bool require_o
             data_windows_new && data_windows_existing && data_installed_windows && data_fft_jobs && data_existing_fft_jobs,
             "actual DATA Live integration lacks bounded truth coverage, new/existing windows or joined FFT work");
     }
+    if(require_pair_data)check(!pair_control && pair_data_projections && !pair_data_escapes && pair_guard_accept &&
+        pair_data_installed_windows && pair_data_existing_narrowed && pair_data_existing_fft_jobs,
+        "actual pair DATA lane lacked qualified future support or escaped truth");
     if(require_prior_frequency)check(prior_corrections && (!helper_end_seconds || prior_after_loss_corrections),
         "actual RF model did not use a dated prior frequency without a current-hop pilot");
 }
 }
 int main(int argc,char** argv)try {
     bool independent_clock=false,require_oscillator_model=false,require_prior_frequency=false,require_data_coordinate=false;
+    bool pair_control=false,require_pair_data=false,retrospective_envelope=false,quantized_grid=false;
+    double snr_db=40,rf_hop_step_hz=700000;std::optional<double> sampled_high_cn0;
     std::optional<std::filesystem::path> requested_path;std::optional<double> helper_end_seconds;
     for(int i=1;i<argc;++i) {
         if(std::string_view(argv[i])=="--independent-clock")independent_clock=true;
         else if(std::string_view(argv[i])=="--require-oscillator-model")require_oscillator_model=true;
         else if(std::string_view(argv[i])=="--require-prior-frequency")require_prior_frequency=true;
         else if(std::string_view(argv[i])=="--require-data-coordinate")require_data_coordinate=true;
+        else if(std::string_view(argv[i])=="--pair-control")pair_control=true;
+        else if(std::string_view(argv[i])=="--require-pair-data")require_pair_data=true;
+        else if(std::string_view(argv[i])=="--retrospective-envelope")retrospective_envelope=true;
+        else if(std::string_view(argv[i])=="--quantized-grid")quantized_grid=true;
+        else if(std::string_view(argv[i])=="--snr-db") {
+            check(++i<argc,"actual RF SNR requires a number");std::size_t consumed=0;snr_db=std::stod(argv[i],&consumed);
+            check(consumed==std::string_view(argv[i]).size() && std::isfinite(snr_db),"invalid actual RF SNR");
+        }
+        else if(std::string_view(argv[i])=="--sampled-high-cn0") {
+            check(++i<argc && !sampled_high_cn0,"actual RF sampled high C/N0 requires one number");
+            std::size_t consumed=0;sampled_high_cn0=std::stod(argv[i],&consumed);
+            check(consumed==std::string_view(argv[i]).size() && std::isfinite(*sampled_high_cn0),"invalid sampled high C/N0");
+        }
+        else if(std::string_view(argv[i])=="--rf-hop-step-hz") {
+            check(++i<argc,"actual RF hop step requires a number");std::size_t consumed=0;rf_hop_step_hz=std::stod(argv[i],&consumed);
+            check(consumed==std::string_view(argv[i]).size() && std::isfinite(rf_hop_step_hz) && rf_hop_step_hz>0 &&
+                7e6+3*rf_hop_step_hz<=54e6,"invalid actual RF hop step");
+        }
         else if(std::string_view(argv[i])=="--helper-end-seconds") {
             check(++i<argc && !helper_end_seconds,"actual RF Helper loss requires one seconds value");
             std::size_t consumed=0;helper_end_seconds=std::stod(argv[i],&consumed);
@@ -787,5 +979,6 @@ int main(int argc,char** argv)try {
         ("datapump-helper-actual-rf-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".jsonl"));
     check(!require_oscillator_model || independent_clock,"oscillator-model fixture requires independent RF/audio clocks");
     frozen_source_band_declines_wide_retune();mixed_output_certificates_preserve_pcm();
-    run(path,independent_clock,require_oscillator_model,helper_end_seconds,require_prior_frequency,require_data_coordinate);return 0;
+    run(path,independent_clock,require_oscillator_model,helper_end_seconds,require_prior_frequency,require_data_coordinate,
+        pair_control,require_pair_data,snr_db,sampled_high_cn0,rf_hop_step_hz,retrospective_envelope,quantized_grid);return 0;
 }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}

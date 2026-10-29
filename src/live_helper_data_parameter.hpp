@@ -26,6 +26,8 @@ struct DataParameterBound {
     DataParameterStamp stamp;
     Kind kind=Kind::unsupported;
     bool includes_nuisance=false;
+    // Observability only: does not alter the bound or confer authority.
+    bool pair_derived=false;
     static double down(long double value)noexcept {auto out=static_cast<double>(value);if(static_cast<long double>(out)>value)out=std::nextafter(out,-INFINITY);return out;}
     static double up(long double value)noexcept {auto out=static_cast<double>(value);if(static_cast<long double>(out)<value)out=std::nextafter(out,INFINITY);return out;}
     static DataParameterBound around(double mean,double radius,double q,DataParameterStamp stamp)noexcept {
@@ -37,6 +39,7 @@ struct DataParameterBound {
         if(!a.supported()||!b.supported()||a.stamp!=b.stamp)return {};
         auto out=a;out.includes_nuisance=a.includes_nuisance||b.includes_nuisance||
             a.kind==Kind::retune_nuisance||b.kind==Kind::retune_nuisance;
+        out.pair_derived=a.pair_derived||b.pair_derived;
         if(b.kind==Kind::bounded){
             if(a.kind==Kind::bounded){out.lower=std::min(a.lower,b.lower);out.upper=std::max(a.upper,b.upper);}
             else {out.lower=b.lower;out.upper=b.upper;out.kind=Kind::bounded;}

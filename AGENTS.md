@@ -5,6 +5,29 @@ Current compatibility requirements are in [the development contract](docs/develo
 build and test stages are in [the build guide](docs/building.md#testing-stages).
 Search `src/`, `include/`, `tests/` and `cmake/` first when locating implementation.
 
+## Helper Carrier priority
+
+Prioritize Helper Carrier's frequency and phase search-space narrowing for the
+ordinary Robust receiver, especially the HF GPSDO alternative and also microwave
+GPSDO supplementation. Do not make successful Helper auxiliary APSK decoding or
+improved APSK sensitivity a prerequisite for this work. See the
+[Helper Carrier priority and identification rationale](docs/helper-carrier.md#development-priority).
+Preserve applicable regression requirements and report actual failures honestly.
+
+For Helper-assisted ordinary Robust reception, assume the receiver is present
+for the full 36-second Helper observation needed for frequency narrowing before
+ordinary acquisition. The transmit lead is fixed at 95 400-ms dwells (38 seconds),
+whether or not FHSS is enabled: 90 dwells for observation and five for detection.
+Do not prioritize implementation or testing of receivers
+joining an ongoing transmission without that lead-in. See the
+[lead-in operating requirement](docs/helper-carrier.md#lead-in-operating-requirement).
+
+For high-pilot identification, follow the [quiet-spectrum assumption](docs/helper-carrier.md#quiet-spectrum-assumption).
+The strongest tone in the oscillator-model-derived expected high-pilot range may
+be assumed to be the pilot. Do not add elaborate competing-tone identification
+or tests for rejecting such tones solely to address interference excluded by this
+assumption.
+
 ## Changes and validation
 
 - Preserve wire formats and bit progress: 1–16 source-byte text keeps its fixed

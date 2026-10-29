@@ -227,6 +227,9 @@ private:
         return OscillatorModelReason::accepted;
     }
 public:
+    double current_retune_variance_hz2()const noexcept {
+        return config_.retune_variance_floor_hz2+std::max(0.,excess_scatter_estimate_hz2_);
+    }
     OscillatorFrequencyPrediction predict(const LinkMapping& m,std::uint64_t at_sample)const noexcept {
         OscillatorFrequencyPrediction out;
         if(!valid_){out.reason=OscillatorModelReason::invalid_configuration;return out;}

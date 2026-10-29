@@ -8,14 +8,109 @@ and use Git history for comparisons. Detailed studies remain in the
 
 ## Three-tone Helper Carrier implementation checkpoint
 
-The current 29 October development GUI is `build/dev/datapump-gui`, SHA-256
+The latest 29 October continuation built with `./build.sh` successfully. The
+development GUI at `build/dev/datapump-gui` had SHA-256
+`f4a566b6978417765948b7fb6cce5d1ed69833ad5c232b0763c338db6c18ebd2`;
+`build/dev/pump` had SHA-256
+`d1b803de68905589141cca92e14b40b6a5a8bdc2b0024c034558069fc55cc79e`.
+The build used HEAD `f1a9cd1b81d56d0fe73759380ffb372dc7e0452b` with dirty
+tracked and untracked changes; the [checkpoint manifest](../local-evidence/helper-three-tone/continuation-final/)
+records their hashes and the binaries before these documentation updates. This
+is a development checkpoint, not a qualification or release.
+
+The [focused retest](../local-evidence/helper-three-tone/continuation-final-focused.log)
+passed four of six: actual RF data, paired dwell, pair model and pair capture.
+The unchanged 24 dB-Hz frequency-only fallback and registered three-tone
+auxiliary decoder failed. A separately selected stress and Live observation
+[run](../local-evidence/helper-three-tone/continuation-final-stress.log) passed
+15/15; it used a separate test selection, not the full contract group. Full
+contract, GUI, sanitizer and supplied HF/EME qualification remain outstanding.
+The private grid improvement remains unqualified, pair authority is disabled,
+and mixed-retune support remains a concern for high-only assistance.
+
+A later private [actual factory boundary experiment](../local-evidence/helper-three-tone/grid-boundary/)
+tested the proposed eight-ULP grid heuristic at DATA center 1,000 Hz, native
+radius 0.125 Hz, measured uncertainty ±0.001 Hz and RF shift 30 MHz. With
+margin 1, the instantiated count increased from 9 to 15 templates and reported
+receiver workspace from 7,378,832 to 10,525,280 bytes; the increase persisted
+across 400 adjacent-double cases. Margin 3 kept 9 templates in the corresponding
+case and sweep. This counterexample rules out deploying the heuristic without
+per-profile coverage, lane, capture and budget checks plus an actual-count guard
+and fallback. It establishes no general throughput or reception result and did
+not change the checkpoint source or binaries.
+
+A private [two-Hilbert prefilter-mixing probe](../local-evidence/helper-three-tone/premix-prototype/iq-probe.cpp)
+and its [results](../local-evidence/helper-three-tone/premix-prototype/iq-results.txt)
+test synthetic single sinusoids with truth-seeded frequency, not causal pilot
+acquisition or Robust reception. At 32 kHz, over 2.4 seconds with a 512-sample
+output delay, its normal and conjugate constant-tone cases showed roughly
+1.2e-7 steady RMS error against the ideal signal. With 400 ms hops, five
+frequency changes, 12 ms hop-start muting and independent specified phase jumps,
+transition RMS error against that ideal was 0.021–0.023, with peaks of
+0.757–0.765. This ideal is the samplewise oracle NCO reference; the production
+post-filter translator in the comparison changes frequency only after its
+1,025-sample settled support, so it is not the transition reference. Image
+crossing at a 3 kHz shift produced approximately 0.707 steady RMS error, while
+the tested separated-image tones did not; a simple guard is only a proposed
+condition, not a proven full-band guarantee. The probe measured about
+0.023–0.026 CPU seconds versus 0.015–0.017 for the post-filter translator;
+the two object/workspace figures are not equivalent accounting. It does not
+test noise, mixtures, payload, causal phase support or hardware. The retained
+probe source hashes to
+`5fc06b26bdab67231e9bfec49adf9b42ef2480f7522bb4e4c3d2526c61846cb0`;
+the result file hashes to
+`5539e5c33ef2324a8c45ae8c19e1afc22e4cba3356df5e44469e33a136ca25aa`.
+No complete executable or dependency binding is asserted.
+
+A further private causal component probe used the actual generated Helper and
+data waveform, sampled simulated retunes with independently seeded hop phases,
+and prior paired-pilot observations to predict the next segment's correction.
+The retained [probe](../local-evidence/helper-three-tone/premix-prototype/causal-iq-probe.cpp)
+hashes to `591d909c046bbfa17b8b8abfb4fb83019557e3a4b5af8be942b0206d963ee9c0`.
+For nominal 60 dB-Hz and one seed, the [positive signed-RF model run](../local-evidence/helper-three-tone/premix-prototype/causal-side-plus.log)
+recorded 0 predicted three-sigma escapes in 103 supported segments; the
+[negative signed-RF model run](../local-evidence/helper-three-tone/premix-prototype/causal-side-minus.log)
+recorded 34/103. These are correlated segments, not independent trials. The
+respective logs hash to
+`02d715bf543f8303dcd1be87fecbadd9f6d99ca17b99552c05eaaf7e74124e23` and
+`2bb2ca63efe855c75841bf6b7f2494cacf92efb814ccaf7942b941e62cba7323`.
+The signed-RF model cases are not conjugate-output tests: the probe constructs
+the prefilter with conjugation disabled in both. The retained source was
+modified after the log timestamps; no exact pre-run source, executable or
+dependency binding is established. These component results do not establish
+admission, physical END, production behavior or CPU performance.
+
+A [source-bound rerun](../local-evidence/helper-three-tone/premix-prototype/causal-rerun-after.sha256)
+reproduced the seed-1 0/103 and 34/103 supported-segment results; its before
+and after manifests bind the retained probe, oscillator-model header and linked
+libraries, with the executable and log hashes recorded after the run. A
+separate [seed-2 discriminator](../local-evidence/helper-three-tone/premix-prototype/causal-seed2-after.sha256),
+whose source changes the seed from 1 to 2, recorded 0/103 escapes for each sign.
+Its manifest binds its source, executable and logs; it does not independently
+record all dependency hashes. These observations remain correlated within each
+run, and seed 2 does not erase the seed-1 negative-sign failure. Inspection
+found no obvious sign inversion; the cause is not established.
+
+A further [guarded scratch rerun](../local-evidence/helper-three-tone/premix-prototype/causal-guarded-after.sha256)
+changed only the paired model's input marginal variances, multiplying both by
+two. With seed 1 it recorded 0/103 predicted three-sigma escapes for each sign,
+while the original 34/103 negative-sign failure remains a failure. The
+[before manifest](../local-evidence/helper-three-tone/premix-prototype/causal-guarded-before.sha256)
+and after manifest record the probe, linked libraries and relevant headers;
+the latter also records executable and log hashes. This is one seed with
+correlated observations and clean interior support. It does not qualify the
+guard, production reception or ordinary scoring.
+
+An earlier 29 October development GUI checkpoint was `build/dev/datapump-gui`, SHA-256
 `5bbda8df61e16e6e6e956a04356205344ceaba06901724cc63e36a045b53dac6`;
-`build/dev/pump` is
+`build/dev/pump` was
 `6441b4531c0cc91bfae432b43c59e7237fb4c5800c823511345029126fd2b5c7`.
 Both were built from HEAD `1e21a364bb09f602325e66027c926cbd70b2e9b6` plus
 uncommitted changes, with tracked and untracked file and binary hashes in
-[delivery](../local-evidence/helper-three-tone/delivery/). This is an experimental
-development build, not accepted assisted-reception or release qualification.
+[delivery](../local-evidence/helper-three-tone/delivery/). Later development
+builds may overwrite that path and are not identified by those bindings. This
+was an experimental development build, not accepted assisted-reception or
+release qualification.
 
 The source-bound focused command
 `ctest --test-dir build/dev --output-on-failure -R '^(helper_actual_rf_data|helper_continuous|helper_tone_tracker|helper_local_aperture|helper_frontend|helper_filter_response|helper_acquisition_admission|helper_simple_dispatch|helper_observation_live_)' -j 1`
@@ -25,8 +120,240 @@ is retained. Actual-retune and all eight Live observation cases passed. The
 produced no fallback or qualified polls. The tested segmented-precision header
 SHA-256 is `9b708c22c9a026950c7cf1464afe53b269893c02872d8aa6f9db0a140b27e25e`.
 The passing Live fade tests do not resolve the separate 5 ms component failure
-described below. The low-pilot runtime path remains unimplemented, CLI batch and
-no-oscillator-policy limitations remain, and full qualification is incomplete.
+described below. At that checkpoint the low-pilot runtime path was unimplemented;
+the later diagnostic worker below does not yet grant receiver authority. CLI
+batch and no-oscillator-policy limitations remain, and full qualification is
+incomplete.
+
+### Subsequent paired-pilot and auxiliary development
+
+Later in-progress changes are based on clean HEAD
+`f1a9cd1b81d56d0fe73759380ffb372dc7e0452b`. A separately funded optional
+worker retains bounded recent input and one aperture snapshot, fits a low pilot
+only against the matching high-pilot aperture, and records conditional audio
+scale and uncertainty. It and the optional auxiliary service share CPU credit;
+capture/copy and worker work are separately measured. A conditional pair-only
+numeric model accepts completed apertures in date order and activates no earlier
+than publication. Neither result supplies ordinary receiver acquisition, payload
+phase or timing authority. The existing high-pilot path still reacquires phase
+within each supported actual-retune dwell. Physical RF segment notifications
+are supplied by the sampled simulator; the dated mock injection used below is
+test-only, not a hardware retune adapter.
+
+The development command `ctest --test-dir build/dev --output-on-failure -R
+'^(helper_pair_model|helper_paired_dwell|helper_actual_rf_data|helper_pair_stress_|helper_pair_capture)' -j 1`
+passed 10/10 on the then-built patch, before a subsequent trace-only change; the
+[log](../local-evidence/helper-three-tone/pair-model-integration.log) is not a
+final source/binary binding. Its strict actual-retune case retains the `001`,
+pending-row identity and scored-END assertions; the pair-model and stress cases
+do not establish pair-driven acquisition. An earlier development run of the
+same strict retune fixture recorded 115 matching low fits, no observed low or
+conditional audio-scale interval escapes in that run, a maximum scale error of
+0.573 ppm, and approximately 73 ms of low-worker CPU. Those are correlated
+observations in one simulated case. The CPU figure excludes capture/copy and
+trace work, and the adjacent post-test source snapshot is not an exact binary
+binding. Its [detail](../local-evidence/helper-three-tone/pair-worker-r2-ctest-detail.log)
+does not qualify operational precision or show pair-driven work reduction.
+
+The separate [mock-capture retest](../local-evidence/helper-three-tone/pair-capture-r6-detail.log)
+advanced 4,480 raw samples, or 140 ms, during a deliberately stalled worker;
+it recorded eight raw observations during the stall, later high and low fits,
+debt repayment and no reported drops. The 210 ms maximum worker CPU quantum
+was injected, not a normal-cost benchmark. Its peak 2,782,688-byte workspace
+was sampled, and the test used a mock-only dated RF provider with Helper only;
+it establishes neither hardware retune support nor payload completion. Earlier
+[R3](../local-evidence/helper-three-tone/pair-worker-r3.log),
+[R4](../local-evidence/helper-three-tone/pair-worker-r4.log) and
+[R5](../local-evidence/helper-three-tone/pair-worker-r5.log) failures remain:
+the simulator slow-worker capture-progress assumption was invalid for its
+synchronous source loop, while initial mock-provider setup and geometry did not
+reach the intended worker checkpoint. The later pass does not turn those runs
+into successes or establish real hardware throughput.
+
+The [pair-model protocol study](../local-evidence/helper-three-tone/pair-model-protocol/)
+uses a separate numeric model and a conditional twice-diagonal same-window
+covariance bound. Its 32-seed positive-process simulation recorded 3 escapes
+among 2,880 correlated predictions and none at the 32 final boundaries; six
+observations were declined for digital capture geometry. This assumes selected
+Gaussian frequency observations and does not establish causal tone identity,
+marginal coverage, temporal correlation or actual waveform behavior. A local
+GCC component probe measured a 56,296-byte retained object and a 56,208-byte
+reset stack frame; 320 updates with 64 history rollovers took about 0.039 CPU
+seconds on that host. These figures do not establish concurrent fairness,
+platform stack bounds or practical HF/EME feasibility. The pair posterior is
+not used to narrow the ordinary receiver.
+
+A subsequent [V2 matched waveform study](../local-evidence/helper-three-tone/pair-waveform-continuation/v2/)
+fed identical physical samples within each case to high-only and conditional
+pair models. It used the actual three-tone Generator and Robust source through
+the sampled channel, +100 ppm audio-clock error, four 30–39 MHz RF shifts,
+independent hop phases, both sideband signs and three seeds at each nominal
+configured 30, 40 and 60 dB-Hz C/N0 label. These labels are not measurements.
+The [actual plan and steady sampled-AWGN-only calculation](../local-evidence/helper-three-tone/pair-waveform-continuation/v2/plan-info.log)
+give high-pilot C/N0 of 29.295, 39.295 and 59.295 dB-Hz and low-pilot C/N0 of
+26.295, 36.295 and 56.295 dB-Hz respectively. These ideal values exclude
+Robust sidelobes, other noise sidebands, ramps, settling and added spurs. The
+no-spur cases included zero and
+declared 0.5°/√s phase noise, plus a 0.001 ppm/s RF-slew magnitude with the
+declared phase noise. Each case used 91 hops and approximately 36 seconds of
+physical input; the [commands, hashes and results](../local-evidence/helper-three-tone/pair-waveform-continuation/v2/summary.txt)
+are retained. This was a component experiment, not Live admission, actual
+hardware retuning or a calibrated radio-passband test.
+
+With declared phase noise and no slew or spur, the conditional pair had no
+DATA-frequency or audio-scale interval escapes in the six cases at each label.
+At the 30 label it used a pair for 140 of 528 correlated predictions and the
+high-only fallback supplied the rest; that fallback had one DATA escape. At
+the 40 and 60 labels all 528 predictions used the pair, with no observed DATA or
+audio-scale escapes. The last query was approximately 35.662–35.678 seconds,
+not the 36-second boundary. At 40 and 60 labels, final pair and high-only
+half-widths refer to that same query: 0.0773–0.0817 versus 0.0773–0.0812 Hz
+at 40, and 0.0264–0.0290 versus 0.0309–0.0328 Hz at 60. At 30, the last
+pair result (0.160–0.270 Hz) can be earlier than the last high-only result
+(0.180–0.217 Hz), so their widths are not a matched endpoint comparison.
+The [interpretation](../local-evidence/helper-three-tone/pair-waveform-continuation/v2/interpretation.txt)
+records the query-date derivation. These are conditional bounds, not a demonstrated
+ordinary acquisition or CPU saving. Mean whole-component CPU was about
+0.55–0.59 seconds per case, including channel generation and model work; the
+reported low-fit portion was about 0.035–0.053 seconds. Its reported allocation
+was 1,996,768 bytes, not a Live or transient peak.
+
+A persistent straight tone twice the low pilot's amplitude, placed 0.4 or
+1 Hz from that pilot, caused substantial DATA and audio-scale undercoverage
+despite the model's clock-domain check. For the 0.4 Hz cases, pair DATA escapes
+were 259/451, 477/528 and 494/528 pair-used predictions at the 30, 40 and
+60 labels; audio-scale escapes were 445/451, 528/528 and 528/528. For the
+1 Hz cases, pair DATA escapes were 325/336, 300/302 and 255/257, and audio-scale
+escapes were 336/336, 302/302 and 257/257. The domain check declined some
+1 Hz measurements but did not eliminate the remaining escapes. Predictions
+within each run are correlated; these fractions are not independent trial
+probabilities. Stronger nearby tones are a selection ambiguity under the
+manual quiet-spectrum operating assumption, not evidence that metadata or
+authentication should gate the pure pilots. The model remains diagnostic and
+its selected-tone and covariance assumptions do not justify pair-driven
+ordinary frequency narrowing.
+
+A source-bound scratch [high-only predicted-low discriminator](../local-evidence/helper-three-tone/pair-waveform-continuation/guard/)
+uses the current high-only model after its high-aperture update to predict the
+low frequency. It compares the low measurement to that prediction using the
+sum of their three-sigma marginal widths plus the declared local-slew allowance;
+it does not assume instantaneous high/low errors are independent. A failed
+initial setup used an invalid modified mapping and declined every observation;
+that [setup failure](../local-evidence/helper-three-tone/pair-waveform-continuation/guard/guard-first-invalid-map.log)
+is retained separately from the corrected run. The discriminator, gated
+history and gated-reset variants are scratch diagnostics; no production source
+was changed for them.
+
+Under the user's experimental quiet-spectrum assumption, clean nominal
+40/60-label cases used three seeds, both sidebands and +100 or ±290 ppm audio
+error. In each six-case group all 528 pair queries were retained, with no
+observed DATA or audio-scale interval escapes. A smaller 0.001 ppm/s RF-slew
+subset at +100 ppm used one seed per sideband at each label: all 176 pair
+queries were retained and no such escapes were observed. At the nominal 30
+label only 140 of 528 queries used a pair; high-only fallback supplied the rest
+and had one DATA escape. Each pair/high comparison consumed the same physical
+PCM within its case. At the last high-valid query, approximately 35.662–35.678
+seconds rather than a 36-second boundary, the clean +100 ppm 40-label paired
+half-width range was 0.0773–0.0817 Hz versus 0.0773–0.0812 Hz high-only;
+at the 60 label it was 0.0264–0.0290 versus 0.0309–0.0328 Hz. The nominal
+labels and their ideal sampled-AWGN-only plan values are described above, not
+measured received C/N0.
+
+This screen is conditional on the high reference, measured marginal variances,
+the process model and selected low tone. It is not authentication, a calibrated
+confidence guarantee or proof of selected-tone identity. The operator may
+accept the strongest plausible high pilot inside its oscillator-derived range;
+the screen adds no auxiliary-metadata or known-start requirement. Small
+near-tone spot cases still produced conditional interval escapes, and the
+[summary](../local-evidence/helper-three-tone/pair-waveform-continuation/guard/summary.txt)
+retains them. Queries share history and are correlated; three seeds per sign
+and clock setting do not establish operational coverage. These tests do not
+exercise Live asynchronous scheduling, ordinary RF search or work savings,
+hardware retunes, analog passband, fading or noise calibration.
+
+An experimental Live pair-authority trial then tested the RF-coordinate and
+filter-support interaction. The [large-step run](../local-evidence/helper-three-tone/pair-live-ab-r6.log)
+used 700 kHz retune steps and recorded zero ordinary FFT jobs, no `001` pending
+row and no scored END. Its settled-input FIR/NCO-frequency hull escaped the
+constructor's narrower pair bound; it failed strict reception. Its earlier
+high-only bare-nuisance control recorded 882 FFT jobs and completed, but that
+control did not cover the same full settled support and is not an equivalent
+coverage comparison. The q/FIR/settled-piece concern also applies to the
+high-only bare-nuisance coverage claim; neither result establishes a physical
+precision floor.
+
+A later [matched small-step run](../local-evidence/helper-three-tone/pair-live-small-r2.log)
+used 10 kHz retune steps and the full-support bound in both arms. Pair and
+high-only control both passed strict `001`, pending identity and scored END,
+with the same 2,046,093-sample FNV witness. That witness is non-cryptographic;
+it is not a byte-for-byte proof. Pair versus high-only recorded 1,806 versus
+1,764 FFT jobs, 42 transforms in each, 2.13705 versus 2.13459 Session CPU
+seconds and 40,386,705 sampled workspace bytes in each. This run shows no
+measured acquisition-work, CPU or sampled-workspace benefit. Its measured
+high-pilot C/N0 was approximately 82 dB-Hz in a strong cable simulation; it
+does not qualify the supplied HF configurations, real hardware or other hop
+geometries. The retained [detail logs](../local-evidence/helper-three-tone/pair-live-small-r2-detail.log)
+contain the commands and per-arm counters. After the run, the retained executable
+at `build/dev/test_helper_actual_rf_session` was observed to hash to
+`7ef51ad994cfde33b43315cbd470c9604784ee43748ac334a3ddbb21f1bcce62`;
+the source was edited after the run and no complete source binding was found,
+so the result cannot be bound to the current source tree. In each arm the final
+simulation-join snapshots for 10 of 13 owners were joined but marked
+interrupted/incomplete; the work snapshots therefore do not independently
+prove complete scored coverage. The strict END assertion is separate evidence.
+Pair-driven production authority remains off.
+
+The subsequent [retrospective large-step comparison](../local-evidence/helper-three-tone/pair-live-retro-r1.log)
+used a hindsight envelope of −2.36 to +0.58 Hz. The constructor expanded it to
+−2.45765625 to +0.67765625 Hz, selecting 57 frequency pairs versus 437 in the
+ordinary bank. Both arms passed exact `001`, pending-row identity and strict
+END, with 51,335 consecutive scored absent samples at 8,000 samples/s, above
+the required 51,200. Both recorded 14,994 FFT jobs, 42 transforms and a sampled
+workspace peak of 40,579,628 bytes; pair versus control Session CPU was 4.441
+versus 4.472 seconds. Their 2,046,093-sample FNV witnesses matched, but FNV is
+not a byte-for-byte proof. In each arm, 10 of 13 final simulation-join owner
+snapshots were joined but interrupted or incomplete; strict END is a separate
+assertion, not proof of complete per-owner scored coverage. The approximately
+82 dB-Hz cable simulation had no drift or phase noise. Its hindsight envelope is
+not available causally in deployment and produced no measured work reduction.
+The [detail log](../local-evidence/helper-three-tone/pair-live-retro-r1-detail.log)
+retains the observations. The executable subsequently observed at
+`build/dev/test_helper_actual_rf_session` had SHA-256
+`2f6cc3482c00ace20c997bbb062a374494fdf0f0b037cbd7b0df4c085982f124`;
+source changed after the run and an exact pre-run source snapshot was not
+available, so this is not a source-bound qualification.
+
+The current-waveform auxiliary receiver baseline
+`build/dev/test_helper_receiver three_tone` failed with zero references and
+metadata in 3.2 seconds; [log and source/binary hashes](../local-evidence/helper-three-tone/auxiliary/)
+retain the result. The registered `helper_receiver_three_tone` case was then
+[run](../local-evidence/helper-three-tone/auxiliary/registered-baseline.log)
+and failed in all eight gated/ungated, phase-jump and reset geometries, with
+zero references and metadata. The existing production decoder remains
+unchanged. A provisional
+isolated fit decoded when receiver state spanned
+dwells but not with a reset on each retune. An oracle supplied true dwell start
+and auxiliary frequency and decoded 4–7 references per case; a separate
+truth-frequency-seeded reversal search found the edge in 10/16, 14/16 and
+14/16 trials at 30, 40 and 60 dB-Hz, with zero matched no-punctuation hits.
+Those are bounded laboratory controls without causal bootstrap, real Robust or
+channel filtering. They do not qualify auxiliary metadata or retune timing.
+
+A later scratch [causal-bootstrap prototype](../local-evidence/helper-three-tone/auxiliary/causal-60-trace.log)
+supplied neither the true pilot frequency nor true dwell start. It used the
+actual Generator, including gated and ungated cases, independent per-dwell
+phase changes and receiver resets. At configured 30, 40 and 60 dB-Hz, each
+eight-case run produced zero metadata references and selected inaccurate
+reversal dates; each retained its failed assertion. A separate
+[noise-only control](../local-evidence/helper-three-tone/auxiliary/causal-noise-only.log)
+selected 20 false reversal edges across 36 correlated searches. The cases and
+repeated searches are not independent trials. The 60 dB-Hz eight-case run used
+3.439 CPU seconds for 25.6 source-audio seconds, and its joint fit remains an
+uninterruptible optional-work quantum. [Trace bindings](../local-evidence/helper-three-tone/auxiliary/causal-trace-bindings.sha256)
+identify the scratch sources and binaries. This failure does not invalidate the
+separately labeled true-start/frequency oracle successes above, and it is not a
+physical SNR limit. No production decoder change resulted; the registered
+`helper_receiver_three_tone` failure remains.
 
 The earlier 29 October development GUI checkpoint had SHA-256
 `44ea3a24d92e47c5f9ac6c3a6c8860fb762ecfa364ad6e6f1e2f366e73bb9e41`.
@@ -279,7 +606,7 @@ retune segment made the unguarded model's RF sigma shrink from 0.20025 to
 avoided that shrinkage but blocks fixed-RF operation with the default scatter
 setting. Review also found its model patch lacks the twice-diagonal covariance
 bound above. These numeric, conditional probes do not qualify the posterior or
-production reception; Live currently tracks only the high pilot.
+production reception; at that checkpoint Live tracked only the high pilot.
 
 A subsequent scratch [near-tone experiment](../local-evidence/helper-three-tone/pair-near-tone/)
 used the actual Helper Generator, synthetic AWGN, independent hop phases and
@@ -293,7 +620,8 @@ Without the spur, mean pair half-width was 0.01372 Hz versus 0.01596 Hz
 high-only. Bindings and logs are retained in that directory. This synthetic
 mixture did not include actual Robust or its sampled channel, and does not
 establish general discovery behavior, authentication or runtime confidence.
-The low-pilot pair remains unintegrated in Live.
+The later Live low-pilot worker is diagnostic and does not use the pair to
+correct or narrow ordinary reception.
 
 The previous 2,226- and 6,153-job results are different legacy two-tone runs:
 their documented physical input matches over a prefix but tails differ. The

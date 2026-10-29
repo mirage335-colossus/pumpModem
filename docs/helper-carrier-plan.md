@@ -1,5 +1,23 @@
 # Helper Carrier implementation and qualification
 
+**Development priority:** Improve Helper Carrier frequency and phase
+search-space narrowing for the ordinary Robust receiver, first for the HF GPSDO
+alternative and also for microwave GPSDO supplementation. Successful auxiliary
+APSK identification decoding is not a prerequisite for that work. See the
+[priority and rationale](helper-carrier.md#development-priority); retain the
+actual outcomes and applicable regression requirements below.
+
+**Lead-in:** Ordinary Robust acquisition with Helper enabled requires the full
+36-second Helper observation for frequency narrowing. The transmit lead is
+always 95 400-ms dwells (38 seconds), with or without FHSS: 90 for observation
+and five for detection. Do not prioritize
+implementation or testing of late listeners without that lead-in; see the
+[operating requirement](helper-carrier.md#lead-in-operating-requirement).
+
+**High-pilot identification:** Apply the [quiet-spectrum assumption](helper-carrier.md#quiet-spectrum-assumption):
+the strongest tone in the oscillator-derived expected range may be treated as
+the high pilot. Competing-tone rejection is not a requirement under that assumption.
+
 Updated 28 October 2026. Human checkpoint `572b051` is committed. The rebuilt
 GUI is `build/dev/datapump-gui`; source-bound results and remaining limits are in
 [validation](validation.md). The completed contract stage failed; qualification
