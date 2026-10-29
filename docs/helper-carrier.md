@@ -21,10 +21,38 @@ ratios describe the transmitted audio waveform; actual RF ratios depend on the
 radio and audio chain.
 
 This transmitter change is not a receiver qualification. Acquisition, tracking
-and decoding for the new waveform remain deferred. Earlier two-tone receiver
-measurements and binary bindings in [validation](validation.md) apply only to
-their stated source and waveform, not to this transmitter. Physical display,
-audio and radio testing and full regression qualification remain open.
+and decoding for the new waveform remain under development. The current Live
+baseline tracks the high pilot; it does not yet qualify a low-pilot runtime
+measurement. Earlier two-tone receiver measurements and binary bindings in
+[validation](validation.md) apply only to their stated source and waveform, not
+to this transmitter. Physical display, audio and radio testing and full
+regression qualification remain open.
+
+The [29 October development checkpoint](validation.md#three-tone-helper-carrier-implementation-checkpoint)
+includes a rebuilt GUI and focused measurements. The latest focused retest
+passed 15/16 cases, including eight Live observation cases; the 24 dB-Hz
+frequency-only fallback failed, and a separate 5 ms fade-support problem remains.
+The strict rolling Live check
+and a three-tone frontend stopband check initially failed and passed in later
+focused reruns. The Live rerun was Helper-only and did not establish payload or
+physical END. A separate actual-retune fixture passed exact `001`, pending before
+Helper loss and scored END. A later matched timing-only laboratory comparison
+executed 13,734 FFT jobs with the observation wait bypassed versus 882 with it
+enforced; both recovered `001` and scored END. A pre-analysis Session CPU
+measurement also decreased in that instrumented comparison, while sampled
+workspace changed by only about 0.17%. Its scope and audit limits are in
+[validation](validation.md#three-tone-helper-carrier-implementation-checkpoint).
+This is not a hardware throughput or full HF/EME qualification. A diagnostic two-pilot
+model also produced interval escapes in strong-reference controls. Those controls
+had shared channel phase diffusion while their trackers assumed zero phase
+noise. Explicit-zero diffusion controls showed no pair escapes in 32 seeds, but
+do not establish operational covariance or prove the full cause of the earlier
+escapes. Neither their precision nor useful narrowed acquisition is yet qualified.
+Helper-enabled
+CLI batch WAV/device `rx`, `status-rx` and `simulate` are currently unavailable
+while their causal admission path is incomplete. Subsequent development code
+also defers Live Helper-assisted admission without an oscillator-search policy.
+These limits are distinct from the earlier two-tone results below.
 
 ## Manual reception
 
@@ -57,8 +85,8 @@ enter the RF/audio model using actual RF and sideband, and local pilot phase
 must be reacquired. The raw stage is bounded at 400 ms. Model frequency
 availability is bounded to 0.5 seconds from independent evidence; retuning cannot
 renew that witness. The current RF/audio evolution assumptions through 54 MHz
-are explicit and uncalibrated. Numeric retention remains separate from the
-maximum 36 additional seconds of precision lead.
+are explicit and uncalibrated. Numeric retention is separate from the fixed
+transmit lead and must not retroactively establish phase support.
 
 Without a fresh qualified reference, new acquisition may wait. Established
 reception retains ordinary recovery, draining, per-bit progress and the same
@@ -128,9 +156,10 @@ remains incomplete. Gate and terminal-join prototypes remain
 private. See
 [validation](validation.md) for every failed case, command and exact binding.
 
-## Receiver architecture decision
+## Earlier receiver architecture decision
 
-The bounded code/evidence review, including Astra, freezes estimator tuning:
+For the earlier two-tone source, the bounded code/evidence review, including Astra,
+froze estimator tuning:
 Q, lag/history, uncertainty multipliers and extra lead remain unchanged. The
 HF40 reference quality and its modest residual RF penalty are accepted as useful
 on the stated six-physical-core/2 GiB simulator; matching GPSDO specifications or
@@ -259,9 +288,10 @@ pulse shaping and applicable gating allowances, with power-dependent leakage
 and separation guards. The low pilot and auxiliary stay at 550 Hz and 950 Hz;
 the high pilot starts at 2400 Hz and rises only as needed for the selected
 Robust carrier, occupied bandwidth and guards. A configuration that cannot fit
-these bands within the output passband is unavailable for Helper assistance.
-The radio/audio path must pass the complete group with margin below steep filter
-attenuation; digital Nyquist margin alone does not establish an SSB passband.
+these bands within the digital output passband is unavailable for Helper assistance.
+The radio/audio path must also pass the complete group with margin below steep
+filter attenuation. The physical radio passband is not established by digital
+Nyquist clearance; where that passband is unknown, actual fit remains unknown.
 
 Native and browser playback generate the helper after output resampling.
 Helper-enabled audio requests a separate physical clock, with a practical
@@ -400,22 +430,45 @@ observations, oscillator evolution, measured excess or interference. The followi
 short-window level gate is different from SNR in a 10 Hz presentation bandwidth.
 No calibrated acquisition probability or globally optimal estimator is claimed.
 
-Helper-only lead and tail surround the unchanged ordinary waveform. The lead
-baseline reserves at least two seconds plus the cold acquisition/frontend
-aperture and source/capture clock allowance. The tail retains at least two
-seconds and any greater filter, initial-FFT, pulse-support and physical-absence
-obligations. The shared lead predictor seeks a frequency half-width of **0.1 Hz**
-by adding complete 400 ms dwells, up to **36 extra seconds** beyond the baseline.
-The forecast separates pilot C/N0 after the split, independent coherent
-apertures, configured phase noise and estimator/model assumptions. At the cap,
-payload starts with achievable precision; elapsed airtime grants no runtime
-qualification. The ±0.1 Hz target is a lead-planning milestone, not a sufficient
-bin width for every configuration, including 128-second symbols. Tail duration
-never uses expected message length as completion authority.
+The required assisted schedule is a fixed **38-second Helper-only transmit
+lead**: 36 seconds of precision lead plus the original two-second baseline,
+or 90 + 5 dwells at 400 ms each. The ordinary Robust waveform then begins on
+its unchanged calendar. A forecast or receiver uncertainty cannot shorten or
+extend this lead. The tail retains at least two seconds and any greater filter,
+initial-FFT, pulse-support and physical-absence obligations; expected message
+length never supplies completion authority.
+
+The receiver-local admission rule requires both a minimum **36 seconds after
+causal Helper presence detection and the beginning of reference observation**
+and actual measured precision sufficient for useful narrowed acquisition. The
+fixed transmit lead offers up to two seconds for initial detection before that
+observation interval. This margin still needs demonstration for the intended
+three-tone cases. A late listener must observe its own full interval and can
+miss part or all of a transmission; it cannot infer an earlier onset or use an
+early precision estimate to enter sooner. Brief fades do not restart the timer,
+but contribute no measurement support. Elapsed time and predicted C/N0 alone
+do not qualify a reference. If measured precision is inadequate, new ordinary
+acquisition remains gated, while established reception retains ordinary draining
+and fully scored physical completion after Helper loss. This is the required
+policy; its three-tone integration and validation remain in progress.
+
+The forecast separates received pilot C/N0, independent coherent apertures,
+configured phase noise and estimator/model assumptions. Predicted ±0.1 Hz
+eligibility is a comparison milestone, not a runtime qualification or a
+sufficient search width for every configuration, including 128-second symbols.
 The independent-retune comparison assumes constant drift and configured Brownian
 phase noise. It excludes operational RF/audio acceleration, retune scatter and
-integrated-model precision; it selects neither TX lead nor receiver-cost
-precision. It is not a prediction of measured retune performance.
+integrated-model precision; it is not a prediction of measured retune performance.
+
+Two sufficiently measured pure pilots can estimate a relative audio-frequency
+scale and common displacement using `f_received = a * f_transmitted + b` for a
+compatible RF and sideband context. Their separation and measurement covariance
+determine the uncertainty in the correction at a payload frequency. Two tones
+do not separately identify every transmitter and receiver oscillator; a single
+qualified pilot leaves additional clock uncertainty. Each retune can introduce
+an independent phase, so only compatible, dated frequency observations are
+combined across hops and the current phase must be reacquired. This model does
+not make auxiliary metadata a prerequisite for frequency assistance.
 
 For pilot C/N0 in linear Hz, the ideal uninterrupted noise-only three-times-CRLB
 standard-deviation scale is
@@ -443,25 +496,27 @@ High-Dynamic Trajectories](https://ntrs.nasa.gov/api/citations/19890011016/downl
 For a common constant frequency with an independent unknown phase per aperture,
 replace `(C/N0) T³` by `sum_i((C/N0)_i T_i³)`. Thus 25 ideal 400 ms apertures
 at 30 dB-Hz give ±0.02924 Hz; 25 × 384 ms gives ±0.03108 Hz, rather than the
-uninterrupted-ten-second ±0.0011695 Hz. For amplitude envelope `g(t)`, the
+uninterrupted-ten-second ±0.0011695 Hz. Ninety ideal 400 ms apertures give
+approximately ±0.01541 Hz at 30 dB-Hz or ±0.004873 Hz at 40 dB-Hz. For
+amplitude envelope `g(t)`, the
 information uses `g²`-weighted centered aperture moments, not elapsed time cubed.
 These are derived independent-phase references. Ramps, rejected contexts, drift, clock ambiguity, local model fits
 and estimator inefficiency need additional treatment. Practical measured
 intervals and their observed escapes remain separately reported in validation.
-The current adaptive-factory consumer passes 236 frequency fits, including
+An earlier two-tone adaptive-factory consumer passed 236 frequency fits, including
 21 outside the earlier phase-qualified subset, and 237 next-hop predictions
 without observed escapes. Fits use 384 ms apertures in independently phased
 7/21/35/49 MHz hops. Model storage is 42,816 bytes; measured component model CPU
 is about 0.0004 seconds per 32 audio seconds. Hardware noise, positive Q and the
 nominal Hann-kernel approximation remain uncalibrated. These controls do not
 erase the original proof failure or earlier WLS/drift-case escapes.
-A private practical four-second forecast meets 25 seeded milestones versus the
-older 38-second forecast while retaining eight earlier escaped estimates;
-prediction alone supplies no runtime qualification or confidence calibration.
+A private practical four-second forecast met 25 seeded milestones while retaining
+eight earlier escaped estimates. It does not change the fixed schedule; prediction
+alone supplies no runtime qualification or confidence calibration.
 
-The ordinary baseline remains visible. Planner shows total Helper and pilot
-C/N0, ideal uninterrupted and segmented references, practical model prediction,
-baseline lead, capped precision extension, residual RF uncertainty and unresolved
+The ordinary baseline remains visible. Planner development includes total Helper
+and separate pilot C/N0, ideal uninterrupted and segmented references, practical
+model prediction, the fixed schedule, residual RF uncertainty and unresolved
 clock/timing work. Conditional initial and sustained receiver prices use the
 existing receiver-cost model, not frequency-interval ratios, and remain distinct
 from discovery, tracking and total helper-assisted runtime cost. The current

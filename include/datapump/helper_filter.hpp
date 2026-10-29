@@ -17,12 +17,17 @@ namespace datapump::helper {
 // observed windows: output zero is input delay(), and no missing PCM or EOF
 // zeros are inserted. The caller must retain that input-coordinate offset.
 class PayloadFilter {
+public:
+    struct NotchBand { double center_hz=0,half_width_hz=225; };
+private:
     std::vector<double> taps_;
     std::vector<float> history_;
     std::size_t next_=0,seen_=0;
     std::uint64_t output_=0;
     std::uint32_t rate_=0;
     double center_=0,half_width_=225;
+    std::array<NotchBand,3> bands_{};
+    std::size_t band_count_=0;
     // Every bound operation rounds away from the exact nonnegative result.
     // This certificate is deliberately unavailable under altered FP modes.
     static double upper(double value) noexcept {
@@ -85,6 +90,19 @@ class PayloadFilter {
         const auto low=k==0?2*half_width_/rate_:
             std::sin(2*std::numbers::pi*half_width_*k/rate_)/(std::numbers::pi*k);
         return (i==middle?1.:0.)-2*low*std::cos(2*std::numbers::pi*center*k/rate_)*window;
+    }
+    double coefficient(std::size_t i,std::span<const NotchBand> bands)const noexcept {
+        const auto middle=taps_.size()/2;
+        const auto k=static_cast<double>(i)-middle;
+        const auto window=.42-.5*std::cos(2*std::numbers::pi*i/(taps_.size()-1))+
+            .08*std::cos(4*std::numbers::pi*i/(taps_.size()-1));
+        double value=i==middle?1.:0.;
+        for(const auto& band:bands) {
+            const auto low=k==0?2*band.half_width_hz/rate_:
+                std::sin(2*std::numbers::pi*band.half_width_hz*k/rate_)/(std::numbers::pi*k);
+            value-=2*low*std::cos(2*std::numbers::pi*band.center_hz*k/rate_)*window;
+        }
+        return value;
     }
     double response_error(double frequency)const noexcept {
         // These adjacent binary64 values bracket mathematical pi.
@@ -154,6 +172,23 @@ public:
         taps_.resize(count);history_.resize(count);
         if(!retune(center))throw Error("adjacent helper filter cannot establish a finite kernel in this FP environment");
     }
+    PayloadFilter(std::uint32_t rate,std::span<const NotchBand> bands):rate_(rate) {
+        if(bands.empty()||bands.size()>bands_.size())throw Error("helper filter needs one to three stopbands");
+        for(const auto& band:bands)if(!valid_center(band.center_hz)||!std::isfinite(band.half_width_hz)||band.half_width_hz<=0||
+                band.center_hz<=band.half_width_hz||band.center_hz+band.half_width_hz>=rate_/2.)
+            throw Error("helper stopband is outside the receiver passband");
+        for(std::size_t i=0;i<bands.size();++i)for(std::size_t j=0;j<i;++j)
+            if(bands[i].center_hz-bands[i].half_width_hz<=bands[j].center_hz+bands[j].half_width_hz &&
+               bands[j].center_hz-bands[j].half_width_hz<=bands[i].center_hz+bands[i].half_width_hz)
+                throw Error("helper stopbands must be merged when they overlap");
+        const auto count=static_cast<std::size_t>(std::ceil(rate*.04))|1U;
+        if(count<3||count>4097)throw Error("adjacent helper filter exceeds its optional workspace bound");
+        taps_.resize(count);history_.resize(count);
+        if(!retune(bands))throw Error("helper filter cannot establish finite multi-notch coefficients");
+    }
+    template<std::size_t N>
+    PayloadFilter(std::uint32_t rate,const std::array<NotchBand,N>& bands):
+        PayloadFilter(rate,std::span<const NotchBand>(bands)) {}
     // Replace only the coefficients of this SAME-rate, SAME-length symmetric
     // FIR. The input ring, warmup, output counter, delay and capacities remain
     // untouched. A rejected center/FP mode cannot mutate even one tap. The
@@ -164,11 +199,22 @@ public:
     // |new_output-old_output| <= l1_change * max|input| (before float rounding).
     // This is NOT an all-time spectral certificate for a time-varying kernel.
     bool retune(double center,double* l1_change=nullptr)noexcept {
-        if(!enabled() || !valid_center(center) || !certificate_environment())return false;
-        if(center==center_) {if(l1_change)*l1_change=0;return true;}
+        const NotchBand band{center,half_width_};
+        return retune(std::span<const NotchBand>(&band,1),l1_change);
+    }
+    bool retune(std::span<const NotchBand> bands,double* l1_change=nullptr)noexcept {
+        if(!enabled() || bands.empty()||bands.size()>bands_.size()||!certificate_environment())return false;
+        for(const auto& band:bands)if(!valid_center(band.center_hz)||!std::isfinite(band.half_width_hz)||band.half_width_hz<=0||
+                band.center_hz<=band.half_width_hz||band.center_hz+band.half_width_hz>=rate_/2.)return false;
+        for(std::size_t i=0;i<bands.size();++i)for(std::size_t j=0;j<i;++j)
+            if(bands[i].center_hz-bands[i].half_width_hz<=bands[j].center_hz+bands[j].half_width_hz &&
+               bands[j].center_hz-bands[j].half_width_hz<=bands[i].center_hz+bands[i].half_width_hz)return false;
+        if(bands.size()==band_count_ && std::equal(bands.begin(),bands.end(),bands_.begin(),[](auto a,auto b){return a.center_hz==b.center_hz&&a.half_width_hz==b.half_width_hz;})) {
+            if(l1_change)*l1_change=0;return true;
+        }
         double sum=0,largest=0;
         for(std::size_t i=0;i<taps_.size();++i) {
-            const auto value=coefficient(i,center);
+            const auto value=coefficient(i,bands);
             if(!std::isfinite(value))return false;
             sum+=value;largest=std::max(largest,std::abs(value));
         }
@@ -177,14 +223,17 @@ public:
            largest/std::abs(sum)>std::numeric_limits<double>::max()/(4*taps_.size()))return false;
         double change=0;
         for(std::size_t i=0;i<taps_.size();++i) {
-            const auto value=coefficient(i,center)/sum;
+            const auto value=coefficient(i,bands)/sum;
             change=add_upper(change,upper(std::abs(value-taps_[i])));
             taps_[i]=value;
         }
-        center_=center;if(l1_change)*l1_change=change;
+        bands_.fill({});std::copy(bands.begin(),bands.end(),bands_.begin());band_count_=bands.size();
+        center_=bands.front().center_hz;half_width_=bands.front().half_width_hz;
+        if(l1_change)*l1_change=change;
         return true;
     }
     double center_hz()const noexcept{return center_;}
+    double notch_center_hz(std::size_t i)const noexcept{return i<band_count_?bands_[i].center_hz:0;}
     double half_width_hz()const noexcept{return half_width_;}
     std::span<const double> coefficients()const noexcept{return taps_;}
     bool enabled()const noexcept{return !taps_.empty();}

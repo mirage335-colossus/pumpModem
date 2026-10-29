@@ -72,10 +72,10 @@ void cohort_model() {
         check(discover && *discover>=std::abs(sign*rf+H*b),"union discovery envelope lost feasible corrected source");
         const auto data_width=modem::oscillator_pattern_search(c,C).frequency.requested_half_width_hz;
         const auto tracker=d::helper_cohort_tracker_radius(c,H,data_width,true);
-        check(data_width<std::abs(sign*rf+H*b) && tracker>=std::abs(sign*rf+H*b) && tracker<=100,
-            "cohort preliminary capture gate retained DATA-only width or exceeded the actual narrow observer");
-        check(d::helper_cohort_tracker_radius(c,H,1000,true)==100,
-            "discovery union fabricated an uncapped narrow-observer capture range");
+        check(data_width<std::abs(sign*rf+H*b) && tracker>=std::abs(sign*rf+H*b),
+            "cohort preliminary capture gate retained DATA-only width");
+        check(d::helper_cohort_tracker_radius(c,H,1000,true)>=1000,
+            "cohort admission discarded the requested frequency range");
         std::cout<<"cohort B b_ppm="<<b*1e6<<" a_ppm="<<a*1e6<<" c_ppm="<<correction*1e6
             <<" physical_declined=1 common_current=1 original_DATA_halfwidth_ppm="<<*original.admitted_clock_half_width_ppm
             <<" discovery_halfwidth_hz="<<*discover<<'\n';
@@ -88,6 +88,8 @@ void cohort_model() {
     const auto base=d::helper_cohort_discovery_radius(shared,H,false),expanded=d::helper_cohort_discovery_radius(shared,H,true);
     check(base && expanded && *base==*expanded && *base>=9000,
         "common discovery changed shared A's original clock or lost wide capture coverage");
+    check(d::helper_cohort_tracker_radius(shared,H,1,true)>=*base,
+        "cohort admission clipped a wide oscillator-derived reference");
     check(!d::helper_common_source_native_domain(shared,original,true,false,nominal),"shared A used independent common-b proof");
     // 128-second EME remains unsupported by this NEW typed native gate; its
     // original compact frequency/clock path and full UTC union remain intact.

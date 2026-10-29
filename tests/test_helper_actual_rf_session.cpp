@@ -46,6 +46,7 @@ bool data_coordinate(const std::string& line) {
 bool filter(const char* name)noexcept {
     const std::string_view event{name};
     return event=="trace_begin" || event=="receiver_signal_commit" ||
+        event=="receiver_helper_observation_started" || event=="receiver_bank_admitted" ||
         event=="receiver_acquisition_work" || event=="receiver_helper_raw_reference" ||
         event=="receiver_helper_actual_rf_segment" || event=="receiver_helper_pilot_phase" ||
         event=="receiver_helper_oscillator" || event=="receiver_helper_oscillator_correction" ||
@@ -53,13 +54,19 @@ bool filter(const char* name)noexcept {
         event=="receiver_helper_DATA_parameter_window" || event=="receiver_helper_DATA_parameter_projection";
 }
 struct Laboratory {
-    std::atomic<std::uint64_t> transmit_epoch=0,channels=0;
+    std::atomic<std::uint64_t> transmit_epoch=0,channels=0,bank_creations=0;
+    std::atomic<std::uint64_t> bank_source_origin=UINT64_MAX;
     std::optional<double> helper_end_seconds;
     std::uint64_t helper_end_sample=0;
     std::uint32_t physical_rate=0;
     live::detail::SimulationHook hook{this,[](void* opaque,const live::detail::SimulationObservation& event) {
+        auto& self=*static_cast<Laboratory*>(opaque);
         if(event.phase==live::detail::SimulationPhase::transmit_epoch)
-            static_cast<Laboratory*>(opaque)->transmit_epoch=static_cast<std::uint64_t>(event.epoch);
+            self.transmit_epoch=static_cast<std::uint64_t>(event.epoch);
+        if(event.phase==live::detail::SimulationPhase::bank_created) {
+            ++self.bank_creations;
+            self.bank_source_origin=event.source>=event.bank?event.source-event.bank:UINT64_MAX;
+        }
     },1800000000.125,nullptr,[](void* opaque,modem::SampledSimulationChannel& channel) {
         auto& self=*static_cast<Laboratory*>(opaque);++self.channels;
         modem::SampledSimulationChannel::RfRetuneSimulation retunes;
@@ -323,7 +330,9 @@ void run(const std::filesystem::path& path,bool independent_clock,bool require_o
         live::Session session({},[&]{return std::chrono::steady_clock::time_point{}+
             std::chrono::milliseconds(replay_ms.load());});
         session.start(value);session.transmit_bits(bits);
-        const auto deadline=start+std::chrono::seconds(60);
+        // Full 36-second observation plus the ordinary payload and physical
+        // absence must run even on hosts slower than captured media time.
+        const auto deadline=start+std::chrono::seconds(480);
         while(std::chrono::steady_clock::now()<deadline) {
             const auto snapshot=session.snapshot();final_samples=snapshot.samples_received;status=snapshot.helper_status;
             peak_bytes=std::max<std::uint64_t>(peak_bytes,snapshot.dsp_buffered_bytes);
@@ -362,7 +371,8 @@ void run(const std::filesystem::path& path,bool independent_clock,bool require_o
     std::uint64_t data_projections=0,data_projection_escapes=0,data_windows_new=0,data_windows_existing=0;
     std::uint64_t data_installed_windows=0,data_paused_windows=0,data_fft_jobs=0,data_existing_fft_jobs=0,data_new_fft_jobs=0;
     double data_projection_error_max=0;
-    bool saw_trace_end=false;
+    bool saw_trace_end=false,pending_before_loss=false;
+    std::optional<std::uint64_t> observation_deadline;
     std::uint64_t model_updates=0,raw_only_updates=0,phase_unqualified_updates=0,phase_fit_unqualified_updates=0;
     std::uint64_t innovation_vetoes=0,model_epoch=0,model_epoch_changes=0;
     std::uint64_t model_corrections=0,raw_escapes=0,model_escapes=0,data_diagnostic_escapes=0,correction_escapes=0;
@@ -380,6 +390,18 @@ void run(const std::filesystem::path& path,bool independent_clock,bool require_o
             check(!number(line,"dropped") && line.find("\"size_limited\":false")!=std::string::npos,
                 "actual RF trace exceeded its fixed quota or dropped evidence");saw_trace_end=true;
         }
+        if(line.find("\"event\":\"receiver_helper_observation_started\"")!=std::string::npos) {
+            const auto detected=number(line,"detection_frontier"),rate=number(line,"sample_rate");
+            check(!observation_deadline && rate==laboratory.physical_rate && number(line,"minimum_seconds")==36,
+                "actual RF Helper observation was restarted or lost its causal sample clock");
+            // The Bank's zero source origin is verified from its creation
+            // checkpoint below; its dates then match this global raw clock.
+            const auto numerator=(detected+36ULL*rate)*value.transfer.modem.sample_rate;
+            observation_deadline=(numerator+rate-1)/rate;
+        }
+        if(line.find("\"event\":\"receiver_bank_admitted\"")!=std::string::npos)
+            check(observation_deadline && number(line,"sample")>=*observation_deadline,
+                "actual RF ordinary bank was constructed before the local 36-second observation");
         if(line.find("\"event\":\"receiver_helper_constructor_frequency\"")!=std::string::npos) {
             ConstructorInput input;
             input.uncertainty=real(line,"helper_constructor_uncertainty_hz");input.center=real(line,"helper_constructor_center_hz");
@@ -656,9 +678,21 @@ void run(const std::filesystem::path& path,bool independent_clock,bool require_o
                 check(count==bits.size(),"actual RF ordinary END completed a suffix");++completed;
                 const auto symbol=number(line,"symbol_samples"),feed=number(line,"feed_end_sample"),end_sample=number(line,"physical_end");
                 const auto sample_rate=value.transfer.modem.sample_rate;
+                if(helper_end_seconds)check(
+                    number(line,"physical_first")*laboratory.physical_rate < laboratory.helper_end_sample*sample_rate &&
+                    laboratory.helper_end_sample*sample_rate < end_sample*laboratory.physical_rate,
+                    "actual RF Helper loss was not inside the traced payload interval");
                 check(symbol && feed>=end_sample && feed-end_sample>=((6ULL*sample_rate+symbol-1)/symbol)*symbol,
                     "actual RF END lacked consecutive fully scored six-second absence");
-            } else ++pending;
+            } else {
+                ++pending;
+                // Compare captured frontiers in their physical and logical
+                // clocks, not the payload's expected length or a TX timestamp.
+                if(helper_end_seconds && laboratory.physical_rate &&
+                   number(line,"captured_samples")*laboratory.physical_rate <
+                       laboratory.helper_end_sample*value.transfer.modem.sample_rate)
+                    pending_before_loss=true;
+            }
         }
     }
     std::uint64_t total_jobs=0,total_fft=0,total_transforms=0;
@@ -666,7 +700,9 @@ void run(const std::filesystem::path& path,bool independent_clock,bool require_o
     std::cout<<"actual_rf_session,independent_clock="<<independent_clock<<",finished="<<finished<<",exact="<<exact<<",segments="<<segments.size()
         <<",references="<<references<<",frequency_escapes="<<escapes<<",max_frequency_error_hz="<<maximum_error
         <<",phase_updates="<<phase_updates<<",ordinary_jobs_peak="<<jobs<<",phase_covered_feed_jobs="<<phase_work_jobs<<",frequency_assisted="<<frequency
-        <<",phase_assisted="<<phase<<",pending="<<pending<<",complete="<<completed<<",logical_samples="<<final_samples
+        <<",phase_assisted="<<phase<<",pending="<<pending<<",pending_before_loss="<<pending_before_loss
+        <<",observation_deadline="<<observation_deadline.value_or(0)
+        <<",complete="<<completed<<",logical_samples="<<final_samples
         <<",ordinary_owner_count="<<owner_jobs.size()<<",ordinary_jobs_sum="<<total_jobs<<",ordinary_fft_jobs_sum="<<total_fft
         <<",ordinary_transforms_sum="<<total_transforms<<",worker_slots_peak="<<worker_slots_peak
         <<",first_qualified_raw_capture="<<first_qualified_capture<<",first_positive_fft_frontier="<<first_positive_fft_frontier
@@ -703,11 +739,16 @@ void run(const std::filesystem::path& path,bool independent_clock,bool require_o
         <<",wall_seconds="<<std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count()
         <<",tx_epoch_observed_only="<<laboratory.transmit_epoch<<",lab_helper_end_seconds="<<helper_end_seconds.value_or(-1)
         <<",lab_helper_end_physical_sample="<<laboratory.helper_end_sample<<",physical_sample_rate="<<laboratory.physical_rate
+        <<",bank_creations="<<laboratory.bank_creations<<",bank_source_origin="<<laboratory.bank_source_origin
         <<",status="<<status<<",trace="<<path<<'\n';
-    check(laboratory.channels==1 && segments.size()>=12 && references>=4 && !escapes && phase_updates>=4,
+    check(laboratory.channels==1 && laboratory.bank_creations==1 && laboratory.bank_source_origin==0,
+        "actual RF fixture's Bank origin changed; local/global date comparisons are invalid");
+    check(segments.size()>=12 && references>=4 && !escapes && phase_updates>=4,
         "actual RF Session did not causally re-acquire independent retuned pilot segments");
-    check(finished && exact && pending && completed && jobs && phase_work_jobs && frequency && phase,
+    check(finished && exact && pending && completed && observation_deadline && jobs && phase_work_jobs && frequency && phase,
         "actual RF Session did not complete ordinary encrypted Auto/rolling reception");
+    if(helper_end_seconds)check(pending_before_loss,
+        "actual RF Helper ended before the ordinary pending payload was established");
     if(independent_clock)check(local_references && retained_clock_masks && !constructor_owners.empty() &&
         constructors.assisted_pairs<constructors.ordinary_pairs && (!existing_mask_opportunities || narrowed_masks),
         "independent RF/audio local frequency did not preserve LF while narrowing available actual RF work");

@@ -357,12 +357,27 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
   target_link_libraries(test_helper_actual_rf_session PRIVATE datapump)
   add_test(NAME helper_actual_rf_session COMMAND test_helper_actual_rf_session)
   add_test(NAME helper_actual_rf_independent COMMAND test_helper_actual_rf_session --independent-clock --require-oscillator-model)
-  add_test(NAME helper_actual_rf_data COMMAND test_helper_actual_rf_session --independent-clock --require-oscillator-model --helper-end-seconds 10.5 --require-prior-frequency --require-data-coordinate)
-  set_tests_properties(helper_actual_rf_session helper_actual_rf_independent helper_actual_rf_data PROPERTIES TIMEOUT 75)
+  add_test(NAME helper_actual_rf_data COMMAND test_helper_actual_rf_session --independent-clock --require-oscillator-model --helper-end-seconds 46.5 --require-prior-frequency --require-data-coordinate)
+  set_tests_properties(helper_actual_rf_session helper_actual_rf_independent helper_actual_rf_data PROPERTIES TIMEOUT 600)
   add_executable(test_helper_local_aperture tests/test_helper_local_aperture.cpp)
   target_link_libraries(test_helper_local_aperture PRIVATE datapump)
   add_test(NAME helper_local_aperture COMMAND test_helper_local_aperture)
   set_tests_properties(helper_local_aperture PROPERTIES TIMEOUT 90)
+  add_executable(test_helper_paired_dwell tests/test_helper_paired_dwell.cpp)
+  target_link_libraries(test_helper_paired_dwell PRIVATE datapump)
+  add_test(NAME helper_paired_dwell COMMAND test_helper_paired_dwell)
+  set_tests_properties(helper_paired_dwell PROPERTIES TIMEOUT 90)
+  add_executable(test_helper_acquisition_admission tests/test_helper_acquisition_admission.cpp)
+  target_link_libraries(test_helper_acquisition_admission PRIVATE datapump)
+  add_test(NAME helper_acquisition_admission COMMAND test_helper_acquisition_admission)
+  add_executable(test_helper_observation_live tests/test_helper_observation_live.cpp)
+  target_link_libraries(test_helper_observation_live PRIVATE datapump)
+  foreach(_helper_observation_case early late early_plain late_plain fade fade_boundary fade_offset inadequate)
+    add_test(NAME helper_observation_live_${_helper_observation_case}
+      COMMAND test_helper_observation_live ${_helper_observation_case})
+    set_tests_properties(helper_observation_live_${_helper_observation_case}
+      PROPERTIES TIMEOUT 600 RUN_SERIAL TRUE)
+  endforeach()
   add_test(NAME helper_live_gps_clock COMMAND test_helper_live_assistance --gps-clock-positive)
   set_tests_properties(helper_live_gps_clock PROPERTIES TIMEOUT 60)
   add_test(NAME helper_live_default_clock COMMAND test_helper_live_assistance --gps-clock-default-on)
@@ -863,7 +878,7 @@ endif()
 # ordering when Application introduces audio references through another archive.
 if(NOT DATAPUMP_BUILD_WASM)
   set(_datapump_mock_audio_tests
-    test_symbol_burst_live test_gui_scheduled_cold_start test_gui_timing_advice test_legacy_session test_live_profiles
+    test_symbol_burst_live test_gui_scheduled_cold_start test_gui_timing_advice test_legacy_session test_live_profiles test_helper_observation_live
     test_fast_session test_live_transmit_lock test_helper_output_fallback test_helper_conditioned_native test_helper_normal_loss test_fast_telemetry
     test_gui_legacy_live test_gui_fast_live)
   set(_datapump_direct_audio_tests test_alsa_audio test_windows_audio)

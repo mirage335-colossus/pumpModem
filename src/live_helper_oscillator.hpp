@@ -77,7 +77,7 @@ public:
     // Explicit raw-provider discontinuity: no payload-start/reset entry exists.
     bool reset_provider(HelperOscillatorProvider p)noexcept {
         if(!configured_||!provider_valid(p)||!model_.reset(config_.model))return false;
-        provider_=p;have_segment_=domain_blocked_=false;closed_=true;seed_={};last_state_={};last_observation_={};++epoch_;++raw_origin_generation_;return true;
+        provider_=p;have_segment_=domain_blocked_=false;closed_=true;seed_={};last_state_={};last_observation_={};last_window_=0;++epoch_;++raw_origin_generation_;return true;
     }
     void close_reference()noexcept{closed_=true;}
     const HelperOscillatorConfig& assumptions()const noexcept{return config_;}
@@ -91,19 +91,35 @@ public:
         HelperOscillatorSeed next;next.mapping=m;next.epoch=epoch_;next.raw_origin_generation=raw_origin_generation_;next.actual_first_sample=actual_first;
         next.state=model_.predict(m,m.settled_first_sample);
         if(next.state.valid&&next.state.evidence_end_sample>actual_first)return block();
-        seed_=next;have_segment_=true;last_observation_={};return true;
+        seed_=next;have_segment_=true;last_observation_={};last_window_=0;return true;
     }
+    // Commit once per independent measured window. An optional low pilot must
+    // have exactly the same usable support/kernel; it is part of this atomic
+    // update, never a later independent update of already-used high PCM.
     HelperOscillatorUpdate observe(const helper::ToneFrequencyObservation& o,HelperOscillatorProvider p,
-            std::uint64_t captured_end)noexcept {
+            std::uint64_t captured_end,const helper::ToneFrequencyObservation* low=nullptr,
+            double low_audio_hz=550,std::uint64_t independent_window=0)noexcept {
         HelperOscillatorUpdate out;out.seed=seed_;
         if(configured_&&!same_provider(p)){block();return out;}
         if(!configured_||domain_blocked_||!have_segment_||!raw_valid(o,seed_.mapping,captured_end))return out;
         out.independent_variance_hz2=o.independent_variance_hz2;out.residual_variance_hz2=o.residual_variance_hz2;
-        if(last_observation_.valid){out.duplicate=o.end_sample==last_observation_.end_sample;out.reason=helper::OscillatorModelReason::reused_phase_segment;return out;}
+        if(last_observation_.valid && (!independent_window||!last_window_||independent_window<=last_window_)) {
+            out.duplicate=o.end_sample==last_observation_.end_sample;
+            out.reason=helper::OscillatorModelReason::reused_phase_segment;return out;
+        }
+        if(low && (!std::isfinite(low_audio_hz)||low_audio_hz==seed_.mapping.helper_audio_hz||
+            !raw_valid(*low,seed_.mapping,captured_end)||!same_observed_kernel(o,*low)))return out;
         helper::IndependentFrequencyAperture a{seed_.mapping,o.first_sample,o.end_sample,o.mean_sample,o.mean_sample_fraction,o.frequency_hz,
             o.independent_variance_hz2+o.residual_variance_hz2,static_cast<double>(o.end_sample-o.first_sample)/seed_.mapping.sample_rate,
             helper::FrequencyApertureProcessMoments{o.valid,o.first_sample,o.end_sample,o.state_endpoint_sample,o.mass,o.mu_seconds,
                 o.integral_k_seconds2,o.integral_b_minus_s_k_seconds3,o.integral_k_squared_seconds3,o.k_at_end_seconds,o.k_prime_at_end}};
+        a.independent_window=independent_window;
+        auto lower=a;
+        if(low) {
+            lower.mapping.helper_audio_hz=low_audio_hz;
+            lower.frequency_hz=low->frequency_hz;
+            lower.variance_hz2=low->independent_variance_hz2+low->residual_variance_hz2;
+        }
         // One conventional innovation check. The same declared floor remains
         // after a reset; IID PLL frequency errors are never fitted as drift.
         if(last_state_.valid&&o.state_endpoint_sample>=last_state_.sample){
@@ -125,8 +141,9 @@ public:
                 if(!config_.model.learn_repeat_visit_scatter && !model_.reset(config_.model))return out;
             }
         }
-        out.reason=model_.observe(a,captured_end);out.accepted=out.reason==helper::OscillatorModelReason::accepted;
-        if(out.accepted){last_state_=model_.predict(seed_.mapping,o.state_endpoint_sample);last_observation_=o;
+        out.reason=low?model_.observe_pair(a,lower,captured_end):model_.observe(a,captured_end);
+        out.accepted=out.reason==helper::OscillatorModelReason::accepted;
+        if(out.accepted){last_state_=model_.predict(seed_.mapping,o.state_endpoint_sample);last_observation_=o;last_window_=independent_window;
             // Reweighting history changes the old prior covariance too. Do not
             // reuse its smaller R on staged input; direct observed support stays.
             if(seed_.state.valid && last_state_.retune_variance_hz2>seed_.state.retune_variance_hz2){
@@ -186,6 +203,15 @@ private:
     bool block()noexcept{domain_blocked_=closed_=true;return false;}
     bool mapping_valid(const helper::LinkMapping& m)const noexcept{return m.reference_identity_known&&m.sample_rate&&m.actual_rf_shift_hz>0&&m.actual_rf_shift_hz<=config_.maximum_actual_rf_hz&&m.settled_first_sample<m.settled_end_sample&&m.mono_image_sign==1&&(m.sideband_sign==1||m.sideband_sign==-1)&&std::isfinite(m.helper_audio_hz)&&std::isfinite(m.data_audio_hz)&&(m.provenance==helper::LinkMappingProvenance::confirmed_adapter||m.provenance==helper::LinkMappingProvenance::modelled_physical_capture);}
     bool same_domain(const helper::LinkMapping& m)const noexcept{return have_segment_&&m.capture_generation==seed_.mapping.capture_generation&&m.timebase_identity==seed_.mapping.timebase_identity&&m.reference_identity_known&&m.reference_identity==seed_.mapping.reference_identity&&m.sample_rate==seed_.mapping.sample_rate&&mapping_valid(m);}
+    static bool same_observed_kernel(const helper::ToneFrequencyObservation& a,
+            const helper::ToneFrequencyObservation& b)noexcept {
+        return a.first_sample==b.first_sample&&a.end_sample==b.end_sample&&a.state_endpoint_sample==b.state_endpoint_sample&&
+            a.mean_sample==b.mean_sample&&a.mean_sample_fraction==b.mean_sample_fraction&&a.mass==b.mass&&
+            a.mu_seconds==b.mu_seconds&&a.integral_k_seconds2==b.integral_k_seconds2&&
+            a.integral_b_minus_s_k_seconds3==b.integral_b_minus_s_k_seconds3&&
+            a.integral_k_squared_seconds3==b.integral_k_squared_seconds3&&
+            a.k_at_end_seconds==b.k_at_end_seconds&&a.k_prime_at_end==b.k_prime_at_end;
+    }
     static bool raw_valid(const helper::ToneFrequencyObservation& o,const helper::LinkMapping& m,std::uint64_t end)noexcept{return o.valid&&o.first_sample>=m.settled_first_sample&&o.first_sample<o.end_sample&&o.end_sample<=m.settled_end_sample&&o.end_sample<=end&&o.state_endpoint_sample==o.end_sample-1&&o.mean_sample>=o.first_sample&&o.mean_sample<o.end_sample&&std::isfinite(o.mean_sample_fraction)&&o.mean_sample_fraction>=0&&o.mean_sample_fraction<1&&std::isfinite(o.frequency_hz)&&std::isfinite(o.independent_variance_hz2)&&o.independent_variance_hz2>0&&std::isfinite(o.residual_variance_hz2)&&o.residual_variance_hz2>=0;}
     helper::OscillatorFrequencyPrediction advance(helper::OscillatorFrequencyPrediction p,std::uint64_t at,std::uint32_t rate)const noexcept {
         if(at<p.sample){p.valid=false;return p;}const auto dt=static_cast<double>(at-p.sample)/rate;
@@ -206,6 +232,6 @@ private:
     }
     HelperOscillatorConfig config_;HelperOscillatorProvider provider_;helper::OscillatorFrequencyModel model_;
     HelperOscillatorSeed seed_;helper::OscillatorFrequencyPrediction last_state_;helper::ToneFrequencyObservation last_observation_;
-    std::uint64_t epoch_=0,raw_origin_generation_=0;bool configured_=false,have_segment_=false,closed_=true,domain_blocked_=false;
+    std::uint64_t epoch_=0,raw_origin_generation_=0,last_window_=0;bool configured_=false,have_segment_=false,closed_=true,domain_blocked_=false;
 };
 }

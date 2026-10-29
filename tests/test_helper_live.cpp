@@ -318,7 +318,7 @@ void helper_only_live_simulation(bool wide_offset=false) {
 }
 bool lifecycle_trace_event(const char* name)noexcept {
     const std::string_view event{name};
-    return event=="trace_begin" || event=="receiver_helper_raw_reference" ||
+    return event=="trace_begin" || event=="receiver_helper_observation_started" || event=="receiver_helper_raw_reference" ||
         event=="receiver_helper_corrected_interval" || event=="receiver_helper_reference_reentry" ||
         event=="receiver_acquisition_work" || event=="receiver_acquisition_work_unavailable" ||
         event=="receiver_bank_admitted" || event=="receiver_signal_commit" ||
@@ -371,6 +371,9 @@ void rolling_helper_waits_and_drains_after_loss() {
             verify(snapshot.error.empty() && !snapshot.receiver_health.failed() &&
                    !snapshot.receiver_health.dropped_samples,"rolling Helper changed ordinary receiver health");
             verify(snapshot.received.empty(),"helper-only rolling wait decoded payload content");
+            if(snapshot.samples_received<36ULL*c.sample_rate)
+                verify(!snapshot.receiver_admissions && !snapshot.receiver_instances,
+                       "ordinary bank was constructed before the earliest possible local observation boundary");
             for(const auto& event:snapshot.signals)
                 verify(event.helper_carrier || (!event.received_bits && !event.complete),
                        "helper-only rolling wait invented Robust bits or physical END");
@@ -388,10 +391,12 @@ void rolling_helper_waits_and_drains_after_loss() {
                    "manual realtime Helper started a companion broad/input-view audit bank");
             return snapshot.helper_frequency_assistance_active;
         };
-        const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(25);
+        // Allow the full 36-second media interval even on constrained hosts.
+        // This does not relax any measured-media or completion assertion.
+        const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(480);
         do {
             const auto snapshot=session.snapshot();assisted=observe(snapshot)||assisted;
-            if(last_samples>=18ULL*c.sample_rate) {waited=true;break;}
+            if(last_samples>=40ULL*c.sample_rate && assisted) {waited=true;break;}
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
         } while(std::chrono::steady_clock::now()<deadline);
         loss_origin=last_samples;
@@ -436,7 +441,7 @@ void rolling_helper_waits_and_drains_after_loss() {
     std::ifstream input(path);verify(bool(input),"Helper lifecycle evidence was not written");
     std::string line;
     bool raw_qualified=false,corrected_qualified=false,joined_work=false,post_loss_join=false,footer=false;
-    std::optional<std::uint64_t> corrected_end,unlocked_first;
+    std::optional<std::uint64_t> corrected_end,unlocked_first,observation_deadline;
     std::uint64_t unlocked_end=0,admissions=0,rows=0;
     while(std::getline(input,line)) {
         const auto event=[&](std::string_view name) {
@@ -448,6 +453,14 @@ void rolling_helper_waits_and_drains_after_loss() {
                line.find("\"event\":\"receiver_helper_conditioning_")==std::string::npos &&
                !event("receiver_helper_assistance_admitted"),
                "manual realtime Helper launched a legacy companion receiver or broad probe");
+        if(event("receiver_helper_observation_started")) {
+            const auto detected=number(line,"detection_frontier"),raw_rate=number(line,"sample_rate");
+            verify(!observation_deadline && raw_rate && number(line,"minimum_seconds")==36,
+                   "causal Helper observation was restarted or omitted its fixed interval");
+            // This fixture's simulation Bank starts at source sample zero.
+            const auto numerator=(detected+36ULL*raw_rate)*c.sample_rate;
+            observation_deadline=(numerator+raw_rate-1)/raw_rate;
+        }
         if(event("receiver_helper_raw_reference") && number(line,"qualified")) {
             verify(number(line,"sample")<number(line,"captured_end") &&
                    number(line,"frequency_first_sample")<=number(line,"sample"),
@@ -469,6 +482,8 @@ void rolling_helper_waits_and_drains_after_loss() {
             }
         }
         if(event("receiver_bank_admitted")) {
+            verify(observation_deadline && number(line,"sample")>=*observation_deadline,
+                   "ordinary receiver constructed before 36 seconds after causal presence detection");
             verify(number(line,"revision")==input_revision,"ordinary admission escaped the single capture bank revision");
             verify(!unlocked_first,"new ordinary receiver admission followed the actual Helper-loss fence");
             verify(number(line,"workspace")<=settings.dsp_workspace_bytes,
@@ -521,7 +536,7 @@ void rolling_helper_waits_and_drains_after_loss() {
              <<" peak_workspace="<<peak_workspace<<" withdrawn="<<withdrawn<<" drained="<<loss_drained
              <<" post_loss_join="<<post_loss_join<<" loss_origin="<<loss_origin
              <<" last_samples="<<last_samples<<" last_processed="<<last_processed<<'\n';
-    verify(assisted && waited && raw_qualified && corrected_qualified && joined_work && !work.empty() && rows &&
+    verify(assisted && waited && observation_deadline && raw_qualified && corrected_qualified && joined_work && !work.empty() && rows &&
            peak_workspace && withdrawn && loss_drained && unlocked_first &&
            unlocked_end>=*unlocked_first+3ULL*c.sample_rate && post_loss_join && footer,
            "single-bank Helper waiting/loss/drain coverage was incomplete");

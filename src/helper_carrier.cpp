@@ -227,26 +227,24 @@ EnvelopePlan plan_envelope(const modem::Config& config,const EnvelopeRequirement
         throw Error("invalid Helper Carrier precision lead extension");
     if(!std::isfinite(requirements.maximum_source_capture_ratio)||requirements.maximum_source_capture_ratio<=0)
         throw Error("invalid Helper Carrier envelope clock ratio");
-    const auto ratio=std::max(1.L,static_cast<long double>(requirements.maximum_source_capture_ratio));
     const auto rate=static_cast<long double>(config.sample_rate);
     const auto support=2.L*modem::pattern_pulse_padding_samples(config)/rate;
     const auto ordinary_tail=static_cast<long double>(modem::pattern_absence_capture_samples(config))/rate+1+support;
     const auto lookahead=static_cast<long double>(requirements.frontend_lookahead_seconds);
     EnvelopePlan result;
-    result.lead_seconds=aligned_duration(ratio*(std::max(2.L,
-        static_cast<long double>(requirements.frequency_acquisition_seconds))+lookahead),rate);
-    auto precision_extension=aligned_duration(
-        static_cast<long double>(requirements.frequency_precision_extension_seconds),rate);
-    // 36 seconds is exactly 90 dwells. Clamp only input-rounding residue;
-    // validated additional airtime may never exceed that independent cap.
-    precision_extension=std::min(36.L,precision_extension);
-    result.lead_seconds+=precision_extension;
+    // The transmit schedule is a fixed 36-second Helper measurement window
+    // followed by the original 2-second Helper-only baseline. These are 90
+    // precision dwells plus five baseline dwells; all durations passed by
+    // receiver/startup forecasts are diagnostic only and cannot enlarge it.
+    result.lead_seconds=36.L+2.L;
+    const auto ratio=std::max(1.L,static_cast<long double>(requirements.maximum_source_capture_ratio));
     result.tail_seconds=aligned_duration(ratio*(std::max({2.L,ordinary_tail,
         static_cast<long double>(requirements.receiver_buffer_deficit_seconds)})+lookahead),rate);
-    result.preparation_seconds=result.lead_seconds+dwell+1/rate;
+    // The start no longer rounds down to a dwell boundary. Scheduling already
+    // retries after slow construction, so reserve exactly the emitted lead.
+    result.preparation_seconds=result.lead_seconds;
     result.maximum_stop_extension_seconds=result.lead_seconds+result.tail_seconds+2*dwell+2/rate;
-    // The source wrapper still checks its full endpoint. Reject a plan whose
-    // independent extension alone cannot fit the existing 64-bit source clock.
+    // The source wrapper still checks its full endpoint.
     if(!std::isfinite(result.maximum_stop_extension_seconds)||
        std::ceil(result.maximum_stop_extension_seconds*rate)>=std::ldexp(1.L,64))
         throw Error("Helper Carrier envelope exceeds the source sample counter");

@@ -79,6 +79,37 @@ class StreamCLI(unittest.TestCase):
                 '--helper-data-power','2uW','--helper-ratio-limit','10dB',
                 '--helper-frequency','high','--helper-callsign','W1ABC',*AUDIO)
             self.assertEqual(original.read_bytes(),disabled.read_bytes())
+    def test_helper_batch_receive_declines_unqualified_acquisition(self):
+        # A short capture cannot satisfy the receiver-local observation rule.
+        # Batch receive has no causal narrow admission yet, so it must decline
+        # instead of constructing an ordinary receiver on retrospective input.
+        with tempfile.TemporaryDirectory() as directory:
+            capture=pathlib.Path(directory)/'short.wav'
+            with wave.open(str(capture),'wb') as output:
+                output.setnchannels(1)
+                output.setsampwidth(2)
+                output.setframerate(48000)
+                output.writeframes(b'\0\0'*48000)
+            for command,extra in (('rx',('--json',)),('status-rx',('--bits','001'))):
+                result=self.run_pump(command,'--input',capture,'--helper-power','100W',
+                    *extra,*AUDIO,ok=False)
+                self.assertIn(b'causal 36-second observation and measured narrowed acquisition are not implemented',
+                    result.stderr)
+            missing=pathlib.Path(directory)/'missing.wav'
+            malformed=pathlib.Path(directory)/'malformed.wav'
+            malformed.write_bytes(b'not a WAV file')
+            for path in (missing,malformed):
+                for command,extra in (('rx',('--json',)),('status-rx',('--bits','001')),
+                                      ('simulate',())):
+                    result=self.run_pump(command,'--input',path,'--helper-power','100W',
+                        *extra,*AUDIO,ok=False)
+                    self.assertIn(b'causal 36-second observation and measured narrowed acquisition are not implemented',
+                        result.stderr)
+                    self.assertNotIn(b'cannot open',result.stderr)
+            result=self.run_pump('rx','--device','nonexistent-helper-test-device',
+                '--helper-power','100W',*AUDIO,ok=False)
+            self.assertIn(b'causal 36-second observation and measured narrowed acquisition are not implemented',
+                result.stderr)
     def test_helper_wav_composition_and_separation(self):
         with tempfile.TemporaryDirectory() as directory:
             directory=pathlib.Path(directory)
@@ -97,7 +128,7 @@ class StreamCLI(unittest.TestCase):
                 self.assertEqual(envelope['sample_rate'],48000)
                 lead=envelope['helper_lead_frames']; robust=envelope['robust_frames']
                 post=envelope['helper_post_frames']
-                self.assertGreaterEqual(lead,2*48000)
+                self.assertEqual(lead,38*48000)
                 self.assertGreaterEqual(post,2*48000)
                 with wave.open(str(output),'rb') as source:
                     self.assertEqual(source.getframerate(),48000)
@@ -227,7 +258,7 @@ class StreamCLI(unittest.TestCase):
             self.run_pump('keygen','--output',key)
             transmitted=self.run_pump('tx','--text',text,'--keyfile',key,'--output',capture,*helper,*AUDIO)
             envelope=self.helper_envelope(transmitted)
-            self.assertGreaterEqual(envelope['helper_lead_frames'],2*envelope['sample_rate'])
+            self.assertEqual(envelope['helper_lead_frames'],38*envelope['sample_rate'])
             self.assertGreaterEqual(envelope['helper_post_frames'],2*envelope['sample_rate'])
             value=json.loads(self.run_pump('rx','--input',capture,'--keyfile',key,
                 '--json','--save',saved,*helper,*AUDIO).stdout)

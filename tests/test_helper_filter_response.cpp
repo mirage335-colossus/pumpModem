@@ -30,6 +30,15 @@ Impulse observed_kernel(std::uint32_t rate,double center,double half_width=225) 
     const auto rounding=mass*u/(1-u)+64*static_cast<double>(output.size())*std::numeric_limits<double>::epsilon();
     return {std::move(output),rounding};
 }
+Impulse observed_kernel(std::uint32_t rate,std::span<const helper::PayloadFilter::NotchBand> bands) {
+    helper::PayloadFilter filter(rate,bands);
+    const auto delay=filter.delay();std::vector<float> input(4*delay+1),output(input.size());input[2*delay]=1;
+    const auto count=filter.push(input,output);output.resize(count);
+    check(count==2*delay+1,"observed multi-notch impulse did not cover complete centered kernel");
+    double mass=0;for(const auto value:output)mass+=std::abs(static_cast<double>(value));
+    constexpr auto u=std::numeric_limits<float>::epsilon()/2;
+    return {std::move(output),mass*u/(1-u)+64*static_cast<double>(output.size())*std::numeric_limits<double>::epsilon()};
+}
 std::complex<double> observed_gain(const Impulse& impulse,std::uint32_t rate,double frequency) {
     std::complex<double> gain{};
     const auto middle=impulse.kernel.size()/2;
@@ -98,33 +107,47 @@ void full_hf_controller_band() {
         check(observed_error(impulse,rate,low+(high-low)*i/1024.)<=bound+impulse.rounding,
               "full HF certificate missed actual shifted payload response");
 }
-void two_tone_group_uses_one_fixed_fir() {
-    // High two-tone placement: DATA 1500 +/-112.5, auxiliary 2062.5,
-    // pure pilot 2462.5. Include the original RF/audio DATA allowance.
-    constexpr double pilot=2462.5,center=pilot-200,half_width=425;
+void three_tone_group_uses_one_fixed_fir() {
+    // Fixed low/aux group is 550 and 950 +/-150 Hz; the high pilot is 2450.
+    // The wider FIR design cutoff leaves 75 Hz transition on either side.
+    // DATA occupies 1500 +/-112.5, with room for independent RF/audio allowance.
+    constexpr double pilot=2450,center=750,half_width=425;
     constexpr double expansion=100+1612.5*300e-6;
     for(const auto rate:{6120U,8000U,48000U}) {
-        helper::PayloadFilter group(rate,center,half_width),legacy(rate,pilot);
+        const std::array bands{helper::PayloadFilter::NotchBand{center,half_width},
+            helper::PayloadFilter::NotchBand{pilot,225}};
+        helper::PayloadFilter group(rate,bands),legacy(rate,pilot);
         check(group.delay()==legacy.delay() && group.allocated_bytes()==legacy.allocated_bytes() &&
               group.coefficients().size()==legacy.coefficients().size(),
-              "two-tone suppression increased FIR length, delay or fixed storage");
+              "three-tone suppression increased FIR length, delay or fixed storage");
         check(group.center_hz()==center && group.half_width_hz()==half_width && legacy.half_width_hz()==225,
-              "two-tone width changed the legacy filter default");
+              "three-tone group geometry changed the legacy filter default");
         const auto payload=group.maximum_amplitude_error(1387.5-expansion,1612.5+expansion);
-        const auto stopped=group.maximum_response(pilot-550.2,pilot+150.2);
-        check(payload<=.001 && stopped<=.001,
-              "one two-tone FIR did not certify the full DATA and modulated helper group bands");
-        const auto impulse=observed_kernel(rate,center,half_width);
+        const auto stopped_low=group.maximum_response(400,1100);
+        const auto stopped_high=group.maximum_response(pilot-150,pilot+150);
+        check(payload<=.001 && stopped_low<=.001 && stopped_high<=.001,
+              "one three-tone FIR did not certify DATA and both disjoint helper groups");
+        const auto impulse=observed_kernel(rate,bands);
         for(unsigned i=0;i<=1024;++i) {
-            const auto frequency=pilot-550.2+700.4*i/1024.;
-            check(std::abs(observed_gain(impulse,rate,frequency))<=stopped+impulse.rounding,
-                  "two-tone certificate missed actual rejection inside the complete group band");
+            const auto frequency=400+700.*i/1024.;
+            check(std::abs(observed_gain(impulse,rate,frequency))<=stopped_low+impulse.rounding,
+                  "three-tone certificate missed actual rejection inside the low/aux group band");
+            const auto high_frequency=pilot-150+300.*i/1024.;
+            check(std::abs(observed_gain(impulse,rate,high_frequency))<=stopped_high+impulse.rounding,
+                  "three-tone certificate missed actual rejection inside the high-pilot band");
         }
-        check(group.maximum_amplitude_error(pilot-460,pilot-340)>.9,
-              "auxiliary-overlapping DATA was falsely certified safe");
-        check(legacy.maximum_response(pilot-400,pilot-400)>.99 &&
-              std::abs(observed_gain(impulse,rate,pilot-400))<.001,
-              "two-tone test did not distinguish the old auxiliary leak from the wider notch");
+        check(group.maximum_response(550,550)<=.001 && group.maximum_response(950,950)<=.001 &&
+              group.maximum_response(pilot,pilot)<=.001,
+              "one of the fixed 550/950/high pilots remained audible");
+        check(group.maximum_response(325,325)>.49 && group.maximum_response(1175,1175)>.49 &&
+              group.maximum_response(pilot-225,pilot-225)>.49 &&
+              group.maximum_response(pilot+225,pilot+225)>.49,
+              "design cutoff was incorrectly treated as an already-rejected stopband edge");
+        check(group.maximum_amplitude_error(1120,1430)>.9,
+              "DATA overlapping a stopband transition was falsely certified safe");
+        check(legacy.maximum_response(950,950)>.99 &&
+              std::abs(observed_gain(impulse,rate,950))<.001,
+              "three-tone test did not distinguish the old auxiliary leak from the new notch group");
     }
 }
 void invalid_or_unsupported_qualification_fails_closed() {
@@ -144,7 +167,7 @@ void invalid_or_unsupported_qualification_fails_closed() {
 }
 int main() {
     try {continuous_response_qualifies_only_safe_bands();shifted_full_band_needs_its_own_certificate();full_hf_controller_band();
-        two_tone_group_uses_one_fixed_fir();invalid_or_unsupported_qualification_fails_closed();
+        three_tone_group_uses_one_fixed_fir();invalid_or_unsupported_qualification_fails_closed();
         std::cout<<"continuous helper FIR response certificates passed\n";return 0;
     }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

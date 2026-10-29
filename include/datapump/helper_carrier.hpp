@@ -118,12 +118,11 @@ ReferenceLevel reference_level(const Options&,double nominal_payload_cn0_db_hz,
     double amplitude_scale=1,double payload_power_fraction=1,double usable_tone_fraction=1);
 
 struct EnvelopeRequirements {
-    // Actual receiver aperture, including any sequential discovery/warmup.
-    // No level-to-precision prediction or metadata requirement is inferred.
+    // Filter, converter and bounded-stage support contributes to capture-tail
+    // coverage. It never enlarges the fixed transmit lead.
     double frequency_acquisition_seconds=0,frontend_lookahead_seconds=0;
-    // Optional predicted source-clock airtime beyond the complete baseline.
-    // A duration never qualifies the received reference. Bounded independently
-    // of the existing aperture/drain requirement and rounded to full dwells.
+    // Retained for forecast reporting compatibility; it does not alter the
+    // fixed 38-second Helper-only lead or qualify a received reference.
     double frequency_precision_extension_seconds=0;
     // Total additional capture obligation from the payload endpoint, including
     // any required absence coverage. This is frozen at source completion, not
@@ -134,9 +133,9 @@ struct EnvelopePlan {
     long double lead_seconds=0,tail_seconds=0,preparation_seconds=0,maximum_stop_extension_seconds=0;
 };
 // Helper callers opt in; ordinary helper-off callers need no planning call.
-// Durations use the source clock, round up to complete 400ms dwells, and retain
-// the ordinary physical-absence, pulse-support and one-second capture margin.
-// Preparation/stop bounds include worst dwell alignment and source rounding.
+// The fixed lead is exactly 38 seconds. Tail coverage uses complete 400 ms
+// dwells and retains ordinary absence, pulse support and capture margin.
+// Preparation reserves the lead; the stop bound retains tail alignment margin.
 EnvelopePlan plan_envelope(const modem::Config&,const EnvelopeRequirements& = {});
 void validate(const Options&);
 // Validates the options and preserves the calibrated payload gain independently

@@ -1,6 +1,7 @@
 #include "datapump/live.hpp"
 #include "datapump/resampler.hpp"
 #include "../src/helper_power_reference.hpp"
+#include "../src/live_helper.hpp"
 #include "../src/transmit_timing.hpp"
 #include <algorithm>
 #include <array>
@@ -280,12 +281,19 @@ void explicit_past_declines_at_calibrated_amplitude() {
           "past explicit helper epoch changed key exposure or omitted its decline reason");
 }
 void hardware_helper_envelope(bool fresh) {
-    auto value=settings();value.transfer.timestamp=fresh?0:epoch+10;
+    // The explicit timestamp case must leave enough future time to emit the
+    // complete fixed38-second lead before its payload origin.
+    auto value=settings();value.transfer.timestamp=fresh?0:epoch+100;
     auto options=value.transfer;
+    const auto rate=options.modem.sample_rate;
+    for(const auto origin:{std::uint64_t{0},std::uint64_t{1},static_cast<std::uint64_t>(rate/3),
+            static_cast<std::uint64_t>(3ULL*rate+rate/2)})
+        check(live::detail::helper_leading_seconds(origin,rate,38)==38,
+              "partial first dwell rounded the fixed helper lead upward");
     std::unique_ptr<modem::StreamingTransmitter> reference;
     if(fresh) {
         audio::detail::UtcPlaybackScope buffered(true);
-        const auto margin=audio::minimum_lead_seconds()+2.4+1./options.modem.sample_rate;
+        const auto margin=audio::minimum_lead_seconds()+38.4+1./options.modem.sample_rate;
         auto scheduled=detail::schedule_transmission(options.modem,[&](std::uint64_t selected,std::uint32_t phase) {
             options.timestamp=selected;options.modem.stream_epoch=selected;options.modem.stream_phase_samples=phase;
             return transfer::binary_transmitter(Bytes{0,0,1},options);
@@ -293,7 +301,6 @@ void hardware_helper_envelope(bool fresh) {
         reference=std::move(scheduled.transmitter);
     } else reference=transfer::binary_transmitter(Bytes{0,0,1},options);
     const auto total=reference->total_samples();
-    const auto rate=options.modem.sample_rate;
     const auto physical=reference->physical_output_origin();
     const auto result=run(value);
     check(!result.snapshot.transmission_failed && result.snapshot.transmission_fraction==1 &&
@@ -302,8 +309,8 @@ void hardware_helper_envelope(bool fresh) {
     const auto first=std::find_if(result.reads.begin(),result.reads.end(),[](const auto& read){return read.source_samples>0;});
     check(first!=result.reads.end() && first->supplied>=first->source_samples,"hardware helper envelope never read its source");
     const auto lead=first->supplied-first->source_samples;
-    check(lead>=2ULL*rate && result.logical_pcm.size()>=lead+total+2ULL*rate,
-          "hardware helper envelope omitted its two-second lead or tail");
+    check(lead==38ULL*rate && result.logical_pcm.size()>=lead+total+2ULL*rate,
+          "hardware helper envelope did not retain exactly 95 dwells and the two-second minimum tail");
     const auto payload_epoch=static_cast<long double>(physical/rate)+static_cast<long double>(physical%rate)/rate;
     check(std::abs(*result.accepted_utc+static_cast<long double>(lead)/rate-payload_epoch)<1e-6L,
           "hardware helper lead shifted the already planned keyed payload epoch");

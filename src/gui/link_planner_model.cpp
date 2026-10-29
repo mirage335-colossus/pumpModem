@@ -784,9 +784,12 @@ RealtimeHelperCpuPoint realtime_helper_point(const Inputs& inputs,const modem::C
         const auto receive_bound=live::detail::helper_receive_envelope_bound(settings);
         auto requirements=live::detail::helper_envelope_baseline_requirements(settings,config,receive_bound);
         requirements.frequency_precision_extension_seconds=0;
-        const auto baseline=helper::plan_envelope(config,requirements);
+        // Forecast the first36 seconds from Helper onset. The separate two-
+        // second baseline remains in the emitted38-second plan, but cannot
+        // supply extra precision observations or be adjusted from SNR.
         auto request=live::detail::helper_tone_precision_request(settings,config,physical,cno,
-            static_cast<double>(baseline.lead_seconds),requirements.maximum_source_capture_ratio);
+            0.,requirements.maximum_source_capture_ratio);
+        request.max_extra_seconds=36.;
         request.pilot_segmented=true;
         auto& reference=out.precision_reference;
         reference.cn0_db_hz=request.straight_cn0_db_hz;
@@ -805,24 +808,59 @@ RealtimeHelperCpuPoint realtime_helper_point(const Inputs& inputs,const modem::C
         auto comparison=request;
         comparison.pilot_observation=helper::PilotObservationMode::independent_retunes;
         out.precision.retune_model=precision_cache.predict(comparison).pilot_model;
-        // Match transmit airtime even when the bounded lead is selected without
-        // a numeric precision estimate. Such a cap never creates an RF search.
-        requirements.frequency_precision_extension_seconds=
-            (out.precision.supported || out.precision.extension_capped)?out.precision.extra_lead_seconds:0;
+        // The fixed envelope selects 38 seconds regardless of this result.
+        // Forecast fields describe precision time since pilot onset only.
         const auto envelope=helper::plan_envelope(config,requirements);
         out.planned_lead_seconds=static_cast<double>(envelope.lead_seconds);
         out.planned_tail_seconds=static_cast<double>(envelope.tail_seconds);
         // This is an ideal uninterrupted observation over the same physical
         // elapsed lead, not a claim that numeric segment history retains phase.
-        reference.ideal_lead_observation_seconds=out.planned_lead_seconds/request.maximum_source_capture_ratio;
+        reference.ideal_lead_observation_seconds=36./request.maximum_source_capture_ratio;
         reference.ideal_lead_half_width_hz=helper_ideal_tone_half_width(reference.cn0_db_hz,
             reference.ideal_lead_observation_seconds);
         if(out.precision.retune_model.supported)
             reference.segmented_lead_half_width_hz=out.precision.retune_model.constant_frequency_noise_half_width_hz;
-        if(!out.precision.supported)throw Error("Automatic helper precision lead prediction declined: "+out.precision.reason);
-        out.observation_seconds=out.precision.usable_tone_seconds;
+        // Separate ideal two-pilot affine reference. Every low/high pair uses
+        // the same90 settled dwells; the pilots have different received C/N0
+        // and their errors are kept separate through [a,b] covariance. This
+        // is a noise-only ceiling, not the operational oscillator model.
+        {
+            std::array<double,90> apertures{};
+            apertures.fill(.392/request.maximum_source_capture_ratio);
+            const auto high=plan.frequency_hz;
+            const auto low=plan.low_frequency_hz;
+            const auto data=config.carrier_hz;
+            const auto span=high-low;
+            const auto high_width=helper_segmented_tone_half_width(reference.cn0_db_hz,apertures);
+            const auto low_cno=cno+10*std::log10(helper::low_pilot_power_fraction/helper::pilot_power_fraction);
+            const auto low_width=helper_segmented_tone_half_width(low_cno,apertures);
+            if(span>0&&high_width&&low_width&&std::isfinite(data)) {
+                const auto vh=std::pow(*high_width/3,2),vl=std::pow(*low_width/3,2);
+                const auto denominator=span*span;
+                const auto va=(vl+vh)/denominator;
+                const auto vb=(high*high*vl+low*low*vh)/denominator;
+                const auto vab=-(high*vl+low*vh)/denominator;
+                const auto data_width=helper_affine_data_half_width(low,high,data,*low_width,*high_width);
+                if(std::isfinite(va)&&std::isfinite(vb)&&std::isfinite(vab)&&
+                   data_width&&va>=0&&vb>=0) {
+                    reference.segmented_affine_scale_variance_ppm2=va*1e12;
+                    reference.segmented_affine_offset_variance_hz2=vb;
+                    reference.segmented_affine_covariance_ppm_hz=vab*1e6;
+                    reference.segmented_affine_data_half_width_hz=*data_width;
+                }
+            }
+        }
+        if(!out.precision.supported)throw Error("Helper precision prediction declined: "+out.precision.reason);
+        out.observation_seconds=out.precision.sustained_supported?
+            out.precision.sustained_at_seconds/request.maximum_source_capture_ratio:
+            out.precision.usable_tone_seconds;
+        // Receiver pricing is conditional on the measured model's predicted U
+        // at the fixed36-second measurement boundary, not an earlier point
+        // where a forecast might first cross the ±0.1Hz milestone.
+        const auto boundary_uncertainty=out.precision.sustained_supported?
+            out.precision.sustained_frequency_half_width_hz:out.precision.frequency_half_width_hz;
         static_cast<RealtimeHelperReceiverWork&>(out)=helper_reference_receiver_work(inputs,config,settings,
-            target,plan.frequency_hz,out.precision.frequency_half_width_hz,out.precision.reason,stop);
+            target,plan.frequency_hz,boundary_uncertainty,out.precision.reason,stop);
         if(out.precision.sustained_supported) {
             out.sustained_at_seconds=out.precision.sustained_at_seconds;
             try {
@@ -1072,6 +1110,16 @@ std::optional<double> helper_segmented_tone_half_width(double cn0_db_hz,
     const auto effective=std::cbrt(information_time);
     if(effective>std::numeric_limits<double>::max())return {};
     return helper_ideal_tone_half_width(cn0_db_hz,static_cast<double>(effective));
+}
+std::optional<double> helper_affine_data_half_width(double low,double high,double data,
+        double low_width,double high_width) noexcept {
+    if(!std::isfinite(low)||!std::isfinite(high)||!std::isfinite(data)||
+       !std::isfinite(low_width)||!std::isfinite(high_width)||
+       !(high>low)||low_width<0||high_width<0)return {};
+    const auto low_weight=(high-data)/(high-low);
+    const auto high_weight=(data-low)/(high-low);
+    const auto result=std::hypot(low_weight*low_width,high_weight*high_width);
+    return std::isfinite(result)?std::optional<double>{result}:std::nullopt;
 }
 HelperReceiverCostLedger helper_receiver_cost(const simulation::Estimate& estimate) {
     HelperReceiverCostLedger out;

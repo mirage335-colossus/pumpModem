@@ -24,16 +24,18 @@ class Pilot {
     static constexpr double tau=2*std::numbers::pi;
     static constexpr std::size_t maximum_fft=32768,points=10,records=768,phase_records=8192;
     struct Point {double phase=0,variance=0;std::uint64_t sample=0;};
-    struct Row {C value{},lower{},upper{};};
+    struct Row {C value{},lower{},upper{};bool good=false;};
     struct FrequencyFit {
         bool valid=false;double hz=0,variance=0,aperture=0;
         bool fallback=false;unsigned gap=0;double aperture_cube=0;
         bool dated=false;std::uint64_t sample=0;double sample_fraction=0;
     };
     static constexpr std::size_t profile_points=251;
-    struct Record {double hz=0,variance=0,aperture=0;std::uint64_t first=0,last=0,sample=0;double sample_fraction=-1;};
+    struct Record {double hz=0,variance=0,aperture=0;std::uint64_t first=0,last=0,sample=0;double sample_fraction=-1,aperture_cube=0;};
     using Matrix=std::array<std::array<double,3>,3>;
     struct PhaseObservation {std::uint64_t end=0;double phase=0,variance=0;};
+    struct PendingPhase {std::uint64_t end=0,sample=0;double cycles=0,fraction=0,variance=0;bool valid=false;};
+    struct PendingFrequency {FrequencyFit fit;ToneTrackerSnapshot phase;std::uint64_t first=0,end=0;bool valid=false;};
     struct PhaseState {std::array<double,3> x{};Matrix p{};std::uint64_t sample=0;bool valid=false;};
     // Past frequency/rate marginals and their cross covariance with the current
     // phase/frequency/rate state. This bounded joint Kalman update needs no
@@ -63,6 +65,9 @@ class Pilot {
     std::array<std::array<double,profile_points>,points> profile_bic_{};
     std::array<Record,records> r_{};
     std::array<PhaseObservation,phase_records> phase_rows_{};
+    PendingPhase pending_phase_{};
+    PendingFrequency pending_frequency_{};
+    bool phase_recovery_guard_=false;
     PhaseState continuous_;
     // Accepted numeric endpoints: 256 nodes are an opportunistic lag, not a
     // guaranteed time span. Sparse observations and phase/model boundaries
@@ -71,6 +76,10 @@ class Pilot {
     std::size_t lag_head_=0,lag_count_=0;
     std::size_t phase_head_=0,phase_count_=0,phase_since_refit_=0,phase_updates_=0;
     std::uint64_t phase_origin_=0,phase_support_first_=0,phase_frequency_support_first_=0;
+    // Prior frequency-only evidence may survive an independent phase reset.
+    // Its measured duration is carried separately from the new phase rows.
+    std::uint64_t phase_frequency_prior_end_=0;
+    double phase_frequency_prior_support_seconds_=0;
     double phase_reference_hz_=0,phase_chisq_=0,phase_lag_=0,phase_lag2_=0,phase_process_i1_=0,phase_process_i2_=0;
     phase_detail::FrequencyProcessProjection frequency_process_projection_;
     double phase_change_positive_=0,phase_change_negative_=0;
@@ -177,6 +186,9 @@ public:
         scale_=1;noise_=power_=0;nco_=side_={1,0};sum_=lower_=upper_={};
         result={};result.sample_rate=c_.sample_rate;result.captured_end_sample=first;
         full_mode_=false;full_good_=true;full_closed_=false;full_count_=full_block_length_=0;frequency_kernel={};
+        pending_phase_={};
+        pending_frequency_={};
+        phase_recovery_guard_=false;
         clear_continuous(false);
         lag_head_=lag_count_=0;
         result.frequency_model_expected_hz=c_.expected_hz;result.frequency_model_residual_scale=scale_;
@@ -202,6 +214,9 @@ public:
         c_.expected_hz=expected;c_.search_half_width_hz=width;scale_=scale;geometry();
         local_aperture_=qualify_local_aperture;fft_n_=local_aperture_?local_fft_n_:ordinary_fft_n_;
         clear_continuous(); // Unknown retune phase is never a coherent bridge.
+        pending_phase_={};
+        pending_frequency_={};
+        phase_recovery_guard_=false;
         // The scalar query API has the new RF mapping. The separate Live joint
         // RF/audio model owns frequency transport across actual retunes.
         lag_head_=lag_count_=0;
@@ -291,7 +306,12 @@ private:
         if(std::isfinite(measured_noise) && measured_noise>0)noise_=.9*noise_+.1*measured_noise;
         noise_=std::max(noise_,1e-30);
         const auto measured_power=std::max(0.,2*std::norm(sum_)/(full_ws_*full_ws_)-noise_*bandwidth);
-        const auto good=measured_power>noise_*bandwidth && (!power_ || measured_power>.12*power_);
+        const auto present=measured_power>noise_*bandwidth && (!power_ || measured_power>.12*power_);
+        // A first recovered Hann row can begin inside the fade even when its
+        // mean power looks good. Require one full subsequent row before using
+        // it for phase/frequency fitting. This is not the local wait timer.
+        const auto good=present&&!phase_recovery_guard_;
+        phase_recovery_guard_=!present;
         power_=.95*power_+.05*measured_power;
         result.carrier_to_noise_db_hz=10*std::log10(std::max(measured_power/noise_,1e-20));
         const auto phase=std::arg(sum_),variance=good?noise_*bandwidth/(2*measured_power):0.;
@@ -422,6 +442,7 @@ private:
         // marginal. Only explicit model contradiction/reset rejects that.
         result.frequency_continuous_phase=false;
         continuous_={};phase_head_=phase_count_=phase_since_refit_=phase_updates_=0;phase_chisq_=0;
+        phase_frequency_prior_end_=0;phase_frequency_prior_support_seconds_=0;
         phase_change_positive_=phase_change_negative_=0;
         // An independent new phase has no derived cross covariance with these
         // old states. Freeze already qualified historical frequency marginals
@@ -500,6 +521,8 @@ private:
         state.p[0][0]=phase_measurement_variance(row)+
             a*a*variance+2*a*b*cross+b*b*vrr-2*(a*measurement_cross[1]+b*measurement_cross[2]);
         phase_frequency_support_first_=result.first_sample;
+        phase_frequency_prior_end_=result.sample+1;
+        phase_frequency_prior_support_seconds_=result.frequency_support_seconds;
         return true; // This first independent phase row leaves P(f,rate) unchanged.
     }
     static bool valid_lag_node(const LagNode& node) noexcept {
@@ -645,30 +668,33 @@ private:
         continuous_=state;phase_chisq_=chisq;phase_updates_=updates;phase_since_refit_=0;
         phase_support_first_=phase_rows_[phase_head_].end+1-block_n_;
         phase_frequency_support_first_=phase_support_first_;
+        // The bounded refit starts afresh from its retained numeric rows.
+        phase_frequency_prior_end_=0;phase_frequency_prior_support_seconds_=0;
     }
     bool current_frequency_witness()const noexcept {
         return next_>=last_good_&&static_cast<double>(next_-last_good_)/c_.sample_rate<=.4;
     }
-    void observe_continuous(double variance) noexcept {
+    void observe_continuous(const PendingPhase& pending) noexcept {
         // A weak phase projection alone is not a new tone-presence witness.
         // The coarse acquisition or accepted independent frequency aperture
         // owns that existing lease, evaluated here at the actual row date.
         if(!c_.continuous_pilot || local_aperture_ || !current_frequency_witness())return;
-        const auto end=next_-1;
+        if(!pending.valid || pending.end<block_n_-1)return;
+        const auto end=pending.end,first=end+1-block_n_;
         // A first independent phase cannot consume overlapping frequency
         // evidence as an independent prior. Retain that marginal and wait for
         // the next disjoint projection; this does not withdraw frequency.
         if(!continuous_.valid&&frequency_process_density()>0&&result.frequency_knowledge_valid&&
-           result.frequency_covariance_valid&&result.sample>next_-block_n_)return;
+           result.frequency_covariance_valid&&result.sample>=first)return;
         // Elapsed covariance and cycle ambiguity decide phase continuity.
         // Sparse accepted observations are not missing ADC samples.
         if(!continuous_.valid) {
-            phase_origin_=end;phase_reference_hz_=center_;phase_support_first_=next_-block_n_;
+            phase_origin_=end;phase_reference_hz_=center_;phase_support_first_=first;
             phase_frequency_support_first_=phase_support_first_;
         }
-        const auto date=static_cast<long double>(result.phase_sample)-phase_origin_+result.phase_sample_fraction;
-        PhaseObservation row{end,std::remainder(result.phase_cycles-
-            static_cast<double>(std::remainder(phase_reference_hz_*date/c_.sample_rate,1.L)),1.),variance/(tau*tau)};
+        const auto date=static_cast<long double>(pending.sample)-phase_origin_+pending.fraction;
+        PhaseObservation row{end,std::remainder(pending.cycles-
+            static_cast<double>(std::remainder(phase_reference_hz_*date/c_.sample_rate,1.L)),1.),pending.variance/(tau*tau)};
         if(!continuous_.valid) {
             const auto prior=2.*c_.sample_rate/fft_n_/3;
             continuous_=initial_phase_state(row,prior*prior);
@@ -694,8 +720,51 @@ private:
         }
         row.phase=measured;phase_chisq_+=nis;++phase_updates_;retain_phase_observation(row);
     }
+    struct MeasuredPhaseSupport {double seconds=0,longest_seconds=0,cube_seconds3=0;};
+    MeasuredPhaseSupport measured_phase_support()const noexcept {
+        MeasuredPhaseSupport out;
+        if(!c_.sample_rate || !block_n_ || !phase_count_)return out;
+        // Rows are chronological, non-overlapping, Hann-weighted 20 ms
+        // observations. No historical PCM is retained. A good transition row
+        // may straddle a fade, so discard one row on each side of each gap in
+        // this conservative support summary; the filter covariance itself
+        // continues to use its actual accepted rows and elapsed propagation.
+        const auto row_seconds=static_cast<double>(block_n_)/c_.sample_rate;
+        double prior=phase_frequency_prior_support_seconds_;
+        std::uint64_t previous_end=0;std::size_t run=0;bool have=false,trim_start=false;
+        const auto flush=[&](bool trim_end) {
+            auto n=run;
+            if(trim_start&&n)--n;
+            if(trim_end&&n)--n;
+            const auto seconds=n*row_seconds;
+            out.seconds+=seconds;out.longest_seconds=std::max(out.longest_seconds,seconds);
+            out.cube_seconds3+=seconds*seconds*seconds;
+            run=0;
+        };
+        for(std::size_t i=0;i<phase_count_;++i) {
+            const auto& row=phase_rows_[(phase_head_+i)%phase_records];
+            const auto end=row.end+1;
+            if(end<block_n_)continue;
+            const auto first=end-block_n_;
+            // The seeded frequency marginal has already consumed its own
+            // observations; do not count an overlapping phase row twice.
+            if(phase_frequency_prior_end_ && first<phase_frequency_prior_end_)continue;
+            if(!have) {
+                if(phase_frequency_prior_end_ && first>phase_frequency_prior_end_) {
+                    prior=std::max(0.,prior-row_seconds);trim_start=true;
+                }
+                have=true;run=1;previous_end=end;continue;
+            }
+            if(first!=previous_end) {flush(true);trim_start=true;}
+            ++run;previous_end=end;
+        }
+        if(have)flush(false);
+        out.seconds+=prior;
+        return out;
+    }
     bool publish_continuous() noexcept {
-        if(!continuous_.valid || continuous_.sample!=next_-1 || phase_updates_<19 || !current_frequency_witness())return false;
+        if(!continuous_.valid || continuous_.sample>=next_ ||
+           next_-1-continuous_.sample!=block_n_ || phase_updates_<19 || !current_frequency_witness())return false;
         const auto span=static_cast<double>(continuous_.sample-phase_support_first_+1)/c_.sample_rate;
         if(span<.38)return false;
         const auto inflate=std::max(1.,phase_chisq_/std::max<std::size_t>(1,phase_updates_-2));
@@ -713,10 +782,11 @@ private:
         result.frequency_knowledge_valid=result.frequency_covariance_valid=result.frequency_precision_refined=result.qualified=result.present=true;
         result.frequency_continuous_phase=true;result.frequency_local_aperture=false;
         result.frequency_used_fallback=false;result.frequency_gap_index=0;
-        result.frequency_context_first_sample=phase_support_first_;result.frequency_context_end_sample=next_;
-        result.frequency_aperture_cube_seconds3=span*span*span;
-        result.coherent_aperture_seconds=span;
-        result.frequency_support_seconds=static_cast<double>(result.sample-result.first_sample+1)/c_.sample_rate;
+        result.frequency_context_first_sample=phase_support_first_;result.frequency_context_end_sample=continuous_.sample+1;
+        const auto measured=measured_phase_support();
+        result.frequency_aperture_cube_seconds3=measured.cube_seconds3;
+        result.coherent_aperture_seconds=measured.longest_seconds;
+        result.frequency_support_seconds=measured.seconds;
         for(std::size_t i=0;i<lag_count_;++i) {
             auto& node=lag_nodes_[(lag_head_+i)%lag_nodes_.size()];if(!node.active)continue;
             node.first=phase_support_first_;node.end=continuous_.sample+1;
@@ -759,12 +829,14 @@ private:
         const auto measured_power=std::max(0.,2*std::norm(sum_)/(ws_*ws_)-noise_*bandwidth);
         // This gate qualifies a row only for the separate straight phase fit.
         // Frequency fallback retains all ten current complex observations.
-        const auto good=measured_power>noise_*bandwidth && (!power_ || measured_power>.12*power_);
+        const auto present=measured_power>noise_*bandwidth && (!power_ || measured_power>.12*power_);
+        const auto good=present&&!phase_recovery_guard_;
+        phase_recovery_guard_=!present;
         power_=.95*power_+.05*measured_power;result.carrier_to_noise_db_hz=10*std::log10(std::max(measured_power/noise_,1e-20));
         const auto phase=std::arg(sum_),variance=good?noise_*bandwidth/(2*measured_power):0.;
         const auto sample=next_-(block_n_+1)/2;
         if(!pn_){context_first_=next_-block_n_;straight_context_=true;previous_=false;}
-        rows_[pn_]={sum_/ws_,lower_/ws_,upper_/ws_};
+        rows_[pn_]={sum_/ws_,lower_/ws_,upper_/ws_,good};
         if(good){
             const auto increment=std::remainder(phase-previous_phase_,tau);
             const auto jump=previous_ && std::abs(increment)>std::min(2.5,std::max(.65,5*std::sqrt(variance+previous_variance_)));
@@ -779,10 +851,40 @@ private:
             const auto phase_process=c_.phase_noise_radians_per_sqrt_second*c_.phase_noise_radians_per_sqrt_second*block_n_/c_.sample_rate;
             result.phase_uncertainty_cycles=3*std::sqrt(variance+phase_process)/tau;
             result.projection_phase_valid=true;result.phase_qualified=false;
-            observe_continuous(variance);
+            // Retain one numeric row until an adjacent good row confirms that
+            // it did not end in an abrupt disappearance. A failed next row
+            // discards the pending row, so a half-muted Hann window cannot
+            // enter the frequency/phase covariance as a full observation.
+            if(pending_phase_.valid)observe_continuous(pending_phase_);
+            pending_phase_={next_-1,result.phase_sample,result.phase_cycles,
+                result.phase_sample_fraction,variance,true};
         } else {
+            pending_phase_={};
             straight_context_=false;previous_=false;
             result.phase_qualified=result.projection_phase_valid=false;invalidate_phase_fit();
+        }
+        if(pending_frequency_.valid) {
+            if(good && pending_frequency_.end<=UINT64_MAX-block_n_ &&
+               pending_frequency_.end+block_n_==next_) {
+                // Commit only the dated previous context, after an adjacent
+                // present row. Restore no phase outside its observed support.
+                const auto actual_next=next_,actual_first=context_first_;
+                const auto& saved=pending_frequency_.phase;
+                result.phase_fit_cycles=saved.phase_fit_cycles;
+                result.phase_fit_uncertainty_cycles=saved.phase_fit_uncertainty_cycles;
+                result.phase_fit_frequency_hz=saved.phase_fit_frequency_hz;
+                result.phase_fit_frequency_uncertainty_hz=saved.phase_fit_frequency_uncertainty_hz;
+                result.phase_fit_support_uncertainty_cycles=saved.phase_fit_support_uncertainty_cycles;
+                result.phase_fit_sample_fraction=saved.phase_fit_sample_fraction;
+                result.phase_fit_sample=saved.phase_fit_sample;
+                result.phase_fit_first_sample=saved.phase_fit_first_sample;
+                result.phase_fit_end_sample=saved.phase_fit_end_sample;
+                result.phase_fit_qualified=saved.phase_fit_qualified;
+                next_=pending_frequency_.end;context_first_=pending_frequency_.first;
+                accept_frequency(pending_frequency_.fit,false);
+                next_=actual_next;context_first_=actual_first;
+            }
+            pending_frequency_={};
         }
         const auto context_end=++pn_==points;
         if(context_end) {
@@ -791,7 +893,13 @@ private:
             auto fit=straight_context_?straight_fit():FrequencyFit{};
             if(!straight_context_)invalidate_phase_fit();
             if(!fit.valid)fit=gap_fit();
-            if(fit.valid)accept_frequency(fit);
+            if(fit.valid && c_.continuous_pilot && !local_aperture_) {
+                pending_frequency_={fit,result,context_first_,next_,true};
+                invalidate_phase_fit();
+                // The current context is complete; defer its fitted NCO
+                // change until the next context boundary, after confirmation.
+                if(result.frequency_knowledge_valid)set_center(std::clamp(result.frequency_hz,low_,high_));
+            } else if(fit.valid)accept_frequency(fit);
             pn_=0;previous_=false;straight_context_=true;
         }
         if(publish_continuous() && context_end)set_center(std::clamp(result.frequency_hz,low_,high_));
@@ -859,6 +967,10 @@ private:
         // Current-context profile only. Each gap has independent unknown
         // complex amplitudes on its two sides and one common frequency.
         // Nothing here publishes phase or replays historical PCM.
+        // A noisy/absent row cannot be counted as a whole measured aperture.
+        // This conservative guard intentionally declines some weak contexts;
+        // preserve that availability limitation rather than crediting noise.
+        if(std::any_of(rows_.begin(),rows_.end(),[](const Row& row){return !row.good;}))return {};
         struct Model {double frequency=0,score=0,bic=0,variance=0,chi=0,snr=0;std::size_t index=0;};
         std::array<Model,points> models{};
         double noise=0,energy=0;
@@ -924,18 +1036,45 @@ private:
             const auto f=-radius+i*grid;
             if(std::abs(f-best.frequency)>5)side_best=std::max(side_best,score(best_model,f));
         }
-        const auto f=center_+best.frequency;
+        const auto residual=best.frequency;
         const auto uncertainty=std::max({best.frequency-lower+grid,upper-best.frequency+grid,3*std::sqrt(best.variance)});
-        const auto process=2*c_.phase_noise_radians_per_sqrt_second*c_.phase_noise_radians_per_sqrt_second/(tau*tau*aperture);
-        const auto variance=uncertainty*uncertainty/9+process;
-        if(clipped || !best.index || best.index==steps || best.snr<16 || best.chi>25 ||
-           !(best.score>1.5*side_best) || !std::isfinite(variance) || f<low_ || f>high_)return {};
+        // A noisy 20 ms row is not by itself proof of absence. Check each
+        // independently fitted side by its own coherent score against the
+        // measured sideband noise, so a long noise-only side cannot acquire a
+        // pilot aperture merely by having more rows. For a no-gap winner use
+        // the two halves as separate presence checks, not as phase anchors.
+        const auto split=best_model?best_model:points/2;
+        const auto side_score=[&](std::size_t first,std::size_t end,double frequency) {
+            C sum{};
+            for(std::size_t i=first;i<end;++i) {
+                const auto t=(static_cast<double>(i)-.5*(points-1))*dt;
+                sum+=rows_[i].value*std::polar(1.,-tau*frequency*t);
+            }
+            return end>first?std::norm(sum)/(end-first):0.;
+        };
+        const bool left_supported=side_score(0,split,residual)>6*noise;
+        const bool right_supported=side_score(split,points,residual)>6*noise;
+        if(!left_supported&&!right_supported)return {};
         const auto selected_aperture=best_model?std::max(best_model,points-best_model)*dt:points*dt;
         const auto left=best_model*dt,right=(points-best_model)*dt;
         const auto cube=best_model?left*left*left+right*right*right:selected_aperture*selected_aperture*selected_aperture;
+        if(!left_supported || !right_supported)return {};
+        const auto f=center_+residual;
+        const auto process=2*c_.phase_noise_radians_per_sqrt_second*c_.phase_noise_radians_per_sqrt_second/
+            (tau*tau*std::min(aperture,selected_aperture));
+        // Unequal supported sides need not have their frequency information
+        // centered on the context midpoint. In the pooled path enclose that
+        // date ambiguity using the declared operational slew allowance. The
+        // local-only path already applies its own full-support enclosure.
+        const auto date_allowance=local_aperture_?0.:
+            c_.maximum_tracking_slew_hz_per_second*points*dt/3;
+        const auto sigma=uncertainty/3+date_allowance;
+        const auto variance=sigma*sigma+process;
+        if(clipped || !best.index || best.index==steps || best.snr<16 || best.chi>25 ||
+           !(best.score>1.5*side_best) || !std::isfinite(variance) || f<low_ || f>high_)return {};
         return {true,f,variance,selected_aperture,true,static_cast<unsigned>(best_model),cube};
     }
-    void accept_frequency(const FrequencyFit& fit) noexcept {
+    void accept_frequency(const FrequencyFit& fit,bool update_center=true) noexcept {
         // A model-change detector can fire inside this disjoint context. Its
         // frequency summary must not reintroduce support from the rejected
         // model; the independent local phase certificate remains available.
@@ -989,7 +1128,7 @@ private:
             result.frequency_local_aperture=true;result.coherent_aperture_seconds=aperture;
             result.frequency_support_seconds=aperture;result.frequency_precision_refined=qualified;
             result.qualified=result.frequency_covariance_valid && f>=200 && f<=c_.sample_rate/2.-200;
-            last_good_=next_;set_center(std::clamp(f,low_,high_));result.present=true;
+            last_good_=next_;if(update_center)set_center(std::clamp(f,low_,high_));result.present=true;
             return; // Never enter numeric cross-aperture pooling in this mode.
         }
         const auto common=(f-c_.expected_hz)/scale_;
@@ -1024,7 +1163,8 @@ private:
         rn_=retained;
         if(rn_==(c_.continuous_pilot?records:192)){std::move(r_.begin()+1,r_.begin()+rn_,r_.begin());--rn_;}
         const auto date=fit.dated?fit.sample:context_first_+(points*block_n_-1)/2;
-        r_[rn_++]={common,std::max(var/(scale_*scale_),1e-24),aperture,context_first_,next_-1,date,fit.dated?fit.sample_fraction:-1};
+        r_[rn_++]={common,std::max(var/(scale_*scale_),1e-24),aperture,context_first_,next_-1,date,
+            fit.dated?fit.sample_fraction:-1,fit.aperture_cube};
         last_good_=next_;
         // A context ending on an uninformative row may add independent dated
         // frequency evidence without replacing a still-qualified continuous
@@ -1032,7 +1172,7 @@ private:
         // later actual phase row, genuine reset or expiry decides its future.
         if(!retain_publication)pool();
         // Increment changes only at an independent context boundary.
-        set_center(std::clamp(f,low_,high_));result.present=true;
+        if(update_center)set_center(std::clamp(f,low_,high_));result.present=true;
     }
     double record_time(const Record& r,std::uint64_t now)const noexcept {
         if(r.sample_fraction>=0) {
@@ -1066,7 +1206,15 @@ private:
         // on this locally linear oscillator model, not a future drift lease.
         const auto inflate=std::max(1.,chisq/std::max<std::size_t>(1,rn_-(linear?2:1)));
         const auto uncertainty=3*std::sqrt(thermal*inflate)*std::abs(scale_);
-        const auto span=static_cast<double>(r_[rn_-1].last-r_[0].first+1)/c_.sample_rate;
+        double support=0;
+        for(std::size_t i=0;i<rn_;++i) {
+            // Independent accepted records never include elapsed time between
+            // windows. For a gap fit, its selected coherent side is a
+            // conservative lower bound on actual measured support.
+            const auto aperture=std::min(r_[i].aperture,
+                static_cast<double>(r_[i].last-r_[i].first+1)/c_.sample_rate);
+            support+=aperture;
+        }
         result.sample=now;result.first_sample=r_[0].first;result.frequency_hz=c_.expected_hz+frequency*scale_;
         result.frequency_rate_hz_per_second=slope*scale_;result.uncertainty_hz=uncertainty;
         const auto covariance_scale=inflate*scale_*scale_;
@@ -1079,7 +1227,10 @@ private:
             std::isfinite(result.frequency_rate_variance_hz2_per_second2);
         result.frequency_knowledge_valid=result.frequency_covariance_valid;
         result.frequency_model_expected_hz=c_.expected_hz;result.frequency_model_residual_scale=scale_;
-        result.coherent_aperture_seconds=r_[rn_-1].aperture;result.frequency_support_seconds=span;
+        result.coherent_aperture_seconds=r_[rn_-1].aperture;result.frequency_support_seconds=support;
+        // This field describes the newest independent context (including its
+        // two independently phased sides), not the pooled history cube.
+        result.frequency_aperture_cube_seconds3=r_[rn_-1].aperture_cube;
         result.frequency_precision_refined=rn_>=4;
         result.qualified=rn_>=4 && std::isfinite(uncertainty) &&
             std::abs(slope*scale_)<=c_.maximum_tracking_slew_hz_per_second+3*std::abs(scale_)/std::sqrt(std::max(tt,1e-30)) &&

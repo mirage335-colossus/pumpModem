@@ -771,9 +771,9 @@ void link_budget(Node& root, const planner::Model& model) {
                 11,Tone::muted,false,4);
             else if(!helper.status.empty())paragraph(n,helper.status,11,Tone::caution,false,4);
             if(helper.geometry_available) {
-                paragraph(n,"With FHSS off, both straight pilots retain amplitude and phase across dwell boundaries. Auxiliary boundary gates, shaped reversals and metadata transitions remain. Start/end transitions are shaped. Receiver acquisition, tracking and decoding for this waveform remain deferred.",
+                paragraph(n,"With FHSS off, both straight pilots retain amplitude and phase across dwell boundaries. Auxiliary boundary gates, shaped reversals and metadata transitions remain. Start/end transitions are shaped. Planner precision is a conditional model; measured pilot qualification and ordinary Robust reception remain runtime requirements.",
                     11,Tone::muted,false,4);
-                paragraph(n,"The strongest tone in the expected helper range supplies the real-time frequency reference for direct conversion. Robust acquisition waits while the helper is unavailable. Disable Helper Carrier to use ordinary oscillator search.",
+                paragraph(n,"The high pure pilot supplies the current frequency-reference forecast; the separate low-pilot calculation below is an ideal affine comparison, not a claim of two-pilot runtime qualification. Auxiliary metadata never qualifies frequency assistance. Disable Helper Carrier to use ordinary oscillator search.",
                     11,Tone::muted,false,4);
             }
             const auto& conditional=helper.conditional;
@@ -790,7 +790,7 @@ void link_budget(Node& root, const planner::Model& model) {
                     " Hz after 1 s";
                 if(reference.ideal_lead_half_width_hz)ideal+="; ±"+
                     number(*reference.ideal_lead_half_width_hz,4)+" Hz over the same "+
-                    number(reference.ideal_lead_observation_seconds,4)+" s physical lead";
+                    number(reference.ideal_lead_observation_seconds,4)+" s uninterrupted aperture at the36 s measurement boundary";
                 paragraph(n,ideal+". Identified uninterrupted constant tone in white noise; this theoretical reference is not an operational confidence interval or promised precision.",
                     11,Tone::muted,false,4);
             }
@@ -799,8 +799,23 @@ void link_budget(Node& root, const planner::Model& model) {
                 " from "+std::to_string(precision.retune_model.independent_apertures)+" separate "+
                 number(precision.retune_model.coherent_aperture_seconds,4)+
                 " s nominal assumed settled apertures at "+number(precision.retune_model.total_lead_seconds,4)+
-                " s total lead. The default392ms excludes only the4ms ramps on each side; actual RF settling can reduce usable support (for example,12ms settling leaves384ms). Information sums C/N0 × aperture³; unrelated retune phases cannot supply uninterrupted coherence. This is a theoretical reference, not measured coverage.",
+                " s within the measurement interval. The default392ms excludes only the4ms ramps on each side; actual RF settling can reduce usable support (for example,12ms settling leaves384ms). Information sums C/N0 × aperture³; unrelated retune phases cannot supply uninterrupted coherence. This is a theoretical reference, not measured coverage.",
                 11,Tone::muted,false,4);
+            if(reference.segmented_affine_scale_variance_ppm2&&
+               reference.segmented_affine_offset_variance_hz2&&
+               reference.segmented_affine_covariance_ppm_hz&&
+               reference.segmented_affine_data_half_width_hz) {
+                paragraph(n,"Two-pilot affine noise-only reference, using 90 matched independent-phase 392 ms apertures and the separate received low/high C/N0 values: 3σ audio-scale error ±"+
+                    number(3*std::sqrt(*reference.segmented_affine_scale_variance_ppm2),6)+
+                    " ppm; common audio-frequency displacement ±"+
+                    frequency(3*std::sqrt(*reference.segmented_affine_offset_variance_hz2))+
+                    "; Cov(scale, displacement)="+number(*reference.segmented_affine_covariance_ppm_hz,9)+
+                    " ppm·Hz. Propagated DATA-frequency reference at nominal "+
+                    frequency(model.inputs.options.modem.carrier_hz)+" audio is ±"+
+                    frequency(*reference.segmented_affine_data_half_width_hz)+
+                    " (3σ), retaining the scale/displacement covariance. The affine pair identifies only a combined audio scale and common displacement; it cannot separate transmitter and receiver clocks or identify RF offset independently. This noise-only calculation assumes independent low/high measurement errors; real shared oscillator, channel and retune errors need their measured cross-covariance.",
+                    11,Tone::muted,false,4);
+            }
             for(const auto* comparison:{&precision.pilot_model,&precision.retune_model}) {
                 if(!comparison->supported)continue;
                 const bool continuous=comparison->observation==helper::PilotObservationMode::continuous_phase;
@@ -815,13 +830,12 @@ void link_budget(Node& root, const planner::Model& model) {
                     (continuous?" (4× the uninterrupted constant-tone reference)":"")+
                     "; configured Brownian endpoint term ±"+frequency(comparison->brownian_endpoint_half_width_hz)+
                     ". Conditional clean-model estimate ±"+frequency(comparison->conditional_half_width_hz)+
-                    " at "+number(comparison->total_lead_seconds,4)+" s total lead, with +"+
-                    number(comparison->extra_lead_seconds,4)+" s extension of at most36 s. "+
-                    (comparison->target_reached?"Conditional ±0.1 Hz milestone predicted. ":"Conditional ±0.1 Hz milestone remains unmet. ")+
+                    " at "+number(comparison->total_lead_seconds,4)+" s from Helper onset within the fixed36 s measurement interval. "+
+                    (comparison->target_reached?"The model predicts the ±0.1 Hz milestone within that interval. ":"The model does not predict the ±0.1 Hz milestone within that interval. ")+
                     "Discovery/initial-support budget "+number(comparison->discovery_budget_seconds,4)+
                     " s is an explicit software assumption, not hidden baseline airtime or a qualification deadline. "+
                     comparison->reason+(continuous?
-                        ". This continuous model supplies the TX lead and existing conditional ordinary-receiver cost query; the cost comes from the actual receiver model, not interval-width ratios.":
+                        ". This continuous model supplies the conditional ordinary-receiver cost query; the cost comes from the receiver model, not interval-width ratios. The transmit lead is fixed independently of the forecast.":
                         ". This retune comparison assumes nominal settled support and compatible oscillator mapping; actual settling must be measured. It does not select the production lead or imply measured CPU savings."),
                     11,Tone::muted,false,4);
             }
@@ -832,26 +846,26 @@ void link_budget(Node& root, const planner::Model& model) {
                 frequency(precision.fallback_frequency_grid_hz)+
                 " frequency-grid padding per context. This all-context fallback allowance is conservative; strong straight fits can be better. It is not calibrated confidence or a physical precision floor. Runtime measured uncertainty remains authoritative; model competition, excess and observation availability require measurement.",
                 11,Tone::muted,false,4);
-            if(conditional.planned_lead_seconds>0)paragraph(n,
-                "Required baseline helper lead: "+number(precision.baseline_lead_seconds,4)+
-                " s; precision extension: "+number(precision.extra_lead_seconds,4)+
-                " s of at most 36 additional seconds; planned total: "+number(conditional.planned_lead_seconds,4)+
-                " s. Payload starts at the cap with achievable precision; elapsed lead does not grant runtime qualification.",
+            paragraph(n,
+                "Fixed Helper-only schedule: 36 s precision allowance plus the original 2 s baseline, for a 38-second total lead (95 × 400 ms dwells). The receiver requires 36 s after its own causal detection, leaving up to 2 s for initial detection. Late listeners must also wait 36 s and may miss the transmission. Brief fades do not restart that timer or provide measurement support. Measured precision must also qualify; elapsed time and this forecast do not grant admission.",
                 11,Tone::muted,false,4);
             if(precision.supported) {
-                paragraph(n,"Automatic helper precision lead: +"+number(precision.extra_lead_seconds,4)+
-                    " s extra; "+number(conditional.planned_lead_seconds,4)+" s total helper-only lead. "+
-                    (precision.target_reached?"Predicted ±0.1 Hz target reached.":
-                        precision.extension_capped?"36 s extra-lead cap reached; ±0.1 Hz target not reached.":
-                        "Predicted ±0.1 Hz target not reached.")+
-                    " Initial conditional planning-model half-width at payload start: "+frequency(conditional.uncertainty_hz)+"; measured uncertainty can be wider.",
-                    11,precision.target_reached?Tone::muted:Tone::caution,false,4);
+                const bool fixed_boundary_target=precision.sustained_supported&&
+                    precision.sustained_frequency_half_width_hz<=.1;
+                paragraph(n,"Fixed-schedule practical planning-model half-width at the36 s measurement boundary: "+
+                    (precision.sustained_supported?frequency(precision.sustained_frequency_half_width_hz):"Unavailable")+
+                    ". Predicted ±0.1 Hz eligibility at that boundary: "+
+                    (fixed_boundary_target?"yes":"no or unavailable")+
+                    (precision.target_reached?"; the conditional model first crosses the milestone by "+
+                        number(precision.total_lead_seconds,4)+" s from Helper onset":"; the conditional model does not cross the milestone within36 s")+
+                    ". This planning milestone does not determine the receiver's required search width; measured uncertainty and runtime qualification remain authoritative.",
+                    11,fixed_boundary_target?Tone::muted:Tone::caution,false,4);
                 paragraph(n,"Conditional planning-model precision: "+number(precision.usable_tone_seconds,4)+
                     " s usable straight tone across "+std::to_string(precision.expected_segments)+
                     " dated observations at "+std::to_string(conditional.physical_sample_rate)+
                     " raw samples/s. The unretuned pilot retains phase through publication windows; dwell ramps apply only with FHSS enabled. A Fake-FHSS calendar is not an actual RF retune. Auxiliary punctuation/metadata do not interrupt the pure pilot. Configured phase noise and the exact20ms Hann projection information loss are included. Runtime measured uncertainty remains authoritative; the prediction is not calibrated confidence or a physical precision floor. "+
                     precision.reason+" Prediction is not measured lock or a lock-probability forecast; planning-model precision is not an operational confidence interval. "
-                    "Unexpected noise, glitches or model mismatch can widen actual uncertainty.",11,Tone::muted,false,4);
+                    "The transmitter still uses the fixed 38-second lead. Unexpected noise, glitches or model mismatch can widen actual uncertainty.",11,Tone::muted,false,4);
                 if(model.bit_seconds>0)paragraph(n,
                     "Residual RF half-width: ±"+frequency(conditional.uncertainty_hz)+
                     "; one complete symbol's coherent half-bin scale is "+frequency(.5/model.bit_seconds)+
@@ -873,7 +887,7 @@ void link_budget(Node& root, const planner::Model& model) {
                     ". Robust waveform time remains "+planner::duration(model.send_seconds)+
                     "; helper lead/tail add startup and drain time without changing payload Rate or framing.",
                     11,Tone::muted,false,4);
-            } else paragraph(n,"Automatic helper precision lead prediction declined: "+
+            } else paragraph(n,"Helper precision prediction declined: "+
                 (precision.reason.empty()?conditional.reason:precision.reason)+
                 ". This is a limitation of the current forecast/estimator, not proof of a physical precision limit.",
                 11,Tone::caution,false,4);

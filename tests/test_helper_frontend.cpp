@@ -185,41 +185,41 @@ void realtime_retuning_preserves_phase() {
     check(!t.track_frequency(-10000),"helper update moved payload through DC");
     check(t.phase_at(at)==phase,"declined helper update changed phase");
 }
-void two_tone_frontend_removes_auxiliary_before_decimation() {
+void three_tone_frontend_removes_all_pilots_before_decimation() {
     using Frontend=live::detail::HelperInputFrontend;
-    constexpr std::uint32_t raw_rate=8000,logical_rate=2000;
+    constexpr std::uint32_t raw_rate=8000,logical_rate=4000;
     constexpr std::uint64_t origin=37;
-    constexpr double pilot=1650,data=500;
+    constexpr double pilot=2450,data=1500;
     modem::Config config;config.sample_rate=logical_rate;config.carrier_hz=data;
     config.bandwidth_hz=200;config.spreading_factor=16;config.pulse_shaping=false;
     helper::Reference reference;reference.sample_rate=raw_rate;reference.frequency_valid=true;
     reference.frequency_hz=pilot;reference.frequency_uncertainty_hz=.01;
     const auto grant=Frontend::reservation_bound(raw_rate,logical_rate,pilot);
     check(grant>Frontend::reservation_bound(raw_rate,logical_rate),
-          "two-tone physical notch did not prepay its one larger-rate FIR");
+          "three-tone physical notches did not prepay their one larger-rate FIR");
     check(!Frontend::logical_notch_supported(logical_rate,pilot) &&
           Frontend::logical_notch_supported(raw_rate,pilot) &&
           !Frontend::logical_notch_supported(raw_rate,625),
-          "notch placement omitted the group's lower auxiliary edge");
+          "notch placement omitted the fixed low/aux or high pilot band");
     struct Output {std::uint64_t first=0;std::vector<float> samples;};
     const auto collect=[&](bool helper_enabled,std::size_t chunk) {
         Frontend frontend(grant,71);frontend.admit_realtime(config,pilot,reference,raw_rate,3990,origin);
-        check(frontend.active() && frontend.bytes()<=grant,"safe two-tone physical view was not admitted");
+        check(frontend.active() && frontend.bytes()<=grant,"safe three-tone physical view was not admitted");
         Output result;std::uint64_t next=0;
         std::vector<float> input(3*raw_rate);
+        helper::Options helper_options;helper_options.power_w=40;helper_options.data_power_w=4;
+        helper_options.callsign="N0CALL";
+        helper::Plan helper_plan;helper_plan.frequency_hz=pilot;helper_plan.low_frequency_hz=550;
+        helper_plan.auxiliary_frequency_hz=950;helper_plan.helper_gain=.5;helper_plan.data_gain=0;
+        helper::Generator generator(helper_options,helper_plan,1800000000,true);
+        // Keep the same 0.6 high-pilot amplitude and DATA ratio as the
+        // original stress fixture, while using the real shaped auxiliary and
+        // compact metadata rather than an abrupt full-amplitude dwell reset.
+        const auto scale=.6/(helper_plan.helper_gain*helper::pilot_amplitude_fraction);
         for(std::size_t i=0;i<input.size();++i) {
             const auto t=static_cast<double>(origin+i)/raw_rate;
             double value=.02*std::cos(tau*data*t);
-            if(helper_enabled) {
-                // 90/10 power, with an independent shaped auxiliary reversal
-                // each dwell. Natural polarity alternation avoids a boundary flip.
-                const auto dwell=static_cast<std::uint64_t>(std::floor(t/.4));
-                const auto local=t-.4*dwell;
-                auto punctuation=local<.236?0.:local>=.244?std::numbers::pi:
-                    .5*std::numbers::pi*(1-std::cos(std::numbers::pi*(local-.236)/.008));
-                punctuation+=(dwell&1)?std::numbers::pi:0.;
-                value+=.6*std::cos(tau*pilot*t)+.2*std::cos(tau*(pilot-400)*t+punctuation);
-            }
+            if(helper_enabled)value+=scale*generator.mix(0,t,raw_rate);
             input[i]=static_cast<float>(value);
         }
         for(std::size_t at=0;at<input.size();) {
@@ -229,20 +229,20 @@ void two_tone_frontend_removes_auxiliary_before_decimation() {
             for(const auto& block:frontend.take(frontier,reference,end)) {
                 if(result.samples.empty())result.first=next=block.first_sample;
                 check(block.first_sample==next && block.raw_captured_end==end && block.view->budget_serial==71,
-                      "two-tone physical filtering changed sample dates, frontier or view identity");
+                      "three-tone physical filtering changed sample dates, frontier or view identity");
                 next+=block.samples.size();result.samples.insert(result.samples.end(),block.samples.begin(),block.samples.end());
             }
-            check(frontend.bytes()<=grant,"two-tone capture grew beyond its fixed workspace grant");
+            check(frontend.bytes()<=grant,"three-tone capture grew beyond its fixed workspace grant");
         }
         check(frontend.take(UINT64_MAX,reference,origin+input.size()).empty(),
-              "two-tone physical FIR published unobserved EOF samples");
+              "three-tone physical FIR published unobserved EOF samples");
         return result;
     };
     const auto baseline=collect(false,137),mixed=collect(true,137),chunked=collect(true,1024);
     check(baseline.first==mixed.first && mixed.first==chunked.first &&
           baseline.samples.size()==mixed.samples.size() && mixed.samples==chunked.samples,
-          "two-tone filtering changed payload count/dates or depended on input chunking");
-    check(mixed.samples.size()>2*logical_rate,"two-tone component did not retain a useful measured aperture");
+          "three-tone filtering changed payload count/dates or depended on input chunking");
+    check(mixed.samples.size()>2*logical_rate,"three-tone component did not retain a useful measured aperture");
     const auto begin=mixed.samples.size()-2*logical_rate;
     double interference=0;
     for(std::size_t i=begin;i<mixed.samples.size();++i) {
@@ -253,8 +253,8 @@ void two_tone_frontend_removes_auxiliary_before_decimation() {
     const auto gain=std::abs(projection(std::span<const float>(mixed.samples).subspan(begin),
         logical_rate,data,mixed.first+begin));
     check(leakage<.0005 && std::abs(gain-.02)<.0001,
-          "auxiliary/pilot aliases survived the single physical notch or corrupted DATA");
-    std::cout<<"two_tone_physical payload_gain="<<gain<<" helper_residual_rms="<<leakage
+          "a fixed pilot/auxiliary survived the shared FIR or corrupted DATA");
+    std::cout<<"three_tone_physical payload_gain="<<gain<<" helper_residual_rms="<<leakage
              <<" first="<<mixed.first<<" output_samples="<<mixed.samples.size()<<" workspace_grant="<<grant<<'\n';
 
     // The old pilot-only geometry looked safe at 1250 Hz. Its new auxiliary
@@ -273,23 +273,97 @@ void raw_notch_domain_includes_clock_scaled_auxiliary() {
     const auto domain=live::detail::raw_helper_notch_domain(config,2500,3990,.0003);
     const auto bands=live::detail::raw_helper_notch_bands(domain,{2499.8,2500.2});
     check(domain.valid && bands.valid && bands.data.lower_hz==0,
-          "two-tone raw domain lost the complete folded DATA image");
+          "three-tone raw domain lost the complete folded DATA image");
     for(const auto clock:{domain.one_plus_clock.lower,1.,domain.one_plus_clock.upper})
-        for(const auto hz:{2499.8,2500.2})for(const auto edge:{-550.,150.}) {
+        for(const auto hz:{2499.8,2500.2})for(const auto edge:{-2100.,-1400.,-150.,150.}) {
             const auto truth=hz+edge*clock;
             check(bands.helper.lower_hz<=truth && truth<=bands.helper.upper_hz,
-                  "raw stopband omitted an original-clock auxiliary/pilot boundary");
+                  "raw stopbands omitted an original-clock three-tone boundary");
+            const auto& protected_band=bands.pilots[edge < -150?0:1];
+            check(protected_band.lower_hz<=truth && truth<=protected_band.upper_hz,
+                  "individual protected stopband omitted its clock-scaled boundary");
         }
-    check(bands.helper.lower_hz<1950 && bands.helper.upper_hz>2650,
-          "raw notch still certified only the old pilot metadata band");
+    check(bands.helper.lower_hz<400 && bands.helper.upper_hz>2650,
+          "raw notch did not include the complete fixed three-tone group");
+}
+void translated_three_tone_certifies_clock_and_tracking() {
+    using Frontend=live::detail::HelperInputFrontend;
+    constexpr std::uint32_t raw_rate=8000,logical_rate=4000;
+    constexpr double pilot=2450;
+    modem::Config config;config.sample_rate=logical_rate;config.carrier_hz=1500;
+    config.bandwidth_hz=200;config.spreading_factor=16;config.pulse_shaping=false;
+    config.oscillator_search=modem::OscillatorSearchConfig{{100,.5},{1,.1},30000000,3,
+        modem::OscillatorReference::independent_audio,modem::OscillatorSideband::upper};
+    helper::Reference reference;reference.sample_rate=raw_rate;reference.frequency_valid=true;
+    reference.frequency_hz=pilot+12;reference.frequency_uncertainty_hz=.01;
+    const auto grant=Frontend::reservation_bound(raw_rate,logical_rate,pilot);
+    Frontend frontend(grant);frontend.admit_realtime(config,pilot,reference,raw_rate,3990,0);
+    check(frontend.active() && !frontend.reference_passthrough(),
+          "clock-scaled three-tone fixture did not establish a corrected view");
+    reference.frequency_hz+=2;
+    check(frontend.track_frequency(reference,pilot),
+          "corrected frontend declined a measured high-pilot change with certified clock-scaled bands");
+    const auto bytes=frontend.bytes();
+    auto too_wide=reference;too_wide.frequency_uncertainty_hz=60;
+    check(!frontend.track_frequency(too_wide,pilot) && frontend.bytes()==bytes,
+          "unsafe translated frequency support was accepted or changed fixed storage");
+    // A broad audio-clock domain can move the low group towards the cutoff
+    // even when the high pilot itself is precise. It must not be certified
+    // using the high-pilot uncertainty alone.
+    config.oscillator_search->lf.accuracy_ppm=9000;
+    Frontend unsafe(grant);bool certificate_declined=false;
+    try {unsafe.admit_realtime(config,pilot,reference,raw_rate,3990,0);}
+    catch(const Error& error) {
+        certificate_declined=std::string_view(error.what()).find(
+            "translated helper filter cannot certify the clock-scaled DATA and helper bands")!=std::string_view::npos;
+    }
+    check(certificate_declined && !unsafe.active(),
+          "clock-scaled low-pilot transition was not declined by the translated filter certificate");
+}
+void translated_override_preserves_dates_without_phase_authority() {
+    using Frontend=live::detail::HelperInputFrontend;
+    constexpr std::uint32_t raw_rate=8000,logical_rate=4000;
+    constexpr double pilot=2450;
+    modem::Config config;config.sample_rate=logical_rate;config.carrier_hz=1500;
+    config.bandwidth_hz=200;config.spreading_factor=16;config.pulse_shaping=false;
+    config.oscillator_search=modem::OscillatorSearchConfig{{.001,.1},{0,0},30000000,3,
+        modem::OscillatorReference::independent_audio,modem::OscillatorSideband::upper};
+    helper::Reference reference;reference.sample_rate=raw_rate;reference.frequency_valid=true;
+    reference.frequency_hz=pilot+.001;reference.frequency_uncertainty_hz=.002;
+    constexpr double utc=.000000003;
+    check(modem::helper_reference_prefers_original_prior(config,reference.frequency_uncertainty_hz,pilot,utc,
+        modem::HelperReferenceClockRelation::common_corrected_source,reference.frequency_hz-pilot),
+        "fixture did not exercise the preferred original basis");
+    Frontend frontend(Frontend::reservation_bound(raw_rate,logical_rate,pilot),314);
+    frontend.admit_realtime(config,pilot,reference,raw_rate,3990,0,utc,false);
+    check(frontend.active() && !frontend.original_prior_retained() && !frontend.reference_passthrough(),
+        "explicit translated input failed to override the original preference");
+    check(std::abs(frontend.current_correction_hz()+.001)<1e-9,
+        "translated override did not execute the measured nonzero NCO correction");
+    std::vector<float> input(raw_rate/2);
+    for(std::size_t i=0;i<input.size();++i)input[i]=static_cast<float>(.1*std::cos(tau*1500*i/raw_rate));
+    std::uint64_t output_end=0;bool observed=false;
+    for(std::size_t at=0;at<input.size();) {
+        const auto n=std::min<std::size_t>(137,input.size()-at);
+        frontend.push(std::span<const float>(input).subspan(at,n),at);at+=n;
+        const auto frontier=static_cast<std::uint64_t>(at)*logical_rate/raw_rate;
+        for(const auto& block:frontend.take(frontier,reference,at)) {
+            if(observed)check(block.first_sample==output_end,"translated override broke output dates");
+            observed=true;output_end=block.first_sample+block.samples.size();
+            check(block.raw_captured_end==at && !block.common_phase_corrected,
+                "frequency-only frontend manufactured later capture or phase authority");
+        }
+    }
+    check(observed,"translated override did not emit dated observed input");
 }
 }
 int main() {
     try {
         coarse_seed_is_wide_bounded_and_source_independent();coarse_noise_has_no_persistent_peak();
         translation_removes_offset_without_a_mixer_image();capture_limits_and_exact_delay();
-        realtime_retuning_preserves_phase();two_tone_frontend_removes_auxiliary_before_decimation();
-        raw_notch_domain_includes_clock_scaled_auxiliary();
+        realtime_retuning_preserves_phase();three_tone_frontend_removes_all_pilots_before_decimation();
+        raw_notch_domain_includes_clock_scaled_auxiliary();translated_three_tone_certifies_clock_and_tracking();
+        translated_override_preserves_dates_without_phase_authority();
         std::cout<<"helper coarse discovery and analytic frequency translation passed\n";return 0;
     }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

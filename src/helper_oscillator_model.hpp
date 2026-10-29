@@ -60,6 +60,10 @@ struct IndependentFrequencyAperture {
     // Mandatory for positive acceleration PSD. Q0 accepts an existing dated
     // frequency mean without kernel process moments; C and Rprocess are zero.
     std::optional<FrequencyApertureProcessMoments> process_moments;
+    // Explicit independent, nonoverlapping measurement windows may advance
+    // within one physical phase segment. Zero preserves the original one-fit
+    // per-retune rule. This identity never manufactures another retune.
+    std::uint64_t independent_window=0;
 };
 enum class OscillatorModelReason { accepted,invalid_configuration,invalid_mapping,
     invalid_measurement,overlapping_support,reused_phase_segment,timebase_changed,reference_changed,
@@ -84,7 +88,10 @@ class OscillatorFrequencyModel {
     using Matrix=std::array<Vector,4>;
     struct Visit {double rf=0;int sideband=1;std::size_t count=0;};
     struct NumericAperture {
-        Vector row{};double observed=0,variance=0,aperture=0;
+        std::array<Vector,2> row{};
+        std::array<double,2> observed{},variance{};
+        std::size_t count=1;
+        double aperture=0;
         std::uint64_t first=0,end=0;
         FrequencyApertureProcessMoments moments{};
     };
@@ -103,41 +110,91 @@ public:
         covariance_=initial_covariance();valid_=finite(state_,covariance_);return valid_;
     }
     OscillatorModelReason observe(const IndependentFrequencyAperture& input,std::uint64_t captured_end_sample)noexcept {
+        return observe_packet(input,nullptr,captured_end_sample);
+    }
+    // One atomic two-pilot update. Both independent thermal observations share
+    // the SAME actual support and effective frequency kernel. The common
+    // oscillator process and retune error retain their off-diagonal covariance.
+    OscillatorModelReason observe_pair(const IndependentFrequencyAperture& high,
+            const IndependentFrequencyAperture& low,std::uint64_t captured_end_sample)noexcept {
+        return observe_packet(high,&low,captured_end_sample);
+    }
+private:
+    static bool same_kernel(const FrequencyApertureProcessMoments& a,const FrequencyApertureProcessMoments& b)noexcept {
+        return a.valid==b.valid&&a.first_sample==b.first_sample&&a.end_sample==b.end_sample&&
+            a.state_endpoint_sample==b.state_endpoint_sample&&a.mass==b.mass&&a.mu_seconds==b.mu_seconds&&
+            a.integral_k_seconds2==b.integral_k_seconds2&&
+            a.integral_b_minus_s_k_seconds3==b.integral_b_minus_s_k_seconds3&&
+            a.integral_k_squared_seconds3==b.integral_k_squared_seconds3&&
+            a.k_at_end_seconds==b.k_at_end_seconds&&a.k_prime_at_end==b.k_prime_at_end;
+    }
+    bool valid_aperture(const IndependentFrequencyAperture& input,std::uint64_t captured_end,
+            FrequencyApertureProcessMoments& moments)const noexcept {
+        const auto& m=input.mapping;
+        return input.first_sample<input.end_sample&&input.first_sample>=m.settled_first_sample&&
+            input.end_sample<=m.settled_end_sample&&input.end_sample<=captured_end&&
+            input.sample>=input.first_sample&&input.sample<input.end_sample&&
+            std::isfinite(input.sample_fraction)&&input.sample_fraction>=0&&input.sample_fraction<1&&
+            std::isfinite(input.frequency_hz)&&std::isfinite(input.variance_hz2)&&input.variance_hz2>0&&
+            std::isfinite(input.coherent_aperture_seconds)&&input.coherent_aperture_seconds>0&&
+            input.coherent_aperture_seconds<=static_cast<double>(input.end_sample-input.first_sample)/m.sample_rate+1e-12&&
+            measurement_moments(input,moments);
+    }
+    OscillatorModelReason observe_packet(const IndependentFrequencyAperture& input,
+            const IndependentFrequencyAperture* low,std::uint64_t captured_end_sample)noexcept {
         if(!valid_)return OscillatorModelReason::invalid_configuration;
         if(!mapping_valid(input.mapping))return OscillatorModelReason::invalid_mapping;
         const auto& m=input.mapping;
-        if(input.first_sample>=input.end_sample||input.first_sample<m.settled_first_sample||input.end_sample>m.settled_end_sample||
-            input.end_sample>captured_end_sample||input.sample<input.first_sample||input.sample>=input.end_sample||
-            !std::isfinite(input.sample_fraction)||input.sample_fraction<0||input.sample_fraction>=1||
-            !std::isfinite(input.frequency_hz)||!std::isfinite(input.variance_hz2)||input.variance_hz2<=0||
-            !std::isfinite(input.coherent_aperture_seconds)||input.coherent_aperture_seconds<=0||
-            input.coherent_aperture_seconds>static_cast<double>(input.end_sample-input.first_sample)/m.sample_rate+1e-12)
-            return OscillatorModelReason::invalid_measurement;
         FrequencyApertureProcessMoments moments;
-        if(!measurement_moments(input,moments))return OscillatorModelReason::invalid_measurement;
+        if(!valid_aperture(input,captured_end_sample,moments))return OscillatorModelReason::invalid_measurement;
+        if(low) {
+            const auto& l=low->mapping;
+            if(!mapping_valid(l)||l.capture_generation!=m.capture_generation||l.timebase_identity!=m.timebase_identity||
+               l.reference_identity!=m.reference_identity||l.sample_rate!=m.sample_rate||l.phase_segment!=m.phase_segment||
+               l.settled_first_sample!=m.settled_first_sample||l.settled_end_sample!=m.settled_end_sample||
+               l.actual_rf_shift_hz!=m.actual_rf_shift_hz||l.sideband_sign!=m.sideband_sign||l.mono_image_sign!=m.mono_image_sign||
+               l.data_audio_hz!=m.data_audio_hz||l.provenance!=m.provenance||l.helper_audio_hz==m.helper_audio_hz)
+                return OscillatorModelReason::invalid_mapping;
+            FrequencyApertureProcessMoments lower_moments;
+            if(!valid_aperture(*low,captured_end_sample,lower_moments)||
+               low->first_sample!=input.first_sample||low->end_sample!=input.end_sample||
+               low->sample!=input.sample||low->sample_fraction!=input.sample_fraction||
+               low->coherent_aperture_seconds!=input.coherent_aperture_seconds||
+               low->independent_window!=input.independent_window||!same_kernel(moments,lower_moments))
+                return OscillatorModelReason::invalid_measurement;
+        }
         if(have_) {
             if(m.capture_generation!=mapping_.capture_generation||m.timebase_identity!=mapping_.timebase_identity||m.sample_rate!=mapping_.sample_rate)
                 return OscillatorModelReason::timebase_changed;
             if(m.reference_identity!=mapping_.reference_identity)return OscillatorModelReason::reference_changed;
             if(input.first_sample<last_end_)return OscillatorModelReason::overlapping_support;
-            if(m.phase_segment<=mapping_.phase_segment)return OscillatorModelReason::reused_phase_segment;
+            if(m.phase_segment<mapping_.phase_segment || (m.phase_segment==mapping_.phase_segment&&
+               (!last_window_||!input.independent_window||input.independent_window<=last_window_)))
+                return OscillatorModelReason::reused_phase_segment;
             if(!transition_valid(m))return OscillatorModelReason::invalid_mapping;
         }
         const auto endpoint=input.end_sample-1;
         auto state=state_;auto covariance=covariance_;
-        // The initial prior is at the FIRST aperture's START. Advancing to its
-        // observed endpoint supplies the very process shared by C and Rprocess.
         const auto prior_sample=have_?sample_:input.first_sample;
         if(!advance(state,covariance,seconds(endpoint,prior_sample,m.sample_rate)))return OscillatorModelReason::numeric_failure;
-        auto h=row(m,m.helper_audio_hz);h[2]=-h[0]*moments.mu_seconds;h[3]=-h[1]*moments.mu_seconds;
-        const auto noise=observation_noise(h,moments);
+        NumericAperture newest;newest.first=input.first_sample;newest.end=input.end_sample;
+        newest.aperture=input.coherent_aperture_seconds;newest.moments=moments;newest.count=low?2:1;
+        for(std::size_t n=0;n<newest.count;++n) {
+            const auto& a=n?*low:input;auto h=row(a.mapping,a.mapping.helper_audio_hz);
+            h[2]=-h[0]*moments.mu_seconds;h[3]=-h[1]*moments.mu_seconds;
+            newest.row[n]=h;newest.observed[n]=a.mapping.mono_image_sign*a.frequency_hz-a.mapping.helper_audio_hz;
+            newest.variance[n]=a.variance_hz2;
+        }
+        // Repeat-visit scatter is one common RF-frequency nuisance per actual
+        // retune, estimated once from the high row, never once per pilot/window.
+        const auto& h=newest.row[0];const auto noise=observation_noise(h,moments);
         const auto ph=multiply(covariance,h);
         const auto model_variance=dot(h,ph)+2*dot(h,noise.cross)+noise.process_variance;
-        const auto observed=m.mono_image_sign*input.frequency_hz-m.helper_audio_hz;
-        const auto innovation=observed-dot(h,state);
+        const auto innovation=newest.observed[0]-dot(h,state);
         auto visits=visits_;auto repeats=repeat_visits_;auto scatter=excess_scatter_estimate_hz2_;
         const auto slot=visit_slot(visits,m.actual_rf_shift_hz,m.sideband_sign);
-        if(visits[slot].count&&have_&&m.phase_segment!=mapping_.phase_segment) {
+        const bool new_phase=!have_||m.phase_segment!=mapping_.phase_segment;
+        if(visits[slot].count&&have_&&new_phase) {
             ++repeats;
             if(config_.learn_repeat_visit_scatter) {
                 const auto excess=innovation*innovation-model_variance-input.variance_hz2-config_.retune_variance_floor_hz2;
@@ -145,33 +202,31 @@ public:
                 scatter=std::fma(weight,excess-scatter,scatter);
             }
         }
-        ++visits[slot].count;
+        if(new_phase)++visits[slot].count;
         const auto retune=config_.retune_variance_floor_hz2+std::max(0.,scatter);
-        const NumericAperture newest{h,observed,input.variance_hz2,input.coherent_aperture_seconds,input.first_sample,input.end_sample,moments};
-        // Reweight bounded NUMERIC rows when unexplained variance increases;
-        // no PCM replay, frequency search, or36-second knowledge expiry.
         const bool drop_oldest=history_count_==history_capacity;
         if(drop_oldest||retune>config_.retune_variance_floor_hz2+std::max(0.,excess_scatter_estimate_hz2_)) {
             state={};covariance=initial_covariance();auto previous=have_?origin_sample_:input.first_sample;
             for(std::size_t n=drop_oldest?1:0;n<history_count_;++n) {
                 const auto& saved=history_[(history_head_+n)%history_capacity];
                 if(!advance(state,covariance,seconds(saved.end-1,previous,m.sample_rate))||
-                    !update(state,covariance,saved.row,saved.observed,saved.variance+retune,observation_noise(saved.row,saved.moments)))
-                    return OscillatorModelReason::numeric_failure;
+                    !update_packet(state,covariance,saved,retune))return OscillatorModelReason::numeric_failure;
                 previous=saved.end-1;
             }
             if(!advance(state,covariance,seconds(endpoint,previous,m.sample_rate))||
-                !update(state,covariance,h,observed,input.variance_hz2+retune,noise))return OscillatorModelReason::numeric_failure;
-        } else if(!update(state,covariance,h,observed,input.variance_hz2+retune,noise))return OscillatorModelReason::numeric_failure;
+                !update_packet(state,covariance,newest,retune))return OscillatorModelReason::numeric_failure;
+        } else if(!update_packet(state,covariance,newest,retune))return OscillatorModelReason::numeric_failure;
         if(!have_)origin_sample_=input.first_sample;
         if(drop_oldest){history_head_=(history_head_+1)%history_capacity;--history_count_;}
         history_[(history_head_+history_count_)%history_capacity]=newest;++history_count_;
         first_=history_[history_head_].first;aperture_=0;aperture_cube_=0;
         for(std::size_t n=0;n<history_count_;++n){const auto t=history_[(history_head_+n)%history_capacity].aperture;aperture_+=t;aperture_cube_+=t*t*t;}
         state_=state;covariance_=covariance;sample_=endpoint;
-        last_end_=input.end_sample;mapping_=m;have_=true;visits_=visits;repeat_visits_=repeats;excess_scatter_estimate_hz2_=scatter;++measurements_;
+        last_end_=input.end_sample;last_window_=input.independent_window;mapping_=m;have_=true;visits_=visits;
+        repeat_visits_=repeats;excess_scatter_estimate_hz2_=scatter;++measurements_;
         return OscillatorModelReason::accepted;
     }
+public:
     OscillatorFrequencyPrediction predict(const LinkMapping& m,std::uint64_t at_sample)const noexcept {
         OscillatorFrequencyPrediction out;
         if(!valid_){out.reason=OscillatorModelReason::invalid_configuration;return out;}
@@ -243,6 +298,55 @@ private:
     static Vector multiply(const Matrix& a,const Vector& b)noexcept{Vector out{};for(std::size_t i=0;i<4;++i)out[i]=dot(a[i],b);return out;}
     static bool finite(const Vector& x,const Matrix& p)noexcept{for(std::size_t i=0;i<4;++i){if(!std::isfinite(x[i])||!std::isfinite(p[i][i])||p[i][i]<0)return false;for(double v:p[i])if(!std::isfinite(v))return false;}return true;}
     Matrix initial_covariance()const noexcept {Matrix out{};const Vector sigma{config_.rf_prior_sigma_ppm,config_.topology==LinkTopology::shared_radio?0:config_.audio_prior_sigma_ppm,config_.rf_drift_prior_sigma_ppm_per_second,config_.topology==LinkTopology::shared_radio?0:config_.audio_drift_prior_sigma_ppm_per_second};for(std::size_t i=0;i<4;++i)out[i][i]=sigma[i]*sigma[i];return out;}
+    bool update_packet(Vector& state,Matrix& covariance,const NumericAperture& packet,double retune)const noexcept {
+        if(packet.count==1)return update(state,covariance,packet.row[0],packet.observed[0],
+            packet.variance[0]+retune,observation_noise(packet.row[0],packet.moments));
+        if(packet.count!=2)return false;
+        // Work in high / (low-high) coordinates. This invertible transform
+        // cancels the large common RF coefficient in the difference and keeps
+        // the 2x2 solve conditioned without discarding any covariance.
+        std::array<Vector,2> h{packet.row[0],{}},cross{};
+        for(std::size_t i=0;i<4;++i)h[1][i]=packet.row[1][i]-packet.row[0][i];
+        for(std::size_t n=0;n<2;++n)cross[n]=observation_noise(h[n],packet.moments).cross;
+        std::array<std::array<long double,2>,2> r{},innovation_covariance{},inverse{};
+        r[0][0]=packet.variance[0]+retune;r[0][1]=r[1][0]=-packet.variance[0];
+        r[1][1]=packet.variance[0]+packet.variance[1];
+        for(std::size_t a=0;a<2;++a)for(std::size_t b=0;b<2;++b)
+            for(std::size_t coordinate=0;coordinate<2;++coordinate)
+                r[a][b]+=static_cast<long double>(h[a][coordinate])*h[b][coordinate]*q(coordinate)*packet.moments.integral_k_squared_seconds3;
+        std::array<Vector,2> ph{};
+        for(std::size_t n=0;n<2;++n)ph[n]=multiply(covariance,h[n]);
+        for(std::size_t a=0;a<2;++a)for(std::size_t b=0;b<2;++b)
+            innovation_covariance[a][b]=dot(h[a],ph[b])+dot(h[a],cross[b])+dot(h[b],cross[a])+r[a][b];
+        const auto determinant=innovation_covariance[0][0]*innovation_covariance[1][1]-
+            innovation_covariance[0][1]*innovation_covariance[1][0];
+        if(!(innovation_covariance[0][0]>0)||!(innovation_covariance[1][1]>0)||!(determinant>0)||!std::isfinite(determinant))return false;
+        inverse[0][0]=innovation_covariance[1][1]/determinant;
+        inverse[1][1]=innovation_covariance[0][0]/determinant;
+        inverse[0][1]=-innovation_covariance[0][1]/determinant;inverse[1][0]=-innovation_covariance[1][0]/determinant;
+        std::array<std::array<long double,2>,4> gain{};
+        const std::array<double,2> observed{packet.observed[0],packet.observed[1]-packet.observed[0]};
+        const std::array<double,2> innovation{observed[0]-dot(h[0],state),observed[1]-dot(h[1],state)};
+        for(std::size_t i=0;i<4;++i)for(std::size_t a=0;a<2;++a)
+            for(std::size_t b=0;b<2;++b)gain[i][a]+=(static_cast<long double>(ph[b][i])+cross[b][i])*inverse[b][a];
+        for(std::size_t i=0;i<4;++i)for(std::size_t a=0;a<2;++a)state[i]+=static_cast<double>(gain[i][a]*innovation[a]);
+        std::array<std::array<long double,4>,4> a{},next{};
+        std::array<std::array<long double,2>,4> ac{};
+        for(std::size_t i=0;i<4;++i)for(std::size_t j=0;j<4;++j) {
+            a[i][j]=i==j?1.L:0.L;for(std::size_t n=0;n<2;++n)a[i][j]-=gain[i][n]*h[n][j];
+        }
+        for(std::size_t i=0;i<4;++i)for(std::size_t n=0;n<2;++n)
+            for(std::size_t j=0;j<4;++j)ac[i][n]+=a[i][j]*cross[n][j];
+        for(std::size_t i=0;i<4;++i)for(std::size_t j=0;j<4;++j) {
+            for(std::size_t k=0;k<4;++k)for(std::size_t l=0;l<4;++l)next[i][j]+=a[i][k]*covariance[k][l]*a[j][l];
+            for(std::size_t u=0;u<2;++u) {
+                next[i][j]-=ac[i][u]*gain[j][u]+gain[i][u]*ac[j][u];
+                for(std::size_t v=0;v<2;++v)next[i][j]+=gain[i][u]*r[u][v]*gain[j][v];
+            }
+        }
+        for(std::size_t i=0;i<4;++i)for(std::size_t j=0;j<4;++j)covariance[i][j]=static_cast<double>((next[i][j]+next[j][i])/2);
+        return finite(state,covariance);
+    }
     static bool update(Vector& state,Matrix& covariance,const Vector& h,double observed,double independent_variance,const ObservationNoise& noise)noexcept {
         const auto ph=multiply(covariance,h);
         const auto variance=dot(h,ph)+2*dot(h,noise.cross)+independent_variance+noise.process_variance;
@@ -267,7 +371,7 @@ private:
         auto at=std::min_element(visits.begin(),visits.end(),[](const auto& a,const auto& b){return a.count<b.count;});const auto i=static_cast<std::size_t>(at-visits.begin());visits[i]={rf,sideband,0};return i;
     }
     OscillatorFrequencyModelConfig config_{};Vector state_{};Matrix covariance_{};LinkMapping mapping_{};std::array<Visit,16> visits_{};
-    std::uint64_t sample_=0,first_=0,last_end_=0,origin_sample_=0;double aperture_=0,aperture_cube_=0,excess_scatter_estimate_hz2_=0;
+    std::uint64_t sample_=0,first_=0,last_end_=0,origin_sample_=0,last_window_=0;double aperture_=0,aperture_cube_=0,excess_scatter_estimate_hz2_=0;
     std::array<NumericAperture,history_capacity> history_{};std::size_t history_head_=0,history_count_=0,measurements_=0,repeat_visits_=0;bool valid_=false,have_=false;
 };
 }

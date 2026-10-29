@@ -111,12 +111,21 @@ std::optional<double> helper_ideal_tone_half_width(double cn0_db_hz,double obser
 // sum of C/N0*T_i^3, rather than the cube of elapsed time or total tone time.
 std::optional<double> helper_segmented_tone_half_width(double cn0_db_hz,
     std::span<const double> coherent_apertures_seconds) noexcept;
+std::optional<double> helper_affine_data_half_width(double low_hz,double high_hz,
+    double data_hz,double low_width_hz,double high_width_hz) noexcept;
 struct HelperPrecisionReference {
     double cn0_db_hz=0,phase_noise_radians_per_sqrt_second=0;
     // An acceptance guard, not a physical oscillator-drift prior.
     double maximum_tracking_slew_hz_per_second=0,maximum_source_capture_ratio=1;
     std::optional<double> ideal_one_second_half_width_hz,ideal_lead_half_width_hz;
     std::optional<double> segmented_lead_half_width_hz;
+    // Noise-only independent low/high pilot errors over matched apertures.
+    // The scale/offset covariance and propagated DATA residual are conditional
+    // planning references; runtime must retain measured cross-covariance.
+    std::optional<double> segmented_affine_scale_variance_ppm2;
+    std::optional<double> segmented_affine_offset_variance_hz2;
+    std::optional<double> segmented_affine_covariance_ppm_hz;
+    std::optional<double> segmented_affine_data_half_width_hz;
     double ideal_lead_observation_seconds=0;
     double coherent_aperture_seconds=0,estimator_efficiency=1;
 };

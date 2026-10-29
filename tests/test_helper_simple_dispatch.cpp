@@ -1,6 +1,7 @@
 #include "datapump/pattern_correlator.hpp"
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_pulse.hpp"
+#include "../src/live_helper_measurement_admission.hpp"
 #include <algorithm>
 #include <complex>
 #include <iostream>
@@ -10,6 +11,35 @@
 using namespace datapump;
 namespace {
 void check(bool v,const char* s){if(!v)throw Error(s);}
+void measured_admission_boundary() {
+    live::detail::HelperMeasurementAdmission gate;
+    constexpr std::uint32_t raw_rate=48000,logical_rate=6000;
+    constexpr std::uint64_t origin=137;
+    check(!gate.ready(100000000,logical_rate),"elapsed capture without a pilot authorized admission");
+    check(!gate.observe(origin,origin+960,origin+959,raw_rate,true),"future pilot support started observation");
+    check(!gate.observe(origin,origin+960,origin+960,raw_rate,false),"unqualified pilot started observation");
+    check(gate.observe(origin,origin+960,origin+960,raw_rate,true),"accepted pilot did not start observation");
+    const auto detection=origin+960; // Last sample needed to causally detect presence.
+    const auto deadline=36ULL*logical_rate+138; // ceil((137+960) / 8).
+    check(gate.deadline(logical_rate)==deadline && !gate.ready(deadline-1,logical_rate) &&
+        gate.ready(deadline,logical_rate),"measurement boundary was rounded early or extended");
+    check(!gate.observe(origin+10000,origin+11000,origin+11000,raw_rate,false) &&
+        gate.first_sample()==detection,"brief fade restarted or renewed the measurement origin");
+    check(gate.observe(origin+20000,origin+21000,origin+21000,raw_rate,true) &&
+        gate.first_sample()==detection,"reacquisition restarted the minimum interval");
+    // Hardware queue rebases the Bank at a nonzero source origin; its view
+    // date stays global for the timer and maps once to the local frontier.
+    const auto source_origin=20ULL*logical_rate;
+    check(!live::detail::HelperMeasurementAdmission::local_sample(source_origin-1,source_origin) &&
+        live::detail::HelperMeasurementAdmission::local_sample(deadline,source_origin)==deadline-source_origin &&
+        !gate.ready(deadline-1,logical_rate) && gate.ready(deadline,logical_rate),
+        "nonzero capture origin altered the dated observation boundary");
+    gate.reset();
+    check(!gate.ready(deadline,logical_rate),"capture reset retained old admission authority");
+    check(gate.observe(50ULL*raw_rate,51ULL*raw_rate,51ULL*raw_rate,raw_rate,true) &&
+        !gate.ready(86ULL*logical_rate,logical_rate) && gate.ready(87ULL*logical_rate,logical_rate),
+        "late listening bypassed the required local observation interval");
+}
 modem::Config config(double seconds=1) {
     modem::Config c;c.sample_rate=256;c.carrier_hz=64;c.bandwidth_hz=8;c.spreading_factor=8;
     c.integration_seconds=seconds;c.pattern_symbols=true;c.constellation_bits=1;c.scramble=true;c.dsss=true;
@@ -147,4 +177,4 @@ void repeated_true_current_window() {
     std::cout<<"repeated true/current .075/.02/.01 windows, exact8bits/prefix/identity/pending/END and work equality passed\n";
 }
 }
-int main(){try{plain_128();payload();repeated_true_current_window();std::cout<<"plain compact dispatch and exact payload/END passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+int main(){try{measured_admission_boundary();plain_128();payload();repeated_true_current_window();std::cout<<"measured admission, plain compact dispatch and exact payload/END passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

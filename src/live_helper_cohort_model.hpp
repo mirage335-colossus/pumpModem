@@ -109,15 +109,15 @@ inline std::optional<double> helper_cohort_discovery_radius(const modem::Config&
     const auto radius=sum(product(p.rf_shift_hz,rf).upper,product(std::abs(expected),std::max(a,b)).upper).upper;
     return std::isfinite(radius)?std::optional<double>{radius}:std::nullopt;
 }
-// Match the actual narrow observer constructor and the cohort's admission
-// gate. A larger union is only a coarse discovery request; no +/-100-Hz
-// observer or unavailable independent wide-input path is silently expanded.
+// The admission gate must cover both the ordinary requested range and the
+// oscillator-derived Helper range. Actual observed capture and source-domain
+// checks still apply independently; this value does not create a wider input.
 inline double helper_cohort_tracker_radius(const modem::Config& c,double expected,
         double original_request,bool ordinary_utc_steering) noexcept {
     if(!std::isfinite(original_request) || original_request<0)return 0;
-    auto radius=std::min(100.,original_request);
+    auto radius=original_request;
     if(const auto discovery=helper_cohort_discovery_radius(c,expected,ordinary_utc_steering))
-        radius=std::max(radius,std::min(100.,*discovery));
+        radius=std::max(radius,*discovery);
     return radius;
 }
 }

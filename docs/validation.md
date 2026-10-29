@@ -1,15 +1,317 @@
 # Validation status
 
-Updated 28 October 2026. This page records current qualification, release status,
+Updated 29 October 2026. This page records current qualification, release status,
 coverage limits and useful historical anchors. It is not a session log. Replace
 superseded status here; keep one latest [resource snapshot](ci-resource-results.json)
 and use Git history for comparisons. Detailed studies remain in the
 [evidence index](indexes/evidence.md).
 
+## Three-tone Helper Carrier implementation checkpoint
+
+The current 29 October development GUI is `build/dev/datapump-gui`, SHA-256
+`5bbda8df61e16e6e6e956a04356205344ceaba06901724cc63e36a045b53dac6`;
+`build/dev/pump` is
+`6441b4531c0cc91bfae432b43c59e7237fb4c5800c823511345029126fd2b5c7`.
+Both were built from HEAD `1e21a364bb09f602325e66027c926cbd70b2e9b6` plus
+uncommitted changes, with tracked and untracked file and binary hashes in
+[delivery](../local-evidence/helper-three-tone/delivery/). This is an experimental
+development build, not accepted assisted-reception or release qualification.
+
+The source-bound focused command
+`ctest --test-dir build/dev --output-on-failure -R '^(helper_actual_rf_data|helper_continuous|helper_tone_tracker|helper_local_aperture|helper_frontend|helper_filter_response|helper_acquisition_admission|helper_simple_dispatch|helper_observation_live_)' -j 1`
+passed 15/16; its [log](../local-evidence/helper-three-tone/delivery-focused.log)
+is retained. Actual-retune and all eight Live observation cases passed. The
+`helper_tone_tracker` 24 dB-Hz frequency-only fallback failed: three contexts
+produced no fallback or qualified polls. The tested segmented-precision header
+SHA-256 is `9b708c22c9a026950c7cf1464afe53b269893c02872d8aa6f9db0a140b27e25e`.
+The passing Live fade tests do not resolve the separate 5 ms component failure
+described below. The low-pilot runtime path remains unimplemented, CLI batch and
+no-oscillator-policy limitations remain, and full qualification is incomplete.
+
+The earlier 29 October development GUI checkpoint had SHA-256
+`44ea3a24d92e47c5f9ac6c3a6c8860fb762ecfa364ad6e6f1e2f366e73bb9e41`.
+It was built from HEAD `1e21a364bb09f602325e66027c926cbd70b2e9b6` plus the
+then-uncommitted changes; the tracked diff and untracked source hashes are
+recorded in [gui-checkpoint](../local-evidence/helper-three-tone/gui-checkpoint/).
+Those bindings identify that checkpoint, not later source or binaries. It has
+been overwritten at `build/dev/datapump-gui` by a subsequent development GUI,
+SHA-256 `c7733547ec90c1e603dd58cf649ec449695bddf342c36e79a071413f6878e33c`,
+also based on `1e21a36` plus uncommitted changes and now superseded by the
+current build above. Its tracked-file, untracked
+source and binary hashes are recorded in
+[current-gui](../local-evidence/helper-three-tone/current-gui/); subsequent
+documentation edits do not affect that binary. These are development builds,
+not accepted assisted-reception or release qualification.
+
+The focused command
+`ctest --test-dir build/dev --output-on-failure -R '^(helper_simple_dispatch|helper_planner_forecast|helper_calendar_bandwidth|helper_cohort_model|helper_paired_dwell)$' -j 1`
+passed 5/5. A separate `ctest --test-dir build/dev --output-on-failure -R
+'^(helper_acquisition_admission|helper_simple_dispatch|helper_frontend)$' -j 1`
+passed 2/3: `helper_frontend` failed with “three-tone helper filter cannot
+certify the complete auxiliary and pilot stopband”. The strict
+`build/dev/test_helper_live --rolling-helper-only` run failed after 7.162 seconds
+of source audio and a 60-second wall limit, before the local 36-second admission
+boundary; it observed no admitted bank, payload or physical END. Its retained
+log is in the checkpoint directory. These unit passes do not establish Live
+admission, useful narrowed work or complete payload behavior.
+
+A later focused retest on the development source,
+`ctest --test-dir build/dev --output-on-failure -R '^(helper_frontend|helper_filter_response|helper_acquisition_admission|helper_simple_dispatch)$' -j 1`,
+passed 4/4; its [log](../local-evidence/helper-three-tone/current-focused-retest.log)
+is retained. An isolated diagnostic using the actual Generator fixture measured
+residual RMS 0.000170136 and fitted DATA amplitude 0.0200009 for a 0.02 input,
+in normalized sample units, without clipping or retuning.
+This is a focused filter result; it does not erase the earlier frontend failure
+or establish behavior with hardware, retunes, Live payload or physical END.
+
+The subsequent strict `build/dev/test_helper_live --rolling-helper-only` rerun
+passed: the [log](../local-evidence/helper-three-tone/current-rolling-live.log)
+reports `assisted=1`, `waited=1`, seven owners and admitted rows, a 21,665,293-byte
+workspace peak, reference withdrawal, draining and one post-loss join. At
+8 kHz, the loss origin was sample 320,164, the last captured sample count was
+351,764 and the processed frontier was 348,452. The trace receipt reports a
+complete flush with zero drops; the successful fixture deleted the trace after
+inspection, so that trace is unavailable for independent reinspection. The
+test binary and log hashes are in
+[current-rolling-live-bindings.sha256](../local-evidence/helper-three-tone/current-rolling-live-bindings.sha256).
+This Helper-only fixture carried no payload and did not demonstrate physical END.
+It does not erase the earlier failed run or complete the supplied integrations.
+
+The later `ctest --test-dir build/dev --output-on-failure -R
+'^helper_observation_live_' -j 1` run retained in
+[observation-live.log](../local-evidence/helper-three-tone/observation-live.log)
+passed its early and late cases but failed its fade and inadequate-precision
+cases. The fade case observed runtime support spanning the injected mute. The
+inadequate case assumed a 128-second
+configuration had to narrow to less than one native bin; reduced multi-bin
+coverage can still be useful, so that failure did not establish inadequate-gate
+behavior. The
+original early/late cases used punctuation and lacked an origin assertion. In
+the later delivery retest above, all eight Live cases passed, including early
+and late without punctuation and assertions of `helper_source_origin==0`.
+Those tests do not establish complete Live admission coverage or physical END.
+
+A [short-fade component study](../local-evidence/helper-three-tone-short-fade/)
+used a synthetic three-tone signal plus a data tone, 0.7 Hz frequency offset,
+three seeds each at 30, 40 and 60 dB-Hz, and zero or correctly declared
+0.5-degree-per-square-root-second phase noise. In the bound adjacent-row
+implementation, 5 ms mutes produced published support and phase overlaps with
+the mute; 50 ms mutes produced no overlap in these cases. A four-quarter,
+noise/image-scaled [prototype](../local-evidence/helper-three-tone-short-fade/prototype.log)
+still produced 5 ms overlaps at every tested 30/40 dB-Hz alignment and one
+60 dB-Hz alignment. Its component CPU was approximately 0.514–0.525 seconds
+per 324 audio seconds versus 0.500–0.512 for the bound baseline, and it was
+not adopted. These are synthetic tone mixtures, not actual Robust waveform
+qualification; sub-row fade policy remains unresolved. The current source
+after the context-cube change has not yet completed this retest. The earlier
+one-second Live fade failure and its scope remain as recorded above.
+
+An unadopted [joint Gram-matrix diagnostic](../local-evidence/helper-three-tone-subrow-gram/joint-control.log)
+used truth-seeded synthetic inputs. At 60 dB-Hz with an aligned 5 ms mute, it
+reduced 550 Hz pilot phase-interval escapes from 77 to 2 of 512 rows and high
+pilot escapes from 25 to 1. With a mute split across quarters, 88 of 512 low
+pilot rows still escaped for one alignment. At 30 dB-Hz, 486–490 of 512 clean
+rows missed at least one quarter. These results establish neither causal
+discovery nor a physical limit; there is no production change from this probe.
+
+A separate strict [actual-retune test](../local-evidence/helper-three-tone/actual-retune.log)
+passed exact `001`, observed a pending row before Helper loss and reached scored
+physical END. The command was
+`build/dev/test_helper_actual_rf_session --independent-clock --require-oscillator-model --helper-end-seconds 46.5 --require-prior-frequency --require-data-coordinate local-evidence/helper-three-tone/actual-retune-trace.jsonl`.
+It used independent hop phases and cut Helper at 46.5 seconds,
+inside payload. The first qualified raw capture was sample 25,533 at 32 kHz;
+the local observation deadline was sample 294,384 on the 8 kHz receiver grid.
+The run created one bank with source origin zero. It executed 882 FFT jobs,
+42 transforms and 13 owners, with 11 peak worker slots, 39,359,986 bytes peak
+sampled workspace, 1.98707 seconds process CPU and 1.74172 seconds wall time.
+For the tested profiles it counted 9 assisted versus 437 ordinary constructor
+pairs; those counts are not a matched runtime cost comparison. The
+[trace](../local-evidence/helper-three-tone/actual-retune-trace.jsonl) and
+[binary/source bindings](../local-evidence/helper-three-tone/actual-retune-bindings.sha256)
+are retained. No complete unchanged-input before/after work comparison has been
+established by this particular pass, so it alone is not evidence of a speedup
+or completion of the supplied HF, EME and cable qualification.
+
+The subsequent [matched timing-only comparison](../local-evidence/helper-three-tone/matched-timing/comparison.txt)
+uses the same instrumented binary, fixed lead, seed and CPU affinity. All
+2,046,093 physical input samples match in their dated block hashes. The only
+policy difference is that the laboratory bypass permits ordinary acquisition
+before the local 36-second observation boundary; the fixed run enforces it.
+Both recovered exact `001`, kept pending identity 2 and reached scored END.
+
+| Measurement | Timing bypass | Required wait |
+| --- | ---: | ---: |
+| FFT jobs | 13,734 | 882 |
+| Transforms | 294 | 42 |
+| Owners | 49 | 13 |
+| Process CPU seconds, including trace parsing | 5.96915 | 1.98461 |
+| Instrumented partial receiver-scope CPU seconds | 2.966 | 0.301 |
+| Peak sampled workspace bytes | 39,428,105 | 39,359,986 |
+| Peak worker slots | 11 | 11 |
+
+The bypass trace attributed 12,306 FFT jobs to the interval before the
+observation deadline; the required-wait trace attributed none there. Interval
+buckets can coalesce work across their boundaries. Independent audit confirmed
+the full matching raw PCM, common binary and timing-only bypass, matching
+payload identity and END dates, and totals joined across all retired owners.
+It also found 22/20 incomplete or interrupted simulation-join snapshots, so
+the logged execution counts are not independent complete-work coverage.
+
+After 41.25 seconds of capture, sampled peak unprocessed-input backlog was
+0.67 seconds in both runs. The required-wait run's approximately 37.3-second
+pre-admission capture-minus-processed span is intentionally ignored input, not
+retained PCM. The post-admission value is not a global startup backlog or
+hardware real-time guarantee. The peak of 11 worker slots does not establish
+11 simultaneous CPU cores; sampled workspace excludes transient peaks.
+Process CPU includes post-session parsing of unequal trace sizes
+(24 versus 9.4 MiB), so its difference is not a receiver runtime reduction or
+CPU-per-audio-second measurement. The separately instrumented receiver-scope
+CPU values cover only part of the work and are not whole-process costs. The
+[commands, instrumentation, hashes and traces](../local-evidence/helper-three-tone/matched-timing/)
+define this comparison's scope. The bypass
+is a timing-only laboratory control, not the earlier broad receiver policy.
+These figures do not establish whole-system hardware throughput or qualify the
+supplied HF, EME or cable cases.
+
+An independently audited [r3 comparison](../local-evidence/helper-three-tone/matched-timing/comparison-r3.txt)
+measured the instrumented Session before post-session trace analysis. Its
+Session CPU was 5.63060 seconds with the timing bypass and 1.88620 seconds
+with the required wait, or 0.08806 and 0.02950 CPU seconds per captured audio
+second; Session wall time was 3.48999 and 1.67797 seconds. Profiling, hashing
+and trace emission remain included, trace overhead differs between the runs,
+and this is one ordered run. Its FFT counts remain 13,734 and 882, while peak
+sampled workspace was 39,428,217 and 39,359,986 bytes, a roughly 0.17% change
+that does not demonstrate substantial workspace savings. The same binary,
+timing-only bypass and complete matching physical PCM were confirmed. These
+Session measurements are scoped laboratory evidence, not a whole-application
+CPU ceiling, hardware throughput result or supplied-configuration qualification.
+
+The source-bound [current per-dwell baseline](../local-evidence/helper-three-tone/current-baseline/)
+uses independent hop phases and an actual three-tone/Robust mixture. Across
+eight zero-phase-noise seeds each at configured high-pilot 30 and 40 dB-Hz, reported maximum
+per-fit error was 0.213–0.393 and 0.068–0.123 Hz respectively, with no endpoint
+escapes or wrong-tone selections in those cases. First qualification ranged from
+0.349 to 1.152 seconds in the 30 dB-Hz cases. This is a short high-pilot component
+test, not a 36-second receiver admission or clock-separation result. Its own
+process CPU measurement was 2.799 seconds; external `/usr/bin/time` was unavailable.
+
+A separate [two-pilot probe](../local-evidence/three-tone-pair-probe/) combines
+independent 400 ms hop observations through a zero-process-noise (`Q=0`) model
+over 36 seconds. Its channel retained the default shared phase diffusion of
+0.5 degrees per square-root second while the trackers assumed zero phase noise;
+the model is therefore mismatched to that channel, not a zero-diffusion control.
+At 30 dB-Hz its three seeds supplied 22–23 paired
+observations and final reported three-sigma half-widths of 0.0381–0.0432 Hz;
+at 40 dB-Hz all three supplied 89 pairs and reported 0.00585–0.00601 Hz. These
+are conditional diagnostic intervals, not operational confidence or runtime
+qualification. At 60 dB-Hz, two of three seeds had 6 and 9 pair-interval escapes
+respectively; the third had none. The probe does not validate the evolving-clock
+model, final receiver acquisition, CPU savings or a physical precision floor.
+
+In a [matched 60 dB-Hz control](../local-evidence/three-tone-pair-probe/matched.log)
+with the same phase-model mismatch and equal power reference, noise and retune
+settings, one seed produced six
+pair-interval escapes with Robust enabled and none with Helper alone. Across
+three Robust-enabled seeds, empirical per-hop high- and low-pilot error
+variances were approximately 1.4–1.6 times their reported variances. The
+startup seed differs from the original probe above. These small diagnostic
+samples are not calibrated confidence or acceptance evidence.
+
+A later [32-seed matched study](../local-evidence/three-tone-pair-probe/coverage32.log)
+at 60 dB-Hz, with the same shared phase diffusion and mismatched `Q=0`/zero-noise
+tracker assumptions, used a different diagnostic model and
+binary from the earlier probe; its source and binary hashes are in
+[coverage32-bindings.sha256](../local-evidence/three-tone-pair-probe/coverage32-bindings.sha256).
+At the 36-second endpoint, 3/32 seeds escaped the reported pair interval with
+Robust enabled and 3/32 with Helper alone. The 95% Wilson interval for each
+endpoint escape rate is 3.2–24.2%. Across the correlated polls, 10/32 and
+16/32 seeds respectively escaped at least once. Mean standardized per-hop
+high/low error variances were 1.612/1.407 with Robust and 2.030/1.426 with
+Helper alone; the corresponding standardized covariances were +0.492 and
++0.840. The mismatch is a possible contributor, not proof of the full cause of
+the escapes. These results do not establish a physical cause or operational
+confidence. The separate actual-retune integration above has its stated scope.
+
+An [explicit-zero diffusion control](../local-evidence/three-tone-pair-probe/coverage32-zero.log)
+at nominal 60 dB-Hz produced 0/32 endpoint and 0/32 ever-poll pair escapes in
+each of the matched Robust-on and Helper-only cases. The 95% Wilson upper bound
+for each 0/32 endpoint rate is 10.7%. Final mean reported half-width was
+0.0007576/0.0005673 Hz and mean absolute error was 0.0001983/0.0001225 Hz,
+respectively. These remain `Q=0` component controls, not operational covariance
+qualification.
+
+In a separate [negligible-AWGN, explicit-zero diffusion control](../local-evidence/three-tone-pair-probe/negligible_noise-zero.log),
+seed 3 had high/low per-hop error standard deviations of 0.0000217/0.0000528 Hz
+and correlation −0.009 with Helper alone, versus 0.001237/0.003683 Hz and
+correlation 0.296 with Robust on; neither case had pair escapes. Robust signal
+interference is present in this isolated control. The earlier common error
+occurred with unmodeled 0.5-degree-per-square-root-second diffusion, and is not
+proved to be deterministic bias. [Bindings](../local-evidence/three-tone-pair-probe/zero-bindings.sha256)
+retain the corrected inputs and binaries; operationally calibrated phase noise
+and runtime qualification remain outstanding.
+
+A separate [32-seed shared-diffusion control](../local-evidence/three-tone-pair-probe/shared_diffusion.log)
+declared 0.5 degrees per square-root second in both the channel and trackers;
+its [source and binary bindings](../local-evidence/three-tone-pair-probe/shared_diffusion-bindings.sha256)
+are retained. Both Robust-on and Helper-only cases had 0/32 endpoint escapes,
+with a 95% Wilson upper bound of 10.7% for each endpoint rate. Robust-on had no
+ever-poll escapes; one Helper-only seed escaped on 21 correlated polls. Mean
+standardized within-hop high/low covariance was +0.266 with Robust and +0.347
+with Helper alone, while the pair update still omits cross covariance. This
+component model retains `Q=0` and does not establish a retune scatter floor or
+drift coverage; it is not operational qualification.
+
+An unadopted [pair-covariance bound probe](../local-evidence/helper-three-tone/pair-covariance-bound/)
+tested replacing a pair's covariance with twice its marginal diagonal. This is
+a positive-semidefinite bound for one pair when its marginal variances are
+valid; sequential aggregation additionally needs justified independence across
+measurements. In 32 seeds with correctly declared shared diffusion it had no
+endpoint or ever-poll escapes versus one ever-poll escape in the baseline, with
+reported half-widths growing by approximately √2. The experiment does not
+resolve low-pilot innovation handling, shared retune effects or temporal
+correlation, and is not operational qualification or a production change.
+
+A separate scratch [pair-spur and refusal investigation](../local-evidence/helper-three-tone/pair-spur-refusal/)
+rejected a low measurement displaced by 400 Hz in a numeric probe, while a
++1 Hz spur remained plausible. Repeating a common 0.2 Hz error in the same
+retune segment made the unguarded model's RF sigma shrink from 0.20025 to
+0.02832 Hz after 50 windows despite that shared error. A refusal prototype
+avoided that shrinkage but blocks fixed-RF operation with the default scatter
+setting. Review also found its model patch lacks the twice-diagonal covariance
+bound above. These numeric, conditional probes do not qualify the posterior or
+production reception; Live currently tracks only the high pilot.
+
+A subsequent scratch [near-tone experiment](../local-evidence/helper-three-tone/pair-near-tone/)
+used the actual Helper Generator, synthetic AWGN, independent hop phases and
+an operational-Q model with the twice-diagonal pair bound. With a +1 Hz spur
+at twice the low pilot's amplitude, the pair path versus a forced high-only
+control produced DATA-interval escapes of 127/233 versus 0/233 at 30 dB-Hz,
+160/255 versus 0/255 at 40 dB-Hz, and 152/216 versus 0/216 at 60 dB-Hz;
+these are correlated polls, not independent trials. At 60 dB-Hz, mean final
+pair error/half-width was 0.317/0.305 Hz versus 0.00387/0.01596 Hz high-only.
+Without the spur, mean pair half-width was 0.01372 Hz versus 0.01596 Hz
+high-only. Bindings and logs are retained in that directory. This synthetic
+mixture did not include actual Robust or its sampled channel, and does not
+establish general discovery behavior, authentication or runtime confidence.
+The low-pilot pair remains unintegrated in Live.
+
+The previous 2,226- and 6,153-job results are different legacy two-tone runs:
+their documented physical input matches over a prefix but tails differ. The
+6,195-job result is a later distinct integration. None establishes a matched
+three-tone speedup. The current CLI batch Helper-assisted WAV/device `rx`,
+`status-rx` and `simulate` paths are unavailable while causal admission cannot
+be enforced there. In subsequent development code, Live Helper-assisted
+configurations without an oscillator-search policy defer admission; this is an
+implementation limitation, not a result bound to the GUI checkpoint above.
+Supplied HF and EME acceptance, matched work/CPU/workspace,
+complete progress and scored END, GUI/device checks and applicable regression and
+sanitizer stages remain incomplete. Preserve the existing strict HF15k END
+failure below; an exact canonical payload does not make it pass.
+
 ## Helper harmonic sensitivity manual-test build
 
-The 28 October 2026 local GUI with the uncommitted Helper changes is available
-at `build/dev/datapump-gui`, SHA-256
+The preceding 28 October 2026 local GUI with uncommitted Helper changes has been
+superseded at `build/dev/datapump-gui`; its SHA-256 was
 `8fd76c5d78d30ceadc23f768d561eaf2ae3214585e6e944efc8d0ece3ea24e27`;
 core archive SHA-256 is
 `ee90715304164656bb090c6d0e220b301249761296629be920dbcac0685f478b`.
@@ -307,9 +609,9 @@ auxiliary shape; there is no automatic prior-auxiliary template fallback.
 The older paired-marker path retains its own quintic waveform. This is not
 release certification and does not extend the receiver evidence below.
 
-## Current two-tone Helper Carrier candidate
+## Previous two-tone Helper Carrier candidate
 
-The current human checkpoint is `572b051`, with initial-descriptor support
+The earlier human checkpoint was `572b051`, with initial-descriptor support
 source `9977084b…`/test `8fd185fa…`, unchanged core `2c118bf0…` and Live
 `70a546c1…`. Current GUI `79d40073…` passes the EME Planner caution check and
 headless self-check. The prior `64824037…` GUI retains its standard build and

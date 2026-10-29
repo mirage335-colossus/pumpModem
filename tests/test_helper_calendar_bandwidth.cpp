@@ -190,59 +190,48 @@ void auxiliary_punctuation_calendar() {
 }
 void bounded_envelope_planning() {
     const auto c=eme();const auto initial=helper::plan_envelope(c);
-    check(initial.lead_seconds==2&&std::abs(initial.tail_seconds-161.2L)<1e-14L,
-          "helper envelope lost its minimum lead or 128-second absence and pulse-support tail");
-    check(std::abs(initial.preparation_seconds-(2.4L+1.L/6000))<1e-14L&&
-          std::abs(initial.maximum_stop_extension_seconds-(164.L+2.L/6000))<1e-14L,
-          "helper preparation and protected-stop bounds omitted dwell alignment or sample rounding");
+    check(initial.lead_seconds==38&&std::abs(initial.tail_seconds-161.2L)<1e-14L,
+          "helper envelope lost its fixed 36+2-second lead or 128-second absence and pulse-support tail");
+    check(initial.preparation_seconds==38.L&&
+          std::abs(initial.maximum_stop_extension_seconds-(200.L+2.L/6000))<1e-14L,
+          "helper preparation was widened or protected-stop bounds lost their tail margin");
     helper::EnvelopeRequirements requirements;requirements.frequency_acquisition_seconds=6.4;
     auto planned=helper::plan_envelope(c,requirements);
-    check(std::abs(planned.lead_seconds-6.4L)<1e-14L,"binary64 aperture rounding added an unintended whole dwell");
+    check(planned.lead_seconds==38,"receiver acquisition widened the fixed helper lead");
     requirements.frequency_acquisition_seconds=std::nextafter(6.4,std::numeric_limits<double>::infinity());
-    check(std::abs(helper::plan_envelope(c,requirements).lead_seconds-6.4L)<1e-14L,
-          "one input ULP changed the intended dwell count");
+    check(helper::plan_envelope(c,requirements).lead_seconds==38,
+          "an acquisition ULP changed the fixed helper lead");
     requirements.frequency_acquisition_seconds=1000000000000.0002;
     const auto large=helper::plan_envelope(c,requirements);
-    check(large.lead_seconds>=static_cast<long double>(requirements.frequency_acquisition_seconds)&&
-          large.lead_seconds-static_cast<long double>(requirements.frequency_acquisition_seconds)>.3L,
-          "large-duration ULP snapping shortened capture by more than half a source frame");
+    check(large.lead_seconds==38,"a large receiver forecast enlarged the fixed helper lead");
     requirements.frequency_acquisition_seconds=2.4;
-    check(std::abs(helper::plan_envelope(c,requirements).lead_seconds-2.4L)<1e-14L,
-          "wide-search aperture was replaced by a hardcoded receiver policy");
+    check(helper::plan_envelope(c,requirements).lead_seconds==38,
+          "the receiver aperture replaced the fixed helper lead");
     requirements.frequency_acquisition_seconds=6.4;requirements.frontend_lookahead_seconds=.08;
     requirements.receiver_buffer_deficit_seconds=512;
     planned=helper::plan_envelope(c,requirements);
-    check(std::abs(planned.lead_seconds-6.8L)<1e-14L&&std::abs(planned.tail_seconds-512.4L)<1e-14L,
-          "helper envelope omitted frontend lookahead or its frozen receiver-buffer obligation");
+    check(planned.lead_seconds==38&&std::abs(planned.tail_seconds-512.4L)<1e-14L,
+          "helper lookahead changed the fixed lead or was omitted from the frozen tail obligation");
     requirements.maximum_source_capture_ratio=.5;
     const auto slower=helper::plan_envelope(c,requirements);
-    check(slower.lead_seconds==planned.lead_seconds&&slower.tail_seconds==planned.tail_seconds,
-          "a slower source clock shortened required receiver coverage");
+    check(slower.lead_seconds==38&&slower.tail_seconds==planned.tail_seconds,
+          "a slower source clock changed the fixed lead or tail coverage");
     requirements.maximum_source_capture_ratio=1.001;
     const auto faster=helper::plan_envelope(c,requirements);
-    check(faster.lead_seconds>=1.001L*(6.4L+.08L)&&faster.tail_seconds>=1.001L*(512.L+.08L),
-          "source clock allowance shortened the physical acquisition or drain aperture");
-    // Precision airtime is additive to the unchanged physical baseline. It
-    // cannot shorten acquisition/drain obligations or grow beyond 36 seconds.
-    // Binary64 .4 and its next ULP intentionally snap to one exact dwell.
-    // Check independent expected durations rather than an unsnapped request.
-    struct PrecisionCase {double requested;long double aligned;};
-    for(const auto [extra,aligned]:{PrecisionCase{0.,0.L},PrecisionCase{.001,.4L},
-            PrecisionCase{.4,.4L},PrecisionCase{std::nextafter(.4,std::numeric_limits<double>::infinity()),.4L},
-            PrecisionCase{.4001,.8L},PrecisionCase{35.9,36.L},PrecisionCase{36.,36.L}}) {
+    check(faster.lead_seconds==38&&faster.tail_seconds>=1.001L*(512.L+.08L),
+          "source clock allowance changed the fixed lead or shortened the drain aperture");
+    // The former adaptive input remains accepted for Planner forecast
+    // compatibility, but cannot change the fixed 36+2-second transmission.
+    for(const auto extra:{0.,.001,.4,std::nextafter(.4,std::numeric_limits<double>::infinity()),
+            .4001,35.9,36.}) {
         auto precision=requirements;precision.frequency_precision_extension_seconds=extra;
         const auto extended=helper::plan_envelope(c,precision);
-        check(extended.lead_seconds==faster.lead_seconds+aligned &&
-              extended.lead_seconds<=faster.lead_seconds+36.L &&
+        check(extended.lead_seconds==38 &&
               extended.tail_seconds==faster.tail_seconds,
-              "precision extension changed the physical baseline/tail or exceeded its cap");
-        const auto extension=extended.lead_seconds-faster.lead_seconds;
-        check(std::abs(extended.maximum_stop_extension_seconds-faster.maximum_stop_extension_seconds-
-                  extension)<1e-12L,
-              "precision lead was not reserved through preparation/protected stopping");
-        check(std::abs(extension*2.5L-
-                       std::round(extension*2.5L))<1e-12L,
-              "precision extension did not retain the dwell calendar");
+              "precision forecast changed the fixed lead or physical tail");
+        check(extended.preparation_seconds==faster.preparation_seconds&&
+              extended.maximum_stop_extension_seconds==faster.maximum_stop_extension_seconds,
+              "precision forecast changed preparation or protected-stop reservation");
     }
     for(const auto extra:{std::nextafter(36.,std::numeric_limits<double>::infinity()),36.01}) {
         auto invalid_precision=requirements;invalid_precision.frequency_precision_extension_seconds=extra;
@@ -262,8 +251,6 @@ void bounded_envelope_planning() {
     }
     helper::EnvelopeRequirements invalid;invalid.maximum_source_capture_ratio=0;
     rejects([&] {helper::plan_envelope(c,invalid);},"zero source/capture ratio was accepted");
-    invalid={};invalid.frequency_acquisition_seconds=std::numeric_limits<double>::max();
-    rejects([&] {helper::plan_envelope(c,invalid);},"overflowing helper preparation was accepted");
     invalid={};invalid.receiver_buffer_deficit_seconds=std::numeric_limits<double>::max();
     rejects([&] {helper::plan_envelope(c,invalid);},"overflowing helper drain obligation was accepted");
 }

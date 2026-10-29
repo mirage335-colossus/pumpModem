@@ -534,9 +534,7 @@ void play_transmission(const Args& a, transfer::Options& options,const helper::O
     const auto helper_lead=[&] {return static_cast<long double>(leading_samples)/options.modem.sample_rate;};
     const auto prepare_envelope=[&] {
         if(helper::effective_helper_power(helper_settings)<=0)return;
-        const auto origin=helper_source_origin(options.modem,options.timestamp,source.get());
-        const auto start=helper_dwell_boundary(options.timestamp,origin-envelope.lead_seconds,false);
-        leading_samples=helper_sample_count(origin-start,options.modem.sample_rate);
+        leading_samples=helper_sample_count(envelope.lead_seconds,options.modem.sample_rate);
     };
     const auto helper_end=[&] {
         const auto origin=helper_source_origin(options.modem,options.timestamp,source.get());
@@ -876,6 +874,12 @@ auto receive_with_helper_diagnostics(const Args& args,const std::optional<Helper
 transfer::Received receive_helper_payload(std::span<const float> samples,const transfer::Options& options,
         const helper::Options& helper_options,const std::optional<HelperCapture>& capture,
         const transfer::Progress& progress,std::size_t other_waveform_bytes=0) {
+    // This batch path observes a completed recording and cannot establish the
+    // receiver-local detection frontier, the ensuing 36-second observation, or
+    // a measured narrow search before ordinary acquisition. Do not silently
+    // fall back to a broad receiver while Helper assistance is requested.
+    if(helper::effective_helper_power(helper_options)>0)
+        throw Error("Helper-assisted batch reception is unavailable: causal 36-second observation and measured narrowed acquisition are not implemented");
     auto receive_options=options;
     if(capture&&capture->payload_group_filtered) {
         if(capture->payload_origin_samples>UINT64_MAX-receive_options.input_sample_origin_samples)
@@ -894,9 +898,12 @@ transfer::Received receive_helper_payload(std::span<const float> samples,const t
     if(helper::effective_helper_power(helper_options)>0 && helper_options.frequency!=helper::Frequency::cochannel &&
        capture && capture->present && !capture->payload_group_filtered)try {
         const auto frequency=capture->observation?capture->observation->frequency_hz:0.;
-        const auto center=frequency-helper::auxiliary_pilot_spacing_hz/2;
-        if(center>425 && center+425<options.modem.sample_rate/2.) {
-            helper::PayloadFilter filter(options.modem.sample_rate,center,425);
+        const auto nominal=helper::plan(helper_options,helper::placement_band(options.modem),
+            options.modem.sample_rate,0,modem::outer_dsss_transmit_gain(options.modem)).frequency_hz;
+        const std::array bands{helper::PayloadFilter::NotchBand{frequency+750-nominal,425},
+            helper::PayloadFilter::NotchBand{frequency,225}};
+        if(bands.front().center_hz>425 && bands.back().center_hz+225<options.modem.sample_rate/2.) {
+            helper::PayloadFilter filter(options.modem.sample_rate,bands);
             const auto margin=2*filter.delay();
             const auto budget=options.modem.memory_limit;
             const auto raw_bytes=samples.size_bytes();
@@ -952,8 +959,10 @@ HelperCapture preselect_helper_wav(modem::Wav& wav,const modem::Config& config,c
     if(helper_capture.present&&helper_capture.observation) {
         // Reject the complete group in its physical PCM clock, before rate
         // conversion can alias or discard either tone into Robust's band.
-        helper::PayloadFilter filter(wav.sample_rate,
-            helper_capture.observation->frequency_hz-helper::auxiliary_pilot_spacing_hz/2,425);
+        const std::array bands{helper::PayloadFilter::NotchBand{
+            helper_capture.observation->frequency_hz+750-plan.frequency_hz,425},
+            helper::PayloadFilter::NotchBand{helper_capture.observation->frequency_hz,225}};
+        helper::PayloadFilter filter(wav.sample_rate,bands);
         const auto quantum=wav.sample_rate/std::gcd(wav.sample_rate,config.sample_rate);
         const auto skip=(quantum-filter.delay()%quantum)%quantum;
         const auto physical_origin=skip+filter.delay();
@@ -1007,8 +1016,7 @@ void output_wave(const Args& a,std::vector<float> samples,const modem::Config& c
         const auto plan=helper::plan(helper_settings,helper::placement_band(c),output_rate,0,
             modem::outer_dsss_transmit_gain(c),helper_reference);
         const auto envelope=helper_output_envelope(c,helper_settings,plan.frequency_hz);
-        const auto start_boundary=helper_dwell_boundary(helper_epoch,helper_origin-envelope.lead_seconds,false);
-        const auto leading=helper_sample_count(helper_origin-start_boundary,output_rate);
+        const auto leading=helper_sample_count(envelope.lead_seconds,output_rate);
         // Compose the public helper at the physical rate. Only the original
         // Robust samples enter the resampler, retaining their source origin.
         const auto helper_start=helper_origin-static_cast<long double>(leading)/output_rate;
@@ -1588,6 +1596,15 @@ int main(int argc,char** argv) {
         }
         if(!commands.contains(a.command)) throw Error("unknown command: "+a.command);
         auto c=config(a);auto timestamp=epoch(a);
+        if(a.command=="rx" || a.command=="status-rx" || a.command=="simulate") {
+            // The batch receiver has no causal narrow-admission implementation.
+            // Decline before opening an input/key, starting capture, or generating
+            // simulated PCM; retrospective processing cannot supply that proof.
+            const auto preflight=helper_options(a,
+                c.spreading_mode!=modem::SpreadingMode::tone && a.has("keyfile"));
+            if(helper::effective_helper_power(preflight)>0)
+                throw Error("Helper-assisted batch reception is unavailable: causal 36-second observation and measured narrowed acquisition are not implemented");
+        }
         auto k=c.spreading_mode==modem::SpreadingMode::tone?std::optional<Crypto>{}:key(a);
         const auto helper_settings=helper_options(a,k.has_value());
         // Scheduled calendar geometry is keyed before transfer preparation,

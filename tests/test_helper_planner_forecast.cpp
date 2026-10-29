@@ -120,6 +120,12 @@ int main(){try{
     check(!gui::planner::helper_segmented_tone_half_width(30,{})&&
         !gui::planner::helper_segmented_tone_half_width(30,invalid_aperture),
         "segmented reference accepted empty or zero-length physical support");
+    const auto affine_low=gui::planner::helper_affine_data_half_width(550,2400,550,.2,.1);
+    const auto affine_high=gui::planner::helper_affine_data_half_width(550,2400,2400,.2,.1);
+    const auto affine_middle=gui::planner::helper_affine_data_half_width(550,2400,1475,.2,.1);
+    check(affine_low&&affine_high&&affine_middle&&std::abs(*affine_low-.2)<1e-12&&
+        std::abs(*affine_high-.1)<1e-12&&std::abs(*affine_middle-std::hypot(.1,.05))<1e-12,
+        "affine DATA uncertainty did not preserve low/high endpoint variances");
     helper::TonePrecisionRequest pilot;pilot.sample_rate=48000;pilot.straight_cn0_db_hz=30;
     pilot.pilot_segmented=true;
     const auto pilot30=helper::predict_tone_precision(pilot);
@@ -312,17 +318,18 @@ int main(){try{
     check(ideal.ideal_one_second_half_width_hz&&ideal.ideal_lead_half_width_hz&&
         ideal.segmented_lead_half_width_hz&&ideal.coherent_aperture_seconds>0&&
         *ideal.segmented_lead_half_width_hz>*ideal.ideal_lead_half_width_hz&&
-        ideal.ideal_lead_observation_seconds==forecast.planned_lead_seconds/ideal.maximum_source_capture_ratio&&
+        std::abs(ideal.ideal_lead_observation_seconds-36/ideal.maximum_source_capture_ratio)<1e-12&&
         ideal.ideal_lead_half_width_hz==gui::planner::helper_ideal_tone_half_width(ideal.cn0_db_hz,
             ideal.ideal_lead_observation_seconds),
         "ideal reference used numeric history or usable segments as coherent observation duration");
     check(forecast.precision.supported&&forecast.precision.extra_lead_seconds>=0&&
         forecast.precision.extra_lead_seconds<=36&&forecast.precision.expected_segments>0&&
-        forecast.uncertainty_hz==forecast.precision.frequency_half_width_hz&&
-        forecast.planned_lead_seconds>=forecast.precision.baseline_lead_seconds&&
+        forecast.uncertainty_hz==forecast.precision.sustained_frequency_half_width_hz&&
+        forecast.planned_lead_seconds==38&&forecast.precision.baseline_lead_seconds==0&&
+        forecast.precision.sustained_at_seconds==36&&
         forecast.planned_tail_seconds>=2&&
-        (!forecast.precision.target_reached||forecast.uncertainty_hz<=.1),
-        "selected point lost the shared lead predictor/cap/achievable-precision contract");
+        (!forecast.precision.target_reached||forecast.precision.frequency_half_width_hz<=.1),
+        "fixed schedule or 36-second boundary forecast disagreed with the conditional receiver price");
     check(forecast.precision.sustained_supported&&forecast.sustained&&
         forecast.sustained_at_seconds==forecast.precision.sustained_at_seconds&&
         forecast.sustained->uncertainty_hz==forecast.precision.sustained_frequency_half_width_hz&&
@@ -330,13 +337,8 @@ int main(){try{
         forecast.sustained->clock_half_width_ppm==forecast.clock_half_width_ppm&&
         forecast.sustained->retained_clock_rates==forecast.retained_clock_rates&&
         forecast.sustained->frequency_rate_hypotheses>0&&
-        // The envelope accumulates long-double dwell time; the predictor
-        // sums double baseline/extra time. Preserve the same selected airtime
-        // without requiring their final double conversions to be identical.
-        std::abs(forecast.planned_lead_seconds-forecast.precision.total_lead_seconds)<=
-            4*std::numeric_limits<double>::epsilon()*std::max({1.,
-                std::abs(forecast.planned_lead_seconds),std::abs(forecast.precision.total_lead_seconds)}),
-        "sustained receiver query lost its own residual U, unresolved clocks or unchanged initial lead");
+        forecast.planned_lead_seconds==38,
+        "sustained receiver query lost its own residual U, unresolved clocks or fixed lead");
     const auto& sustained_cost=forecast.sustained->receiver_cost;
     check(!sustained_cost.helper_startup_cpu_seconds&&!sustained_cost.helper_sustained_realtime_ratio&&
         !sustained_cost.post_lock_lead_receiver_cpu_seconds,
@@ -377,18 +379,17 @@ int main(){try{
             ignored.cpu_points[i].realtime_ratio==enabled.cpu_points[i].realtime_ratio,
             "ignored helper scenario changed ordinary CPU baseline");
     const auto page=gui::planner_page::build(enabled,900,true,false);
-    for(const auto* required:{"Helper reference on","The strongest tone in the expected helper range",
-        "Robust acquisition waits while the helper is unavailable",
+    for(const auto* required:{"Helper reference on","high pure pilot supplies the current frequency-reference forecast",
         "Disable Helper Carrier to use ordinary oscillator search",
         "Solid: ordinary receiver baseline. Dashed: conditional helper-corrected ordinary receiver cost",
         "not total CPU, measured speed, or a lock/probability forecast",
         "No clock narrowing is inferred from tone power",
         "helper power does not increase payload SNR or Rate",
-        "DSP fixed workspace", "Automatic helper precision lead:","Conditional planning-model precision:",
+        "DSP fixed workspace", "Fixed Helper-only schedule: 36 s precision allowance","Conditional planning-model precision:",
         "Expected helper C/N0:","High pilot:","Low pilot:","W (−3 dB)","W (−9 dB)",
         "dB-Hz", "Ideal noise-only 3σ scale:","Independent-retune noise-only 3σ scale:",
         "Current continuous-pilot practical forecast:","Independent actual-retune comparison:",
-        "4× the uninterrupted constant-tone reference","existing conditional ordinary-receiver cost query",
+        "4× the uninterrupted constant-tone reference","conditional ordinary-receiver cost query",
         "nominal assumed settled apertures","actual RF settling can reduce usable support",
         "explicit software assumption, not hidden baseline airtime",
         "Information sums C/N0 × aperture³","one complete symbol's coherent half-bin scale",
@@ -426,17 +427,20 @@ int main(){try{
     capped_point.precision.supported=true;capped_point.precision.target_reached=false;
     capped_point.precision.extension_capped=true;capped_point.precision.extra_lead_seconds=36;
     capped_point.precision.frequency_half_width_hz=.2;capped_point.uncertainty_hz=.2;
-    capped_point.precision.total_lead_seconds=capped_point.precision.baseline_lead_seconds+36;
-    capped_point.planned_lead_seconds=capped_point.precision.total_lead_seconds;
+    capped_point.precision.sustained_supported=true;capped_point.precision.sustained_at_seconds=36;
+    capped_point.precision.sustained_frequency_half_width_hz=.2;
+    capped_point.precision.total_lead_seconds=36;
+    capped_point.planned_lead_seconds=38;
     const auto capped_page=gui::planner_page::build(capped,900,true,false);
-    check(capped_point.available&&contains(capped_page,"36 s extra-lead cap reached; ±0.1 Hz target not reached")&&
-        contains(capped_page,"Initial conditional planning-model half-width at payload start: 0.2 Hz"),
-        "cap outcome hid the supported achievable residual precision/work");
+    check(capped_point.available&&contains(capped_page,"Predicted ±0.1 Hz eligibility at that boundary: no or unavailable")&&
+        contains(capped_page,"Fixed Helper-only schedule: 36 s precision allowance")&&
+        contains(capped_page,"planning-model half-width at the36 s measurement boundary: 0.2 Hz"),
+        "fixed-boundary precision and schedule were not displayed separately");
     auto declined=enabled;auto& declined_point=declined.helper_reference.conditional;
     declined_point.precision.supported=false;declined_point.precision.reason="bounded forecast input unavailable";
     declined_point.available=false;
     check(contains(gui::planner_page::build(declined,900,true,false),
-        "Automatic helper precision lead prediction declined: bounded forecast input unavailable")&&
+        "Helper precision prediction declined: bounded forecast input unavailable")&&
         contains(gui::planner_page::build(declined,900,true,false),"not proof of a physical precision limit"),
         "unsupported precision forecast was displayed as reached or locked");
     // Shared TX/Planner request uses actual metadata length and key precedence.
@@ -570,15 +574,19 @@ int main(){try{
     check(weak_model.available&&!weak_point.available&&!weak_point.precision.supported&&
         weak_point.precision.extension_capped&&!weak_point.precision.target_reached&&
         weak_point.precision.extra_lead_seconds==36&&transmit_weak.extra_lead_seconds==36&&
-        weak_requirements.frequency_precision_extension_seconds==36&&
+        weak_requirements.frequency_precision_extension_seconds==0&&
         weak_point.planned_lead_seconds==static_cast<double>(weak_envelope.lead_seconds)&&
+        weak_point.planned_lead_seconds==38&&
         weak_point.planned_tail_seconds==static_cast<double>(weak_envelope.tail_seconds)&&
         weak_point.uncertainty_hz==0&&weak_point.frequency_rate_hypotheses==0&&!weak_point.sustained&&
         weak_point.reason.find("precision not predicted")!=std::string::npos,
         "weak lead cap disagreed between transmit and Planner or created an assisted RF estimate");
     check(contains(gui::planner_page::build(weak_model,900,true,false),
-        "36.000000 s extra-lead cap selected; precision not predicted; target remains unmet"),
-        "weak-cap UI omitted its planned airtime or unsupported-precision limit");
+        "Fixed Helper-only schedule: 36 s precision allowance")&&
+        contains(gui::planner_page::build(weak_model,900,true,false),"38-second total lead")&&
+        contains(gui::planner_page::build(weak_model,900,true,false),"Helper precision prediction declined:")&&
+        contains(gui::planner_page::build(weak_model,900,true,false),"not proof of a physical precision limit"),
+        "weak-cap UI omitted its fixed schedule or unsupported-precision limit");
     const auto gps_estimate=gui::planner::build(gps.inputs);
     const auto& gps_conditional=gps_estimate.helper_reference.conditional;
     check(gps_conditional.precision.supported&&gps_conditional.frequency_rate_hypotheses>0&&

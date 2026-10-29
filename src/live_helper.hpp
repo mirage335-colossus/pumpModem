@@ -434,14 +434,11 @@ inline long double helper_leading_seconds(std::uint64_t physical_origin,std::uin
     if(!rate)throw Error("Helper Carrier lead has no source sample clock");
     if(!std::isfinite(minimum_seconds)||minimum_seconds<2.L)
         throw Error("invalid Helper Carrier lead duration");
-    const auto epoch=physical_origin/rate;
-    const auto origin=static_cast<long double>(physical_origin%rate)/rate;
-    const auto parity=static_cast<long double>(epoch%2);
-    const auto count=(parity+origin-minimum_seconds)*2.5L,nearest=std::round(count);
-    const auto snapped=std::abs(count-nearest)<=8*std::numeric_limits<long double>::epsilon()*
-        std::max(1.L,std::abs(count))?nearest:count;
-    const auto start=std::floor(snapped)*.4L-parity;
-    return origin-start;
+    // The physical origin may fall between dwell boundaries. The first helper
+    // dwell can be partial; adding up to one dwell to align its start would
+    // silently exceed the fixed lead (38 seconds for assisted transmission).
+    (void)physical_origin;
+    return minimum_seconds;
 }
 inline std::uint64_t helper_envelope_samples(long double seconds,std::uint32_t rate) {
     const auto samples=std::ceil(seconds*rate);
@@ -618,9 +615,9 @@ inline helper::EnvelopeRequirements helper_envelope_baseline_requirements(const 
             }
         }catch(const Error&) {} // Optional forecast cannot remove the physical baseline.
         catch(const std::bad_alloc&) {}
-        // Actual bounded PCM staging waits for the local pilot phase aperture.
-        // Charge this transport delay to the genuine lead/drain baseline,
-        // separately from the at-most36s precision extension.
+        // Preserve the bounded PCM stage's maximum dwell before local phase
+        // support is available. plan_envelope uses this only in tail coverage;
+        // it cannot enlarge the fixed 36+2-second transmitted lead.
         result.frontend_lookahead_seconds=static_cast<double>(
             helper_outward_duration_sum(result.frontend_lookahead_seconds,.4L));
     }
@@ -632,14 +629,13 @@ inline helper::EnvelopeRequirements helper_envelope_requirements(const Settings&
         helper::TonePrecisionPrediction* precision=nullptr) {
     auto result=helper_envelope_baseline_requirements(settings,config,receive,acquisition);
     if(active_helper_power(settings)>0) {
-        const auto baseline=helper::plan_envelope(config,result);
+        // Forecast the precision interval against the unchanged two-second
+        // baseline. Scheduling is fixed at 36+2 seconds and never consumes an
+        // adaptive forecast's shorter target time.
         auto forecast=helper_lead_precision_prediction(settings,config,
-            static_cast<double>(baseline.lead_seconds),result.maximum_source_capture_ratio);
-        // Capped airtime remains planned when this valid request cannot predict
-        // precision; it grants no frequency/phase/clock authority. Invalid or
-        // allocation-failed forecasts keep both flags false and yield safely.
-        if(forecast.supported || forecast.extension_capped)
-            result.frequency_precision_extension_seconds=forecast.extra_lead_seconds;
+            2.,result.maximum_source_capture_ratio);
+        // Forecast results report estimated precision only; they never select
+        // or shorten the fixed 36-second measurement interval.
         if(precision)*precision=std::move(forecast);
     }
     return result;
