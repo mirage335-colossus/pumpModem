@@ -205,6 +205,11 @@ void startup_and_submit_behavior() {
     Controller simulated({true,false,patch});
     check(simulated.settings().simulation,"Startup lost explicit --simulation compatibility");
     simulated.close();
+    auto partial=launch_command::parse("--shift 1MHz");
+    Controller shifted({true,false,partial});
+    near(shifted.settings().transfer.modem.carrier_hz,1725,"Partial startup Shift changed the default baseband carrier");
+    check(shifted.field(F::carrier).text=="1.001725 MHz","Partial startup Shift did not update the absolute Carrier");
+    shifted.close();
 
     Launch launch;launch.page=ui::Page::planner;
     Application app(launch);
@@ -255,12 +260,11 @@ void live_validation_is_atomic() {
 }
 void real_radio_configuration() {
     Controller controller;
-    const auto tone=controller.settings().transfer.modem.carrier_hz;
     load(controller,"--carrier 10.0015MHz --shift 10MHz --rf-oscillator gpsdo-ocxo --reference shared-radio --search-margin 3x");
     const auto policy=*controller.settings().transfer.modem.oscillator_search;
     check(policy.reference==modem::OscillatorReference::shared_radio&&policy.rf_shift_hz==10000000&&policy.margin==3,
         "Radio controls did not reach the actual receiver policy");
-    near(controller.settings().transfer.modem.carrier_hz,tone,"RF configuration changed the nonzero PCM carrier");
+    near(controller.settings().transfer.modem.carrier_hz,1500,"Explicit RF configuration did not preserve its PCM carrier");
     near(controller.settings().simulation_clock_error_ppm,.0001,"Shared radio incorrectly retained the independent sound-card clock");
     near(controller.settings().simulation_frequency_offset_hz,.001,"Shared radio applied the RF conversion error more than once");
     const auto canonical=controller.field(F::planner_command).text;
@@ -283,17 +287,18 @@ void real_radio_configuration() {
 }
 void invalid_shift_edit_recovers() {
     Controller controller({true,true});
-    const auto accepted=controller.settings().transfer.modem;
+    const auto accepted=controller.settings().transfer.modem.carrier_hz;
     controller.edit(F::rf_shift,"1 MHz");
-    check(controller.settings().transfer.modem.carrier_hz==accepted.carrier_hz&&
-          controller.settings().transfer.modem.oscillator_search==accepted.oscillator_search&&
-          controller.field(F::rf_shift).text=="1 MHz"&&
-          controller.field(F::status).text.find("Carrier must be greater than Shift")!=std::string::npos,
-          "An invalid Shift edit must preserve accepted geometry and expose a correctable error");
-    controller.edit(F::carrier,"1.0015 MHz");
-    check(controller.settings().transfer.modem.carrier_hz==1500&&
+    near(controller.settings().transfer.modem.carrier_hz,accepted,"Shift edit changed the accepted baseband carrier");
+    check(controller.field(F::carrier).text=="1.001725 MHz"&&
           controller.settings().transfer.modem.oscillator_search->rf_shift_hz==1000000,
-          "Correcting Carrier must recover the originally rejected Shift edit");
+          "Shift edit did not convert the preserved baseband carrier to absolute frequency");
+    controller.edit(F::carrier,"1 MHz");
+    near(controller.settings().transfer.modem.carrier_hz,accepted,"Invalid Carrier changed accepted geometry");
+    check(controller.field(F::status).text.find("Carrier must be greater than Shift")!=std::string::npos,
+          "Invalid Carrier did not expose a correctable error");
+    controller.edit(F::carrier,"1.0015 MHz");
+    near(controller.settings().transfer.modem.carrier_hz,1500,"Correcting Carrier did not recover the explicit edit");
     controller.close();
 }
 void absolute_carrier_and_shift() {
@@ -308,17 +313,17 @@ void absolute_carrier_and_shift() {
     near(*command.carrier_hz,1001500,"Export wrote the internal stream tone instead of Carrier");
     near(*command.rf_shift_hz,1000000,"Export lost Shift");
     check(controller.field(F::carrier).text=="1.0015 MHz","Carrier field did not retain absolute frequency");
-    check(controller.field(F::carrier).options.front().id=="1.0015 MHz","Carrier presets ignored Shift");
+    check(controller.field(F::carrier).options.front().id=="1.001725 MHz","Carrier presets ignored Shift");
     load(controller,controller.field(F::planner_command).text);
     near(controller.settings().transfer.modem.carrier_hz,1500,"Round trip subtracted Shift twice");
     controller.edit(F::rf_shift,"0 Hz");
-    near(controller.settings().transfer.modem.carrier_hz,1001500,"Direct real stream did not use absolute Carrier");
-    check(controller.settings().transfer.modem.sample_rate>=4006000,"Direct real stream sample rate aliases Carrier");
+    near(controller.settings().transfer.modem.carrier_hz,1500,"Shift removal changed the stream carrier");
+    check(controller.field(F::carrier).text=="1.5 kHz","Shift removal did not update the absolute Carrier");
     controller.edit(F::rf_shift,"1 MHz");
     near(controller.settings().transfer.modem.carrier_hz,1500,"Shift edit did not restore audio stream");
     controller.edit(F::bandwidth,"100 Hz");
-    near(controller.settings().transfer.modem.carrier_hz,tuning::recommended_carrier_hz(100),"Rate edit lost translated stream default");
-    check(controller.field(F::carrier).options.front().id==controller.field(F::carrier).text,"Rate edit did not select an absolute carrier preset");
+    near(controller.settings().transfer.modem.carrier_hz,1500,"Rate edit discarded a valid imported stream carrier");
+    check(controller.field(F::carrier).options.front().id=="1.001725 MHz","Rate edit did not recalculate the absolute recommendation");
     const auto accepted=controller.settings().transfer.modem;
     controller.edit(F::carrier,"1 MHz");
     near(controller.settings().transfer.modem.carrier_hz,accepted.carrier_hz,"Invalid Carrier committed a zero stream tone");
@@ -871,8 +876,9 @@ void doppler_settings() {
     near(controller.settings().transfer.modem.carrier_hz,expected,"Doppler round trip compounded frequency adjustment");
     check(controller.field(F::carrier).text==configured,"Doppler changed configured Carrier display");
     controller.edit(F::doppler,"-100 mph");
-    check(controller.settings().transfer.modem.carrier_hz>9000&&controller.field(F::doppler).display_text.find('%')!=std::string::npos,
-        "Approaching manual velocity did not raise carrier or show percentage");
+    near(controller.settings().transfer.modem.carrier_hz,expected,"Doppler edit changed the accepted baseband carrier");
+    check(controller.field(F::carrier).text!=configured&&controller.field(F::doppler).display_text.find('%')!=std::string::npos,
+        "Doppler edit did not update absolute Carrier or show percentage");
     const auto accepted=controller.settings().transfer.modem.carrier_hz;
     load(controller,"--rate 100 --doppler 2c");
     near(controller.settings().transfer.modem.carrier_hz,accepted,"Invalid Doppler import partially applied settings");
@@ -887,8 +893,9 @@ void doppler_settings() {
     check(controller.field(F::carrier).text==accepted_carrier&&controller.field(F::planner_command).text!=accepted_command&&
         controller.field(F::doppler).text==tuning::parse_doppler("-100 mph").canonical,
         "invalid complete adjusted stream partially committed field state");
+    const auto before_zero=controller.settings().transfer.modem.carrier_hz;
     controller.edit(F::doppler,"0.000000c");
-    near(controller.settings().transfer.modem.carrier_hz,9500,"Zero Doppler failed to restore configured carrier");
+    near(controller.settings().transfer.modem.carrier_hz,before_zero,"Zero Doppler changed the accepted baseband carrier");
     controller.close();
 }
 void duplex_settings() {

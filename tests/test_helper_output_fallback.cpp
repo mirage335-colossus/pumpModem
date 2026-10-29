@@ -1,5 +1,6 @@
 #include "datapump/live.hpp"
 #include "datapump/resampler.hpp"
+#include "../src/helper_power_reference.hpp"
 #include "../src/transmit_timing.hpp"
 #include <algorithm>
 #include <array>
@@ -43,7 +44,9 @@ live::Settings settings() {
     value.transfer.automatic_receive_profiles=false;value.transfer.recovery_options.enabled=false;
     value.transfer.key.emplace(Bytes(32,0x63));
     auto& c=value.transfer.modem;
-    c.sample_rate=8000;c.carrier_hz=1000;c.bandwidth_hz=200;
+    // Keep the data band clear of the fixed550/950Hz helper tones. The
+    // provider/fallback seam and ordinary source timing remain the same.
+    c.sample_rate=8000;c.carrier_hz=2000;c.bandwidth_hz=200;
     c.spreading_factor=16;c.pulse_shaping=false;c.scramble=true;
     value.content_limit=1024*1024;value.dsp_workspace_bytes=32*1024*1024;
     value.helper.power_w=100;return value;
@@ -98,6 +101,32 @@ std::shared_ptr<modem::FhssPlan> fhss_hops() {
     for(unsigned i=0;i<hops->channels;++i)hops->shifts[i]=30000000.+2000*i;
     return hops;
 }
+double calibrated_gain(const live::Settings& value,const Result& result,
+                       const std::shared_ptr<const modem::FhssPlan>& hopping={}) {
+    auto options=value.transfer;
+    if(hopping)options.modem.fake_hopping=transfer::transmit_hopping(*hopping,options);
+    const auto rate=options.modem.sample_rate;
+    auto selected=options.timestamp;
+    auto phase=static_cast<std::uint64_t>(options.modem.stream_phase_samples);
+    if(!selected) {
+        check(result.accepted_utc.has_value(),"fresh calibrated fallback did not expose its actual source UTC origin");
+        const auto prefix=modem::training_sample_count(options.modem)+modem::pattern_pulse_padding_samples(options.modem);
+        const auto payload=static_cast<long double>(*result.accepted_utc)+static_cast<long double>(prefix)/rate;
+        selected=static_cast<std::uint64_t>(std::floor(payload));
+        phase=static_cast<std::uint64_t>(std::llround((payload-selected)*rate));
+        if(phase==rate) {++selected;phase=0;}
+    }
+    options.timestamp=selected;options.modem.stream_phase_samples=phase;
+    auto source=transfer::binary_transmitter(Bytes{0,0,1},options);
+    const auto config=transfer::seeded_config(options,selected);
+    auto reference=helper::transmit_power_reference(config,*source,selected,selected,options.key);
+    const auto origin=source->physical_output_origin();
+    reference.helper_start_seconds=static_cast<long double>(origin/rate)-selected+
+        static_cast<long double>(origin%rate)/rate;
+    reference.helper_end_seconds=*reference.helper_start_seconds+
+        static_cast<long double>(source->total_samples())/rate;
+    return helper::calibrated_data_gain(value.helper,static_cast<bool>(config.fake_hopping),&reference);
+}
 void rate_failure_retries_ordinary() {
     auto value=settings();auto baseline=value;baseline.helper.power_w=0;
     const auto ordinary=run(baseline),fallback=run(value,true);
@@ -107,11 +136,10 @@ void rate_failure_retries_ordinary() {
     check(fallback.opened==2 && fallback.closed==2 && fallback.formats==1 &&
           fallback.requested_rates.size()==2 && fallback.requested_rates[0]>=48000 &&
           fallback.requested_rates[1]==0,"helper rate failure did not make exactly one pre-PCM ordinary retry");
-    const auto plan=helper::plan(value.helper,value.transfer.modem.carrier_hz,
-        helper::occupied_bandwidth(value.transfer.modem),48000,0,modem::outer_dsss_transmit_gain(value.transfer.modem));
+    const auto gain=calibrated_gain(value,fallback);
     check(fallback.pcm.size()==ordinary.pcm.size(),"helper decline changed the ordinary output duration");
     for(std::size_t i=0;i<fallback.pcm.size();++i)
-        check(fallback.pcm[i]==static_cast<float>(ordinary.pcm[i]*plan.data_gain),
+        check(fallback.pcm[i]==static_cast<float>(ordinary.pcm[i]*gain),
               "helper decline changed the calibrated data amplitude or ordinary PCM");
     check(fallback.logical_pcm==ordinary.logical_pcm &&
           fallback.snapshot.transmit_trace.wire_bits==ordinary.snapshot.transmit_trace.wire_bits &&
@@ -142,7 +170,7 @@ void unavailable_geometry_retains_ordinary() {
     check(fallback.opened==1&&fallback.closed==1&&fallback.formats==1&&fallback.source_calls>0&&
           fallback.requested_rates==std::vector<std::uint32_t>{requested},
           "unavailable High placement repeated output or lost its single physical-rate request");
-    const auto gain=helper::calibrated_data_gain(value.helper);
+    const auto gain=calibrated_gain(value,fallback);
     check(fallback.pcm.size()==ordinary.pcm.size(),"unavailable placement changed ordinary output duration");
     for(std::size_t i=0;i<fallback.pcm.size();++i)
         check(fallback.pcm[i]==static_cast<float>(ordinary.pcm[i]*gain),
@@ -184,7 +212,7 @@ void gated_geometry_retains_ordinary() {
     check(fallback.opened==1&&fallback.closed==1&&fallback.formats==1&&fallback.source_calls>0&&
           fallback.requested_rates==std::vector<std::uint32_t>{requested},
           "unavailable gated placement repeated output or lost its physical-rate request");
-    const auto gain=helper::calibrated_data_gain(value.helper);
+    const auto gain=calibrated_gain(value,fallback,hops);
     check(fallback.pcm.size()==ordinary.pcm.size(),"gated fallback changed ordinary output duration");
     for(std::size_t i=0;i<fallback.pcm.size();++i)
         check(fallback.pcm[i]==static_cast<float>(ordinary.pcm[i]*gain),
@@ -238,8 +266,7 @@ void helper_only_cannot_succeed_without_helper() {
 void explicit_past_declines_at_calibrated_amplitude() {
     auto value=settings();auto baseline=value;baseline.helper.power_w=0;
     const auto ordinary=run(baseline),declined=run(value);
-    const auto gain=helper::plan(value.helper,value.transfer.modem.carrier_hz,
-        helper::occupied_bandwidth(value.transfer.modem),48000).data_gain;
+    const auto gain=calibrated_gain(value,declined);
     check(!declined.snapshot.transmission_failed && declined.snapshot.transmission_fraction==1 &&
           declined.opened==1 && declined.logical_pcm==ordinary.logical_pcm,
           "past explicit helper epoch changed or aborted the ordinary source");

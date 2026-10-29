@@ -1507,6 +1507,7 @@ void expanded_spectrum() {
     app.gesture(compact,compact.right_click);
     check(!app.overlay(),"disabled Helper Carrier opened a helper spectrum");
     app.edit(F::helper_power,"10 W");
+    const auto helper_carrier=app.field(F::carrier).text;
     check(app.enabled(compact.right_click),"enabled Helper Carrier did not enable its spectrum gesture");
     app.gesture(compact,compact.right_click);
     const auto helper_view=app.overlay();
@@ -1518,7 +1519,7 @@ void expanded_spectrum() {
           "helper detail spectrum did not identify the helper frequency range");
     app.gesture(helper_source,helper_source.right_click);
     check(!app.overlay(),"right-click did not restore the compact waterfall");
-    check(app.field(F::bandwidth).text==rate&&app.field(F::carrier).text==carrier,
+    check(app.field(F::bandwidth).text==rate&&app.field(F::carrier).text==helper_carrier,
           "opening Helper Carrier detail changed receiver geometry");
     app.gesture(compact,compact.click);const auto current=app.overlay();
     check(current&&current->generation!=view->generation,"expanded spectrum reused a stale callback surface");
@@ -1608,24 +1609,22 @@ void rate_carrier_declarations() {
     check(std::string_view(rate.label)=="Rate" && std::string_view(carrier.label)=="Carrier" &&
           rate.kind==ui::Kind::text && carrier.kind==ui::Kind::text && rate.persistent && carrier.persistent &&
           carrier.open_upward && app.field(carrier.field).options.size()==2 &&
-          app.field(carrier.field).options.front().id=="1.5 kHz" &&
+          app.field(carrier.field).options.front().id=="1.725 kHz" &&
           app.field(carrier.field).options.back().id=="1.8 kHz",
           "Rate and Carrier must be shared persistent editable dropdowns");
     for(const auto& page:ui::pages()) {
-        app.select_page(page.id);app.preset(rate,"2.4 kHz");
-        check(app.field(F::carrier).text=="1.8 kHz" && app.field(F::carrier).options.size()==2 &&
-              app.field(F::carrier).options.front().id=="1.8 kHz" && app.field(F::carrier).options.back().id=="1.2 kHz",
-              "Rate preset did not offer its default and center Carrier on every page");
+        app.select_page(page.id);app.preset(carrier,"1.725 kHz");app.preset(rate,"2.4 kHz");
+        check(app.field(F::carrier).text=="1.725 kHz" && app.field(F::carrier).options.size()==2 &&
+              app.field(F::carrier).options.front().id=="1.725 kHz" && app.field(F::carrier).options.back().id=="1.2 kHz",
+              "Rate preset did not preserve the valid Carrier and offer the calculated default and half-rate on every page");
         app.preset(carrier,"1.2 kHz");
-        check(app.field(F::carrier).text=="1.2 kHz","Center Carrier preset did not use the shared edit path");
+        check(app.field(F::carrier).text=="1.2 kHz","Half-rate Carrier preset did not use the shared edit path");
         app.edit(carrier,"2150 Hz");
         check(app.field(F::carrier).text=="2150 Hz","Carrier dropdown did not accept a custom frequency");
-        app.preset(carrier,"1.8 kHz");
-        check(app.field(F::carrier).text=="1.8 kHz","Default Carrier preset did not use the shared edit path");
         app.preset(rate,"3.6 kHz");
-        check(app.field(F::carrier).text=="1.5 kHz","HF rate preset did not restore its recommended carrier");
+        check(app.field(F::carrier).text=="2.15 kHz","Rate change discarded a valid custom Carrier");
         app.preset(carrier,"1.8 kHz");
-        check(app.field(F::carrier).text=="1.8 kHz","HF rate center Carrier was not selectable on every page");
+        check(app.field(F::carrier).text=="1.8 kHz","HF half-rate Carrier was not selectable on every page");
         for(const auto size:{ui::Rect{0,0,ui::min_width,ui::min_height},ui::Rect{0,0,ui::default_width,ui::default_height}}) {
             const auto rate_geometry=ui::control_layout(rate,app.field(rate.field),size.w,size.h);
             const auto carrier_geometry=ui::control_layout(carrier,app.field(carrier.field),size.w,size.h);
@@ -1785,7 +1784,7 @@ void oscillator_declaration() {
     app.select(control(F::rf_oscillator),"gpsdo-ocxo");
     check(app.field(F::rf_oscillator).selected==initial_shift_model,
           "Disabled Shift oscillator must reject stale native callbacks");
-    app.edit(control(F::carrier),"1.0015 MHz");app.edit(control(F::rf_shift),"1 MHz");
+    app.edit(control(F::rf_shift),"1 MHz");app.edit(control(F::carrier),"1.0015 MHz");
     check(app.control(control(F::rf_oscillator)).enabled&&app.field(F::rf_oscillator).display_text.empty(),
           "Nonzero Shift must restore the selectable oscillator model");
     app.preset(control(F::search_margin),"2x");
@@ -1828,7 +1827,7 @@ void oscillator_declaration() {
         }
     }
     app.select_page(P::console);app.toggle(F::developer_mode,false);
-    app.edit(control(F::carrier),"10.0015 MHz");app.edit(control(F::rf_shift),"10 MHz");
+    app.edit(control(F::rf_shift),"10 MHz");app.edit(control(F::carrier),"10.0015 MHz");
     app.select(control(F::rf_oscillator),"baseband-clock");
     for(const auto* mode:{"no","yes"}) {
         app.select(F::simulation,mode);app.select_page(P::planner);
@@ -2064,7 +2063,7 @@ void typed_short_text_inspection() {
     Application app({});app.select(ui::Field::fast_mode,"robust"); // Production defaults; no audio session is needed to inspect a draft.
     app.toggle(ui::Field::developer_mode,true);
     const auto& message=control(F::message);
-    check(app.field(F::bandwidth).text=="3.6 kHz" && app.field(F::carrier).text=="1.5 kHz" &&
+    check(app.field(F::bandwidth).text=="3.6 kHz" && app.field(F::carrier).text=="1.725 kHz" &&
           app.field(F::snr).text=="32" && app.field(F::long_snr).text=="55" && app.field(F::receive_snr).text=="32, 55" &&
           app.field(F::pattern).selected=="auto-pattern" && app.field(F::fec).selected=="rs60" &&
           !app.field(F::repeatable).checked,"Production defaults changed the short message fixture");

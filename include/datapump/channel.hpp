@@ -83,6 +83,9 @@ public:
     // Applies before the first read of the prepared burst, or to the next burst
     // if output has already begun. No extra begin_burst call is required.
     void set_helper_time_key(std::optional<Crypto> key);
+    // Supply the prepared source's actual metadata/calendar reference before
+    // binding a burst when scheduling or temporary source keys changed it.
+    void set_helper_power_reference(helper::PowerReference reference);
     using PhysicalObserver=std::function<void(std::span<const float>,std::uint32_t,std::uint64_t)>;
     // Actual receiver tuning metadata, in the same continuous ADC coordinate
     // as PhysicalObserver. No oscillator-error or carrier-phase truth is

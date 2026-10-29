@@ -259,21 +259,25 @@ independently.
 The DSP workspace dropdown is an upper limit: 25%, 50% (default), or 75% of
 available RAM. It does not request that amount of history. Received messages
 and files have a separate 256 MiB quota. The GUI defaults to **Rate**
-`3.6 kHz`, **Carrier** `1.5 kHz`, **Short ≤16 B target SNR (dB-Hz)** `32`, and
+`3.6 kHz`, **Carrier** `1.725 kHz`, **Short ≤16 B target SNR (dB-Hz)** `32`, and
 **Long / file target SNR (dB-Hz)** `55`. The short target applies to nonempty
 text of 1–16 source bytes inclusive and exact raw bits. Longer text and all
 attachments use the long target. Estimates, inspection and transmission follow
 the draft's source bytes; crossing the boundary does not restart reception.
 Rate is the nominal chip-rate planning parameter, not a measured occupied
-bandwidth: the default produces 1,800 chips/s and an ideal shaped spectrum of
-375–2,625 Hz, including the 25% RRC rolloff. Rate presets still include `18 kHz`.
+bandwidth; Rate presets include `18 kHz`.
 Carrier is the absolute transmitted/received frequency; Shift defaults to
 `0 Hz`. The positive real USB stream tone is **Carrier − Shift**. For example,
-Carrier `1.0015 MHz` with Shift `1 MHz` gives a `1.5 kHz` tone; Shift `0` instead
-requires a direct real stream supporting the `1.0015 MHz` tone. Changing Rate
-sets Carrier to Shift plus `1.5 kHz` for `3.6 kHz`, otherwise Shift plus
-`max(1500, 0.75 × rate)` Hz. Carrier presets add Shift to the rate's recommended
-stream tone or center frequency; manual absolute frequency entry remains available.
+Carrier `1.001725 MHz` with Shift `1 MHz` gives a `1.725 kHz` tone; Shift `0`
+instead requires a direct real stream supporting the `1.001725 MHz` tone.
+Carrier recommendations use the actual waveform bandwidth and include a
+half-rate choice when otherwise valid. The higher default is at least 1725 Hz,
+raised as needed to keep the lower occupied edge at 375 Hz without Helper
+Carrier or 1400 Hz with it. The Helper-enabled list also offers 1525, 1575 and
+1775 Hz when they fit. Configuration changes preserve a valid selected baseband
+frequency, including a custom value, and update its displayed absolute Carrier;
+an invalid selection falls back to the recommended default. See the
+[GUI contract](docs/gui-contract.md) for rounding and other constraints.
 Both Carrier and Shift accept Hz, kHz, MHz, GHz and THz units, ignoring case
 and optional spaces, as well as scientific notation.
 Compact **Baseband Osc**, **Shift Osc** and **Margin** controls remain visible

@@ -1,6 +1,7 @@
 #include "datapump/helper_carrier.hpp"
 #include "datapump/modem.hpp"
 #include "datapump/types.hpp"
+#include "helper_power_reference_checks.hpp"
 #include <openssl/err.h>
 #include <openssl/evp.h>
 #include <algorithm>
@@ -37,70 +38,114 @@ std::complex<double> auxiliary_baseband(const h::Generator& generator,const h::G
     return (generator.mix_analytic({},time,rate,end,start)-pilot.mix_analytic({},time,rate,end,start))/
         (plan.helper_gain*h::auxiliary_amplitude_fraction*oscillator(plan.auxiliary_frequency_hz,time));
 }
+// The metadata/reversal fixtures deliberately isolate the previous two-tone
+// laboratory arrangement; production placement is tested independently below.
+h::Plan metadata_fixture_plan(const h::Options& options,double carrier,double bandwidth,std::uint32_t) {
+    const auto relative=std::sqrt(2*datapump::modem::nominal_signal_power*options.power_w/options.data_power_w);
+    const auto gain=.95/(1+relative*(h::pilot_amplitude_fraction+h::auxiliary_amplitude_fraction));
+    return {carrier+bandwidth/2+850,relative*gain,gain,options.power_w,
+        carrier+bandwidth/2+450,0,true};
+}
 void power_and_placement() {
     h::Options options;
-    require(h::minimum_output_rate(options,1000,200,6000)==0,
-            "disabled helper changes hardware negotiation");
     const auto disabled=h::plan(options,1000,200,8000);
     require(disabled.helper_gain==0&&disabled.data_gain==1,"disabled helper changes gain");
     h::Generator off(options,disabled);
     for(const auto sample:{0.f,-0.f,.125f,-.83f,std::numeric_limits<float>::infinity()})
         require(std::bit_cast<std::uint32_t>(off.mix(sample,0,0))==std::bit_cast<std::uint32_t>(sample),
                 "disabled mixer changed payload bits");
-    options.power_w=1500;
-    require(h::minimum_output_rate(options,1500,36,6000)==48000,
-            "helper did not negotiate independently of the low-rate modem");
-    require(h::minimum_output_rate(options,1500,36,48000)==48000&&
-            h::minimum_output_rate(options,1500,36,96000)==96000,
-            "logical sample clock pushed an adjacent helper into a remote audio band");
-    require(h::minimum_output_rate(options,1700,3000,6000)==48000,
-            "hardware negotiation applied logical Nyquist to the physical helper geometry");
-    const auto high=h::plan(options,1000,200,8000);
-    const auto backed_off=h::plan(options,1000,200,8000,0,.5);
-    require(backed_off.helper_gain==high.helper_gain*.5&&backed_off.data_gain==high.data_gain&&
-            backed_off.effective_power_w==high.effective_power_w,
-            "payload backoff calibration changed Robust PCM or failed to reduce only helper amplitude");
-    rejects([&]{h::plan(options,1000,200,8000,0,0);});
-    rejects([&]{h::plan(options,1000,200,8000,0,std::numeric_limits<double>::quiet_NaN());});
-    require(high.auxiliary_frequency_hz==1600&&high.frequency_hz==2000,
-            "High helper did not use the nearest leakage-qualified 50Hz separation");
-    const auto ssb=h::plan(options,1500,36,48000);
-    require(ssb.frequency_hz==2368&&ssb.auxiliary_frequency_hz==1968&&
-            ssb.auxiliary_frequency_hz-150>1518&&ssb.frequency_hz-ssb.auxiliary_frequency_hz==400,
-            "narrow Robust signal did not retain a close nonoverlapping High helper");
-    require(std::abs(high.helper_gain/high.data_gain-
-        std::sqrt(2*datapump::modem::nominal_signal_power*1500/4))<1e-12,"power ratio used as amplitude ratio");
-    require(high.data_gain==h::calibrated_data_gain(options)&&
-            high.data_gain+high.helper_gain*(h::pilot_amplitude_fraction+h::auxiliary_amplitude_fraction)<=.950000000001,
-            "two-tone peak sum lost calibrated payload gain or reserved headroom");
-    const auto level=h::reference_level(options,10);
-    require(std::abs(level.pilot_effective_power_ratio-337.5)<1e-12&&
-            std::abs(level.pilot_straight_cn0_db_hz-level.straight_cn0_db_hz-10*std::log10(.9))<1e-12&&
-            std::abs(level.pilot_usable_cn0_db_hz-level.usable_cn0_db_hz-10*std::log10(.9))<1e-12&&
-            std::abs(level.pilot_straight_cn0_db_hz-level.auxiliary_straight_cn0_db_hz-10*std::log10(9.))<1e-12,
-            "reference level confused total helper, pilot and auxiliary power");
-    const auto outside_capture=h::plan(options,1000,200,48000,8250);
-    require(outside_capture.frequency_hz>=8250&&outside_capture.frequency_hz<8300,
-            "caller-supplied High frequency floor was not rounded outward");
-    require(outside_capture.data_gain==high.data_gain&&outside_capture.helper_gain==high.helper_gain,
-            "capture-stopband placement changed relative power calibration");
-    rejects([&]{h::plan(options,1000,200,16000,8250);});
-    rejects([&]{h::plan(options,1000,200,48000,-1);});
-    rejects([&]{h::plan(options,1000,200,48000,std::numeric_limits<double>::quiet_NaN());});
-    options.frequency=h::Frequency::low;
-    rejects([&]{h::validate(options);});
-    rejects([&]{h::plan(options,1000,200,8000);});
-    options.frequency=h::Frequency::high;
-    rejects([&]{h::plan(options,3500,500,8000);});
-    options.frequency=h::Frequency::cochannel;
-    rejects([&]{h::validate(options);});
-    rejects([&]{h::plan(options,1000,200,8000);});
-    options.frequency=h::Frequency::high;options.data_power_w=1e-6;
-    const auto capped=h::plan(options,1000,200,48000);
-    require(std::abs(capped.effective_power_w-1000)<1e-9,"ratio ceiling did not reduce helper power");
-    options.power_w=-1;rejects([&]{h::validate(options);});
-    options.power_w=1;options.callsign="ABCDEFGHIJKLMNOPQRST";rejects([&]{h::validate(options);});
+    options.power_w=40;options.data_power_w=4;options.timecode=false;
+    const auto high=h::plan(options,1725,200,48000);
+    require(high.low_frequency_hz==550&&high.auxiliary_frequency_hz==950&&high.frequency_hz==2400,
+        "fixed low/auxiliary or 2400Hz high-pilot floor changed");
+    require(high.effective_power_w==36,"configured total did not subtract Robust allocation");
+    require(h::minimum_output_rate(options,1725,200,6000)==48000,
+        "helper physical clock changed the logical source clock");
+    const auto wider=h::plan(options,4000,3000,48000);
+    require(wider.low_frequency_hz==550&&wider.auxiliary_frequency_hz==950&&wider.frequency_hz>=5950,
+        "wide Robust signal moved fixed tones or failed to raise high pilot");
+    const auto raised=h::plan(options,1725,200,48000,8250);
+    require(raised.frequency_hz>=8250&&raised.low_frequency_hz==550&&raised.auxiliary_frequency_hz==950,
+        "external placement floor moved low pilots");
+    rejects([&]{h::plan(options,1000,200,48000);});
+    rejects([&]{h::plan(options,1725,200,4000);});
+    rejects([&]{h::plan(options,1725,200,48000,-1);});
+    rejects([&]{h::plan(options,1725,200,48000,0,0);});
+    const auto below=h::plan(options,.5,1,48000);
+    require(below.low_frequency_hz==550,"valid low baseband waveform lost the fixed pilots");
+    const auto backed_off=h::plan(options,1725,200,48000,0,.5);
+    require(backed_off.helper_gain==high.helper_gain*.5&&backed_off.data_gain==high.data_gain,
+        "existing Robust source backoff changed relative calibration");
+    require(high.data_gain+high.helper_gain*(h::pilot_amplitude_fraction+h::low_pilot_amplitude_fraction+
+        h::auxiliary_amplitude_fraction)<=.950000000001,"three-tone composite lost peak headroom");
+    require(std::abs(10*std::log10(h::low_pilot_power_fraction/h::pilot_power_fraction)+3)<1e-12&&
+        std::abs(10*std::log10(h::auxiliary_power_fraction/h::pilot_power_fraction)+9)<1e-12,
+        "steady component levels are not -3/-9dB relative to high pilot");
+    auto exhausted=options;exhausted.power_w=exhausted.data_power_w;
+    const auto no_helpers=h::plan(exhausted,1000,200,8000);
+    require(no_helpers.helper_gain==0&&no_helpers.data_gain==1&&h::calibrated_data_gain(exhausted)==1&&
+        h::minimum_output_rate(exhausted,1000,200,8000)==0,
+        "zero helper remainder did not retain the ordinary payload gain/clock");
+    const auto absent=h::reference_level(exhausted,10);
+    require(absent.effective_power_ratio==0&&std::isinf(absent.straight_cn0_db_hz)&&absent.straight_cn0_db_hz<0,
+        "zero helper remainder manufactured a finite reference level");
+    options.ratio_limit_db=3;
+    const auto capped=h::plan(options,1725,200,48000);
+    require(std::abs(capped.effective_power_w-4*std::pow(10.,.3))<1e-12,
+        "existing helper/data ratio ceiling changed");
+    options.frequency=h::Frequency::low;rejects([&]{h::validate(options);});
+    options.frequency=h::Frequency::cochannel;rejects([&]{h::validate(options);});
+    options.frequency=h::Frequency::high;options.power_w=-1;rejects([&]{h::validate(options);});
+    options.power_w=40;options.callsign="ABCDEFGHIJKLMNOPQRST";rejects([&]{h::validate(options);});
     options.callsign=std::string(1,static_cast<char>(128));rejects([&]{h::validate(options);});
+}
+void active_average_and_continuous_pilots() {
+    constexpr std::uint32_t rate=48000;
+    std::array<std::uint8_t,32> key_bytes{};key_bytes[0]=23;
+    const datapump::Crypto key(key_bytes);
+    for(const auto gating:{false,true})for(const auto callsign:{"","N0CALL","ABCDEFGHIJKLMNOPQRS"})for(const auto encrypted:{false,true})for(const auto measured:{false,true}) {
+        h::Options options;options.power_w=40;options.data_power_w=4;options.callsign=callsign;
+        h::PowerReference reference;reference.epoch=1800000000;reference.begin_seconds=.013L;reference.end_seconds=1.189L;
+        reference.time_key=encrypted?std::optional<datapump::Crypto>{key}:std::nullopt;
+        if(measured)reference.data_mean_power=datapump::modem::nominal_signal_power*.37;
+        reference.active=[](long double t){return t<.1L||t>=.12L;};
+        h::PlacementBand band{1725,200,0,gating};
+        const auto plan=h::plan(options,band,rate,0,measured?.5:1,&reference);
+        h::Generator whole(options,plan,reference.epoch,true,reference.time_key);
+        auto high_plan=plan;high_plan.auxiliary_frequency_hz=0;high_plan.low_frequency_hz=0;
+        h::Generator high(options,high_plan,reference.epoch,true,reference.time_key);
+        auto pilots_plan=plan;pilots_plan.auxiliary_frequency_hz=0;
+        h::Generator pilots(options,pilots_plan,reference.epoch,true,reference.time_key);
+        double helper=0,data=0,high_energy=0,low_energy=0;std::size_t count=0;
+        for(std::uint32_t i=0;i<rate*1.2;++i) {
+            const auto t=static_cast<long double>(i)/rate;
+            if(t<reference.begin_seconds||t>=reference.end_seconds||!reference.active(t))continue;
+            const auto high_sample=high.mix_analytic({},t,rate);
+            const auto low_sample=pilots.mix_analytic({},t,rate)-high_sample;
+            const auto auxiliary=whole.mix_analytic({},t,rate)-pilots.mix_analytic({},t,rate);
+            helper+=std::norm(high_sample)+std::norm(low_sample)+std::norm(auxiliary);
+            data+=2*reference.data_mean_power.value_or(datapump::modem::nominal_signal_power)*plan.data_gain*plan.data_gain;
+            high_energy+=std::norm(high_sample);low_energy+=std::norm(low_sample);++count;
+        }
+        require(count&&std::abs(data/(data+helper)-.1)<2e-5,
+            "actual active helper gates/APSK did not establish the 40W/4W average allocation");
+        require(std::abs(10*std::log10(low_energy/high_energy)+3)<1e-10,
+            "steady low/high pilot power ratio changed");
+        for(const auto boundary:{.4L,.8L,1.2L}) {
+            const auto sample=high.mix_analytic({},boundary,rate);
+            require(gating?std::abs(sample)<1e-10:std::abs(sample-plan.helper_gain*h::pilot_amplitude_fraction*
+                oscillator(plan.frequency_hz,boundary))<1e-10,
+                "straight pilot dwell gate disagrees with FHSS selection");
+            if(!gating) {
+                const auto t=boundary+1.L/rate;
+                require(std::abs(high.mix_analytic({},t,rate)/sample-
+                    oscillator(plan.frequency_hz,1.L/rate))<1e-10,
+                    "non-FHSS straight pilot reset phase at a dwell boundary");
+            }
+        }
+        require(whole.mix(0,.15L,rate,{},.15L)==0&&whole.mix(0,.15L,rate,.15L)==0,
+            "continuous pilots lost shaped transmission endpoints");
+    }
 }
 void metadata_vectors() {
     // Independently generated with a Python CRC7/MMC and explicit MSB
@@ -118,7 +163,7 @@ void metadata_vectors() {
     require(std::abs(h::apsk_point(512)-std::complex<double>{0,.9})<1e-14,"APSK quadrant label changed");
     rejects([]{h::apsk_point(1U<<21);});
     h::Options options;options.power_w=100;options.callsign="N0CALL";
-    const auto plan=h::plan(options,1000,200,8000);
+    const auto plan=metadata_fixture_plan(options,1000,200,8000);
     h::Generator generator(options,plan);
     const auto pilot=pilot_only(plan);
     for(std::size_t i=0;i<expected.size();++i) {
@@ -151,7 +196,7 @@ void metadata_vectors() {
 void timecode_generation() {
     h::Options options;options.power_w=100;
     require(options.timecode,"empty callsign no longer defaults to timecode");
-    const auto plan=h::plan(options,1000,200,8000);
+    const auto plan=metadata_fixture_plan(options,1000,200,8000);
     const auto pilot=pilot_only(plan);
     std::array<std::uint8_t,32> master{};
     for(std::size_t i=0;i<master.size();++i)master[i]=static_cast<std::uint8_t>(3*i+1);
@@ -270,7 +315,7 @@ void timecode_generation() {
 }
 void waveform_coordinates() {
     h::Options options;options.power_w=1500;options.timecode=false;
-    const auto plan=h::plan(options,1000,200,8000);
+    const auto plan=metadata_fixture_plan(options,1000,200,8000);
     h::Generator generator(options,plan),odd(options,plan,1);
     const auto pilot=pilot_only(plan);
     const auto baseband=[&](long double time) {
@@ -337,7 +382,7 @@ void waveform_coordinates() {
                 std::complex<double>{1,0})<1e-12,"pure pilot unexpectedly modulated");
         }
     }
-    require(std::abs(pilot_power/auxiliary_power-9)<1e-11&&
+    require(std::abs(pilot_power/auxiliary_power-h::pilot_power_fraction/h::auxiliary_power_fraction)<1e-11&&
             std::abs(straight_power-pilot_power-auxiliary_power)<1e-9,
             "straight interval did not preserve90/10 power or coherent total accounting");
     // Known auxiliary values, rather than a composite subtraction used as
@@ -396,7 +441,7 @@ void protected_streaming_endpoint() {
     rejects([]{h::protected_endpoint(0,1,0);});
     rejects([]{h::protected_endpoint(0,0,std::numeric_limits<long double>::infinity());});
     h::Options options;options.power_w=100;options.timecode=false;
-    const auto plan=h::plan(options,1000,200,8000);
+    const auto plan=metadata_fixture_plan(options,1000,200,8000);
     h::Generator generator(options,plan);
     const auto pilot=pilot_only(plan);
     const auto before=generator.mix_analytic({},.25L,8000,.4L,0);
@@ -478,7 +523,7 @@ void spectrum() {
     for(const auto& test:std::array<MetadataCase,5>{{{"",false,false},{"",false,true},{"",true,true},
             {"N0CALL",false,true},{"ABCDEFGHIJKLMNOPQRS",false,true}}}) {
         h::Options options;options.power_w=100;options.callsign=test.callsign;options.timecode=test.timecode;
-        const auto plan=h::plan(options,1000,200,10240);
+        const auto plan=metadata_fixture_plan(options,1000,200,10240);
         h::Generator generator(options,plan,1800000000,true,test.encrypted?std::optional<datapump::Crypto>{key}:std::nullopt);
         const auto pilot=pilot_only(plan,1800000000);
         std::vector<std::complex<double>> samples(4096);
@@ -510,31 +555,30 @@ void spectrum() {
         require(outside/total<.01,"helper exceeds300Hz99percent occupied bandwidth");
         require(data_band/total<1e-5,"helper transition leakage exceeds measured-geometry mask");
     }
-    // Exercise the actual planned guard, both real carrier images, and broad
-    // data bands. The worst allowed ratio must expand the helper guard rather
-    // than change data bandwidth, power or sample rate.
+    // Sample the actual planned guards at the full ratio ceiling. Fixed
+    // lower tones require a high enough Robust carrier before high placement.
     for(const auto bandwidth:{200.,6000.})for(const auto ratio_db:{0.,40.,60.,90.})for(const auto encrypted:{false,true}) {
         constexpr std::uint32_t rate=40960;
-        h::Options options;options.data_power_w=1e-6;
-        options.power_w=options.data_power_w*std::pow(10.,ratio_db/10);
+        h::Options options;options.data_power_w=1;options.power_w=1+std::pow(10.,ratio_db/10);
         options.callsign=encrypted?"":"ABCDEFGHIJKLMNOPQRS";
-        const auto plan=h::plan(options,4500,bandwidth,rate);
-        h::Generator generator(options,plan,0,true,encrypted?std::optional<datapump::Crypto>{key}:std::nullopt);
+        h::PowerReference reference;reference.time_key=encrypted?std::optional<datapump::Crypto>{key}:std::nullopt;
+        const auto plan=h::plan(options,10000,bandwidth,rate,0,1,&reference);
+        require(plan.low_frequency_hz==550&&plan.auxiliary_frequency_hz==950&&plan.frequency_hz>=2400,
+            "power-dependent placement moved fixed helper frequencies");
+        h::Generator generator(options,plan,0,true,reference.time_key);
         std::vector<std::complex<double>> samples(16384);
         for(std::size_t i=0;i<samples.size();++i)
             samples[i]=generator.mix(0,static_cast<long double>(i)/rate,rate)/plan.helper_gain;
-        fft(samples);
-        double leaked=0;
+        fft(samples);double leaked=0;
         for(std::size_t i=0;i<samples.size();++i) {
             const auto frequency=(i<=samples.size()/2?static_cast<double>(i):
                 static_cast<double>(i)-static_cast<double>(samples.size()))*2.5;
-            if(std::abs(std::abs(frequency)-4500)<=bandwidth/2)leaked+=std::norm(samples[i]);
+            if(std::abs(std::abs(frequency)-10000)<=bandwidth/2)leaked+=std::norm(samples[i]);
         }
-        const auto fraction=2*leaked/static_cast<double>(samples.size()*samples.size());
+        const auto fraction=2*leaked/static_cast<double>(samples.size()*samples.size())/
+            h::mean_power(options,false,&reference).total;
         const auto relative_to_data=fraction*std::pow(10.,ratio_db/10);
-        std::cout<<"helper guard encrypted="<<encrypted<<" ratio_dB="<<ratio_db<<" data_bandwidth="<<bandwidth
-                 <<" carrier="<<plan.frequency_hz<<" leakage/data_dB="<<10*std::log10(relative_to_data)<<'\n';
-        require(relative_to_data<1e-3,"power-dependent guard exceeded data leakage mask");
+        require(relative_to_data<1e-3,"fixed helper power-dependent guard exceeded sampled leakage mask");
     }
     // A finite transmission may begin in the middle of a dwell. Test both
     // sides of a hop boundary; explicit start/end ramps must keep the same
@@ -542,7 +586,7 @@ void spectrum() {
     for(const auto start:{.153L,.3995L}) {
         constexpr std::uint32_t rate=40960;
         h::Options options;options.power_w=100;options.callsign="N0CALL";
-        const auto plan=h::plan(options,1000,200,rate);
+        const auto plan=metadata_fixture_plan(options,1000,200,rate);
         h::Generator generator(options,plan);
         const auto pilot=pilot_only(plan);
         std::vector<std::complex<double>> samples(32768);
@@ -562,13 +606,18 @@ void spectrum() {
     for(const auto ratio_db:{60.,90.})for(const auto& endpoints:{
             std::pair{.153L,.35L},std::pair{.3995L,.702L},
             std::pair{.398L,.402L},std::pair{.153L,.402L}}) {
-        constexpr std::uint32_t rate=40960;
+        const std::uint32_t rate=ratio_db==90?163840:40960;
+        const auto data_carrier=ratio_db==90?45000.:10000.;
         h::Options options;options.data_power_w=1e-6;
         options.power_w=options.data_power_w*std::pow(10.,ratio_db/10);
         options.callsign="ABCDEFGHIJKLMNOPQRS";
-        const auto plan=h::plan(options,4500,200,rate);
+        h::PowerReference reference;reference.begin_seconds=endpoints.first;reference.end_seconds=endpoints.second;
+        reference.helper_start_seconds=endpoints.first;reference.helper_end_seconds=endpoints.second;
+        if(ratio_db==90&&endpoints.second-endpoints.first<.005L)
+            rejects([&]{h::plan(options,10000,200,40960,0,1,&reference);});
+        const auto plan=h::plan(options,data_carrier,200,rate,0,1,&reference);
         h::Generator generator(options,plan);
-        std::vector<std::complex<double>> samples(32768);
+        std::vector<std::complex<double>> samples(rate*4/5);
         for(std::size_t i=0;i<samples.size();++i)
             samples[i]=generator.mix(0,static_cast<long double>(i)/rate,rate,
                 endpoints.second,endpoints.first)/plan.helper_gain;
@@ -576,12 +625,12 @@ void spectrum() {
         for(std::size_t i=0;i<samples.size();++i) {
             const auto frequency=(i<=samples.size()/2?static_cast<double>(i):
                 static_cast<double>(i)-static_cast<double>(samples.size()))*1.25;
-            if(std::abs(std::abs(frequency)-4500)<=100)leaked+=std::norm(samples[i]);
+            if(std::abs(std::abs(frequency)-data_carrier)<=100)leaked+=std::norm(samples[i]);
         }
         // Average over active source duration, not the zero-padded FFT record.
         const auto active_fraction=static_cast<double>((endpoints.second-endpoints.first)/.8L);
         const auto relative_to_data=2*leaked/static_cast<double>(samples.size()*samples.size())*
-            std::pow(10.,ratio_db/10)/active_fraction;
+            std::pow(10.,ratio_db/10)/active_fraction/h::mean_power(options,false,&reference).total;
         std::cout<<"helper finite ratio_dB="<<ratio_db<<" start="<<static_cast<double>(endpoints.first)
                  <<" end="<<static_cast<double>(endpoints.second)
                  <<" leakage/data_dB="<<10*std::log10(relative_to_data)<<'\n';
@@ -680,7 +729,7 @@ void tracker() {
     std::cout<<"helper Gaussian controls false_admissions="<<false_admissions<<" streams=64 duration=4s\n";
     for(const auto callsign:{"","N0CALL"}) {
         h::Options options;options.power_w=4;options.callsign=callsign;
-        const auto plan=h::plan(options,500,100,rate);
+        const auto plan=metadata_fixture_plan(options,500,100,rate);
         h::Generator generator(options,plan);h::Tracker actual(plan.frequency_hz);
         bool found=false;
         for(std::size_t begin=0;begin<rate*7;begin+=400) {
@@ -699,7 +748,7 @@ void tracker() {
 }
 }
 int main() {
-    try {power_and_placement();metadata_vectors();timecode_generation();waveform_coordinates();protected_streaming_endpoint();spectrum();tracker();tracker_lifetime_admission();}
+    try {test_helper_power_reference();power_and_placement();active_average_and_continuous_pilots();metadata_vectors();timecode_generation();waveform_coordinates();protected_streaming_endpoint();spectrum();tracker();tracker_lifetime_admission();}
     catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
     std::cout<<"helper carrier checks passed\n";return 0;
 }

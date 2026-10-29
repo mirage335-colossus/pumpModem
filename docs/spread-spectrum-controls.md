@@ -113,11 +113,11 @@ or cumulative sensitivity. Unsupported geometries continue to show an unavailabl
 reason; see [simulation estimates](simulation-estimates.md).
 
 Enabling Interleave from Off, or selecting 10x, 100x or 1000x in the GUI, sets a useful voice-passband starting
-point: inner Rate 360, 36 or 3.6 Hz respectively, with stream Carrier 1500 Hz
-(displayed absolute Carrier is Shift plus 1500 Hz). Explicit imported commands
-retain their supplied Rate and Carrier. The outer nominal Rate is 3600 Hz in
-all three presets. Ignoring sample quantization, the shaped span is 375–2625 Hz;
-actual geometry can be narrower. Increasing factor at this fixed outer bandwidth
+point: inner Rate 360, 36 or 3.6 Hz respectively. Carrier recommendations are
+recalculated and a valid selected baseband Carrier is retained. Explicit imported
+commands retain their supplied Rate and Carrier. The outer nominal Rate is
+3600 Hz in all three presets. With a 1725 Hz stream carrier and ignoring sample
+quantization, the shaped span is 600–2850 Hz; actual geometry can be narrower. Increasing factor at this fixed outer bandwidth
 lengthens the inner chips and symbols; more collection energy requires airtime.
 
 The IC-7100 manual specifies SSB transmit defaults of 300–2700 Hz for MID and

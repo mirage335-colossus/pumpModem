@@ -68,6 +68,8 @@ public:
     std::uint64_t total_samples() const;
     std::uint64_t samples_emitted() const;
     std::uint64_t physical_output_origin() const;
+    // Exact first payload slot after enabled sparse calendars select it.
+    std::uint64_t physical_payload_begin() const;
     std::uint64_t physical_valid_payload_end() const;
     // Nonmutating forecast at a supplied physical PCM frontier, including
     // already-generated samples; excludes the independent suppression drain.
@@ -95,6 +97,9 @@ public:
     // Same recent waveform before projecting its analytic carrier to real PCM;
     // up to analytic_preview_limit samples, including interpolation margins.
     void preview_last_analytic(std::span<std::complex<double>> output) const;
+    // Bounded preparation-point preview, without generated bits/chips or
+    // source advancement. The physical coordinate is relative to this burst.
+    std::complex<double> preview_analytic_at(std::uint64_t physical_sample,std::stop_token stop = {}) const;
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

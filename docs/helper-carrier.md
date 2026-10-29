@@ -1,6 +1,6 @@
 # Helper Carrier
 
-Helper Carrier is an experimental independent two-tone reference for propagation
+Helper Carrier is an experimental independent three-tone reference for propagation
 diagnostics and optional assistance to Robust reception, including operation
 without GPSDO hardware. It can accompany an ordinary transmission or transmit
 alone. Its product name does not classify an operation as an automatically
@@ -9,35 +9,28 @@ frequency, jurisdiction, license, station control and other authorizations.
 The software retains general-purpose power options; it does not impose a blanket
 regulatory power limit or certify an installation's compliance.
 
-## Current two-tone preview
+## Transmitter waveform and receiver scope
 
-Human checkpoint `572b051` retains a **90/10 straight-tone power split**:
-90% pure frequency/phase pilot and 10% auxiliary punctuation/optional metadata.
-The pilot is nine times stronger in power, three times in amplitude and 9.54 dB
-above the auxiliary. Only the auxiliary has intentional phase reversals or
-metadata modulation. High-only placement keeps the guarded group adjacent to
-Robust, with the pure pilot highest in the usable passband.
+The transmitter uses a fixed 550 Hz low pilot at −3 dB, a fixed 950 Hz
+auxiliary at −9 dB, and a high pilot at 0 dB relative to the high pilot's
+steady-tone power. The high pilot is at least 2400 Hz and rises as needed for
+Robust occupied bandwidth and the applicable separation guard. The low pilot
+and auxiliary do not move to make room for a wider Robust waveform. Robust
+carrier and rate must leave enough space for them. These frequency and power
+ratios describe the transmitted audio waveform; actual RF ratios depend on the
+radio and audio chain.
 
-The rebuilt GUI is `build/dev/datapump-gui`. It is available for manual testing;
-its headless self-check does not qualify physical display/audio hardware.
-The current GUI `79d40073…` passes the specific EME Planner caution check and
-headless self-check; core `2c118bf0…` is unchanged and retains its five focused
-passes on the preceding `64824037…` GUI binding. The retained full HF15k
-capture's original fixture exits 0 with the canonical exact row, but independent
-and current test-only audits identify four premature native ENDs among 17
-identities. The new strict guard is verified on that trace without another
-receiver/PCM run. The calendar-END authority defect remains unfixed.
-The full 39/39 GUI group and six selected ordinary-Live regressions, including
-unskipped `live_exact_source`, retain their preceding `0463/276e` binding. The frozen
-`21bf/913` Rate-360 pass and prior `85a5/d8e3` full HF40 pass keep their own
-bindings; neither full run has been repeated on this binary.
-Manual display/radio testing and full regression qualification remain open.
-[Validation](validation.md#current-measured-status-and-remaining-failures) records
-the current build bindings, focused results and incomplete qualification.
+This transmitter change is not a receiver qualification. Acquisition, tracking
+and decoding for the new waveform remain deferred. Earlier two-tone receiver
+measurements and binary bindings in [validation](validation.md) apply only to
+their stated source and waveform, not to this transmitter. Physical display,
+audio and radio testing and full regression qualification remain open.
 
 ## Manual reception
 
-Helper reception is manually enabled. On quiet spectrum, the receiver accepts
+The following receiver behavior and observations describe the earlier two-tone
+waveform and are not yet validated for the new transmitter. Helper reception is
+manually enabled. On quiet spectrum, the receiver accepts
 the strongest qualifying straight tone inside the oscillator-derived expected
 pilot range, bounded by actual capture geometry. There is no artificial ±100 Hz
 cap. Discovery and isolation precede local tracking. Auxiliary detection or
@@ -238,48 +231,37 @@ text and attachment framing, decompression, recovery, per-bit progress and the
 six-second fully scored physical-end rule. If the required resources cannot fit,
 optional assistance yields rather than imposing a reduced decoding mode.
 
-Power controls establish a calibrated relative audio ratio, not a radio-control
-command. The amplitude ratio is the square root of the power ratio. When a ratio
-limit is reached, effective helper power is reduced and displayed; configured
-Robust power is retained. Linear composite normalization reserves headroom, and
-the operator calibrates the RF chain for the intended helper/data levels.
-Robust's target SNR remains referenced to its low-power data component.
+Helper Carrier Power specifies the combined average power of the simultaneous
+active Robust and helper waveform. Robust transmit power specifies its share of
+that average; the remaining power is allocated to the helpers. Helper-only
+lead and tail periods and transmission gaps do not enter this reference. For
+example, a configured 40 W total and 4 W Robust allocation request 36 W for the
+helpers. Once actual composite average RF output is established as 40 W, the
+Robust component is approximately 4 W if the radio/audio chain preserves the
+component-power ratios. The controls do not command a radio's power directly.
 
-The helper also follows any existing digital amplitude backoff of the selected
-Robust waveform. Interleaved V2 DSSS already applies a data amplitude factor
-`g = 0.5` (6.02 dB in power). Applying that factor to the helper component alone
-preserves the requested helper/data ratio without changing the intrinsic Robust
-source waveform. Composite headroom and physical RF calibration are accounted
-separately below.
-A ratio measured over a whole helper dwell can be slightly lower than its steady
-tone calibration because ramps and metadata reduce average power, with further
-differences from the physical route's frequency response.
+The helper and Robust component means are estimated separately using 32,768
+deterministically stratified samples in a bounded reference window of up to two
+seconds. The calculation uses the actual active waveform, including auxiliary
+modulation, shaping and applicable gating, while excluding gaps. The transmission
+epoch, metadata and start/end eligibility enter that calculation. Robust amplitude
+is set from those numerical means to establish the requested allocation and
+remains fixed for the transmission. Sampling error and later changes in the
+waveform can change the instantaneous or later-window average; the RF allocation
+is therefore approximate. When the
+existing Helper Carrier Ratio Limit prevents the requested allocation, the
+effective limited result is used and reported.
+Composite headroom and the physical chain still require calibration; Robust's
+target SNR remains referenced to the data component.
 
-The order is **Robust data → guard → auxiliary modulation → guard → pure
-pilot**. The auxiliary center starts 450 Hz above the upper shaped data edge,
-increasing in 50 Hz steps only as required by the power-dependent digital leakage
-bound. The pilot is 400 Hz above the auxiliary. The auxiliary's nominal ±150 Hz
-band leaves a 300 Hz data guard and a 250 Hz pilot guard at minimum placement.
-The bound uses the actual shaped/gated data bandwidth and both tones' power,
-ramps and auxiliary transitions. Tone-center separation alone is not the
-isolation argument. No logical-sample-rate floor moves the group arbitrarily far
-away.
-
+Placement uses the shared waveform occupied bandwidth, including spreading,
+pulse shaping and applicable gating allowances, with power-dependent leakage
+and separation guards. The low pilot and auxiliary stay at 550 Hz and 950 Hz;
+the high pilot starts at 2400 Hz and rises only as needed for the selected
+Robust carrier, occupied bandwidth and guards. A configuration that cannot fit
+these bands within the output passband is unavailable for Helper assistance.
 The radio/audio path must pass the complete group with margin below steep filter
-attenuation. Digital Nyquist margin does not establish an SSB radio passband.
-The selected Robust Rate, carrier, logical sample rate, framing and target SNR
-stay unchanged; a configuration that cannot pass the adjacent group is unavailable
-for Helper assistance.
-
-The two tones' possible voltage sum requires more peak headroom than the old
-single tone. At unchanged audio volume, the native calibrated data gain is lower
-by approximately 1.353 dB for 40 W Helper/4 W Robust and 1.989 dB for 15 kW/4 W.
-Recalibrate the physical RF chain to retain the configured powers. This is an
-audio-headroom change, not a requested payload-power reduction. Headroom and
-physical-oversampling compensation scale sampled signal/noise together; they do
-not remove Interleaved V2's separate **−6.0206 dB sampled DATA gain** relative to
-the nominal RF budget. Ramps/metadata and channel/filter gains are separate
-received-power effects.
+attenuation; digital Nyquist margin alone does not establish an SSB passband.
 
 Native and browser playback generate the helper after output resampling.
 Helper-enabled audio requests a separate physical clock, with a practical
@@ -355,7 +337,7 @@ windowed FFT bins are correlated. The independent peak noise-floor estimate
 retains its best observation. Capture gaps, stale
 measurements and rate changes withdraw the current value. A complete window
 and enough resolved noise bins are required; ordinary 44.1/48 kHz audio
-is supported, but the fixed window cannot resolve the two tones at 96/192 kHz.
+is supported, but the fixed window cannot resolve the previous two-tone measurement at 96/192 kHz.
 Simulation without the raw hardware monitor shows the measurement unavailable.
 These display-only measurements do not alter receiver qualification. They are
 noise estimates, not integrated ADC noise/distortion or SINAD tests; colored
@@ -402,13 +384,14 @@ seconds before completing payload reception.
 ## Link Planner and lead time
 
 Link Planner separates the helper reference budget from the ordinary payload.
-For effective helper power `P` watts, path loss `L` dB and noise density `N0`
-dBm/Hz, received helper power is `30 + 10*log10(P) - L` dBm and expected C/N0
-is that result minus `N0`. Its 10 Hz presentation reference is C/N0 minus 10 dB.
-A 4 W data/40 W helper setting has a 10 dB calibrated reference ratio. At
-180 dB path loss and -164 dBm/Hz noise, the total Helper budget is 30.02 dB-Hz
-and pure pilot is 29.56 dB-Hz before relevant waveform/channel gains. Neither is
-the level necessarily present in a physical loopback cable.
+The configured total and Robust powers determine the effective helper allocation,
+after applying the ratio limit. Planner presents the resulting helper and pilot
+reference budgets alongside the ordinary payload. Planner uses a one-dwell
+preview at epoch zero, including the selected key for encrypted metadata;
+transmission uses its own active reference window. These are predicted
+levels: path loss, noise density, component waveform averages and channel gains affect
+the received reference. They are not a measurement of RF output or a promise
+of receiver lock.
 
 Predicted C/N0 does not grant lock, narrow the receiver by itself or change
 payload SNR, Rate or PHY probability. Runtime uses the actual measured interval.
@@ -501,8 +484,7 @@ Physical AWGN preserves the original in-data-band noise spectral density and
 the existing `modem::nominal_signal_power` convention. Interleaved V2 DSSS has a
 −6.0206 dB sampled digital power gain: DATA C/N0 is the nominal reference minus
 6.0206 dB,
-and the calibrated steady helper adds the requested helper/data ratio to that
-data reference. The simulator does not reduce noise or boost Robust PCM to
+and the helper/data allocation is referenced to the active waveform. The simulator does not reduce noise or boost Robust PCM to
 make assistance succeed. Physical cable tests do not inject the configured RF
 path loss/noise and therefore cannot qualify the corresponding weak RF budget.
 
@@ -518,27 +500,20 @@ from digital isolation or a single controlled payload result.
 ## Dwell waveform and metadata
 
 Every dwell is exactly 400 ms on the physical calendar, including when FHSS
-is off. Pilot entry and exit ramps occupy 4 ms at each boundary; the auxiliary
-uses gentler 8 ms ramps. Explicit transmission start/end ramps remain 4 ms for
-both tones, preserving partial-dwell punctuation protection.
-Only the auxiliary has one shaped reversal, over 236–244 ms and crossing zero at
-240 ms. It stays inverted through the rest of the dwell, including metadata,
-and resets while amplitude is zero at the boundary. There is no unintended
-full-amplitude boundary reversal. The pilot remains unmodulated apart from
-necessary start/end and dwell/hop ramps.
+is off. With FHSS disabled, the low and high straight pilots remain continuous
+in amplitude and phase at dwell boundaries. With FHSS enabled, their boundary
+ramps protect retunes. Transmission start and end remain shaped in either mode.
+The auxiliary retains its dwell-boundary gate and phase reset, shaped reversal,
+and metadata transitions regardless of FHSS.
 
-The auxiliary reversal and metadata blends now use a septic smootherstep with
-three continuous derivatives at their endpoints. The 8 ms intervals, 240 ms
-timing reference, metadata endpoints and both tone frequencies are unchanged.
-The dwell ramps retain their quintic shape. The wider auxiliary ramps reduce
-far-out gate energy without widening the timing marker. The pilot's own 4 ms
-ramps still contribute spectral skirts. A waterfall phase column can change sharply as the
-auxiliary passes through zero amplitude, where phase is undefined, even though
-the emitted waveform is smooth.
-The current receiver matches this new auxiliary shape; the immediately prior
-quintic auxiliary waveform has no automatic template fallback. Use matching
-builds when testing auxiliary timing or metadata. The older paired-marker
-receiver path retains its separate quintic templates.
+Only the auxiliary has a shaped reversal, over 236–244 ms and crossing zero at
+240 ms. It stays inverted through the rest of the dwell, including metadata,
+and resets while amplitude is zero at the boundary. Auxiliary reversal and
+metadata blends use a septic smootherstep with three continuous derivatives at
+their endpoints. A waterfall phase column can change sharply as the auxiliary
+passes through zero amplitude, where phase is undefined even though the emitted
+waveform is smooth. Receiver template updates for this transmitter waveform are
+deferred; matching old receiver measurements do not establish compatibility.
 
 Partial dwells omit punctuation unless its required support fits. Graceful
 streaming stop protects a reversal already begun: helper-only continuation can
@@ -618,11 +593,11 @@ compliance for every emission, band or radio installation.
 ## CLI examples
 
 ```
-pump tx --text hello --output helper.wav --helper-power 1.5kW --helper-data-power 4W --helper-callsign N0CALL
-pump listen --bw 200 --carrier 500 --helper-power 100W --helper-callsign N0CALL --helper-only --seconds 30
+pump tx --text hello --carrier 2400 --output helper.wav --helper-power 1.5kW --helper-data-power 4W --helper-callsign N0CALL
+pump listen --bw 200 --carrier 1725 --helper-power 100W --helper-callsign N0CALL --helper-only --seconds 30
 pump listen --simulation '3dBm -60dB' --helper-power 100W --helper-only --seconds 30
-pump simulate --text hello --helper-power 100W --helper-callsign N0CALL --json
-pump rx --input helper.wav --helper-power 1.5kW --helper-data-power 4W --json
+pump simulate --text hello --carrier 2400 --helper-power 100W --helper-callsign N0CALL --json
+pump rx --input helper.wav --carrier 2400 --helper-power 1.5kW --helper-data-power 4W --json
 ```
 
 `--helper-ratio-limit`, `--helper-frequency` and `--helper-callsign` are included

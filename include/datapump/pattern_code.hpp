@@ -112,6 +112,9 @@ public:
     // Bounded reconstruction from stream coordinates; no waveform history is
     // retained and preview does not advance the transmitter.
     void preview_last_analytic(std::span<std::complex<double>> output) const;
+    // Preparation-only point reconstruction; does not advance PCM, payload
+    // progress, exposure, or the protected endpoint. Internal caches may warm.
+    std::complex<double> preview_analytic_at(std::uint64_t physical_sample,std::stop_token stop = {}) const;
     // Source-thread request: retain already-emitted pulse contributions and
     // finish protected cover and finite tails. A stopped read token remains immediate abort.
     void request_finish();
@@ -123,6 +126,7 @@ public:
     // Physical UTC origin and elapsed endpoint of all still-valid payload
     // pulse contributions. Scheduled null time never advances the source.
     std::uint64_t physical_output_origin() const;
+    std::uint64_t physical_payload_begin() const;
     std::uint64_t physical_valid_payload_end() const;
     // Nonmutating forecast at a supplied physical PCM frontier, including
     // already-generated samples; excludes the independent suppression drain.
@@ -168,6 +172,7 @@ public:
     std::size_t read_analytic(std::span<std::complex<double>> output,
                               std::stop_token stop = {}, const ChipObserver& observer = {});
     void preview_last_analytic(std::span<std::complex<double>> output) const;
+    std::complex<double> preview_analytic_at(std::uint64_t physical_sample,std::stop_token stop = {}) const;
     // Source-thread request: retain already-emitted pulse contributions and
     // finish protected cover and finite tails. A stopped read token remains immediate abort.
     void request_finish();
@@ -177,6 +182,7 @@ public:
     std::uint64_t total_samples() const;
     std::uint64_t samples_emitted() const;
     std::uint64_t physical_output_origin() const;
+    std::uint64_t physical_payload_begin() const;
     std::uint64_t physical_valid_payload_end() const;
     // Nonmutating forecast at a supplied physical PCM frontier, including
     // already-generated samples; excludes the independent suppression drain.

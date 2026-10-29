@@ -240,6 +240,8 @@ void helper_controls() {
     const auto inactive_export=launch_command::parse(controller.field(F::planner_command).text);
     check(inactive_export.helper_callsign==inactive_callsign&&inactive_export.tx_key=="named",
           "Encrypted export discarded its inactive stored callsign");
+    check(controller.enabled(ui::Command::transmit_helper)&&controller.spectrum_helper_band().has_value(),
+          "Inactive stored callsign disabled keyed helper routing or spectrum placement");
     controller.edit(F::helper_callsign,"STALE");
     check(controller.settings().helper.callsign==inactive_callsign,
           "Hidden inactive callsign accepted a direct edit");
@@ -631,9 +633,9 @@ void shift_oscillator_controls() {
           controller.settings().transfer.modem.sample_rate==initial.sample_rate,"Disabled oscillator callbacks changed accepted settings");
     controller.edit(F::rf_shift,"1 GHz");
     check(controller.field(F::rf_oscillator).enabled&&controller.field(F::rf_oscillator).display_text.empty()&&
-          controller.settings().transfer.modem.oscillator_search==initial.oscillator_search&&
+          controller.settings().transfer.modem.oscillator_search->rf_shift_hz==1e9&&
           controller.settings().transfer.modem.carrier_hz==initial.carrier_hz&&
-          controller.settings().transfer.modem.sample_rate==initial.sample_rate,"Correctable positive Shift did not unlock its model");
+          controller.settings().transfer.modem.sample_rate==initial.sample_rate,"Positive Shift changed the baseband carrier or did not unlock its model");
     controller.select(F::rf_oscillator,"baseband-clock");
     controller.select(F::simulation_oscillator,"gpsdo-ocxo");
     controller.edit(F::carrier,"1.0000015 ghz");
@@ -649,7 +651,7 @@ void shift_oscillator_controls() {
     policy=*controller.settings().transfer.modem.oscillator_search;
     check(policy.reference==modem::OscillatorReference::independent_audio&&policy.rf.accuracy_ppm==100,
           "Selecting an independent Shift preset retained shared clock correlation");
-    controller.edit(F::carrier,"1.0015 MHz");controller.edit(F::rf_shift,"0 Hz");
+    controller.edit(F::rf_shift,"1 MHz");controller.edit(F::carrier,"1.0015 MHz");controller.edit(F::rf_shift,"0 Hz");
     check(controller.field(F::rf_oscillator).selected=="crystal"&&controller.field(F::rf_oscillator).display_text=="N/A"&&
           !controller.field(F::rf_oscillator).enabled&&controller.settings().transfer.modem.oscillator_search->rf==modem::OscillatorModel{0,0}&&
           controller.settings().simulation_phase_noise_degrees_per_sqrt_second==.05,
@@ -1231,7 +1233,7 @@ void noise_transmission_controls() {
     check(controller.enabled(C::acknowledge_key_failure),"Noise silently acknowledged a keyfile failure");
     controller.close();check(!controller.enabled(C::transmit_noise),"Closing left tuning noise available");
 }
-void fake_hop_display() {
+void fake_hop_display(bool list_only=false) {
     using F=ui::Field;using C=ui::Command;
     std::ostringstream delayed_arrival_warnings;
     struct Fixture {
@@ -1241,6 +1243,7 @@ void fake_hop_display() {
     std::filesystem::create_directories(fixture.path.parent_path());
     create_keyring(fixture.path,{"FHSS display synthetic key"});
     for(const auto* preference:{"fake-fcc","fake-eu","fake-list"}) {
+    if(list_only&&std::string_view(preference)!="fake-list")continue;
     Controller controller({true,true});
     controller.edit(F::rf_shift,"1 MHz");
     controller.edit(F::carrier,"1.0015 MHz");
@@ -1274,12 +1277,29 @@ void fake_hop_display() {
         // audio lag must still block instead of substituting ungated output.
         controller.edit(F::audio_error,"500ms");
         check(!controller.enabled(C::transmit_noise) &&
+              controller.settings().transfer.audio_timing_error_seconds==.5&&
+              controller.settings().transfer.modem.fake_hopping&&
+              !controller.settings().transfer.modem.fake_hopping->power_ramps&&
               controller.field(F::fhss).display_text.find("TX blocked:")!=std::string::npos,
               "impossible FHSS shaping silently allowed ungated noise");
         controller.activate(C::transmit_noise);
         check(!controller.snapshot().transmitting,"blocked FHSS started physical audio");
         check(controller.field(F::fhss).selected=="fake-list","blocked shaping discarded selected hop preference");
-        controller.edit(F::audio_error,"default");
+        controller.edit(F::audio_error,"default");controller.edit(F::helper_power,"100 W");
+        check(helper::effective_helper_power(controller.settings().helper)>0&&controller.enabled(C::transmit_helper),
+              "Helper-active FHSS guard fixture did not start from a valid helper plan");
+        controller.edit(F::binary,"0");prepare(controller);
+        check(controller.enabled(C::transmit),"Blocked-data FHSS fixture did not prepare an otherwise valid raw bit");
+        controller.edit(F::audio_error,"500ms");
+        check(!controller.enabled(C::transmit)&&!controller.enabled(C::transmit_noise)&&!controller.enabled(C::transmit_helper)&&
+              controller.settings().transfer.audio_timing_error_seconds==.5&&
+              controller.settings().transfer.modem.fake_hopping&&
+              !controller.settings().transfer.modem.fake_hopping->power_ramps&&
+              controller.field(F::fhss).display_text.find("TX blocked:")!=std::string::npos,
+              "Helper recommendations undid a blocked FHSS guard or allowed helper-only output");
+        controller.activate(C::transmit);controller.activate(C::transmit_helper);
+        check(!controller.snapshot().transmitting,"Blocked FHSS started data or helper-only audio");
+        controller.edit(F::audio_error,"default");controller.edit(F::helper_power,"0");controller.edit(F::message,"");
         controller.edit(F::bandwidth,"3600 Hz");
     }
     controller.select(F::transmit_scope_format,"hex");
@@ -1620,74 +1640,104 @@ std::size_t check_pending_snapshot(Controller& controller) {
 void rate_carrier_controls() {
     using F=ui::Field;using C=ui::Command;
     Controller controller({true,true});
-    check(controller.field(F::bandwidth).text=="3.6 kHz" && controller.field(F::carrier).text=="1.5 kHz" &&
-          controller.settings().transfer.modem.bandwidth_hz==3600 && controller.settings().transfer.modem.carrier_hz==1500 &&
+    check(controller.field(F::bandwidth).text=="3.6 kHz" && controller.field(F::carrier).text=="1.725 kHz" &&
+          controller.settings().transfer.modem.bandwidth_hz==3600 && controller.settings().transfer.modem.carrier_hz==1725 &&
           controller.field(F::snr).text=="32" && controller.field(F::long_snr).text=="55" &&
           controller.settings().transfer.fec==FecMode::rs60,
-          "GUI defaults must use the 3.6 kHz rate, 1.5 kHz carrier, 32/55 dB-Hz targets and 60% FEC");
-    struct CarrierPreset { const char* rate; const char* recommended; const char* center; double center_hz; };
+          "GUI defaults must use the calculated 1725 Hz audio carrier");
+    struct CarrierPreset { const char* rate; const char* recommended; const char* half; double half_hz; };
     constexpr CarrierPreset presets[]={
-        {"0.001 Hz","1.5 kHz","0.0005 Hz",.0005},
-        {"0.01 Hz","1.5 kHz","0.005 Hz",.005},{"0.1 Hz","1.5 kHz","0.05 Hz",.05},
-        {"1 Hz","1.5 kHz","0.5 Hz",.5},{"10 Hz","1.5 kHz","5 Hz",5},
-        {"100 Hz","1.5 kHz","50 Hz",50},
-        {"1.2 kHz","1.5 kHz","600 Hz",600},{"2.4 kHz","1.8 kHz","1.2 kHz",1200},
-        {"3.6 kHz","1.5 kHz","1.8 kHz",1800},{"12 kHz","9 kHz","6 kHz",6000},
-        {"18 kHz","13.5 kHz","9 kHz",9000},{"24 kHz","18 kHz","12 kHz",12000},
-        {"1 MHz","750 kHz","500 kHz",500000},{"30 MHz","22.5 MHz","15 MHz",15000000}};
+        {"0.001 Hz","1.725 kHz","0.0005 Hz",.0005},
+        {"0.01 Hz","1.725 kHz","0.005 Hz",.005},{"0.1 Hz","1.725 kHz","0.05 Hz",.05},
+        {"1 Hz","1.725 kHz","0.5 Hz",.5},{"10 Hz","1.725 kHz","5 Hz",5},
+        {"100 Hz","1.725 kHz","50 Hz",50},
+        {"1.2 kHz","1.725 kHz","600 Hz",600},{"2.4 kHz","1.725 kHz","1.2 kHz",1200},
+        {"3.6 kHz","1.725 kHz","1.8 kHz",1800},{"12 kHz","4.125 kHz","6 kHz",6000},
+        {"18 kHz","6 kHz","9 kHz",9000},{"24 kHz","7.875 kHz","12 kHz",12000},
+        {"1 MHz","312.875 kHz","500 kHz",500000},{"30 MHz","9.375375 MHz","15 MHz",15000000}};
     for(const auto& preset:presets) {
         controller.edit(F::bandwidth,preset.rate);
         const auto& carrier=controller.field(F::carrier);
-        check(carrier.text==preset.recommended && carrier.options.size()==2 &&
-              carrier.options[0].id==preset.recommended && carrier.options[1].id==preset.center,
-              "Rate presets must keep the recommended carrier first and offer the center frequency");
-        controller.edit(F::carrier,preset.center);
-        check(controller.settings().transfer.modem.carrier_hz==preset.center_hz,
-              "A center carrier suggestion did not reach the modem configuration");
+        check(carrier.options.size()==2 && carrier.options[0].id==preset.recommended && carrier.options[1].id==preset.half,
+              "Rate recommendations must use the shaped lower edge and half the selected Rate");
+        controller.edit(F::carrier,preset.half);
+        check(controller.settings().transfer.modem.carrier_hz==preset.half_hz,
+              "A valid half-rate suggestion did not reach the modem configuration");
     }
-    controller.edit(F::bandwidth,"3 kHz");
-    check(controller.field(F::carrier).options.size()==2 && controller.field(F::carrier).options.front().id=="2.25 kHz" &&
-          controller.field(F::carrier).options.back().id=="1.5 kHz",
-          "A manually entered Rate must offer its recommended and center carriers");
-    controller.edit(F::bandwidth,"3.6 kHz");
-    controller.edit(F::carrier,"1650 Hz");
-    check(controller.settings().transfer.modem.carrier_hz==1650,
-          "A custom audio carrier did not reach the modem configuration");
+    controller.edit(F::bandwidth,"3.6 kHz");controller.edit(F::carrier,"1650 Hz");
     controller.edit(F::snr,"60");controller.select(F::fec,"off");
     controller.select(F::simulation,"3dBm -90dB");controller.edit(F::device,"test-device");
-    check(controller.field(F::carrier).text=="1650 Hz" && controller.settings().transfer.modem.carrier_hz==1650,
-          "An unrelated setting replaced the manual carrier");
+    controller.edit(F::bandwidth,"2.4 kHz");
+    check(controller.settings().transfer.modem.carrier_hz==1650,
+          "A valid custom baseband carrier disappeared after a configuration edit");
+    controller.edit(F::rf_shift,"1 MHz");
+    check(controller.settings().transfer.modem.carrier_hz==1650&&controller.field(F::carrier).text=="1.00165 MHz",
+          "Shift did not preserve and redisplay the selected custom baseband carrier");
+    controller.edit(F::doppler,"100 kph");
+    check(controller.settings().transfer.modem.carrier_hz==1650,
+          "Doppler changed the selected numeric baseband carrier");
     const auto profiles=tuning::receive_profiles(controller.settings().transfer.modem,
         std::vector<double>{60,40},tuning::PatternMode::auto_pattern,false);
     check(!profiles.empty() && std::all_of(profiles.begin(),profiles.end(),[](const auto& profile){return profile.carrier_hz==1650;}),
           "Automatic receive hypotheses discarded the selected carrier");
-    controller.edit(F::bandwidth,"2.4 kHz");
-    check(controller.field(F::carrier).text=="1.8 kHz" && controller.settings().transfer.modem.carrier_hz==1800,
-          "Changing Rate did not restore that rate's recommended carrier");
-    controller.edit(F::bandwidth,"30 MHz");
-    check(controller.field(F::carrier).text=="22.5 MHz" && controller.settings().transfer.modem.carrier_hz==22500000 &&
-          controller.field(F::carrier).options.front().id=="22.5 MHz",
-          "The widest rate has no selectable recommended carrier");
+    controller.edit(F::doppler,"0c");controller.edit(F::rf_shift,"0 Hz");
+    controller.edit(F::planner_command,"--shift 2MHz");controller.activate(C::planner_load_command);
+    check(controller.settings().transfer.modem.carrier_hz==1650,
+          "A partial Shift import changed the accepted baseband carrier");
+    controller.edit(F::rf_shift,"0 Hz");
+    controller.edit(F::bandwidth,"4613.34 Hz");
+    check(controller.field(F::carrier).options.front().id=="1.725 kHz",
+          "Carrier-dependent sample rounding skipped a sufficient 1725 Hz default");
+    controller.edit(F::bandwidth,"12 kHz");
+    check(controller.settings().transfer.modem.carrier_hz==4125&&controller.field(F::carrier).text=="4.125 kHz",
+          "An invalid prior carrier did not fall back to the calculated default");
     controller.edit(F::bandwidth,"3.6 kHz");
-    check(controller.field(F::carrier).text=="1.5 kHz" && controller.settings().transfer.modem.carrier_hz==1500,
-          "Returning to the HF rate did not restore the 1.5 kHz carrier");
+    check(controller.settings().transfer.modem.carrier_hz==4125,
+          "Reducing Rate discarded a still-valid numeric carrier");
     const auto valid=controller.settings().transfer.modem;
     controller.edit(F::bandwidth,"unfinished");
-    check(controller.field(F::carrier).text=="1.5 kHz" && controller.settings().transfer.modem.bandwidth_hz==valid.bandwidth_hz &&
-          !controller.enabled(C::transmit),"Invalid Rate text changed the carrier or permitted transmission");
+    check(controller.settings().transfer.modem.bandwidth_hz==valid.bandwidth_hz && !controller.enabled(C::transmit),
+          "Invalid Rate text changed the accepted geometry or permitted transmission");
     controller.edit(F::bandwidth,"3.6 kHz");controller.edit(F::carrier,"900 Hz");
-    check(controller.field(F::carrier).text=="900 Hz" && controller.settings().transfer.modem.carrier_hz==1500 &&
+    check(controller.field(F::carrier).text=="900 Hz" && controller.settings().transfer.modem.carrier_hz==4125 &&
           !controller.enabled(C::transmit) && controller.field(F::status).text.find("carrier")!=std::string::npos,
-          "An incompatible carrier was silently replaced or applied");
+          "An explicit incompatible carrier was silently replaced or applied");
     controller.edit(F::carrier,"1.5 kHz");controller.select(F::pattern,"auto-tone");
-    check(controller.field(F::carrier).text=="1.5 kHz" && !controller.enabled(C::transmit) &&
-          controller.field(F::status).text.find("raise the carrier")!=std::string::npos,
-          "An incompatible tone profile silently changed the carrier or hid the corrective action");
-    controller.edit(F::carrier,"2.7 kHz");
-    check(controller.settings().transfer.modem.carrier_hz==2700 &&
-          controller.settings().transfer.modem.spreading_mode==modem::SpreadingMode::tone,
-          "Raising the carrier did not recover the selected tone profile");
+    check(controller.settings().transfer.modem.carrier_hz==2175&&controller.field(F::carrier).options.front().id=="2.175 kHz",
+          "Unshaped mode did not calculate the 375 Hz lower-edge default");
+    controller.select(F::pattern,"auto-pattern");controller.edit(F::bandwidth,"100 Hz");
+    controller.edit(F::carrier,"1650 Hz");controller.edit(F::link_power,"4 W");controller.edit(F::helper_power,"4.001 W");
+    const auto& helper_presets=controller.field(F::carrier).options;
+    const auto has=[&](std::string_view value){return std::any_of(helper_presets.begin(),helper_presets.end(),
+        [&](const auto& option){return option.id==value;});};
+    check(has("1.725 kHz")&&has("1.525 kHz")&&has("1.575 kHz")&&has("1.775 kHz")&&
+          has("50 Hz")&&controller.settings().transfer.modem.carrier_hz==1650,
+          "Helper recommendations omitted valid audio choices, admitted overlap, or discarded a valid custom carrier");
+    controller.edit(F::bandwidth,"1.04 kHz");
+    check(controller.field(F::carrier).options.front().id=="1.725 kHz",
+          "Helper lower-edge boundary discarded the sufficient 1725 Hz default");
+    controller.edit(F::bandwidth,"1.1 kHz");
+    check(controller.field(F::carrier).options.front().id=="1.775 kHz",
+          "Helper default did not prefer 1775 Hz when 1725 Hz became insufficient");
+    controller.edit(F::bandwidth,"1.21 kHz");
+    const auto suggested=*frequency_input::parse(controller.field(F::carrier).options.front().id);
+    check(suggested>=1780&&std::fmod(suggested,5)==0,
+          "Wider helper profile did not round its lower-edge default upward on the 5 Hz grid");
+    controller.select(F::helper_ratio_limit,"0");
+    controller.edit(F::helper_power,"0");controller.edit(F::bandwidth,"1 Hz");
+    check(controller.field(F::carrier).options.back().id=="0.5 Hz",
+          "Disabling helpers did not restore the exempt half-rate recommendation");
+    controller.edit(F::bandwidth,"1200 Hz");controller.select(F::helper_ratio_limit,"90");
+    controller.edit(F::link_power,"1 uW");
+    const auto guard_start=std::chrono::steady_clock::now();
+    controller.edit(F::helper_power,"1000 W");
+    const auto guard_seconds=std::chrono::duration<double>(std::chrono::steady_clock::now()-guard_start).count();
+    std::cout<<"Carrier recommendation 90 dB guard edit: "<<guard_seconds<<" seconds\n";
+    check(helper::effective_helper_power(controller.settings().helper)>0&&
+          controller.settings().transfer.modem.carrier_hz>=1725&&controller.spectrum_helper_band().has_value(),
+          "Strong helper ratio did not produce a valid fixed-tone carrier plan");
 }
+
 void planner_examples() {
     using F=ui::Field;using C=ui::Command;
     Controller controller({true,false});controller.edit(F::short_bits,"00101");
@@ -1971,10 +2021,10 @@ void dsss_voice_carrier_controls() {
     for(const auto factor:{10u,100u,1000u}) {
         controller.select(F::dsss_factor,std::to_string(factor));
         const auto& config=controller.settings().transfer.modem;
-        check(config.dsss_factor==factor&&config.bandwidth_hz==3600./factor&&config.carrier_hz==1500&&
+        check(config.dsss_factor==factor&&config.bandwidth_hz==3600./factor&&config.carrier_hz==1725&&
             modem::waveform_bandwidth_hz(config)==3600&&
-            controller.field(F::carrier).text=="11.5 kHz"&&controller.field(F::carrier).options.front().id=="11.5 kHz"&&
-            controller.field(F::carrier).options.back().id=="11.8 kHz",
+            controller.field(F::carrier).text=="11.725 kHz"&&controller.field(F::carrier).options.front().id=="11.725 kHz"&&
+            controller.field(F::carrier).options.size()==1,
             "DSSS selection lost its voice-passband width, translated carrier or occupied-band suggestions");
     }
     auto before_doppler=launch_command::parse(controller.field(F::planner_command).text);
@@ -1995,19 +2045,19 @@ void dsss_voice_carrier_controls() {
             controller.select(F::dsss_factor,std::to_string(factor));
         const auto& c=controller.settings().transfer.modem;
         const auto d=tuning::parse_doppler(controller.field(F::doppler).text);
-        check(c.dsss_factor==factor&&c.bandwidth_hz==3600./factor&&std::abs(c.carrier_hz-1500)<3e-6&&
+        check(c.dsss_factor==factor&&c.bandwidth_hz==3600./factor&&std::abs(c.carrier_hz-1725)<3e-6&&
               modem::waveform_bandwidth_hz(c)==3600&&d.canonical==tuning::parse_doppler("100kph").canonical,
               "DSSS voice preset did not preserve its effective carrier under manual Doppler");
         const auto& suggestions=controller.field(F::carrier).options;
         const auto tone=[&](const std::string& text) {return tuning::doppler_carrier_hz(*frequency_input::parse(text),d)-5.8e9;};
-        check(std::abs(tone(suggestions.front().id)-1500)<3e-6&&std::abs(tone(suggestions.back().id)-1800)<3e-6,
+        check(std::abs(tone(suggestions.front().id)-1725)<3e-6&&suggestions.size()==1,
               "Doppler-aware Carrier suggestions do not target the intended stream tones");
         const auto command=launch_command::parse(controller.field(F::planner_command).text);
-        check(command.doppler&&std::abs(tuning::doppler_carrier_hz(*command.carrier_hz,d)-*command.rf_shift_hz-1500)<3e-6,
+        check(command.doppler&&std::abs(tuning::doppler_carrier_hz(*command.carrier_hz,d)-*command.rf_shift_hz-1725)<3e-6,
               "Doppler-aware preset export compounded or lost the correction");
     }
     prepare_plan(controller);
-    check(std::abs(controller.link_plan()->inputs.options.modem.carrier_hz-1500)<3e-6,
+    check(std::abs(controller.link_plan()->inputs.options.modem.carrier_hz-1725)<3e-6,
           "Doppler-aware preset left the planner on an obsolete tone");
     controller.edit(F::doppler,"incomplete");controller.select(F::dsss_factor,"100");
     check(controller.field(F::doppler).text=="incomplete","preset silently replaced malformed Doppler with zero");
@@ -2081,7 +2131,7 @@ void sub_hertz_controls() {
               "sub-hertz rates must be discoverable in the Rate dropdown");
     controller.edit(F::message,"a");controller.edit(F::bandwidth,"0.01 Hz");prepare(controller);
     check(controller.settings().transfer.modem.bandwidth_hz==.01 &&
-          controller.settings().transfer.modem.carrier_hz==1500 && controller.estimate()->wire_bits==3 &&
+          controller.settings().transfer.modem.carrier_hz==1725 && controller.estimate()->wire_bits==3 &&
           controller.estimate()->coded_seconds==38400 && controller.enabled(C::transmit),
           "sub-hertz GUI preparation must keep the exact short message and permit bounded transmission");
     controller.edit(F::bandwidth,"0.0009 Hz");
@@ -3707,6 +3757,9 @@ int main(int argc,char** argv) {
             std::cout<<"Delayed replay interruption checks passed\n";
             return 0;
         }
+        if(argc>1&&std::string_view(argv[1])=="--carrier-controls") {rate_carrier_controls();std::cout<<"Carrier controls passed\n";return 0;}
+        if(argc>1&&std::string_view(argv[1])=="--helper-controls") {helper_controls();std::cout<<"Helper controls passed\n";return 0;}
+        if(argc>1&&std::string_view(argv[1])=="--fhss-list-controls") {fake_hop_display(true);std::cout<<"FHSS list controls passed\n";return 0;}
         helper_controls();search_arithmetic_controls();
         datapump::gui::controller_self_check();
         simulation_estimate_controls();

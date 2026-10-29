@@ -114,15 +114,31 @@ void helper_reference_plan(Model& model,const modem::Config& config) {
     if(settings.transfer.key)settings.helper.callsign.clear();
     try {
         helper::validate(settings.helper);
-        result.effective_power_w=std::min(settings.helper.power_w,
-            settings.helper.data_power_w*std::pow(10.,settings.helper.ratio_limit_db/10));
+        result.configured_total_power_w=settings.helper.power_w;
+        result.robust_power_w=settings.helper.data_power_w;
+        result.effective_power_w=helper::effective_helper_power(settings.helper);
+        result.effective_total_power_w=result.robust_power_w+result.effective_power_w;
+        result.ratio_limited=result.effective_power_w<std::max(0.,settings.helper.power_w-settings.helper.data_power_w);
+        if(result.effective_power_w==0) {
+            result.budget_available=true;
+            result.status="No helper power remains after the Robust allocation; no helper tones or helper precision forecast are available.";
+            return;
+        }
+        helper::PowerReference preview;
+        preview.time_key=settings.transfer.key;
+        const auto* preview_reference=settings.transfer.key?&preview:nullptr;
+        const auto mean=helper::mean_power(settings.helper,static_cast<bool>(config.fake_hopping),preview_reference);
         result.received_dbm=30+10*std::log10(result.effective_power_w)-model.inputs.path_loss_db;
         result.cn0_db_hz=result.received_dbm-model.inputs.noise_density_dbm_hz;
         result.tone_snr_db=result.cn0_db_hz-10; // Legacy presentation cell, not a lock gate.
-        result.pilot_power_w=result.effective_power_w*helper::pilot_power_fraction;
-        result.pilot_cn0_db_hz=result.cn0_db_hz+10*std::log10(helper::pilot_power_fraction);
+        const auto high_straight_share=helper::pilot_power_fraction/mean.total;
+        result.pilot_power_w=result.effective_power_w*high_straight_share;
+        result.low_pilot_power_w=result.effective_power_w*helper::low_pilot_power_fraction/mean.total;
+        result.auxiliary_power_w=result.effective_power_w*helper::auxiliary_power_fraction/mean.total;
+        result.pilot_cn0_db_hz=result.cn0_db_hz+10*std::log10(high_straight_share);
         result.pilot_tone_snr_db=result.pilot_cn0_db_hz-10;
-        result.auxiliary_cn0_db_hz=result.cn0_db_hz+10*std::log10(helper::auxiliary_power_fraction);
+        result.low_pilot_cn0_db_hz=result.cn0_db_hz+10*std::log10(helper::low_pilot_power_fraction/mean.total);
+        result.auxiliary_cn0_db_hz=result.cn0_db_hz+10*std::log10(helper::auxiliary_power_fraction/mean.total);
         if(!std::isfinite(result.received_dbm)||!std::isfinite(result.cn0_db_hz)||!std::isfinite(result.tone_snr_db))
             throw Error("helper link budget exceeds the numerical range");
         result.budget_available=true;
@@ -142,8 +158,9 @@ void helper_reference_plan(Model& model,const modem::Config& config) {
         // This is the same placement as Live, without claiming that an unknown
         // hardware output rate or radio filter can pass the resulting tone.
         const auto placement=helper::placement_band(config,live::detail::helper_occupied_bandwidth(settings));
-        const auto plan=helper::plan(settings.helper,placement,120000000,0,waveform_gain);
+        const auto plan=helper::plan(settings.helper,placement,120000000,0,waveform_gain,preview_reference);
         result.frequency_hz=plan.frequency_hz;result.auxiliary_frequency_hz=plan.auxiliary_frequency_hz;
+        result.low_frequency_hz=plan.low_frequency_hz;
         result.geometry_available=true;
         result.status="Manual real-time helper reference: Robust acquisition waits for helper lock. Disable Helper Carrier for ordinary oscillator search. Conditional receiver cost preserves the full residual LF domain; helper tracking/conversion cost and lock probability are not calibrated.";
     } catch(const Error& error) {
@@ -716,13 +733,20 @@ CpuPoint cpu_point(double target,const simulation::Estimate& estimate) {
 RealtimeHelperCpuPoint realtime_helper_point(const Inputs& inputs,const modem::Config& config,
         double target,HelperPrecisionCache& precision_cache,std::stop_token stop) {
     RealtimeHelperCpuPoint out;out.target_db_hz=target;
-    if(!inputs.receiver_settings || !(inputs.receiver_settings->helper.power_w>0))return out;
+    if(!inputs.receiver_settings)return out;
     try {
         estimate_detail::check(stop);
+        auto settings=*inputs.receiver_settings;settings.transfer=inputs.options;settings.transfer.modem=config;
+        if(settings.transfer.key)settings.helper.callsign.clear();
+        settings.helper.data_power_w=std::pow(10.,(inputs.tx_dbm-30)/10);
+        const auto power=helper::effective_helper_power(settings.helper);
+        if(power==0) {
+            out.reason="No helper power remains after the Robust allocation; helper precision forecast unavailable";
+            return out;
+        }
         if(!config.oscillator_search)throw Error("Conditional helper search requires an oscillator model");
         if(config.symbol_burst.enabled() || modem::scheduled_bursts(config))
             throw Error("Conditional helper cost is not modeled for Symbol_Burst or scheduled bursts");
-        auto settings=*inputs.receiver_settings;settings.transfer=inputs.options;settings.transfer.modem=config;
         settings.simulation=inputs.receiver_work_mode==simulation::ReceiverWorkMode::sampled_simulation;
         if(settings.simulation) {
             settings.simulation_phase_noise_degrees_per_sqrt_second=inputs.channel.phase_noise_degrees_per_sqrt_second;
@@ -732,13 +756,14 @@ RealtimeHelperCpuPoint realtime_helper_point(const Inputs& inputs,const modem::C
         // link budget, rather than a retained Live settings snapshot.
         settings.simulation_snr_db=inputs.tx_dbm-inputs.path_loss_db-inputs.noise_density_dbm_hz-
             10*std::log10(config.sample_rate/2.);
-        settings.helper.data_power_w=std::pow(10.,(inputs.tx_dbm-30)/10);
-        if(settings.transfer.key)settings.helper.callsign.clear();
         if(settings.helper.frequency==helper::Frequency::cochannel)
             throw Error("Cochannel helper capture is not modeled by the corrected-input cost estimate");
         const auto gain=modem::outer_dsss_transmit_gain(config);
         const auto width=live::detail::helper_occupied_bandwidth(settings);
-        const auto plan=helper::plan(settings.helper,helper::placement_band(config,width),120000000,0,gain);
+        helper::PowerReference preview;
+        preview.time_key=settings.transfer.key;
+        const auto* preview_reference=settings.transfer.key?&preview:nullptr;
+        const auto plan=helper::plan(settings.helper,helper::placement_band(config,width),120000000,0,gain,preview_reference);
         std::uint32_t physical=0;
         if(inputs.helper_forecast_plan_sampled_capture)physical=modem::SampledSimulationChannel::planned_physical_sample_rate(
             config,settings.helper,width,live::detail::shared_helper_capture(config,plan.frequency_hz));
@@ -750,10 +775,10 @@ RealtimeHelperCpuPoint realtime_helper_point(const Inputs& inputs,const modem::C
         out.minimum_seed_seconds=static_cast<double>(helper::forecast_detail::pilot_discovery_samples(physical))/physical;
         if(plan.frequency_hz<200 || plan.frequency_hz>physical/2.-200)
             throw Error("Nominal helper is outside the real-time tracker's DC/Nyquist noise-projection margin");
-        const auto power=std::min(settings.helper.power_w,settings.helper.data_power_w*std::pow(10.,settings.helper.ratio_limit_db/10));
         auto cno=30+10*std::log10(power)-inputs.path_loss_db-inputs.noise_density_dbm_hz;
         if(inputs.receiver_work_mode==simulation::ReceiverWorkMode::sampled_simulation)cno+=20*std::log10(gain);
-        cno+=10*std::log10(helper::pilot_power_fraction);
+        cno+=10*std::log10(helper::pilot_power_fraction/
+            helper::mean_power(settings.helper,static_cast<bool>(config.fake_hopping),preview_reference).total);
         // Use the shared production request: actual metadata/punctuation and
         // oscillator process, not the retired uninterrupted 384-date ideal.
         const auto receive_bound=live::detail::helper_receive_envelope_bound(settings);
@@ -796,95 +821,16 @@ RealtimeHelperCpuPoint realtime_helper_point(const Inputs& inputs,const modem::C
             reference.segmented_lead_half_width_hz=out.precision.retune_model.constant_frequency_noise_half_width_hz;
         if(!out.precision.supported)throw Error("Automatic helper precision lead prediction declined: "+out.precision.reason);
         out.observation_seconds=out.precision.usable_tone_seconds;
-        const auto price_reference=[&](double uncertainty,const std::string& precision_reason) {
-            RealtimeHelperReceiverWork out;out.uncertainty_hz=uncertainty;
-            try {
-                auto options=inputs.options;options.modem=config;
-                const auto correction=transfer::receiver_utc_rate_correction(config,options);
-                // Match HelperInputFrontend::admit_realtime: when the nominal payload
-                // guard reaches DC, its immutable input basis is raw mono PCM (q=0).
-                // The measured helper offset M then centers the ordinary templates;
-                // DATA retains the residual (D-H)*clock term, not a fictitious NCO.
-                const auto reference_guard=std::max(32.,4*out.uncertainty_hz);
-                const bool folded_reference=config.carrier_hz-helper::occupied_bandwidth(config)/2-reference_guard<=10;
-                const auto reference_center=folded_reference?
-                    inputs.channel.frequency_offset_hz+plan.frequency_hz*inputs.channel.clock_error_ppm*1e-6:0.;
-                const auto search=modem::helper_reference_search(config,out.uncertainty_hz,plan.frequency_hz,
-                    reference_center,correction,modem::HelperReferenceClockRelation::common_corrected_source,{},
-                    modem::PatternUtcClockGrid::complete_expanded_domain);
-                out.rf_half_width_hz=search.rf_half_width_hz;
-                out.clock_half_width_ppm=search.catalogue.requested_clock_half_width_ppm;
-                out.frequency_rate_hypotheses=search.catalogue.hypotheses.size();
-                std::set<double> clocks;
-                for(const auto& pair:search.catalogue.hypotheses)clocks.insert(pair.clock_error_ppm);
-                out.retained_clock_rates=clocks.size();
-                // This is a conditional forecast at the configured channel offset,
-                // never qualification inferred from expected power. Match the runtime
-                // shared-radio/no-UTC formula and ORIGINAL-cell intersection exactly.
-                const auto observed_helper=plan.frequency_hz+inputs.channel.frequency_offset_hz+
-                    plan.frequency_hz*inputs.channel.clock_error_ppm*1e-6;
-                out.shared_frequency_clock=modem::helper_reference_shared_clock_interval(config,observed_helper,
-                    plan.frequency_hz,out.uncertainty_hz,correction,
-                    modem::HelperReferenceClockRelation::common_corrected_source);
-                std::optional<modem::PatternHelperFrequencyWindow> execution_window;
-                if(out.shared_frequency_clock) {
-                    execution_window.emplace(modem::PatternHelperFrequencyWindow{reference_center,out.rf_half_width_hz,
-                        plan.frequency_hz-config.carrier_hz,search.catalogue.clock_step_ppm/2,out.shared_frequency_clock});
-                    const auto& window=*execution_window;
-                    modem::PatternSearch declared;declared.hypotheses=search.catalogue.hypotheses;
-                    declared.admitted_clock_half_width_ppm=search.catalogue.requested_clock_half_width_ppm;
-                    declared.admitted_clock_cell_half_width_ppm=search.catalogue.clock_step_ppm/2;
-                    modem::detail::PatternHelperFrequencySelector selector;
-                    estimate_detail::check(stop);
-                    if(!selector.initialize(declared,window))throw Error("Shared-radio clock forecast is unsupported by original runtime cells");
-                    std::set<double> selected_clocks;
-                    for(std::size_t i=0;i<search.catalogue.hypotheses.size();++i)if(selector.keep(i)) {
-                        if((i&127U)==0)estimate_detail::check(stop);
-                        ++out.shared_clock_selected_pairs;selected_clocks.insert(search.catalogue.hypotheses[i].clock_error_ppm);
-                    }
-                    out.shared_clock_selected_rates=selected_clocks.size();
-                    if(!out.shared_clock_selected_pairs)throw Error("Shared-radio clock forecast has no selected original cells");
-                    // Price this exact selection below. No smaller owner or stronger
-                    // waveform replaces the original constructor/trial/continuation path.
-                }
-                auto channel=inputs.channel;
-                const auto sample_snr=inputs.tx_dbm-inputs.path_loss_db-inputs.noise_density_dbm_hz-10*std::log10(config.sample_rate/2.);
-                if(!std::isfinite(sample_snr)||sample_snr< -300||sample_snr>300)
-                    throw Error("Payload sample SNR is outside the ordinary estimator numerical range");
-                channel.snr_db=sample_snr;
-                // Only the positive-band converter removes the common RF/helper LF
-                // contribution. Raw folded PCM and a retained original prior keep the
-                // actual channel CFO and ordinary real-image waveform unchanged.
-                if(!search.original_prior_retained && !folded_reference)
-                    channel.frequency_offset_hz=-plan.frequency_hz*channel.clock_error_ppm*1e-6;
-                const auto estimate=simulation::estimate_with_receiver_search(one_bit_estimate(options),options,true,channel,
-                    search.catalogue,1,100,inputs.receiver_work_mode,inputs.receiver_timing_model,&settings,stop,
-                    execution_window?&*execution_window:nullptr,true);
-                const auto point=cpu_point(target,estimate);
-                out.receiver_cost=helper_receiver_cost(estimate);
-                out.realtime_ratio=point.realtime_ratio;out.available=point.available;
-                out.reason=precision_reason+(search.original_prior_retained?
-                    "; conditional reference forecast; original oscillator prior retained; ordinary baseline, no NCO retuning or claimed RF gain":
-                    folded_reference?
-                    "; conditional raw mono Robust source; measured helper offset centers ordinary RF templates; no upstream NCO correction":
-                    "; conditional same corrected Robust source")+
-                    (out.shared_frequency_clock?
-                    "; conditional shared-radio frequency-derived clock selects full-domain acquisition cells; ordinary constructor, backend/bin/workspace, logical trials, arrival/epoch alternatives and complete continuation retained":
-                    "; full DATA-clock/UTC, arrival and epoch alternatives retained")+
-                    "; ordinary reference-model receiver work, helper startup/tracking/conversion overhead excluded";
-                if(!out.available)out.reason+="; residual receiver work/coverage/workspace is unsupported: "+estimate.receiver_work_assumptions;
-            } catch(const Error& error) {out.reason=error.what();}
-            return out;
-        };
-        static_cast<RealtimeHelperReceiverWork&>(out)=price_reference(
-            out.precision.frequency_half_width_hz,out.precision.reason);
+        static_cast<RealtimeHelperReceiverWork&>(out)=helper_reference_receiver_work(inputs,config,settings,
+            target,plan.frequency_hz,out.precision.frequency_half_width_hz,out.precision.reason,stop);
         if(out.precision.sustained_supported) {
             out.sustained_at_seconds=out.precision.sustained_at_seconds;
             try {
                 if(out.precision.sustained_frequency_half_width_hz==out.uncertainty_hz)
                     out.sustained=static_cast<const RealtimeHelperReceiverWork&>(out);
-                else out.sustained=price_reference(out.precision.sustained_frequency_half_width_hz,
-                    "separate sustained conditional planning-model precision; reference must remain available");
+                else out.sustained=helper_reference_receiver_work(inputs,config,settings,target,plan.frequency_hz,
+                    out.precision.sustained_frequency_half_width_hz,
+                    "separate sustained conditional planning-model precision; reference must remain available",stop);
             } catch(const std::bad_alloc&) {
                 // A second optional price yields without erasing a valid
                 // initial forecast or increasing any receiver allowance.
@@ -1003,7 +949,7 @@ void receive_curve(Model& model,const simulation::Estimate& selected_one,CurveCa
     for(const auto& [target,point]:cpu_output){(void)target;model.cpu_points.push_back(point);}
     // Separate cheap ordinary-work queries; no probability draws, source PCM,
     // historical masks or parallel broad helper bank are constructed.
-    if(model.helper_reference.enabled)for(const auto& [target,point]:cpu_output) {
+    if(model.helper_reference.effective_power_w>0)for(const auto& [target,point]:cpu_output) {
         (void)point;estimate_detail::check(stop);
         if(target==inputs.target_db_hz)model.helper_reference_cpu_points.push_back(model.helper_reference.conditional);
         else if(const auto config=try_resolve(inputs,target))
@@ -1013,6 +959,93 @@ void receive_curve(Model& model,const simulation::Estimate& selected_one,CurveCa
     }
 
 }
+}
+
+RealtimeHelperReceiverWork helper_reference_receiver_work(const Inputs& inputs,const modem::Config& config,
+        const live::Settings& settings,double target,double helper_frequency_hz,double uncertainty,
+        const std::string& precision_reason,std::stop_token stop) {
+    RealtimeHelperReceiverWork out;out.uncertainty_hz=uncertainty;
+    try {
+        estimate_detail::check(stop);
+        if(!std::isfinite(helper_frequency_hz)||helper_frequency_hz<=0||
+           !std::isfinite(uncertainty)||uncertainty<0)
+            throw Error("Invalid conditional helper reference frequency or uncertainty");
+        auto options=inputs.options;options.modem=config;
+        const auto correction=transfer::receiver_utc_rate_correction(config,options);
+        // Match HelperInputFrontend::admit_realtime: when the nominal payload
+        // guard reaches DC, its immutable input basis is raw mono PCM (q=0).
+        // The measured helper offset M then centers the ordinary templates;
+        // DATA retains the residual (D-H)*clock term, not a fictitious NCO.
+        const auto reference_guard=std::max(32.,4*out.uncertainty_hz);
+        const bool folded_reference=config.carrier_hz-helper::occupied_bandwidth(config)/2-reference_guard<=10;
+        const auto reference_center=folded_reference?
+            inputs.channel.frequency_offset_hz+helper_frequency_hz*inputs.channel.clock_error_ppm*1e-6:0.;
+        const auto search=modem::helper_reference_search(config,out.uncertainty_hz,helper_frequency_hz,
+            reference_center,correction,modem::HelperReferenceClockRelation::common_corrected_source,{},
+            modem::PatternUtcClockGrid::complete_expanded_domain);
+        out.rf_half_width_hz=search.rf_half_width_hz;
+        out.clock_half_width_ppm=search.catalogue.requested_clock_half_width_ppm;
+        out.frequency_rate_hypotheses=search.catalogue.hypotheses.size();
+        std::set<double> clocks;
+        for(const auto& pair:search.catalogue.hypotheses)clocks.insert(pair.clock_error_ppm);
+        out.retained_clock_rates=clocks.size();
+        // This is a conditional forecast at the configured channel offset,
+        // never qualification inferred from expected power. Match the runtime
+        // shared-radio/no-UTC formula and ORIGINAL-cell intersection exactly.
+        const auto observed_helper=helper_frequency_hz+inputs.channel.frequency_offset_hz+
+            helper_frequency_hz*inputs.channel.clock_error_ppm*1e-6;
+        out.shared_frequency_clock=modem::helper_reference_shared_clock_interval(config,observed_helper,
+            helper_frequency_hz,out.uncertainty_hz,correction,
+            modem::HelperReferenceClockRelation::common_corrected_source);
+        std::optional<modem::PatternHelperFrequencyWindow> execution_window;
+        if(out.shared_frequency_clock) {
+            execution_window.emplace(modem::PatternHelperFrequencyWindow{reference_center,out.rf_half_width_hz,
+                helper_frequency_hz-config.carrier_hz,search.catalogue.clock_step_ppm/2,out.shared_frequency_clock});
+            const auto& window=*execution_window;
+            modem::PatternSearch declared;declared.hypotheses=search.catalogue.hypotheses;
+            declared.admitted_clock_half_width_ppm=search.catalogue.requested_clock_half_width_ppm;
+            declared.admitted_clock_cell_half_width_ppm=search.catalogue.clock_step_ppm/2;
+            modem::detail::PatternHelperFrequencySelector selector;
+            estimate_detail::check(stop);
+            if(!selector.initialize(declared,window))throw Error("Shared-radio clock forecast is unsupported by original runtime cells");
+            std::set<double> selected_clocks;
+            for(std::size_t i=0;i<search.catalogue.hypotheses.size();++i)if(selector.keep(i)) {
+                if((i&127U)==0)estimate_detail::check(stop);
+                ++out.shared_clock_selected_pairs;selected_clocks.insert(search.catalogue.hypotheses[i].clock_error_ppm);
+            }
+            out.shared_clock_selected_rates=selected_clocks.size();
+            if(!out.shared_clock_selected_pairs)throw Error("Shared-radio clock forecast has no selected original cells");
+            // Price this exact selection below. No smaller owner or stronger
+            // waveform replaces the original constructor/trial/continuation path.
+        }
+        auto channel=inputs.channel;
+        const auto sample_snr=inputs.tx_dbm-inputs.path_loss_db-inputs.noise_density_dbm_hz-10*std::log10(config.sample_rate/2.);
+        if(!std::isfinite(sample_snr)||sample_snr< -300||sample_snr>300)
+            throw Error("Payload sample SNR is outside the ordinary estimator numerical range");
+        channel.snr_db=sample_snr;
+        // Only the positive-band converter removes the common RF/helper LF
+        // contribution. Raw folded PCM and a retained original prior keep the
+        // actual channel CFO and ordinary real-image waveform unchanged.
+        if(!search.original_prior_retained && !folded_reference)
+            channel.frequency_offset_hz=-helper_frequency_hz*channel.clock_error_ppm*1e-6;
+        const auto estimate=simulation::estimate_with_receiver_search(one_bit_estimate(options),options,true,channel,
+            search.catalogue,1,100,inputs.receiver_work_mode,inputs.receiver_timing_model,&settings,stop,
+            execution_window?&*execution_window:nullptr,true);
+        const auto point=cpu_point(target,estimate);
+        out.receiver_cost=helper_receiver_cost(estimate);
+        out.realtime_ratio=point.realtime_ratio;out.available=point.available;
+        out.reason=precision_reason+(search.original_prior_retained?
+            "; conditional reference forecast; original oscillator prior retained; ordinary baseline, no NCO retuning or claimed RF gain":
+            folded_reference?
+            "; conditional raw mono Robust source; measured helper offset centers ordinary RF templates; no upstream NCO correction":
+            "; conditional same corrected Robust source")+
+            (out.shared_frequency_clock?
+            "; conditional shared-radio frequency-derived clock selects full-domain acquisition cells; ordinary constructor, backend/bin/workspace, logical trials, arrival/epoch alternatives and complete continuation retained":
+            "; full DATA-clock/UTC, arrival and epoch alternatives retained")+
+            "; ordinary reference-model receiver work, helper startup/tracking/conversion overhead excluded";
+        if(!out.available)out.reason+="; residual receiver work/coverage/workspace is unsupported: "+estimate.receiver_work_assumptions;
+    } catch(const Error& error) {out.reason=error.what();}
+    return out;
 }
 
 std::optional<double> helper_ideal_tone_half_width(double cn0_db_hz,double observation_seconds) noexcept {
@@ -1232,11 +1265,8 @@ Model build(const Inputs& inputs,Cache& cache,std::stop_token stop,const std::fu
             static_cast<std::size_t>(waveform):0;
 
         result.shaped_band=modem::pattern_pulse_enabled(config);
-        result.occupied_bandwidth_hz=result.shaped_band?
-            (1+modem::pattern_pulse_rolloff)*config.sample_rate/static_cast<double>(modem::pattern_chip_samples(config)):
-            config.bandwidth_hz;
         result.gate_bandwidth_allowance_hz=modem::waveform_gate_bandwidth_allowance_hz(config);
-        result.occupied_bandwidth_hz+=result.gate_bandwidth_allowance_hz;
+        result.occupied_bandwidth_hz=helper::occupied_bandwidth(config);
         result.low_audio_hz=config.carrier_hz-result.occupied_bandwidth_hz/2;
         result.high_audio_hz=config.carrier_hz+result.occupied_bandwidth_hz/2;
         result.observer_hypothetical=!options.key || config.spreading_mode!=modem::SpreadingMode::pattern;
@@ -1362,7 +1392,7 @@ Model build(const Inputs& inputs,Cache& cache,std::stop_token stop,const std::fu
         }
         if(result.receiver_status.empty())result.receiver_status="Clock and RAM fit · reception unverified";
         helper_reference_plan(result,config);
-        if(result.helper_reference.enabled)
+        if(result.helper_reference.effective_power_w>0)
             result.helper_reference.conditional=realtime_helper_point(inputs,config,inputs.target_db_hz,
                 cache.impl_->curves.helper_precision,stop);
 

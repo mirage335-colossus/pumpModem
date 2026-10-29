@@ -748,7 +748,16 @@ void PatternCode::enable_transmit_trace(std::uint64_t first_chip) {
 }
 bool PatternCode::transmit_trace_enabled() const noexcept {return bool(impl_->trace);}
 void PatternCode::capture_transmit_trace(bool enabled) {
-    if(impl_->trace)impl_->trace->capture=enabled;
+    if(impl_->trace) {
+        if(enabled) {
+            // A preparation preview may have warmed these values without
+            // recording their mapper/outer-key trace. Regenerate bounded chip
+            // caches once the real source starts capturing them.
+            for(auto& entry:impl_->shaped_chips)entry.valid=false;
+            for(auto& entry:impl_->shaped_chips_one)entry.valid=false;
+        }
+        impl_->trace->capture=enabled;
+    }
 }
 void PatternCode::copy_transmit_trace(TransmitTrace& result,std::uint64_t begun_chips) const {
     result.pattern_input.clear();result.pattern_output.clear();result.pattern_key.clear();result.dsss_key.clear();
@@ -870,6 +879,12 @@ struct PatternTransmitter::Impl {
     PatternCode code;
     std::unique_ptr<VirtualCover> cover;
     bool cover_is_tail=false,private_cover=false,protected_cover=false;
+    bool previewing=false;
+    struct PreviewGuard {
+        Impl& source;bool previous;
+        explicit PreviewGuard(Impl& value):source(value),previous(value.previewing) {source.previewing=true;}
+        ~PreviewGuard() {source.previewing=previous;}
+    };
     std::uint64_t cover_start=0,cover_end=0,cover_origin=0;
     struct RetainedPrefix {long double center=0;double scale=0;std::complex<double> value{};};
     using PrefixSnapshot=std::array<RetainedPrefix,32>;
@@ -1102,7 +1117,7 @@ struct PatternTransmitter::Impl {
         if(burst) {
             require(std::isfinite(position) && position<std::ldexp(1.L,64),"Symbol_Burst lookup exceeds the sample range");
             const auto slot=burst->cursor.seek_payload_at_or_after(burst->plan.add(burst->first.payload_begin,static_cast<std::uint64_t>(std::ceil(position))));
-            if(burst->open && !burst->horizon_finish) {
+            if(!previewing && burst->open && !burst->horizon_finish) {
                 const auto reserve=transmit_stop_sample_count(config);
                 const auto end=symbol_schedule_detail::add(training,burst->plan.distance(burst->first.support_begin,slot.support_end));
                 if(reserve>NoiseTransmitter::sample_target || end>NoiseTransmitter::sample_target-reserve) {
@@ -1347,6 +1362,8 @@ struct PatternTransmitter::Impl {
     template<class Output, class Convert>
     std::size_t render_source(std::uint64_t& cursor, std::span<Output> output, Convert convert,
                        std::stop_token stop, const ChipObserver& observer,bool trace=false) {
+        if(trace && code.transmit_trace_enabled())
+            for(auto& entry:settling_chips)if(entry.payload)entry.valid=false;
         struct CaptureGuard {
             PatternCode& code;
             CaptureGuard(PatternCode& value,bool enabled):code(value) { code.capture_transmit_trace(enabled); }
@@ -1362,7 +1379,7 @@ struct PatternTransmitter::Impl {
             std::size_t i=0;
             for(;i<count && cursor<total;++i,++cursor) {
                 if((i&4095U)==0)cancelled(stop);
-                if(burst && burst->horizon_finish && !stop_at && cursor>=*burst->horizon_finish) {
+                if(!previewing && burst && burst->horizon_finish && !stop_at && cursor>=*burst->horizon_finish) {
                     position=cursor;finish();physical_total=total;
                     if(cursor>=total)break;
                 }
@@ -1637,12 +1654,20 @@ std::size_t PatternTransmitter::read_analytic(std::span<std::complex<double>> ou
     return impl_->render(impl_->physical_position, output, [](auto value) { return value; }, stop, observer,true);
 }
 void PatternTransmitter::preview_last_analytic(std::span<std::complex<double>> output) const {
+    Impl::PreviewGuard guard(*impl_);
     require(output.size() <= analytic_preview_limit, "pattern preview exceeds its bounded sample limit");
     const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(output.size(), impl_->physical_position));
     const auto leading = output.size() - count;
     std::fill_n(output.begin(), leading, std::complex<double>{});
     auto cursor = impl_->physical_position - count;
     impl_->render(cursor, output.subspan(leading), [](auto value) { return value; }, {}, {});
+}
+std::complex<double> PatternTransmitter::preview_analytic_at(std::uint64_t sample,std::stop_token stop) const {
+    require(sample<impl_->physical_total,"pattern power preview is outside its physical waveform");
+    Impl::PreviewGuard guard(*impl_);
+    std::complex<double> result;
+    impl_->render(sample,std::span(&result,1),[](auto value) {return value;},stop,{});
+    return result;
 }
 void PatternTransmitter::request_finish() { impl_->finish_physical(); }
 std::uint64_t PatternTransmitter::original_total_samples() const { return impl_->original_total; }
@@ -1656,6 +1681,16 @@ std::uint64_t PatternTransmitter::physical_output_origin() const {
     const auto prefix=symbol_schedule_detail::add(impl_->training,impl_->padding);
     require(anchor>=prefix,"transmit UTC origin precedes the representable sample clock");
     return anchor-prefix;
+}
+std::uint64_t PatternTransmitter::physical_payload_begin() const {
+    const auto first=symbol_schedule_detail::add(impl_->training+impl_->padding,impl_->payload_offset(0));
+    if(impl_->scheduled) {
+        const auto physical=impl_->scheduled->source_to_physical(
+            {symbol_schedule_detail::add(impl_->source_origin,first)});
+        require(physical.fraction==0,"first payload slot must have an integer physical coordinate");
+        return physical.sample;
+    }
+    return symbol_schedule_detail::add(physical_output_origin(),first);
 }
 std::uint64_t PatternTransmitter::source_valid_payload_end() const { return impl_->valid_source_end(); }
 std::uint64_t PatternTransmitter::emitted_payload_epoch() const { return impl_->emitted_epoch(); }
@@ -1816,6 +1851,9 @@ std::size_t NoiseTransmitter::read_analytic(std::span<std::complex<double>> outp
 void NoiseTransmitter::preview_last_analytic(std::span<std::complex<double>> output) const {
     impl_->pattern.preview_last_analytic(output);
 }
+std::complex<double> NoiseTransmitter::preview_analytic_at(std::uint64_t sample,std::stop_token stop) const {
+    return impl_->pattern.preview_analytic_at(sample,stop);
+}
 void NoiseTransmitter::request_finish() { impl_->pattern.request_finish(); }
 std::uint64_t NoiseTransmitter::original_total_samples() const { return impl_->pattern.original_total_samples(); }
 std::uint64_t NoiseTransmitter::original_source_total_samples() const { return impl_->pattern.original_source_total_samples(); }
@@ -1823,6 +1861,7 @@ bool NoiseTransmitter::finished() const { return impl_->pattern.finished(); }
 std::uint64_t NoiseTransmitter::total_samples() const { return impl_->pattern.total_samples(); }
 std::uint64_t NoiseTransmitter::samples_emitted() const { return impl_->pattern.samples_emitted(); }
 std::uint64_t NoiseTransmitter::physical_output_origin() const { return impl_->pattern.physical_output_origin(); }
+std::uint64_t NoiseTransmitter::physical_payload_begin() const { return impl_->pattern.physical_payload_begin(); }
 std::uint64_t NoiseTransmitter::physical_valid_payload_end() const { return impl_->pattern.physical_valid_payload_end(); }
 std::uint64_t NoiseTransmitter::predicted_physical_valid_payload_end(std::uint64_t frontier) const { return impl_->pattern.predicted_physical_valid_payload_end(frontier); }
 std::uint64_t NoiseTransmitter::predicted_physical_stop_end(std::uint64_t frontier) const { return impl_->pattern.predicted_physical_stop_end(frontier); }

@@ -90,6 +90,11 @@ public:
     explicit HelperJointClockDiagnosticPool(std::shared_ptr<live::detail::ReceiverAllocationAccount> value):account(std::move(value)){}
 };
 namespace {
+double active_helper_power(const live::Settings& settings) {
+    auto options=settings.helper;
+    if(settings.transfer.key)options.callsign.clear();
+    return helper::effective_helper_power(options);
+}
 struct HelperJointClockDiagnosticLease {
     std::shared_ptr<HelperJointClockDiagnosticPool> pool;
     std::size_t slot=0;
@@ -4584,7 +4589,8 @@ HelperFrequencyForecast helper_frequency_forecast(const transfer::Estimate& tran
     if(config.receiver_strategy!=modem::ReceiverStrategy::automatic&&
        config.receiver_strategy!=modem::ReceiverStrategy::complex_only)
         return fail("Helper rolling acquisition requires Automatic or Complex receiver policy; the selected policy is ineligible");
-    if(settings&&(settings->helper.power_w<=0||settings->helper.frequency!=helper::Frequency::high))
+    if(settings&&(settings->helper.power_w<=0||settings->helper.frequency!=helper::Frequency::high||
+       active_helper_power(*settings)<=0))
         return fail("Disabled or cochannel helper has no isolated rolling frequency-reference forecast");
     if(!config.oscillator_search||!config.pattern_symbols||config.spreading_mode!=modem::SpreadingMode::pattern||
        config.symbol_burst.enabled()||modem::scheduled_bursts(config)||options.timestamp)
@@ -4852,7 +4858,8 @@ HelperJointClockScenario helper_executed_joint_scenario(const transfer::Estimate
        source.modem.frequency_search_multiplier!=proof->config.frequency_search_multiplier||
        source.modem.oscillator_search!=proof->config.oscillator_search||!same_joint_profile_numeric(source.modem,*proof,false))
         return fail("Executed joint-clock copy belongs to different original rolling target/policy/oscillator geometry");
-    if(settings&&(settings->helper.power_w<=0||settings->helper.frequency!=helper::Frequency::high))
+    if(settings&&(settings->helper.power_w<=0||settings->helper.frequency!=helper::Frequency::high||
+       active_helper_power(*settings)<=0))
         return fail("Current disabled/cochannel helper cannot use an older executed joint-clock copy");
     try {
         auto options=source;options.search_seconds=live::detail::effective_epoch_search_seconds(options,false);
@@ -4906,7 +4913,8 @@ HelperNativeWork helper_native_work(const transfer::Options& source,
     if(source.modem.receiver_strategy!=modem::ReceiverStrategy::automatic&&
        source.modem.receiver_strategy!=modem::ReceiverStrategy::complex_only)
         return fail("Selected receiver policy does not support helper rolling work narrowing");
-    if(actual&&(actual->helper.power_w<=0||actual->helper.frequency!=helper::Frequency::high))
+    if(actual&&(actual->helper.power_w<=0||actual->helper.frequency!=helper::Frequency::high||
+       active_helper_power(*actual)<=0))
         return fail("Disabled or cochannel helper has no isolated rolling work reference");
     if(scenario.profiles.size()!=1||scenario.profiles.front().profile_index!=0||!source.key||source.timestamp)
         return fail("Native work curve models one representative rolling keyed profile/epoch, not full reception or every cohort");

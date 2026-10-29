@@ -63,14 +63,15 @@ decimal Rate can round this minimum upward to whole sampled half-chips, with at 
 5% extra samples and the same 120 MHz ceiling. Rate 100 Hz therefore uses
 6000 samples/s at both 1500 Hz and 1490 Hz stream tones. Explicit caller-supplied
 sample clocks remain unchanged. The GUI defaults to `B=3600`,
-Carrier 1500 Hz, Shift 0 and 14,400 internal samples/s, and exposes Rate,
+Carrier 1725 Hz, Shift 0 and 14,400 internal samples/s, and exposes Rate,
 Carrier and Shift controls.
 Both frequency fields accept case-insensitive Hz, kHz, MHz, GHz and THz units,
 optional spaces and scientific notation. The CLI accepts the same suffixes and
 the existing `--rf-carrier` / `--rf-shift` aliases.
-Narrow audio remains around a usable carrier rather than falling below 300 Hz.
-The 6 kHz floor is needed for this real-PCM carrier representation; it does not
-raise the nominal chip or symbol rate. The 30 MHz plan still uses 120 million
+GUI carrier recommendations include an audio-band higher default and a half-rate
+choice for specialized hardware when otherwise valid; see the
+[GUI contract](gui-contract.md) for its floors and constraints. Automatic sample
+rate follows the selected carrier and does not raise the nominal chip or symbol rate. The 30 MHz plan still uses 120 million
 internal samples/second. Explicit Carrier/Shift and manual sample-rate choices remain available.
 The range is a DSP configuration range; physical operation uses the selected
 audio device's available sample rate and passband.

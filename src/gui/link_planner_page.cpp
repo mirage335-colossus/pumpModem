@@ -661,9 +661,9 @@ void notable_points(Node& root, const planner::Model& model) {
     const bool fits = model.low_audio_hz >= 300 && model.high_audio_hz <= 2700 && model.occupied_bandwidth_hz > 0;
     paragraph(passband, model.shaped_band ? (fits ? "Fits 300–2700 Hz" : "Outside 300–2700 Hz") :
         "Check radio passband", 12, Tone::text, true, 4);
-    paragraph(passband, model.shaped_band ? (model.gate_bandwidth_allowance_hz>0?"Signal + ramp allowance: ":"Ideal signal: ") +
-        band_span(model.low_audio_hz, model.high_audio_hz) :
-        "Nominal rate: " + frequency(model.inputs.options.modem.bandwidth_hz),
+    paragraph(passband, (model.gate_bandwidth_allowance_hz>0?"Signal + ramp allowance: ":
+        model.shaped_band?"Ideal signal: ":"Nominal waveform support: ")+
+        band_span(model.low_audio_hz, model.high_audio_hz),
         11, Tone::muted, false, 0);
     values.push_back(std::move(passband));
     for (std::size_t first = 0; first < values.size(); first += columns) {
@@ -737,27 +737,45 @@ void link_budget(Node& root, const planner::Model& model) {
             " dB", 11, Tone::muted, false, 0);
         const auto& helper=model.helper_reference;
         if(helper.enabled) {
-            paragraph(n,"Helper reference on",12,Tone::text,true,4);
+            paragraph(n,helper.budget_available&&helper.effective_power_w==0?"Helper reference configured · no helper power":
+                helper.geometry_available?"Helper reference on":"Helper reference configured · unavailable",12,Tone::text,true,4);
             if(helper.budget_available) {
-                paragraph(n,"Expected helper C/N0: RF-budget total "+db(helper.cn0_db_hz)+" dB-Hz in straight-tone intervals. Effective power: "+number(helper.effective_power_w)+
-                    " W; received: "+db(helper.received_dbm)+" dBm.",11,Tone::muted,false,4);
-                paragraph(n,"Pure pilot: RF-budget "+db(helper.pilot_cn0_db_hz)+" dB-Hz ("+
-                    db(helper.pilot_tone_snr_db)+" dB in 10 Hz), "+number(helper.pilot_power_w)+
-                    " W from the 90% power share. Auxiliary: "+db(helper.auxiliary_cn0_db_hz)+
-                    " dB-Hz from 10%. Pilot power is 9× auxiliary power; optional auxiliary metadata does not qualify frequency assistance. Ramps and interference are separate losses.",
+                paragraph(n,"Active composite power: "+number(helper.effective_total_power_w)+" W (configured "+
+                    number(helper.configured_total_power_w)+" W); Robust "+number(helper.robust_power_w)+
+                    " W; mean helpers "+number(helper.effective_power_w)+
+                    " W. Helper-only lead/tail and transmission gaps are excluded. Robust/helper amplitude scaling stays fixed throughout transmission.",
                     11,Tone::muted,false,4);
-                if(helper.simulation_level_modeled)paragraph(n,"Sampled simulation helper C/N0: "+
-                    db(helper.simulation_cn0_db_hz)+" dB-Hz total; pilot "+db(helper.simulation_pilot_cn0_db_hz)+
-                    " dB-Hz, including "+db(helper.simulation_level_db)+
-                    " dB existing digital waveform backoff. This backoff affects both DATA and Helper against the sampled nominal noise; it does not reduce the calibrated hardware RF budget.",
+                if(helper.ratio_limited)paragraph(n,"Helper Carrier Ratio Limit reduces the helper allocation; the effective active composite power is below the configured total.",
+                    11,Tone::caution,false,4);
+                if(helper.effective_power_w>0) {
+                    paragraph(n,"Expected helper C/N0: RF-budget active mean "+db(helper.cn0_db_hz)+" dB-Hz; received: "+db(helper.received_dbm)+" dBm.",
+                        11,Tone::muted,false,4);
+                    paragraph(n,"High pilot: preview steady tone "+db(helper.pilot_cn0_db_hz)+" dB-Hz ("+
+                        db(helper.pilot_tone_snr_db)+" dB in 10 Hz), "+number(helper.pilot_power_w)+
+                        " W. Low pilot: "+db(helper.low_pilot_cn0_db_hz)+" dB-Hz, "+number(helper.low_pilot_power_w)+
+                        " W (−3 dB). Auxiliary: "+db(helper.auxiliary_cn0_db_hz)+" dB-Hz, "+number(helper.auxiliary_power_w)+
+                        " W (−9 dB). These steady-tone power ratios are relative to the high pilot; the separate mean-helper calculation includes auxiliary modulation and applicable gates. Optional auxiliary metadata does not qualify frequency assistance.",
+                        11,Tone::muted,false,4);
+                    paragraph(n,"Component levels are a planning preview using the helper mean-power model. The actual active-window average depends on metadata, epoch and applicable gating; encrypted time metadata can change that mean. Transmission establishes its own fixed amplitude scaling.",
+                        11,Tone::muted,false,4);
+                    if(helper.simulation_level_modeled)paragraph(n,"Sampled simulation helper C/N0: "+
+                        db(helper.simulation_cn0_db_hz)+" dB-Hz total; pilot "+db(helper.simulation_pilot_cn0_db_hz)+
+                        " dB-Hz, including "+db(helper.simulation_level_db)+
+                        " dB existing digital waveform backoff. This backoff affects both DATA and Helper against the sampled nominal noise; it does not reduce the calibrated hardware RF budget.",
+                        11,Tone::muted,false,4);
+                }
+            }
+            if(helper.geometry_available)paragraph(n,"Nominal helper audio center: low pilot "+frequency(helper.low_frequency_hz)+
+                ", auxiliary "+frequency(helper.auxiliary_frequency_hz)+", high pilot "+frequency(helper.frequency_hz)+
+                ". Low pilot and auxiliary remain fixed; the high pilot stays at or above 2400 Hz and rises only for Robust occupied bandwidth and separation. The audio route and radio must pass all components with radio-filter margin; ADC rate alone does not establish that passband.",
+                11,Tone::muted,false,4);
+            else if(!helper.status.empty())paragraph(n,helper.status,11,Tone::caution,false,4);
+            if(helper.geometry_available) {
+                paragraph(n,"With FHSS off, both straight pilots retain amplitude and phase across dwell boundaries. Auxiliary boundary gates, shaped reversals and metadata transitions remain. Start/end transitions are shaped. Receiver acquisition, tracking and decoding for this waveform remain deferred.",
+                    11,Tone::muted,false,4);
+                paragraph(n,"The strongest tone in the expected helper range supplies the real-time frequency reference for direct conversion. Robust acquisition waits while the helper is unavailable. Disable Helper Carrier to use ordinary oscillator search.",
                     11,Tone::muted,false,4);
             }
-            if(helper.geometry_available)paragraph(n,"Nominal helper audio center: pure pilot "+frequency(helper.frequency_hz)+
-                ", auxiliary "+frequency(helper.auxiliary_frequency_hz)+
-                ". The audio route and radio must pass Robust, guard, auxiliary modulation, guard and pilot with radio-filter margin; ADC rate alone does not establish that passband.",
-                11,Tone::muted,false,4);
-            paragraph(n,"The strongest tone in the expected helper range supplies the real-time frequency reference for direct conversion. Robust acquisition waits while the helper is unavailable. Disable Helper Carrier to use ordinary oscillator search.",
-                11,Tone::muted,false,4);
             const auto& conditional=helper.conditional;
             const auto& precision=conditional.precision;
             const auto& reference=conditional.precision_reference;
@@ -831,7 +849,7 @@ void link_budget(Node& root, const planner::Model& model) {
                 paragraph(n,"Conditional planning-model precision: "+number(precision.usable_tone_seconds,4)+
                     " s usable straight tone across "+std::to_string(precision.expected_segments)+
                     " dated observations at "+std::to_string(conditional.physical_sample_rate)+
-                    " raw samples/s. The unretuned pilot retains phase through publication windows and400ms amplitude ramps; a Fake-FHSS calendar is not an actual RF retune. Auxiliary punctuation/metadata do not interrupt the pure pilot. Configured phase noise and the exact20ms Hann projection information loss are included. Runtime measured uncertainty remains authoritative; the prediction is not calibrated confidence or a physical precision floor. "+
+                    " raw samples/s. The unretuned pilot retains phase through publication windows; dwell ramps apply only with FHSS enabled. A Fake-FHSS calendar is not an actual RF retune. Auxiliary punctuation/metadata do not interrupt the pure pilot. Configured phase noise and the exact20ms Hann projection information loss are included. Runtime measured uncertainty remains authoritative; the prediction is not calibrated confidence or a physical precision floor. "+
                     precision.reason+" Prediction is not measured lock or a lock-probability forecast; planning-model precision is not an operational confidence interval. "
                     "Unexpected noise, glitches or model mismatch can widen actual uncertainty.",11,Tone::muted,false,4);
                 if(model.bit_seconds>0)paragraph(n,
@@ -1211,7 +1229,7 @@ void details(Node& root,const planner::Model& model) {
     paragraph(n, "Observer. Energy-only listener; private waveform; equal signal and noise at both receivers. 90% detection, 1% false alarm; known band, window and stationary noise. Numeric range: at most −10 dB in-band SNR. Each point holds bit energy relative to noise at 18 dB; longer bits use lower power. Repeated traffic, location, noise uncertainty and other detectors change the comparison.");
     paragraph(n, "Red indicators. RX estimates below 80% and observer / receiver times below 8× are red. Observer results outside the model range, unavailable results and errors are also red; calculating is neutral. The 8× cutoff is a listening guideline, not a validated acoustic threshold.");
     paragraph(n, "Sound and structure. A steadier, less abruptly changing sound may reflect less conspicuous envelope or spectral structure, as well as less frequent repetition. Longer pseudorandom patterns can change that texture even without encryption; pulse shaping, rate, filtering and level also matter. A public noise-like pattern remains predictable to a correlating observer. Private patterns can withhold that template, but even genuinely random signals can reveal energy and modulation structure. The ratio assumes a noise-like private waveform; it does not measure randomness, sound quality or interference complaints. Without an encrypted private pattern the observer estimate is not applicable. Tone modes still transmit tones.");
-    paragraph(n, "Voice bandwidth. The ideal shaped signal must fit the radio's passband. At 3.6 kHz rate and 1.5 kHz carrier, the automatic shaped pattern spans 375–2625 Hz. DSSS 10×, 100× and 1000× selections start at inner rates of 360, 36 and 3.6 Hz with the same outer bandwidth and stream carrier. Radio filtering and spectral tails still matter.");
+    paragraph(n, "Voice bandwidth. The shared waveform calculation includes spreading, pulse-shaping rolloff and smooth-gate allowances. Audio carrier recommendations keep the lower edge at or above 375 Hz, or 1400 Hz with Helper Carrier enabled. The half-rate preset is exempt from that audio floor and still needs valid waveform, sample-rate and helper separation. The higher default starts at 1725 Hz; helper operation prefers 1775 Hz when a rise is needed, then rounds upward to the next sufficient multiple of 5 Hz. Radio filtering and spectral tails still matter.");
     paragraph(n, "FT8 reference. −8 dB in 1 Hz converts to about −42 dB on the 2500 Hz reporting scale: 21 dB below the published −21 dB reference threshold. This is a scale conversion, not tested sensitivity.");
     paragraph(n, "Quick references", 15, Tone::text, true, 8);
     paragraph(n, "Rough examples; antennas, propagation and noise change the result. Power (dBm) and path loss (dB) are separate quantities.");

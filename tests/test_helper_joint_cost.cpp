@@ -5,6 +5,7 @@
 #include "test_helper_joint_clock.cpp"
 #undef main
 #include "datapump/simulation_estimate.hpp"
+#include "datapump/live.hpp"
 #include <array>
 
 namespace {
@@ -154,6 +155,10 @@ void executed_cost_copy() {
     modem::ChannelConfig channel;channel.clock_error_ppm=100;channel.frequency_offset_hz=0;
     const auto scenario=simulation::helper_executed_joint_scenario(tx,options,channel,copied.proof);
     check(scenario.scenario.has_value(),scenario.reason.c_str());
+    live::Settings no_remainder;no_remainder.helper.power_w=4;no_remainder.helper.data_power_w=4;
+    check(!simulation::helper_executed_joint_scenario(tx,options,channel,copied.proof,{},
+        simulation::ReceiverWorkMode::hardware_fallback,{},&no_remainder).scenario,
+        "Zero helper remainder reused an older joint-clock reference");
     check(scenario.reason.find("Independent unsteered helper")!=std::string::npos&&
         scenario.scenario->profiles[0].input.joint_source_relation==input.joint_source_relation,
         "joint scenario lost the copied source relation or described the wrong unresolved domain");

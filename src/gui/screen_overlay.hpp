@@ -29,9 +29,9 @@ inline OverlayDefinition helper_waterfall_overlay_definition() {
     auto view=waterfall_overlay_definition();
     auto& spectrum=view.controls.front();
     spectrum.bitmap=Bitmap::waterfall_helper_detail;
-    spectrum.label="Helper Carrier / auxiliary and pilot / amplitude and phase";
+    spectrum.label="Helper Carrier / low pilot, auxiliary and high pilot / amplitude and phase";
     spectrum.right_click=Command::dismiss_overlay;
-    spectrum.help="Zoomed Helper Carrier spectrum: the auxiliary tone and its metadata band are on the left, and the pure pilot is on the right. Frequency increases left to right. Adjacent columns show amplitude and wrapped phase at the retained FFT resolution. Click, right-click or press Escape to return.";
+    spectrum.help="Zoomed Helper Carrier spectrum: the fixed 550 Hz low pilot and 950 Hz auxiliary metadata band are on the left, with the high pilot at or above 2400 Hz on the right. Frequency increases left to right. Adjacent columns show amplitude and wrapped phase at the retained FFT resolution. Click, right-click or press Escape to return.";
     return view;
 }
 }

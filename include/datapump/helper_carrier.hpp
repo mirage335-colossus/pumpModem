@@ -3,7 +3,9 @@
 #include "datapump/pattern_pulse.hpp"
 #include <array>
 #include <complex>
+#include <cmath>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <span>
 #include <string>
@@ -25,6 +27,7 @@ inline double occupied_bandwidth(const modem::Config& config) {
 // frequencies; it does not make an invalid nominal waveform valid.
 struct PlacementBand {
     double carrier_hz=0,waveform_bandwidth_hz=0,gate_bandwidth_hz=0;
+    bool pilot_dwell_gating=false;
 };
 struct MonoPassband {double lower_hz=0,upper_hz=0;};
 // A nonzero minimum full width conservatively includes other already-valid
@@ -32,14 +35,22 @@ struct MonoPassband {double lower_hz=0,upper_hz=0;};
 PlacementBand placement_band(const modem::Config&,double minimum_occupied_bandwidth_hz=0);
 MonoPassband mono_passband(const PlacementBand&);
 // Legacy enum values remain readable by settings migration; validate accepts
-// only High for the adjacent two-tone waveform.
+// only High for the fixed-low, raised-high helper waveform.
 enum class Frequency { high, low, cochannel };
-// Steady straight-tone power fractions, before ramps or auxiliary metadata.
-// helper_gain is the equivalent amplitude of their combined power, not their
-// worst-case voltage sum. Keep these separate for received-level accounting.
-inline constexpr double pilot_power_fraction=.9,auxiliary_power_fraction=.1;
-inline constexpr double pilot_amplitude_fraction=.9486832980505137996;
-inline constexpr double auxiliary_amplitude_fraction=.3162277660168379332;
+// Steady powers relative to the high pilot are 0, -3 and -9 dB.
+// Normalize their sum only to give helper_gain a useful bounded peak reference;
+// mean_power() separately accounts for the gates and auxiliary modulation.
+inline constexpr double low_pilot_relative_power=.501187233627272285;
+inline constexpr double auxiliary_relative_power=.125892541179416721;
+inline constexpr double steady_power_sum=1+low_pilot_relative_power+auxiliary_relative_power;
+inline constexpr double pilot_power_fraction=1/steady_power_sum;
+inline constexpr double low_pilot_power_fraction=low_pilot_relative_power/steady_power_sum;
+inline constexpr double auxiliary_power_fraction=auxiliary_relative_power/steady_power_sum;
+inline const double pilot_amplitude_fraction=std::sqrt(pilot_power_fraction);
+inline const double low_pilot_amplitude_fraction=std::sqrt(low_pilot_power_fraction);
+inline const double auxiliary_amplitude_fraction=std::sqrt(auxiliary_power_fraction);
+inline constexpr double low_pilot_frequency_hz=550,auxiliary_frequency_hz=950;
+// Legacy receiver/laboratory geometry. Production auxiliary placement is fixed.
 inline constexpr double auxiliary_pilot_spacing_hz=400;
 struct Options {
     double power_w=0, data_power_w=4, ratio_limit_db=90;
@@ -54,12 +65,46 @@ struct Options {
 struct Plan {
     double frequency_hz=0, helper_gain=0, data_gain=1, effective_power_w=0;
     // frequency_hz is the pure pilot. Zero auxiliary frequency is an explicit
-    // pilot-only laboratory plan; production plan() always supplies both tones.
+    // pilot-only laboratory plan; production plan() supplies all three tones.
     double auxiliary_frequency_hz=0;
+    // Appended fields preserve explicit pilot-only laboratory aggregates.
+    double low_frequency_hz=0;
+    bool pilot_dwell_gating=false;
 };
+struct MeanPower {double high_pilot=0,low_pilot=0,auxiliary=0,total=0;};
+struct PowerReference {
+    std::uint64_t epoch=0;
+    long double begin_seconds=0,end_seconds=.4L;
+    std::optional<Crypto> time_key;
+    // Actual source component mean, norm(analytic PCM)/2, over this same
+    // active window including shaping, backoff and nonzero gate ramps.
+    // Missing means nominal preview; carrier phase does not set RF power.
+    std::optional<double> data_mean_power;
+    bool punctuate=true;
+    std::optional<long double> helper_start_seconds,helper_end_seconds;
+    // Coordinates match Generator::mix. False excludes inactive Robust gaps.
+    std::function<bool(long double)> active;
+};
+inline constexpr unsigned power_reference_nodes=32768;
+// Stateless stratified quadrature avoids coherent undersampling of a high-rate
+// source while preserving the exact same accepted nodes for both components.
+inline long double power_reference_node(const PowerReference& reference,unsigned node,std::uint64_t variant=0) {
+    auto bits=(static_cast<std::uint64_t>(node)^(reference.epoch*0xd1b54a32d192ed03ULL)^
+        (variant*0xa0761d6478bd642fULL))+0x9e3779b97f4a7c15ULL;
+    bits=(bits^(bits>>30))*0xbf58476d1ce4e5b9ULL;
+    bits=(bits^(bits>>27))*0x94d049bb133111ebULL;bits^=bits>>31;
+    const auto fraction=(static_cast<long double>(bits>>11)+.5L)/9007199254740992.L;
+    return reference.begin_seconds+(reference.end_seconds-reference.begin_seconds)*(node+fraction)/power_reference_nodes;
+}
+// The configured power is the active composite average. Lead/tail and gaps
+// are excluded. The existing ratio ceiling applies to the helper remainder.
+double effective_helper_power(const Options&);
+// Average the actual shaped auxiliary envelope independently from the Robust
+// amplitude calculation. Straight-tone levels remain the constants above.
+MeanPower mean_power(const Options&,bool pilot_dwell_gating=false,const PowerReference* reference=nullptr);
 struct ReferenceLevel {
     // Existing fields describe total Helper power. Precision predictions must
-    // use the explicit pilot fields below, after the90/10 split.
+    // use the explicit high-pilot fields below, after active-mean calibration.
     double effective_power_ratio=0,straight_cn0_db_hz=0,usable_cn0_db_hz=0,payload_average_cn0_db_hz=0;
     double pilot_effective_power_ratio=0,pilot_straight_cn0_db_hz=0,pilot_usable_cn0_db_hz=0;
     double auxiliary_straight_cn0_db_hz=0;
@@ -96,8 +141,9 @@ EnvelopePlan plan_envelope(const modem::Config&,const EnvelopeRequirements& = {}
 void validate(const Options&);
 // Validates the options and preserves the calibrated payload gain independently
 // of helper placement, occupied-band geometry or output sample rate. Disabled
-// helper power returns unity. This computes no tone or metadata waveform.
-double calibrated_data_gain(const Options&);
+// helper power returns unity. An actual active-waveform reference freezes
+// metadata/gate calibration before PCM is emitted.
+double calibrated_data_gain(const Options&,bool pilot_dwell_gating=false,const PowerReference* reference=nullptr);
 // Throws when the helper cannot fit; callers may retain their unchanged Robust
 // path and report that helper configuration unavailable. Never retunes data.
 // A nonzero minimum_high_frequency_hz adds a High-only caller-supplied
@@ -107,12 +153,12 @@ double calibrated_data_gain(const Options&);
 // it calibrates helper power without changing the returned payload gain.
 Plan plan(const Options&,double data_carrier_hz,double occupied_bandwidth_hz,
           std::uint32_t output_rate,double minimum_high_frequency_hz=0,
-          double data_amplitude_scale=1);
+          double data_amplitude_scale=1,const PowerReference* reference=nullptr);
 // Explicit gate-aware geometry. The original scalar overload retains its
 // strict nominal waveform check. All engineering gate allowance remains in
 // this band's real-mono support and power-dependent helper leakage bound.
 Plan plan(const Options&,const PlacementBand&,std::uint32_t output_rate,
-          double minimum_high_frequency_hz=0,double data_amplitude_scale=1);
+          double minimum_high_frequency_hz=0,double data_amplitude_scale=1,const PowerReference* reference=nullptr);
 // Negotiate the physical audio clock independently of the unchanged modem
 // clock. Includes the helper metadata band and a practical 48 kHz audio floor.
 std::uint32_t minimum_output_rate(const Options&,double data_carrier_hz,

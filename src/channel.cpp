@@ -1,6 +1,7 @@
 #include "datapump/channel.hpp"
 #include "live_simulation_clock.hpp"
 #include "audio_trace.hpp"
+#include "helper_power_reference.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -54,7 +55,7 @@ struct SampledLegacy {
         rate=1+static_cast<long double>(channel.clock_error_ppm)*1e-6L;
         diffusion=channel.phase_noise_degrees_per_sqrt_second*std::numbers::pi/180/std::sqrt(config.sample_rate);
         sigma=std::sqrt(nominal_signal_power*std::pow(10.,-channel.snr_db/10));
-        if(helper_options.power_w>0) {
+        if(helper::effective_helper_power(helper_options)>0) {
             const auto plan=helper::plan(helper_options,helper::placement_band(config,helper_bandwidth),
                 config.sample_rate,0,outer_dsss_transmit_gain(config));
             helper_plan=plan;
@@ -136,7 +137,7 @@ struct SampledPhysicalSelection {
 SampledPhysicalSelection select_sampled_physical_clock(const Config& config,const helper::Options& options,
         double bandwidth,const std::optional<SampledSimulationChannel::PreconversionCapture>& capture) {
     validate(config);helper::validate(options);validate_sampled_capture_domain(capture);
-    if(options.power_w<=0)throw Error("Helper Carrier physical clock requires an enabled helper");
+    if(helper::effective_helper_power(options)<=0)throw Error("Helper Carrier physical clock requires an enabled helper");
     const auto band=helper::placement_band(config,bandwidth);
     SampledPhysicalSelection selected;selected.occupied=band.waveform_bandwidth_hz+band.gate_bandwidth_hz;
     for(selected.stages=2;selected.stages<=sampled_physical_max_stages;++selected.stages) {
@@ -194,7 +195,7 @@ struct SampledPhysical {
     std::uint64_t received=0,physical_received=0,origin=0,total=0,buffer_start=0,helper_epoch=0;
     std::size_t buffer_count=0,observer_count=0;
     StreamingTransmitter* source=nullptr;
-    bool complete=false,helper_only=false,primed=false,logical_payload_preserved=true;
+    bool complete=false,helper_only=false,primed=false,logical_payload_preserved=true,power_reference_prepared=false;
     Complex oscillator{},step{},burst_rotation{};
     double diffusion=0,sigma=0,occupied_bandwidth_hz=0;
     std::mt19937_64 startup_random,phase_random,noise_random;
@@ -261,7 +262,7 @@ struct SampledPhysical {
         // auxiliary images which can fold into DATA at the logical clock.
         // The frontend's additional 75 Hz notch transitions are filter support,
         // not additional transmitted modulation bandwidth.
-        const std::array helper_frequencies{plan.auxiliary_frequency_hz,plan.frequency_hz};
+        const std::array helper_frequencies{plan.low_frequency_hz,plan.auxiliary_frequency_hz,plan.frequency_hz};
         constexpr double helper_half_width=150;
         if(capture_domain) {
             const auto helper_low=(helper_frequencies.front()-helper_half_width)*clock_rate+channel.frequency_offset_hz;
@@ -382,6 +383,7 @@ struct SampledPhysical {
         if(channel.delay_samples+(lead+tail+.8L)*config.sample_rate/rate+group_delay()+1>=available)
             throw Error("Helper Carrier envelope duration overflow");
         origin=received;source=nullptr;total=0;buffer_start=0;buffer_count=0;complete=false;generator.reset();
+        power_reference_prepared=false;
         lead_seconds=lead;tail_seconds=tail;helper_start=helper_end=0;helper_epoch=0;
         startup=channel.delay_samples+std::floor((.05L+.25L*uniform())*config.sample_rate)+.05L+.9L*uniform();
         // A previously observed lookahead cannot be rewritten when a fresh
@@ -389,7 +391,7 @@ struct SampledPhysical {
         startup=std::max(startup,group_delay()+1);
         startup+=lead_seconds*config.sample_rate/rate;
     }
-    void attach(StreamingTransmitter& transmitter,std::uint64_t additional_idle=0) {
+    void attach(StreamingTransmitter& transmitter,std::uint64_t additional_idle=0,std::stop_token stop={}) {
         if(source)throw Error("Helper Carrier burst is already bound to a source");
         if(transmitter.samples_emitted())throw Error("sampled simulation requires a fresh transmitter for each burst");
         if(origin!=received)throw Error("Helper Carrier lead must be prepared before reading the burst");
@@ -425,7 +427,17 @@ struct SampledPhysical {
             throw Error("Helper Carrier lead exceeds the physical receiver counter");
         // Construct optional metadata before publishing a source binding. An
         // unavailable cipher cannot leave a half-prepared active burst.
-        helper::Generator next_generator(options,plan,next_epoch,true,time_key);
+        auto next_plan=plan;
+        if(!power_reference_prepared && !helper_only) {
+            auto reference=helper::transmit_power_reference(config,transmitter,next_epoch,config.stream_epoch,time_key,stop);
+            reference.helper_start_seconds=next_start;
+            reference.helper_end_seconds=next_end;
+            next_plan=helper::plan(options,helper::placement_band(config,occupied_bandwidth_hz),
+                physical_rate,0,outer_dsss_transmit_gain(config),&reference);
+        }
+        helper::Generator next_generator(options,next_plan,next_epoch,true,time_key);
+        plan=next_plan;
+        sigma=std::sqrt(nominal_signal_power*std::pow(10.,-channel.snr_db/10))*plan.data_gain*std::sqrt(factor);
         source=&transmitter;total=next_total;
         helper_origin=next_origin;helper_epoch=next_epoch;helper_start=next_start;helper_end=next_end;
         startup=next_startup;
@@ -460,7 +472,7 @@ struct SampledPhysical {
                 derivative*(static_cast<long double>(sample)/physical_rate);
             const auto low=(config.carrier_hz-half)*clock_rate+offset;
             const auto high=(config.carrier_hz+half)*clock_rate+offset;
-            const auto helper_low=(plan.auxiliary_frequency_hz-150)*clock_rate+offset;
+            const auto helper_low=(plan.low_frequency_hz-150)*clock_rate+offset;
             const auto helper_high=(plan.frequency_hz+150)*clock_rate+offset;
             const auto full_low=std::min(low,helper_low),full_high=std::max(high,helper_high);
             if(!std::isfinite(offset)||!std::isfinite(full_low)||!std::isfinite(full_high)||
@@ -476,7 +488,7 @@ struct SampledPhysical {
                     if(!capture_domain)throw Error("sampled RF drift leaves the ordinary payload filter passband");
                 }
             }
-            if(!capture_domain)for(const auto center:std::array{plan.auxiliary_frequency_hz,plan.frequency_hz})
+            if(!capture_domain)for(const auto center:std::array{plan.low_frequency_hz,plan.auxiliary_frequency_hz,plan.frequency_hz})
                 for(unsigned i=0;i<=120;++i) {
                     const auto frequency=(center-150+300.*i/120)*clock_rate+offset;
                     const auto alias=std::abs(std::remainder(frequency,static_cast<long double>(config.sample_rate)));
@@ -600,7 +612,7 @@ struct SampledPhysical {
         if(capture_domain&&!observer)
             throw Error("Helper Carrier preconversion capture requires a physical PCM consumer");
         if(!source) {
-            attach(transmitter);
+            attach(transmitter,0,stop);
         } else if(source!=&transmitter||transmitter.samples_emitted()!=buffer_start+buffer_count)
             throw Error("sampled simulation source changed without begin_burst");
         const auto endpoint=transmitter.total_samples();
@@ -649,7 +661,7 @@ struct SampledSimulationChannel::Impl {
         static_assert(sizeof(Impl)+sizeof(SampledPhysical)+sizeof(SampledSimulationChannel)+
             SampledSimulationChannel::auxiliary_workspace_bound+
             SampledSimulationChannel::physical_helper_cohort_workspace_bound<=SampledSimulationChannel::workspace_bound);
-        if(options.power_w>0)physical=std::make_unique<SampledPhysical>(config,channel,std::move(options),bandwidth,envelope,capture);
+        if(helper::effective_helper_power(options)>0)physical=std::make_unique<SampledPhysical>(config,channel,std::move(options),bandwidth,envelope,capture);
         else {
             if(capture)throw Error("preconversion capture requires an enabled Helper Carrier");
             legacy=std::make_unique<SampledLegacy>(config,channel,std::move(options),bandwidth);
@@ -661,7 +673,7 @@ SampledSimulationChannel::SampledSimulationChannel(Config config,ChannelConfig c
     std::optional<PreconversionCapture> capture):impl_(std::make_unique<Impl>(config,channel,std::move(helper),helper_bandwidth,envelope,capture)){}
 std::uint32_t SampledSimulationChannel::planned_physical_sample_rate(const Config& config,const helper::Options& helper,
         double bandwidth,std::optional<PreconversionCapture> capture) {
-    if(!(helper.power_w>0)) {
+    if(!(helper::effective_helper_power(helper)>0)) {
         if(capture)throw Error("preconversion capture requires an enabled Helper Carrier");
         validate(config);return config.sample_rate;
     }
@@ -688,6 +700,15 @@ void SampledSimulationChannel::set_helper_callsign(std::string callsign) {
 }
 void SampledSimulationChannel::set_helper_time_key(std::optional<Crypto> key) {
     if(impl_->physical)impl_->physical->time_key=std::move(key);else impl_->time_key=std::move(key);
+}
+void SampledSimulationChannel::set_helper_power_reference(helper::PowerReference reference) {
+    if(!impl_->physical)throw Error("Helper Carrier power reference requires an enabled physical helper");
+    auto& s=*impl_->physical;
+    if(s.source)throw Error("Helper Carrier power reference must precede source binding");
+    s.plan=helper::plan(s.options,helper::placement_band(s.config,s.occupied_bandwidth_hz),
+        s.physical_rate,0,outer_dsss_transmit_gain(s.config),&reference);
+    s.sigma=std::sqrt(nominal_signal_power*std::pow(10.,-s.channel.snr_db/10))*s.plan.data_gain*std::sqrt(s.factor);
+    s.power_reference_prepared=true;
 }
 void SampledSimulationChannel::set_physical_observer(PhysicalObserver observer) {
     if(impl_->physical)impl_->physical->observer=std::move(observer);else impl_->observer=std::move(observer);
@@ -789,7 +810,14 @@ std::size_t SampledSimulationChannel::read(StreamingTransmitter& source,std::spa
         if(s.helper_plan) {
             const auto origin=source.physical_output_origin();
             s.helper_origin=static_cast<long double>(origin%s.config.sample_rate)/s.config.sample_rate;
-            s.helper_generator.emplace(s.helper_options,*s.helper_plan,origin/s.config.sample_rate,false);
+            auto reference=helper::transmit_power_reference(s.config,source,origin/s.config.sample_rate,
+                s.config.stream_epoch,impl_->time_key);
+            reference.punctuate=false;reference.helper_start_seconds=s.helper_origin;
+            reference.helper_end_seconds=s.helper_origin+static_cast<long double>(s.total)/s.config.sample_rate;
+            s.helper_plan=helper::plan(s.helper_options,helper::placement_band(s.config),s.config.sample_rate,0,
+                outer_dsss_transmit_gain(s.config),&reference);
+            s.sigma=std::sqrt(nominal_signal_power*std::pow(10.,-s.channel.snr_db/10))*s.helper_plan->data_gain;
+            s.helper_generator.emplace(s.helper_options,*s.helper_plan,origin/s.config.sample_rate,false,impl_->time_key);
         }
         const auto duration=std::ceil(s.startup+static_cast<long double>(s.total)/s.rate);
         if(duration>=static_cast<long double>(std::numeric_limits<std::uint64_t>::max()-s.origin))

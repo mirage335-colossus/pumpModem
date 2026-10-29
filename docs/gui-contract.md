@@ -313,38 +313,19 @@ The prepared draft is reused. Optional advice work is cancelled/deferred during
 hardware playback, including tuning noise, and resumes afterward.
 
 Link Planner shows a separate Helper Carrier reference budget when helper power
-is nonzero: effective ratio-limited power, received dBm, C/N0, expected SNR in
-the tracker's 10 Hz cell and the required audio center. The current editable
-Robust transmit power supplies its ratio reference. At -164 dBm/Hz noise and
-these effective helper powers, 40 W through 180 dB loss gives 20.02 dB tone SNR;
-1.5 kW through 210 dB gives
-5.76 dB, below the 6 dB presence level. An adequate predicted level still needs
-measured confidence/coherence and a supported route. The helper budget does not
-change payload SNR, receive-probability curves or CPU estimates, and does not
-claim a quantified assistance gain. Its revised preview uses the runtime's
-original-cell selector under explicit hypothetical qualification: +/-0.01 Hz
-frequency uncertainty and zero helper offset. Selected/original frequency and
-audio-clock pairs and retained clock values describe geometry, not a measured reference,
-C/N0-to-latency prediction or CPU gain. The 2D closed-slab coverage check uses
-explicit physical-clock provenance and preserves every original clock value.
-A nonzero measured RF
-origin may align a full tiny catalogue without reducing work; zero-offset full
-selection gives no alignment or reduction. Normal Automatic/Complex rolling
-acquisition uses the common-link cohort policy below, with actual backend,
-all-profile FIR and reserved-resource checks still required at runtime.
-Fixed-epoch reception keeps its separate legacy path. Long-symbol compact,
-unsupported strategy, scheduled and invalid passband cases decline optional
-acquisition. Adjacent High/Low retain real interference in capture; 0 Hz overlap
-is discouraged. This planner/selector source revision passed the coherent
-application build and selected focused checks; broader current runtime
-qualification remains pending.
-
-These hardware budgets use measured/calibrated RF power; 4 W data and 40 W
-helper retain a 10 dB reference ratio. The helper follows existing interleaved
-V2 DSSS amplitude backoff without changing data PCM or simulation noise. Sampled
-simulation still uses its nominal signal-power convention, under which that
-waveform's actual data and calibrated helper C/N0 both include a 6.02 dB backoff;
-helper dwell duty and route response can further affect measured average power.
+is nonzero. Helper Carrier Power is the combined average power of simultaneous
+active Robust and helper output; Robust transmit power is its data allocation.
+The remaining helper allocation is subject to the existing ratio limit. The
+reference excludes helper-only lead/tail and transmission gaps, and helper
+averaging accounts for modulation and gating using 32,768 stratified samples
+over a bounded active reference window of up to two seconds; planner uses a
+one-dwell preview at epoch zero with the selected key for encrypted metadata.
+Predicted levels depend on path
+loss and noise density and do not establish receiver lock or physical RF output.
+Receiver acquisition and tracking updates for the changed transmitter waveform
+remain deferred; prior receiver measurements are bound to their original source
+and waveform. The helper budget does not alter payload SNR, framing or physical
+completion.
 
 A visible helper reference does not imply immediate payload acquisition.
 Current 441-input source/build overlay `87513574` passed its application build,
@@ -869,8 +850,9 @@ qualified UTC following. See [timing behavior and qualification](clock-sync.md).
 The DSSS factor and FHSS dropdowns sit beside the keyfile control. Outer DSSS
 offers Off/10x/100x/1000x and requires a selected key; its dedicated stream does
 not replace inner private patterns. Selecting an enabled factor sets inner Rate
-360/36/3.6 Hz and stream Carrier 1500 Hz for 10x/100x/1000x. Explicit command imports
-preserve their requested Rate/Carrier. Invalid geometry still displays intended
+360/36/3.6 Hz for 10x/100x/1000x and recalculates carrier recommendations while
+preserving a valid selected stream Carrier. Explicit command imports preserve
+their requested Rate/Carrier. Invalid geometry still displays intended
 outer rate and shaped band edges to help correct Rate, Carrier or sample rate.
 Fake FHSS offers Off, Fake: FCC and Fake: EU, plus Developer-only Fake: List.
 The resolved profile or Shift list determines channel count, spacing and
@@ -951,19 +933,34 @@ and transfer estimates receive the same budget, independently of the 256 MiB
 received-message/file cache.
 
 The persistent **Rate** field defaults to `3.6 kHz`, with `18 kHz` also
-available as a preset. **Carrier** is absolute and defaults to `1.5 kHz`;
-adjacent **Shift** defaults to `0 Hz`. Their positive difference is the real
-USB stream tone. Both accept case-insensitive Hz, kHz, MHz, GHz and THz suffixes,
-optional spaces and scientific notation. Carrier `1.0015 MHz` and Shift `1 MHz`
-give `1.5 kHz`;
-Shift 0 requires direct MHz samples for that Carrier. Changing Rate resets
-Carrier to Shift plus `1.5 kHz` for `3.6 kHz`, otherwise Shift plus the existing
-`max(1500, 0.75 × rate)` Hz recommendation. Carrier presets add Shift to the
-current rate's default stream tone or center frequency (half the rate),
-including `1.8 kHz` at Rate `3.6 kHz` and Shift 0. A manually entered absolute
-Carrier persists until Rate changes. These fields configure transmit planning,
-receive profiles, live audio, simulation and inspection together. Rate remains
-the nominal timing parameter; it does not claim a measured spectral width.
+available as a preset. **Carrier** is absolute and defaults to `1.725 kHz`;
+adjacent **Shift** defaults to `0 Hz`; their positive difference represents the real USB stream tone. Both
+accept case-insensitive Hz, kHz, MHz, GHz and THz suffixes, optional spaces and
+scientific notation. Carrier `1.001725 MHz` and Shift `1 MHz` give a `1.725 kHz`
+stream tone.
+
+Carrier recommendations are calculated from the waveform's occupied bandwidth,
+including spreading, pulse shaping and applicable gating allowances. They
+include the half-rate baseband choice when waveform and passband constraints
+permit it, plus a higher default at 1725 Hz when its lower occupied edge is
+acceptable. With Helper Carrier off, that lower-edge recommendation floor is
+375 Hz; otherwise the higher default is raised to the smallest multiple of
+5 Hz that satisfies the floor. With Helper Carrier on, the floor is 1400 Hz;
+if 1725 Hz is insufficient, 1775 Hz is preferred when sufficient, otherwise the
+smallest adequate multiple of 5 Hz is used. With Helper enabled, 1525, 1575 and
+1775 Hz are additional choices when their lower edges and other constraints
+permit them. The half-rate choice is exempt from the audio recommendation floor,
+but still obeys waveform, sample-rate and helper-overlap constraints.
+
+Relevant configuration edits recalculate recommendations and preserve the
+selected numeric baseband frequency, including a valid custom value outside the
+list. Its displayed absolute Carrier follows the updated tuning transformation;
+an invalid selection falls back to the recommended default. Live FHSS hops keep
+the existing baseband plan instead of rewriting the selection. These fields
+configure transmit planning, receive profiles, live audio, simulation and
+inspection together. Rate remains the nominal timing parameter; it does not
+claim a measured spectral width.
+
 Two editable **target SNR (dB-Hz)** dropdowns select transmit planning:
 **Short ≤16 B** defaults to `32` for nonempty text of 1–16 source bytes inclusive
 and explicit raw bits; **Long / file** defaults to `55` for longer text, empty
@@ -1277,25 +1274,20 @@ entry points. Unencrypted output uses a nonempty callsign or
 otherwise clear time; encrypted output uses encrypted time, with no public
 callsign. The helper-only action is visible in Developer mode.
 
-Placement uses actual shaped occupied data bandwidth plus gating allowance and
-the nearest power-qualified leakage guard. High has no logical-sample-rate
-floor. The selected Rate, carrier and logical modem geometry stay unchanged;
-there is no automatic Rate reduction for narrow, wide or 3.6 kHz SSB settings.
-The radio/audio route must still pass the complete data/helper bands and guard;
-closest placement does not guarantee a fit inside a narrow SSB filter. Helper
-audio negotiates a physical-rate floor independently of the logical modem rate.
-If higher-rate capture cannot open, optional helper observation yields during
-pre-PCM setup and ordinary capture continues. Existing mixed Live fallback
-reports helper-specific provider-rate failure or a past helper epoch before PCM
-delivery. It preserves calibrated `data_gain`, logical PCM, wire and key epoch;
-full-scale restoration would violate operator RF calibration. A provider setup
-retry without the helper rate request is permitted only before any PCM callback.
-Validated calibrated gain is now independent of placement geometry, including
-valid FHSS engineering gate allowances crossing DC. Placement or minimum-output-
-rate `Error` disables helper output before PCM, retaining calibrated ordinary
-PCM, wire and key epoch.
-Malformed powers/settings still reject, helper-only transmission fails if its
-helper cannot emit, and actual output gaps still fail transmission without retry.
+Placement uses shared occupied data bandwidth including spreading, shaping and
+applicable gating, plus power-qualified leakage guards. The low pilot stays at
+550 Hz, the auxiliary at 950 Hz, and the high pilot at or above 2400 Hz; only
+the high pilot rises when needed for Robust carrier, bandwidth and separation.
+The radio/audio route must pass the complete data/helper bands and guards. Helper
+audio negotiates a physical rate independently of the logical modem rate. If
+higher-rate capture cannot open, optional helper observation yields during
+pre-PCM setup and ordinary capture continues. Mixed Live fallback reports a
+helper-specific provider-rate failure or past helper epoch before PCM delivery,
+retaining calibrated ordinary PCM, wire and key epoch. A provider setup retry
+without the helper rate request is permitted only before any PCM callback.
+Placement or minimum-output-rate errors disable helper output before PCM;
+malformed powers/settings still reject, helper-only transmission fails if its
+helper cannot emit, and actual output gaps still fail without retry.
 
 The wider minimum retains readable oscillator choices alongside all four timing
 fields, preserving the existing composition, reception and plot allocations.

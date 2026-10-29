@@ -35,15 +35,28 @@ void validate_callsign(std::string_view callsign) {
     for(const char c:callsign)
         if(static_cast<unsigned char>(c)>127)throw Error("Helper Carrier callsign must be seven-bit ASCII");
 }
-double effective_power(const Options& options) {
-    return std::min(options.power_w,
-        options.data_power_w*std::pow(10.,options.ratio_limit_db/10));
-}
-std::pair<double,double> gains_from_ratio(double power_ratio) {
-    const auto relative_peak=std::sqrt(2*modem::nominal_signal_power)*
-        std::sqrt(power_ratio);
-    const auto composite_peak=relative_peak*(pilot_amplitude_fraction+auxiliary_amplitude_fraction);
+std::pair<double,double> gains_from_ratio(double power_ratio,double helper_mean,
+        double data_mean=modem::nominal_signal_power) {
+    const auto relative_peak=std::sqrt(2*data_mean*power_ratio/helper_mean);
+    const auto composite_peak=relative_peak*(pilot_amplitude_fraction+low_pilot_amplitude_fraction+auxiliary_amplitude_fraction);
     return {relative_peak,.95/(1+composite_peak)};
+}
+std::complex<double> auxiliary_modulation(long double local,
+        std::span<const std::complex<double>> symbols,bool punctuate) {
+    const auto reversal=punctuate?1-2*auxiliary_smooth((local-punctuation_begin)/punctuation_transition):1.;
+    std::complex<double> result{reversal,0};
+    const auto begin=metadata_end-symbols.size()*symbol_time;
+    if(!symbols.empty() && local>=begin) {
+        const auto position=(local-begin)/symbol_time;
+        const auto index=static_cast<std::size_t>(std::floor(position));
+        if(index<symbols.size()) {
+            const auto previous=index?symbols[index-1]:std::complex<double>{1,0};
+            result*=previous+(symbols[index]-previous)*auxiliary_smooth(position-index);
+        } else if(index==symbols.size()) {
+            result*=symbols.back()+(std::complex<double>{1,0}-symbols.back())*auxiliary_smooth(position-index);
+        }
+    }
+    return result;
 }
 // Bound the periodic complex envelope's energy in either data sideband. The
 // pilot4ms ramps retain quintic smootherstep (C2), whose Beta(3,3) derivative
@@ -92,10 +105,87 @@ void validate(const Options& options) {
     }
     validate_callsign(options.callsign);
 }
-double calibrated_data_gain(const Options& options) {
+double effective_helper_power(const Options& options) {
     validate(options);
-    if(options.power_w==0)return 1;
-    return gains_from_ratio(effective_power(options)/options.data_power_w).second;
+    return std::min(std::max(0.,options.power_w-options.data_power_w),
+        options.data_power_w*std::pow(10.,options.ratio_limit_db/10));
+}
+MeanPower mean_power(const Options& options,bool pilot_gating,const PowerReference* supplied) {
+    validate(options);
+    struct PreviewCache {Options options;bool pilot_gating=false;MeanPower power;};
+    thread_local std::optional<PreviewCache> preview;
+    if(!supplied&&preview&&preview->options==options&&preview->pilot_gating==pilot_gating)return preview->power;
+    const PowerReference default_reference;
+    const auto& reference=supplied?*supplied:default_reference;
+    if(!std::isfinite(reference.begin_seconds)||!std::isfinite(reference.end_seconds)||
+       reference.end_seconds<=reference.begin_seconds||reference.end_seconds-reference.begin_seconds>2.000001L)
+        throw Error("invalid Helper Carrier active power reference interval");
+    if(reference.data_mean_power&&(!std::isfinite(*reference.data_mean_power)||*reference.data_mean_power<=0))
+        throw Error("invalid Helper Carrier actual Robust mean power");
+    for(const auto endpoint:{reference.helper_start_seconds,reference.helper_end_seconds})
+        if(endpoint&&!std::isfinite(*endpoint))throw Error("invalid Helper Carrier power reference envelope");
+    std::array<std::complex<double>,9> symbols{};
+    std::size_t count=0;
+    const auto callsign=reference.time_key?std::string_view{}:std::string_view(options.callsign);
+    if(!callsign.empty()) {
+        const auto packet=callsign_packet(callsign);count=packet.count;
+        for(std::size_t i=0;i<count;++i)symbols[i]=apsk_point(packet.symbols[i]);
+    }
+    std::optional<std::uint64_t> cached_time;
+    // The bounded actual-waveform reference resolves a 4ms ramp with at least
+    // 65 nodes even at the maximum two-second window. No calibration is
+    // performed while samples are emitted.
+    constexpr auto nodes=power_reference_nodes;
+    double pilot=0,auxiliary=0,accepted=0;
+    for(unsigned i=0;i<nodes;++i) {
+        const auto seconds=power_reference_node(reference,i);
+        if(reference.active&&!reference.active(seconds))continue;
+        auto local=std::fmod(static_cast<long double>(reference.epoch%2)+seconds,2.L);
+        if(local<0)local+=2;
+        local-=std::floor(local/dwell)*dwell;
+        if(callsign.empty()&&options.timecode&&local>=metadata_end-3*symbol_time) {
+            const auto absolute_dwell=static_cast<long double>(reference.epoch)+seconds-local;
+            if(absolute_dwell>=0&&absolute_dwell<4294967296.L) {
+                const auto ticks=static_cast<std::uint64_t>(std::round(absolute_dwell*65536));
+                if(cached_time!=ticks) {
+                    const auto packet=timecode_packet(ticks,reference.time_key?&*reference.time_key:nullptr);
+                    count=packet.count;
+                    for(std::size_t k=0;k<count;++k)symbols[k]=apsk_point(packet.symbols[k]);
+                    cached_time=ticks;
+                }
+            } else count=0;
+        }
+        auto pg=pilot_gating?smooth(std::min(local,dwell-local)/ramp):1.;
+        auto ag=smooth(std::min(local,dwell-local)/.008L);
+        if(reference.helper_start_seconds) {
+            const auto start=smooth((seconds-*reference.helper_start_seconds)/ramp);pg*=start;ag*=start;
+        }
+        if(reference.helper_end_seconds) {
+            const auto end=smooth((*reference.helper_end_seconds-seconds)/ramp);pg*=end;ag*=end;
+        }
+        const auto roundoff=calendar_roundoff(local);
+        const bool punctuation_fits=reference.punctuate &&
+            (!reference.helper_start_seconds||(*reference.helper_start_seconds-seconds)+local<=punctuation_latest_start+roundoff) &&
+            (!reference.helper_end_seconds||(*reference.helper_end_seconds-seconds)+local+roundoff>=punctuation_protected_end);
+        pilot+=pg*pg;
+        auxiliary+=ag*ag*std::norm(auxiliary_modulation(local,std::span(symbols).first(count),punctuation_fits));
+        ++accepted;
+    }
+    if(!accepted)throw Error("Helper Carrier active power reference contains no active Robust samples");
+    MeanPower result{pilot_power_fraction*pilot/accepted,low_pilot_power_fraction*pilot/accepted,
+        auxiliary_power_fraction*auxiliary/accepted};
+    result.total=result.high_pilot+result.low_pilot+result.auxiliary;
+    if(!std::isfinite(result.total)||result.total<=0)
+        throw Error("Helper Carrier active power reference has no helper energy");
+    if(!supplied)preview=PreviewCache{options,pilot_gating,result};
+    return result;
+}
+double calibrated_data_gain(const Options& options,bool pilot_gating,const PowerReference* reference) {
+    validate(options);
+    if(options.power_w==0||effective_helper_power(options)==0)return 1;
+    return gains_from_ratio(effective_helper_power(options)/options.data_power_w,
+        mean_power(options,pilot_gating,reference).total,
+        reference&&reference->data_mean_power?*reference->data_mean_power:modem::nominal_signal_power).second;
 }
 ReferenceLevel reference_level(const Options& options,double nominal,double scale,double payload_fraction,double usable_fraction) {
     validate(options);
@@ -104,18 +194,23 @@ ReferenceLevel reference_level(const Options& options,double nominal,double scal
        !std::isfinite(payload_fraction)||payload_fraction<=0||payload_fraction>1||
        !std::isfinite(usable_fraction)||usable_fraction<=0||usable_fraction>1)
         throw Error("invalid Helper Carrier reference-level inputs");
-    const auto ratio=std::min(static_cast<long double>(options.power_w)/options.data_power_w,
-        std::pow(10.L,static_cast<long double>(options.ratio_limit_db)/10));
+    const auto ratio=static_cast<long double>(effective_helper_power(options))/options.data_power_w;
     const auto payload=static_cast<long double>(nominal)+20*std::log10(static_cast<long double>(scale));
+    if(ratio==0) {
+        const auto absent=-std::numeric_limits<double>::infinity();
+        return {0,absent,absent,static_cast<double>(payload+10*std::log10(static_cast<long double>(payload_fraction))),
+            0,absent,absent,absent};
+    }
     const auto straight=payload+10*std::log10(ratio);
     const auto usable=straight+10*std::log10(static_cast<long double>(usable_fraction));
     const auto average=payload+10*std::log10(static_cast<long double>(payload_fraction));
     ReferenceLevel result{static_cast<double>(ratio),static_cast<double>(straight),
         static_cast<double>(usable),static_cast<double>(average)};
-    result.pilot_effective_power_ratio=static_cast<double>(ratio*pilot_power_fraction);
-    result.pilot_straight_cn0_db_hz=static_cast<double>(straight+10*std::log10(pilot_power_fraction));
-    result.pilot_usable_cn0_db_hz=static_cast<double>(usable+10*std::log10(pilot_power_fraction));
-    result.auxiliary_straight_cn0_db_hz=static_cast<double>(straight+10*std::log10(auxiliary_power_fraction));
+    const auto mean=mean_power(options).total;
+    result.pilot_effective_power_ratio=static_cast<double>(ratio*pilot_power_fraction/mean);
+    result.pilot_straight_cn0_db_hz=static_cast<double>(straight+10*std::log10(pilot_power_fraction/mean));
+    result.pilot_usable_cn0_db_hz=static_cast<double>(usable+10*std::log10(pilot_power_fraction/mean));
+    result.auxiliary_straight_cn0_db_hz=static_cast<double>(straight+10*std::log10(auxiliary_power_fraction/mean));
     if(!std::isfinite(result.effective_power_ratio)||result.effective_power_ratio<=0||
        !std::isfinite(result.straight_cn0_db_hz)||!std::isfinite(result.usable_cn0_db_hz)||
        !std::isfinite(result.payload_average_cn0_db_hz))
@@ -171,7 +266,7 @@ PlacementBand placement_band(const modem::Config& config,double minimum_bandwidt
         (1+modem::pattern_pulse_rolloff)*config.sample_rate/modem::pattern_chip_samples(config):
         modem::waveform_bandwidth_hz(config);
     const auto full=std::max(minimum_bandwidth,waveform+modem::waveform_gate_bandwidth_allowance_hz(config));
-    PlacementBand band{config.carrier_hz,waveform,full-waveform};
+    PlacementBand band{config.carrier_hz,waveform,full-waveform,static_cast<bool>(config.fake_hopping)};
     (void)mono_passband(band);
     return band;
 }
@@ -191,14 +286,14 @@ MonoPassband mono_passband(const PlacementBand& band) {
     return {std::max(0.,lower),std::max(std::abs(lower),std::abs(upper))};
 }
 Plan plan(const Options& options,double carrier,double bandwidth,std::uint32_t rate,
-          double minimum_high_frequency_hz,double data_amplitude_scale) {
+          double minimum_high_frequency_hz,double data_amplitude_scale,const PowerReference* reference) {
     return plan(options,PlacementBand{carrier,bandwidth,0},rate,
-        minimum_high_frequency_hz,data_amplitude_scale);
+        minimum_high_frequency_hz,data_amplitude_scale,reference);
 }
 Plan plan(const Options& options,const PlacementBand& band,std::uint32_t rate,
-          double minimum_high_frequency_hz,double data_amplitude_scale) {
+          double minimum_high_frequency_hz,double data_amplitude_scale,const PowerReference* reference) {
     validate(options);
-    if(options.power_w==0)return {};
+    if(options.power_w==0||effective_helper_power(options)==0)return {};
     if(!std::isfinite(minimum_high_frequency_hz)||minimum_high_frequency_hz<0)
         throw Error("invalid Helper Carrier minimum High frequency");
     if(!std::isfinite(data_amplitude_scale)||data_amplitude_scale<=0||data_amplitude_scale>1)
@@ -210,37 +305,51 @@ Plan plan(const Options& options,const PlacementBand& band,std::uint32_t rate,
         throw Error("Helper Carrier requires a valid data passband at the output sample rate");
     const bool folded=carrier-bandwidth/2<0;
     const auto leakage_width=folded?passband.upper_hz-passband.lower_hz:bandwidth;
-    const auto effective=effective_power(options);
+    const auto effective=effective_helper_power(options);
     const auto power_ratio=effective/options.data_power_w;
-    // Data -> 300Hz guard -> auxiliary's nominal 300Hz band -> 250Hz
-    // guard -> pure pilot. Increase only the data/auxiliary separation until
-    // the combined conservative leakage bound is 30dB below data power.
-    // Their voltage sum is bounded conservatively before squaring. The pilot
-    // contains only dwell/start/end ramps; auxiliary modulation is weighted by
-    // its actual 10% power. The data waveform and passband never change.
-    double distance=450;
-    if(minimum_high_frequency_hz>0)
-        distance=std::max(distance,50*std::ceil((minimum_high_frequency_hz-passband.upper_hz-
-            auxiliary_pilot_spacing_hz)/50));
-    const auto maximum_distance=rate/2.-250-passband.upper_hz-auxiliary_pilot_spacing_hz;
+    const auto helper_mean=mean_power(options,band.pilot_dwell_gating,reference);
+    const auto mean=helper_mean.total;
+    // Omitting auxiliary average energy is conservative and keeps placement
+    // valid across clear/encrypted metadata changes. Gain uses the full mean.
+    const auto guard_mean=helper_mean.high_pilot+helper_mean.low_pilot;
+    // The periodic leakage certificate averages transitions over 400ms. A
+    // finite helper aperture shorter than that contains proportionately more
+    // start/end transition energy. Its actual duration is independent of the
+    // active Robust reference (which excludes helper-only lead/tail).
+    double finite_transition_factor=1;
+    if(reference&&reference->helper_start_seconds&&reference->helper_end_seconds) {
+        const auto duration=*reference->helper_end_seconds-*reference->helper_start_seconds;
+        if(!std::isfinite(duration)||duration<=0)throw Error("invalid Helper Carrier finite power envelope");
+        finite_transition_factor=static_cast<double>(std::max(1.L,dwell/duration));
+    }
+    const auto low_distance=passband.lower_hz>auxiliary_frequency_hz?
+        passband.lower_hz-auxiliary_frequency_hz:low_pilot_frequency_hz-passband.upper_hz;
+    if(low_distance<450)
+        throw Error("Helper Carrier fixed 550/950 Hz tones overlap the data separation guard; raise the Robust carrier");
+    const auto low_leakage=[&] {
+        const auto distance_to=[&](double f) {return f<passband.lower_hz?passband.lower_hz-f:f-passband.upper_hz;};
+        const auto low=std::sqrt(low_pilot_power_fraction*leakage_bound(distance_to(low_pilot_frequency_hz),leakage_width,0));
+        const auto aux=std::sqrt(auxiliary_power_fraction*leakage_bound(distance_to(auxiliary_frequency_hz),leakage_width,22));
+        return low+aux;
+    }();
+    if(low_leakage*low_leakage*power_ratio/guard_mean*finite_transition_factor>1e-3)
+        throw Error("Helper Carrier fixed low tones require more data separation at this power ratio; raise the Robust carrier");
+    auto frequency=std::max({2400.,minimum_high_frequency_hz,passband.upper_hz+450});
+    const auto maximum_frequency=rate/2.-250;
     const auto leakage=[&] {
-        const auto auxiliary=std::sqrt(auxiliary_power_fraction*leakage_bound(distance,leakage_width,22));
-        const auto pilot=std::sqrt(pilot_power_fraction*leakage_bound(
-            distance+auxiliary_pilot_spacing_hz,leakage_width,0));
-        return (auxiliary+pilot)*(auxiliary+pilot)*power_ratio;
+        const auto high=std::sqrt(pilot_power_fraction*leakage_bound(frequency-passband.upper_hz,leakage_width,0));
+        return (low_leakage+high)*(low_leakage+high)*power_ratio/guard_mean*finite_transition_factor;
     };
-    while(distance<=maximum_distance&&leakage()>1e-3)
-        distance+=50;
-    if(distance>maximum_distance)
+    while(frequency<=maximum_frequency&&leakage()>1e-3)frequency+=50;
+    if(frequency>maximum_frequency)
         throw Error("Helper Carrier cannot fit its power-dependent leakage guard at this output sample rate");
-    const auto auxiliary_frequency=passband.upper_hz+distance;
-    const auto frequency=auxiliary_frequency+auxiliary_pilot_spacing_hz;
-    const auto [relative_peak,data_gain]=gains_from_ratio(power_ratio);
-    // Ordinary PCM has the unchanged nominal mean power and peak bound one.
-    // Leave 5% composite headroom, with no nonlinear limiter or data power boost.
-    // Match the unchanged payload's digital backoff. Keep its conservative
-    // gain identical; only the helper yields amplitude/headroom here.
-    return {frequency,relative_peak*data_gain*data_amplitude_scale,data_gain,effective,auxiliary_frequency};
+    const bool actual_data=reference&&reference->data_mean_power;
+    const auto [relative_peak,data_gain]=gains_from_ratio(power_ratio,mean,
+        actual_data?*reference->data_mean_power:modem::nominal_signal_power);
+    // A measured source mean already contains its DSSS/backoff factor.
+    const auto source_scale=actual_data?1.:data_amplitude_scale;
+    return {frequency,relative_peak*data_gain*source_scale,data_gain,effective,
+        auxiliary_frequency_hz,low_pilot_frequency_hz,band.pilot_dwell_gating};
 }
 std::uint32_t minimum_output_rate(const Options& options,double carrier,double bandwidth,
                                   std::uint32_t logical_rate) {
@@ -248,7 +357,7 @@ std::uint32_t minimum_output_rate(const Options& options,double carrier,double b
 }
 std::uint32_t minimum_output_rate(const Options& options,const PlacementBand& band,
                                   std::uint32_t logical_rate) {
-    if(options.power_w==0)return 0;
+    if(options.power_w==0||effective_helper_power(options)==0)return 0;
     if(logical_rate<64||logical_rate>120000000)
         throw Error("invalid Helper Carrier logical sample rate");
     // Hardware and modem clocks are independent. A larger logical clock is
@@ -285,11 +394,14 @@ Generator::Generator(Options options,Plan plan,std::uint64_t epoch,bool punctuat
     if(time_key_)options_.callsign.clear();
     validate(options_);
     if(!std::isfinite(plan_.frequency_hz)||!std::isfinite(plan_.auxiliary_frequency_hz)||
+       !std::isfinite(plan_.low_frequency_hz)||plan_.low_frequency_hz<0||
+       (plan_.low_frequency_hz>0&&plan_.low_frequency_hz>=plan_.frequency_hz)||
        plan_.auxiliary_frequency_hz<0||
        (plan_.auxiliary_frequency_hz>0&&plan_.auxiliary_frequency_hz>=plan_.frequency_hz)||
        !std::isfinite(plan_.helper_gain)||
        !std::isfinite(plan_.data_gain)||plan_.helper_gain<0||plan_.data_gain<0||
        plan_.helper_gain*(pilot_amplitude_fraction+
+            (plan_.low_frequency_hz>0?low_pilot_amplitude_fraction:0)+
             (plan_.auxiliary_frequency_hz>0?auxiliary_amplitude_fraction:0))+plan_.data_gain>1.0000000001)
         throw Error("invalid Helper Carrier mixer plan");
     if(!options_.callsign.empty()) {
@@ -314,7 +426,7 @@ std::complex<double> Generator::mix_analytic(std::complex<double> payload,long d
     if(local<0)local+=2;
     const auto roundoff=calendar_roundoff(local);
     local-=std::floor(local/dwell)*dwell;
-    auto envelope=smooth(std::min(local,dwell-local)/ramp);
+    auto envelope=plan_.pilot_dwell_gating?smooth(std::min(local,dwell-local)/ramp):1.;
     // The auxiliary's periodic boundary gate has twice the pilot's support.
     // Explicit source start/end ramps still occupy4ms on both components.
     auto auxiliary_envelope=smooth(std::min(local,dwell-local)/.008L);
@@ -335,10 +447,6 @@ std::complex<double> Generator::mix_analytic(std::complex<double> payload,long d
     const bool punctuation_fits=punctuate_ &&
         (!start_seconds || (*start_seconds-seconds)+local<=punctuation_latest_start+roundoff) &&
         (!end_seconds || (*end_seconds-seconds)+local+roundoff>=punctuation_protected_end);
-    const auto reversal=punctuation_fits?
-        1-2*auxiliary_smooth((local-punctuation_begin)/punctuation_transition):1.;
-    const std::complex<double> punctuation{reversal,0};
-    std::complex<double> modulation=punctuation;
     // A time frame has at most three symbols. Cache it before its earliest
     // possible start, then use its actual compact length. No crypto per sample.
     if(options_.callsign.empty()&&options_.timecode&&local>=metadata_end-3*symbol_time) {
@@ -354,23 +462,15 @@ std::complex<double> Generator::mix_analytic(std::complex<double> payload,long d
             }
         } else {symbol_count_=0;cached_time_.reset();}
     }
-    const auto metadata_begin=metadata_end-symbol_count_*symbol_time;
-    if(symbol_count_ && local>=metadata_begin) {
-        const auto position=(local-metadata_begin)/symbol_time;
-        const auto index=static_cast<std::size_t>(std::floor(position));
-        if(index<symbol_count_) {
-            const auto previous=index?symbols_[index-1]:std::complex<double>{1,0};
-            const auto blend=auxiliary_smooth(position-index);
-            modulation=punctuation*(previous+(symbols_[index]-previous)*blend);
-        } else if(symbol_count_ && index==symbol_count_) {
-            const auto blend=auxiliary_smooth(position-index);
-            const auto last=symbols_[symbol_count_-1];
-            modulation=punctuation*(last+(std::complex<double>{1,0}-last)*blend);
-        }
-    }
+    const auto modulation=auxiliary_modulation(local,std::span(symbols_).first(symbol_count_),punctuation_fits);
     const auto cycles=std::fmod(static_cast<long double>(plan_.frequency_hz)*seconds,1.L);
     const auto carrier=std::polar(1.,tau*static_cast<double>(cycles));
     auto helper=plan_.helper_gain*envelope*(pilot_amplitude_fraction*carrier);
+    if(plan_.low_frequency_hz>0) {
+        const auto low_cycles=std::fmod(static_cast<long double>(plan_.low_frequency_hz)*seconds,1.L);
+        helper+=plan_.helper_gain*envelope*low_pilot_amplitude_fraction*
+            std::polar(1.,tau*static_cast<double>(low_cycles));
+    }
     if(plan_.auxiliary_frequency_hz>0) {
         const auto auxiliary_cycles=std::fmod(static_cast<long double>(plan_.auxiliary_frequency_hz)*seconds,1.L);
         helper+=plan_.helper_gain*auxiliary_envelope*

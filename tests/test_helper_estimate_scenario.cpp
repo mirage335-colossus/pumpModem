@@ -63,6 +63,16 @@ void original_domain() {
     request.expected_usable_helper_cn0_db_hz=120;
     const auto forecast=simulation::helper_frequency_forecast(tx,o,ch,request);
     check(forecast.scenario.has_value(),forecast.reason.c_str());
+    live::Settings keyed_preference;keyed_preference.transfer=o;
+    keyed_preference.helper.power_w=40;keyed_preference.helper.data_power_w=4;
+    keyed_preference.helper.callsign="12345678901234567890";
+    const auto keyed_forecast=simulation::helper_frequency_forecast(tx,o,ch,request,{},
+        simulation::ReceiverWorkMode::hardware_fallback,{},&keyed_preference);
+    check(keyed_forecast.scenario.has_value(),keyed_forecast.reason.c_str());
+    (void)simulation::helper_native_work(o,*forecast.scenario,
+        simulation::ReceiverWorkMode::hardware_fallback,&keyed_preference);
+    check(keyed_preference.helper.callsign=="12345678901234567890",
+        "Forecast query changed an inactive keyed callsign preference");
     check(forecast.scenario->origin==simulation::HelperScenarioOrigin::requirements_forecast,
         "source requirements manufactured validated utility or observed qualification");
     const auto baseline=simulation::estimate(tx,o,true,ch,{},1,false,100,64,
@@ -125,6 +135,15 @@ void original_domain() {
     cochannel.helper.frequency=helper::Frequency::cochannel;
     check(!simulation::helper_frequency_forecast(tx,o,ch,request,{},simulation::ReceiverWorkMode::hardware_fallback,{},&cochannel).scenario,
         "Retired cochannel policy manufactured an isolated helper forecast");
+    auto no_remainder=cochannel;no_remainder.helper.frequency=helper::Frequency::high;
+    no_remainder.helper.data_power_w=4;no_remainder.helper.power_w=4;
+    check(!simulation::helper_frequency_forecast(tx,o,ch,request,{},simulation::ReceiverWorkMode::hardware_fallback,{},&no_remainder).scenario,
+        "Zero helper remainder manufactured an isolated helper forecast");
+    check(!simulation::helper_native_work(o,*forecast.scenario,simulation::ReceiverWorkMode::hardware_fallback,&no_remainder).available,
+        "Zero helper remainder manufactured a helper work reference");
+    no_remainder.helper.power_w=3;
+    check(!simulation::helper_frequency_forecast(tx,o,ch,request,{},simulation::ReceiverWorkMode::hardware_fallback,{},&no_remainder).scenario,
+        "Total below Robust allocation manufactured a helper forecast");
     auto filter_request=request;filter_request.helper_frequency_hz=2990;
     const auto filter_limit=simulation::helper_frequency_forecast(tx,o,ch,filter_request);
     check(!filter_limit.scenario&&filter_limit.reason.find("filter is ineligible")!=std::string::npos,

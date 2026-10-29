@@ -159,6 +159,17 @@ helper::Frequency helper_frequency(std::string_view value) {
 std::string helper_frequency_id(helper::Frequency) {
     return "high";
 }
+helper::Options active_helper_options(const live::Settings& settings) {
+    auto options=settings.helper;
+    // The stored callsign remains an editable preference for clear operation.
+    // Keyed transmission uses encrypted time metadata and must not validate or
+    // derive its waveform from that inactive preference.
+    if(settings.transfer.key)options.callsign.clear();
+    return options;
+}
+double active_helper_power(const live::Settings& settings) {
+    return helper::effective_helper_power(active_helper_options(settings));
+}
 double level(std::string value,std::string_view suffix,const char* name) {
     value=compact_units(std::move(value));
     if(value.ends_with(suffix))value.resize(value.size()-suffix.size());
@@ -185,9 +196,6 @@ std::string exact_frequency_text(double hz) {
     if(frequency(text,"Frequency")==hz)return text;
     exact.str({});exact.clear();exact<<std::setprecision(std::numeric_limits<double>::max_digits10)<<hz<<" Hz";
     return exact.str();
-}
-double recommended_gui_carrier(double rate) {
-    return rate==3600?1500:tuning::recommended_carrier_hz(rate);
 }
 std::string seconds_text(double seconds) {
     std::ostringstream text;
@@ -246,6 +254,16 @@ struct Controller::Impl {
     PlotUpdate plot_update;
     bool started=false,closing=false,preparing=false,key_loading=false,key_failed=false,file_loading=false;
     std::vector<audio::Device> audio_devices;
+    bool carrier_plan_ready=false,carrier_edit_pending=false,carrier_constraints_due=false,carrier_refresh_only=false;
+    struct CarrierFormat {
+        std::uint32_t logical_rate=0,minimum_hardware_rate=0,hardware_rate=0;
+        double passband_hz=0;
+        bool capture=true,exclusive=false,full_duplex=false;
+        audio::ChannelMode channel_mode=audio::ChannelMode::left_mono;
+        std::string device;
+        bool operator==(const CarrierFormat&) const = default;
+    };
+    std::array<std::optional<CarrierFormat>,2> carrier_formats;
     bool need_devices=true,settings_valid=true,transmit_requested=false,noise_requested=false,helper_requested=false,was_encrypted=false;
     bool attachment_image=false,target_supported=true;
     bool shellcode_mode=false,composer_received=false,previous_received=false;
@@ -355,7 +373,7 @@ struct Controller::Impl {
         f(UiField::bandwidth).text="3.6 kHz";
         for(const auto* s:{"0.001 Hz","0.01 Hz","0.1 Hz","1 Hz","3.6 Hz","10 Hz","36 Hz","100 Hz","360 Hz","1.2 kHz","2.4 kHz","3.6 kHz","12 kHz","18 kHz","24 kHz","1 MHz","30 MHz"}) f(UiField::bandwidth).options.push_back({s,s});
         f(UiField::doppler).text="0.000000c";
-        reset_carrier(3600);
+        f(UiField::carrier).text="1.725 kHz";
         f(UiField::snr).text="32"; f(UiField::long_snr).text="55";
         f(UiField::planner_target).text="-8";
         for(const auto id:{UiField::snr,UiField::long_snr,UiField::receive_snr,UiField::planner_target})
@@ -613,8 +631,9 @@ struct Controller::Impl {
         else planner_inputs.noise_density_dbm_hz=value;
         invalid_link_inputs[link_input_index(field)]=false;
         sync_link_fields(editing);update_link_channel(settings);dirty();
+        if(field==UiField::link_power&&settings.helper.power_w>0) {configure();return;}
         // A hypothetical power edit must not discard a live pending symbol.
-        if(started&&settings_valid&&(settings.simulation||settings.helper.power_w>0)) {
+        if(started&&settings_valid&&(settings.simulation||active_helper_power(settings)>0)) {
             snapshot.helper_planner_joint.reset();session.configure(settings);
         }
     }
@@ -646,25 +665,14 @@ struct Controller::Impl {
         if(encrypted() && !was_encrypted && f(UiField::pattern).selected=="auto-pattern") f(UiField::pattern).selected="auto-keystream";
         was_encrypted=encrypted();
     }
-    void reset_carrier(double rate,double shift=0,bool replace_text=true) {
-        // Presets describe the desired stream tone after the manual Doppler
-        // calculator. Explicit imported Carrier values remain untouched.
-        // An incomplete velocity edit must not throw from a dropdown callback.
-        try {
-            const auto ratio=tuning::parse_doppler(f(UiField::doppler).text).frequency_ratio;
-            const auto nominal=[&](double tone) {
-                const auto value=static_cast<double>((static_cast<long double>(shift)+tone)/ratio);
-                if(!std::isfinite(value)||value<=0)throw Error("Doppler-adjusted carrier suggestion is out of range");
-                return exact_frequency_text(value);
-            };
-            const auto recommended=nominal(recommended_gui_carrier(rate));
-            const auto center=nominal(rate/2);
-            auto& carrier=f(UiField::carrier);
-            if(replace_text)carrier.text=recommended;
-            carrier.options={{recommended,recommended}};
-            if(center!=recommended)carrier.options.push_back({center,center});
-        } catch(const Error&) {
-            // configure() reports the invalid field and retains accepted DSP.
+    void carrier_options(std::span<const double> tones,double shift,const tuning::Doppler& doppler) {
+        auto& carrier=f(UiField::carrier);carrier.options.clear();
+        for(const auto tone:tones) {
+            const auto absolute=static_cast<double>((static_cast<long double>(shift)+tone)/doppler.frequency_ratio);
+            if(!std::isfinite(absolute)||absolute<=0)throw Error("Doppler-adjusted carrier suggestion is out of range");
+            const auto text=exact_frequency_text(absolute);
+            if(std::none_of(carrier.options.begin(),carrier.options.end(),[&](const auto& option){return option.id==text;}))
+                carrier.options.push_back({text,text});
         }
     }
     std::string requested_bandwidth_hint(bool compact=false) const {
@@ -823,13 +831,14 @@ struct Controller::Impl {
                 "not yet";
         }
     }
-    void configure(bool match_receive_target=false,bool match_carrier=false,
+    void configure(bool match_receive_target=false,bool explicit_carrier=false,
                    std::optional<UiField> align_target=std::nullopt,
                    const launch_command::Patch* load=nullptr,bool simulation_off=true,
                    const std::vector<KeyEntry>* loaded_keys=nullptr,
                    const std::filesystem::path* loaded_path=nullptr) {
+        if(explicit_carrier)carrier_edit_pending=true;
         const bool align_receive=receive_targets_due.has_value()||align_target==UiField::receive_snr;
-        if(!load) {
+        if(!load&&!carrier_refresh_only) {
             receive_targets_due.reset();dirty();
             f(UiField::profile_reference).records.clear();
             f(UiField::profile_reference).selected.clear();
@@ -926,18 +935,11 @@ struct Controller::Impl {
             const auto rate=load&&load->rate_hz?*load->rate_hz:frequency(f(UiField::bandwidth).text,"Rate");
             const auto shift=load&&load->rf_shift_hz?*load->rf_shift_hz:frequency(f(UiField::rf_shift).text,"Shift");
             if(!std::isfinite(shift)||shift<0)throw Error("Shift must be finite and nonnegative");
-            if(match_carrier)reset_carrier(rate*factor,shift);
             auto short_snr=load&&load->short_target_db_hz?*load->short_target_db_hz:
                 load&&load->target_db_hz?*load->target_db_hz:effective_target(UiField::snr);
             auto long_snr=load&&load->long_target_db_hz?*load->long_target_db_hz:
                 load&&load->target_db_hz?*load->target_db_hz:effective_target(UiField::long_snr);
-            const auto physical_carrier=load&&load->carrier_hz?*load->carrier_hz:frequency(f(UiField::carrier).text,"Carrier");
             const auto doppler=tuning::parse_doppler(load&&load->doppler?*load->doppler:f(UiField::doppler).text);
-            // Public frequencies are absolute. DSP consumes only the real USB
-            // stream above Shift; reject partial/invalid edits before planning.
-            const auto carrier=tuning::doppler_carrier_hz(physical_carrier,doppler)-shift;
-            if(!std::isfinite(physical_carrier)||!std::isfinite(carrier)||carrier<=0)
-                throw Error("Adjusted Carrier must be greater than Shift (stream = adjusted Carrier - Shift)");
             auto next_planner=planner_inputs;
             if(load) {
                 if(load->tx_dbm)next_planner.tx_dbm=*load->tx_dbm;
@@ -1009,6 +1011,24 @@ struct Controller::Impl {
             next.content_limit=default_memory_limit; next.dsp_workspace_bytes=workspace_bytes;
             next.transfer.dsp_workspace_bytes=next.dsp_workspace_bytes;
 
+            // Configuration edits retain the accepted numeric stream carrier.
+            // Carrier edits and explicit imports remain exact requests. Runtime
+            // FHSS hops never pass through this configuration path.
+            const bool carrier_requested=load?load->carrier_hz.has_value():carrier_edit_pending;
+            const bool preserve_baseband=!carrier_requested&&(carrier_plan_ready||load);
+            const auto retained_baseband=carrier_plan_ready?settings.transfer.modem.carrier_hz:1725.;
+            auto physical_carrier=load&&load->carrier_hz?*load->carrier_hz:
+                preserve_baseband?
+                    static_cast<double>((static_cast<long double>(shift)+retained_baseband)/doppler.frequency_ratio):
+                    frequency(f(UiField::carrier).text,"Carrier");
+            auto carrier=preserve_baseband?retained_baseband:
+                tuning::doppler_carrier_hz(physical_carrier,doppler)-shift;
+            if(!std::isfinite(physical_carrier)||!std::isfinite(carrier)||carrier<=0)
+                throw Error("Adjusted Carrier must be greater than Shift (stream = adjusted Carrier - Shift)");
+            // Apply checked interactive target fitting before resolving any
+            // recommendation waveform. A raw weak request may not have a
+            // representable symbol duration until nearest_fit_target chooses
+            // its accepted neighbor; carrier previews use those actual targets.
             std::optional<TargetEdit> adjustment;
             const bool automatic=mode==tuning::PatternMode::auto_pattern||
                 mode==tuning::PatternMode::auto_keystream||mode==tuning::PatternMode::auto_tone;
@@ -1060,15 +1080,151 @@ struct Controller::Impl {
                     throw Error("Target SNR must be -200 to 200 dB-Hz");
                 if(load->target_db_hz)next_planner.target_db_hz=*load->target_db_hz;
             }
-            if(align_target&&*align_target!=UiField::receive_snr) {
-                auto& target=*align_target==UiField::snr?short_snr:long_snr;
-                target=number(f(*align_target).text,"Target SNR");
-                if(target< -200||target>200)throw Error("Target SNR must be -200 to 200 dB-Hz");
-                const std::array companions{*align_target==UiField::snr?long_snr:short_snr};
-                const auto fitted=fit_target(target,companions);
-                if(fitted!=target)adjustment=TargetEdit{f(*align_target).text,fitted};
-                target=fitted;
+            const bool helper_active=active_helper_power(next)>0;
+            const auto candidate_geometry=[&](double tone) {
+                auto profiles=next;
+                const auto make=[&](double target) {
+                    auto config=tuning::resolve(rate,target,mode,next_encrypted,tone,factor,dsss_version,arithmetic).config;
+                    receiver_policy(config);config.oscillator_search=oscillator_policy;
+                    auto options=next.transfer;options.modem=config;
+                    config.fake_hopping=make_fake_plan(private_hopping(fhss::parse(fhss),config,
+                        next_encrypted,next_fhss_list),options,next_fhss_list);
+                    sample_gate_bandwidth(config);return config;
+                };
+                profiles.transfer.modem=make(short_snr);profiles.long_message_modem=make(long_snr);
+                return profiles;
+            };
+            const auto candidate_width=[&](double tone,bool enforce_passband=true) {
+                auto profiles=candidate_geometry(tone);
+                const auto width=live::detail::helper_occupied_bandwidth(profiles);
+                std::optional<helper::PlacementBand> helper_band;
+                if(helper_active) {
+                    // Recommendations describe frequency geometry even when
+                    // the independent mandatory FHSS guard blocks TX. Do not
+                    // turn that guard failure into a carrier search or undo a
+                    // clock edit. Strip only blocked gates from this preview
+                    // copy; the original plans are committed unchanged and
+                    // transmit_hop_ready() blocks data, noise and helpers.
+                    const bool pilot_gating=static_cast<bool>(profiles.transfer.modem.fake_hopping);
+                    const auto preview_gate=[](modem::Config& config) {
+                        const auto& hop=config.fake_hopping;
+                        if(hop&&hop->mandatory_ramps&&!hop->power_ramps)config.fake_hopping.reset();
+                    };
+                    preview_gate(profiles.transfer.modem);
+                    if(profiles.long_message_modem)preview_gate(*profiles.long_message_modem);
+                    auto band=live::detail::helper_placement_band(profiles);
+                    band.gate_bandwidth_hz=std::max(band.gate_bandwidth_hz,width-band.waveform_bandwidth_hz);
+                    band.pilot_dwell_gating=pilot_gating;
+                    (void)helper::plan(active_helper_options(next),band,120000000);
+                    helper_band=band;
+                }
+                if(enforce_passband&&!next.simulation)for(const auto& observed:carrier_formats) {
+                    if(!observed||observed->logical_rate!=profiles.transfer.modem.sample_rate||
+                       observed->device!=next.device||observed->exclusive!=next.exclusive||
+                       observed->full_duplex!=next.full_duplex||
+                       (!observed->capture&&observed->channel_mode!=next.channel_mode))continue;
+                    std::optional<std::uint32_t> minimum_rate;
+                    try {
+                        minimum_rate=observed->capture?live::detail::capture_minimum_hardware_rate(profiles):
+                            helper_band?helper::minimum_output_rate(active_helper_options(next),*helper_band,
+                                profiles.transfer.modem.sample_rate):0;
+                    } catch(const Error&) {
+                        // An unavailable mandatory gate is handled separately;
+                        // it cannot certify a prospective audio-format request.
+                    }
+                    // Converter passband belongs to this negotiated request.
+                    // A different clock or hardware-rate request must negotiate
+                    // its own format; Live validates that actual format before
+                    // consuming or emitting its PCM.
+                    if(!minimum_rate||*minimum_rate!=observed->minimum_hardware_rate)continue;
+                    if(tone+width/2>observed->passband_hz)
+                        throw Error("Carrier waveform exceeds the current audio passband");
+                    // Helpers are synthesized/observed in the physical clock,
+                    // outside the data converter's logical flat passband.
+                    if(helper_band&&observed->hardware_rate)
+                        (void)helper::plan(active_helper_options(next),*helper_band,observed->hardware_rate);
+                }
+                return width;
+            };
+            const auto usable=[&](double tone) {try {(void)candidate_width(tone);return true;}catch(const Error&){return false;}};
+            const auto floor=helper_active?1400.:375.;
+            const auto recommendation_lower_valid=[&](double tone) {
+                try {return tone-candidate_width(tone,false)/2>=floor-1e-9;}
+                catch(const Error&) {return false;}
+            };
+            std::vector<double> carrier_tones;
+            for(unsigned pass=0;;++pass) {
+                const auto fitted_carrier=carrier;
+                adjustment.reset();
+                if(align_target&&*align_target!=UiField::receive_snr) {
+                    auto& target=*align_target==UiField::snr?short_snr:long_snr;
+                    target=number(f(*align_target).text,"Target SNR");
+                    if(target< -200||target>200)throw Error("Target SNR must be -200 to 200 dB-Hz");
+                    const std::array companions{*align_target==UiField::snr?long_snr:short_snr};
+                    const auto fitted=fit_target(target,companions);
+                    if(fitted!=target)adjustment=TargetEdit{f(*align_target).text,fitted};
+                    target=fitted;
+                }
+                double recommended=1725;
+                if(!recommendation_lower_valid(recommended)) {
+                    if(helper_active&&recommendation_lower_valid(1775))recommended=1775;
+                    else {
+                        // Evaluate actual candidate geometry. At wide rates the
+                        // sample clock is rate-limited below Rate, so the seed at
+                        // Rate supplies the same quantized width as the default.
+                        // In the narrow carrier-limited region inspect every 5 Hz
+                        // choice; a different chip rounding must not skip a valid
+                        // lower default.
+                        const auto outer=rate*factor;
+                        const auto seed=std::min(30000000.,std::max(1725.,outer));
+                        const auto width=live::detail::helper_occupied_bandwidth(candidate_geometry(seed));
+                        const auto grid=5*std::ceil((floor+width/2)/5);
+                        const auto first=helper_active?1780.:1730.;
+                        recommended=std::max(first,grid<=outer?grid:5*std::ceil(outer/5));
+                        while(recommended<=30000000&&!recommendation_lower_valid(recommended))recommended+=5;
+                        if(recommended>30000000)throw Error("No recommended carrier fits the waveform and enabled Helper constraints");
+                        // Independently cascaded gates can increase the sample
+                        // clock at the seed. Retire that conservative excess using
+                        // the same candidate-specific waveform calculation.
+                        while(recommended>first&&recommendation_lower_valid(recommended-5))recommended-=5;
+                    }
+                }
+                // Upper passband limits are checked after the monotone lower-bound
+                // search, so a narrow valid interval cannot be jumped over.
+                const bool default_available=usable(recommended);
+                const auto recommendation_valid=[&](double tone) {return recommendation_lower_valid(tone)&&usable(tone);};
+                carrier_tones.clear();
+                if(default_available)carrier_tones.push_back(recommended);
+                const auto add=[&](double tone,bool audio_floor) {
+                    if(std::find(carrier_tones.begin(),carrier_tones.end(),tone)==carrier_tones.end()&&
+                       (audio_floor?recommendation_valid(tone):usable(tone)))carrier_tones.push_back(tone);
+                };
+                add(rate/2,false);
+                if(helper_active)for(const auto tone:{1525.,1575.,1775.})add(tone,true);
+                if(!carrier_requested&&!usable(carrier)) {
+                    if(!default_available)throw Error("No recommended carrier fits the current audio passband");
+                    carrier=recommended;
+                }
+                if(!carrier_requested)
+                    physical_carrier=static_cast<double>((static_cast<long double>(shift)+carrier)/doppler.frequency_ratio);
+                // Explicit incompatible carriers still produce the ordinary error;
+                // the audio recommendation floor alone never rejects custom values.
+                (void)candidate_width(carrier);
+                if(!align_target||*align_target==UiField::receive_snr||carrier==fitted_carrier)break;
+                // Target-dependent hop feasibility can add a gate allowance
+                // and require a different carrier. Check the original request
+                // again at its final sample clock and oscillator geometry.
+                if(pass==3)throw Error("Carrier and target fit did not stabilize");
             }
+            if(carrier_refresh_only) {
+                carrier_options(carrier_tones,shift,doppler);
+                if(carrier==settings.transfer.modem.carrier_hz) {carrier_constraints_due=false;return;}
+                // A newly reported hardware limit must not discard the same
+                // pending reception. Defer a necessary retune until it ends.
+                if(std::any_of(signals.lines().begin(),signals.lines().end(),[](const auto& line){return !line.complete;}))return;
+                dirty();
+            }
+
             auto plan=tuning::resolve(rate,short_snr,mode,next_encrypted,carrier,factor,dsss_version,arithmetic);
             auto longer_plan=tuning::resolve(rate,long_snr,mode,next_encrypted,carrier,factor,dsss_version,arithmetic);
             receiver_policy(plan.config);receiver_policy(longer_plan.config);
@@ -1165,7 +1321,7 @@ struct Controller::Impl {
                 planner_inputs=next_planner;sync_link_fields();planner_target_valid=true;
                 f(UiField::planner_target).text=planner_number(planner_inputs.target_db_hz);
                 f(UiField::planner_target).display_text.clear();
-                f(UiField::bandwidth).text=exact_frequency_text(rate);reset_carrier(rate*factor,shift);
+                f(UiField::bandwidth).text=exact_frequency_text(rate);
                 f(UiField::carrier).text=exact_frequency_text(physical_carrier);
                 f(UiField::doppler).text=doppler.canonical;
                 f(UiField::snr).text=planner_number(short_snr);f(UiField::long_snr).text=planner_number(long_snr);
@@ -1222,7 +1378,9 @@ struct Controller::Impl {
             if(match_receive_target||align_receive)receive_target_edit=std::move(receive_adjustment);
             if(!receive_target_edit)f(UiField::receive_snr).text=targets.canonical;
             settings=std::move(next);searched_spectrum=next_spectrum;timing_advice.reset(); settings_valid=true;settings_error.clear();
-            reset_carrier(rate*factor,shift,false);
+            carrier_options(carrier_tones,shift,doppler);
+            if(!carrier_edit_pending||load)f(UiField::carrier).text=exact_frequency_text(physical_carrier);
+            carrier_plan_ready=true;carrier_edit_pending=false;carrier_constraints_due=false;
             if(target_input_notice) {
                 target_input_notice=false;notice_until={};
                 f(UiField::status).text=snapshot.error.empty()?snapshot.status:snapshot.error;
@@ -1265,7 +1423,7 @@ struct Controller::Impl {
     const std::shared_ptr<const planner::Model>& link_plan() const {
         // GUI-only diagnostic request. This separate fixed arena never changes
         // ordinary DSP/source/receiver budgets and can simply be unavailable.
-        if(started&&settings.helper.power_w>0)
+        if(started&&active_helper_power(settings)>0)
             session.request_helper_planner_diagnostics(simulation::helper_joint_clock_diagnostic_gui_grant_bytes());
         if(planner_model)return planner_model;
         auto input=planner_inputs;
@@ -1407,6 +1565,11 @@ struct Controller::Impl {
         else {
             if(started)session.set_helper_callsign(std::move(text));
             dirty();
+            if(active_helper_power(settings)>0&&!transmit_requested&&!snapshot.transmitting) {
+                carrier_constraints_due=true;carrier_refresh_only=true;
+                try {configure();}catch(...) {carrier_refresh_only=false;throw;}
+                carrier_refresh_only=false;
+            }
         }
         sync_launch_command();
     }
@@ -1646,7 +1809,7 @@ struct Controller::Impl {
         case Command::transmit: return transmit_ready()&&key_lock_seconds()<=0&&separation_seconds()<=0;
         case Command::force_transmit: return transmit_ready()&&(key_lock_seconds()>0||separation_seconds()>0);
         case Command::transmit_noise: return !busy && !key_loading && settings_valid && transmit_hop_ready();
-        case Command::transmit_helper: return developer_mode&&settings.helper.power_w>0&&!busy&&!key_loading&&settings_valid&&transmit_hop_ready();
+        case Command::transmit_helper: return developer_mode&&active_helper_power(settings)>0&&!busy&&!key_loading&&settings_valid&&transmit_hop_ready();
         case Command::cancel: return busy||snapshot.simulation_replay;
         case Command::open_keyfile: case Command::generate_keyfile: return !busy&&!key_loading;
         case Command::show_key_folder: return !busy&&!key_loading&&!key_path.empty();
@@ -1710,7 +1873,8 @@ struct Controller::Impl {
         f(UiField::helper_power).display_text.clear();
         if(helper_enabled&&settings_valid) {
             const auto limit=settings.helper.data_power_w*std::pow(10.,settings.helper.ratio_limit_db/10);
-            if(limit<settings.helper.power_w)f(UiField::helper_power).display_text=power_text(10*std::log10(limit)+30)+" effective (ratio limit)";
+            if(limit<std::max(0.,settings.helper.power_w-settings.helper.data_power_w))
+                f(UiField::helper_power).display_text=power_text(10*std::log10(settings.helper.data_power_w+limit)+30)+" effective (ratio limit)";
         }
         f(UiField::dsss_factor).enabled=!busy&&encrypted()&&selected_key();
         f(UiField::dsss_version).enabled=!busy&&encrypted()&&selected_key();
@@ -2087,7 +2251,16 @@ struct Controller::Impl {
         }
     }
     void accept_snapshot(live::Snapshot next) {
-        if(settings.helper.power_w>0&&(planner_capture::key(next)!=planner_capture::key(snapshot)||
+        if(!next.simulation&&next.audio_passband_hz>0&&next.audio_logical_sample_rate) {
+            CarrierFormat observed;observed.logical_rate=next.audio_logical_sample_rate;
+            observed.minimum_hardware_rate=next.audio_minimum_hardware_rate;
+            observed.hardware_rate=next.hardware_sample_rate;observed.passband_hz=next.audio_passband_hz;
+            observed.capture=next.audio_format_capture;observed.exclusive=settings.exclusive;
+            observed.full_duplex=settings.full_duplex;observed.channel_mode=settings.channel_mode;observed.device=settings.device;
+            auto& retained=carrier_formats[observed.capture?0:1];
+            if(!retained||*retained!=observed) {retained=std::move(observed);carrier_constraints_due=true;}
+        }
+        if(active_helper_power(settings)>0&&(planner_capture::key(next)!=planner_capture::key(snapshot)||
            next.helper_planner_joint!=snapshot.helper_planner_joint||
            next.helper_planner_diagnostic_reason!=snapshot.helper_planner_diagnostic_reason)) {
             // Capture-format loss invalidates conditional work immediately. Keep
@@ -2185,6 +2358,11 @@ struct Controller::Impl {
         if(!target_supported) diagnostics<<" | "<<tuning_explanation;
         fake_display(next);
         f(UiField::diagnostics).text=diagnostics.str(); snapshot=std::move(next);
+        if(carrier_constraints_due&&!transmit_requested&&!snapshot.transmitting&&!closing&&settings_valid) {
+            carrier_refresh_only=true;
+            try {configure();}catch(const Error& error) {carrier_constraints_due=false;notice(error.what(),10);}
+            carrier_refresh_only=false;
+        }
     }
     void request(Purpose purpose,ui::ServiceKind kind,std::string title,std::string value={},std::shared_ptr<const Bytes> bytes={},std::vector<std::string> names={}) {
         const auto id=++service_id; pending_services.emplace(id,Pending{purpose,std::move(bytes),std::move(names),attachment_revision}); services.push_back({id,kind,std::move(title),std::move(value)});
@@ -2556,6 +2734,7 @@ void Controller::edit(UiField field,std::string text) {
         }
         const bool untouched=!p.composer.raw_bits()&&p.draft_error.empty()&&p.f(UiField::message).text==p.seeded_message;
         p.f(field).text=std::move(text);
+        if(field==UiField::device)p.carrier_formats={};
         if(field==UiField::helper_power) {
             p.configure();
             p.f(field).selected=p.settings.helper.power_w>0?p.f(field).text:"0";
@@ -2568,8 +2747,9 @@ void Controller::edit(UiField field,std::string text) {
             p.simulation_estimate_status("Calculating...");
         }
         else if(field==UiField::snr||field==UiField::long_snr) p.configure(true,false,field);
-        else if(field==UiField::bandwidth) p.configure(false,true);
-        else if(field==UiField::device||field==UiField::carrier||field==UiField::rf_shift||field==UiField::doppler||field==UiField::search_margin||field==UiField::receiver_cpu_budget) p.configure();
+        else if(field==UiField::bandwidth) p.configure();
+        else if(field==UiField::carrier) p.configure(false,true);
+        else if(field==UiField::device||field==UiField::rf_shift||field==UiField::doppler||field==UiField::search_margin||field==UiField::receiver_cpu_budget) p.configure();
         else if(field==UiField::callsign||field==UiField::grid) {
             if(field==UiField::callsign) {
                 try {p.helper_callsign_changed(p.f(field).text);}
@@ -2650,7 +2830,7 @@ void Controller::select(UiField field,std::string id) {
         else if(field==UiField::dsss_version&&previous_selection=="off"&&state.selected=="interleave") {
             const auto factor=number(p.f(UiField::dsss_factor).selected,"DSSS factor");
             p.f(UiField::bandwidth).text=exact_frequency_text(3600./factor);
-            p.reset_carrier(3600,frequency(p.f(UiField::rf_shift).text,"Shift"));p.configure();
+            p.configure();
         }
         else if(field==UiField::helper_power||field==UiField::helper_ratio_limit||field==UiField::helper_frequency||field==UiField::simulation||field==UiField::simulation_oscillator||field==UiField::rf_oscillator||
             field==UiField::fec||field==UiField::dsp_workspace||field==UiField::fhss||field==UiField::sched_hop||
@@ -2660,10 +2840,6 @@ void Controller::select(UiField field,std::string id) {
             p.f(UiField::dsss_version).selected="interleave";
             const auto factor=static_cast<unsigned>(number(state.selected,"DSSS factor"));
             if(factor>1)p.f(UiField::bandwidth).text=exact_frequency_text(3600./factor);
-            // User selections install a useful voice-passband starting point;
-            // imported commands bypass this callback and keep exact geometry.
-            p.reset_carrier(factor>1?3600:frequency(p.f(UiField::bandwidth).text,"Rate"),
-                frequency(p.f(UiField::rf_shift).text,"Shift"));
             p.configure();
         }
         else if(field==UiField::transmit_scope_format)
@@ -2714,13 +2890,14 @@ std::chrono::steady_clock::time_point Controller::presentation_time() const {
 const live::Settings& Controller::settings() const { return impl_->settings; }
 std::optional<std::pair<double,double>> Controller::spectrum_search_band() const { return impl_->settings_valid?impl_->searched_spectrum:std::nullopt; }
 std::optional<std::pair<double,double>> Controller::spectrum_helper_band() const {
-    if(!impl_->settings_valid || impl_->settings.helper.power_w<=0)return {};
+    if(!impl_->settings_valid || active_helper_power(impl_->settings)<=0)return {};
     try {
         // Display nominal placement independently of hardware format negotiation.
-        const auto plan=helper::plan(impl_->settings.helper,
+        const auto plan=helper::plan(active_helper_options(impl_->settings),
             live::detail::helper_placement_band(impl_->settings),120000000);
-        // Include the auxiliary's nominal 300 Hz metadata band and pilot context.
-        return std::pair{plan.auxiliary_frequency_hz-150,plan.frequency_hz+150};
+        // Include the fixed low pilot, auxiliary metadata band and high pilot.
+        const auto lower=plan.low_frequency_hz>0?std::min(plan.low_frequency_hz-150,plan.auxiliary_frequency_hz-150):plan.auxiliary_frequency_hz-150;
+        return std::pair{lower,plan.frequency_hz+150};
     } catch(const Error&) {return {};}
 }
 const std::vector<audio::Device>& Controller::audio_devices() const {return impl_->audio_devices;}

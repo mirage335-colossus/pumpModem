@@ -20,6 +20,14 @@
 #include <numbers>
 
 namespace datapump::live::detail {
+inline helper::Options active_helper_options(const Settings& settings) {
+    auto options=settings.helper;
+    if(settings.transfer.key)options.callsign.clear();
+    return options;
+}
+inline double active_helper_power(const Settings& settings) {
+    return helper::effective_helper_power(active_helper_options(settings));
+}
 // Joined current-owner pair totals, not independent per-column maxima or a
 // claim that every owner uses one mask. A broad owner must not hide another
 // owner's qualified narrowing. This call-scope fold owns no allocation.
@@ -47,8 +55,9 @@ inline std::optional<modem::SampledSimulationChannel::PreconversionCapture> shar
     const auto epsilon=static_cast<long double>(policy.rf.accuracy_ppm)*policy.margin*1e-6L;
     const auto kd=sign*policy.rf_shift_hz+config.carrier_hz,kh=sign*policy.rf_shift_hz+expected;
     const auto half=helper::occupied_bandwidth(config)/2;
+    const auto kl=sign*policy.rf_shift_hz+helper::low_pilot_frequency_hz;
     const auto low=std::min(static_cast<long double>(config.carrier_hz)-std::abs(kd)*epsilon-half*(1+epsilon),
-        static_cast<long double>(expected)-std::abs(kh)*epsilon-150*(1+epsilon));
+        static_cast<long double>(helper::low_pilot_frequency_hz)-std::abs(kl)*epsilon-150*(1+epsilon));
     const auto high=std::max(static_cast<long double>(config.carrier_hz)+std::abs(kd)*epsilon+half*(1+epsilon),
         static_cast<long double>(expected)+std::abs(kh)*epsilon+150*(1+epsilon));
     const auto rate=std::ceil(std::max(std::abs(low),std::abs(high))/.42L)+64;
@@ -351,7 +360,7 @@ struct HelperOptionalCpuCredit {
 // statement that there are no bits in retained PCM. ALL admissible short/long
 // and keyed/plain families participate, including not-yet-born epoch rows.
 inline std::optional<std::uint64_t> helper_startup_minimum_symbol(const Settings& value) {
-    if(value.transfer.timestamp || value.helper.power_w<=0)return {};
+    if(value.transfer.timestamp || active_helper_power(value)<=0)return {};
     std::optional<std::uint64_t> minimum;
     const auto visit=[&](modem::Config base,bool keyed) {
         const auto profiles=value.transfer.automatic_receive_profiles?
@@ -593,7 +602,7 @@ inline helper::EnvelopeRequirements helper_envelope_baseline_requirements(const 
         result.maximum_source_capture_ratio=std::max(result.maximum_source_capture_ratio,
             1+search.requested_clock_half_width_ppm*1e-6);
     }
-    if(settings.helper.power_w>0) {
+    if(active_helper_power(settings)>0) {
         // Compute the existing aperture/latency baseline first. Prediction only
         // adds bounded airtime; it never changes the Robust source calendar.
         try {
@@ -601,7 +610,7 @@ inline helper::EnvelopeRequirements helper_envelope_baseline_requirements(const 
             if(raw_rate)result.frequency_acquisition_seconds=std::max(
                 result.frequency_acquisition_seconds,8192./raw_rate+.4);
             if(raw_rate) {
-                const auto expected=helper::plan(settings.helper,helper_placement_band(settings),raw_rate,0,
+                const auto expected=helper::plan(active_helper_options(settings),helper_placement_band(settings),raw_rate,0,
                     modem::outer_dsss_transmit_gain(config)).frequency_hz;
                 if(expected<=helper::auxiliary_pilot_spacing_hz+225 || expected+225>=config.sample_rate/2.)
                     result.frontend_lookahead_seconds=std::max(result.frontend_lookahead_seconds,
@@ -622,7 +631,7 @@ inline helper::EnvelopeRequirements helper_envelope_requirements(const Settings&
         const std::optional<helper::EnvelopeRequirements>& acquisition={},
         helper::TonePrecisionPrediction* precision=nullptr) {
     auto result=helper_envelope_baseline_requirements(settings,config,receive,acquisition);
-    if(settings.helper.power_w>0) {
+    if(active_helper_power(settings)>0) {
         const auto baseline=helper::plan_envelope(config,result);
         auto forecast=helper_lead_precision_prediction(settings,config,
             static_cast<double>(baseline.lead_seconds),result.maximum_source_capture_ratio);
@@ -642,7 +651,7 @@ inline helper::EnvelopeRequirements helper_envelope_requirements(const Settings&
 inline helper::ReferenceLevel helper_configured_reference_level(const Settings& settings,
         const modem::Config& config,double payload_power_fraction=1,double usable_tone_fraction=1) {
     const auto nominal=settings.simulation_snr_db+10*std::log10(settings.transfer.modem.sample_rate/2.);
-    return helper::reference_level(settings.helper,nominal,
+    return helper::reference_level(active_helper_options(settings),nominal,
         settings.simulation?modem::outer_dsss_transmit_gain(config):1.,
         payload_power_fraction,usable_tone_fraction);
 }
@@ -720,6 +729,26 @@ inline helper::PlacementBand helper_placement_band(const Settings& settings) {
     }
     return band;
 }
+// This request is established before the capture clock-follow policy. A
+// declined helper removes its base output-rate request, while the existing
+// shared-radio capture-domain floor remains on the ordinary retry path.
+inline std::uint32_t capture_minimum_hardware_rate(const Settings& settings,bool helper_available=true) {
+    std::uint32_t requested=0;
+    const auto options=active_helper_options(settings);
+    if(helper::effective_helper_power(options)>0) {
+        const auto band=helper_placement_band(settings);
+        const auto& config=settings.transfer.modem;
+        if(helper_available)requested=helper::minimum_output_rate(options,band,config.sample_rate);
+        const auto high=helper::plan(options,band,120000000,0,
+            modem::outer_dsss_transmit_gain(config)).frequency_hz;
+        if(const auto wide=shared_helper_capture(config,high))
+            requested=std::max(requested,wide->minimum_sample_rate);
+    }
+    if(settings.diagnostic_capture_rate_hz &&
+       (settings.simulation || settings.diagnostic_capture_rate_hz!=48000))
+        throw Error("Diagnostic capture requires hardware 48000 Hz");
+    return std::max(requested,settings.diagnostic_capture_rate_hz);
+}
 inline helper::FrequencyPrecisionOptions helper_precision_options(const modem::Config& config) {
     helper::FrequencyPrecisionOptions result;
     // The strong estimator uses the configured link model without receiving
@@ -759,11 +788,12 @@ inline double helper_continuous_frequency_process(const Settings& settings,const
 // Hardware runtime qualification still uses the actual negotiated raw format.
 inline std::uint32_t helper_predicted_capture_sample_rate(const Settings& settings,
         const modem::Config& config) {
-    if(!settings.simulation)return helper::minimum_output_rate(settings.helper,
+    const auto options=active_helper_options(settings);
+    if(!settings.simulation)return helper::minimum_output_rate(options,
         helper_placement_band(settings),config.sample_rate);
-    const auto h=helper::plan(settings.helper,helper_placement_band(settings),120000000,0,
+    const auto h=helper::plan(options,helper_placement_band(settings),120000000,0,
         modem::outer_dsss_transmit_gain(config)).frequency_hz;
-    return modem::SampledSimulationChannel::planned_physical_sample_rate(config,settings.helper,
+    return modem::SampledSimulationChannel::planned_physical_sample_rate(config,options,
         helper_occupied_bandwidth(settings),shared_helper_capture(config,h));
 }
 // Shared TX/Planner inputs. Metadata is confined to the auxiliary and cannot
@@ -787,7 +817,7 @@ inline helper::TonePrecisionRequest helper_tone_precision_request(const Settings
     // Keep its explicit1.2s startup budget separate from genuine baseline lead.
     // This conditional software budget cannot qualify an actual reference.
     request.pilot_discovery_budget_seconds=1.2;
-    const auto pilot=helper::plan(settings.helper,helper_placement_band(settings),120000000,0,
+    const auto pilot=helper::plan(active_helper_options(settings),helper_placement_band(settings),120000000,0,
         modem::outer_dsss_transmit_gain(config)).frequency_hz;
     request.frequency_acceleration_psd_hz2_per_second3=helper_continuous_frequency_process(settings,config,pilot);
     request.phase_noise_radians_per_sqrt_second=settings.simulation?
@@ -831,11 +861,11 @@ struct HelperOptionalPlan {
 };
 inline std::optional<HelperOptionalPlan> helper_optional_plan(const Settings& value,std::uint32_t physical_rate,
                                                             bool unsteered_capture=true) {
-    if(value.helper.power_w<=0 || !physical_rate || !unsteered_capture || !value.transfer.modem.oscillator_search)
+    if(active_helper_power(value)<=0 || !physical_rate || !unsteered_capture || !value.transfer.modem.oscillator_search)
         return {};
     const auto& c=value.transfer.modem;const auto& policy=*c.oscillator_search;
     HelperOptionalPlan p;
-    p.helper_hz=helper::plan(value.helper,helper_placement_band(value),physical_rate,0,
+    p.helper_hz=helper::plan(active_helper_options(value),helper_placement_band(value),physical_rate,0,
         modem::outer_dsss_transmit_gain(c)).frequency_hz;
     const bool shared=policy.reference==modem::OscillatorReference::shared_radio && policy.rf_shift_hz>0;
     const auto side=policy.sideband==modem::OscillatorSideband::upper?1.L:-1.L;

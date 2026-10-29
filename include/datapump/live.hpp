@@ -240,6 +240,10 @@ struct Snapshot {
     double simulation_sample_fraction = 0;
     std::uint64_t constellation_dropped = 0;
     std::uint32_t hardware_sample_rate = 0;
+    // Logical clock of the negotiated converter which supplied this passband.
+    std::uint32_t audio_logical_sample_rate = 0;
+    std::uint32_t audio_minimum_hardware_rate = 0;
+    bool audio_format_capture = true;
     double audio_passband_hz = 0;
     std::size_t dsp_buffered_bytes = 0;
     // A separate bounded post-reception search pool; it never consumes the

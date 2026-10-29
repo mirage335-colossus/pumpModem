@@ -228,8 +228,10 @@ This is not the payload bit rate.
 is an alias.
 .TP
 .BI \-\-carrier " FREQUENCY"
-Set the absolute transmitted/received carrier; default 1500 Hz.
-Carrier minus Shift must be positive and at most 30 MHz for the real USB stream.
+Set the absolute transmitted/received carrier; default 1725 Hz. Recommendations use the selected
+waveform bandwidth and Helper Carrier configuration; valid custom baseband
+frequencies are preserved across configuration edits. Carrier minus Shift must
+be positive and at most 30 MHz for the real USB stream.
 Case-insensitive Hz, kHz, MHz, GHz and THz suffixes, k/m/g/t shorthand, optional
 spaces and scientific notation are accepted; a plain number is in Hz.
 .B \-\-rf\-carrier

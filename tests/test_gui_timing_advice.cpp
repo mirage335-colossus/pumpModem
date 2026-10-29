@@ -4,6 +4,7 @@
 #include "datapump/audio.hpp"
 #include "datapump/crypto.hpp"
 #include "datapump/pattern_correlator.hpp"
+#include "datapump/tuning.hpp"
 #include "resource_test_margin.hpp"
 #include <atomic>
 #include <chrono>
@@ -17,6 +18,8 @@ using namespace std::chrono_literals;
 namespace {
 std::atomic<bool> timing_enabled{true},outside_allowance{false},hold_playback{false},playing{false};
 std::atomic<unsigned> timing_observations{0},capture_opens{0};
+std::atomic<double> capture_passband_limit{0};
+std::atomic<std::uint32_t> capture_logical_rate{0};
 void check(bool value,const char* why){if(!value)throw Error(why);}
 long double utc_now(){return std::chrono::duration<long double>(std::chrono::system_clock::now().time_since_epoch()).count();}
 std::string all_text(const ui::DocumentNode& node) {
@@ -28,7 +31,9 @@ std::vector<Device> devices(){return {{"default","timed synthetic capture"}};}
 void capture(std::uint32_t rate,const std::string&,const CaptureCallback& callback,std::stop_token stop,
              StreamFormatCallback format,Options options) {
     ++capture_opens;
-    if(format)format({rate,rate,rate/2.,4096,TimingQuality::estimated,.0242});
+    capture_logical_rate=rate;
+    const auto limit=capture_passband_limit.load();
+    if(format)format({rate,rate,limit>0?std::min(rate/2.,limit):rate/2.,4096,TimingQuality::estimated,.0242});
     std::vector<float> samples(std::max(1u,rate/50));std::uint32_t random=123;
     const auto origin=utc_now();std::uint64_t frames=0;auto next=std::chrono::steady_clock::now();
     while(!stop.stop_requested()) {
@@ -173,6 +178,10 @@ void check_scheduled_defaults_and_keyed_estimate() {
     options.launch_settings->keyfile=key.path.string();options.launch_settings->key_name="Default";
     options.launch_settings->tx_key="named";
     Controller controller(options);controller.start();controller.edit(F::binary,"0");
+    const auto initial=controller.settings().transfer.modem;
+    const auto initial_long=*controller.settings().long_message_modem;
+    check(initial.bandwidth_hz==3600&&initial.carrier_hz==1725,
+          "scheduled startup did not retain the calculated default carrier");
     const auto wait=[&](auto predicate,const char* reason) {
         const auto until=std::chrono::steady_clock::now()+15s;
         do {controller.poll();
@@ -195,13 +204,49 @@ void check_scheduled_defaults_and_keyed_estimate() {
         !controller.snapshot().receiver_health.failed();},"ordinary short scheduled profiles were not admitted");
     check(controller.estimate()->wire_bits==1&&controller.field(F::airtime).text.find("requires an encryption key")==std::string::npos,
           "scheduled representative preview lost its selected key or exact raw endpoint");
-    check(controller.settings().transfer.modem.bandwidth_hz==3600&&
-          controller.settings().transfer.modem.carrier_hz==1500&&
+    const auto& after=controller.settings().transfer.modem;
+    check(after.sample_rate==initial.sample_rate&&after.bandwidth_hz==initial.bandwidth_hz&&
+          after.carrier_hz==initial.carrier_hz&&after.spreading_factor==initial.spreading_factor&&
+          modem::symbol_sample_count(after)==modem::symbol_sample_count(initial)&&
+          modem::symbol_sample_count(*controller.settings().long_message_modem)==modem::symbol_sample_count(initial_long)&&
           controller.snapshot().capture_certified_null_samples==0,
           "default scheduled reception changed waveform settings or discarded uncertified capture");
     std::cout<<"Scheduled defaults: TX-ready, exact one-bit airtime, "
         <<controller.snapshot().receiver_admissions<<" admitted receivers, no omitted input\n";
     controller.close();wait([&]{return controller.ready_to_close();},"supported scheduled defaults prevented GUI close");
+}
+void check_same_format_passband_limit() {
+    using F=ui::Field;
+    struct Limit {
+        Limit(){capture_passband_limit=2470;}
+        ~Limit(){capture_passband_limit=0;}
+    } limit;
+    Controller::Options options;
+    options.launch_settings=launch_command::parse("--pattern auto-tone --rate 1000 --carrier 1950 --target-snr 32");
+    Controller controller(options);controller.start();
+    const auto wait=[&](auto predicate,const char* reason) {
+        const auto until=std::chrono::steady_clock::now()+5s;
+        do {controller.poll();if(predicate())return;std::this_thread::sleep_for(5ms);}
+        while(std::chrono::steady_clock::now()<until);
+        throw Error(std::string(reason)+": "+controller.field(F::status).text);
+    };
+    wait([&]{return controller.settings().transfer.modem.carrier_hz==1950&&
+        controller.snapshot().audio_logical_sample_rate==controller.settings().transfer.modem.sample_rate&&
+        controller.snapshot().audio_passband_hz==2470&&controller.snapshot().samples_received>0;},
+        "narrow provider format was not observed");
+    const auto initial=controller.settings().transfer.modem;
+    const auto& observed=controller.snapshot();
+    check(initial.sample_rate==8000&&observed.audio_format_capture&&
+          observed.audio_minimum_hardware_rate==0&&observed.hardware_sample_rate==8000,
+          "capture passband lost its negotiated format provenance");
+    const auto opens=capture_opens.load();
+    controller.edit(F::carrier,"1990 Hz");controller.poll();
+    check(controller.settings().transfer.modem.carrier_hz==initial.carrier_hz&&
+          controller.settings().transfer.modem.sample_rate==initial.sample_rate&&
+          controller.field(F::status).text.find("current audio passband")!=std::string::npos&&
+          capture_opens.load()==opens,
+          "same-format carrier edit ignored the observed converter passband or reset capture");
+    controller.close();wait([&]{return controller.ready_to_close();},"limited provider prevented GUI close");
 }
 void check_advice_envelope() {
     ReceiverTimingAdvice cache;auto now=ReceiverTimingAdvice::Clock::now();
@@ -329,6 +374,7 @@ int main(int argc,char** argv) {
     if(argc>1&&std::string_view(argv[1])=="--sched-hop"){std::cout<<"Scheduled initial availability passed\n";return 0;}
     check_advice_envelope();
     check_calendar_advice_envelope();
+    check_same_format_passband_limit();
     using F=ui::Field;using C=ui::Command;const bool probe=argc>1;
     struct KeyFixture {
         std::filesystem::path path=std::filesystem::temp_directory_path()/("datapump-advice-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
@@ -381,6 +427,12 @@ int main(int argc,char** argv) {
         <<" first_plan_document_seconds="<<first_plan_document_seconds<<" max_plan_document_seconds="<<max_plan_document_seconds
         <<" numeric_resets="<<resets<<" timings="<<timing_observations<<" capture_opens="<<capture_opens<<'\n';
     std::cout<<"airtime="<<app.field(F::airtime).text<<" observer="<<app.field(F::lpi_estimate).text<<'\n';
+    std::cout<<"status="<<app.field(F::status).text<<" transmit="<<app.enabled(C::transmit)
+        <<" force="<<app.enabled(C::force_transmit)<<" noise="<<app.enabled(C::transmit_noise)<<'\n';
+    const auto expected_rate=tuning::resolve(1200,60,tuning::PatternMode::auto_keystream,true,9000,10,
+        modem::OuterDsssVersion::legacy_v1).config.sample_rate;
+    check(capture_logical_rate==expected_rate,
+          "keyed startup retained the previous stream format instead of negotiating its accepted profile");
     if(probe)std::cout<<"plan="<<plan_text<<'\n';
     if(!probe) {
         // Hold real hardware playback at its callback boundary. Optional work

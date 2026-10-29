@@ -131,6 +131,14 @@ struct RealtimeHelperReceiverWork {
     HelperReceiverCostLedger receiver_cost;
     std::string reason;
 };
+// Ordinary receiver work conditional on an explicitly supplied reference.
+// This calculation grants no helper placement, observed lock or precision:
+// production callers first validate their waveform and reference separately.
+// Keeping it independent also permits historical raw-mono receiver fixtures
+// whose reference geometry is not a supported production helper waveform.
+RealtimeHelperReceiverWork helper_reference_receiver_work(const Inputs&,const modem::Config&,
+    const live::Settings&,double target_db_hz,double helper_frequency_hz,double uncertainty_hz,
+    const std::string& precision_reason,std::stop_token stop = {});
 struct RealtimeHelperCpuPoint : RealtimeHelperReceiverWork {
     double target_db_hz=0,observation_seconds=0,minimum_seed_seconds=0;
     std::uint32_t physical_sample_rate=0;
@@ -177,11 +185,16 @@ struct HelperReferencePlan {
     // the planner, and a received tone still needs measured qualification.
     bool geometry_available=false;
     bool tone_level_sufficient=false;
+    bool ratio_limited=false;
+    double configured_total_power_w=0,robust_power_w=0,effective_total_power_w=0;
     double effective_power_w=0;
     double received_dbm=0;
     double cn0_db_hz=0;
     double tone_snr_db=0; // The presence tracker's 10 Hz resolution cell.
+    // Component levels are steady-tone powers; effective_power_w is the
+    // separately averaged helper waveform with modulation and gates.
     double pilot_power_w=0,pilot_cn0_db_hz=0,pilot_tone_snr_db=0,auxiliary_cn0_db_hz=0;
+    double low_pilot_power_w=0,auxiliary_power_w=0,low_pilot_cn0_db_hz=0;
     // Sampled simulation retains the source waveform's existing amplitude
     // backoff against its nominal-power noise model. Hardware watts above
     // instead describe the operator's calibrated transmit-power budget.
@@ -192,6 +205,7 @@ struct HelperReferencePlan {
     double simulation_tone_snr_db=0;
     double simulation_pilot_cn0_db_hz=0,simulation_pilot_tone_snr_db=0;
     double frequency_hz=0;
+    double low_frequency_hz=0;
     double auxiliary_frequency_hz=0;
     RealtimeHelperCpuPoint conditional;
     // Original-grid geometry under an explicit hypothetical qualified helper
@@ -310,7 +324,7 @@ struct Model {
     double new_epoch_admissions=0,new_epoch_full_fft_batches=0,new_epoch_retained_fft_batches=0;
     double new_epoch_qualified_ready_batch_slots=0;
     std::string receiver_work_assumptions;
-    // Separate auxiliary link budget. It changes neither the ordinary payload
+    // Separate active-composite/helper link budget. It changes neither the ordinary payload
     // target/margin nor the unassisted probability and CPU curves.
     HelperReferencePlan helper_reference;
     double fallback_cpu_realtime_ratio=0,fallback_timing_hypotheses=0;

@@ -18,13 +18,18 @@ coverage. Full Rate-360 `21bf/913` and HF40 `85a5/d8e3`/`f37/949` passes retain
 their own bindings; those full runs have not been repeated on this binary.
 No full-contract/platform/hardware qualification follows.
 
-## Current implementation
+## Transmitter and receiver scope
 
-- Normal Helper power is 90% pure pilot/10% auxiliary. Only the auxiliary has
-  shaped 240 ms punctuation and optional compact metadata. High-only placement
-  is data, guard, auxiliary, guard, pure pilot: auxiliary starts 450 Hz above
-  the shaped data edge, adjusted by leakage bound; pilot spacing is 400 Hz.
-  The radio/audio passband and filter margin remain physical requirements.
+- The transmitter uses fixed 550 Hz and 950 Hz low pilot and auxiliary tones,
+  with steady-tone powers of −3 dB and −9 dB relative to the high pilot. The
+  high pilot is at least 2400 Hz and rises only for occupied bandwidth and
+  separation. Helper Carrier Power is the simultaneous active composite average;
+  Robust power specifies its allocation. Modulation and gating affect helper
+  average power, and the ratio limit remains in force.
+- Receiver acquisition, tracking and decoding updates for this waveform are
+  deferred. The following receiver observations and source-bound evidence concern
+  the earlier two-tone implementation and are not qualification of the new
+  transmitter waveform.
 - Full oscillator/capture-derived discovery precedes local refinement. Earlier
   200 ms contexts are software apertures, not a continuous-tone physical limit.
   Settled 384 ms fits and dated continuous numeric support remain bounded.
@@ -41,17 +46,14 @@ No full-contract/platform/hardware qualification follows.
   ±0.1 Hz milestone does not qualify every 128-second configuration. CPU prices
   remain conditional on existing receiver work and unresolved geometry.
 
-Two-tone headroom changes native payload calibration by −1.353 dB at 40 W/4 W
-and −1.989 dB at 15 kW/4 W versus the old format at unchanged volume. Recalibrate
-physical RF output to retain configured power. Headroom/oversampling compensation
-scales signal/noise together; Interleaved V2 retains its separate −6.0206 dB
-sampled DATA gain relative to nominal RF budget. Ramps/metadata/channel gains
-remain separate.
+Physical audio/RF calibration and passband margin remain necessary. Previous
+headroom measurements describe their earlier two-tone source binding; they do
+not establish calibration for the new waveform.
 
 ## Measured status and remaining acceptance
 
-Checkpoint `572b051` has a rebuilt GUI and the two-tone/one-bank implementation
-summarized above. The [operating guide](helper-carrier.md#manual-reception) gives
+Checkpoint `572b051` has a rebuilt GUI and the earlier two-tone/one-bank
+implementation; its findings do not qualify the new transmitter waveform. The [operating guide](helper-carrier.md#manual-reception) gives
 a compact measured comparison; [validation](validation.md) retains precision,
 work, CPU, support dates, exact bindings and every individual failed result.
 The preceding `85a5/d8e3` supplied HF40 case passes exact eight-bit/full-wire reception, public

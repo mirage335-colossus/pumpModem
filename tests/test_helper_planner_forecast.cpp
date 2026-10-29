@@ -23,6 +23,73 @@ bool contains(const gui::ui::DocumentNode& node,const char* text) {
 
 }
 int main(){try{
+    {
+        live::Settings raw;raw.helper.power_w=40;raw.helper.data_power_w=4;
+        raw.transfer.key.emplace(Bytes(32,0x41));
+        raw.helper.callsign="12345678901234567890";
+        raw.transfer.automatic_receive_profiles=false;
+        raw.transfer.modem.bandwidth_hz=36;raw.transfer.modem.carrier_hz=1725;
+        raw.transfer.modem.oscillator_search.emplace();
+        auto clean=raw;clean.helper.callsign.clear();
+        check(live::detail::active_helper_power(raw)==36,
+            "Keyed helper power query validated an inactive callsign preference");
+        (void)live::detail::helper_startup_minimum_symbol(raw);
+        for(const bool simulation:{false,true}) {
+            raw.simulation=clean.simulation=simulation;
+            const auto raw_rate=live::detail::helper_predicted_capture_sample_rate(raw,raw.transfer.modem);
+            const auto clean_rate=live::detail::helper_predicted_capture_sample_rate(clean,clean.transfer.modem);
+            check(raw_rate==clean_rate,"Inactive keyed callsign changed helper channel sample-rate planning");
+            check(live::detail::capture_minimum_hardware_rate(raw)==
+                live::detail::capture_minimum_hardware_rate(clean),
+                "Inactive keyed callsign changed the actual capture-rate request");
+            const auto raw_level=live::detail::helper_configured_reference_level(raw,raw.transfer.modem);
+            const auto clean_level=live::detail::helper_configured_reference_level(clean,clean.transfer.modem);
+            check(raw_level.pilot_straight_cn0_db_hz==clean_level.pilot_straight_cn0_db_hz,
+                "Inactive keyed callsign changed the helper power reference");
+            const auto raw_precision=live::detail::helper_tone_precision_request(raw,raw.transfer.modem,
+                raw_rate,raw_level.pilot_straight_cn0_db_hz,2);
+            const auto clean_precision=live::detail::helper_tone_precision_request(clean,clean.transfer.modem,
+                clean_rate,clean_level.pilot_straight_cn0_db_hz,2);
+            check(raw_precision.metadata_symbols==clean_precision.metadata_symbols &&
+                raw_precision.frequency_acceleration_psd_hz2_per_second3==
+                    clean_precision.frequency_acceleration_psd_hz2_per_second3,
+                "Inactive keyed callsign changed helper precision planning");
+            const auto raw_optional=live::detail::helper_optional_plan(raw,raw_rate);
+            const auto clean_optional=live::detail::helper_optional_plan(clean,clean_rate);
+            check(raw_optional.has_value()==clean_optional.has_value() &&
+                (!raw_optional || raw_optional->helper_hz==clean_optional->helper_hz),
+                "Inactive keyed callsign changed optional helper geometry");
+        }
+        check(raw.helper.callsign=="12345678901234567890",
+            "Helper power query changed the saved inactive callsign");
+        auto shared=clean;shared.simulation=false;
+        auto& oscillator=*shared.transfer.modem.oscillator_search;
+        oscillator.reference=modem::OscillatorReference::shared_radio;
+        oscillator.rf_shift_hz=30000000;oscillator.rf.accuracy_ppm=1000;
+        const auto helper_options=live::detail::active_helper_options(shared);
+        const auto band=live::detail::helper_placement_band(shared);
+        const auto high=helper::plan(helper_options,band,120000000,0,
+            modem::outer_dsss_transmit_gain(shared.transfer.modem)).frequency_hz;
+        const auto wide=live::detail::shared_helper_capture(shared.transfer.modem,high);
+        check(wide.has_value(),"Shared capture request fixture lost its wide-domain floor");
+        const auto ordinary_request=live::detail::capture_minimum_hardware_rate(shared,false);
+        check(ordinary_request==wide->minimum_sample_rate,
+            "Declined helper changed the existing shared-radio capture fallback floor");
+        const auto helper_request=helper::minimum_output_rate(helper_options,band,shared.transfer.modem.sample_rate);
+        check(live::detail::capture_minimum_hardware_rate(shared)==
+            std::max(helper_request,wide->minimum_sample_rate),
+            "Capture request omitted helper output or shared-domain minimum");
+        auto diagnostic=clean;diagnostic.simulation=false;diagnostic.helper.power_w=0;
+        diagnostic.diagnostic_capture_rate_hz=48000;
+        check(live::detail::capture_minimum_hardware_rate(diagnostic)==48000,
+            "Diagnostic capture rate floor disappeared");
+        diagnostic.simulation=true;bool bad_diagnostic=false;
+        try {(void)live::detail::capture_minimum_hardware_rate(diagnostic);}catch(const Error&){bad_diagnostic=true;}
+        check(bad_diagnostic,"Simulation accepted the hardware-only diagnostic capture request");
+        raw.transfer.key.reset();bool rejected=false;
+        try {(void)live::detail::active_helper_power(raw);}catch(const Error&){rejected=true;}
+        check(rejected,"Clear helper power query accepted an invalid active callsign");
+    }
     // The ideal reference is separate from every practical forecast and lock
     // decision. Preserve the requested 1 s/10 s noise-only scales and T^-3/2.
     for(const auto cn0:{40.,30.,20.,10.,6.,3.,0.,-3.}) {
@@ -223,12 +290,15 @@ int main(){try{
     const auto enabled=gui::planner::build(in);
     check(enabled.available&&enabled.helper_reference.enabled&&enabled.helper_reference.budget_available,
         "manual helper mode lost its ordinary plan or physical helper link budget");
-    check(std::abs(enabled.helper_reference.pilot_power_w-.9*enabled.helper_reference.effective_power_w)<1e-9&&
+    const auto helper_mean=helper::mean_power(in.receiver_settings->helper).total;
+    check(std::abs(enabled.helper_reference.pilot_power_w-
+            helper::pilot_power_fraction/helper_mean*enabled.helper_reference.effective_power_w)<1e-9&&
         std::abs(enabled.helper_reference.pilot_cn0_db_hz-enabled.helper_reference.cn0_db_hz-
-            10*std::log10(.9))<1e-12&&
+            10*std::log10(helper::pilot_power_fraction/helper_mean))<1e-12&&
         std::abs(enabled.helper_reference.pilot_cn0_db_hz-enabled.helper_reference.auxiliary_cn0_db_hz-
-            10*std::log10(9.))<1e-12,
-        "Planner lost the unambiguous 90/10 straight-interval helper power split");
+            9.)<1e-12&&
+        std::abs(enabled.helper_reference.low_pilot_cn0_db_hz-enabled.helper_reference.pilot_cn0_db_hz+3)<1e-12,
+        "Planner lost mean-helper calibration or the3/9dB steady-tone power ratios");
     check(enabled.helper_cpu_points.empty()&&enabled.helper_receive_points.empty()&&
         enabled.helper_backend_feasibility_points.empty()&&enabled.helper_work_points.empty()&&
         !enabled.helper_reference.conditional_geometry_available,
@@ -315,7 +385,7 @@ int main(){try{
         "No clock narrowing is inferred from tone power",
         "helper power does not increase payload SNR or Rate",
         "DSP fixed workspace", "Automatic helper precision lead:","Conditional planning-model precision:",
-        "Expected helper C/N0:","Pure pilot:","90% power share","9× auxiliary power",
+        "Expected helper C/N0:","High pilot:","Low pilot:","W (−3 dB)","W (−9 dB)",
         "dB-Hz", "Ideal noise-only 3σ scale:","Independent-retune noise-only 3σ scale:",
         "Current continuous-pilot practical forecast:","Independent actual-retune comparison:",
         "4× the uninterrupted constant-tone reference","existing conditional ordinary-receiver cost query",
@@ -548,10 +618,10 @@ int main(){try{
     raw_inputs.helper_forecast_capture_passband_hz=std::nextafter(24000.,0.);
     raw_inputs.helper_forecast_capture_logical_sample_rate=14400;
     const auto raw_model=gui::planner::build(raw_inputs);
-    const auto& raw_point=raw_model.helper_reference.conditional;
-    check(raw_model.available&&raw_point.precision.supported&&
-        raw_point.reason.find("conditional raw mono Robust source")!=std::string::npos,
-        "folded reference forecast pretended its raw PCM was NCO corrected");
+    check(raw_model.available&&!raw_model.helper_reference.geometry_available&&
+        !raw_model.helper_reference.conditional.precision.supported&&
+        raw_model.helper_reference.status.find("fixed 550/950 Hz")!=std::string::npos,
+        "folded data overlapping the fixed helper tones gained a production reference forecast");
     auto raw_options=raw_inputs.options;
     raw_options.modem=tuning::receive_profiles(raw_config,raw_targets,raw_inputs.mode,true).front();
     check(std::abs(helper::occupied_bandwidth(raw_options.modem)-5850)<1e-9,
@@ -561,14 +631,22 @@ int main(){try{
     raw_settings.simulation_snr_db=raw_inputs.tx_dbm-raw_inputs.path_loss_db-raw_inputs.noise_density_dbm_hz-
         10*std::log10(raw_options.modem.sample_rate/2.);
     raw_settings.helper.data_power_w=std::pow(10.,(raw_inputs.tx_dbm-30)/10);
-    const auto raw_width=live::detail::helper_occupied_bandwidth(raw_settings);
-    const auto raw_plan=helper::plan(raw_settings.helper,helper::placement_band(raw_options.modem,raw_width),
-        120000000,0,modem::outer_dsss_transmit_gain(raw_options.modem));
+    // Retain the original genuinely folded receiver-work regression with an
+    // explicit historical laboratory reference. The old adjacent pilot was
+    // 5475 Hz for this band and 15000 W/4 W reference; this supplied interval
+    // has no production placement or measured-lock authority. Production
+    // correctly rejects this occupied band above, while the same receiver-work
+    // calculation must still preserve its raw input basis and ordinary ledger.
+    constexpr double raw_helper_hz=5475,raw_uncertainty_hz=.0157;
+    const auto raw_point=gui::planner::helper_reference_receiver_work(raw_inputs,raw_options.modem,raw_settings,
+        raw_inputs.target_db_hz,raw_helper_hz,raw_uncertainty_hz,"Historical folded raw-mono laboratory reference");
+    check(raw_point.reason.find("conditional raw mono Robust source")!=std::string::npos,
+        "folded reference forecast pretended its raw PCM was NCO corrected");
     const auto measured_offset=raw_inputs.channel.frequency_offset_hz+
-        raw_plan.frequency_hz*raw_inputs.channel.clock_error_ppm*1e-6;
+        raw_helper_hz*raw_inputs.channel.clock_error_ppm*1e-6;
     const auto raw_utc=transfer::receiver_utc_rate_correction(raw_options.modem,raw_options);
     const auto raw_search=modem::helper_reference_search(raw_options.modem,raw_point.uncertainty_hz,
-        raw_plan.frequency_hz,measured_offset,raw_utc,
+        raw_helper_hz,measured_offset,raw_utc,
         modem::HelperReferenceClockRelation::common_corrected_source,{},
         modem::PatternUtcClockGrid::complete_expanded_domain);
     check(!raw_search.original_prior_retained&&raw_search.residual_center_hz==measured_offset&&
@@ -579,7 +657,7 @@ int main(){try{
     const auto true_frequency=raw_inputs.channel.frequency_offset_hz+
         raw_options.modem.carrier_hz*raw_inputs.channel.clock_error_ppm*1e-6;
     check(std::abs(true_frequency-(measured_offset+
-        (raw_options.modem.carrier_hz-raw_plan.frequency_hz)*raw_inputs.channel.clock_error_ppm*1e-6))<1e-12,
+        (raw_options.modem.carrier_hz-raw_helper_hz)*raw_inputs.channel.clock_error_ppm*1e-6))<1e-12,
         "raw helper frequency origin omitted the unresolved DATA/helper clock coupling");
     auto raw_channel=raw_inputs.channel;raw_channel.snr_db=raw_settings.simulation_snr_db;
     constexpr std::array<std::uint8_t,1> raw_bit{0};
@@ -612,7 +690,10 @@ int main(){try{
     shared_inputs.target_db_hz=8;shared_inputs.path_loss_db=180;
     shared_inputs.options.key.emplace(Bytes(32,0x53));
     auto& shared_config=shared_inputs.options.modem;
-    shared_config=tuning::resolve(36,8,shared_inputs.mode,true,1500,10,
+    // Keep this production shared-radio/UI fixture above the fixed auxiliary
+    // separation floor. Its original-cell selection and work assertions below
+    // remain independent of the separate historical folded fixture.
+    shared_config=tuning::resolve(36,8,shared_inputs.mode,true,1725,10,
         modem::OuterDsssVersion::interleaved_v2).config;
     shared_config.oscillator_search.emplace();auto& shared_policy=*shared_config.oscillator_search;
     shared_policy.lf={100,.5};shared_policy.rf={100,.5};shared_policy.margin=3;

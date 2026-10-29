@@ -24,6 +24,7 @@
 #include <limits>
 #include <map>
 #include <set>
+#include <source_location>
 #include <string_view>
 #include <thread>
 #include <tuple>
@@ -1086,18 +1087,19 @@ void stable_planner_navigation_document() {
     prepare_plan(app);
     app.close();
 }
-void prepare(Controller& controller) {
+void prepare(Controller& controller,std::source_location caller=std::source_location::current()) {
     const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
     while((!controller.estimate()||controller.field(ui::Field::simulation_cpu_time).text.ends_with("Calculating..."))&&std::chrono::steady_clock::now()<deadline) {
         controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
-    check(controller.estimate().has_value(),"Current-draft estimate was not prepared");
-    check(!controller.field(ui::Field::simulation_cpu_time).text.ends_with("Calculating..."),"Current-draft receiver advice was not prepared");
+    check(controller.estimate().has_value(),("Current-draft estimate was not prepared at line "+std::to_string(caller.line())).c_str());
+    check(!controller.field(ui::Field::simulation_cpu_time).text.ends_with("Calculating..."),
+          ("Current-draft receiver advice was not prepared at line "+std::to_string(caller.line())).c_str());
 }
 void asynchronous_planner_edits() {
     using F=ui::Field;using C=ui::Command;
     Controller controller({true,true});
-    controller.edit(F::carrier,"1.0015 MHz");controller.edit(F::rf_shift,"1 MHz");
+    controller.edit(F::rf_shift,"1 MHz");controller.edit(F::carrier,"1.0015 MHz");
     prepare(controller);
     const auto pending=controller.link_plan();
     check(!pending->available&&pending->error=="Calculating plan..."&&
@@ -1106,9 +1108,15 @@ void asynchronous_planner_edits() {
     controller.poll(); // Dispatch the old request before replacing its inputs.
     controller.edit(F::rf_shift,"999.5 kHz");
     const auto middle=controller.link_plan();
-    check(middle!=pending&&!middle->available&&middle->inputs.options.modem.carrier_hz==2000,
-          "A shift edit must immediately replace the pending input snapshot");
+    check(middle!=pending&&!middle->available&&middle->inputs.options.modem.carrier_hz==1500&&
+          middle->inputs.options.modem.oscillator_search->rf_shift_hz==999500,
+          "A shift edit must replace the pending snapshot while preserving its numeric baseband carrier");
     controller.edit(F::rf_shift,"2 MHz");
+    const auto shifted=controller.link_plan();
+    check(shifted!=middle&&!shifted->available&&shifted->inputs.options.modem.carrier_hz==1500&&
+          shifted->inputs.options.modem.oscillator_search->rf_shift_hz==2000000,
+          "A second shift edit must preserve the baseband plan in the newest pending snapshot");
+    controller.edit(F::carrier,"1 MHz");
     const auto invalid=controller.link_plan();
     check(!invalid->available&&invalid->error.find("Fix the modem settings")!=std::string::npos,
           "Invalid edits must withdraw stale planner results immediately");
@@ -1268,6 +1276,58 @@ void controller_target_alignment() {
     controller.edit(F::message,"quick brown fox!!");prepare(controller);
     check(controller.inspection()->stream_layout&&controller.estimate()->wire_bits==1216,
           "Target rounding must not alter the fixed interval endpoint of a longer source");
+    controller.close();
+}
+void target_fit_after_fhss_carrier_fallback() {
+    using F=ui::Field;
+    struct Keys {
+        std::filesystem::path path=std::filesystem::temp_directory_path()/
+            ("datapump-target-carrier-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        ~Keys(){std::error_code ignored;std::filesystem::remove(path,ignored);}
+    } keys;
+    create_keyring(keys.path,{"target carrier"});
+    launch_command::Patch patch;patch.keyfile=keys.path.string();patch.key_name="target carrier";
+    patch.rate_hz=1000;patch.carrier_hz=1800;patch.target_db_hz=200;
+    patch.short_target_db_hz=200;patch.long_target_db_hz=200;
+    patch.tx_dbm=10*std::log10(4000.);patch.helper_power_w=4.001;
+    patch.fhss="fake-list";patch.fhss_list="1000000,1010000,1030000";
+    patch.oscillator="gpsdo-xo";patch.rf_oscillator="gpsdo-xo";patch.audio_timing_error_seconds=.35;
+    Controller controller({true,true,patch});
+    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(10);
+    while(!controller.settings().transfer.key&&std::chrono::steady_clock::now()<deadline) {
+        controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    check(controller.settings().transfer.key&&controller.settings().transfer.modem.carrier_hz==1800&&
+          controller.settings().transfer.modem.fake_hopping&&!controller.settings().transfer.modem.fake_hopping->power_ramps,
+          "Target/carrier fixture must begin with a valid stored carrier and blocked short FHSS symbol");
+    const auto initial=controller.link_plan()->inputs;
+    const auto checked=[&](double carrier) {
+        auto input=initial;const auto base=input.options.modem;
+        input.options.modem=tuning::resolve(base.bandwidth_hz,200,input.mode,true,carrier,
+            base.dsss_factor,base.outer_dsss_version,base.search_arithmetic).config;
+        auto& config=input.options.modem;config.oscillator_search=base.oscillator_search;
+        config.receiver_strategy=base.receiver_strategy;config.receiver_cpu_budget=base.receiver_cpu_budget;
+        config.fake_hopping=transfer::transmit_hopping(*base.fake_hopping,input.options);
+        const auto effects=modem::oscillator_effects(config);
+        input.channel.clock_error_ppm=effects.clock_error_ppm;input.channel.frequency_offset_hz=effects.frequency_offset_hz;
+        input.channel.phase_noise_degrees_per_sqrt_second=effects.phase_noise_degrees_per_sqrt_second;
+        input.target_db_hz=-47;input.receiver_settings.reset();
+        const std::array companions{200.};
+        const auto target=planner::nearest_fit_target(input,companions,planner::ReceiveBanks{false,1});
+        check(target.has_value(),"Target/carrier fixture must retain a checked fit");
+        return std::pair{*target,modem::symbol_sample_count(planned_config(input,*target))};
+    };
+    const auto old=checked(1800);
+    controller.edit(F::short_bits,"00101");controller.edit(F::snr,"-47");prepare(controller);
+    const auto& config=controller.settings().transfer.modem;
+    check(config.carrier_hz>1800&&config.sample_rate>initial.options.modem.sample_rate&&
+          config.fake_hopping&&config.fake_hopping->power_ramps,
+          "A longer fitted symbol must activate FHSS gating and move an overlapping helper carrier");
+    const auto final=checked(config.carrier_hz);
+    check(old.first!=final.first&&controller.settings().transfer.receive_targets_db_hz.front()==final.first&&
+          modem::symbol_sample_count(config)==final.second&&controller.estimate()->wire_bits==5&&
+          controller.field(F::short_bits).text=="00101"&&controller.field(F::snr).text=="-47",
+          "Carrier fallback must refit the original target at its final sample clock without changing raw bits");
     controller.close();
 }
 void current_draft_and_modem_isolation() {
@@ -1896,14 +1956,22 @@ void helper_reference_link_budget() {
     const auto& helper=forty.helper_reference;
     check(helper.enabled&&helper.budget_available&&helper.geometry_available&&helper.tone_level_sufficient,
           "Strong configured helper needs a separate budget and nominal placement");
-    near(helper.effective_power_w,40,"Helper budget used stale Live data power");
-    near(helper.received_dbm,10*std::log10(40.)+30-180,"Helper received power is incorrect");
-    near(helper.cn0_db_hz,30.020599913279625,"Helper C/N0 is incorrect");
-    near(helper.tone_snr_db,20.020599913279625,"Helper tone SNR must use the observer's 10 Hz cell");
-    near(helper.pilot_power_w,36,"Planner pilot must use 90% of total straight-tone helper power");
-    near(helper.pilot_cn0_db_hz,helper.cn0_db_hz+10*std::log10(.9),"Pilot forecast used total helper C/N0");
-    near(helper.pilot_cn0_db_hz-helper.auxiliary_cn0_db_hz,10*std::log10(9.),
-         "Planner lost the pilot/auxiliary power split");
+    near(helper.configured_total_power_w,40,"Planner lost configured composite power");
+    near(helper.robust_power_w,4,"Helper budget used stale Live Robust power");
+    near(helper.effective_power_w,36,"Helper budget did not subtract Robust power");
+    near(helper.effective_total_power_w,40,"Planner changed the active composite power");
+    check(!helper.ratio_limited,"Unrestricted40W/4W allocation reported a ratio limit");
+    near(helper.received_dbm,10*std::log10(36.)+30-180,"Helper received power is incorrect");
+    near(helper.cn0_db_hz,10*std::log10(36.)+14,"Helper C/N0 is incorrect");
+    near(helper.tone_snr_db,helper.cn0_db_hz-10,"Helper tone SNR must use the observer's 10 Hz cell");
+    auto budget=inputs.receiver_settings->helper;budget.data_power_w=4;
+    const auto mean=helper::mean_power(budget);
+    near(helper.pilot_power_w,36*helper::pilot_power_fraction/mean.total,
+         "Planner high pilot must use separate mean-helper power");
+    near(helper.pilot_cn0_db_hz-helper.low_pilot_cn0_db_hz,3,"Planner lost the low pilot power ratio");
+    near(helper.pilot_cn0_db_hz-helper.auxiliary_cn0_db_hz,9,"Planner lost the auxiliary power ratio");
+    near(helper.low_pilot_power_w/helper.pilot_power_w,std::pow(10.,-.3),"Low pilot watts use amplitude instead of power ratio");
+    near(helper.auxiliary_power_w/helper.pilot_power_w,std::pow(10.,-.9),"Auxiliary watts use amplitude instead of power ratio");
     near(forty.actual_cn0_db_hz,baseline.actual_cn0_db_hz,"Helper changed ordinary payload C/N0");
     near(forty.margin_db,baseline.margin_db,"Helper changed the ordinary payload target margin");
     near(forty.cpu_realtime_ratio,baseline.cpu_realtime_ratio,"Unqualified helper gain changed the CPU estimate");
@@ -1912,25 +1980,37 @@ void helper_reference_link_budget() {
         const auto page=planner_page::build(forty,width,false,false);
         check(contains_text(page,"Helper reference on")&&contains_text(page,"dB in 10 Hz")&&
               contains_text(page,"Nominal helper audio center:")&&contains_text(page,"ordinary receiver baseline")&&
-              contains_text(page,"90% power share")&&contains_text(page,"not total CPU, measured speed"),
+              contains_text(page,"Active composite power:")&&contains_text(page,"mean helpers")&&
+              contains_text(page,"Low pilot:")&&contains_text(page,"(−3 dB)")&&contains_text(page,"(−9 dB)")&&
+              contains_text(page,"Component levels are a planning preview")&&
+              contains_text(page,"Receiver acquisition, tracking and decoding for this waveform remain deferred")&&
+              contains_text(page,"not total CPU, measured speed"),
               "Helper level, passband requirement and model limits must remain visible at all widths");
     }
     auto spread=forty.inputs;
     spread.mode=tuning::PatternMode::auto_keystream;
     spread.options.key=Crypto(Bytes(32,0x63));
     spread.options.modem.dsss_factor=10;
+    spread.options.modem.pulse_shaping=false;
+    spread.options.modem.carrier_hz=1725;
     spread.options.modem.outer_dsss_version=modem::OuterDsssVersion::interleaved_v2;
     spread.receiver_settings->transfer=spread.options;
     const auto spread_helper=selected(spread);
+    near(spread_helper.occupied_bandwidth_hz,360,
+         "Planner passband omitted unshaped outer spreading bandwidth");
     const auto& simulation=spread_helper.helper_reference;
     check(simulation.geometry_available&&simulation.simulation_level_modeled,
           "Interleave simulation needs an explicit modeled helper level");
     near(simulation.cn0_db_hz,helper.cn0_db_hz,"Interleave backoff changed calibrated hardware helper watts");
+    helper::PowerReference keyed_preview;keyed_preview.time_key=spread.options.key;
+    near(simulation.pilot_power_w,36*helper::pilot_power_fraction/helper::mean_power(budget,false,&keyed_preview).total,
+         "Keyed planner component preview used clear timestamp metadata");
     near(simulation.simulation_level_db,20*std::log10(.5),"Interleave simulation lost existing waveform backoff");
-    near(simulation.simulation_tone_snr_db,14,"Interleave helper simulation used hardware tone SNR");
+    near(simulation.simulation_tone_snr_db,simulation.tone_snr_db+20*std::log10(.5),
+         "Interleave helper simulation used hardware tone SNR");
     near(simulation.simulation_pilot_cn0_db_hz,simulation.pilot_cn0_db_hz+20*std::log10(.5),
          "Interleave pilot simulation omitted its actual waveform gain");
-    near(simulation.simulation_cn0_db_hz-simulation.simulation_data_cn0_db_hz,10,
+    near(simulation.simulation_cn0_db_hz-simulation.simulation_data_cn0_db_hz,10*std::log10(9.),
          "Interleave simulation changed the helper-to-payload power ratio");
     spread.receiver_settings->helper.power_w=0;
     const auto spread_ordinary=selected(spread);
@@ -1953,7 +2033,7 @@ void helper_reference_link_budget() {
          "Changing planner execution scope changed calibrated helper watts");
     inputs.receiver_settings->helper.power_w=1500;inputs.path_loss_db=210;
     const auto weak=selected(inputs);
-    near(weak.helper_reference.tone_snr_db,10*std::log10(1500.)+30-210+164-10,
+    near(weak.helper_reference.tone_snr_db,10*std::log10(1496.)+30-210+164-10,
          "Microwave helper link budget is incorrect");
     check(!weak.helper_reference.tone_level_sufficient&&
           contains_text(planner_page::build(weak,900,false,false),"Expected tone power does not report a measured lock"),
@@ -1961,8 +2041,28 @@ void helper_reference_link_budget() {
     inputs.receiver_settings->helper.ratio_limit_db=10;
     const auto limited=selected(inputs);
     near(limited.helper_reference.effective_power_w,40,"Helper ratio ceiling did not use current planner transmit power");
+    check(limited.helper_reference.ratio_limited&&contains_text(planner_page::build(limited,900,false,false),
+        "Helper Carrier Ratio Limit reduces the helper allocation"),"Planner hid the effective ratio limit");
+    near(limited.helper_reference.effective_total_power_w,44,"Ratio limit did not update effective composite power");
     check(limited.helper_reference.tone_snr_db<weak.helper_reference.tone_snr_db,
           "A reused planner cache hid the changed helper ratio ceiling");
+    for(const auto total:{helper.robust_power_w,1.}) {
+        auto no_remainder=inputs;no_remainder.receiver_settings->helper.power_w=total;
+        const auto zero=selected(no_remainder);const auto& empty=zero.helper_reference;
+        near(empty.effective_power_w,0,"Configured total at or below Robust must leave zero helper power");
+        near(empty.effective_total_power_w,helper.robust_power_w,"Zero helper remainder changed Robust power");
+        check(empty.enabled&&empty.budget_available&&!empty.geometry_available&&!empty.tone_level_sufficient&&
+              !empty.conditional.available&&!empty.conditional.precision.supported&&
+              empty.status.find("No helper power remains")!=std::string::npos&&
+              empty.status.find("numerical range")==std::string::npos,
+              "Valid zero helper remainder must retain its budget without fabricated geometry or precision");
+        const auto page=planner_page::build(zero,900,false,false);
+        check(contains_text(page,"mean helpers 0 W")&&contains_text(page,"No helper power remains")&&
+              contains_text(page,"Helper reference configured · no helper power")&&
+              !contains_text(page,"The strongest tone in the expected helper range supplies")&&
+              !contains_text(page,"Expected helper C/N0:")&&!contains_text(page,"High pilot: preview steady tone"),
+              "Zero helper remainder must show its allocation without a logarithmic component level");
+    }
     for(const auto removed:{helper::Frequency::low,helper::Frequency::cochannel}) {
         auto rejected=inputs.receiver_settings->helper;rejected.frequency=removed;bool failed=false;
         try {helper::validate(rejected);}catch(const Error&){failed=true;}
@@ -2022,8 +2122,11 @@ void helper_conditional_acquisition_plan() {
         // The microwave command has a separate -33.197 dB-Hz planner preview.
         // Its explicit short/long -3.072 dB-Hz targets retain 128 s symbols.
         input.target_db_hz=eme?-3.0720996964786846:8;
-        input.options.modem=tuning::resolve(eme?1:36,input.target_db_hz,input.mode,true,1500,
+        input.options.modem=tuning::resolve(eme?1:36,input.target_db_hz,input.mode,true,1725,
             eme?1:10,modem::OuterDsssVersion::interleaved_v2).config;
+        // Retain the original128s/6000Hz receiver geometry while raising only
+        // the audio carrier above the fixed helpers' gate/power guard.
+        if(eme)input.options.modem.sample_rate=6000;
         input.options.key.emplace(Bytes(32,0x57));
         input.options.automatic_receive_profiles=true;input.options.receive_pattern_mode=input.mode;
         input.options.audio_timing_error_seconds=0;
@@ -2042,10 +2145,10 @@ void helper_conditional_acquisition_plan() {
             check(input.fake_hopping.available,"Microwave helper fixture lost its Fake FCC profile");
             input.observer_hopping=input.fake_hopping.observer();
             modem::FhssPlan hops;hops.channels=input.fake_hopping.channels;hops.dwell_seconds=.4;
-            for(unsigned i=0;i<hops.channels;++i)hops.shifts[i]=input.fake_hopping.center(i)-1500;
+            for(unsigned i=0;i<hops.channels;++i)hops.shifts[i]=input.fake_hopping.center(i)-input.options.modem.carrier_hz;
             input.options.modem.fake_hopping=transfer::transmit_hopping(hops,input.options);
             // Match the planner's conservative oscillator domain at the highest hop.
-            input.options.modem.oscillator_search->rf_shift_hz=input.fake_hopping.last_hz-1500;
+            input.options.modem.oscillator_search->rf_shift_hz=input.fake_hopping.last_hz-input.options.modem.carrier_hz;
         }
         const auto effects=modem::oscillator_effects(input.options.modem);
         input.channel.clock_error_ppm=effects.clock_error_ppm;
@@ -2116,8 +2219,19 @@ void helper_conditional_acquisition_plan() {
         check(advice.geometry_available&&advice.budget_available&&advice.tone_level_sufficient,
               "Reported crystal/microwave configuration lost its separate helper geometry and budget");
         matches_reference_search(input,assisted);
-        near(advice.frequency_hz-advice.auxiliary_frequency_hz,helper::auxiliary_pilot_spacing_hz,
-             "Planner did not retain the adjacent auxiliary/pilot geometry");
+        auto inactive_callsign=input;
+        inactive_callsign.receiver_settings->helper.callsign=std::string(20,'Q');
+        const auto ignored=selected(inactive_callsign,cache);
+        check(ignored.helper_reference.geometry_available&&ignored.helper_reference.budget_available&&
+              ignored.helper_reference.conditional.precision.supported,
+              "An invalid inactive callsign must not disable keyed helper geometry or precision forecasts");
+        near(ignored.helper_reference.conditional.uncertainty_hz,advice.conditional.uncertainty_hz,
+             "An inactive callsign changed the keyed precision preview");
+        check(inactive_callsign.receiver_settings->helper.callsign==std::string(20,'Q'),
+              "Keyed helper forecasting overwrote the saved clear-mode callsign");
+        near(advice.low_frequency_hz,550,"Planner moved the fixed low pilot");
+        near(advice.auxiliary_frequency_hz,950,"Planner moved the fixed auxiliary");
+        check(advice.frequency_hz>=2400,"Planner lowered the high pilot below2400Hz");
         check(advice.status.find("Robust acquisition waits for helper lock")!=std::string::npos&&
               advice.status.find("requires Complex only")==std::string::npos,
               "Manual helper policy lost measured qualification or required a forced backend");
@@ -2145,7 +2259,7 @@ void helper_conditional_acquisition_plan() {
               !uncaptured.helper_reference.conditional.available&&
               uncaptured.helper_reference.conditional.reason.find("capture format")!=std::string::npos,
               "Unknown physical capture format manufactured a conditional helper price");
-        auto weak=input;weak.receiver_settings->helper.power_w=1e-6;
+        auto weak=input;weak.receiver_settings->helper.power_w=std::pow(10.,(input.tx_dbm-30)/10)+1e-6;
         const auto prospective=selected(weak,cache);
         unchanged(prospective,selected([&]{auto off=weak;off.receiver_settings->helper.power_w=0;return off;}(),cache));
         const auto& unsupported=prospective.helper_reference.conditional;
@@ -2163,22 +2277,27 @@ void helper_conditional_acquisition_plan() {
                   "Scheduled geometry advertised an unsupported conditional receiver price");
         }
     }
-    // Retain the wide shared-radio and folded Rate360/Fake-FHSS cases, using
-    // the current actual receiver-search API instead of the retired mask plan.
-    for(const bool short_fhss:{false,true}) {
+    // Keep wide shared-radio and short FHSS advice; the old folded1500Hz
+    // carrier now conflicts with the fixed lower helpers and must be rejected.
+    for(const auto scenario:{0,1,2}) {
+        const bool short_fhss=scenario!=0,overlapping=scenario==1;
         auto input=fixture(false);auto oscillator=input.options.modem.oscillator_search;
         if(short_fhss) {
             input.target_db_hz=40;input.path_loss_db=60;
-            input.options.modem=tuning::resolve(360,40,input.mode,true,1500,10,
+            const auto carrier=overlapping?1500.:4500.;
+            input.options.modem=tuning::resolve(360,40,input.mode,true,carrier,10,
                 modem::OuterDsssVersion::interleaved_v2).config;
+            // Keep the original sampled short-symbol calendar independent of
+            // the higher audio carrier's automatically recommended clock.
+            input.options.modem.sample_rate=14400;
             input.options.modem.oscillator_search=oscillator;
             input.fake_hopping=fhss::resolve(fhss::Preference::fcc,input.options.modem);
             check(input.fake_hopping.available,"Short helper fixture lost its Fake FCC profile");
             input.observer_hopping=input.fake_hopping.observer();
             modem::FhssPlan hops;hops.channels=input.fake_hopping.channels;hops.dwell_seconds=.4;
-            for(unsigned i=0;i<hops.channels;++i)hops.shifts[i]=input.fake_hopping.center(i)-1500;
+            for(unsigned i=0;i<hops.channels;++i)hops.shifts[i]=input.fake_hopping.center(i)-carrier;
             input.options.modem.fake_hopping=transfer::transmit_hopping(hops,input.options);
-            input.options.modem.oscillator_search->rf_shift_hz=input.fake_hopping.last_hz-1500;
+            input.options.modem.oscillator_search->rf_shift_hz=input.fake_hopping.last_hz-carrier;
             check(modem::deferred_symbols(input.options.modem),"Short helper fixture lost its ordinary FHSS calendar");
         }else {
             input.options.modem.oscillator_search->rf=tuning::oscillator_model(tuning::parse_oscillator_preset("crystal"));
@@ -2196,7 +2315,14 @@ void helper_conditional_acquisition_plan() {
         input.helper_forecast_capture_logical_sample_rate=planned_config(input,input.target_db_hz).sample_rate;
         planner::Cache cache;const auto assisted=selected(input,cache);
         auto ordinary=input;ordinary.receiver_settings->helper.power_w=0;
-        unchanged(assisted,selected(ordinary,cache));matches_reference_search(input,assisted);
+        unchanged(assisted,selected(ordinary,cache));
+        if(overlapping) {
+            check(!assisted.helper_reference.geometry_available&&!assisted.helper_reference.conditional.available&&
+                  assisted.helper_reference.status.find("fixed 550/950 Hz tones overlap")!=std::string::npos,
+                  "Overlapping Robust bandwidth must reject fixed-helper geometry without changing ordinary reception");
+            continue;
+        }
+        matches_reference_search(input,assisted);
         check(contains_text(planner_page::build(assisted,900,false,false),
                   "does not qualify actual hardware retuning or self-interference rejection"),
               "Fake-FHSS or wide search was presented as physical retune qualification");
@@ -2245,7 +2371,9 @@ void helper_conditional_acquisition_plan() {
               "Helper fabricated a CPU improvement in the ordinary graph");
     }
     for(const double rate:{100,3600,12000}) {
-        launch_command::Patch patch;patch.rate_hz=rate;patch.carrier_hz=std::max(1500.,.75*rate);
+        // Keep a valid custom placement above the fixed lower helpers. An
+        // overlapping carrier must now fall back to a valid recommendation.
+        launch_command::Patch patch;patch.rate_hz=rate;patch.carrier_hz=std::max(3000.,rate+2000.);
         Controller controller({false,false,patch});
         const auto before=controller.settings().transfer.modem;
         const auto rate_text=controller.field(ui::Field::bandwidth).text;
@@ -2254,7 +2382,7 @@ void helper_conditional_acquisition_plan() {
         check(std::abs(controller.settings().helper.power_w-1500)<1e-9&&controller.field(ui::Field::bandwidth).text==rate_text&&
               std::tie(after.bandwidth_hz,after.sample_rate,after.carrier_hz,after.pattern_symbols,after.spreading_factor,after.integration_seconds)==
               std::tie(before.bandwidth_hz,before.sample_rate,before.carrier_hz,before.pattern_symbols,before.spreading_factor,before.integration_seconds),
-              "Enabling helper must not silently change the configured 100 Hz, SSB or 12 kHz waveform");
+              "Enabling helper must preserve a valid custom 100 Hz, SSB or 12 kHz waveform");
         controller.close();
     }
 }
@@ -2769,6 +2897,12 @@ void document_semantics_layout_and_plots() {
 }
 int main(int argc,char** argv) {
     try {
+        if(argc==2&&std::string_view(argv[1])=="--async-edits-only") {
+            asynchronous_planner_edits();std::cout<<"Asynchronous planner input snapshots passed\n";return 0;
+        }
+        if(argc==2&&std::string_view(argv[1])=="--target-alignment-only") {
+            controller_target_alignment();target_fit_after_fhss_carrier_fallback();std::cout<<"Controller target alignment passed\n";return 0;
+        }
         if(argc==2&&std::string_view(argv[1])=="--cpu-scope-only") {
             receiver_overlay_and_cpu_status();std::cout<<"Ordinary receiver CPU scope and overlays passed\n";return 0;
         }
@@ -2805,7 +2939,7 @@ int main(int argc,char** argv) {
         persistent_worker_curve_cache();removing_key_withdraws_cached_observer();stable_planner_navigation_document();
         asynchronous_planner_edits();current_draft_and_modem_isolation();application_prompt_roundtrips();all_target_dropdowns_and_native_planner_editor();
         controller_checked_navigation();
-        controller_target_alignment();
+        controller_target_alignment();target_fit_after_fhss_carrier_fallback();
         failed_draft_estimate_and_recovery();one_warning_on_planner_page();
         selected_workspace_reaches_planner();
         shared_link_budget_without_simulation();shared_link_controls_visibility();

@@ -32,7 +32,8 @@ helper::Options options() {
     helper::Options h;h.power_w=15000;h.data_power_w=4;return h;
 }
 bool same_plan(const helper::Plan& a,const helper::Plan& b) {
-    return a.frequency_hz==b.frequency_hz&&a.auxiliary_frequency_hz==b.auxiliary_frequency_hz&&a.helper_gain==b.helper_gain&&
+    return a.frequency_hz==b.frequency_hz&&a.auxiliary_frequency_hz==b.auxiliary_frequency_hz&&
+        a.low_frequency_hz==b.low_frequency_hz&&a.pilot_dwell_gating==b.pilot_dwell_gating&&a.helper_gain==b.helper_gain&&
         a.data_gain==b.data_gain&&a.effective_power_w==b.effective_power_w;
 }
 void deferred_support_still_needs_gate_skirt() {
@@ -61,12 +62,17 @@ void deferred_support_still_needs_gate_skirt() {
           helper::occupied_bandwidth(c)==5850,"HF gate allowance was dropped or ordinary bandwidth changed");
     const auto mono=helper::mono_passband(band);
     check(mono.lower_hz==0&&mono.upper_hz==4425,"real mono gate spectrum was not folded into its full positive union");
-    auto h=options();const auto high=helper::plan(h,band,48000);
-    check(high.auxiliary_frequency_hz>=mono.upper_hz+450&&
-          high.frequency_hz-high.auxiliary_frequency_hz==helper::auxiliary_pilot_spacing_hz&&high.frequency_hz+250<24000&&
-          high.data_gain==helper::calibrated_data_gain(h),"folded High helper changed payload power or lost its leakage guard");
-    check(helper::minimum_output_rate(h,band,c.sample_rate)==48000,
-          "folded helper did not keep independent hardware-rate negotiation");
+    auto h=options();
+    rejects([&] {helper::plan(h,band,48000);},
+            "folded data overlapping the fixed550/950Hz helpers was accepted");
+    auto separated=band;separated.carrier_hz=6500;
+    const auto high=helper::plan(h,separated,48000);
+    check(high.low_frequency_hz==550&&high.auxiliary_frequency_hz==950&&
+          high.frequency_hz>=std::max(2400.,helper::mono_passband(separated).upper_hz+450)&&high.frequency_hz+250<24000&&
+          high.data_gain==helper::calibrated_data_gain(h,true),
+          "raised Robust carrier changed fixed helper frequencies, payload power or leakage guard");
+    check(helper::minimum_output_rate(h,separated,c.sample_rate)==48000,
+          "separated helper did not keep independent hardware-rate negotiation");
     const auto wider=helper::placement_band(c,6000);
     check(wider.waveform_bandwidth_hz==2250&&wider.gate_bandwidth_hz==3750&&
           helper::mono_passband(wider).upper_hz==4500,"local profile union was truncated during placement");
@@ -87,8 +93,10 @@ void long_gate_and_nonfolding_identity() {
     check(band.waveform_bandwidth_hz==.625&&band.gate_bandwidth_hz==200&&
           helper::occupied_bandwidth(c)==200.625,"active long-symbol gate allowance was reduced");
     const auto h=options();
-    check(same_plan(helper::plan(h,band,48000),helper::plan(h,1500,200.625,48000)),
-          "nonfolding gate-aware placement changed the established symmetric helper plan");
+    auto separated=band;separated.carrier_hz=4000;
+    check(same_plan(helper::plan(h,separated,48000),
+                    helper::plan(h,helper::PlacementBand{4000,200.625,0,true},48000)),
+          "nonfolding gate-aware placement changed the equivalent symmetric gated helper plan");
     // Gate-aware and scalar geometry agree for the same valid High group.
     const helper::PlacementBand plain{4000,200,0};
     check(same_plan(helper::plan(h,plain,48000),helper::plan(h,4000,200,48000)),
@@ -126,16 +134,18 @@ void reference_level_accounting() {
     const auto h=options();
     const auto nominal=36.020599913279625-205+164;
     const auto hardware=helper::reference_level(h,nominal);
-    const auto expected=30+10*std::log10(15000.)-205+164;
-    check(hardware.effective_power_ratio==3750&&std::abs(hardware.straight_cn0_db_hz-expected)<1e-12&&
+    const auto expected=30+10*std::log10(14996.)-205+164;
+    check(hardware.effective_power_ratio==3749&&std::abs(hardware.straight_cn0_db_hz-expected)<1e-12&&
           hardware.usable_cn0_db_hz==hardware.straight_cn0_db_hz&&
           hardware.payload_average_cn0_db_hz==nominal,"helper reference level did not match the RF link budget");
-    check(hardware.pilot_effective_power_ratio==hardware.effective_power_ratio*helper::pilot_power_fraction&&
+    const auto mean=helper::mean_power(h).total;
+    check(std::abs(hardware.pilot_effective_power_ratio-hardware.effective_power_ratio*helper::pilot_power_fraction/mean)<1e-9&&
           std::abs(hardware.pilot_straight_cn0_db_hz-hardware.straight_cn0_db_hz-
-              10*std::log10(helper::pilot_power_fraction))<1e-12&&
+              10*std::log10(helper::pilot_power_fraction/mean))<1e-12&&
           std::abs(hardware.pilot_straight_cn0_db_hz-hardware.auxiliary_straight_cn0_db_hz-
-              10*std::log10(9.))<1e-12,
-          "pilot/auxiliary reference levels did not preserve the90/10 straight-tone power split");
+              9.)<1e-12&&
+          std::abs(10*std::log10(helper::low_pilot_power_fraction/helper::pilot_power_fraction)+3)<1e-12,
+          "pilot/auxiliary reference levels did not preserve mean calibration and3/9dB steady-tone powers");
     const auto sampled=helper::reference_level(h,nominal,.5,.25,.5);
     const auto backoff=20*std::log10(.5);
     check(std::abs(sampled.straight_cn0_db_hz-hardware.straight_cn0_db_hz-backoff)<1e-12&&
@@ -157,9 +167,11 @@ void reference_level_accounting() {
         rejects([&] {helper::reference_level(h,nominal,1,fraction);},"invalid payload power fraction was accepted");
         rejects([&] {helper::reference_level(h,nominal,1,1,fraction);},"invalid usable tone fraction was accepted");
     }
-    auto unrepresentable=h;unrepresentable.power_w=std::numeric_limits<double>::denorm_min();
-    unrepresentable.data_power_w=std::numeric_limits<double>::max();
-    rejects([&] {helper::reference_level(unrepresentable,nominal);},"unrepresentable helper ratio was silently rounded to zero");
+    auto no_remainder=h;no_remainder.power_w=std::numeric_limits<double>::denorm_min();
+    no_remainder.data_power_w=std::numeric_limits<double>::max();
+    const auto absent=helper::reference_level(no_remainder,nominal);
+    check(absent.effective_power_ratio==0&&std::isinf(absent.straight_cn0_db_hz)&&absent.straight_cn0_db_hz<0,
+          "total power below Robust invented a helper reference");
     auto disabled=h;disabled.power_w=0;
     rejects([&] {helper::reference_level(disabled,nominal);},"disabled helper produced a finite tone-level prediction");
 }

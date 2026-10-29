@@ -128,6 +128,9 @@ std::uint64_t StreamingTransmitter::original_source_total_samples()const {
 std::uint64_t StreamingTransmitter::physical_output_origin()const {
     return impl_->noise?impl_->noise->physical_output_origin():impl_->pattern->physical_output_origin();
 }
+std::uint64_t StreamingTransmitter::physical_payload_begin()const {
+    return impl_->noise?impl_->noise->physical_payload_begin():impl_->pattern->physical_payload_begin();
+}
 std::uint64_t StreamingTransmitter::physical_valid_payload_end()const {
     return impl_->noise?impl_->noise->physical_valid_payload_end():impl_->pattern->physical_valid_payload_end();
 }
@@ -198,6 +201,9 @@ void StreamingTransmitter::preview_last_analytic(std::span<Complex> output)const
     if(output.size()>analytic_preview_limit)throw Error("analytic streaming preview exceeds its bounded history");
     if(impl_->noise)impl_->noise->preview_last_analytic(output);
     else impl_->pattern->preview_last_analytic(output);
+}
+Complex StreamingTransmitter::preview_analytic_at(std::uint64_t sample,std::stop_token stop)const {
+    return impl_->noise?impl_->noise->preview_analytic_at(sample,stop):impl_->pattern->preview_analytic_at(sample,stop);
 }
 
 struct StreamingReceiver::Impl {
