@@ -1264,15 +1264,12 @@ A further persistent row holds editable Helper Carrier Power with presets,
 Ratio Limit, Frequency and editable Callsign; power zero disables the other
 helper controls. Finite nonnegative watts are accepted, with 10 kW and 15 kW
 presets alongside lower powers. Invalid edits retain the last valid value and
-block transmission until corrected. Encryption hides the helper callsign field
-and ignores its stored value for transmission, including invalid inactive text;
-the preference is preserved. Clear-mode callsign validation resumes when
-encryption is disabled. This normalization passed source review and focused
-shared controller/parser/planner checks. Broader GUI/native-adapter qualification
-remains separate, and focused receiver sanitizer coverage does not qualify GUI
-entry points. Unencrypted output uses a nonempty callsign or
-otherwise clear time; encrypted output uses encrypted time, with no public
-callsign. The helper-only action is visible in Developer mode.
+block transmission until corrected. The callsign field remains available with or
+without encryption and accepts at most 16 printable ASCII characters. Each
+metadata record contains a time phase and the callsign; with encryption selected,
+the time phase is clear and the callsign field is encrypted. Broader GUI/native-
+adapter qualification remains separate from focused shared-controller checks.
+The helper-only action is visible in Developer mode.
 
 Placement uses shared occupied data bandwidth including spreading, shaping and
 applicable gating, plus power-qualified leakage guards. The low pilot stays at

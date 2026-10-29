@@ -26,6 +26,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <iostream>
+#include <iomanip>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -578,7 +579,8 @@ void physical_matched() {
 
 bool tail_trace_filter(const char* name) noexcept {
     const std::string_view event{name};return event=="trace_begin"||event=="receiver_signal_commit"||
-        event=="receiver_selection"||event=="receiver_bank_admitted"||event.starts_with("receiver_helper_");
+        event=="receiver_selection"||event=="receiver_bank_build"||event=="receiver_profile_unavailable"||
+        event=="receiver_bank_admitted"||event.starts_with("receiver_helper_");
 }
 bool framed_tail_trace_filter(const char* name) noexcept {
     return tail_trace_filter(name)||std::string_view(name)=="receiver_acquisition_work";
@@ -603,10 +605,17 @@ struct TailDates {
     ~TailDates(){live::detail::simulation_hook.store(nullptr);}
 };
 struct LiveTailResult {Bytes wire;std::uint64_t transmit_epoch=0;};
-LiveTailResult live_tail(bool helper_on,int kind=0) {
+LiveTailResult live_tail(bool helper_on,int kind=0,bool explicit_oscillator=false) {
     live::Settings value;value.simulation=true;value.full_duplex=true;
-    auto& c=value.transfer.modem;c.sample_rate=2000;c.carrier_hz=500;c.bandwidth_hz=200;
+    // Keep the same bandwidth/spreading duration while placing Robust above
+    // the fixed 550/950 Hz tones and inside the capture converter's flat band.
+    // The former 2 kHz / 500 Hz geometry could never admit this Helper waveform.
+    auto& c=value.transfer.modem;c.sample_rate=4800;c.carrier_hz=1800;c.bandwidth_hz=200;
     c.spreading_factor=16;c.pulse_shaping=false;c.receiver_strategy=modem::ReceiverStrategy::automatic;
+    // The supported-path discriminator uses the existing live Helper search
+    // catalogue. Keep the original no-policy case separate: it has implicit
+    // timing lanes which cannot claim narrowed acquisition from scalar RF.
+    if(explicit_oscillator)c.oscillator_search=modem::OscillatorSearchConfig{{.01,0},{1,0},1e6,3};
     std::array<std::uint8_t,32> secret{};for(std::size_t i=0;i<secret.size();++i)secret[i]=static_cast<std::uint8_t>(i*11+7);
     value.transfer.key=Crypto(secret);value.transfer.timestamp=0;value.transfer.search_seconds=0;
     value.transfer.recovery_options.enabled=false;value.simulation_snr_db=30;
@@ -628,6 +637,7 @@ LiveTailResult live_tail(bool helper_on,int kind=0) {
         (std::string("helper-tail-rolling-")+std::to_string(kind)+"-"+(helper_on?"on":"off")+"-"+std::to_string(audio::trace::identity())+"-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".jsonl");
     std::filesystem::create_directories(path.parent_path());
     std::atomic<std::int64_t> replay_ms{0};bool finished=false,exact=false;std::uint64_t admitted=0,samples=0,transmit_epoch=0;
+    std::string receiver_error,helper_status;
     {
         audio::trace::Scope trace(path,false,kind?&framed_tail_trace_filter:&tail_trace_filter);TailDates dates;
         // Control only the initial station clock. The receiver still has no
@@ -637,6 +647,7 @@ LiveTailResult live_tail(bool helper_on,int kind=0) {
         const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(kind==2?90:60);
         while(std::chrono::steady_clock::now()<deadline) {
             const auto snapshot=session.snapshot();samples=snapshot.samples_received;admitted=snapshot.receiver_admissions;
+            receiver_error=snapshot.receiver_error;helper_status=snapshot.helper_status;
             if(!snapshot.error.empty())std::cerr<<"live helper="<<helper_on<<" error="<<snapshot.error<<'\n';
             check(snapshot.error.empty()&&!snapshot.receiver_health.failed()&&!snapshot.receiver_health.dropped_samples,
                   "rolling Auto helper payload-tail fixture caused an ordinary receiver error");
@@ -648,6 +659,7 @@ LiveTailResult live_tail(bool helper_on,int kind=0) {
                     transfer::xor_binary_bits(expected,dated);expected_text=binary(expected);}
                 else {dated_wire=expected;transfer::xor_binary_bits(dated_wire,dated);}
                 const auto visible=session.snapshot();
+                receiver_error=visible.receiver_error;helper_status=visible.helper_status;
                 for(const auto& signal:visible.signals) {
                     if(signal.helper_carrier||!signal.received_bits)continue;
                     const auto raw=signal.binary?signal.text:signal.raw_bits;
@@ -690,16 +702,17 @@ LiveTailResult live_tail(bool helper_on,int kind=0) {
     bool raw_qualified=false,realtime_seen=false,parallel_assistance=false,later_epoch_work=false;
     while(std::getline(input,line)) {
         phase_applied=phase_applied||line.find("\"event\":\"receiver_helper_phase_applied\"")!=std::string::npos;
+        if(line.find("\"event\":\"receiver_helper_raw_reference\"")!=std::string::npos &&
+           line.find("\"qualified\":")!=std::string::npos && trace_number(line,"qualified")) {
+            const auto sample=trace_number(line,"sample"),end=trace_number(line,"captured_end");
+            const auto frequency=trace_real(line,"frequency_hz"),uncertainty=trace_real(line,"uncertainty_hz");
+            check(sample<end && std::isfinite(frequency) && frequency>0 && std::isfinite(uncertainty) && uncertainty>=0,
+                  "helper reference lost its actual measured frequency or captured support");
+            raw_qualified=true;
+        }
         if(kind) {
             parallel_assistance|=line.find("\"event\":\"receiver_helper_assistance_admitted\"")!=std::string::npos ||
                 line.find("\"event\":\"receiver_helper_conditioning_admitted\"")!=std::string::npos;
-            if(line.find("\"event\":\"receiver_helper_raw_reference\"")!=std::string::npos && trace_number(line,"qualified")) {
-                const auto sample=trace_number(line,"sample"),end=trace_number(line,"captured_end");
-                const auto frequency=trace_real(line,"frequency_hz"),uncertainty=trace_real(line,"uncertainty_hz");
-                check(sample<end && std::isfinite(frequency) && frequency>0 && std::isfinite(uncertainty) && uncertainty>=0,
-                      "framed helper reference lost its actual measured frequency or captured support");
-                raw_qualified=true;
-            }
             if(line.find("\"event\":\"receiver_bank_admitted\"")!=std::string::npos) {
                 const auto sample=trace_number(line,"sample"),epoch=trace_number(line,"epoch");
                 first_admission=std::min(first_admission,sample);first_epoch=std::min(first_epoch,epoch);
@@ -762,11 +775,18 @@ LiveTailResult live_tail(bool helper_on,int kind=0) {
         check(found->second<=UINT64_MAX-payload_jobs,"framed payload work total overflowed");payload_jobs+=found->second;
         payload_narrowed_work|=narrowed_rows.contains(row);
     }
-    std::cout<<"rolling kind="<<kind<<" helper="<<helper_on<<" finished="<<finished<<" exact="<<exact<<" trace_bits="<<last
+    std::cout<<"rolling kind="<<kind<<" helper="<<helper_on<<" explicit_oscillator="<<explicit_oscillator
+             <<" finished="<<finished<<" exact="<<exact<<" trace_bits="<<last
              <<" transmit_epoch="<<transmit_epoch<<" id="<<id<<" revision="<<revision<<" pending="<<pending<<" complete="<<complete
              <<" observed_end="<<observed_end<<" helper_assisted_committed="<<assisted_committed<<" phase_applied="<<phase_applied<<" admissions="<<admitted<<" samples="<<samples
-             <<" raw_qualified="<<raw_qualified<<" payload_joined_jobs="<<payload_jobs<<" payload_narrowed_work="<<payload_narrowed_work<<" later_epoch_work="<<later_epoch_work<<" trace="<<path<<'\n';
-    if(!kind)check(admitted>8,"controlled-clock tail fixture did not retain actual rolling receiver admissions");
+             <<" raw_qualified="<<raw_qualified<<" payload_joined_jobs="<<payload_jobs<<" payload_narrowed_work="<<payload_narrowed_work<<" later_epoch_work="<<later_epoch_work
+             <<" receiver_error="<<std::quoted(receiver_error)<<" helper_status="<<std::quoted(helper_status)<<" trace="<<path<<'\n';
+    if(!kind) {
+        if(helper_on)check(raw_qualified,"raw helper payload-tail fixture did not observe an actual qualified Helper reference");
+        if(helper_on && explicit_oscillator)check(assisted_committed,
+            "supported raw helper payload-tail fixture did not commit assisted ordinary payload work");
+        check(admitted>8,"controlled-clock tail fixture did not retain actual rolling receiver admissions");
+    }
     else if(helper_on)check(raw_qualified && payload_jobs && !parallel_assistance,
         "framed helper did not feed qualified actual work to its ordinary payload receiver");
     else check(!raw_qualified && !realtime_seen && !parallel_assistance && later_epoch_work,
@@ -776,8 +796,8 @@ LiveTailResult live_tail(bool helper_on,int kind=0) {
     if(!base){std::filesystem::remove(path);std::filesystem::remove(path.string()+".seal");}
     return {dated_wire,transmit_epoch};
 }
-void live_matched(int kind=0) {
-    const auto ordinary=live_tail(false,kind),helper=live_tail(true,kind);
+void live_matched(int kind=0,bool explicit_oscillator=false) {
+    const auto ordinary=live_tail(false,kind,explicit_oscillator),helper=live_tail(true,kind,explicit_oscillator);
     // Each run above compares its entire dated wire and recovered source. A
     // helper lead reserves a future private epoch rather than delaying a source
     // already keyed for the current epoch; its masked wire can therefore differ.
@@ -795,6 +815,7 @@ int main(int argc,char** argv) {try {
     if(argc==2&&std::string(argv[1])=="--frontend-only"){frontend_physical_notch();notch_retune_components();return 0;}
     if(argc==2&&std::string(argv[1])=="--physical-only"){physical_matched();return 0;}
     if(argc==2&&std::string(argv[1])=="--live-only"){live_matched();return 0;}
+    if(argc==2&&std::string(argv[1])=="--live-supported-only"){live_matched(0,true);return 0;}
     if(argc==2&&std::string(argv[1])=="--framed-text-only"){live_matched(1);return 0;}
     if(argc==2&&std::string(argv[1])=="--attachment-only"){live_matched(2);return 0;}
     if(argc==1){history_preserves_complete_tail();frontend_physical_notch();notch_retune_components();physical_matched();live_matched();live_matched(1);live_matched(2);return 0;}

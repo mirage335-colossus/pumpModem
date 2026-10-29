@@ -122,9 +122,9 @@ Modem:
   --helper-data-power WATTS  Robust power for helper amplitude calibration; default4W
   --helper-ratio-limit DB  10, 20, 40, 60, 80, 90 (default); caps helper power
   --helper-frequency high  Helper auxiliary and pilot above Robust; only high supported
-  --helper-callsign TEXT  Up to19 printable ASCII characters; defaults to --callsign
-                        Ignored when encryption is selected; optional encrypted time instead
-                        Empty: optional compact time; helper time is unauthenticated
+  --helper-callsign TEXT  Up to 16 printable ASCII characters; defaults to --callsign
+                        Included with the time phase; encrypted when a key is selected
+                        Helper metadata is unauthenticated
   --helper-only         listen: transmit the helper without Robust data/noise
   --fec 20|60|off        Reed-Solomon parity overhead, default60
   --no-compression      Diagnostic override; both peers must select the same source codec
@@ -306,7 +306,7 @@ double helper_power(const Args& a,const std::string& name,double fallback) {
         throw Error("--"+name+" requires finite nonnegative watts");
     return watts;
 }
-helper::Options helper_options(const Args& a,bool keyed) {
+helper::Options helper_options(const Args& a,bool) {
     helper::Options result;
     result.power_w=helper_power(a,"helper-power",0);
     result.data_power_w=helper_power(a,"helper-data-power",4);
@@ -324,10 +324,10 @@ helper::Options helper_options(const Args& a,bool keyed) {
     const auto frequency=a.get("helper-frequency","high");
     if(frequency=="high")result.frequency=helper::Frequency::high;
     else throw Error("--helper-frequency supports only high; low and 0 Hz are no longer supported");
-    result.callsign=keyed?"":a.get("helper-callsign",helper::effective_helper_power(result)>0?a.get("callsign"):"");
-    if(result.callsign.size()>19||std::any_of(result.callsign.begin(),result.callsign.end(),
+    result.callsign=a.get("helper-callsign",helper::effective_helper_power(result)>0?a.get("callsign"):"");
+    if(result.callsign.size()>16||std::any_of(result.callsign.begin(),result.callsign.end(),
         [](unsigned char ch){return ch<32||ch>126;}))
-        throw Error("helper carrier callsign must contain at most 19 printable ASCII characters");
+        throw Error("helper carrier callsign must contain at most 16 printable ASCII characters");
     helper::validate(result);
     if(a.has("helper-only") && (a.command!="listen" || helper::effective_helper_power(result)<=0 || a.has("text") || a.has("input")))
         throw Error("--helper-only requires listen, Helper Carrier power above the Robust allocation, and no message input");
@@ -807,7 +807,7 @@ public:
                 const auto required=helper::AuxiliaryMetadataReceiver::workspace_required(rate);
                 if(required>grant_)unavailable_=true;
                 else receiver_.emplace(rate,plan_.auxiliary_frequency_hz,plan_.frequency_hz,
-                    keys_,precision_,required,first);
+                    keys_,precision_,required,first,std::nullopt,plan_.low_frequency_hz);
             }catch(const std::exception&) {unavailable_=true;}
         }
         if(receiver_)for(std::size_t offset=0;offset<samples.size();offset+=4096) {
@@ -842,12 +842,9 @@ void report_helper_capture_json(const HelperCapture& helper_capture) {
     std::cout<<",\"metadata\":";
     if(helper_capture.reference&&helper_capture.reference->metadata) {
         const auto& metadata=*helper_capture.reference->metadata;
-        std::cout<<"{\"kind\":\""<<(metadata.kind==helper::MetadataKind::callsign?"callsign":
-            metadata.kind==helper::MetadataKind::clear_time?"clear_time":"encrypted_time")
-            <<"\",\"authenticated\":false";
-        if(metadata.kind==helper::MetadataKind::callsign)
-            std::cout<<",\"callsign\":\""<<json_escape(received_text(metadata.callsign))<<'"';
-        else std::cout<<",\"time_ticks\":"<<metadata.time_ticks;
+        std::cout<<"{\"kind\":\"metadata\",\"authenticated\":false"
+            <<",\"callsign\":\""<<json_escape(received_text(metadata.callsign))<<'"'
+            <<",\"time_phase\":"<<metadata.time_ticks;
         std::cout<<'}';
     } else std::cout<<"null";
     std::cout<<'}';

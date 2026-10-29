@@ -30,6 +30,7 @@
 #include "live_helper_data_parameter.hpp"
 #include "live_cold_input_stage.hpp"
 #include "live_helper_clock.hpp"
+#include "live_helper_utc.hpp"
 #include "live_helper_continuation.hpp"
 #include "live_helper_frequency_snapshot.hpp"
 #include "live_helper_cohort_model.hpp"
@@ -5861,6 +5862,22 @@ struct Session::Impl {
         release_realtime_score_history(bank);
         release_optional_helper_work(bank,reason);return true;
     }
+    std::optional<double> auxiliary_capture_utc(const Bank& bank,const Settings& value,
+            const HelperWorkspace& work) const noexcept {
+        std::optional<long double> utc;
+        long double seconds_per_frame=0;
+        if(bank.timing) {
+            if(!std::isfinite(bank.timing->uncertainty_seconds) || bank.timing->uncertainty_seconds<0 ||
+               bank.timing->uncertainty_seconds>=1 || !std::isfinite(bank.timing->rate_uncertainty_fraction) ||
+               bank.timing->rate_uncertainty_fraction<0 || bank.timing->rate_uncertainty_fraction>=.01)return {};
+            utc=bank.timing->utc_seconds;seconds_per_frame=bank.timing->seconds_per_frame;
+        } else if(bank.observed_epoch && value.transfer.modem.sample_rate) {
+            utc=*bank.observed_epoch;seconds_per_frame=1.L/value.transfer.modem.sample_rate;
+        }
+        return detail::helper_capture_utc(work.capture_transport,work.rate,value.transfer.modem.sample_rate,
+            work.next_raw,work.clock_capture_first,work.next_raw,bank.helper_input_origin_samples,
+            bank.observed_sample,utc,seconds_per_frame);
+    }
     bool prepare_auxiliary_helper_work(Bank& bank,const Settings& value,std::uint64_t version) {
         // A waiting pre-reference Bank has not established its ordinary
         // diagnostic-capacity promise yet. Optional metadata waits for that
@@ -5907,7 +5924,8 @@ struct Session::Impl {
                 throw Error("observed auxiliary band is outside the supported positive capture");
             owner->auxiliary=std::make_unique<helper::AuxiliaryMetadataReceiver>(work.rate,
                 auxiliary,pilot.frequency_hz,std::move(keys),detail::helper_precision_options(value.transfer.modem),
-                external,work.next_raw);
+                external,work.next_raw,auxiliary_capture_utc(bank,value,work),
+                plan.low_frequency_hz>0?pilot.frequency_hz-(plan.frequency_hz-plan.low_frequency_hz):0);
             if(external>SIZE_MAX-work.optional_external_bytes)throw Error("optional auxiliary accounting overflow");
             work.auxiliary_work=owner.get();work.optional_owner=owner->serial;
             work.optional_external_bytes+=external;bank.helper_optional_work=std::move(owner);
@@ -6285,6 +6303,7 @@ struct Session::Impl {
         std::uint64_t spent=0;bool published=false;
         while(!stop.stop_requested() && cpu.credit && !cpu.debt && spent<burst) {
             if(!owner.auxiliary->pending_samples() && !owner.auxiliary->prepare())break;
+            owner.auxiliary->set_capture_utc(work.next_raw,auxiliary_capture_utc(bank,value,work));
             helper_lock.unlock();
             const auto before=rx_cpu::native_thread_cpu(nullptr);
             try {owner.auxiliary->advance(4096);}
@@ -8482,8 +8501,8 @@ struct Session::Impl {
         std::string_view callsign;
         std::optional<detail::HelperPresence::AdvisoryTime> advisory;
         if(reception.metadata) {
-            if(reception.metadata->kind==helper::MetadataKind::callsign)callsign=reception.metadata->callsign;
-            else advisory=detail::HelperPresence::AdvisoryTime{
+            callsign=reception.metadata->callsign;
+            advisory=detail::HelperPresence::AdvisoryTime{
                 reception.metadata->kind==helper::MetadataKind::encrypted_time,reception.metadata->time_ticks};
         }
         const auto active_before=helper_presence.pending_id();

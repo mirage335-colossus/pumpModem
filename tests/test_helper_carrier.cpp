@@ -27,6 +27,19 @@ template<class F>void rejects(F f) {
 std::complex<double> oscillator(double frequency,long double time) {
     return std::polar(1.,tau*static_cast<double>(std::fmod(static_cast<long double>(frequency)*time,1.L)));
 }
+void apsk_constellation() {
+    require(std::abs(h::apsk_point(0)-std::complex<double>{.2,0})<1e-14,"APSK inner radius is not 20 percent");
+    require(std::abs(h::apsk_point(127U<<7)-std::complex<double>{1,0})<1e-14,"APSK outer radius changed");
+    require(std::abs(h::apsk_point(32)-std::complex<double>{0,.2})<1e-14,"APSK quadrant mapping changed");
+    rejects([]{h::apsk_point(1U<<14);});
+    for(std::uint32_t word=0;word<(1U<<14);++word) {
+        const auto point=h::apsk_point(word);
+        const auto ring=std::lround((std::abs(point)-.2)*127/.8);
+        const auto sector=std::lround(std::arg(point)*128/tau);
+        require(((static_cast<std::uint32_t>(ring)<<7)|(static_cast<std::uint32_t>(sector)&127U))==word,
+            "APSK mapper does not round-trip all 16384 symbols");
+    }
+}
 h::Generator pilot_only(const h::Plan& plan,std::uint64_t epoch=0) {
     auto pilot=plan;pilot.auxiliary_frequency_hz=0;
     h::Options options;options.power_w=1;options.timecode=false;
@@ -96,14 +109,14 @@ void power_and_placement() {
     options.frequency=h::Frequency::low;rejects([&]{h::validate(options);});
     options.frequency=h::Frequency::cochannel;rejects([&]{h::validate(options);});
     options.frequency=h::Frequency::high;options.power_w=-1;rejects([&]{h::validate(options);});
-    options.power_w=40;options.callsign="ABCDEFGHIJKLMNOPQRST";rejects([&]{h::validate(options);});
+    options.power_w=40;options.callsign="ABCDEFGHIJKLMNOPQ";rejects([&]{h::validate(options);});
     options.callsign=std::string(1,static_cast<char>(128));rejects([&]{h::validate(options);});
 }
 void active_average_and_continuous_pilots() {
     constexpr std::uint32_t rate=48000;
     std::array<std::uint8_t,32> key_bytes{};key_bytes[0]=23;
     const datapump::Crypto key(key_bytes);
-    for(const auto gating:{false,true})for(const auto callsign:{"","N0CALL","ABCDEFGHIJKLMNOPQRS"})for(const auto encrypted:{false,true})for(const auto measured:{false,true}) {
+    for(const auto gating:{false,true})for(const auto callsign:{"","N0CALL","ABCDEFGHIJKLMNOP"})for(const auto encrypted:{false,true})for(const auto measured:{false,true}) {
         h::Options options;options.power_w=40;options.data_power_w=4;options.callsign=callsign;
         h::PowerReference reference;reference.epoch=1800000000;reference.begin_seconds=.013L;reference.end_seconds=1.189L;
         reference.time_key=encrypted?std::optional<datapump::Crypto>{key}:std::nullopt;
@@ -148,48 +161,36 @@ void active_average_and_continuous_pilots() {
     }
 }
 void metadata_vectors() {
-    // Independently generated with a Python CRC7/MMC and explicit MSB
-    // packing; these vectors catch coordinated mapper/framing regressions.
-    constexpr std::array<std::uint32_t,3> expected{0x01a730,0x10e0cc,0x133f00};
-    const auto normal=h::callsign_packet("N0CALL");
-    require(normal.count==expected.size()&&std::equal(expected.begin(),expected.end(),normal.symbols.begin()),
-        "compact callsign wire vector changed");
-    constexpr std::array<std::uint32_t,7> longest{0x04e0c2,0x10e245,0x11a3c8,0x12654b,0x1326ce,0x13e851,0x14a99f};
-    const auto maximum=h::callsign_packet("ABCDEFGHIJKLMNOPQRS");
-    require(maximum.count==longest.size()&&std::equal(longest.begin(),longest.end(),maximum.symbols.begin()),
-        "nineteen-character compact wire vector changed");
-    require(std::abs(h::apsk_point(0)-std::complex<double>{.9,0})<1e-14,"inner APSK point changed");
-    require(std::abs(h::apsk_point(1023U<<11)-std::complex<double>{1,0})<1e-14,"outer APSK point changed");
-    require(std::abs(h::apsk_point(512)-std::complex<double>{0,.9})<1e-14,"APSK quadrant label changed");
-    rejects([]{h::apsk_point(1U<<21);});
+    // Independent MSB-first vector: 14-bit time phase, then 7-bit ASCII pairs.
+    constexpr std::array<std::uint32_t,9> expected{0,10032,8641,9804,0,0,0,0,0};
+    const auto normal=h::metadata_packet(0,"N0CALL");
+    require(normal.count==expected.size()&&normal.symbols==expected,
+        "combined metadata wire vector changed");
     h::Options options;options.power_w=100;options.callsign="N0CALL";
     const auto plan=metadata_fixture_plan(options,1000,200,8000);
     h::Generator generator(options,plan);
     const auto pilot=pilot_only(plan);
     for(std::size_t i=0;i<expected.size();++i) {
-        const auto time=.388L-expected.size()*.008L+(i+1)*.008L;
+        const auto time=.316L+(i+1)*.008L;
         const auto observed=-auxiliary_baseband(generator,pilot,plan,time,8000);
-        // Metadata multiplies the auxiliary's inverted underlying state.
-        require(std::abs(observed-h::apsk_point(expected[i]))<1e-11,"strong analytic metadata symbol changed");
-        const auto ring=std::clamp(std::llround((std::abs(observed)-.9)*10230),0LL,1023LL);
-        auto phase=std::llround(std::arg(observed)*2048/tau)%2048;
-        if(phase<0)phase+=2048;
-        require((static_cast<std::uint32_t>(ring)<<11|static_cast<std::uint32_t>(phase))==expected[i],
-                "public algebraic strong-signal metadata slicer failed");
+        require(std::abs(observed-h::apsk_point(expected[i]))<1e-11,
+            "strong analytic metadata symbol changed");
+        const auto ring=std::clamp(std::llround((std::abs(observed)-.2)*127/.8),0LL,127LL);
+        auto phase=std::llround(std::arg(observed)*128/tau)%128;
+        if(phase<0)phase+=128;
+        require((static_cast<std::uint32_t>(ring)<<7|static_cast<std::uint32_t>(phase))==expected[i],
+            "public algebraic strong-signal metadata slicer failed");
     }
-    for(const auto callsign:{"X","XY","N0CALL","ABCDEFGHIJKLMNOPQRS"}) {
+    for(const auto callsign:{"X","XY","N0CALL","ABCDEFGHIJKLMNOP"}) {
         options.callsign=callsign;
-        const auto packet=h::callsign_packet(callsign);
-        const auto begin=.388L-packet.count*.008L;
-        const h::Generator compact(options,plan);
-        const auto before=begin-.0001L;
-        const auto observed=auxiliary_baseband(compact,pilot,plan,before,8000);
-        require(std::abs(observed+std::complex<double>{1,0})<1e-11,
-            "short callsign needlessly occupied fixed metadata airtime");
-        const auto last=auxiliary_baseband(compact,pilot,plan,.388L,8000);
-        require(std::abs(last+h::apsk_point(packet.symbols[packet.count-1]))<1e-11,
-            "compact callsign did not finish at388ms");
-        require(std::abs(auxiliary_baseband(compact,pilot,plan,.396L,8000)+std::complex<double>{.5,0})<1e-11,
+        const auto packet=h::metadata_packet(0,callsign);
+        const h::Generator fixed(options,plan);
+        require(packet.count==9,"metadata did not use a fixed nine-symbol record");
+        require(std::abs(auxiliary_baseband(fixed,pilot,plan,.3159L,8000)+std::complex<double>{1,0})<1e-11,
+            "metadata started before the fixed record interval");
+        require(std::abs(auxiliary_baseband(fixed,pilot,plan,.388L,8000)+h::apsk_point(packet.symbols.back()))<1e-11,
+            "metadata did not finish at 388ms");
+        require(std::abs(auxiliary_baseband(fixed,pilot,plan,.396L,8000)+std::complex<double>{.5,0})<1e-11,
             "metadata did not return to the auxiliary's underlying inverted state");
     }
 }
@@ -198,108 +199,74 @@ void timecode_generation() {
     require(options.timecode,"empty callsign no longer defaults to timecode");
     const auto plan=metadata_fixture_plan(options,1000,200,8000);
     const auto pilot=pilot_only(plan);
+    const auto packet_at=[&](const h::Generator& generator,long double dwell_start) {
+        h::MetadataPacket packet;packet.count=9;
+        for(std::size_t i=0;i<packet.count;++i) {
+            const auto time=dwell_start+.316L+(i+1)*.008L;
+            const auto observed=-auxiliary_baseband(generator,pilot,plan,time,8000);
+            const auto ring=std::clamp(std::llround((std::abs(observed)-.2)*127/.8),0LL,127LL);
+            auto phase=std::llround(std::arg(observed)*128/tau)%128;
+            if(phase<0)phase+=128;
+            packet.symbols[i]=(static_cast<std::uint32_t>(ring)<<7)|static_cast<std::uint32_t>(phase);
+        }
+        return packet;
+    };
+    constexpr std::uint64_t epoch=1800000000;
+    constexpr auto expected_ticks=epoch<<16;
+    h::Generator clear(options,plan,epoch);
+    const auto packet=packet_at(clear,0);
+    const auto decoded=h::decode_metadata_packet(packet.symbols);
+    require(decoded&&decoded->time_ticks==((expected_ticks%h::metadata_period_q16)*2/65)&&
+        decoded->callsign.empty()&&!decoded->authenticated,
+        "generator time phase does not describe physical dwell start");
+    require(packet.symbols==h::metadata_packet(expected_ticks,{}).symbols,
+        "generator timestamp packet differs from the physical epoch");
+    (void)packet_at(clear,.8L);
+    require(packet_at(clear,0).symbols==packet.symbols,
+        "cached timestamp depends on render order");
+    options.callsign="N0CALL";
+    h::Generator identified(options,plan,epoch);
+    const auto identified_packet=packet_at(identified,0);
+    const auto identified_metadata=h::decode_metadata_packet(identified_packet.symbols);
+    require(identified_metadata&&identified_metadata->callsign==options.callsign&&
+        identified_metadata->time_ticks==decoded->time_ticks,
+        "combined metadata did not carry both callsign and time phase");
     std::array<std::uint8_t,32> master{};
     for(std::size_t i=0;i<master.size();++i)master[i]=static_cast<std::uint8_t>(3*i+1);
     const datapump::Crypto key(master);
     const std::array<datapump::Crypto,1> keys{key};
-    master[0]^=1;
-    const std::array<datapump::Crypto,1> wrong_keys{datapump::Crypto(master)};
-    const auto packet_at=[&](const h::Generator& generator,long double dwell_start,std::size_t count) {
-        h::MetadataPacket packet;packet.count=count;
-        const auto begin=.388L-count*.008L;
-        for(std::size_t i=0;i<count;++i) {
-            const auto time=dwell_start+begin+(i+1)*.008L;
-            const auto observed=-auxiliary_baseband(generator,pilot,plan,time,8000);
-            const auto ring=std::clamp(std::llround((std::abs(observed)-.9)*10230),0LL,1023LL);
-            auto phase=std::llround(std::arg(observed)*2048/tau)%2048;
-            if(phase<0)phase+=2048;
-            packet.symbols[i]=(static_cast<std::uint32_t>(ring)<<11)|static_cast<std::uint32_t>(phase);
-        }
-        return packet;
-    };
-    const auto view=[](const h::MetadataPacket& packet) {
-        return std::span<const std::uint32_t>(packet.symbols).first(packet.count);
-    };
-    constexpr std::uint64_t epoch=1800000000;
-    constexpr auto expected_ticks=epoch<<16;
-    h::Generator clear(options,plan,epoch),encrypted(options,plan,epoch,true,key);
-    const auto clear_count=h::timecode_packet(expected_ticks).count;
-    const auto encrypted_count=h::timecode_packet(expected_ticks,&key).count;
-    require(clear_count<=3&&encrypted_count<=3,"48-bit timestamp exceeded24ms metadata airtime");
-    const auto clear_packet=packet_at(clear,0,clear_count),encrypted_packet=packet_at(encrypted,0,encrypted_count);
-    const auto clear_metadata=h::decode_metadata_packet(view(clear_packet));
-    require(clear_metadata&&clear_metadata->kind==h::MetadataKind::clear_time&&
-        clear_metadata->time_ticks==expected_ticks&&!clear_metadata->authenticated&&clear_metadata->callsign.empty(),
-        "generator clear timestamp does not describe physical dwell start");
-    const auto encrypted_metadata=h::decode_metadata_packet(view(encrypted_packet),keys);
-    require(encrypted_metadata&&encrypted_metadata->kind==h::MetadataKind::encrypted_time&&
-        encrypted_metadata->time_ticks==expected_ticks&&!encrypted_metadata->authenticated&&encrypted_metadata->callsign.empty(),
-        "generator encrypted timestamp did not use the selected station key");
-    require(!h::decode_metadata_packet(view(encrypted_packet)),"generator transmitted a clear timestamp with encryption enabled");
-    const auto wrong=h::decode_metadata_packet(view(encrypted_packet),wrong_keys);
-    require(!wrong||!wrong->authenticated,"unauthenticated FF1 time claimed wrong-key integrity");
-    require(clear_packet.symbols==h::timecode_packet(expected_ticks).symbols&&
-        encrypted_packet.symbols==h::timecode_packet(expected_ticks,&key).symbols,
-        "generator timestamp packet differs from the fixed physical epoch");
-    // Packet generation uses the supplied physical coordinate, never wall time
-    // or call order. Visit a later dwell and then revisit the original one.
-    (void)packet_at(encrypted,.8L,encrypted_count);
-    require(packet_at(encrypted,0,encrypted_count).symbols==encrypted_packet.symbols,
-        "cached encrypted timestamp depends on render order");
-    options.callsign="N0CALL";
-    h::Generator identified(options,plan,epoch);
-    const auto callsign=packet_at(identified,0,h::callsign_packet(options.callsign).count);
-    const auto decoded_callsign=h::decode_metadata_packet(view(callsign),keys);
-    require(decoded_callsign&&decoded_callsign->kind==h::MetadataKind::callsign&&
-        decoded_callsign->callsign==options.callsign&&decoded_callsign->time_ticks==0,
-        "clear-mode callsign did not take exclusive precedence over timecode");
-    const auto before_callsign=auxiliary_baseband(identified,pilot,plan,.32L,8000);
-    require(std::abs(before_callsign+std::complex<double>{1,0})<1e-12,
-        "clear callsign transmission also started a timestamp");
-    const h::Generator keyed_identified(options,plan,epoch,true,key);
-    const auto keyed_packet=packet_at(keyed_identified,0,encrypted_count);
-    const auto keyed_metadata=h::decode_metadata_packet(view(keyed_packet),keys);
-    require(keyed_metadata&&keyed_metadata->kind==h::MetadataKind::encrypted_time&&
-        keyed_metadata->callsign.empty()&&keyed_metadata->time_ticks==expected_ticks&&
-        keyed_packet.symbols==encrypted_packet.symbols,
-        "encryption allowed a stored helper callsign to replace its timestamp");
-    // A stored callsign has no effect on keyed PCM, even when timecode is
-    // explicitly disabled or the ignored string is not a valid public ID.
-    for(const auto timecode:{false,true}) {
-        options.callsign.clear();options.timecode=timecode;
-        const h::Generator reference(options,plan,epoch,true,key);
-        for(const auto& stored:std::array<std::string,3>{"X","ABCDEFGHIJKLMNOPQRS",std::string(32,static_cast<char>(0xff))}) {
-            options.callsign=stored;
-            const h::Generator ignored(options,plan,epoch,true,key);
-            require(options.callsign==stored,"generator changed the caller's stored helper callsign");
-            for(std::uint32_t sample=0;sample<6400;++sample) {
-                const auto seconds=static_cast<long double>(sample)/8000;
-                require(ignored.mix_analytic({.125,-.25},seconds,8000)==
-                    reference.mix_analytic({.125,-.25},seconds,8000),
-                    "stored helper callsign changed encrypted-mode samples");
-            }
-        }
+    const h::Generator encrypted(options,plan,epoch,true,key);
+    const auto encrypted_packet=packet_at(encrypted,0);
+    require(encrypted_packet.symbols==h::metadata_packet(expected_ticks,options.callsign,&key).symbols,
+        "generator encrypted metadata differs from the physical dwell packet");
+    require(encrypted_packet.symbols[0]==identified_packet.symbols[0]&&
+        encrypted_packet.symbols!=identified_packet.symbols,
+        "keyed metadata did not preserve the time phase while encrypting the callsign");
+    for(const auto offset:{-4LL*65536,0LL,4LL*65536}) {
+        const auto recovered=h::decode_metadata_packet(encrypted_packet.symbols,keys,
+            static_cast<std::uint64_t>(static_cast<std::int64_t>(expected_ticks)+offset));
+        require(recovered&&recovered->callsign==options.callsign&&
+            recovered->time_ticks==decoded->time_ticks&&!recovered->authenticated,
+            "keyed generator record did not decrypt with the selected clock anchor");
     }
-
+    require(!h::decode_metadata_packet(encrypted_packet.symbols,keys),
+        "encrypted metadata decoded without a clock anchor");
+    (void)packet_at(encrypted,.8L);
+    require(packet_at(encrypted,0).symbols==encrypted_packet.symbols,
+        "cached encrypted metadata depends on render order");
     options.callsign.clear();options.timecode=true;
-    for(const auto encrypted_time:{false,true}) {
-        h::Generator cached(options,plan,0,true,encrypted_time?std::optional<datapump::Crypto>{key}:std::nullopt);
-        const auto count=h::timecode_packet(0,encrypted_time?&key:nullptr).count;
-        const auto original=packet_at(cached,0,count);
-        for(const auto invalid:{-.4L,4294967296.L}) {
-            const auto time=invalid+.38L;
-            require(std::abs(auxiliary_baseband(cached,pilot,plan,time,8000)+std::complex<double>{1,0})<1e-12,
-                "out-of-range time was encoded as a timestamp");
-            require(packet_at(cached,0,count).symbols==original.symbols,
-                "valid-invalid-same-valid time sequence lost its cached timestamp");
-        }
+    h::Generator cached(options,plan,0);
+    const auto original=packet_at(cached,0);
+    for(const auto invalid:{-.4L,4294967296.L}) {
+        require(std::abs(auxiliary_baseband(cached,pilot,plan,invalid+.38L,8000)+std::complex<double>{1,0})<1e-12,
+            "out-of-range time was encoded as metadata");
+        require(packet_at(cached,0).symbols==original.symbols,
+            "valid-invalid-same-valid sequence lost its cached timestamp");
     }
     options.timecode=false;
-    h::Generator pure(options,plan,epoch,true,key);
+    h::Generator pure(options,plan,epoch);
     require(std::abs(auxiliary_baseband(pure,pilot,plan,.36L,8000)+std::complex<double>{1,0})<1e-12,
-        "disabled timecode modulates the empty-callsign tone");
-    // Fail before output if encryption is configured but unavailable. The
-    // public callsign path is independent and never sends both packet types.
+        "disabled metadata modulates the empty-callsign tone");
     struct RestoreProperties {
         ~RestoreProperties() {EVP_set_default_properties(nullptr,"");ERR_clear_error();}
     } restore;
@@ -309,9 +276,9 @@ void timecode_generation() {
     rejects([&]{h::Generator unavailable(options,plan,epoch,true,key);});
     options.callsign="N0CALL";
     rejects([&]{h::Generator unavailable_with_callsign(options,plan,epoch,true,key);});
-    const h::Generator callsign_without_cipher(options,plan,epoch);
-    require(packet_at(callsign_without_cipher,0,callsign.count).symbols==callsign.symbols,
-        "public callsign unexpectedly requires the timecode cipher");
+    const h::Generator clear_without_cipher(options,plan,epoch);
+    require(packet_at(clear_without_cipher,0).symbols==identified_packet.symbols,
+        "clear metadata unexpectedly requires the auxiliary cipher");
 }
 void waveform_coordinates() {
     h::Options options;options.power_w=1500;options.timecode=false;
@@ -387,7 +354,7 @@ void waveform_coordinates() {
             "straight interval did not preserve90/10 power or coherent total accounting");
     // Known auxiliary values, rather than a composite subtraction used as
     // truth, expose any pilot reversal at punctuation or metadata endpoints.
-    options.callsign="ABCDEFGHIJKLMNOPQRS";
+    options.callsign="ABCDEFGHIJKLMNOP";
     h::Generator metadata(options,plan);
     const auto packet=h::callsign_packet(options.callsign);
     const auto auxiliary_gate=[](long double time) {
@@ -521,7 +488,7 @@ void spectrum() {
     const datapump::Crypto key(master);
     struct MetadataCase {std::string_view callsign;bool encrypted,timecode;};
     for(const auto& test:std::array<MetadataCase,5>{{{"",false,false},{"",false,true},{"",true,true},
-            {"N0CALL",false,true},{"ABCDEFGHIJKLMNOPQRS",false,true}}}) {
+            {"N0CALL",false,true},{"ABCDEFGHIJKLMNOP",false,true}}}) {
         h::Options options;options.power_w=100;options.callsign=test.callsign;options.timecode=test.timecode;
         const auto plan=metadata_fixture_plan(options,1000,200,10240);
         h::Generator generator(options,plan,1800000000,true,test.encrypted?std::optional<datapump::Crypto>{key}:std::nullopt);
@@ -560,7 +527,7 @@ void spectrum() {
     for(const auto bandwidth:{200.,6000.})for(const auto ratio_db:{0.,40.,60.,90.})for(const auto encrypted:{false,true}) {
         constexpr std::uint32_t rate=40960;
         h::Options options;options.data_power_w=1;options.power_w=1+std::pow(10.,ratio_db/10);
-        options.callsign=encrypted?"":"ABCDEFGHIJKLMNOPQRS";
+        options.callsign=encrypted?"":"ABCDEFGHIJKLMNOP";
         h::PowerReference reference;reference.time_key=encrypted?std::optional<datapump::Crypto>{key}:std::nullopt;
         const auto plan=h::plan(options,10000,bandwidth,rate,0,1,&reference);
         require(plan.low_frequency_hz==550&&plan.auxiliary_frequency_hz==950&&plan.frequency_hz>=2400,
@@ -610,7 +577,7 @@ void spectrum() {
         const auto data_carrier=ratio_db==90?45000.:10000.;
         h::Options options;options.data_power_w=1e-6;
         options.power_w=options.data_power_w*std::pow(10.,ratio_db/10);
-        options.callsign="ABCDEFGHIJKLMNOPQRS";
+        options.callsign="ABCDEFGHIJKLMNOP";
         h::PowerReference reference;reference.begin_seconds=endpoints.first;reference.end_seconds=endpoints.second;
         reference.helper_start_seconds=endpoints.first;reference.helper_end_seconds=endpoints.second;
         if(ratio_db==90&&endpoints.second-endpoints.first<.005L)
@@ -748,7 +715,7 @@ void tracker() {
 }
 }
 int main() {
-    try {test_helper_power_reference();power_and_placement();active_average_and_continuous_pilots();metadata_vectors();timecode_generation();waveform_coordinates();protected_streaming_endpoint();spectrum();tracker();tracker_lifetime_admission();}
+    try {apsk_constellation();test_helper_power_reference();power_and_placement();active_average_and_continuous_pilots();metadata_vectors();timecode_generation();waveform_coordinates();protected_streaming_endpoint();spectrum();tracker();tracker_lifetime_admission();}
     catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
     std::cout<<"helper carrier checks passed\n";return 0;
 }

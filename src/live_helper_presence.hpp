@@ -148,17 +148,18 @@ public:
                 record.peak_cn0=record.cn0;record.peak_end=value.end_sample;record.peak_rate=value.sample_rate;
             }
             record.have_measurement=true;
-            if(!value.callsign.empty()) {
+            if(!value.callsign.empty() || value.advisory_time) {
                 std::array<char,20> next{};
                 const auto n=std::min(value.callsign.size(),next.size()-1);
                 for(std::size_t i=0;i<n;++i) {
                     const auto c=static_cast<unsigned char>(value.callsign[i]);next[i]=c>=32 && c<127?static_cast<char>(c):'?';
                 }
-                record.changed=record.changed || next!=record.callsign || record.advisory_time.has_value();
-                record.callsign=next;record.advisory_time.reset();
-            }else if(value.advisory_time) {
-                record.changed=record.changed || record.advisory_time!=value.advisory_time || record.callsign[0];
-                record.advisory_time=value.advisory_time;record.callsign={};
+                record.changed=record.changed || next!=record.callsign;
+                record.callsign=next;
+            }
+            if(value.advisory_time) {
+                record.changed=record.changed || record.advisory_time!=value.advisory_time;
+                record.advisory_time=value.advisory_time;
             }
         }else if(active_!=none) {
             if(value.captured_absent_seconds && (!std::isfinite(*value.captured_absent_seconds) ||
@@ -265,8 +266,8 @@ private:
         text<<"; receiver C/N0 peak capture "<<static_cast<double>(record.peak_end)/record.peak_rate
             <<" s (sample "<<record.peak_end<<" @ "<<record.peak_rate<<" Hz)";
         if(record.callsign[0])text<<"; callsign "<<record.callsign.data();
-        else if(record.advisory_time)text<<"; "<<(record.advisory_time->encrypted?"encrypted advisory":"clear advisory")
-            <<" time "<<std::setprecision(5)<<static_cast<double>(record.advisory_time->ticks)/65536;
+        if(record.advisory_time)text<<"; advisory time phase "<<std::setprecision(5)
+            <<static_cast<double>(record.advisory_time->ticks)*65/131072<<" s modulo 8.125 s";
         event.text=text.str();return event;
     }
     static constexpr std::size_t none=2;

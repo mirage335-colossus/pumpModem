@@ -1,0 +1,75 @@
+{
+  "source_revision": "162d7660366122232ccee6bb24a6e0c7fc432169",
+  "sources": {
+    "src/helper_carrier.cpp": "59f96cb9d38bb88f474d107c95e87139b90d6cba3c8d1bc6f6f36699ccf37594",
+    "src/helper_metadata.cpp": "54d36feeab10e400bd4c3368560d35a09db01cf5962ae71427cba4cc9351c52c",
+    "tests/test_helper_receiver.cpp": "18d5bd12ba83fdf7d8103cf8304782a6c5d027c5ab1c6308288eb51be1cf7cf5",
+    "include/datapump/helper_carrier.hpp": "e2b519c7969889220f76d07b98215bd6d1dfe368e32c0a95bbad9d5dfdd96baa",
+    "include/datapump/helper_metadata.hpp": "796f32c8ac24da202eae744e1907ce58daf33a0b8dfba0aed65b877d215d0333",
+    "src/crypto.cpp": "d89108ffba168898e45329fa9040c4155d6012711da1a6163b13dc97e9782224"
+  },
+  "record": "N0CALL",
+  "symbols_21bit": [
+    108336,
+    1106124,
+    1261312
+  ],
+  "epoch": 1700000000,
+  "mapping": {
+    "radial_bits": 10,
+    "phase_bits": 11,
+    "minimum_radius": 0.9,
+    "maximum_radius": 1
+  },
+  "compatibility_waveform": "paired C2 punctuation and C2 endpoint interpolation from original AuxiliaryFixture",
+  "sample_comparison": {
+    "sample_rate": 48000,
+    "samples_per_amplitude": 576000,
+    "frequency_hz": 6380.37,
+    "delay_seconds": 0.03719,
+    "amplitudes": [
+      0.003,
+      0.01
+    ],
+    "max_absolute_float_errors": [
+      6.07153e-18,
+      4.44089e-16
+    ],
+    "bit_identical": false
+  },
+  "normalization": {
+    "pilot_spacing_hz": 400,
+    "low_relative_power": 0.5011872336272722,
+    "auxiliary_relative_power": 0.12589254117941673,
+    "high_amplitude_fraction": "sqrt(1/(1+low_relative_power+auxiliary_relative_power))",
+    "auxiliary_amplitude_fraction": "sqrt(auxiliary_relative_power/(1+low_relative_power+auxiliary_relative_power))"
+  },
+  "encrypted_timecode": {
+    "epoch": 1700000000,
+    "dwells": 50,
+    "dwell_seconds": "2/5",
+    "q16_quantization": "round((epoch+dwell*2/5)*65536)",
+    "key_hex": "0000000000000000000000000000000000000000000000000000000000000000",
+    "cipher": "Original FF1 radix2 from bound helper_metadata.cpp; no current production encryption implementation used",
+    "vector_file": "encrypted-timecode.inc",
+    "vector_sha256": "fc8a0d502cfc56cafdb20cca7e3a714c5f849d331229bcbea16a2f35fbe2a813",
+    "generator_file": "generate-timecode-vectors.cpp",
+    "generator_sha256": "e006272e2104ddd25a326eec01fb851c17418ad9cbe2de529f081c2bb7643611",
+    "sample_comparison": {
+      "samples_per_amplitude": 960000,
+      "amplitudes": [
+        0.003,
+        0.01
+      ],
+      "max_absolute_float_errors": [
+        2.22045e-16,
+        4.44089e-16
+      ],
+      "unequal_near_zero_floats": [
+        49,
+        48
+      ],
+      "bit_identical": false
+    }
+  }
+}

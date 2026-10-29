@@ -56,9 +56,9 @@ struct Options {
     double power_w=0, data_power_w=4, ratio_limit_db=90;
     Frequency frequency=Frequency::high;
     std::string callsign;
-    // A configured station key ignores callsign and selects length-preserving
-    // timestamp encryption. Without a key, callsign takes priority over optional
-    // clear time. Turning timecode off leaves keyed operation as tone only.
+    // Emit metadata when timecode is enabled or callsign is nonempty. Each
+    // record contains the time phase and callsign; a configured station key
+    // encrypts the character field while leaving the time phase clear.
     bool timecode=true;
     bool operator==(const Options&) const = default;
 };
@@ -172,7 +172,7 @@ std::uint32_t minimum_output_rate(const Options&,const PlacementBand&,
 // Coordinates are the same physical seconds as Generator.
 long double protected_endpoint(std::uint64_t epoch,long double start_seconds,long double end_seconds);
 
-// 1024 radii [0.9,1], 2048 phases; high ten bits select radius, low eleven phase.
+// 128 radii [0.2,1], 128 phases; high seven bits select radius, low seven phase.
 std::complex<double> apsk_point(std::uint32_t symbol);
 
 class Generator {

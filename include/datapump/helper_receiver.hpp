@@ -226,10 +226,14 @@ public:
     static std::size_t workspace_required(std::uint32_t rate);
     AuxiliaryMetadataReceiver(std::uint32_t rate,double auxiliary_hz,double pilot_hz,
         std::vector<Crypto> keys,FrequencyPrecisionOptions,std::size_t workspace_grant,
-        std::uint64_t first_sample=0);
+        std::uint64_t first_sample=0, std::optional<double> first_sample_utc_seconds={},
+        double low_pilot_hz=0);
     ~AuxiliaryMetadataReceiver();
     AuxiliaryMetadataReceiver(AuxiliaryMetadataReceiver&&) noexcept;
     AuxiliaryMetadataReceiver& operator=(AuxiliaryMetadataReceiver&&) noexcept;
+    // Refresh UTC at a physical sample coordinate only while the worker is joined.
+    // A missing value disables keyed metadata decoding until a new anchor arrives.
+    void set_capture_utc(std::uint64_t sample,std::optional<double> utc_seconds);
     // Owner-side capture only: no filtering, fitting or allocation. push/reset
     // may overlap one advance(credit) call; all other methods require it joined.
     void push(std::span<const float>,std::uint64_t first_sample);

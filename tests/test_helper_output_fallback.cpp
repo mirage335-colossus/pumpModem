@@ -236,7 +236,7 @@ void malformed_helper_settings_are_rejected() {
         catch(const Error& error) {
             const auto message=std::string_view(error.what());
             rejected=invalid_power?message=="invalid Helper Carrier power or ratio limit":
-                message=="Helper Carrier callsign must contain at most 19 seven-bit ASCII characters";
+                message=="Helper Carrier callsign must contain at most 16 seven-bit ASCII characters";
         }
         check(rejected,"placement fallback accepted malformed helper settings");
     }

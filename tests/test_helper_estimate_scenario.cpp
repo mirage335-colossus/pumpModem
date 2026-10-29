@@ -65,14 +65,14 @@ void original_domain() {
     check(forecast.scenario.has_value(),forecast.reason.c_str());
     live::Settings keyed_preference;keyed_preference.transfer=o;
     keyed_preference.helper.power_w=40;keyed_preference.helper.data_power_w=4;
-    keyed_preference.helper.callsign="12345678901234567890";
+    keyed_preference.helper.callsign="1234567890123456";
     const auto keyed_forecast=simulation::helper_frequency_forecast(tx,o,ch,request,{},
         simulation::ReceiverWorkMode::hardware_fallback,{},&keyed_preference);
     check(keyed_forecast.scenario.has_value(),keyed_forecast.reason.c_str());
     (void)simulation::helper_native_work(o,*forecast.scenario,
         simulation::ReceiverWorkMode::hardware_fallback,&keyed_preference);
-    check(keyed_preference.helper.callsign=="12345678901234567890",
-        "Forecast query changed an inactive keyed callsign preference");
+    check(keyed_preference.helper.callsign=="1234567890123456",
+        "Forecast query changed a keyed callsign");
     check(forecast.scenario->origin==simulation::HelperScenarioOrigin::requirements_forecast,
         "source requirements manufactured validated utility or observed qualification");
     const auto baseline=simulation::estimate(tx,o,true,ch,{},1,false,100,64,

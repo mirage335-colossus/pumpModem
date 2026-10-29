@@ -9,6 +9,7 @@
 #include "../src/audio_trace.hpp"
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <chrono>
 #include <cmath>
 #include <complex>
@@ -17,6 +18,7 @@
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <limits>
 #include <numbers>
 #include <optional>
 #include <random>
@@ -148,61 +150,41 @@ void same(const Result& a,const Result& b,const char* why) {
     check(a.bits==b.bits && a.progress==b.progress && a.complete==b.complete,why);
 }
 struct Capture {std::vector<float> mixed,without_helper;Bytes wire;std::uint64_t first=0;};
-Capture cover_capture(const transfer::Options& o) {
-    const auto config=transfer::seeded_config(o,o.timestamp);
-    const auto training=modem::training_sample_count(config);
-    modem::ChannelConfig effects;effects.snr_db=40;effects.clock_error_ppm=0;
-    effects.frequency_offset_hz=0;effects.phase_noise_degrees_per_sqrt_second=0;effects.seed=5181;
-    helper::Options helper;helper.power_w=1500;helper.data_power_w=4;helper.callsign.clear();
-    modem::SampledSimulationChannel calibration(o.modem,effects,helper);
-    calibration.set_helper_time_key(o.key);calibration.begin_burst();
-    auto initial=transfer::binary_transmitter(Bytes{0,0,1},o);std::array<float,1> sample{};
-    calibration.read(*initial,sample);
-    const auto idle=8031ULL-training-static_cast<std::uint64_t>(std::ceil(calibration.startup_offset_samples()));
-    modem::SampledSimulationChannel mixed(o.modem,effects,helper),only(o.modem,effects,helper),noise(o.modem,effects,helper);
-    mixed.set_helper_time_key(o.key);only.set_helper_time_key(o.key);
-    auto source=transfer::binary_transmitter(Bytes{0,0,1},o),suppressed=transfer::binary_transmitter(Bytes{0,0,1},o);
-    Capture out;std::array<float,163> a{},b{},n{};
-    for(std::uint64_t at=0;at<idle;) {
-        const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(a.size(),idle-at));
-        mixed.read_noise(std::span(a).first(count));only.read_noise(std::span(b).first(count));noise.read_noise(std::span(n).first(count));
-        check(std::equal(a.begin(),a.begin()+count,b.begin()) && std::equal(a.begin(),a.begin()+count,n.begin()),
-              "physical cover control changed its initial noise");
-        out.mixed.insert(out.mixed.end(),a.begin(),a.begin()+count);
-        out.without_helper.insert(out.without_helper.end(),a.begin(),a.begin()+count);at+=count;
-    }
-    mixed.begin_burst(false);only.begin_burst(true);noise.begin_burst(false);
-    bool ended=false,extended=false;
-    const auto tail=modem::pattern_absence_capture_samples(config)+config.sample_rate+128;
-    while(out.mixed.size()<24000) {
-        const auto capacity=std::min(a.size(),24000-out.mixed.size());std::size_t count=0;
-        if(!ended) {
-            count=mixed.read(*source,std::span(a).first(capacity));
-            check(only.read(*suppressed,std::span(b).first(capacity))==count,"matched source durations changed");
-            if(!count)ended=true;
-            else {
-                check(mixed.payload_begin_sample()==only.payload_begin_sample() &&
-                      mixed.payload_end_sample()==only.payload_end_sample(),"matched source coordinates changed");
-                out.first=*mixed.payload_begin_sample()+training;
-                if(mixed.payload_finished() && !extended) {
-                    mixed.extend_helper_tail(static_cast<double>(tail)/config.sample_rate);
-                    only.extend_helper_tail(static_cast<double>(tail)/config.sample_rate);extended=true;
-                }
-            }
+// This immutable physical capture preserves the original single-tone Helper
+// extra-bit witness. Regenerating it with a later Helper waveform can erase
+// the defect this ordinary receiver regression must continue to detect.
+// Provenance and the historical capture-only generator live beside the data.
+Capture cover_capture() {
+    const auto path=std::filesystem::path(__FILE__).parent_path()/
+        "fixtures/private-cover-tail/original-single-tone.f32le";
+    std::ifstream file(path,std::ios::binary);check(file.is_open(),"cannot read frozen physical cover capture");
+    std::array<char,8> magic{};file.read(magic.data(),magic.size());
+    check(file && std::string_view(magic.data(),magic.size())=="DPCOVER1","invalid physical cover fixture header");
+    const auto little=[&](unsigned count) {
+        std::uint64_t value=0;
+        for(unsigned i=0;i<count;++i) {
+            const auto byte=file.get();check(byte!=std::char_traits<char>::eof(),"truncated physical cover fixture");
+            value|=static_cast<std::uint64_t>(static_cast<unsigned char>(byte))<<(8*i);
         }
-        if(ended){count=capacity;mixed.read_noise(std::span(a).first(count));only.read_noise(std::span(b).first(count));}
-        noise.read_noise(std::span(n).first(count));
-        for(std::size_t i=0;i<count;++i) {
-            out.mixed.push_back(a[i]);
-            out.without_helper.push_back(static_cast<float>(static_cast<double>(a[i])-b[i]+n[i]));
+        return value;
+    };
+    const auto samples=little(4);Capture out;out.first=little(8);const auto wire_bits=little(4);
+    check(samples==24000 && wire_bits==3,"physical cover fixture extent changed");
+    for(unsigned i=0;i<3;++i)out.wire.push_back(static_cast<std::uint8_t>(little(1)));
+    static_assert(sizeof(float)==4 && std::numeric_limits<float>::is_iec559);
+    for(auto* target:{&out.mixed,&out.without_helper}) {
+        target->resize(24000);
+        for(auto& sample:*target) {
+            sample=std::bit_cast<float>(static_cast<std::uint32_t>(little(4)));
+            check(std::isfinite(sample),"nonfinite physical cover fixture sample");
         }
     }
-    out.wire=source->transmit_trace().wire_bits;
+    check(file.peek()==std::char_traits<char>::eof(),"physical cover fixture has trailing data");
     check(out.first==8031 && out.wire==Bytes({1,0,0}),"physical cover fixture changed its source");
     return out;
 }
 void cover_tail() {
-    const auto o=options();const auto capture=cover_capture(o);
+    const auto o=options();const auto capture=cover_capture();
     constexpr double origin=1792888480.922322416;
     const auto before=receive(o,capture.mixed,"cover preceding",true,false,1792888485,4217,origin,
         capture.first,1,capture.wire,false);

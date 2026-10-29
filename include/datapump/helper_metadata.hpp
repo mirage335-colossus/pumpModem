@@ -12,14 +12,16 @@
 
 namespace datapump::helper {
 
+// Kept for consumers which distinguish metadata from tone observations. The
+// current wire record always carries both the time phase and the callsign.
 enum class MetadataKind { callsign, clear_time, encrypted_time };
 
 struct Metadata {
     MetadataKind kind=MetadataKind::callsign;
     std::string callsign;
-    // Unsigned 48-bit Unix time: 32 whole seconds followed by 16 fractional bits.
+    // 14-bit phase of Unix time in the 8.125-second cycle. One step is
+    // 65/131072 seconds (approximately 495.91 microseconds).
     std::uint64_t time_ticks=0;
-    // Neither encryption nor the optional error checksum authenticates metadata.
     bool authenticated=false;
 };
 
@@ -28,35 +30,37 @@ struct MetadataPacket {
     std::size_t count=0;
 };
 
-// Compact frames are MSB first in 21-bit symbols. The two type bits are 00 for
-// callsign, 01 for clear time, 10 for encrypted time, and 11 reserved. Callsign
-// content is five length bits then exactly that many seven-bit ASCII characters.
-// Time content is six bits containing B-1, then B value bits, retaining Q16 Unix
-// precision. Clear B is the minimum width (at least one); encrypted B is at least
-// twenty for an FF1 domain of at least one million and otherwise the minimum.
-//
-// Symbol count is ceil(content_bits/21), including the type and length. A CRC7
-// is appended only when at least seven unused bits already exist in that count;
-// it never adds a symbol. CRC7/MMC uses polynomial 0x09, initial value zero,
-// nonreflected MSB-first header+content bits and no final XOR. Remaining bits
-// are zero. Nineteen-character callsigns use seven symbols; time uses at most
-// three. The earlier fixed helper frames are deliberately superseded.
-MetadataPacket callsign_packet(std::string_view);
+inline constexpr std::uint64_t metadata_period_q16=532480; // 8.125 seconds
+inline constexpr std::size_t metadata_symbol_count=9;
+inline constexpr std::size_t metadata_max_characters=16;
 
-// Encryption is NIST FF1 with radix two, ten rounds, an empty tweak and forward
-// AES-256. Its separately derived key is Crypto::mac of the exact ASCII label
-// "datapump/helper-time/v2/ff1-key". Integer arithmetic covers widths 20..48.
-// It preserves the time field's length and adds no authentication tag. It is
-// deterministic and does not conceal width. Throws on out-of-range time or
-// unavailable/failed encryption; there is no clear fallback.
+// Fixed 126-bit record, MSB first in nine 14-bit symbols. The first symbol is
+// the phase of Unix Q16 time, measured at the dwell start, in an 8.125-second
+// period. Sixteen seven-bit ASCII slots follow; zero pads unused slots. NUL is
+// reserved for padding and may not appear within text. No checksum or
+// authentication is carried. A record never crosses into the next dwell.
+//
+// With a selected key the phase remains clear and the 112 character bits use
+// AES-256-CTR. The independent AES key is the station key's HMAC-SHA256 of
+// "datapump/helper-aux/v3/ctr-key". Its IV is big-endian absolute six-second
+// bucket (64 bits), 400-ms dwell within that bucket (32 bits), block counter
+// zero (32 bits). Keyed timestamps must be nominal physical dwell starts.
+// Use a station-specific key and one fixed character record per absolute
+// dwell: another sender or changed record in that same key/dwell reuses CTR.
+// Cipher failure throws before output and never falls back to clear text.
+MetadataPacket metadata_packet(std::uint64_t unix_q16_ticks,std::string_view callsign,
+                               const Crypto* key=nullptr);
+
+// Convenience wrappers for callers constructing reference geometry.
+MetadataPacket callsign_packet(std::string_view);
 MetadataPacket timecode_packet(std::uint64_t ticks,const Crypto* key=nullptr);
 
-// Rejects malformed/noncanonical lengths, symbols, padding, checksums or type.
-// Encrypted time uses ONLY receive_keys.front(), the selected station key.
-// There is no authentication: a wrong key can yield a plausible timestamp and
-// cannot reliably be rejected or selected from a key ring. All returned metadata
-// has authenticated=false. This codec changes no clocks. Missing AES fails closed.
 std::optional<Metadata> decode_metadata_packet(
-    std::span<const std::uint32_t>,std::span<const Crypto> receive_keys={});
+    std::span<const std::uint32_t>,std::span<const Crypto> receive_keys={},
+    // Capture-time estimate of the transmitted dwell start. The clear phase
+    // resolves the absolute dwell without a search for clocks within +/-4 s.
+    // Keyed decoding without this anchor fails closed. Only the first key is
+    // selected; wrong keys can yield plausible unauthenticated ASCII.
+    std::optional<std::uint64_t> approximate_unix_q16_ticks={});
 
 } // namespace datapump::helper

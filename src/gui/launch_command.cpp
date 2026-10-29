@@ -89,8 +89,8 @@ double helper_ratio(std::string_view text) {
     return value;
 }
 void helper_callsign(std::string_view text) {
-    if(text.size()>19||std::any_of(text.begin(),text.end(),[](unsigned char ch){return ch<32||ch>126;}))
-        invalid("Helper carrier callsign must contain at most 19 printable ASCII characters.");
+    if(text.size()>16||std::any_of(text.begin(),text.end(),[](unsigned char ch){return ch<32||ch>126;}))
+        invalid("Helper carrier callsign must contain at most 16 printable ASCII characters.");
 }
 double sched_frequency_search(std::string_view text) {
     const auto value=number(text,"--sched-frequency-search",1,32);
@@ -286,10 +286,7 @@ Patch parse_arguments(std::span<const std::string> arguments) {
     }
     if(lf_zero_reference&&explicit_reference=="independent")invalid("--lf-reference 0 conflicts with independent reference.");
     if(result.tx_key=="none"&&result.key_name)invalid("--key-name conflicts with --tx-key none.");
-    // Partial patches inherit the destination key selection. Callsign syntax
-    // belongs to the Controller when that context is unknown, and is inactive
-    // with encryption. Preserve the saved preference in keyed round trips.
-    if(result.tx_key=="none"&&result.helper_callsign)helper_callsign(*result.helper_callsign);
+    if(result.helper_callsign)helper_callsign(*result.helper_callsign);
     if(result.dsss_mode=="interleave"&&(result.dsss_factor==1||result.dsss_version=="legacy"))
         invalid("Interleave mode requires a spreading factor above one and the interleave construction.");
     return result;

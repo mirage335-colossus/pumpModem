@@ -31,9 +31,9 @@ double auxiliary_smooth(long double x) {
     return t*t*t*t*(35+t*(-84+t*(70-20*t)));
 }
 void validate_callsign(std::string_view callsign) {
-    if(callsign.size()>19)throw Error("Helper Carrier callsign must contain at most 19 seven-bit ASCII characters");
+    if(callsign.size()>16)throw Error("Helper Carrier callsign must contain at most 16 seven-bit ASCII characters");
     for(const char c:callsign)
-        if(static_cast<unsigned char>(c)>127)throw Error("Helper Carrier callsign must be seven-bit ASCII");
+        if(static_cast<unsigned char>(c)==0 || static_cast<unsigned char>(c)>127)throw Error("Helper Carrier callsign must be non-NUL seven-bit ASCII");
 }
 std::pair<double,double> gains_from_ratio(double power_ratio,double helper_mean,
         double data_mean=modem::nominal_signal_power) {
@@ -126,11 +126,6 @@ MeanPower mean_power(const Options& options,bool pilot_gating,const PowerReferen
         if(endpoint&&!std::isfinite(*endpoint))throw Error("invalid Helper Carrier power reference envelope");
     std::array<std::complex<double>,9> symbols{};
     std::size_t count=0;
-    const auto callsign=reference.time_key?std::string_view{}:std::string_view(options.callsign);
-    if(!callsign.empty()) {
-        const auto packet=callsign_packet(callsign);count=packet.count;
-        for(std::size_t i=0;i<count;++i)symbols[i]=apsk_point(packet.symbols[i]);
-    }
     std::optional<std::uint64_t> cached_time;
     // The bounded actual-waveform reference resolves a 4ms ramp with at least
     // 65 nodes even at the maximum two-second window. No calibration is
@@ -143,12 +138,12 @@ MeanPower mean_power(const Options& options,bool pilot_gating,const PowerReferen
         auto local=std::fmod(static_cast<long double>(reference.epoch%2)+seconds,2.L);
         if(local<0)local+=2;
         local-=std::floor(local/dwell)*dwell;
-        if(callsign.empty()&&options.timecode&&local>=metadata_end-3*symbol_time) {
+        if((options.timecode||!options.callsign.empty())&&local>=metadata_end-9*symbol_time) {
             const auto absolute_dwell=static_cast<long double>(reference.epoch)+seconds-local;
             if(absolute_dwell>=0&&absolute_dwell<4294967296.L) {
                 const auto ticks=static_cast<std::uint64_t>(std::round(absolute_dwell*65536));
                 if(cached_time!=ticks) {
-                    const auto packet=timecode_packet(ticks,reference.time_key?&*reference.time_key:nullptr);
+                    const auto packet=metadata_packet(ticks,options.callsign,reference.time_key?&*reference.time_key:nullptr);
                     count=packet.count;
                     for(std::size_t k=0;k<count;++k)symbols[k]=apsk_point(packet.symbols[k]);
                     cached_time=ticks;
@@ -381,15 +376,12 @@ long double protected_endpoint(std::uint64_t epoch,long double start,long double
     return end;
 }
 std::complex<double> apsk_point(std::uint32_t symbol) {
-    if(symbol>=(1U<<21))throw Error("invalid APSK-2097152 symbol");
-    const auto radius=.9+.1*static_cast<double>(symbol>>11)/1023;
-    return std::polar(radius,tau*static_cast<double>(symbol&2047U)/2048);
+    if(symbol>=(1U<<14))throw Error("invalid APSK-16384 symbol");
+    const auto radius=.2+.8*static_cast<double>(symbol>>7)/127;
+    return std::polar(radius,tau*static_cast<double>(symbol&127U)/128);
 }
 Generator::Generator(Options options,Plan plan,std::uint64_t epoch,bool punctuate,std::optional<Crypto> time_key)
     :options_(std::move(options)),plan_(plan),epoch_(epoch),punctuate_(punctuate),time_key_(std::move(time_key)) {
-    // Encryption never exposes a stored public callsign, including through
-    // validation or a failed-cipher fallback. Keep the caller's settings intact.
-    if(time_key_)options_.callsign.clear();
     validate(options_);
     if(!std::isfinite(plan_.frequency_hz)||!std::isfinite(plan_.auxiliary_frequency_hz)||
        !std::isfinite(plan_.low_frequency_hz)||plan_.low_frequency_hz<0||
@@ -402,14 +394,9 @@ Generator::Generator(Options options,Plan plan,std::uint64_t epoch,bool punctuat
             (plan_.low_frequency_hz>0?low_pilot_amplitude_fraction:0)+
             (plan_.auxiliary_frequency_hz>0?auxiliary_amplitude_fraction:0))+plan_.data_gain>1.0000000001)
         throw Error("invalid Helper Carrier mixer plan");
-    if(!options_.callsign.empty()) {
-        const auto packet=callsign_packet(options_.callsign);
-        for(std::size_t i=0;i<packet.count;++i)symbols_[i]=apsk_point(packet.symbols[i]);
-        symbol_count_=packet.count;
-    } else if(options_.timecode && plan_.helper_gain>0) {
-        // Validate cipher availability before the first PCM. Real
-        // dwell timestamps are cached below, never encrypted once per sample.
-        (void)timecode_packet(0,time_key_?&*time_key_:nullptr);
+    if(time_key_ && (options_.timecode || !options_.callsign.empty()) && plan_.helper_gain>0) {
+        // Fail before emitting samples when the keyed format is unavailable.
+        (void)metadata_packet(0,options_.callsign,&*time_key_);
     }
 }
 std::complex<double> Generator::mix_analytic(std::complex<double> payload,long double seconds,
@@ -445,15 +432,14 @@ std::complex<double> Generator::mix_analytic(std::complex<double> payload,long d
     const bool punctuation_fits=punctuate_ &&
         (!start_seconds || (*start_seconds-seconds)+local<=punctuation_latest_start+roundoff) &&
         (!end_seconds || (*end_seconds-seconds)+local+roundoff>=punctuation_protected_end);
-    // A time frame has at most three symbols. Cache it before its earliest
-    // possible start, then use its actual compact length. No crypto per sample.
-    if(options_.callsign.empty()&&options_.timecode&&local>=metadata_end-3*symbol_time) {
+    // Cache the complete record at its earliest transition, once per dwell.
+    if((options_.timecode||!options_.callsign.empty())&&local>=metadata_end-9*symbol_time) {
         const auto absolute_dwell=static_cast<long double>(epoch_)+seconds-local;
         if(absolute_dwell>=0 && absolute_dwell<4294967296.L) {
             const auto ticks=static_cast<std::uint64_t>(std::round(absolute_dwell*65536));
             if(ticks>=(std::uint64_t{1}<<48)) {symbol_count_=0;cached_time_.reset();}
             else if(cached_time_!=ticks) {
-                const auto packet=timecode_packet(ticks,time_key_?&*time_key_:nullptr);
+                const auto packet=metadata_packet(ticks,options_.callsign,time_key_?&*time_key_:nullptr);
                 symbol_count_=packet.count;
                 for(std::size_t i=0;i<symbol_count_;++i)symbols_[i]=apsk_point(packet.symbols[i]);
                 cached_time_=ticks;

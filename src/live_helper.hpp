@@ -21,9 +21,7 @@
 
 namespace datapump::live::detail {
 inline helper::Options active_helper_options(const Settings& settings) {
-    auto options=settings.helper;
-    if(settings.transfer.key)options.callsign.clear();
-    return options;
+    return settings.helper;
 }
 inline double active_helper_power(const Settings& settings) {
     return helper::effective_helper_power(active_helper_options(settings));
@@ -796,9 +794,8 @@ inline std::uint32_t helper_predicted_capture_sample_rate(const Settings& settin
         helper_occupied_bandwidth(settings),shared_helper_capture(config,h));
 }
 // Shared TX/Planner inputs. Metadata is confined to the auxiliary and cannot
-// qualify or interrupt the pure pilot. Callsigns use their actual symbol count; three
-// time symbols conservatively cover current/future Unix timestamps (early test
-// epochs may use fewer). The current software always punctuates helper.
+// qualify or interrupt the pure pilot. Each enabled record has nine symbols.
+// The current software always punctuates helper.
 inline helper::TonePrecisionRequest helper_tone_precision_request(const Settings& settings,
         const modem::Config& config,std::uint32_t physical_rate,double straight_cn0_db_hz,
         double baseline_lead_seconds,double maximum_source_capture_ratio=1) {
@@ -823,8 +820,7 @@ inline helper::TonePrecisionRequest helper_tone_precision_request(const Settings
         settings.simulation_phase_noise_degrees_per_sqrt_second*std::numbers::pi/180:
         helper_precision_options(config).phase_noise_radians_per_sqrt_second;
     const auto& callsign=settings.helper.callsign;
-    request.metadata_symbols=!settings.transfer.key && !callsign.empty()?
-        helper::callsign_packet(callsign).count:settings.helper.timecode?3:0;
+    request.metadata_symbols=!callsign.empty()||settings.helper.timecode?helper::metadata_symbol_count:0;
     request.punctuate=true;request.baseline_lead_seconds=baseline_lead_seconds;
     request.maximum_source_capture_ratio=maximum_source_capture_ratio;
     return request;

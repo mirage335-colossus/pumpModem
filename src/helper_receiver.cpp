@@ -15,7 +15,7 @@
 namespace datapump::helper {
 namespace {
 constexpr double tau=2*std::numbers::pi;
-constexpr std::size_t vertices=9;
+constexpr std::size_t vertices=11;
 constexpr std::size_t narrow_bins=72;
 using Pair=std::array<double,2>;
 void attach_punctuation(Reference& reference,const PunctuationObservation& observation) {
@@ -1036,7 +1036,7 @@ public:
 };
 }
 struct Receiver::Impl {
-    struct Bin {std::complex<double> z{};std::uint64_t first=0;double noise_energy=0;};
+    struct Bin {std::complex<double> z{};std::uint64_t first=0;};
     struct State {
         // Fixed builtin/complex<double> values, fixed arrays and disengaged
         // optionals only: no allocation or user-provided throwing constructor.
@@ -1052,7 +1052,6 @@ struct Receiver::Impl {
         double basis_hz=0,pending_basis_hz=0;
         std::uint64_t last_basis_sample=0;
         std::array<Bin,narrow_bins> ring{};
-        double bin_energy=0;
         bool coarse_valid=false;
         std::uint32_t nuisance_range=0;
         std::complex<double> previous_bin{};
@@ -1092,6 +1091,8 @@ struct Receiver::Impl {
     } state;
     double expected,width;
     std::vector<Crypto> keys;
+    std::optional<double> capture_epoch; // UTC seconds at capture sample zero, if known.
+    double capture_anchor_sample_seconds=0;
     OccupiedBand conditioning;
     FrequencyPrecisionOptions precision;
     PunctuationFormat punctuation_format;
@@ -1138,7 +1139,7 @@ struct Receiver::Impl {
         // separate auxiliary remains inverted after its single240ms edge.
         const auto guard=std::max(1./state.rate,state.timing_uncertainty)*state.waveform_scale;
         const auto straight_begin=punctuation_format==PunctuationFormat::auxiliary_single?.244:.284;
-        return (t>=.008&&t<.212)||(t>=straight_begin+guard&&t<.332-guard);
+        return (t>=.008&&t<.212)||(t>=straight_begin+guard&&t<.316-guard);
     }
     void fuse_frequency(Reference& reference) const {
         if(!optional_frequency||!optional_frequency->qualified())return;
@@ -1533,6 +1534,14 @@ struct Receiver::Impl {
         auto& s=state;
         if(!tone_time(seconds(index))) {s.fit_count=0;return;}
         if(!s.fit_count) {
+            // Nine metadata symbols start at316ms. For the paired laboratory
+            // waveform the final straight flank is only32ms; keep the normal
+            // 40ms aperture elsewhere, and fit that flank in31.25ms. The
+            // covariance and process uncertainty use the selected aperture.
+            const auto t=local(seconds(index));
+            const bool short_flank=s.timing_valid&&punctuation_format==PunctuationFormat::paired_legacy&&
+                t>=.284&&t<.316;
+            s.fit_size=std::max<std::size_t>(16,s.rate/(short_flank?32:25));
             s.fit_first=index;s.fit_gram={};s.fit_rhs={};s.fit_energy=0;
             s.fit_hz=s.guess_hz;s.fit_osc={1,0};s.fit_step=std::polar(1.,tau*s.fit_hz/s.rate);
             start_nuisance();
@@ -1745,10 +1754,7 @@ struct Receiver::Impl {
             } else {s.increment_sum={};s.increments=0;}
         }
         s.previous_bin=z;
-        const auto local=std::complex<double>{z}*std::polar(1.,tau*static_cast<double>(cycles));
-        const auto projected=s.bin_cc*local.real()*local.real()-2*s.bin_cs*local.real()*local.imag()+
-            s.bin_ss*local.imag()*local.imag();
-        s.ring[s.ring_position]={z,s.bin_first,std::max(0.,s.bin_energy-projected)};s.ring_position=(s.ring_position+1)%s.ring.size();
+        s.ring[s.ring_position]={z,s.bin_first};s.ring_position=(s.ring_position+1)%s.ring.size();
         s.ring_count=std::min(s.ring.size(),s.ring_count+1);
         // The reversal alone supplies precise timing. A following dwell ramp
         // must also have its independent amplitude notch at +160 ms before
@@ -1760,12 +1766,11 @@ struct Receiver::Impl {
             if(level<.3&&level<s.boundary_level) {s.boundary_notch=bin_center;s.boundary_level=level;}
         }
         find_punctuation();
-        s.bin_first+=s.bin_size;s.bin_count=0;s.bin_osc={1,0};s.bin_sum={};s.bin_cc=s.bin_ss=s.bin_cs=s.bin_energy=0;
+        s.bin_first+=s.bin_size;s.bin_count=0;s.bin_osc={1,0};s.bin_sum={};s.bin_cc=s.bin_ss=s.bin_cs=0;
     }
     void bin_sample(float sample) {
         auto& s=state;const auto c=s.bin_osc.real(),v=-s.bin_osc.imag();
         s.bin_sum+=static_cast<double>(sample)*s.bin_osc;
-        s.bin_energy+=static_cast<double>(sample)*sample;
         s.bin_cc+=c*c;s.bin_ss+=v*v;s.bin_cs+=c*v;s.bin_osc*=s.bin_step;
         if(++s.bin_count==s.bin_size)finish_bin();
     }
@@ -1808,7 +1813,7 @@ struct Receiver::Impl {
     }
     void finish_metadata() {
         auto& s=state;s.metadata_active=false;
-        if(s.metadata_samples<static_cast<std::size_t>(.063*s.rate/s.waveform_scale)||!s.reference)return;
+        if(s.metadata_samples<static_cast<std::size_t>(.079*s.rate/s.waveform_scale)||!s.reference)return;
         std::array<Pair,vertices> points{};double residual=0;
         double lo=-.0002,hi=.0002;
         for(unsigned i=0;i<24;++i) {
@@ -1823,35 +1828,33 @@ struct Receiver::Impl {
         for(std::size_t i=0;i<words.size();++i) {
             const std::complex<double> p{points[i+1][0],points[i+1][1]};
             const auto radius=std::abs(p),phase=std::arg(p);
-            const auto ring=std::lround((radius-.9)*1023/.1);
-            const auto sector=std::lround(phase*2048/tau);
-            if(ring<0||ring>1023)continue;
-            const auto word=(static_cast<std::uint32_t>(ring)<<11)|
-                (static_cast<std::uint32_t>(sector)&2047U);
+            const auto ring=std::lround((radius-.2)*127/.8);
+            const auto sector=std::lround(phase*128/tau);
+            if(ring<0||ring>127)continue;
+            const auto word=(static_cast<std::uint32_t>(ring)<<7)|
+                (static_cast<std::uint32_t>(sector)&127U);
             const auto ideal=apsk_point(word);
-            if(std::abs(radius-std::abs(ideal))>.48*.1/1023||
-               std::abs(phase_wrap(phase-std::arg(ideal)))>.48*tau/2048)continue;
+            if(std::abs(radius-std::abs(ideal))>.48*.8/127||
+               std::abs(phase_wrap(phase-std::arg(ideal)))>.48*tau/128)continue;
             words[i]=word;valid[i]=true;
         }
-        // Compact frames end at 388 ms and contain one through seven symbols.
-        // Fit the unchanged complete interval once, then try only suffixes
-        // whose preceding fitted vertices are all the unmodulated unit tone.
-        // Canonical type/length/padding checks belong to the compact codec.
+        // The fixed record occupies all nine fitted symbols in this dwell.
+        // Never assemble a record across a dwell boundary.
         const auto selected_key=std::span<const Crypto>(keys).first(std::min<std::size_t>(1,keys.size()));
         std::optional<Metadata> metadata;
-        for(std::size_t count=1;count<=7;++count) {
-            const auto first=words.size()-count;
-            bool complete=true;
-            for(std::size_t i=0;i<first;++i)
-                if(std::hypot(points[i+1][0]-1,points[i+1][1])>=.00015)complete=false;
-            for(std::size_t i=first;i<words.size();++i)if(!valid[i])complete=false;
-            if(!complete)continue;
-            metadata=decode_metadata_packet(std::span<const std::uint32_t>(words).subspan(first),selected_key);
-            if(metadata)break;
-        }
+        if(std::all_of(valid.begin(),valid.end(),[](bool value){return value;}))
+            {
+                std::optional<std::uint64_t> anchor;
+                if(capture_epoch && std::abs(s.metadata_dwell-capture_anchor_sample_seconds)<=2.) {
+                    const auto utc=*capture_epoch+s.metadata_dwell;
+                    if(std::isfinite(utc)&&utc>=0&&utc<4294967296.)
+                        anchor=static_cast<std::uint64_t>(std::llround(utc*65536.));
+                }
+                metadata=decode_metadata_packet(words,selected_key,anchor);
+            }
         if(metadata) {
-            // Compact metadata is unauthenticated, and its optional CRC never
-            // grants timing authority. The interpolation shift is only a local
+            // Metadata is unauthenticated and never grants timing authority.
+            // The interpolation shift is only a local
             // nuisance fit; preserve the independent punctuation-derived grid.
             auto update=s.reference->publication(s.actual_punctuation);
             const auto frontier=s.next-1;
@@ -1874,9 +1877,9 @@ struct Receiver::Impl {
         const auto period=.4/s.waveform_scale;
         const auto dwell=s.anchor+period*std::floor((time-s.anchor)/period),t=(time-dwell)*s.waveform_scale;
         if(s.metadata_active&&(dwell!=s.metadata_dwell||t>=.396))finish_metadata();
-        if(t<.332||t>=.396)return;
+        if(t<.316||t>=.396)return;
         if(!s.metadata_active) {
-            if(std::abs(s.metadata_last_dwell-dwell)<.1||t>.332+1.5*s.waveform_scale/s.rate)return;
+            if(std::abs(s.metadata_last_dwell-dwell)<.1||t>.316+1.5*s.waveform_scale/s.rate)return;
             s.metadata_last_dwell=dwell;
             const auto& r=*s.reference;
             const auto age=time-seconds(r.sample);
@@ -1893,7 +1896,7 @@ struct Receiver::Impl {
             s.metadata_osc=std::polar(1.,r.phase_radians+tau*r.frequency_hz*age+sign);
             s.metadata_step=std::polar(1.,tau*r.frequency_hz/s.rate);
         }
-        const auto position=(t-.332)/.008;
+        const auto position=(t-.316)/.008;
         const auto i=std::min<std::size_t>(vertices-2,static_cast<std::size_t>(std::floor(std::max(0.,position))));
         const auto u=position-i;
         const bool auxiliary=punctuation_format==PunctuationFormat::auxiliary_single;
@@ -1949,7 +1952,7 @@ Receiver::Receiver(double expected,double width,std::vector<Crypto> keys,
     }
     // Includes the finite-aperture process-kernel scratch. Focused compiler
     // stack-usage validation checks this bound for the qualified toolchain.
-    constexpr std::size_t scratch_bound=2880;
+    constexpr std::size_t scratch_bound=3072;
     if(sizeof(*this)+sizeof(Impl)+compact.capacity()*sizeof(Crypto)+scratch_bound+metadata_heap>workspace_bound)
         throw Error("Helper Carrier precision receiver exceeds its bounded workspace");
     impl_=std::make_unique<Impl>(expected,width,std::move(compact),ordinary_band,precision,punctuation);
@@ -2069,7 +2072,7 @@ bool Receiver::commit_optional_frequency(const FrequencyPresenceCertificate& pre
 
 struct AuxiliaryMetadataReceiver::Impl {
     std::uint32_t rate;
-    double expected_auxiliary,spacing;
+    double expected_auxiliary,spacing,expected_low;
     Receiver discovery,decoder;
     std::optional<PayloadFilter> notch;
     // Capture ownership is disjoint from the joined optional worker. Only
@@ -2081,18 +2084,25 @@ struct AuxiliaryMetadataReceiver::Impl {
     std::array<float,4096> filtered{},corrected{};
     std::uint64_t prepared_first=0,prepared_end=0,prepared_generation=0,worker_generation=0;
     std::uint64_t first_raw,next_raw,filtered_next,last_dwell_end=0;
-    double last_nominal_dwell=-1;
+    double last_nominal_dwell=-1,last_boundary_attempt=-1;
+    std::uint64_t boundary_support_first=0,boundary_support_last=0;
     std::optional<Reference> grid,update;
     PunctuationObservation pending_punctuation;
     std::uint64_t punctuation_generation=0,punctuation_sample=0;
     Impl(std::uint32_t r,double auxiliary,double pilot,std::vector<Crypto> keys,
-         FrequencyPrecisionOptions precision,std::uint64_t first)
-        :rate(r),expected_auxiliary(auxiliary),spacing(pilot-auxiliary),
+         FrequencyPrecisionOptions precision,std::uint64_t first,std::optional<double> first_utc,double low)
+        :rate(r),expected_auxiliary(auxiliary),spacing(pilot-auxiliary),expected_low(low),
          discovery(auxiliary,20,{},std::nullopt,precision,PunctuationFormat::auxiliary_single),
          decoder(auxiliary,20,std::move(keys),std::nullopt,precision,PunctuationFormat::auxiliary_single),
-         notch(std::in_place,r,pilot,100),capture(static_cast<std::size_t>(r)*84/100),
+         notch(),capture(static_cast<std::size_t>(r)*84/100),
          raw(capture.size()),capture_first(first),capture_next(first),
-         first_raw(first),next_raw(first),filtered_next(first+notch->delay()) {}
+         first_raw(first),next_raw(first),filtered_next(first) {
+        make_notch();filtered_next+=notch->delay();
+        if(first_utc) {
+            decoder.impl_->capture_anchor_sample_seconds=static_cast<double>(first)/rate;
+            decoder.impl_->capture_epoch=*first_utc-decoder.impl_->capture_anchor_sample_seconds;
+        }
+    }
     float sample(std::uint64_t at) const {return raw[at%raw.size()];}
     template<std::size_t N> static bool solve(std::array<std::array<double,N>,N> a,
             std::array<double,N> b,std::array<double,N>& x) {
@@ -2112,82 +2122,132 @@ struct AuxiliaryMetadataReceiver::Impl {
         }
         return true;
     }
-    // Only this dwell's measured straight flank is revisited. Three fixed
-    // local slope corrections refine two already discovered frequencies;
-    // there is no historical PCM frequency search or cross-hop phase model.
-    bool fit(std::uint64_t first,std::uint64_t end,double& auxiliary,double& pilot,
-             std::complex<double>& pilot_amplitude) const {
+    void make_notch() {
+        const std::array<PayloadFilter::NotchBand,2> bands{{{expected_auxiliary+spacing,100},{expected_low,100}}};
+        notch.emplace(rate,std::span<const PayloadFilter::NotchBand>(bands).first(expected_low>0?2:1));
+    }
+    struct Pilots {
+        double auxiliary=0,high=0,low=0;
+        std::complex<double> high_amplitude{},low_amplitude{};
+    };
+    // Revisit only a straight flank in the current dwell. Each tone has an
+    // independently fitted phasor and local frequency slope. No phase history
+    // or decoded metadata is needed to remove the pure pilots.
+    template<std::size_t N> bool fit_tones(std::uint64_t first,std::uint64_t end,Pilots& result) const {
+        std::array<double,N> frequency{};
+        frequency[0]=result.auxiliary;frequency[1]=result.high;
+        if constexpr(N==3)frequency[2]=result.low;
         const auto duration=static_cast<double>(end-first)/rate;
         for(unsigned iteration=0;iteration<3;++iteration) {
-            std::array<std::array<double,8>,8> gram{};std::array<double,8> rhs{},x{};
-            std::complex<double> a{1,0},p{1,0};
-            const auto da=std::polar(1.,tau*auxiliary/rate),dp=std::polar(1.,tau*pilot/rate);
+            std::array<std::array<double,4*N>,4*N> gram{};
+            std::array<double,4*N> rhs{},x{};
+            std::array<std::complex<double>,N> phase{},step{};phase.fill({1,0});
+            for(std::size_t tone=0;tone<N;++tone)step[tone]=std::polar(1.,tau*frequency[tone]/rate);
             for(auto at=first;at<end;++at) {
                 const auto u=static_cast<double>(at-first)/(end-first)-.5;
-                const std::array<double,8> b{a.real(),a.imag(),u*a.real(),u*a.imag(),
-                    p.real(),p.imag(),u*p.real(),u*p.imag()};
-                for(unsigned i=0;i<8;++i) {
-                    rhs[i]+=sample(at)*b[i];
-                    for(unsigned j=0;j<8;++j)gram[i][j]+=b[i]*b[j];
+                std::array<double,4*N> basis{};
+                for(std::size_t tone=0;tone<N;++tone) {
+                    basis[4*tone]=phase[tone].real();basis[4*tone+1]=phase[tone].imag();
+                    basis[4*tone+2]=u*phase[tone].real();basis[4*tone+3]=u*phase[tone].imag();
+                    phase[tone]*=step[tone];
                 }
-                a*=da;p*=dp;
+                const auto value=sample(at);
+                for(std::size_t i=0;i<4*N;++i) {
+                    rhs[i]+=value*basis[i];
+                    for(std::size_t j=0;j<4*N;++j)gram[i][j]+=basis[i]*basis[j];
+                }
             }
             if(!solve(gram,rhs,x))return false;
-            const std::complex<double> ca{x[0],-x[1]},sa{x[2],-x[3]},cp{x[4],-x[5]},sp{x[6],-x[7]};
-            if(std::norm(ca)<1e-12||std::norm(cp)<1e-12)return false;
-            const auto fa=std::imag(sa*std::conj(ca))/(std::norm(ca)*tau*duration);
-            const auto fp=std::imag(sp*std::conj(cp))/(std::norm(cp)*tau*duration);
-            if(!std::isfinite(fa)||!std::isfinite(fp)||std::abs(fa)>2||std::abs(fp)>2)return false;
-            auxiliary+=fa;pilot+=fp;
+            for(std::size_t tone=0;tone<N;++tone) {
+                const std::complex<double> amplitude{x[4*tone],-x[4*tone+1]},slope{x[4*tone+2],-x[4*tone+3]};
+                if(std::norm(amplitude)<1e-12)return false;
+                const auto correction=std::imag(slope*std::conj(amplitude))/(std::norm(amplitude)*tau*duration);
+                if(!std::isfinite(correction)||std::abs(correction)>2)return false;
+                frequency[tone]+=correction;
+            }
         }
-        std::array<std::array<double,4>,4> gram{};std::array<double,4> rhs{},x{};
-        std::complex<double> a{1,0},p{1,0};
-        const auto da=std::polar(1.,tau*auxiliary/rate),dp=std::polar(1.,tau*pilot/rate);
+        std::array<std::array<double,2*N>,2*N> gram{};
+        std::array<double,2*N> rhs{},x{};
+        std::array<std::complex<double>,N> phase{},step{};phase.fill({1,0});
+        for(std::size_t tone=0;tone<N;++tone)step[tone]=std::polar(1.,tau*frequency[tone]/rate);
         double energy=0;
         for(auto at=first;at<end;++at) {
-            const std::array<double,4> b{a.real(),a.imag(),p.real(),p.imag()};
-            const auto value=sample(at);energy+=value*value;
-            for(unsigned i=0;i<4;++i) {
-                rhs[i]+=value*b[i];for(unsigned j=0;j<4;++j)gram[i][j]+=b[i]*b[j];
+            std::array<double,2*N> basis{};
+            for(std::size_t tone=0;tone<N;++tone) {
+                basis[2*tone]=phase[tone].real();basis[2*tone+1]=phase[tone].imag();phase[tone]*=step[tone];
             }
-            a*=da;p*=dp;
+            const auto value=sample(at);energy+=value*value;
+            for(std::size_t i=0;i<2*N;++i) {
+                rhs[i]+=value*basis[i];for(std::size_t j=0;j<2*N;++j)gram[i][j]+=basis[i]*basis[j];
+            }
         }
         if(!solve(gram,rhs,x)||!(energy>0))return false;
-        double explained=0;for(unsigned i=0;i<4;++i)explained+=x[i]*rhs[i];
-        if(explained<.9*energy||std::abs(auxiliary-expected_auxiliary)>20)return false;
-        pilot_amplitude={x[2],-x[3]};return true;
+        double explained=0;for(std::size_t i=0;i<2*N;++i)explained+=x[i]*rhs[i];
+        if(explained<.9*energy||std::abs(frequency[0]-expected_auxiliary)>20)return false;
+        result.auxiliary=frequency[0];result.high=frequency[1];result.high_amplitude={x[2],-x[3]};
+        if constexpr(N==3) {result.low=frequency[2];result.low_amplitude={x[4],-x[5]};}
+        return true;
+    }
+    bool fit(std::uint64_t first,std::uint64_t end,Pilots& result) const {
+        return expected_low>0?fit_tones<3>(first,end,result):fit_tones<2>(first,end,result);
+    }
+    double pure_pilots(const Pilots& pilots,std::uint64_t fit_first,std::uint64_t at) const {
+        const auto seconds=static_cast<double>((static_cast<long double>(at)-fit_first)/rate);
+        return std::real(pilots.high_amplitude*std::polar(1.,tau*pilots.high*seconds)+
+            pilots.low_amplitude*std::polar(1.,tau*pilots.low*seconds));
     }
     void raw_boundary() {
         auto& state=discovery.impl_->state;
         if(state.punctuation<0)return;
         const auto center=state.punctuation+.16;
         if(std::abs(state.boundary_notch-center)<1./rate&&state.boundary_level<=.1)return;
+        if(std::abs(last_boundary_attempt-center)<.1)return;
         const auto position=static_cast<long double>(center)*rate;
-        const auto begin=std::ceil(position-.0005L*rate),end=std::ceil(position+.0005L*rate);
-        const auto plateau_begin=std::ceil(position-.012L*rate),plateau_end=std::ceil(position-.008L*rate);
+        const auto begin=std::ceil(position-.0005L*rate),end=std::floor(position);
+        const auto plateau_begin=std::ceil(position-.10L*rate),plateau_end=std::ceil(position-.096L*rate);
+        const auto fit_first=std::ceil(position-.36L*rate),fit_end=std::ceil(position-.20L*rate);
         const auto retained=std::max(first_raw,next_raw>raw.size()?next_raw-raw.size():0);
-        if(!std::isfinite(position)||plateau_begin<retained||begin<retained||end>next_raw||
-           end-begin<8||plateau_end-plateau_begin<8)return;
-        double energy=0,plateau=0;
-        for(auto at=static_cast<std::uint64_t>(begin);at<static_cast<std::uint64_t>(end);++at)
-            energy+=static_cast<double>(sample(at))*sample(at);
-        for(auto at=static_cast<std::uint64_t>(plateau_begin);at<static_cast<std::uint64_t>(plateau_end);++at)
-            plateau+=static_cast<double>(sample(at))*sample(at);
-        // The diagnostic notch reshapes the ramp and its finite-bin carrier
-        // image. Witness the independently required zero-amplitude boundary
-        // in raw PCM instead, with a stricter 0.1 RMS ratio. The existing
-        // shaped-reversal and 400 ms cadence checks still establish the grid.
-        const auto ratio=plateau>0?energy/(end-begin)/(plateau/(plateau_end-plateau_begin)):1.L;
-        if(ratio<=.01L) {state.boundary_notch=center;state.boundary_level=std::sqrt(ratio);}
+        if(!std::isfinite(position)||fit_first<retained||begin<retained||end>next_raw||
+           end-begin<8||plateau_end-plateau_begin<8||fit_end<=fit_first)return;
+        last_boundary_attempt=center; // At most one complete bounded fit per observed dwell.
+        Pilots pilots{state.guess_hz,state.guess_hz+spacing,
+            expected_low>0?expected_low+(state.guess_hz-expected_auxiliary):0};
+        if(!fit(static_cast<std::uint64_t>(fit_first),static_cast<std::uint64_t>(fit_end),pilots))return;
+        // Pure pilots can remain continuous at the auxiliary gate. Remove
+        // their independently fitted current-dwell phasors before witnessing
+        // its zero. Test the two permitted pilot envelopes; both hypotheses
+        // retain the same reversal/cadence and strict auxiliary RMS guard.
+        double best=1;
+        for(const bool gated:{false,true}) {
+            double energy=0,plateau=0;
+            const auto residual=[&](std::uint64_t at) {
+                const auto envelope=gated?smooth((center-static_cast<double>(at)/rate)/.004):1.;
+                return static_cast<double>(sample(at))-envelope*pure_pilots(pilots,static_cast<std::uint64_t>(fit_first),at);
+            };
+            for(auto at=static_cast<std::uint64_t>(begin);at<static_cast<std::uint64_t>(end);++at) {
+                const auto value=residual(at);energy+=value*value;
+            }
+            for(auto at=static_cast<std::uint64_t>(plateau_begin);at<static_cast<std::uint64_t>(plateau_end);++at) {
+                const auto value=residual(at);plateau+=value*value;
+            }
+            const auto ratio=plateau>0?energy/(end-begin)/(plateau/(plateau_end-plateau_begin)):1.L;
+            best=std::min(best,static_cast<double>(ratio));
+        }
+        if(best<=.01) {
+            state.boundary_notch=center;state.boundary_level=std::sqrt(best);
+            boundary_support_first=static_cast<std::uint64_t>(fit_first);
+            boundary_support_last=static_cast<std::uint64_t>(end)-1;
+        }
     }
     void restart_worker() {
         // Retire old filter storage before rebuilding; the prepaid grant need
         // never hold two filters. This allocation is optional worker work.
-        if(worker_generation||!notch) {notch.reset();notch.emplace(rate,expected_auxiliary+spacing,100);}
+        if(worker_generation||!notch) {notch.reset();make_notch();}
         discovery.reset();decoder.reset();grid.reset();update.reset();
         pending_punctuation={};punctuation_generation=punctuation_sample=0;
         first_raw=next_raw=prepared_first;filtered_next=first_raw+notch->delay();
-        last_dwell_end=0;last_nominal_dwell=-1;worker_generation=prepared_generation;
+        last_dwell_end=0;last_nominal_dwell=last_boundary_attempt=-1;
+        boundary_support_first=boundary_support_last=0;worker_generation=prepared_generation;
     }
     void observe_punctuation() {
         auto observed=discovery.impl_->state.actual_punctuation;
@@ -2199,6 +2259,10 @@ struct AuxiliaryMetadataReceiver::Impl {
         const auto delay=notch->delay();
         if(observed.first_sample<delay||observed.last_sample>UINT64_MAX-delay)return;
         observed.first_sample-=delay;observed.last_sample+=delay;
+        if(boundary_support_last) {
+            observed.first_sample=std::min(observed.first_sample,boundary_support_first);
+            observed.last_sample=std::max(observed.last_sample,boundary_support_last);
+        }
         if(observed.first_sample<first_raw||observed.last_sample>=next_raw)return;
         pending_punctuation=observed;punctuation_generation=observed.generation;punctuation_sample=observed.sample;
     }
@@ -2239,15 +2303,16 @@ struct AuxiliaryMetadataReceiver::Impl {
         if(end>next_raw||end<=last_dwell_end||first<retained)return false;
         const auto fit_first=static_cast<std::uint64_t>(std::ceil((dwell+.04)*rate));
         const auto fit_end=static_cast<std::uint64_t>(std::ceil((dwell+.20)*rate));
-        double auxiliary=grid->frequency_hz,pilot=auxiliary+spacing;
-        std::complex<double> amplitude;
-        if(fit_end<=fit_first||!fit(fit_first,fit_end,auxiliary,pilot,amplitude)) {
+        Pilots pilots{grid->frequency_hz,grid->frequency_hz+spacing,
+            expected_low>0?expected_low+(grid->frequency_hz-expected_auxiliary):0};
+        if(fit_end<=fit_first||!fit(fit_first,fit_end,pilots)) {
             last_dwell_end=end;last_nominal_dwell=nominal_dwell;return true;
         }
         // RF offset is common to both tones. Their measured spacing supplies
         // the local waveform clock without decoding metadata or assigning
         // that clock any receiver-assistance authority. A scalar timing shift
         // cannot fit clock stretch across the eight metadata transitions.
+        const auto auxiliary=pilots.auxiliary,pilot=pilots.high;
         const auto scale=(pilot-auxiliary)/spacing;
         if(!std::isfinite(scale)||std::abs(scale-1)>.001) {
             last_dwell_end=end;last_nominal_dwell=nominal_dwell;return true;
@@ -2274,11 +2339,15 @@ struct AuxiliaryMetadataReceiver::Impl {
             auto oscillator=std::polar(1.,tau*pilot*static_cast<double>(
                 (static_cast<long double>(at)-fit_first)/rate));
             const auto step=std::polar(1.,tau*pilot/rate);
+            auto low_oscillator=std::polar(1.,tau*pilots.low*static_cast<double>(
+                (static_cast<long double>(at)-fit_first)/rate));
+            const auto low_step=std::polar(1.,tau*pilots.low/rate);
             for(std::size_t i=0;i<count;++i) {
                 const auto t=(static_cast<double>(at+i)/rate-dwell)*scale;
                 const auto envelope=smooth(std::min(t,.4-t)/.004);
-                corrected[i]=static_cast<float>(sample(at+i)-envelope*std::real(amplitude*oscillator));
-                oscillator*=step;
+                corrected[i]=static_cast<float>(sample(at+i)-envelope*std::real(
+                    pilots.high_amplitude*oscillator+pilots.low_amplitude*low_oscillator));
+                oscillator*=step;low_oscillator*=low_step;
             }
             decoder.push(std::span<const float>(corrected).first(count),rate,at);at+=count;
             if(auto decoded=decoder.take_update();decoded&&decoded->metadata) {
@@ -2294,23 +2363,34 @@ struct AuxiliaryMetadataReceiver::Impl {
 std::size_t AuxiliaryMetadataReceiver::workspace_required(std::uint32_t rate) {
     if(rate<1000||rate>96000)throw Error("optional Helper metadata requires1..96kHz PCM");
     const auto taps=static_cast<std::size_t>(std::ceil(.04*rate))|1U;
+    // Includes the complete-dwell three-tone Gram fit and its callers. GCC
+    // -O3 stack-usage accounting measures 4176 bytes on the deepest owned
+    // chain; external runtime/provider stacks retain their existing boundary.
+    constexpr std::size_t worker_scratch=5120;
     return sizeof(Impl)+2*(static_cast<std::size_t>(rate)*84/100)*sizeof(float)+
-        taps*(sizeof(double)+sizeof(float))+2*Receiver::workspace_bound+2048;
+        taps*(sizeof(double)+sizeof(float))+2*Receiver::workspace_bound+worker_scratch;
 }
 AuxiliaryMetadataReceiver::AuxiliaryMetadataReceiver(std::uint32_t rate,double auxiliary,double pilot,
-        std::vector<Crypto> keys,FrequencyPrecisionOptions precision,std::size_t grant,std::uint64_t first) {
+        std::vector<Crypto> keys,FrequencyPrecisionOptions precision,std::size_t grant,std::uint64_t first,
+        std::optional<double> first_utc,double low) {
     const auto required=workspace_required(rate);
     if(grant<required)throw Error("optional Helper metadata workspace was not prepaid");
-    if(!std::isfinite(auxiliary)||!std::isfinite(pilot)||pilot<=auxiliary||
+    if((first_utc&&!std::isfinite(*first_utc))||!std::isfinite(auxiliary)||!std::isfinite(pilot)||pilot<=auxiliary||
+       !std::isfinite(low)||low<0||(low>0&&(low<=100||low+200>=auxiliary))||
        first>UINT64_MAX-static_cast<std::size_t>(std::ceil(.04*rate)))
         throw Error("invalid optional Helper metadata geometry");
-    impl_=std::make_unique<Impl>(rate,auxiliary,pilot,std::move(keys),precision,first);
+    impl_=std::make_unique<Impl>(rate,auxiliary,pilot,std::move(keys),precision,first,first_utc,low);
     if(sizeof(*this)+sizeof(Impl)+(impl_->capture.capacity()+impl_->raw.capacity())*sizeof(float)+impl_->notch->allocated_bytes()+
        2*Receiver::workspace_bound>grant)throw Error("optional Helper metadata exceeds its workspace grant");
 }
 AuxiliaryMetadataReceiver::~AuxiliaryMetadataReceiver()=default;
 AuxiliaryMetadataReceiver::AuxiliaryMetadataReceiver(AuxiliaryMetadataReceiver&&) noexcept=default;
 AuxiliaryMetadataReceiver& AuxiliaryMetadataReceiver::operator=(AuxiliaryMetadataReceiver&&) noexcept=default;
+void AuxiliaryMetadataReceiver::set_capture_utc(std::uint64_t sample,std::optional<double> utc) {
+    if(utc&&!std::isfinite(*utc))throw Error("invalid auxiliary capture UTC");
+    impl_->decoder.impl_->capture_anchor_sample_seconds=static_cast<double>(sample)/impl_->rate;
+    impl_->decoder.impl_->capture_epoch=utc?std::optional<double>{*utc-impl_->decoder.impl_->capture_anchor_sample_seconds}:std::nullopt;
+}
 void AuxiliaryMetadataReceiver::push(std::span<const float> samples,std::uint64_t first) {
     auto& s=*impl_;
     if(first!=s.capture_next||samples.size()>UINT64_MAX-first)

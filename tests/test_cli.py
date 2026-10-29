@@ -65,7 +65,7 @@ class StreamCLI(unittest.TestCase):
         for flag,value in (('--helper-power','nan'),('--helper-power','-1W'),
                            ('--helper-power','1horsepower'),('--helper-data-power','0'),
                            ('--helper-ratio-limit','11'),('--helper-ratio-limit','nan'),
-                           ('--helper-frequency','middle'),('--helper-callsign','A'*20),
+                           ('--helper-frequency','middle'),('--helper-callsign','A'*17),
                            ('--helper-callsign','bad\ncall')):
             self.run_pump('tx','--text','e',flag,value,*AUDIO,ok=False)
         for frequency in ('low','0'):
@@ -175,42 +175,38 @@ class StreamCLI(unittest.TestCase):
             directory=pathlib.Path(directory)
             key=directory/'helper.key'
             self.run_pump('keygen','--output',key)
-            for label,mode,extra in (('clear_time','clear_time',()),
-                                    ('callsign','callsign',('--helper-callsign','N0CALL')),
-                                    ('encrypted_time','encrypted_time',('--keyfile',key)),
-                                    ('encrypted_id','encrypted_time',('--keyfile',key,'--helper-callsign','N0CALL')),
-                                    ('encrypted_ignored_id','encrypted_time',('--keyfile',key,'--helper-callsign','private\n'+'A'*20))):
+            for label,callsign,extra in (('clear_time','',()),
+                                         ('callsign','N0CALL',('--helper-callsign','N0CALL'))):
                 capture=directory/(label+'.wav')
                 self.run_pump('status-tx','--bits','001001001001','--output',capture,
                     *helper,*extra,*geometry)
-                with wave.open(str(capture),'rb') as recorded:
-                    capture_ticks=(recorded.getnframes()*65536+recorded.getframerate()-1)//recorded.getframerate()
                 value=json.loads(self.run_pump('status-rx','--bits','001001001001','--input',capture,
                     *helper,*extra,*geometry).stdout)
                 observed=value['helper_carrier']
                 self.assertTrue(observed['present'])
                 metadata=observed['metadata']
-                self.assertIsNotNone(metadata,mode)
-                self.assertEqual(metadata['kind'],mode)
-                # Compact helper time is advisory: encryption carries no tag.
+                self.assertIsNotNone(metadata,label)
+                self.assertEqual(metadata['kind'],'metadata')
                 self.assertFalse(metadata['authenticated'])
-                if mode=='callsign':
-                    self.assertEqual(metadata['callsign'],'N0CALL')
-                    self.assertNotIn('time_ticks',metadata)
-                else:
-                    self.assertNotIn('callsign',metadata)
-                    self.assertGreater(metadata['time_ticks'],(1800000000-4)*65536)
-                    # The physical frame includes training and source cover;
-                    # use its measured extent rather than a guessed eight seconds.
-                    self.assertLess(metadata['time_ticks'],1800000000*65536+capture_ticks)
-            encrypted=(directory/'encrypted_time.wav').read_bytes()
-            for ignored in ('encrypted_id','encrypted_ignored_id'):
-                self.assertEqual((directory/(ignored+'.wav')).read_bytes(),encrypted,
-                    'ignored encrypted callsign changed the transmitted waveform')
+                self.assertEqual(metadata['callsign'],callsign)
+                self.assertGreaterEqual(metadata['time_phase'],0)
+                self.assertLess(metadata['time_phase'],16384)
+            for label,extra in (('encrypted_time',('--keyfile',key)),
+                                ('encrypted_id',('--keyfile',key,'--helper-callsign','N0CALL'))):
+                capture=directory/(label+'.wav')
+                self.run_pump('status-tx','--bits','001001001001','--output',capture,
+                    *helper,*extra,*geometry)
+                # WAV has no trusted capture epoch, so keyed metadata is not decoded.
+                value=json.loads(self.run_pump('status-rx','--bits','001001001001','--input',capture,
+                    *helper,*extra,*geometry).stdout)
+                self.assertTrue(value['helper_carrier']['present'])
+                self.assertIsNone(value['helper_carrier']['metadata'])
+            self.assertNotEqual((directory/'encrypted_time.wav').read_bytes(),
+                (directory/'encrypted_id.wav').read_bytes(),
+                'encrypted callsign did not change the transmitted waveform')
             without_key=json.loads(self.run_pump('status-rx','--bits','001001001001',
                 '--input',directory/'encrypted_time.wav',*helper,*geometry,ok=False).stdout)
             self.assertTrue(without_key['helper_carrier']['present'])
-            self.assertIsNone(without_key['helper_carrier']['metadata'])
             self.assertFalse(without_key['content_validated'])
             self.assertFalse(without_key['stream_complete'])
             self.assertIn('no sufficiently confident pattern',without_key['error'])

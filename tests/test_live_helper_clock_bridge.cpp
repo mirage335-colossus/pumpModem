@@ -1,4 +1,5 @@
 #include "live_helper_clock.hpp"
+#include "live_helper_utc.hpp"
 #include "live_helper_prior.hpp"
 #include "datapump/resampler.hpp"
 #include "datapump/channel.hpp"
@@ -12,6 +13,24 @@ namespace d=datapump::live::detail;
 namespace h=datapump::helper;
 namespace {
 void check(bool value,const char* why){if(!value)throw Error(why);}
+void advisory_utc_mapping() {
+    using K=audio::CaptureTransportKind;
+    audio::CaptureTransportRecipe recipe{K::fixed_nominal_audio,48000,16000,1000,500};
+    auto mapped=d::helper_capture_utc(recipe,48000,16000,97300,1000,98000,200,16000,1000.L,1.L/16000);
+    check(mapped && std::abs(*mapped-1001.025)<1e-9,"dated raw/logical origins or unequal sample rates changed UTC mapping");
+    mapped=d::helper_capture_utc(recipe,48000,16000,43000,1000,98000,200,16000,1000.L,1.L/16000);
+    check(mapped && std::abs(*mapped-999.89375)<1e-9,"signed earlier sample mapping was lost");
+    recipe.kind=K::unknown;
+    check(!d::helper_capture_utc(recipe,48000,16000,97300,1000,98000,200,16000,1000.L,1.L/16000),"unknown transport dated metadata");
+    recipe.kind=K::fixed_nominal_audio;
+    check(!d::helper_capture_utc(recipe,48000,16000,97300,1000,98000,200,0,1000.L,1.L/16000),"stale UTC anchor was accepted");
+    check(!d::helper_capture_utc(recipe,48000,16000,97300,98000,98000,200,16000,1000.L,1.L/16000),"discontinuous raw support was accepted");
+    check(!d::helper_capture_utc(recipe,48000,16000,97300,1000,98000,200,16000,{},1.L/16000),"missing UTC anchor was accepted");
+    recipe={K::sampled_physical_halfband,64000,16000,1000,500};
+    check(bool(d::helper_capture_utc(recipe,64000,16000,65000,1000,65000,200,16000,1000.L,1.L/16000)),"valid halfband capture lost UTC");
+    recipe.raw_rate=48000;
+    check(!d::helper_capture_utc(recipe,48000,16000,49000,1000,49000,200,16000,1000.L,1.L/16000),"unsupported halfband geometry dated metadata");
+}
 h::PunctuationClockDomain domain(std::uint32_t rate){return {7,11,13,17,rate};}
 modem::PatternAcquisitionScoredSupport support(std::uint64_t first,std::uint64_t last,
         std::uint32_t rate,std::uint64_t origin=0) {
@@ -409,7 +428,7 @@ void actual_corrected_source() {
     constexpr std::uint32_t rate=57600;
     for(const auto correction:{-.0003,.0003}) {
         h::Options options;options.power_w=15000;options.data_power_w=4;options.timecode=false;
-        const auto plan=h::plan(options,1500,100,rate);
+        const auto plan=h::plan(options,1800,100,rate);
         h::Generator generator(options,plan,1800000000,true);
         audio::Resampler playback(14400,rate,true);playback.initialize_timing(0,correction);
         long double first_source=0,last_source=0;std::uint64_t generated=0;
@@ -418,7 +437,7 @@ void actual_corrected_source() {
             return generator.mix(payload,seconds,output_rate);
         });
         h::AuxiliaryMetadataReceiver receiver(rate,plan.auxiliary_frequency_hz,plan.frequency_hz,{}, {},
-            h::AuxiliaryMetadataReceiver::workspace_required(rate));
+            h::AuxiliaryMetadataReceiver::workspace_required(rate),0,{},plan.low_frequency_hz);
         h::PunctuationClock clock;
         const auto raw=domain(rate);clock.reset(raw);
         std::vector<float> input(14400*5,0),output(113);
@@ -437,7 +456,9 @@ void actual_corrected_source() {
             }
             check(progress.consumed || progress.produced || playback.finished(),"actual corrected source stalled");
         }
-        check(generated==observed && observed>rate*4 && distinct>=8,"actual corrected helper source did not expose distinct markers");
+        if(generated!=observed || observed<=rate*4 || distinct<8)
+            throw Error("actual corrected helper source did not expose distinct markers: generated="+
+                std::to_string(generated)+" observed="+std::to_string(observed)+" markers="+std::to_string(distinct));
         const auto rate_truth=(last_source-first_source)*rate/(generated-1)-1;
         check(std::abs(rate_truth-correction)<1e-10L,"helper callback did not retain the DATA resampler correction");
         h::PunctuationClockRequest q{first.punctuation.sample+100,last.punctuation.sample-100,observed,2ULL*rate,
@@ -451,7 +472,7 @@ void actual_corrected_source() {
 }
 void actual_sampled_common_source() {
     for(const auto b:{-550.,550.}) {
-        modem::Config c;c.sample_rate=14400;c.carrier_hz=1500;c.bandwidth_hz=360;
+        modem::Config c;c.sample_rate=14400;c.carrier_hz=3000;c.bandwidth_hz=360;
         c.pattern_symbols=true;c.constellation_bits=1;c.spreading_factor=64;c.scramble=true;c.dsss=true;c.dsss_factor=10;
         c.oscillator_search=modem::OscillatorSearchConfig{{100,0},{1,0},30000000,3};
         c.stream_epoch=1800000000;c.spreading_seed[3]=51;c.dsss_seed[13]=171;c.data_key=Crypto(c.spreading_seed);
@@ -462,7 +483,7 @@ void actual_sampled_common_source() {
         const auto rate=channel.physical_sample_rate();const auto raw=domain(rate);
         const auto plan=h::plan(options,h::placement_band(c),rate,0,modem::outer_dsss_transmit_gain(c));
         h::AuxiliaryMetadataReceiver receiver(rate,plan.auxiliary_frequency_hz,plan.frequency_hz,{}, {},
-            h::AuxiliaryMetadataReceiver::workspace_required(rate));
+            h::AuxiliaryMetadataReceiver::workspace_required(rate),0,{},plan.low_frequency_hz);
         h::PunctuationClock clock;clock.reset(raw);
         h::Reference first,last;std::size_t distinct=0;std::uint64_t raw_end=0;
         channel.set_physical_observer([&](std::span<const float> samples,std::uint32_t fs,std::uint64_t at) {
@@ -500,7 +521,7 @@ void actual_sampled_common_source() {
 }
 int main() {
     try {
-        nominal_maps();halfband_maps();history_lifecycle();joint_bridge();common_source_cells();actual_corrected_source();actual_sampled_common_source();
+        advisory_utc_mapping();nominal_maps();halfband_maps();history_lifecycle();joint_bridge();common_source_cells();actual_corrected_source();actual_sampled_common_source();
         std::cout<<"PASS Live helper raw-clock bridge maps, provenance, support and UTC-preserving certificate\n";
         return 0;
     }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}

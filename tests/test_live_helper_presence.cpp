@@ -226,16 +226,22 @@ void terminal_delivery_and_allocation() {
     check(f.presence.pending_id()==102,"new presence did not resume with fresh ID after exact receipt");
     f.presence.synchronize(1,1);
     check(!f.presence.pending_id() && !f.presence.retained_records(),"explicit new/clear generation retained stale diagnostics");
-    // Advisory time is display-only, and mutually exclusive with callsign.
+    // Advisory time and callsign update the same display-only presence record.
     Presence time;std::uint64_t id=500;
-    Presence::Observation value{true,0,1000,1000,true,1500,30,{},0,{},Presence::AdvisoryTime{true,65536}};
+    Presence::Observation value{true,0,1000,1000,true,1500,30,{},0,{},Presence::AdvisoryTime{false,8192}};
     row=time.observe(value,[&]{return id++;},Presence::Clock::time_point{});
-    check(row && row->text.find("encrypted advisory time 1.00000")!=std::string::npos,
+    check(row && row->text.find("advisory time phase 4.06250 s modulo 8.125 s")!=std::string::npos,
           "decoded advisory time was lost");
     value.first_sample=1000;value.end_sample=2000;value.callsign="K1ABC";
     row=time.observe(value,[&]{return id++;},Presence::Clock::time_point{std::chrono::seconds(1)});
-    check(row && row->text.find("callsign K1ABC")!=std::string::npos &&
-          row->text.find("advisory time")==std::string::npos,"callsign and advisory time were both presented");
+    check(row && row->id==500 && row->text.find("callsign K1ABC")!=std::string::npos &&
+          row->text.find("advisory time phase 4.06250")!=std::string::npos,
+          "combined metadata lost its identity, callsign, or advisory time");
+    value.first_sample=2000;value.end_sample=3000;value.callsign={};
+    row=time.observe(value,[&]{return id++;},Presence::Clock::time_point{std::chrono::seconds(2)});
+    check(row && row->id==500 && row->text.find("callsign K1ABC")==std::string::npos &&
+          row->text.find("advisory time phase 4.06250")!=std::string::npos,
+          "empty callsign did not replace the previous combined metadata");
 }
 void gui_sanitization() {
     gui::Signals signals;gui::SignalLine line;line.id=12;line.helper_carrier=true;

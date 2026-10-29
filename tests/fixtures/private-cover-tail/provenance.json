@@ -1,0 +1,32 @@
+{
+  "format": "DPCOVER1 little-endian float32 physical cover witness",
+  "sha256": "8737e8e4e39f8a4d7063fe51b22b54e589f23217548168cbdbb026a930f4ed42",
+  "size_bytes": 192027,
+  "sample_rate_hz": 1024,
+  "samples_per_channel": 24000,
+  "channels_in_order": [
+    "mixed",
+    "matched_helper_component_removed"
+  ],
+  "first_payload_sample": 8031,
+  "source_bits_before_masking": [
+    0,
+    0,
+    1
+  ],
+  "wire_bits": [
+    1,
+    0,
+    0
+  ],
+  "historical_source": {
+    "base": "2e7f3fa61480fbcb82a2a08afd72cf6643cb8bc3",
+    "overlay_sha256": "e2b951fc5bcec3eddbb3d3bb4e334fc69aea7e6f72c7297df3a7d52029e5e8ef",
+    "archive_sha256": "16aebe2a1c6dd068284f087f80e6b6ea5ffc5a2a2f60484f1654fea3a772de16",
+    "binding_count": 441
+  },
+  "historical_test_sha256": "6a7c6a5aaf57439e33175ccb8cc9eab5ebb10380320e3d29e04138f331228799",
+  "generator_sha256": "7c31c77253fa54d9cbb8df5730ac5fe126f190165eb44a896e530151ed2e8589",
+  "compiler": "GCC14.2.0, C++20, -O3 -DNDEBUG -ffp-contract=off -fno-fast-math",
+  "application_scope": "historical fixed ordinary-receiver witness; not current Helper transmitter qualification"
+}

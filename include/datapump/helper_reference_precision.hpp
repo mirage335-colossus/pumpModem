@@ -14,7 +14,7 @@ enum class PilotObservationMode { legacy_segmented,continuous_phase,independent_
 struct TonePrecisionRequest {
     std::uint32_t sample_rate=0;
     double straight_cn0_db_hz=0,phase_noise_radians_per_sqrt_second=0;
-    std::size_t metadata_symbols=3;
+    std::size_t metadata_symbols=9;
     bool punctuate=true;
     double baseline_lead_seconds=2,target_half_width_hz=.1,max_extra_seconds=36;
     double maximum_tracking_slew_hz_per_second=.5,maximum_source_capture_ratio=1;

@@ -147,8 +147,8 @@ double helper_power_w(std::string value) {
     return watts;
 }
 void validate_helper_callsign(std::string_view value) {
-    if(value.size()>19||std::any_of(value.begin(),value.end(),[](unsigned char ch){return ch<32||ch>126;}))
-        throw Error("Helper carrier callsign must contain at most 19 printable ASCII characters");
+    if(value.size()>16||std::any_of(value.begin(),value.end(),[](unsigned char ch){return ch<32||ch>126;}))
+        throw Error("Helper carrier callsign must contain at most 16 printable ASCII characters");
 }
 helper::Frequency helper_frequency(std::string_view value) {
     // Restore legacy stored patches with the only supported placement. Textual
@@ -160,12 +160,7 @@ std::string helper_frequency_id(helper::Frequency) {
     return "high";
 }
 helper::Options active_helper_options(const live::Settings& settings) {
-    auto options=settings.helper;
-    // The stored callsign remains an editable preference for clear operation.
-    // Keyed transmission uses encrypted time metadata and must not validate or
-    // derive its waveform from that inactive preference.
-    if(settings.transfer.key)options.callsign.clear();
-    return options;
+    return settings.helper;
 }
 double active_helper_power(const live::Settings& settings) {
     return helper::effective_helper_power(active_helper_options(settings));
@@ -955,9 +950,7 @@ struct Controller::Impl {
             next.helper.frequency=helper_frequency(load&&load->helper_frequency?*load->helper_frequency:f(UiField::helper_frequency).selected);
             next.helper.callsign=load&&load->helper_callsign?*load->helper_callsign:f(UiField::helper_callsign).text;
             next.helper.data_power_w=std::pow(10.,(next_planner.tx_dbm-30)/10);
-            // The saved callsign is inactive with a transmit key. Preserve it
-            // for later clear operation without letting it reject encryption.
-            if(!next_encrypted)validate_helper_callsign(next.helper.callsign);
+            validate_helper_callsign(next.helper.callsign);
             next.transfer.timestamp=0;
             next.transfer.automatic_receive_profiles=true;
             next.transfer.receive_pattern_mode=mode;
@@ -1559,8 +1552,7 @@ struct Controller::Impl {
         validate_helper_callsign(text);
         f(UiField::helper_callsign).text=text;
         settings.helper.callsign=text;
-        // A saved, inactive callsign can become invalid when encryption is
-        // switched off. A valid visible edit must recover that configuration.
+        // A valid visible edit can recover an invalid configuration.
         if(!settings_valid)configure();
         else {
             if(started)session.set_helper_callsign(std::move(text));
@@ -1868,8 +1860,6 @@ struct Controller::Impl {
         f(UiField::helper_power).enabled=!busy;
         const bool helper_enabled=f(UiField::helper_power).selected!="0";
         for(const auto id:{UiField::helper_ratio_limit,UiField::helper_frequency,UiField::helper_callsign})f(id).enabled=!busy&&helper_enabled;
-        f(UiField::helper_callsign).visible=!encrypted();
-        f(UiField::helper_callsign).enabled=f(UiField::helper_callsign).enabled&&!encrypted();
         f(UiField::helper_power).display_text.clear();
         if(helper_enabled&&settings_valid) {
             const auto limit=settings.helper.data_power_w*std::pow(10.,settings.helper.ratio_limit_db/10);
@@ -2753,7 +2743,7 @@ void Controller::edit(UiField field,std::string text) {
         else if(field==UiField::callsign||field==UiField::grid) {
             if(field==UiField::callsign) {
                 try {p.helper_callsign_changed(p.f(field).text);}
-                catch(const Error&) {p.notice("Developer Callsign was retained; Helper Callsign requires at most 19 printable ASCII characters.",10);}
+                catch(const Error&) {p.notice("Developer Callsign was retained; Helper Callsign requires at most 16 printable ASCII characters.",10);}
             }
             if(untouched&&!p.attachment&&!p.file_loading)p.seed_composer();
         }

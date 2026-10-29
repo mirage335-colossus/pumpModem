@@ -105,9 +105,6 @@ Settings normalized_layout(Settings value) {
             value.transfer.receive_pattern_mode < tuning::PatternMode::tone_1)
             value.transfer.receive_pattern_mode = tuning::PatternMode::auto_tone;
     } else if (value.transfer.key) value.transfer.modem.scramble = true;
-    // The controller retains the preference for a later clear transmission.
-    // Keyed sessions only use encrypted helper metadata.
-    if(value.transfer.key)value.helper.callsign.clear();
     helper::validate(value.helper);
     modem::validate(value.transfer.modem);
     if(value.transfer.modem.oscillator_search)

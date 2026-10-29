@@ -168,10 +168,12 @@ void helper_controls() {
     check(!controller.plot_update().clear_waterfall,"Developer callsign helper copy reconfigured receive settings");
     check(controller.field(F::helper_callsign).text=="N0DEV"&&controller.settings().helper.callsign=="N0DEV",
           "Developer Callsign did not copy one way to helper");
-    controller.edit(F::helper_callsign,"N0HELP");
-    controller.edit(F::helper_callsign,"12345678901234567890");
-    check(controller.settings().helper.callsign=="N0HELP"&&controller.field(F::helper_callsign).text=="N0HELP"&&
+    controller.edit(F::helper_callsign,"1234567890123456");
+    check(controller.settings().helper.callsign=="1234567890123456","A 16-character helper callsign was rejected");
+    controller.edit(F::helper_callsign,"12345678901234567");
+    check(controller.settings().helper.callsign=="1234567890123456"&&controller.field(F::helper_callsign).text=="1234567890123456"&&
           controller.field(F::callsign).text=="N0DEV","Invalid helper callsign truncated or changed identity");
+    controller.edit(F::helper_callsign,"N0HELP");
     controller.edit(F::callsign,"12345678901234567890");
     check(controller.field(F::helper_callsign).text=="N0HELP","Long developer callsign silently truncated into helper");
     controller.edit(F::link_power,"2 mW");
@@ -218,68 +220,48 @@ void helper_controls() {
     while(!controller.settings().transfer.key&&std::chrono::steady_clock::now()<deadline) {
         controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
-    check(controller.settings().transfer.key&&!controller.field(F::helper_callsign).visible&&
-          !controller.field(F::helper_callsign).enabled,"Encryption did not hide and disable Helper Callsign");
-    controller.edit(F::helper_callsign,"STALE");
-    check(controller.field(F::helper_callsign).text=="N0OFF"&&controller.settings().helper.callsign=="N0OFF",
-          "Hidden encrypted Helper Callsign accepted an edit or lost its saved preference");
+    check(controller.settings().transfer.key&&controller.field(F::helper_callsign).visible&&
+          controller.field(F::helper_callsign).enabled,"Encryption hid or disabled Helper Callsign");
+    controller.edit(F::helper_callsign,"KEYED-ID");
+    check(controller.field(F::helper_callsign).text=="KEYED-ID"&&controller.settings().helper.callsign=="KEYED-ID",
+          "Encrypted Helper Callsign edit was not retained");
+    controller.edit(F::helper_callsign,"12345678901234567");
+    check(controller.settings().helper.callsign=="KEYED-ID","Encrypted mode accepted an overlong callsign");
     controller.select(F::key,"none");
     check(controller.field(F::helper_callsign).visible&&controller.field(F::helper_callsign).enabled&&
-          controller.field(F::helper_callsign).text=="N0OFF","Disabling encryption did not restore Helper Callsign");
+          controller.field(F::helper_callsign).text=="KEYED-ID","Disabling encryption lost Helper Callsign");
     controller.select(F::key,"key:Helper privacy");
-    const auto keyed_geometry=controller.settings().transfer.modem;
-    constexpr auto inactive_callsign="12345678901234567890";
-    controller.edit(F::planner_command,std::string("--helper-callsign ")+inactive_callsign);
+    controller.edit(F::planner_command,"--helper-callsign ENCRYPTED-ID");
     controller.activate(ui::Command::planner_load_command);
-    check(controller.settings().transfer.key&&controller.settings().helper.callsign==inactive_callsign&&
-          !controller.field(F::helper_callsign).visible&&
-          controller.settings().transfer.modem.sample_rate==keyed_geometry.sample_rate&&
-          controller.settings().transfer.modem.bandwidth_hz==keyed_geometry.bandwidth_hz&&
-          controller.settings().transfer.modem.carrier_hz==keyed_geometry.carrier_hz,
-          "Invalid inactive Helper Callsign rejected or changed an encrypted profile");
-    const auto inactive_export=launch_command::parse(controller.field(F::planner_command).text);
-    check(inactive_export.helper_callsign==inactive_callsign&&inactive_export.tx_key=="named",
-          "Encrypted export discarded its inactive stored callsign");
+    check(controller.settings().transfer.key&&controller.settings().helper.callsign=="ENCRYPTED-ID",
+          "Encrypted profile did not retain its Helper Callsign");
+    const auto keyed_export=launch_command::parse(controller.field(F::planner_command).text);
+    check(keyed_export.helper_callsign=="ENCRYPTED-ID"&&keyed_export.tx_key=="named",
+          "Encrypted export discarded its callsign");
     check(controller.enabled(ui::Command::transmit_helper)&&controller.spectrum_helper_band().has_value(),
-          "Inactive stored callsign disabled keyed helper routing or spectrum placement");
-    controller.edit(F::helper_callsign,"STALE");
-    check(controller.settings().helper.callsign==inactive_callsign,
-          "Hidden inactive callsign accepted a direct edit");
-    controller.edit(F::planner_command,"--tx-key none");
-    controller.activate(ui::Command::planner_load_command);
-    check(controller.settings().transfer.key&&controller.settings().helper.callsign==inactive_callsign,
-          "An invalid clear-mode callsign partially committed a key change");
-    controller.select(F::key,"none");
-    check(controller.field(F::helper_callsign).visible&&!controller.enabled(ui::Command::transmit_helper),
-          "Invalid clear-mode callsign did not expose a correctable error");
-    controller.edit(F::helper_callsign,"N0RESTORED");
-    check(!controller.settings().transfer.key&&controller.settings().helper.callsign=="N0RESTORED"&&
-          controller.enabled(ui::Command::transmit_helper),
-          "Valid Helper Callsign edit did not recover clear-mode settings");
-    auto startup_patch=inactive_export;
-    startup_patch.keyfile=fixture.path.string();startup_patch.helper_callsign="N0CÄLL";
+          "Encrypted callsign disabled helper routing or spectrum placement");
+    auto startup_patch=keyed_export;
+    startup_patch.keyfile=fixture.path.string();startup_patch.helper_callsign="N0START";
     Controller startup({false,false,startup_patch});
     const auto startup_deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
     while(!startup.settings().transfer.key&&std::chrono::steady_clock::now()<startup_deadline) {
         startup.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
-    check(startup.settings().transfer.key&&startup.settings().helper.callsign=="N0CÄLL"&&
-          !startup.field(F::helper_callsign).visible,
-          "Keyed startup validated its inactive saved callsign before loading the key");
-    auto live_settings=startup.settings();live_settings.helper.callsign=inactive_callsign;
-    live::validate_settings(live_settings);
-    check(live_settings.helper.callsign==inactive_callsign,
-          "Live validation mutated the caller's inactive callsign preference");
-    const auto rejects_clear_callsign=[](const live::Settings& settings) {
+    check(startup.settings().transfer.key&&startup.settings().helper.callsign=="N0START"&&
+          startup.field(F::helper_callsign).visible,
+          "Keyed startup lost its saved callsign");
+    auto live_settings=startup.settings();live_settings.helper.callsign="12345678901234567";
+    const auto rejects_callsign=[](const live::Settings& settings) {
         bool rejected=false;
         try {live::validate_settings(settings);}
         catch(const Error& error) {rejected=std::string_view(error.what()).find("callsign")!=std::string_view::npos;}
-        check(rejected,"Clear Live settings did not validate the active Helper Callsign");
+        check(rejected,"Live settings did not validate the Helper Callsign");
     };
+    rejects_callsign(live_settings);
     auto clear_settings=live_settings;clear_settings.transfer.key.reset();
-    rejects_clear_callsign(clear_settings);
+    rejects_callsign(clear_settings);
     auto tone_settings=live_settings;tone_settings.transfer.modem.spreading_mode=modem::SpreadingMode::tone;
-    rejects_clear_callsign(tone_settings);
+    rejects_callsign(tone_settings);
 }
 
 void search_arithmetic_controls() {

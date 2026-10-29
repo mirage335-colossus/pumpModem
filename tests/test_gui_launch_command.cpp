@@ -283,6 +283,10 @@ void helper_settings() {
         check(patch.helper_callsign==""&&launch_command::parse(launch_command::format(patch))==patch,
               "Helper empty callsign or frequency selection was discarded");
     }
+    {
+        const auto patch=launch_command::parse("--tx-key none --helper-callsign 1234567890123456");
+        check(patch.helper_callsign=="1234567890123456","A 16-character helper callsign was rejected");
+    }
     for(const auto* frequency:{"low","0"}) {
         try {
             (void)launch_command::parse(std::string("--helper-frequency ")+frequency);
@@ -296,16 +300,14 @@ void helper_settings() {
     }
     for(const auto* value:{"--helper-power -1","--helper-power nan","--helper-power 1e308kW",
         "--helper-ratio-limit 30","--helper-ratio-limit 91","--helper-frequency middle",
-        "--tx-key none --helper-callsign 12345678901234567890","--helper-callsign 'N0CÄLL' --tx-key none"})
+        "--tx-key none --helper-callsign 12345678901234567","--helper-callsign 'N0CÄLL' --tx-key none"})
         rejects([&]{launch_command::parse(value);},"Invalid helper setting accepted");
-    for(const auto* callsign:{"12345678901234567890","N0CÄLL"}) {
+    for(const auto* callsign:{"12345678901234567","N0CÄLL"}) {
         for(const auto& command:std::vector<std::string>{
             "--helper-callsign '"+std::string(callsign)+"' --tx-key named",
             "--tx-key named --helper-callsign '"+std::string(callsign)+"'",
             "--helper-callsign '"+std::string(callsign)+"'"}) {
-            const auto patch=launch_command::parse(command);
-            check(patch.helper_callsign==callsign&&launch_command::parse(launch_command::format(patch))==patch,
-                  "Inactive or context-dependent helper callsign was rejected or lost on export");
+            rejects([&]{launch_command::parse(command);},"Invalid keyed or context-dependent helper callsign was accepted");
         }
     }
     check(!launch_command::parse("--rate 1200").helper_power_w,"Older partial commands must preserve helper settings");

@@ -104,12 +104,13 @@ to this transmitter. Physical display, audio and radio testing and full
 regression qualification remain open.
 
 The [29 October development checkpoint](validation.md#three-tone-helper-carrier-implementation-checkpoint)
-includes a rebuilt GUI and focused measurements. Its latest focused retest
-passed four of six cases; the 24 dB-Hz frequency-only fallback and the registered
-three-tone auxiliary decoder failed. A separately selected stress and Live
-observation run passed 15/15; full qualification remains open. The previous
-focused retest passed 15/16 cases, including eight Live observation cases, and
-a separate 5 ms fade-support problem remains.
+includes a rebuilt GUI and focused measurements for the earlier waveform. Its
+last focused retest passed four of six cases; the 24 dB-Hz frequency-only
+fallback and registered three-tone auxiliary decoder failed. A separately selected
+stress and Live observation run passed 15/15. The previous focused retest passed
+15/16 cases, including eight Live observation cases, and a separate 5 ms
+fade-support problem remains. Later metadata results are described below; full
+qualification remains open.
 A private factory boundary test also found that a proposed grid heuristic could
 increase templates and workspace; it is not deployed or qualified. Its specific
 geometry and required guards are recorded in validation.
@@ -152,16 +153,39 @@ injection is not a hardware retune adapter. Fixed-RF repeated-window fusion,
 operation above the model's 54 MHz range, selected-tone ambiguity, and
 operational pair covariance remain unqualified.
 
-The existing auxiliary observer is optional and does not qualify either pure
-pilot. Its earlier decoder was designed around two tones. A focused current
-Generator test fails to decode the complete three-tone waveform, and scratch
-oracle and reversal experiments have not established causal acquisition or
-metadata reception across the Live retune lifecycle. The registered
-`helper_receiver_three_tone` regression failed in all eight fixture geometries;
-the production decoder remains unchanged. A later causal-bootstrap scratch
+The auxiliary observer is optional and does not qualify either pure pilot. An
+earlier decoder designed around two tones failed the registered three-tone
+regression in all eight fixture geometries. Its scratch causal-bootstrap
 experiment also produced no metadata at 30, 40 or 60 dB-Hz and selected false
-edges in noise-only controls; it did not change production. See the current
+edges in noise-only controls; those historical results are in the
 [validation record](validation.md#three-tone-helper-carrier-implementation-checkpoint).
+
+The revised metadata waveform and decoder passed focused `test_helper_receiver`
+runs for all six pair, ten two-tone and eight three-tone cases. The three-tone
+cases include four with retained history and four after reset recovery. The
+`live_helper_clock_bridge` checks passed at ±300 ppm and ±550 ppm. A focused
+current-waveform 24 dB-Hz high-pilot test produced 11 references, with the first
+usable reference at 7.99998 seconds; its final sample, frequency and uncertainty
+matched with 137- and 4096-sample chunks. At the same configured level the 80%
+modulated auxiliary produced no usable narrow reference, while its published
+frequency intervals covered the true frequency. This auxiliary result does not
+qualify the pilot or imply useful metadata sensitivity.
+
+At the configured 20.76 dB-Hz weak encrypted-auxiliary fixture, the original
+HEAD waveform also produced zero references with the unchanged receiver and
+profile, confirming that earlier failure. On the current three-tone waveform,
+the high pilot produced one truth-covering reference with no phase or timing
+authority; the encrypted auxiliary produced zero references. The shifted current
+auxiliary check still fails its requirement for a usable reference within three
+seconds. These focused observations do not establish acquisition qualification.
+
+The supported explicit-oscillator Live raw-tail fixture passed exact 64-bit
+payload, pending progress and scored physical END checks. Its trace also recorded
+a Helper-assisted commit. The fixture uses sampled simulation and does not
+qualify hardware reception or performance across operating conditions. An earlier
+full non-probability contract run had 36 failures out of 321 tests; the subsequent
+focused checks do not replace a complete rerun. The probability stage timed out
+after 1500 seconds and remains incomplete. Full qualification remains open.
 
 A bounded [matched waveform study](../local-evidence/helper-three-tone/pair-waveform-continuation/v2/summary.txt)
 fed the same actual three-tone and Robust samples to high-only and conditional
@@ -373,20 +397,16 @@ Ratio limits are 10, 20, 40, 60, 80 and 90 dB, with 90 dB the default. High is t
 only placement. Low and 0 Hz have been removed. Saved GUI settings/imports
 normalize retired values to High; new textual CLI values other than High reject.
 
-The independent callsign accepts at most 19 printable seven-bit ASCII
+The independent callsign accepts at most 16 printable seven-bit ASCII
 characters. Editing Developer Callsign copies a valid value to the helper.
-Helper edits never modify Developer Callsign or the Robust draft. Clear-mode
-invalid or overlength identifiers are rejected without truncation. Callsign edits apply to
+Helper edits never modify Developer Callsign or the Robust draft. Invalid or
+overlength identifiers are rejected without truncation. Callsign edits apply to
 future transmissions without replacing live receivers or altering active PCM.
-Without encryption, a nonempty callsign takes precedence over clear timestamp
-metadata; an empty callsign selects the timestamp. With a station encryption key
-selected, the helper ignores the stored callsign and sends encrypted time.
-The GUI hides the helper callsign field while encrypted; its saved preference
-returns when encryption is disabled. An inactive stored callsign is ignored even
-if invalid; it cannot block encrypted operation. Switching to clear mode restores
-callsign validation. The generator can also omit optional time
-metadata while retaining the tone, but never exposes the stored callsign in
-that encrypted mode.
+Each metadata record carries the dwell time phase and the callsign together;
+an empty callsign leaves the character slots empty. With a station key selected,
+the character field is encrypted and the time phase remains clear. The callsign
+control remains available in either mode. The generator can also omit optional
+metadata while retaining the tone.
 
 **Transmit** mixes the helper with data; **Transmit noise** mixes it with the ordinary
 temporary-key noise waveform. **Helper** sends the reference alone, without data
@@ -395,14 +415,14 @@ ordinary mixed transmission does not require that diagnostic action. These
 modes also operate in Live simulation. Existing stop/abort controls apply. The
 helper continues during Symbol_Burst waits and scheduled data nulls. It bypasses payload DSSS, Interleave and waveform
 time-shifting streams. It uses the existing physical dwell calendar; current
-Fake FHSS still does not tune radio hardware. Timestamp encryption uses the
-selected station key, including during Transmit noise, rather than that action's
-temporary payload key.
+Fake FHSS still does not tune radio hardware. Metadata encryption derives a
+separate key from the selected station key, including during Transmit noise,
+rather than using that action's temporary payload key.
 
 Robust message payload bits are never transmitted on the helper waveform. They
 remain in the ordinary low-power Robust transmission. The helper carries only
-its tone, punctuation and optional callsign or timestamp. An assisted receiver
-is an ordinary Robust receiver guided by those measurements: it retains long
+its tone, punctuation and optional time phase and callsign metadata. An assisted
+receiver is an ordinary Robust receiver guided by those measurements: it retains long
 text and attachment framing, decompression, recovery, per-bit progress and the
 six-second fully scored physical-end rule. If the required resources cannot fit,
 optional assistance yields rather than imposing a reduced decoding mode.
@@ -712,8 +732,9 @@ and resets while amplitude is zero at the boundary. Auxiliary reversal and
 metadata blends use a septic smootherstep with three continuous derivatives at
 their endpoints. A waterfall phase column can change sharply as the auxiliary
 passes through zero amplitude, where phase is undefined even though the emitted
-waveform is smooth. Receiver template updates for this transmitter waveform are
-deferred; matching old receiver measurements do not establish compatibility.
+waveform is smooth. The revised receiver templates match this transmitter
+waveform for the focused tests described above; older measurements do not
+establish compatibility or qualify the revised path.
 
 Partial dwells omit punctuation unless its required support fits. Graceful
 streaming stop protects a reversal already begun: helper-only continuation can
@@ -726,69 +747,48 @@ Metadata decoding is optional and does not qualify the pure-pilot frequency
 reference. Its intended readability is primarily nearby or directly in the
 antenna beam; distant assistance need not support metadata decoding.
 
-Metadata uses APSK-2097152 at 125 baud, with only the symbols needed for the
-selected identifier or time value, on the auxiliary only. A frame contains one
-to seven symbols and ends at 388 ms; its start is `388 - 8 * symbol_count` milliseconds. The return to
-the auxiliary's applicable underlying straight-tone state completes at 396 ms,
-overlapping the final 4 ms of its exit ramp; the receiver models both. A maximum-length
-callsign therefore occupies seven symbols, 56 ms; timestamps need at most three
-symbols, 24 ms. Auxiliary transitions use septic interpolation in the complex plane. The
-high ten bits of each 21-bit symbol select one of 1024 radii
-`0.9 + 0.1 * index / 1023`; its low eleven bits select one of 2048 phases
-`2*pi*index/2048`. The alphabet contains exactly 2,097,152 points.
+Metadata uses APSK-16384 at 125 baud on the auxiliary only. Each record is
+126 bits in nine 14-bit symbols, sent from 316 ms to 388 ms of a complete
+400 ms dwell. The return to the auxiliary's underlying straight-tone state
+completes at 396 ms, overlapping the final 4 ms of its exit ramp. Auxiliary
+transitions use septic interpolation in the complex plane. The high seven bits
+of each symbol select one of 128 radii `0.2 + 0.8 * index / 127`; its low seven
+bits select one of 128 phases `2*pi*index/128`. This is 80% amplitude modulation
+depth. The next dwell is a hard boundary; records never continue across dwells.
 
-The compact helper format replaces the earlier experimental fixed eight/nine-
-symbol frames. This is a deliberate helper-format change; Robust's ordinary
-wire format remains unchanged. All fields are MSB first:
+The helper format has one record type and no header, transmitted length, CRC or
+authentication tag. All fields are MSB first:
 
-| Kind | Header and transmitted contents | Canonical symbol count |
-| --- | --- | --- |
-| Callsign | Type `00` (2 bits), actual character count `N` (5), `N` seven-bit ASCII characters | `ceil((7 + 7*N) / 21)`, `0 <= N <= 19`; at most 7 |
-| Clear time | Type `01` (2 bits), `B - 1` (6), `B` unsigned time bits | `ceil((8 + B) / 21)`, `1 <= B <= 48`; at most 3 |
-| Encrypted time | Type `10` (2 bits), `B - 1` (6), `B` encrypted time bits | `ceil((8 + B) / 21)`, `20 <= B <= 48`; at most 3 |
+| Field | Bits | Meaning |
+| --- | ---: | --- |
+| Time phase | 14 | Unix time at nominal physical dwell start modulo 8.125 seconds, quantized down to steps of 65/131072 seconds (about 495.91 microseconds) |
+| Callsign | 112 | Up to 16 seven-bit ASCII characters, followed by zero-valued slots; NUL is reserved for padding |
 
-Type `11` is reserved. The callsign has no unused character slots or NUL padding.
-The symbol count is determined before adding an optional checksum. If at least
-seven spare bits already exist in the canonical frame, they contain CRC-7/MMC:
-polynomial `0x09` (`x^7 + x^3 + 1`), initial value zero, no reflection and no final
-XOR. The CRC covers every header and transmitted-content bit, MSB first, before
-the checksum; for encrypted time it covers ciphertext. Remaining spare bits are
-zero. If fewer than seven bits are spare, no checksum is added. CRC never adds
-a symbol or airtime. Noncanonical counts, invalid lengths, nonzero padding and
-incorrect present checksums are rejected.
+The time phase repeats every 8.125 seconds and does not itself convey a complete
+absolute time. This is a deliberate helper-format change; Robust's ordinary
+wire format remains unchanged. Local settings select clear or encrypted metadata;
+there is no encryption flag on the wire.
 
-A timestamp describes the nominal physical dwell start, not payload symbol
-zero or the wall clock at each audio callback. Its unsigned Q16 Unix value is
-`ticks / 65536` seconds, up to 32 whole-second bits and 16 fractional-second bits,
-with nominal resolution about 15.26 microseconds. Clear time uses
-`B = max(1, bit_width(ticks))`; encrypted time uses
-`B = max(20, bit_width(ticks))`. Times outside the 48-bit range omit the timestamp
-while retaining the tone. Callsign and timestamp are never transmitted together;
-encryption always suppresses the stored callsign.
+With a selected station key, the time phase stays clear and the 112 character
+bits, including padding, use AES-256-CTR. The AES key is the station key's
+HMAC-SHA256 of ASCII `datapump/helper-aux/v3/ctr-key`, separating this stream
+from other protocol purposes. The 128-bit IV contains the absolute six-second
+Unix bucket as a big-endian 64-bit integer, the 400 ms dwell index within that
+bucket as a big-endian 32-bit integer, and a zero 32-bit block counter. The
+receiver reconstructs the absolute dwell from the clear phase and its capture-time
+UTC estimate, without searching across candidate clock errors; keyed decoding
+requires that estimate to be within approximately four seconds. Only the first
+selected receive key is used. Cipher failure rejects encrypted output before PCM
+instead of substituting clear text.
 
-Encrypted time uses the length-preserving FF1 mode from NIST SP 800-38G: AES-256
-forward encryption, radix 2, ten rounds, an empty tweak and integer arithmetic.
-The 20-bit minimum gives a domain of at least 1,048,576 values, consistent with
-the larger minimum domain in the
-[NIST revision draft](https://csrc.nist.gov/pubs/sp/800/38/g/r1/2pd).
-The 32-byte AES key is the selected station key's HMAC of ASCII
-`datapump/helper-time/v2/ff1-key`. FF1 transforms exactly the declared `B` time
-bits; there is no authentication tag or extra authentication symbol. The minimum
-20-bit domain can widen very small encrypted timestamps, while current Unix
-values still fit the three-symbol maximum. Payload and calendar key streams are
-unchanged. Cipher unavailability/failure rejects encrypted output before PCM;
-it never silently substitutes clear time.
-
-All helper metadata is unauthenticated, including encrypted timestamps. CRC
-provides only limited transmission-error detection. Length-preserving encryption
-does not reliably detect a wrong key: it can yield a plausible but incorrect
-time value. The receiver uses only the first selected receive key for encrypted
-time rather than selecting a key by timestamp plausibility. Decoded times never
-set an internal UTC correction or qualify GPS synchronization. Metadata also
-provides no freshness, replay protection or proof that the tone and a separately
-received Robust payload share a transmitter. The code and independent vectors
-specify the compact mapping; the format alone does not establish identification
-compliance for every emission, band or radio installation.
+Use a station-specific key and transmit at most one fixed character record in a
+given absolute dwell: a different record or another transmitter sharing the same
+key and dwell would reuse the CTR keystream. Metadata has no authentication or
+replay protection, and a wrong key can yield plausible text. Decoded time phases
+never set an internal UTC correction or qualify GPS synchronization; metadata
+also does not prove that the tone and a separately received Robust payload share
+a transmitter. The format alone does not establish identification compliance
+for every emission, band or radio installation.
 
 ## CLI examples
 

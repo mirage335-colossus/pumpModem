@@ -1983,7 +1983,8 @@ void helper_reference_link_budget() {
               contains_text(page,"Active composite power:")&&contains_text(page,"mean helpers")&&
               contains_text(page,"Low pilot:")&&contains_text(page,"(−3 dB)")&&contains_text(page,"(−9 dB)")&&
               contains_text(page,"Component levels are a planning preview")&&
-              contains_text(page,"Receiver acquisition, tracking and decoding for this waveform remain deferred")&&
+              contains_text(page,"measured pilot qualification and ordinary Robust reception remain runtime requirements")&&
+              contains_text(page,"Auxiliary metadata never qualifies frequency assistance")&&
               contains_text(page,"not total CPU, measured speed"),
               "Helper level, passband requirement and model limits must remain visible at all widths");
     }
@@ -2168,10 +2169,12 @@ void helper_conditional_acquisition_plan() {
         const auto config=planned_config(input,input.target_db_hz);
         const auto& plan=model.helper_reference;
         const auto& advice=plan.conditional;
-        check(advice.precision.supported&&advice.precision.expected_segments>0&&
+        check(advice.precision.supported&&advice.precision.sustained_supported&&
+              advice.precision.sustained_at_seconds==36&&advice.precision.expected_segments>0&&
+              advice.precision.pilot_model.observation==helper::PilotObservationMode::continuous_phase&&
               advice.precision_reference.segmented_lead_half_width_hz&&
-              advice.uncertainty_hz==advice.precision.frequency_half_width_hz,
-              "Conditional receiver cost lacks its independent-phase pilot precision provenance");
+              advice.uncertainty_hz==advice.precision.sustained_frequency_half_width_hz,
+              "Conditional receiver cost lacks its continuous-phase boundary precision provenance");
         const auto guard=std::max(32.,4*advice.uncertainty_hz);
         const bool folded=config.carrier_hz-helper::occupied_bandwidth(config)/2-guard<=10;
         const auto center=folded?input.channel.frequency_offset_hz+
@@ -2220,15 +2223,24 @@ void helper_conditional_acquisition_plan() {
               "Reported crystal/microwave configuration lost its separate helper geometry and budget");
         matches_reference_search(input,assisted);
         auto inactive_callsign=input;
-        inactive_callsign.receiver_settings->helper.callsign=std::string(20,'Q');
+        inactive_callsign.receiver_settings->helper.callsign=std::string(16,'Q');
         const auto ignored=selected(inactive_callsign,cache);
         check(ignored.helper_reference.geometry_available&&ignored.helper_reference.budget_available&&
               ignored.helper_reference.conditional.precision.supported,
-              "An invalid inactive callsign must not disable keyed helper geometry or precision forecasts");
-        near(ignored.helper_reference.conditional.uncertainty_hz,advice.conditional.uncertainty_hz,
-             "An inactive callsign changed the keyed precision preview");
-        check(inactive_callsign.receiver_settings->helper.callsign==std::string(20,'Q'),
-              "Keyed helper forecasting overwrote the saved clear-mode callsign");
+              "A valid callsign must not disable keyed helper geometry or precision forecasts");
+        auto keyed_helper=inactive_callsign.receiver_settings->helper;
+        keyed_helper.data_power_w=std::pow(10.,(input.tx_dbm-30)/10);
+        helper::PowerReference keyed_reference;keyed_reference.time_key=input.options.key;
+        const auto keyed_mean=helper::mean_power(keyed_helper,static_cast<bool>(config.fake_hopping),&keyed_reference);
+        const auto expected_cn0=30+10*std::log10(helper::effective_helper_power(keyed_helper))-
+            input.path_loss_db-input.noise_density_dbm_hz+10*std::log10(helper::pilot_power_fraction/keyed_mean.total);
+        near(ignored.helper_reference.conditional.precision_reference.cn0_db_hz,expected_cn0,
+             "Keyed callsign preview did not use its actual mean helper power");
+        check(std::isfinite(ignored.helper_reference.conditional.uncertainty_hz)&&
+              ignored.helper_reference.conditional.uncertainty_hz>0,
+              "Keyed callsign preview did not produce a finite precision");
+        check(inactive_callsign.receiver_settings->helper.callsign==std::string(16,'Q'),
+              "Keyed helper forecasting overwrote the saved callsign");
         near(advice.low_frequency_hz,550,"Planner moved the fixed low pilot");
         near(advice.auxiliary_frequency_hz,950,"Planner moved the fixed auxiliary");
         check(advice.frequency_hz>=2400,"Planner lowered the high pilot below2400Hz");

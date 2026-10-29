@@ -26,26 +26,26 @@ int main(){try{
     {
         live::Settings raw;raw.helper.power_w=40;raw.helper.data_power_w=4;
         raw.transfer.key.emplace(Bytes(32,0x41));
-        raw.helper.callsign="12345678901234567890";
+        raw.helper.callsign="1234567890123456";
         raw.transfer.automatic_receive_profiles=false;
         raw.transfer.modem.bandwidth_hz=36;raw.transfer.modem.carrier_hz=1725;
         raw.transfer.modem.oscillator_search.emplace();
         auto clean=raw;clean.helper.callsign.clear();
         check(live::detail::active_helper_power(raw)==36,
-            "Keyed helper power query validated an inactive callsign preference");
+            "Keyed helper power query validated an callsign");
         (void)live::detail::helper_startup_minimum_symbol(raw);
         for(const bool simulation:{false,true}) {
             raw.simulation=clean.simulation=simulation;
             const auto raw_rate=live::detail::helper_predicted_capture_sample_rate(raw,raw.transfer.modem);
             const auto clean_rate=live::detail::helper_predicted_capture_sample_rate(clean,clean.transfer.modem);
-            check(raw_rate==clean_rate,"Inactive keyed callsign changed helper channel sample-rate planning");
+            check(raw_rate==clean_rate,"Keyed callsign changed helper channel sample-rate planning");
             check(live::detail::capture_minimum_hardware_rate(raw)==
                 live::detail::capture_minimum_hardware_rate(clean),
-                "Inactive keyed callsign changed the actual capture-rate request");
+                "Keyed callsign changed the actual capture-rate request");
             const auto raw_level=live::detail::helper_configured_reference_level(raw,raw.transfer.modem);
             const auto clean_level=live::detail::helper_configured_reference_level(clean,clean.transfer.modem);
             check(raw_level.pilot_straight_cn0_db_hz==clean_level.pilot_straight_cn0_db_hz,
-                "Inactive keyed callsign changed the helper power reference");
+                "Keyed callsign changed the helper power reference");
             const auto raw_precision=live::detail::helper_tone_precision_request(raw,raw.transfer.modem,
                 raw_rate,raw_level.pilot_straight_cn0_db_hz,2);
             const auto clean_precision=live::detail::helper_tone_precision_request(clean,clean.transfer.modem,
@@ -53,15 +53,15 @@ int main(){try{
             check(raw_precision.metadata_symbols==clean_precision.metadata_symbols &&
                 raw_precision.frequency_acceleration_psd_hz2_per_second3==
                     clean_precision.frequency_acceleration_psd_hz2_per_second3,
-                "Inactive keyed callsign changed helper precision planning");
+                "Keyed callsign changed helper precision planning");
             const auto raw_optional=live::detail::helper_optional_plan(raw,raw_rate);
             const auto clean_optional=live::detail::helper_optional_plan(clean,clean_rate);
             check(raw_optional.has_value()==clean_optional.has_value() &&
                 (!raw_optional || raw_optional->helper_hz==clean_optional->helper_hz),
-                "Inactive keyed callsign changed optional helper geometry");
+                "Keyed callsign changed optional helper geometry");
         }
-        check(raw.helper.callsign=="12345678901234567890",
-            "Helper power query changed the saved inactive callsign");
+        check(raw.helper.callsign=="1234567890123456",
+            "Helper power query changed the saved callsign");
         auto shared=clean;shared.simulation=false;
         auto& oscillator=*shared.transfer.modem.oscillator_search;
         oscillator.reference=modem::OscillatorReference::shared_radio;
@@ -86,9 +86,9 @@ int main(){try{
         diagnostic.simulation=true;bool bad_diagnostic=false;
         try {(void)live::detail::capture_minimum_hardware_rate(diagnostic);}catch(const Error&){bad_diagnostic=true;}
         check(bad_diagnostic,"Simulation accepted the hardware-only diagnostic capture request");
-        raw.transfer.key.reset();bool rejected=false;
+        raw.helper.callsign="12345678901234567";bool rejected=false;
         try {(void)live::detail::active_helper_power(raw);}catch(const Error&){rejected=true;}
-        check(rejected,"Clear helper power query accepted an invalid active callsign");
+        check(rejected,"Keyed helper power query accepted an invalid callsign");
     }
     // The ideal reference is separate from every practical forecast and lock
     // decision. Preserve the requested 1 s/10 s noise-only scales and T^-3/2.
@@ -446,7 +446,7 @@ int main(){try{
     // Shared TX/Planner request uses actual metadata length and key precedence.
     auto metadata=*enabled.inputs.receiver_settings;metadata.helper.callsign="TEST";
     const auto public_request=live::detail::helper_tone_precision_request(metadata,metadata.transfer.modem,48000,30,2);
-    check(public_request.metadata_symbols==helper::callsign_packet("TEST").count&&public_request.punctuate,
+    check(public_request.metadata_symbols==9&&public_request.punctuate,
         "lead request ignored actual callsign airtime or punctuation");
     check(public_request.pilot_observation==helper::PilotObservationMode::continuous_phase&&
         public_request.pilot_discovery_budget_seconds==1.2&&
@@ -461,9 +461,9 @@ int main(){try{
         hf_milestone.pilot_model.discovery_budget_seconds==1.2,
         "actual sampled HF milestone lost its visible baseline/extension or practical observation model");
     metadata.transfer.key.emplace(Bytes(32,0x52));
-    check(live::detail::helper_tone_precision_request(metadata,metadata.transfer.modem,48000,30,2).metadata_symbols==3,
-        "encrypted lead prediction used the ignored public callsign");
-    metadata.helper.timecode=false;
+    check(live::detail::helper_tone_precision_request(metadata,metadata.transfer.modem,48000,30,2).metadata_symbols==9,
+        "encrypted lead prediction omitted fixed metadata airtime");
+    metadata.helper.timecode=false;metadata.helper.callsign.clear();
     check(live::detail::helper_tone_precision_request(metadata,metadata.transfer.modem,48000,30,2).metadata_symbols==0,
         "tone-only lead prediction retained nonexistent metadata airtime");
     metadata.simulation=true;metadata.simulation_phase_noise_degrees_per_sqrt_second=.75;

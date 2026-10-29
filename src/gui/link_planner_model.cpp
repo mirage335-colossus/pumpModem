@@ -111,7 +111,6 @@ void helper_reference_plan(Model& model,const modem::Config& config) {
     // link. A retained Live snapshot can still contain the previous value.
     settings.helper.data_power_w=std::pow(10.,(model.inputs.tx_dbm-30)/10);
     settings.transfer.modem=config;
-    if(settings.transfer.key)settings.helper.callsign.clear();
     try {
         helper::validate(settings.helper);
         result.configured_total_power_w=settings.helper.power_w;
@@ -737,7 +736,6 @@ RealtimeHelperCpuPoint realtime_helper_point(const Inputs& inputs,const modem::C
     try {
         estimate_detail::check(stop);
         auto settings=*inputs.receiver_settings;settings.transfer=inputs.options;settings.transfer.modem=config;
-        if(settings.transfer.key)settings.helper.callsign.clear();
         settings.helper.data_power_w=std::pow(10.,(inputs.tx_dbm-30)/10);
         const auto power=helper::effective_helper_power(settings.helper);
         if(power==0) {

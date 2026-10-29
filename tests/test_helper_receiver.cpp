@@ -2,6 +2,7 @@
 #include "datapump/helper_carrier.hpp"
 #include "datapump/helper_filter.hpp"
 #include "datapump/resampler.hpp"
+#include "helper_legacy_auxiliary_fixture.hpp"
 #include "../src/punctuation_clock.hpp"
 #include "datapump/types.hpp"
 #include <algorithm>
@@ -60,10 +61,10 @@ public:
         // Retain literal C2 legacy fixtures while the production Generator
         // uses C3. Read its unchanged symbol endpoints, then interpolate them
         // independently on the original8ms metadata grid.
-        if(legacy_metadata_&&local>=.332L&&local<.396L) {
-            const auto position=(local-.332L)/.008L,index=std::floor(position);
+        if(legacy_metadata_&&local>=.316L&&local<.396L) {
+            const auto position=(local-.316L)/.008L,index=std::floor(position);
             const auto u=static_cast<double>(position-index),h=u*u*u*(10+u*(-15+6*u));
-            const auto begin=time-local+.332L+index*.008L,end=begin+.008L;
+            const auto begin=time-local+.316L+index*.008L,end=begin+.008L;
             const auto oscillator=[&](long double at) {
                 return std::polar(1.,tau*static_cast<double>(std::fmod(frequency_*at,1.L)));
             };
@@ -219,9 +220,8 @@ void paired_marker_identity_and_missing_return() {
 }
 
 void metadata() {
-    // Includes a one-symbol ID, a two-character ID without spare CRC bits,
-    // a normal callsign and the seven-symbol maximum.
-    for(const auto callsign:{"K","AB","N0CALL/TEST","ABCDEFGHIJKLMNOPQRS"}) {
+    // Short and maximum-length callsigns all use the fixed nine-symbol record.
+    for(const auto callsign:{"K","AB","N0CALL/TEST","ABCDEFGHIJKLMNOP"}) {
         const auto result=run(true,callsign,2100.37,.81,.03719,137,0,true);
         bool found=false;
         for(const auto& r:result.updates)if(r.metadata) {
@@ -351,14 +351,15 @@ void three_tone_auxiliary_metadata() {
         const helper::Plan plan{2400,.5,.1,100,950,550,gated};
         helper::Generator generator(options,plan,1800000000,true);
         helper::AuxiliaryMetadataReceiver receiver(rate,950,2400,{}, {},
-            helper::AuxiliaryMetadataReceiver::workspace_required(rate));
+            helper::AuxiliaryMetadataReceiver::workspace_required(rate),0,{},plan.low_frequency_hz);
         std::mt19937 random(8127);std::uniform_real_distribution<double> phase(-std::numbers::pi,std::numbers::pi);
         std::array<double,16> phases{};for(auto& value:phases)value=phase(random);
         std::array<float,137> input{};Result result;
-        const auto total=static_cast<std::uint64_t>(3.2*rate);
+        const auto reset_end=static_cast<std::uint64_t>(3.2*rate);
+        const auto total=reset_each_hop?2*reset_end:reset_end;
         for(std::uint64_t first=0;first<total;) {
             constexpr std::uint64_t hop=rate*2/5;
-            if(reset_each_hop&&first&&first%hop==0)receiver.reset(first);
+            if(reset_each_hop&&first&&first<reset_end&&first%hop==0)receiver.reset(first);
             const auto count=static_cast<std::size_t>(std::min({static_cast<std::uint64_t>(input.size()),total-first,hop-first%hop}));
             for(std::size_t i=0;i<count;++i) {
                 const auto time=static_cast<long double>(first+i)/rate;
@@ -367,7 +368,13 @@ void three_tone_auxiliary_metadata() {
                     std::polar(1.,phase_jumps?phases[dwell%phases.size()]:0.)));
             }
             receiver.push(std::span(input).first(count),first);receiver.advance();
-            if(auto update=receiver.take_update())result.updates.push_back(std::move(*update));
+            if(auto update=receiver.take_update()) {
+                // Each explicit reset loses the consecutive-dwell timing
+                // history. Once resets stop, the same receiver must recover
+                // from actual complete dwell observations, including phase hops.
+                if(reset_each_hop&&first<reset_end)check(!update->metadata);
+                result.updates.push_back(std::move(*update));
+            }
             first+=count;
         }
         std::size_t decoded=0;
@@ -489,55 +496,71 @@ void timecodes_and_corruption() {
     std::array<std::uint8_t,32> master{};
     const Crypto key(master);master[0]=1;const Crypto wrong(master);
     const auto clear=run(true,"",2100,.2,.034,137,0,true,true);
-    const auto encrypted=run(true,"",2100,.2,.034,137,0,true,true,key,{key,wrong});
-    for(const auto* result:{&clear,&encrypted}) {
-        std::size_t decoded=0;
-        for(const auto& r:result->updates)if(r.metadata) {
-            ++decoded;const auto& m=*r.metadata;
-            check(m.kind==(result==&clear?helper::MetadataKind::clear_time:helper::MetadataKind::encrypted_time));
-            check(!m.authenticated);
-            check(m.callsign.empty());
-            const auto expected=1700000000.L+r.dwell_start_seconds-.034L;
-            check(std::abs(static_cast<long double>(m.time_ticks)/65536-expected)<.0002);
-        }
-        check(decoded>0);metadata_has_no_timing_authority(*result);
+    std::size_t decoded=0;
+    for(const auto& r:clear.updates)if(r.metadata) {
+        ++decoded;const auto& m=*r.metadata;
+        check(!m.authenticated && m.callsign.empty());
+        const auto expected=1700000000.L+r.dwell_start_seconds-.034L;
+        check(std::abs(std::remainder(static_cast<long double>(m.time_ticks)*65/131072-expected,8.125L))<.00052L);
     }
-    // Length-preserving encryption cannot reliably reject a wrong key. It
-    // never grants authenticity or time/grid authority, including when another
-    // key in the vector happens to be correct: only the first key is selected.
-    const auto unverified=run(true,"",2100,.2,.034,137,0,true,true,key,{wrong,key});
+    check(decoded>0);metadata_has_no_timing_authority(clear);
+    // A keyed direct receiver has no capture UTC anchor: ciphertext must not
+    // be published as successfully decoded data. Timing remains independent.
+    for(const auto& keys:{std::vector<Crypto>{key,wrong},std::vector<Crypto>{wrong,key}}) {
+        const auto unavailable=run(true,"N0CALL",2100,.2,.034,137,0,true,true,key,keys);
+        bool timed=false;
+        for(const auto& r:unavailable.updates) {check(!r.metadata);timed|=r.timing_valid;}
+        check(timed);
+    }
+    // There is no type bit, checksum, or MAC, so an unkeyed receiver cannot
+    // guarantee rejection of ciphertext or corrupt data. Neither may grant
+    // authentication or timing authority if a record happens to be admitted.
+    const auto no_key=run(true,"N0CALL",2100,.2,.034,137,0,true,true,key);
     bool timed=false;
-    for(const auto& r:unverified.updates) {
-        if(r.metadata)check(!r.metadata->authenticated);
-        timed|=r.timing_valid;
-    }
-    check(timed);metadata_has_no_timing_authority(unverified);
-    const auto no_key=run(true,"",2100,.2,.034,137,0,true,true,key);
-    timed=false;
-    for(const auto& r:no_key.updates) {check(!r.metadata);timed|=r.timing_valid;}
-    check(timed);
-    // Repeating a fixed physical dwell through the real Generator gives a
-    // coherent fixture for very small timestamps after timing acquisition.
+    for(const auto& r:no_key.updates) {if(r.metadata)check(!r.metadata->authenticated);timed|=r.timing_valid;}
+    check(timed);metadata_has_no_timing_authority(no_key);
     for(const auto dwell:{0.L,.4L}) {
         const auto compact=run(true,"",2100,0,.034,137,0,true,true,{}, {},0,false,0,dwell);
-        bool decoded=false;
+        bool found=false;
         for(const auto& r:compact.updates)if(r.metadata) {
-            check(r.metadata->kind==helper::MetadataKind::clear_time);
-            check(r.metadata->time_ticks==static_cast<std::uint64_t>(std::round(dwell*65536)));
-            check(!r.metadata->authenticated);decoded=true;
+            check(r.metadata->time_ticks==helper::metadata_packet(static_cast<std::uint64_t>(std::round(dwell*65536)),{}).symbols[0]);
+            check(!r.metadata->authenticated);found=true;
         }
-        check(decoded);
+        check(found);
     }
-    const auto compact_encrypted=run(true,"",2100,0,.034,137,0,true,true,key,{key},0,false,0,0.L);
-    bool decoded=false;
-    for(const auto& r:compact_encrypted.updates)if(r.metadata) {
-        check(r.metadata->kind==helper::MetadataKind::encrypted_time);
-        check(r.metadata->time_ticks==0&&!r.metadata->authenticated);decoded=true;
-    }
-    check(decoded);
     const auto corrupted=run(true,"N0CALL",2100,.2,.034,137,0,true,false,{}, {},0,true);
-    for(const auto& r:corrupted.updates)check(!r.metadata);
+    for(const auto& r:corrupted.updates)if(r.metadata)check(!r.metadata->authenticated);
+    metadata_has_no_timing_authority(corrupted);
     helper::Receiver bounded(2100,20,std::vector<Crypto>(8,key));
+}
+
+void encrypted_auxiliary_with_utc_anchor() {
+    constexpr std::uint32_t rate=48000;
+    constexpr double auxiliary=2100,pilot=auxiliary+helper::auxiliary_pilot_spacing_hz;
+    constexpr std::uint64_t epoch=1800000000;
+    std::array<std::uint8_t,32> master{};const Crypto key(master);
+    helper::Options options;options.power_w=100;options.callsign="N0CALL";options.timecode=true;
+    helper::Generator generator(options,{pilot,.7,.1,100,auxiliary},epoch,true,key);
+    helper::AuxiliaryMetadataReceiver receiver(rate,auxiliary,pilot,{key},{},
+        helper::AuxiliaryMetadataReceiver::workspace_required(rate),0,static_cast<double>(epoch)+3.9);
+    std::array<float,137> samples{};Result result;
+    constexpr std::uint64_t count=rate*3;
+    for(std::uint64_t first=0;first<count;first+=samples.size()) {
+        const auto n=static_cast<std::size_t>(std::min<std::uint64_t>(samples.size(),count-first));
+        for(std::size_t i=0;i<n;++i)
+            samples[i]=static_cast<float>(generator.mix_analytic({},static_cast<long double>(first+i)/rate,rate).real());
+        // Refresh the trusted capture-clock anchor while the worker is joined.
+        receiver.set_capture_utc(first,static_cast<double>(epoch)+3.9+static_cast<double>(first)/rate);
+        receiver.push(std::span(samples).first(n),first);receiver.advance();
+        if(auto update=receiver.take_update())result.updates.push_back(std::move(*update));
+    }
+    std::size_t found=0;
+    for(const auto& update:result.updates)if(update.metadata) {
+        check(update.metadata->callsign=="N0CALL" && !update.metadata->authenticated);
+        check(!update.frequency_valid && !update.phase_valid && !update.timing_valid);
+        ++found;
+    }
+    check(found>0);metadata_has_no_timing_authority(result);
 }
 void clock_skew() {
     const auto result=run(true,"",2100.37,.81,.03719,137,0,false,false,{}, {},50);
@@ -583,10 +606,10 @@ void metadata_with_declared_process() {
             } else check(r.frequency_process_uncertainty_hz==0);
             if(!r.metadata)continue;
             ++decoded;
-            check(r.metadata->kind==helper::MetadataKind::clear_time);
+            check(r.metadata->kind==helper::MetadataKind::callsign);
             check(!r.metadata->authenticated);
             const auto expected=1700000000.L+r.dwell_start_seconds-delay;
-            check(std::abs(static_cast<long double>(r.metadata->time_ticks)/65536-expected)<.0002);
+            check(std::abs(std::remainder(static_cast<long double>(r.metadata->time_ticks)*65/131072-expected,8.125L))<.00052L);
             if(result==&modeled) {
                 check(r.phase_uncertainty_radians>.0002);
                 check(r.frequency_uncertainty_hz>.002);
@@ -673,12 +696,21 @@ struct LinkResult {
     double first_usable=0,max_error=0,max_uncertainty=0;
     std::optional<helper::Reference> last;
 };
-LinkResult realistic_link(double cn0_db_hz,double power,double amplitude,std::size_t chunk,unsigned seed) {
+enum class FrequencyFixture { legacy_auxiliary,current_auxiliary,current_high_pilot };
+LinkResult realistic_link(double cn0_db_hz,double power,double amplitude,std::size_t chunk,unsigned seed,
+                          FrequencyFixture fixture=FrequencyFixture::legacy_auxiliary) {
     constexpr std::uint32_t rate=48000;
     constexpr double expected=6380,frequency=6380.37,delay=.03719;
     helper::Options options;options.power_w=power;options.data_power_w=4;
     options.callsign="N0CALL";options.timecode=false;
-    AuxiliaryFixture generator(options,frequency,amplitude,.1,1700000000,true,{},true);
+    test::LegacyAuxiliaryFixture legacy(frequency,amplitude);
+    AuxiliaryFixture auxiliary(options,frequency,amplitude,.1,1700000000,true);
+    // The current ordinary frequency reference is the pure high pilot. Render
+    // the actual three-tone Generator, including both fixed low components,
+    // with the same peak high-pilot amplitude used by the C/N0 calculation.
+    constexpr auto offset=frequency-expected;
+    helper::Generator high_pilot(options,{frequency,amplitude/helper::pilot_amplitude_fraction,.1,power,
+        helper::auxiliary_frequency_hz+offset,helper::low_pilot_frequency_hz+offset},1700000000);
     FundedFrequencyReceiver receiver(expected,20,rate);
     const auto noise_sigma=std::sqrt(amplitude*amplitude*rate/(4*std::pow(10.,cn0_db_hz/10)));
     std::mt19937 rng(seed);std::normal_distribution<double> noise(0,noise_sigma);
@@ -687,7 +719,8 @@ LinkResult realistic_link(double cn0_db_hz,double power,double amplitude,std::si
         const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(chunk,rate*12-first));
         for(std::size_t i=0;i<count;++i) {
             const auto time=static_cast<long double>(first+i)/rate-delay;
-            const auto helper=time<0?0.:generator.mix(time,rate);
+            const auto helper=time<0?0.:fixture==FrequencyFixture::legacy_auxiliary?legacy.mix(time):
+                fixture==FrequencyFixture::current_auxiliary?auxiliary.mix(time,rate):high_pilot.mix(0,time,rate);
             const auto payload=amplitude*std::sqrt(4/power)*std::cos(tau*1500*static_cast<double>(time));
             samples[i]=static_cast<float>(helper+payload+noise(rng));
         }
@@ -744,6 +777,29 @@ void realistic_frequency() {
     // do not turn that floor into a confidence claim on the true C/N0.
     check(second.usable==0);
 }
+void current_frequency_waveforms() {
+    for(const auto seed:{581U,582U,583U}) {
+        const auto high=realistic_link(30.02,40,.003,137,seed,FrequencyFixture::current_high_pilot);
+        std::cout<<"current three-tone high pilot seed="<<seed<<" refs="<<high.references
+                 <<" usable="<<high.usable<<" first="<<high.first_usable<<'\n';
+        check(high.usable>0&&high.first_usable<8);
+    }
+    const auto high=realistic_link(24,40,.003,137,581,FrequencyFixture::current_high_pilot);
+    const auto batched=realistic_link(24,40,.003,4096,581,FrequencyFixture::current_high_pilot);
+    std::cout<<"current 24 dB-Hz three-tone high pilot refs="<<high.references
+             <<" usable="<<high.usable<<" first="<<high.first_usable<<'\n';
+    check(high.usable>0&&high.first_usable<10&&high.last&&batched.last);
+    check(high.last->sample==batched.last->sample);
+    check(high.last->frequency_hz==batched.last->frequency_hz);
+    check(high.last->frequency_uncertainty_hz==batched.last->frequency_uncertainty_hz);
+    // Deep current auxiliary APSK has no promised weak-signal frequency
+    // utility. Retain actual-waveform coverage: every published interval must
+    // still contain truth, and none grants phase, timing or metadata authority.
+    const auto auxiliary=realistic_link(24,40,.003,137,581,FrequencyFixture::current_auxiliary);
+    std::cout<<"current 24 dB-Hz auxiliary refs="<<auxiliary.references<<" usable="<<auxiliary.usable
+             <<" first="<<auxiliary.first_usable<<'\n';
+    check(auxiliary.references>0);
+}
 void weak_timecode_frequency(std::optional<bool> only={}) {
     // Weak existence evidence must not turn unresolved dwell modulation into
     // false fine frequency precision. Narrow intervals, if any, must cover the
@@ -753,8 +809,15 @@ void weak_timecode_frequency(std::optional<bool> only={}) {
     const Crypto key{std::array<std::uint8_t,32>{}};
     for(const bool signal:{false,true}) {
         if(only&&signal!=*only)continue;
+      for(const auto fixture:{FrequencyFixture::legacy_auxiliary,FrequencyFixture::current_high_pilot,
+                              FrequencyFixture::current_auxiliary}) {
+        if(!signal&&fixture!=FrequencyFixture::legacy_auxiliary)continue;
         helper::Options options;options.power_w=1500;options.timecode=true;
-        AuxiliaryFixture generator(options,frequency,amplitude,0,1700000000,true,key,true);
+        test::LegacyAuxiliaryFixture legacy(frequency,amplitude,true);
+        AuxiliaryFixture auxiliary(options,frequency,amplitude,0,1700000000,true,key);
+        constexpr auto offset=frequency-expected;
+        helper::Generator high_pilot(options,{frequency,amplitude/helper::pilot_amplitude_fraction,0,1500,
+            helper::auxiliary_frequency_hz+offset,helper::low_pilot_frequency_hz+offset},1700000000,true,key);
         FundedFrequencyReceiver receiver(expected,20,rate,{key});
         const auto sigma=std::sqrt(amplitude*amplitude*rate/(4*std::pow(10.,cn0/10)));
         std::mt19937 random(5181);std::normal_distribution<double> noise(0,sigma);
@@ -763,7 +826,9 @@ void weak_timecode_frequency(std::optional<bool> only={}) {
             const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(samples.size(),20*rate-first));
             for(std::size_t i=0;i<count;++i) {
                 const auto time=static_cast<long double>(first+i)/rate-.03719L;
-                samples[i]=static_cast<float>((signal&&time>=0?generator.mix(time,rate):0.)+noise(random));
+                const auto helper=!signal||time<0?0.:fixture==FrequencyFixture::legacy_auxiliary?legacy.mix(time):
+                    fixture==FrequencyFixture::current_auxiliary?auxiliary.mix(time,rate):high_pilot.mix(0,time,rate);
+                samples[i]=static_cast<float>(helper+noise(random));
             }
             receiver.push(std::span<const float>(samples).first(count),rate,first);
             if(const auto reference=receiver.take_update()) {
@@ -778,7 +843,14 @@ void weak_timecode_frequency(std::optional<bool> only={}) {
                 }
             }
         }
-        if(signal)check(references>0);else check(references==0);
+        std::cout<<"weak encrypted metadata fixture="<<static_cast<int>(fixture)<<" signal="<<signal
+                 <<" references="<<references<<'\n';
+        if(!signal)check(references==0);
+        else if(fixture!=FrequencyFixture::current_auxiliary)check(references>0);
+        // The current auxiliary's deeper encrypted APSK may not qualify
+        // existence here. Its unchanged per-reference safety checks above
+        // still apply whenever a reference is actually published.
+      }
     }
 }
 LinkResult shifted_helper_frequency(bool signal,std::size_t chunk) {
@@ -850,13 +922,14 @@ int main(int argc,char** argv) {
         check(argc<=2);std::cout<<std::unitbuf;
         const std::string_view which=argc==2?argv[1]:"all";
         if(which=="all") {
-            clean_precision();paired_marker_identity_and_missing_return();metadata();metadata_carrier_images();two_tone_auxiliary_metadata();metadata_frozen_work();auxiliary_punctuation_clock();timecodes_and_corruption();metadata_with_declared_process();clock_skew();frequency_drift();fallback_and_noise();realistic_frequency();weak_timecode_frequency();shifted_frequency();chunks_and_gaps();
+            clean_precision();paired_marker_identity_and_missing_return();metadata();metadata_carrier_images();two_tone_auxiliary_metadata();metadata_frozen_work();auxiliary_punctuation_clock();timecodes_and_corruption();encrypted_auxiliary_with_utc_anchor();metadata_with_declared_process();clock_skew();frequency_drift();fallback_and_noise();realistic_frequency();current_frequency_waveforms();weak_timecode_frequency();shifted_frequency();chunks_and_gaps();
         } else if(which=="strong") {
-            clean_precision();paired_marker_identity_and_missing_return();metadata();metadata_carrier_images();two_tone_auxiliary_metadata();metadata_frozen_work();auxiliary_punctuation_clock();timecodes_and_corruption();metadata_with_declared_process();clock_skew();frequency_drift();fallback_and_noise();chunks_and_gaps();
+            clean_precision();paired_marker_identity_and_missing_return();metadata();metadata_carrier_images();two_tone_auxiliary_metadata();metadata_frozen_work();auxiliary_punctuation_clock();timecodes_and_corruption();encrypted_auxiliary_with_utc_anchor();metadata_with_declared_process();clock_skew();frequency_drift();fallback_and_noise();chunks_and_gaps();
         } else if(which=="pair")paired_marker_identity_and_missing_return();
         else if(which=="two_tone"){two_tone_auxiliary_metadata();metadata_frozen_work();auxiliary_punctuation_clock();}
         else if(which=="three_tone")three_tone_auxiliary_metadata();
         else if(which=="realistic")realistic_frequency();
+        else if(which=="current_frequency")current_frequency_waveforms();
         else if(which=="legacy30"||which=="legacy24") {
             const bool reduced=which=="legacy24";
             const auto result=realistic_link(reduced?24:30.02,40,reduced?.003:.01,137,581);
