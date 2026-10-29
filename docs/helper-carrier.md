@@ -365,6 +365,27 @@ Actual helper
 ramps can produce temporary mean-band readings near 60 dB even with a 100 dB
 injected white-noise floor. Focused synthetic 90 and 100 dB checks establish the
 meter's numerical range, not physical loopback SNR.
+The pilot harmonic distortion estimate reports the summed power around the
+available integer multiples of the pilot relative to its fundamental, in dBc.
+The row identifies the harmonic orders included; they must fit completely
+within the usable capture bandwidth. It subtracts an estimated white-noise
+contribution based on the measured median floor. When the corrected estimate is
+too close to that noise to report, the row instead shows the uncorrected summed
+harmonic-band level, explicitly including noise and other signals; it is not a
+distortion estimate. If no harmonics fit, the readout is unavailable. More
+negative values indicate lower measured harmonic energy. Other
+signals, helper emissions, spectral leakage, colored noise and hardware response
+can contribute or bias the result. The estimate is not proof that those lines
+are distortion of the pilot, and it is neither a full-band SINAD measurement nor
+a measurement of harmonics beyond the captured bandwidth. The row also reports
+the strongest individually resolved apparent pilot harmonic, its order, and its
+noise-corrected level relative to the pilot. It retains the strongest resolved
+line observed during uninterrupted spectrum measurements, so a short-lived line
+can be shown even when the latest window is quieter. It also flags near-full-scale
+samples seen in those analyzed windows. Both reset when the spectrum is reset,
+for example after a capture gap or change of sample rate. Detection remains limited by the
+measured noise, the analysis windows, and other signals at harmonic frequencies;
+a line near a multiple of the pilot is not by itself proof of distortion.
 The entry separately retains the receiver's current or last local C/N0 and peak
 C/N0 in dB-Hz, alongside SNR in a 10 Hz reference bandwidth and dated observations.
 `SNR(10 Hz) = C/N0 - 10 dB`; these are different units, not two estimates of the

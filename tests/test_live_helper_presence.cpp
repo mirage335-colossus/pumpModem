@@ -90,16 +90,27 @@ void interruptions() {
 void pilot_snr_bandwidth() {
     Fixture f;
     auto row=f.observe(0,48000,true,120,true,48000);
-    check(row && row->text.find("Pilot noise-floor SNR estimate awaiting usable raw spectrum")!=std::string::npos,
+    check(row && row->text.find("Pilot noise-floor SNR estimate awaiting usable raw spectrum")!=std::string::npos &&
+          row->text.find("Pilot harmonic distortion estimate unavailable")!=std::string::npos &&
+          row->text.find("strongest apparent pilot harmonic not resolved")!=std::string::npos,
           "local receiver noise was presented as measured broadband SNR");
-    f.presence.update_spectrum({65,99.314,3100,5800,2700,.2,48000,48000,95,.125});
+    live::detail::HelperSpectrumMeasurement measurement{65,99.314,3100,5800,2700,.2,48000,48000,95,.125};
+    measurement.harmonic_distortion_db=-70.26;
+    measurement.harmonic_count=7;
+    measurement.strongest_harmonic_order=3;
+    measurement.strongest_harmonic_level_db=-74.26;
+    f.presence.update_spectrum(measurement);
     row=f.observe(48000,48200,true,120,true,48000);
     check(row && row->id==100 && row->snr_db==110 &&
           row->text.find("Pilot noise-floor SNR estimate current 95.0 dB (white-noise equivalent); mean-band SNR including spurs 65.0 dB; input peak -18.1 dBFS (noise band 3100.0..5800.0 Hz; 2700.0 Hz reference BW; peak noise-floor SNR 95.0 dB)")!=std::string::npos &&
+          row->text.find("Pilot harmonic distortion estimate current -70.3 dBc (harmonics 2..8; may include other signals)")!=std::string::npos &&
+          row->text.find("strongest apparent pilot harmonic current order 3 -74.3 dBc (noise-corrected; may include other signals)")!=std::string::npos &&
+          row->text.find("strongest apparent pilot harmonic peak since uninterrupted spectrum measurements order 3 -74.3 dBc")!=std::string::npos &&
           row->text.find("C/N0 current 120.0 dB-Hz, peak 120.0 dB-Hz")!=std::string::npos,
           "raw pilot SNR or separate receiver C/N0 units lost");
     row=f.observe(48200,49000,false,120,true,48000);
-    check(row && row->text.find("Pilot noise-floor SNR estimate last 95.0 dB")!=std::string::npos,
+    check(row && row->text.find("Pilot noise-floor SNR estimate last 95.0 dB")!=std::string::npos &&
+          row->text.find("Pilot harmonic distortion estimate last -70.3 dBc")!=std::string::npos,
           "absence lost the last measured raw-spectrum SNR");
     row=f.observe(49000,50000,true,119,true,96000);
     check(row && row->text.find("Pilot noise-floor SNR estimate awaiting usable raw spectrum")!=std::string::npos,
@@ -108,12 +119,61 @@ void pilot_snr_bandwidth() {
     f.presence.update_spectrum({64,98.314,3100,5800,2700,.2,96000,50000,94,1.0});
     row=f.observe(50000,50200,true,119,true,96000);
     check(row && row->text.find("Pilot noise-floor SNR estimate current 94.0 dB")!=std::string::npos &&
+          row->text.find("Pilot harmonic distortion estimate unavailable")!=std::string::npos &&
           row->text.find("peak noise-floor SNR 95.0 dB")!=std::string::npos &&
           row->text.find("input peak 0.0 dBFS near full scale")!=std::string::npos,
           "raw-spectrum SNR failed to use matching capture rate or independent peak");
     row=f.observe(80000,81000,true,119,true,96000);
     check(row && row->text.find("Pilot noise-floor SNR estimate awaiting usable raw spectrum")!=std::string::npos,
           "capture gap retained current raw-spectrum SNR");
+
+    // A short-lived line remains visible across publication retries, even if
+    // the next window is quieter, until the spectrum state is reset.
+    Fixture interval;
+    interval.observe(0,48000,true,120,true,48000);
+    auto line=measurement;
+    line.end_sample=48000;
+    interval.presence.update_spectrum(line);
+    interval.observe(48000,48200,true,120,true,48000);
+    interval.observe(48200,48400,true,120,true,48000);
+    line.end_sample=48400;line.capture_peak=1.;line.strongest_harmonic_order=3;line.strongest_harmonic_level_db=-45.;
+    interval.presence.update_spectrum(line);
+    interval.observe(48400,48600,true,120,true,48000);
+    line.end_sample=48600;line.capture_peak=.125;line.strongest_harmonic_order=2;line.strongest_harmonic_level_db=-60.;
+    interval.presence.update_spectrum(line);
+    row=interval.observe(48600,49200,true,120,true,48000);
+    check(row && row->text.find("strongest apparent pilot harmonic current order 2 -60.0 dBc")!=std::string::npos &&
+          row->text.find("peak since uninterrupted spectrum measurements order 3 -45.0 dBc")!=std::string::npos &&
+          row->text.find("near full scale observed during uninterrupted spectrum measurements")!=std::string::npos,
+          "individual harmonic or its transient peak was lost");
+    row=interval.observe(49200,50200,true,120,true,48000);
+    check(row && row->text.find("strongest apparent pilot harmonic current order 2 -60.0 dBc")!=std::string::npos &&
+          row->text.find("peak since uninterrupted spectrum measurements order 3 -45.0 dBc")!=std::string::npos &&
+          row->text.find("near full scale observed during uninterrupted spectrum measurements")!=std::string::npos,
+          "publication retry lost peak or near-full-scale evidence");
+    row=interval.observe(60000,61000,true,120,true,48000);
+    check(row && row->text.find("awaiting usable raw spectrum")!=std::string::npos,
+          "capture gap failed to reset the spectrum");
+    line.end_sample=61000;line.strongest_harmonic_order=4;line.strongest_harmonic_level_db=-85.;
+    interval.presence.update_spectrum(line);
+    row=interval.observe(61000,61200,true,120,true,48000);
+    check(row && row->text.find("peak since uninterrupted spectrum measurements order 4 -85.0 dBc")!=std::string::npos &&
+          row->text.find("-45.0 dBc")==std::string::npos &&
+          row->text.find("near full scale observed during uninterrupted spectrum measurements")==std::string::npos,
+          "old peak or near-full-scale evidence survived spectrum reset");
+
+    Fixture noise_limited;
+    noise_limited.observe(0,48000,true,120,true,48000);
+    live::detail::HelperSpectrumMeasurement bands{65,99.314,3100,5800,2700,.2,48000,48000,95,.125};
+    bands.harmonic_count=7;
+    bands.harmonic_band_level_db=-65.26;
+    noise_limited.presence.update_spectrum(bands);
+    row=noise_limited.observe(48000,48200,true,120,true,48000);
+    check(row && row->text.find("Pilot harmonic distortion estimate not resolved above noise; harmonic-band level current -65.3 dBc (harmonics 2..8; includes noise and other signals)")!=std::string::npos,
+          "noise-limited harmonic band was not labelled or displayed");
+    row=noise_limited.observe(48200,49000,false,120,true,48000);
+    check(row && row->text.find("harmonic-band level last -65.3 dBc")!=std::string::npos,
+          "absence lost the last noise-limited harmonic band");
 }
 
 void invalid_and_sparse() {

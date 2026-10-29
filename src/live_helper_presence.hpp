@@ -49,14 +49,52 @@ public:
     }
     void update_spectrum(const HelperSpectrumMeasurement& value)noexcept {
         if(active_==none || !records_[active_].present || value.sample_rate!=rate_ ||
-           value.end_sample>end_ || end_-value.end_sample>rate_/4)return;
+           value.end_sample>end_ || end_-value.end_sample>rate_/4 ||
+           !std::isfinite(value.pilot_snr_db) || !std::isfinite(value.floor_snr_db))return;
         auto& record=records_[active_];
         if(record.spectrum && value.end_sample<=record.spectrum->end_sample)return;
         if(!record.spectrum)record.changed=true;
-        record.spectrum=SpectrumDisplay{static_cast<float>(value.pilot_snr_db),
-            static_cast<float>(value.floor_snr_db),
+        // 2.7 kHz is the fixed reference bandwidth of the spectrum meter.
+        // Pack levels to tenths of a dB to retain the existing bounded
+        // Helper presentation workspace while also reporting individual lines.
+        std::int16_t harmonic_tenths=0;
+        std::uint16_t harmonic_count=0;
+        constexpr std::uint16_t raw_band_flag=0x8000, interval_full_scale_flag=0x4000;
+        const bool corrected=value.harmonic_distortion_db && std::isfinite(*value.harmonic_distortion_db);
+        const auto level=corrected?value.harmonic_distortion_db:value.harmonic_band_level_db;
+        if(level && std::isfinite(*level) && value.harmonic_count>0 && value.harmonic_count<interval_full_scale_flag) {
+            const auto tenths=std::clamp(*level*10.,-32768.,32767.);
+            harmonic_tenths=static_cast<std::int16_t>(std::lround(tenths));
+            harmonic_count=static_cast<std::uint16_t>(value.harmonic_count) | (corrected?0:raw_band_flag);
+        }
+        const auto to_tenths=[](double v) {
+            return static_cast<std::int16_t>(std::lround(std::clamp(v*10.,-32768.,32767.)));
+        };
+        std::uint8_t strongest_order=0;
+        std::int16_t strongest_tenths=0;
+        if(value.strongest_harmonic_level_db && std::isfinite(*value.strongest_harmonic_level_db) &&
+           value.strongest_harmonic_order>=2 && value.strongest_harmonic_order<=255) {
+            strongest_order=static_cast<std::uint8_t>(value.strongest_harmonic_order);
+            strongest_tenths=to_tenths(*value.strongest_harmonic_level_db);
+        }
+        auto interval_order=strongest_order;
+        auto interval_tenths=strongest_tenths;
+        if(record.spectrum && record.spectrum->interval_order &&
+           (!interval_order || record.spectrum->interval_tenths_db>interval_tenths)) {
+            interval_order=record.spectrum->interval_order;
+            interval_tenths=record.spectrum->interval_tenths_db;
+        }
+        const auto capture_peak=std::isfinite(value.capture_peak)?
+            std::clamp(value.capture_peak,0.,1.):0.;
+        if(capture_peak>=.999 || (record.spectrum &&
+                                 (record.spectrum->harmonic_count&interval_full_scale_flag)))
+            harmonic_count|=interval_full_scale_flag;
+        record.spectrum=SpectrumDisplay{value.end_sample,
             static_cast<float>(value.noise_band_lower_hz),static_cast<float>(value.noise_band_upper_hz),
-            static_cast<float>(value.reference_bandwidth_hz),static_cast<float>(value.capture_peak),value.end_sample};
+            to_tenths(value.pilot_snr_db),to_tenths(value.floor_snr_db),harmonic_tenths,
+            strongest_tenths,interval_tenths,harmonic_count,
+            static_cast<std::uint16_t>(std::lround(capture_peak*65535.)),
+            strongest_order,interval_order};
         if(!record.peak_spectrum || value.floor_snr_db>*record.peak_spectrum)
             record.peak_spectrum=static_cast<float>(value.floor_snr_db);
     }
@@ -145,9 +183,17 @@ private:
     // Presentation needs only tenths of a dB/Hz. Retain a compact dated value
     // inside the existing fixed Helper workspace reservation.
     struct SpectrumDisplay {
-        float pilot_snr_db=0,floor_snr_db=0,noise_band_lower_hz=0,noise_band_upper_hz=0,reference_bandwidth_hz=0,capture_peak=0;
         std::uint64_t end_sample=0;
+        float noise_band_lower_hz=0,noise_band_upper_hz=0;
+        std::int16_t pilot_snr_tenths_db=0,floor_snr_tenths_db=0,harmonic_tenths_db=0;
+        std::int16_t strongest_tenths_db=0,interval_tenths_db=0;
+        // High bits: noise-inclusive band level and near-full-scale during
+        // uninterrupted spectrum measurements. Low 14 bits: harmonic count.
+        std::uint16_t harmonic_count=0;
+        std::uint16_t capture_peak=0; // linear 0..65535 maps to 0..1 full scale
+        std::uint8_t strongest_order=0,interval_order=0; // zero means unavailable
     };
+    static_assert(sizeof(SpectrumDisplay)<=32, "Helper spectrum workspace grew");
     struct Record {
         std::uint64_t id=0,revision=0,measurement_end=0,peak_end=0;
         std::uint32_t measurement_rate=0,peak_rate=0;
@@ -176,17 +222,42 @@ private:
         text<<std::fixed<<std::setprecision(1)<<"; Pilot noise-floor SNR estimate ";
         if(record.spectrum) {
             const auto& measured=*record.spectrum;
-            text<<label<<' '<<measured.floor_snr_db<<" dB (white-noise equivalent); mean-band SNR including spurs "
-                <<measured.pilot_snr_db<<" dB";
-            if(measured.capture_peak>0 && std::isfinite(measured.capture_peak)) {
-                text<<"; input peak "<<20*std::log10(measured.capture_peak)<<" dBFS";
-                if(measured.capture_peak>=.999)text<<" near full scale";
+            text<<label<<' '<<static_cast<double>(measured.floor_snr_tenths_db)/10.<<" dB (white-noise equivalent); mean-band SNR including spurs "
+                <<static_cast<double>(measured.pilot_snr_tenths_db)/10.<<" dB";
+            if(measured.capture_peak>0) {
+                const double peak=static_cast<double>(measured.capture_peak)/65535.;
+                text<<"; input peak "<<20*std::log10(peak)<<" dBFS";
+                if(peak>=.999)text<<" near full scale";
             }
             text<<" (noise band "
                 <<measured.noise_band_lower_hz<<".."<<measured.noise_band_upper_hz
-                <<" Hz; "<<measured.reference_bandwidth_hz
-                <<" Hz reference BW; peak noise-floor SNR "<<*record.peak_spectrum<<" dB)";
+                <<" Hz; 2700.0 Hz reference BW; peak noise-floor SNR "<<*record.peak_spectrum<<" dB)";
         } else text<<"awaiting usable raw spectrum";
+        text<<"; Pilot harmonic distortion estimate ";
+        if(record.spectrum && (record.spectrum->harmonic_count&0x3fff)) {
+            const auto& measured=*record.spectrum;
+            const bool raw=(measured.harmonic_count&0x8000)!=0;
+            const auto count=measured.harmonic_count&0x3fff;
+            if(raw)text<<"not resolved above noise; harmonic-band level ";
+            text<<label<<' '<<static_cast<double>(measured.harmonic_tenths_db)/10.
+                <<" dBc (harmonics 2.."<<(static_cast<unsigned>(count)+1)
+                <<(raw?"; includes noise and other signals)":"; may include other signals)");
+        } else text<<"unavailable (no usable spectrum or unresolved harmonics)";
+        if(record.spectrum && (record.spectrum->harmonic_count&0x4000))
+            text<<"; near full scale observed during uninterrupted spectrum measurements";
+        text<<"; strongest apparent pilot harmonic ";
+        if(record.spectrum && record.spectrum->strongest_order) {
+            const auto& measured=*record.spectrum;
+            text<<label<<" order "<<static_cast<unsigned>(measured.strongest_order)<<' '
+                <<static_cast<double>(measured.strongest_tenths_db)/10.
+                <<" dBc (noise-corrected; may include other signals)";
+        } else text<<"not resolved";
+        if(record.spectrum && record.spectrum->interval_order) {
+            text<<"; strongest apparent pilot harmonic peak since uninterrupted spectrum measurements order "
+                <<static_cast<unsigned>(record.spectrum->interval_order)<<' '
+                <<static_cast<double>(record.spectrum->interval_tenths_db)/10.
+                <<" dBc (noise-corrected; may include other signals)";
+        }
         text<<"; receiver local C/N0 "<<label<<' '<<record.cn0<<" dB-Hz, peak "<<record.peak_cn0
             <<" dB-Hz; SNR (10 Hz) "<<label<<' '<<record.cn0-10<<" dB, peak "<<record.peak_cn0-10<<" dB";
         text<<std::setprecision(3)<<"; observed capture "<<static_cast<double>(record.measurement_end)/record.measurement_rate

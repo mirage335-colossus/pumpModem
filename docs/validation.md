@@ -6,10 +6,67 @@ superseded status here; keep one latest [resource snapshot](ci-resource-results.
 and use Git history for comparisons. Detailed studies remain in the
 [evidence index](indexes/evidence.md).
 
+## Helper harmonic sensitivity manual-test build
+
+The 28 October 2026 local GUI with the uncommitted Helper changes is available
+at `build/dev/datapump-gui`, SHA-256
+`8fd76c5d78d30ceadc23f768d561eaf2ae3214585e6e944efc8d0ece3ea24e27`;
+core archive SHA-256 is
+`ee90715304164656bb090c6d0e220b301249761296629be920dbcac0685f478b`.
+The standard build, `signal_view` and `live_helper_presence` focused checks
+(2/2), headless GUI self-check and `git diff --check` passed. Full regression,
+qualification and native GUI interaction were not run.
+
+The meter adds a strongest individual apparent pilot harmonic, comparing each
+harmonic peak with local sideband noise rather than requiring the sum across
+all harmonic bands to exceed the summed noise floor. Current and maximum
+observed values are separate; the maximum and near-full-scale warning remain
+until spectrum state resets. Local noise and unrelated coincident signals can
+affect the estimate; the maximum may retain an old value or false detection.
+Focused coverage includes one weak harmonic among seven noisy bands, seeded
+white/colored noise, local-band availability, and peak/reset behavior.
+
+Before the change, a physical cable test at microphone volume 25% showed
+full-scale samples and a third harmonic around −28.4 dBc while the summed
+readout alternated between −27 to −30 dBc and not resolved. After the change,
+at 25% the current strongest harmonic was order 3 in 3 of 11 snapshots; all
+11 displayed the retained order-3 peak near −31.0 dBc and the near-full-scale
+indication. At 15%, the retained peak was order 2 near −80.1 dBc, with current
+detection in 1 of 11 snapshots. Both short sessions exited normally. The
+original microphone volume 15% (raw 9830 on both channels, Capture +10.5 dB),
+Mic Boost 0 dB and sink 100% were verified restored. The 25% clipped run is a
+diagnostic, not a recommended operating level. Raw capture and logs are in
+ignored `local-evidence/harmonic-sensitivity/`.
+
+## Helper pilot harmonic measurement manual-test build
+
+The preceding 28 October 2026 local GUI on `458c2d2` plus uncommitted Helper
+changes has been superseded at `build/dev/datapump-gui`; its SHA-256 was
+`63cc27ccb7a62d6a273f369dcd7fe597c25e897d6b0caa34018300cd688d9e77`;
+core archive SHA-256 is
+`c38f685fd49effb2eeb5da580e5e9e20dd80a3c5c8ff277ab6071812ad1c76c9`.
+The standard build, GUI headless self-check and `git diff --check` passed.
+The local GUI adds a noise-corrected estimate of summed pilot harmonic power
+relative to the fundamental, with harmonic orders identified. When the
+harmonic-band sum is not resolved above the estimated noise, it instead shows
+the raw harmonic-band level including noise and other signals. The estimator
+uses complete, unaliased bands only; it is display-only and does not establish
+formal THD or SINAD. Focused `signal_view` and `live_helper_presence` tests
+passed 2/2, including known harmonics, noise-limited and out-of-band cases.
+
+A short physical `live::Session` loopback using the final archive, a synthetic
+key and unchanged mixer measured harmonic-band levels −78.9 to −77.2 dBc for
+harmonics 2–8; the corrected distortion was not resolved above noise in the
+seven sampled rows.
+The levels include noise and other signals, not measured THD. The session
+stopped cleanly and reported no errors after initial ALSA fallback warnings.
+This did not exercise the native GUI or run full regression or qualification.
+Evidence is in ignored `local-evidence/helper-harmonic-*.log`.
+
 ## Helper radio-band SNR manual-test build
 
-The 28 October 2026 local GUI on `458c2d2` plus uncommitted Helper changes is
-available at `build/dev/datapump-gui`, SHA-256
+The preceding 28 October 2026 local GUI on `458c2d2` plus uncommitted Helper
+changes has been superseded at `build/dev/datapump-gui`; its SHA-256 was
 `52d529f7335bcfe45af3246f2ad450487eabe6baa23aa4c214473212461da7d2`;
 core archive SHA-256 is
 `d4c9f0430acf7391ab408e35b4d4488f8a5e29e6aac3a5e8ede5f80f9ee57459`.

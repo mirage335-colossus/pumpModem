@@ -333,11 +333,99 @@ void generated_helper_floor() {
           transition->floor_snr_db>transition->pilot_snr_db+15.,
           "generated helper transition did not raise the measured mean and median band power");
 }
+void helper_harmonic_estimate() {
+    constexpr std::uint32_t sample_rate=48000;
+    constexpr double pilot_hz=4103.71,pilot_amplitude=.45;
+    const auto fixture=[](double frequency,double second,double third) {
+        std::array<float,live::detail::signal_window_size> samples{};
+        std::mt19937 random(1973);
+        std::normal_distribution<double> noise(0,2e-6);
+        for(std::size_t i=0;i<samples.size();++i) {
+            const double time=static_cast<double>(i)/sample_rate;
+            samples[i]=static_cast<float>(pilot_amplitude*std::cos(2*std::numbers::pi*frequency*time+.1)+
+                second*std::cos(2*std::numbers::pi*2*frequency*time+.2)+
+                third*std::cos(2*std::numbers::pi*3*frequency*time+.4)+noise(random));
+        }
+        return samples;
+    };
+    // A second harmonic at -40 dBc and third at -50 dBc combine to
+    // 10*log10(10^-4 + 10^-5), independent of arbitrary phases and FFT bins.
+    auto samples=fixture(pilot_hz,pilot_amplitude*.01,pilot_amplitude*std::sqrt(1e-5));
+    const auto estimate=live::detail::helper_spectrum_measurement(samples,sample_rate,pilot_hz,2048);
+    const double expected=10*std::log10(1e-4+1e-5);
+    check(estimate && estimate->harmonic_distortion_db && estimate->harmonic_band_level_db &&
+          estimate->harmonic_count==3 && std::abs(*estimate->harmonic_distortion_db-expected)<.05 &&
+          std::abs(*estimate->harmonic_band_level_db-expected)<.05 &&
+          estimate->strongest_harmonic_level_db && estimate->strongest_harmonic_order==2 &&
+          std::abs(*estimate->strongest_harmonic_level_db+40.)<.05,
+          "pilot harmonics did not produce the expected summed relative power");
+    for(auto& value:samples)value*=.125f;
+    const auto scaled=live::detail::helper_spectrum_measurement(samples,sample_rate,pilot_hz,2048);
+    check(scaled && scaled->harmonic_distortion_db && scaled->harmonic_band_level_db &&
+          std::abs(*scaled->harmonic_distortion_db-*estimate->harmonic_distortion_db)<.001 &&
+          std::abs(*scaled->harmonic_band_level_db-*estimate->harmonic_band_level_db)<.001,
+          "pilot harmonic estimate depends on capture gain");
+    const auto clean=live::detail::helper_spectrum_measurement(
+        fixture(pilot_hz,0,0),sample_rate,pilot_hz,2048);
+    check(clean && clean->harmonic_count==3 && clean->harmonic_band_level_db &&
+          std::isfinite(*clean->harmonic_band_level_db) && !clean->harmonic_distortion_db &&
+          !clean->strongest_harmonic_level_db && clean->strongest_harmonic_order==0,
+          "noise-limited harmonic bands were presented as measurable distortion");
+    const auto partial=live::detail::helper_spectrum_measurement(
+        fixture(6700.,.0045,.0045),sample_rate,6700.,2048);
+    check(partial && partial->harmonic_count==1 && partial->harmonic_distortion_db &&
+          std::abs(*partial->harmonic_distortion_db+40.)<.05,
+          "out-of-band harmonic was counted or complete second harmonic was lost");
+    const auto no_harmonics=live::detail::helper_spectrum_measurement(
+        fixture(11000.,.0045,.0045),sample_rate,11000.,2048);
+    check(no_harmonics && no_harmonics->harmonic_count==0 && !no_harmonics->harmonic_distortion_db &&
+          !no_harmonics->harmonic_band_level_db && !no_harmonics->strongest_harmonic_level_db &&
+          no_harmonics->strongest_harmonic_order==0,
+          "out-of-band or aliased harmonics were reported as usable bands");
+    const auto no_sidebands=live::detail::helper_spectrum_measurement(
+        fixture(400.,.0045,0),sample_rate,400.,2048);
+    check(no_sidebands && no_sidebands->harmonic_count>0 &&
+          !no_sidebands->strongest_harmonic_level_db && no_sidebands->strongest_harmonic_order==0,
+          "a resolved harmonic was claimed without usable local sidebands");
+
+    // One line can be visible while its power is smaller than the summed
+    // noise in all seven harmonic bands. A separate local test must find it.
+    constexpr double low_pilot=2462.36, sigma=.0005, harmonic=.0002;
+    const auto noisy_fixture=[](unsigned seed,double line,bool colored) {
+        std::mt19937 random(seed);
+        std::normal_distribution<double> noise(0,sigma);
+        std::array<float,live::detail::signal_window_size> result{};
+        double previous=0;
+        for(std::size_t i=0;i<result.size();++i) {
+            const double current=noise(random);
+            const double t=static_cast<double>(i)/sample_rate;
+            result[i]=static_cast<float>(pilot_amplitude*std::cos(2*std::numbers::pi*low_pilot*t+.1)+
+                line*std::cos(2*std::numbers::pi*3*low_pilot*t+.4)+
+                (colored?current+.8*(current-previous):current));
+            previous=current;
+        }
+        return result;
+    };
+    const auto weak=live::detail::helper_spectrum_measurement(
+        noisy_fixture(1973,harmonic,false),sample_rate,low_pilot,2048);
+    check(weak && weak->harmonic_count==7 && weak->strongest_harmonic_level_db &&
+          weak->strongest_harmonic_order==3 &&
+          std::abs(*weak->strongest_harmonic_level_db-20*std::log10(harmonic/pilot_amplitude))<3.,
+          "one weak harmonic among seven bands was missed or misestimated");
+    for(unsigned seed=0;seed<32;++seed)for(const bool colored:{false,true}) {
+        const auto noise_only=live::detail::helper_spectrum_measurement(
+            noisy_fixture(seed,0,colored),sample_rate,low_pilot,2048);
+        check(noise_only && !noise_only->strongest_harmonic_level_db &&
+              noise_only->strongest_harmonic_order==0,
+              "noise-only local harmonic test reported a resolved line");
+    }
+}
 }
 int main() {
     try {
         helper_spectrum_snr();
         generated_helper_floor();
+        helper_harmonic_estimate();
         native_spectrum_phase();
         fractional_carrier_capture();
         actual_default_clock_carrier();

@@ -176,10 +176,91 @@ std::optional<HelperSpectrumMeasurement> helper_spectrum_measurement(
         return std::nullopt;
     constexpr double reference_bandwidth=2700.;
     const double cn0_db_hz=10*std::log10(pilot_power/noise_density);
+    // Each harmonic uses the same full Hann^6 lobe as the pilot. Refuse
+    // overlapping or truncated lobes, and stop before the usable baseband
+    // limit instead of treating folded frequencies as harmonics. Keep the
+    // sum bounded by the fixed positive-frequency FFT size.
+    double harmonic_power=0;
+    std::size_t harmonic_bins=0,harmonic_count=0,previous_last=pilot_last;
+    const auto upper_bin=static_cast<std::size_t>(std::floor(upper_hz/bin_hz));
+    std::optional<double> strongest_harmonic_level;
+    std::size_t strongest_harmonic_order=0;
+    for(std::size_t order=2;order<=signal_window_size/2;++order) {
+        const double center=order*pilot_hz/bin_hz;
+        if(center+8>upper_bin)break;
+        const auto first=static_cast<std::size_t>(std::ceil(center-8));
+        const auto last=static_cast<std::size_t>(std::floor(center+8));
+        if(first<=previous_last)break;
+        double band_power=0;
+        for(auto i=first;i<=last;++i)
+            band_power+=std::norm(bins[i])*psd_scale*bin_hz;
+        harmonic_power+=band_power;
+        harmonic_bins+=last-first+1;
+        ++harmonic_count;
+        previous_last=last;
+
+        // Detect a narrow line separately so noise from all the other
+        // harmonic bands cannot hide a single visible harmonic. Compare the
+        // strongest bin near the expected frequency with local sidebands,
+        // leaving a gap beyond the complete Hann^6 lobe. Exclude the pilot,
+        // auxiliary and all harmonic lobes from the sideband estimate.
+        const auto center_bin=static_cast<std::size_t>(std::floor(center+.5));
+        double local_sum=0;
+        std::size_t local_count=0;
+        const auto add_local=[&](std::size_t i) {
+            if(i==0 || i>upper_bin)return;
+            const double nearest=std::round(static_cast<double>(i)*bin_hz/pilot_hz);
+            if(nearest>=1 && std::abs(static_cast<double>(i)-nearest*pilot_hz/bin_hz)<=10)return;
+            if(std::abs(static_cast<double>(i)-(pilot_hz-400.)/bin_hz)<=10)return;
+            local_sum+=std::norm(bins[i]);
+            ++local_count;
+        };
+        for(std::size_t distance=16;distance<=64;++distance) {
+            if(center_bin>distance)add_local(center_bin-distance);
+            if(center_bin+distance<=upper_bin)add_local(center_bin+distance);
+        }
+        if(local_count<16)continue;
+        const double local_mean=local_sum/static_cast<double>(local_count);
+        double peak=0;
+        for(auto i=center_bin-2;i<=center_bin+2;++i)
+            peak=std::max(peak,std::norm(bins[i]));
+        // The bins of a Hann^6 window are correlated, so a five-bin search
+        // is not five independent observations. This conservative threshold
+        // was checked against independent white and colored noise windows;
+        // it does not guarantee immunity to other signals or transient noise.
+        if(!(local_mean>0) || !std::isfinite(local_mean) || peak<=16*local_mean)continue;
+        const double corrected=band_power-local_mean*psd_scale*bin_hz*(last-first+1);
+        if(!(corrected>0) || !std::isfinite(corrected))continue;
+        const double db=10*std::log10(corrected/pilot_power);
+        if(std::isfinite(db) && (!strongest_harmonic_level || db>*strongest_harmonic_level)) {
+            strongest_harmonic_level=db;
+            strongest_harmonic_order=order;
+        }
+    }
+    // A single periodogram is noisy. Only show the corrected estimate if
+    // total band energy exceeds twice the floor estimate; otherwise reporting
+    // a value would make a noise-limited measurement look like distortion.
+    // The median floor avoids counting a narrow harmonic twice, but assumes
+    // that its noise density also represents the harmonic bands.
+    std::optional<double> harmonic_distortion;
+    std::optional<double> harmonic_band_level;
+    const double expected_noise=floor_density*harmonic_bins*bin_hz;
+    if(harmonic_count && harmonic_power>0 && std::isfinite(harmonic_power)) {
+        const double db=10*std::log10(harmonic_power/pilot_power);
+        if(std::isfinite(db))harmonic_band_level=db;
+    }
+    if(harmonic_count && std::isfinite(harmonic_power) &&
+       std::isfinite(expected_noise) && harmonic_power>2*expected_noise) {
+        const double corrected=harmonic_power-expected_noise;
+        const double db=10*std::log10(corrected/pilot_power);
+        if(std::isfinite(db))harmonic_distortion=db;
+    }
     return HelperSpectrumMeasurement{
         cn0_db_hz-10*std::log10(reference_bandwidth),cn0_db_hz,
         noise_first*bin_hz,noise_last*bin_hz,reference_bandwidth,pilot_power,
-        sample_rate,end_sample,10*std::log10(pilot_power/(floor_density*reference_bandwidth)),capture_peak};
+        sample_rate,end_sample,10*std::log10(pilot_power/(floor_density*reference_bandwidth)),capture_peak,
+        harmonic_distortion,harmonic_count,harmonic_band_level,
+        strongest_harmonic_level,strongest_harmonic_order};
 }
 SignalPlots signal_plots(std::span<const float> samples,const modem::Config& config,std::uint64_t first_sample,SignalView view) {
     if (samples.size()>SignalWindow::sample_capacity(config)) throw Error("signal preview exceeds its frame window");

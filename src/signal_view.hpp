@@ -39,6 +39,19 @@ struct HelperSpectrumMeasurement {
     double floor_snr_db=0;
     // Largest absolute raw capture sample in this same window (1 = full scale).
     double capture_peak=0;
+    // Estimated summed power of resolved, unaliased pilot harmonic bands
+    // relative to pilot power, in dBc. Null means absent bands or below the
+    // measured floor. These bands can contain other signals and are not THD.
+    std::optional<double> harmonic_distortion_db;
+    std::size_t harmonic_count=0;
+    // Uncorrected harmonic-band power relative to the pilot, including the
+    // noise and any other signals in these bands. This is not a THD estimate.
+    std::optional<double> harmonic_band_level_db;
+    // Strongest individually resolved harmonic band, after subtracting noise
+    // estimated from its local sidebands, relative to the pilot. A line at a
+    // harmonic frequency can also be another signal, so this is not THD.
+    std::optional<double> strongest_harmonic_level_db;
+    std::size_t strongest_harmonic_order=0;
 };
 // Display-only measurement from one complete raw capture window. Estimate the
 // mean noise density above the pilot, away from its lobe and the auxiliary tone.
