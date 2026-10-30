@@ -174,7 +174,9 @@ void high_dates_and_fresh_window() {
 }
 void actual_helper_publications() {
     h::Options options;options.power_w=15000;options.data_power_w=4;options.timecode=false;
-    const auto plan=h::plan(options,1000,100,rate);
+    // Keep the 550/950 Hz Helper tones at their production positions while
+    // placing the test DATA band outside their fixed separation guard.
+    const auto plan=h::plan(options,1800,100,rate);
     // Isolate and normalize the actual Generator auxiliary for this Receiver
     // republication contract. Composite-pilot isolation is covered separately;
     // no reversal is added to the pure pilot and no paired legacy shape used.
@@ -190,6 +192,12 @@ void actual_helper_publications() {
         receiver.push(std::span(input).first(n),rate,at);at+=n;
         if(auto update=receiver.take_update();update && update->punctuation.known) {
             const auto& p=update->punctuation;check(p.last_sample<=update->sample,"actual helper publication manufactured a future marker");
+            // The Generator's physical reversal is now centered at 160 ms.
+            // Use the known source/capture ratio, not decoded metadata, to
+            // check the independently observed marker's dwell phase.
+            const auto source_time=(static_cast<long double>(p.sample)+p.fraction)*ratio/rate;
+            check(std::abs(std::remainder(source_time-.160L,.4L))<.008L,
+                "actual auxiliary marker did not follow the 160ms reversal");
             const auto key=std::pair{p.generation,p.sample};
             if(const auto old=identities.find(key);old!=identities.end()) {
                 check(h::punctuation_clock_detail::same(p,old->second),"tone republication changed actual marker support/identity");++repeats;
@@ -207,7 +215,14 @@ void actual_helper_publications() {
     const auto fit=clock.qualify({-300,300},request(first,last_distinct));
     check(fit.qualified_for_acquisition && fit.physical_audio_lower_ppm<=100 && fit.physical_audio_upper_ppm>=100 && fit.physical_audio_upper_ppm-fit.physical_audio_lower_ppm<100,
         "actual Generator/Receiver punctuation did not bound the channel's signed audio clock");
-    check(clock.qualify({-300,300},request(first,last)).reason==h::PunctuationClockReason::stale_marker,
+    // The last carried publication can still be within the 50ms freshness
+    // limit: the new post-reversal straight flank is only 44ms long. Score
+    // freshness at the real, later end of the 6-second capture instead of
+    // assuming the final tone publication itself is already stale.
+    check(h::punctuation_clock_detail::same(last.punctuation,last_distinct.punctuation) &&
+          last.sample<6ULL*rate,"carried publication changed marker or capture provenance");
+    auto captured=request(first,last);captured.captured_end_sample=6ULL*rate;
+    check(clock.qualify({-300,300},captured).reason==h::PunctuationClockReason::stale_marker,
         "carried tone publication renewed the actual marker's freshness");
     const auto generation=last.punctuation.generation;receiver.reset();
     bool poisoned=false;

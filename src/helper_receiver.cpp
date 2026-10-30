@@ -15,7 +15,7 @@
 namespace datapump::helper {
 namespace {
 constexpr double tau=2*std::numbers::pi;
-constexpr std::size_t vertices=11;
+constexpr std::size_t vertices=11; // Paired legacy has an extra fixed return vertex.
 constexpr std::size_t narrow_bins=72;
 using Pair=std::array<double,2>;
 void attach_punctuation(Reference& reference,const PunctuationObservation& observation) {
@@ -85,6 +85,11 @@ double auxiliary_smooth(double x) {
 }
 double auxiliary_smooth_derivative(double x) {
     return x<=0||x>=1?0:140*x*x*x*(1-x)*(1-x)*(1-x);
+}
+// Two independent eight-millisecond amplitude tapers meet at the timing zero.
+// The phase changes only where the auxiliary amplitude is zero.
+double auxiliary_reversal(double offset) {
+    return offset<0?auxiliary_smooth(-offset/.008):-auxiliary_smooth(offset/.008);
 }
 bool solve6(std::array<std::array<double,6>,6> a,std::array<double,6> b,
             std::array<double,6>& x) {
@@ -1135,11 +1140,10 @@ struct Receiver::Impl {
     bool tone_time(double time) const {
         if(!state.timing_valid)return true;
         const auto t=local(time);
-        // Both formats leave a straight flank before compact metadata. The
-        // separate auxiliary remains inverted after its single240ms edge.
         const auto guard=std::max(1./state.rate,state.timing_uncertainty)*state.waveform_scale;
-        const auto straight_begin=punctuation_format==PunctuationFormat::auxiliary_single?.244:.284;
-        return (t>=.008&&t<.212)||(t>=straight_begin+guard&&t<.316-guard);
+        if(punctuation_format==PunctuationFormat::auxiliary_single)
+            return (t>=.008&&t<.152-guard)||(t>=.168+guard&&t<.212-guard);
+        return (t>=.008&&t<.212)||(t>=.284+guard&&t<.316-guard);
     }
     void fuse_frequency(Reference& reference) const {
         if(!optional_frequency||!optional_frequency->qualified())return;
@@ -1395,8 +1399,9 @@ struct Receiver::Impl {
         // Remove only the selected waveform's known punctuation sign. This
         // auxiliary phase never becomes the pure pilot's phase observation.
         const auto dwell_phase=local(seconds(r.sample));
-        const auto inverted_end=punctuation_format==PunctuationFormat::auxiliary_single?.4:.276;
-        if(s.timing_valid&&dwell_phase>=.244&&dwell_phase<inverted_end)phase-=std::numbers::pi;
+        const bool auxiliary=punctuation_format==PunctuationFormat::auxiliary_single;
+        const auto inverted_begin=auxiliary?.168:.244,inverted_end=auxiliary?.4:.276;
+        if(s.timing_valid&&dwell_phase>=inverted_begin&&dwell_phase<inverted_end)phase-=std::numbers::pi;
         r.phase_radians=phase_wrap(phase);
         const auto noise=std::sqrt(residual/degrees);
         // Endpoint evaluation has greater variance than a center phasor. Use
@@ -1569,11 +1574,14 @@ struct Receiver::Impl {
         return b.z*std::polar(1.,-tau*(state.guess_hz-state.basis_hz)*(t-center));
     }
     void find_punctuation() {
-        auto& s=state;if(s.metadata_timing_hint||s.ring_count<32||!s.coarse_valid)return;
-        const auto center=(static_cast<double>(bin(13).first)+.5*s.bin_size)/s.rate;
+        auto& s=state;
+        const bool auxiliary=punctuation_format==PunctuationFormat::auxiliary_single;
+        const std::size_t center_age=auxiliary?17:13,left_first=auxiliary?22:18,left_last=auxiliary?32:28;
+        if(s.metadata_timing_hint||s.ring_count<(auxiliary?33U:32U)||!s.coarse_valid)return;
+        const auto center=(static_cast<double>(bin(center_age).first)+.5*s.bin_size)/s.rate;
         if(s.punctuation>=0&&center-s.punctuation<.1)return;
         std::complex<double> left{},right{};double left_power=0,right_power=0;
-        for(std::size_t age=18;age<=28;++age) {const auto z=aligned(bin(age),center);left+=z;left_power+=std::norm(z);}
+        for(std::size_t age=left_first;age<=left_last;++age) {const auto z=aligned(bin(age),center);left+=z;left_power+=std::norm(z);}
         for(std::size_t age=0;age<=10;++age) {const auto z=aligned(bin(age),center);right+=z;right_power+=std::norm(z);}
         left/=11;right/=11;
         if(std::norm(left)<1e-12||std::norm(right)<1e-12||
@@ -1598,7 +1606,7 @@ struct Receiver::Impl {
         const auto determinant=s.bin_cc*s.bin_ss-s.bin_cs*s.bin_cs;
         if(determinant<=1e-12)return;
         for(std::size_t i=0;i<reversal_bins.size();++i) {
-            const auto& b=bin(i+10);
+            const auto& b=bin(i+(auxiliary?14:10));
             const auto begin=seconds(b.first);
             const auto cycles=std::fmod(static_cast<long double>(s.basis_hz)*b.first/s.rate,1.L);
             const auto phase=std::polar(1.,tau*static_cast<double>(cycles));
@@ -1618,15 +1626,15 @@ struct Receiver::Impl {
                 const auto& b=reversal_bins[i];
                 auto carrier=b.carrier,basis=std::complex<double>{1,0};
                 auto position=(b.begin-crossing+.004)/.008;
+                auto offset=b.begin-crossing;
                 double ac=0,as=0,bc=0,bs=0;
                 for(std::size_t j=0;j<s.bin_size;++j) {
-                    const auto envelope=1-2*(punctuation_format==PunctuationFormat::auxiliary_single?
-                        auxiliary_smooth(position):smooth(position));
+                    const auto envelope=auxiliary?auxiliary_reversal(offset):1-2*smooth(position);
                     const auto cosine=carrier.real()*envelope;
                     const auto sine=-carrier.imag()*envelope;
                     ac+=cosine*basis.real();as+=cosine*basis.imag();
                     bc+=sine*basis.real();bs+=sine*basis.imag();
-                    carrier*=carrier_step;basis*=basis_step;position+=envelope_step;
+                    carrier*=carrier_step;basis*=basis_step;position+=envelope_step;offset+=sample_seconds;
                 }
                 const auto project=[&](double c,double v) {
                     return std::complex<double>{
@@ -1667,8 +1675,8 @@ struct Receiver::Impl {
         if(s.punctuation>=0) {
             const auto intervals=std::round((crossing-s.punctuation)/.4);
             if(intervals>=1&&intervals<=3&&std::abs(crossing-s.punctuation-.4*intervals)<.0005&&
-               std::abs(s.boundary_notch-(s.punctuation+.16))<.004) {
-                s.timing_valid=true;s.anchor=crossing-.24;
+               std::abs(s.boundary_notch-(s.punctuation+(auxiliary?.24:.16)))<.004) {
+                s.timing_valid=true;s.anchor=crossing-(auxiliary?.16:.24);
                 s.timing_uncertainty=std::max(uncertainty,std::abs(crossing-s.punctuation-.4*intervals));
                 ++s.punctuation_count;
             } else {s.timing_valid=false;s.punctuation_count=1;}
@@ -1676,9 +1684,9 @@ struct Receiver::Impl {
         s.punctuation=crossing;s.punctuation_uncertainty=uncertainty;
         if(s.punctuation_arithmetic_qualified && punctuation_numeric::environment() &&
            s.timing_valid && punctuation_generation && punctuation_generation!=UINT64_MAX && s.next) {
-            // This fit used plateau/reversal bins 0..28. Keep its actual raw
-            // support and date, not the much newer date of a carried tone fit.
-            const auto first=bin(28).first,last=s.next-1;
+            // Keep every plateau/reversal bin in the raw support and date,
+            // rather than the much newer date of a carried tone fit.
+            const auto first=bin(left_last).first,last=s.next-1;
             const auto position=(static_cast<long double>(crossing)-static_cast<long double>(first)/s.rate)*s.rate;
             const auto numeric=64*std::numeric_limits<double>::epsilon()*
                 std::max({1.L,std::abs(static_cast<long double>(crossing)*s.rate),static_cast<long double>(first)});
@@ -1757,11 +1765,12 @@ struct Receiver::Impl {
         s.ring[s.ring_position]={z,s.bin_first};s.ring_position=(s.ring_position+1)%s.ring.size();
         s.ring_count=std::min(s.ring.size(),s.ring_count+1);
         // The reversal alone supplies precise timing. A following dwell ramp
-        // must also have its independent amplitude notch at +160 ms before
+        // must also have its independent amplitude notch before
         // another reversal is allowed to establish the 400 ms grid. Metadata
         // need not be a straight tone near that boundary.
         const auto bin_center=(static_cast<double>(s.bin_first)+.5*s.bin_size)/s.rate;
-        if(s.punctuation>=0&&s.amplitude>0&&std::abs(bin_center-s.punctuation-.16)<.004) {
+        const auto boundary_offset=punctuation_format==PunctuationFormat::auxiliary_single?.24:.16;
+        if(s.punctuation>=0&&s.amplitude>0&&std::abs(bin_center-s.punctuation-boundary_offset)<.004) {
             const auto level=std::abs(z)/s.amplitude;
             if(level<.3&&level<s.boundary_level) {s.boundary_notch=bin_center;s.boundary_level=level;}
         }
@@ -1787,8 +1796,14 @@ struct Receiver::Impl {
             rhs[i]={s.rhs[i][0]-shift*s.rhs_derivative[i][0],s.rhs[i][1]-shift*s.rhs_derivative[i][1]};
             if(i+1<vertices)upper[i]=block(s.bb.upper[i],s.bd.upper[i],s.bd.lower[i],s.dd.upper[i]);
         }
-        points.front()={1,0};points.back()={1,0};
-        rhs[1]=rhs[1]-upper[0]*points.front();rhs[vertices-2]=rhs[vertices-2]-upper[vertices-2]*points.back();
+        const bool auxiliary=punctuation_format==PunctuationFormat::auxiliary_single;
+        const auto active_vertices=auxiliary?vertices-1:vertices;
+        points.front()={1,0};
+        rhs[1]=rhs[1]-upper[0]*points.front();
+        if(!auxiliary) {
+            points.back()={1,0};
+            rhs[vertices-2]=rhs[vertices-2]-upper[vertices-2]*points.back();
+        }
         for(std::size_t i=1;i+1<vertices;++i) {
             if(i>1) {
                 const auto multiplier=upper[i-1]*inverse_diagonal[i-1];
@@ -1803,17 +1818,18 @@ struct Receiver::Impl {
             if(!std::isfinite(points[i][0])||!std::isfinite(points[i][1]))return false;
         }
         residual=s.metadata_energy;
-        for(std::size_t i=0;i<vertices;++i) {
+        for(std::size_t i=0;i<active_vertices;++i) {
             const Pair b{s.rhs[i][0]-shift*s.rhs_derivative[i][0],s.rhs[i][1]-shift*s.rhs_derivative[i][1]};
             const auto a=block(s.bb.diagonal[i],s.bd.diagonal[i],s.bd.diagonal[i],s.dd.diagonal[i]);
             residual+=dot(points[i],a*points[i])-2*dot(points[i],b);
-            if(i+1<vertices)residual+=2*dot(points[i],upper[i]*points[i+1]);
+            if(i+1<active_vertices)residual+=2*dot(points[i],upper[i]*points[i+1]);
         }
         residual=std::max(0.,residual);return true;
     }
     void finish_metadata() {
         auto& s=state;s.metadata_active=false;
-        if(s.metadata_samples<static_cast<std::size_t>(.079*s.rate/s.waveform_scale)||!s.reference)return;
+        const auto minimum_duration=punctuation_format==PunctuationFormat::auxiliary_single?.179:.079;
+        if(s.metadata_samples<static_cast<std::size_t>(minimum_duration*s.rate/s.waveform_scale)||!s.reference)return;
         std::array<Pair,vertices> points{};double residual=0;
         double lo=-.0002,hi=.0002;
         for(unsigned i=0;i<24;++i) {
@@ -1876,10 +1892,12 @@ struct Receiver::Impl {
         const auto time=seconds(index);
         const auto period=.4/s.waveform_scale;
         const auto dwell=s.anchor+period*std::floor((time-s.anchor)/period),t=(time-dwell)*s.waveform_scale;
-        if(s.metadata_active&&(dwell!=s.metadata_dwell||t>=.396))finish_metadata();
-        if(t<.316||t>=.396)return;
+        const bool auxiliary=punctuation_format==PunctuationFormat::auxiliary_single;
+        const auto begin=auxiliary?.212:.316,end=auxiliary?.392:.396,symbol_time=auxiliary?.020:.008;
+        if(s.metadata_active&&(dwell!=s.metadata_dwell||t>=end))finish_metadata();
+        if(t<begin||t>=end)return;
         if(!s.metadata_active) {
-            if(std::abs(s.metadata_last_dwell-dwell)<.1||t>.316+1.5*s.waveform_scale/s.rate)return;
+            if(std::abs(s.metadata_last_dwell-dwell)<.1||t>begin+1.5*s.waveform_scale/s.rate)return;
             s.metadata_last_dwell=dwell;
             const auto& r=*s.reference;
             const auto age=time-seconds(r.sample);
@@ -1890,25 +1908,19 @@ struct Receiver::Impl {
                r.metadata_frequency_uncertainty_hz>.002)return;
             s.metadata_active=true;s.metadata_dwell=dwell;s.bb={};s.dd={};s.bd={};s.rhs={};s.rhs_derivative={};
             s.metadata_energy=0;s.metadata_samples=0;s.metadata_gain=s.amplitude;
-            // Metadata returns to the applicable underlying auxiliary state,
-            // which remains inverted for the single-reversal waveform.
+            // Symbol coordinates are relative to the inverted auxiliary.
+            // Its last symbol continues into the final exit taper.
             const auto sign=punctuation_format==PunctuationFormat::auxiliary_single?std::numbers::pi:0.;
             s.metadata_osc=std::polar(1.,r.phase_radians+tau*r.frequency_hz*age+sign);
             s.metadata_step=std::polar(1.,tau*r.frequency_hz/s.rate);
         }
-        const auto position=(t-.316)/.008;
+        const auto position=(t-begin)/symbol_time;
         const auto i=std::min<std::size_t>(vertices-2,static_cast<std::size_t>(std::floor(std::max(0.,position))));
         const auto u=position-i;
-        const bool auxiliary=punctuation_format==PunctuationFormat::auxiliary_single;
         const auto h=auxiliary?auxiliary_smooth(u):smooth(u);
-        const auto d=(auxiliary?auxiliary_smooth_derivative(u):smooth_derivative(u))*s.waveform_scale/.008;
-        // The current auxiliary's8ms boundary gate overlaps the last4ms of
-        // its metadata return. The nuisance shift moves the whole waveform,
-        // so differentiate both gate and interpolation in physical seconds.
-        const auto gate_position=(.4-t)/.008;
-        const auto gate=auxiliary?smooth(gate_position):1.;
-        const auto gate_derivative=auxiliary?
-            -smooth_derivative(gate_position)*s.waveform_scale/.008:0.;
+        const auto d=(auxiliary?auxiliary_smooth_derivative(u):smooth_derivative(u))*s.waveform_scale/symbol_time;
+        // The current auxiliary fit ends at392ms, before its final-symbol exit taper.
+        const auto gate=1.,gate_derivative=0.;
         const Pair v{s.metadata_gain*s.metadata_osc.real(),-s.metadata_gain*s.metadata_osc.imag()};
         const auto vv=outer(v,1);
         const std::array<double,2> b{gate*(1-h),gate*h},
@@ -2199,13 +2211,13 @@ struct AuxiliaryMetadataReceiver::Impl {
     void raw_boundary() {
         auto& state=discovery.impl_->state;
         if(state.punctuation<0)return;
-        const auto center=state.punctuation+.16;
+        const auto center=state.punctuation+.24;
         if(std::abs(state.boundary_notch-center)<1./rate&&state.boundary_level<=.1)return;
         if(std::abs(last_boundary_attempt-center)<.1)return;
         const auto position=static_cast<long double>(center)*rate;
         const auto begin=std::ceil(position-.0005L*rate),end=std::floor(position);
-        const auto plateau_begin=std::ceil(position-.10L*rate),plateau_end=std::ceil(position-.096L*rate);
-        const auto fit_first=std::ceil(position-.36L*rate),fit_end=std::ceil(position-.20L*rate);
+        const auto plateau_begin=std::ceil(position-.216L*rate),plateau_end=std::ceil(position-.212L*rate);
+        const auto fit_first=std::ceil(position-.36L*rate),fit_end=std::ceil(position-.28L*rate);
         const auto retained=std::max(first_raw,next_raw>raw.size()?next_raw-raw.size():0);
         if(!std::isfinite(position)||fit_first<retained||begin<retained||end>next_raw||
            end-begin<8||plateau_end-plateau_begin<8||fit_end<=fit_first)return;
@@ -2282,6 +2294,28 @@ struct AuxiliaryMetadataReceiver::Impl {
             observe_punctuation();
             if(auto current=discovery.take_update();current&&current->timing_valid&&current->frequency_valid)
                 grid=std::move(current);
+            // The newly observed reversal can qualify a grid before another
+            // full straight-tone fit ends. Keep that private timing seed
+            // separate from a fresh phase/frequency publication: its date is
+            // the actual marker's raw FIR support, and its frequency remains
+            // the separately admitted, bounded-age tone observation. The
+            // complete-dwell fit below independently remeasures both tones.
+            const auto& state=discovery.impl_->state;
+            const auto& marker=state.actual_punctuation;
+            if(state.timing_valid&&state.reference&&marker.known&&
+               marker.generation==punctuation_generation&&marker.sample==punctuation_sample&&
+               marker.last_sample<=UINT64_MAX-notch->delay()) {
+                const auto date=marker.last_sample+notch->delay();
+                if(date<next_raw&&state.reference->frequency_valid&&date>=state.reference->sample&&
+                   date-state.reference->sample<=rate&&(!grid||grid->sample<date)) {
+                    auto seed=state.reference->publication({});
+                    seed.frequency_sample=seed.frequency_sample?seed.frequency_sample:state.reference->sample;
+                    seed.sample=date;seed.timing_valid=true;seed.dwell_start_seconds=state.anchor;
+                    seed.dwell_uncertainty_seconds=state.timing_uncertainty;
+                    seed.phase_valid=false;seed.phase_observation_known=false;seed.phase_observation_sample=0;
+                    seed.punctuation={};grid=std::move(seed);
+                }
+            }
         }
         return decode_latest()||count;
     }
@@ -2302,7 +2336,7 @@ struct AuxiliaryMetadataReceiver::Impl {
         const auto retained=std::max(first_raw,next_raw>raw.size()?next_raw-raw.size():0);
         if(end>next_raw||end<=last_dwell_end||first<retained)return false;
         const auto fit_first=static_cast<std::uint64_t>(std::ceil((dwell+.04)*rate));
-        const auto fit_end=static_cast<std::uint64_t>(std::ceil((dwell+.20)*rate));
+        const auto fit_end=static_cast<std::uint64_t>(std::ceil((dwell+.12)*rate));
         Pilots pilots{grid->frequency_hz,grid->frequency_hz+spacing,
             expected_low>0?expected_low+(grid->frequency_hz-expected_auxiliary):0};
         if(fit_end<=fit_first||!fit(fit_first,fit_end,pilots)) {
@@ -2318,7 +2352,7 @@ struct AuxiliaryMetadataReceiver::Impl {
             last_dwell_end=end;last_nominal_dwell=nominal_dwell;return true;
         }
         const auto period=.4/scale;
-        const auto anchor=grid->dwell_start_seconds+.24-.24/scale;
+        const auto anchor=grid->dwell_start_seconds+.16-.16/scale;
         dwell=anchor+period*std::floor((frontier-anchor)/period);
         if(dwell+period>frontier)dwell-=period;
         if(dwell<0)return true;

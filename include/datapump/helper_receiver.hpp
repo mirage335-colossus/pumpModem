@@ -29,8 +29,8 @@ namespace datapump::helper {
 // the local AWGN linearization into a global likelihood/confidence interval.
 enum class FrequencyFit { unknown, local_polynomial, conditioned_polynomial, masked_tone_profile };
 // The former single-tone component fixtures retain their paired reversal.
-// Production optional metadata uses the separate auxiliary, whose240ms
-// reversal stays inverted until the zero-amplitude dwell boundary.
+// Production optional metadata uses the separate auxiliary, whose160ms
+// reversal stays inverted into the metadata and final-symbol exit taper.
 enum class PunctuationFormat { paired_legacy, auxiliary_single };
 
 // One ACTUAL independently qualified phase-flip fit, not an extrapolated dwell

@@ -583,7 +583,7 @@ void payload_survives_physical_helper_preselection() {
             Case{1500,true,false,"",-1},Case{4000000000.,true,false,"",-1},
             Case{1500,false,true,"",-1},Case{4000000000.,false,true,"",-1},
             Case{1500,false,false,"N0CALL/TEST1",-1},Case{4000000000.,false,false,"N0CALL/TEST1",-1},
-            Case{4000000000.,false,false,"N0CALL/TEST1",.24},Case{4000000000.,false,false,"N0CALL/TEST1",.352125},
+            Case{4000000000.,false,false,"N0CALL/TEST1",.16},Case{4000000000.,false,false,"N0CALL/TEST1",.352125},
             Case{0,false,false,"N0CALL/TEST1",-1,true},Case{1500,false,false,"N0CALL/TEST1",-1,true},
             Case{400000000.,false,false,"N0CALL/TEST1",-1,true},Case{4000000000.,false,false,"N0CALL/TEST1",-1,true}};
         for(const auto& test:cases) {

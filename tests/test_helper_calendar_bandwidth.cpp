@@ -178,13 +178,13 @@ void reference_level_accounting() {
 void auxiliary_punctuation_calendar() {
     for(const auto epoch:{0ULL,1ULL,1800000000ULL}) {
         const auto origin=epoch%2?-.2L:0.L;
-        const auto first=origin+.236L,last=origin+.268L;
-        for(const auto stop:{first,origin+.244L,origin+.264L,last-.000001L})
+        const auto first=origin+.152L,last=origin+.192L;
+        for(const auto stop:{first,origin+.160L,origin+.168L,origin+.188L,last-.000001L})
             check(std::abs(helper::protected_endpoint(epoch,origin,stop)-last)<1e-15L,
                   "protected helper stop split its auxiliary reversal or inverted straight-tone flank");
         check(helper::protected_endpoint(epoch,origin,last)==last&&
-              helper::protected_endpoint(epoch,origin,origin+.272L)==origin+.272L&&
-              helper::protected_endpoint(epoch,origin+.212001L,first)==first,
+              helper::protected_endpoint(epoch,origin,origin+.196L)==origin+.196L&&
+              helper::protected_endpoint(epoch,origin+.128001L,first)==first,
               "punctuation protection changed an unpunctuated partial dwell");
     }
 }

@@ -80,6 +80,26 @@ void power_and_placement() {
     const auto raised=h::plan(options,1725,200,48000,8250);
     require(raised.frequency_hz>=8250&&raised.low_frequency_hz==550&&raised.auxiliary_frequency_hz==950,
         "external placement floor moved low pilots");
+    // Mean modulation energy and gain can change with the new record, but
+    // matching options must never shift the independently placed tones.
+    std::array<std::uint8_t,32> placement_key_bytes{};placement_key_bytes[0]=37;
+    const datapump::Crypto placement_key(placement_key_bytes);
+    for(const auto gating:{false,true})for(const auto geometry:
+            std::array<std::array<double,2>,2>{{{1725,200},{4000,3000}}}) {
+        const h::PlacementBand band{geometry[0],geometry[1],0,gating};
+        auto blank=options;blank.timecode=false;blank.callsign.clear();
+        const auto unchanged=h::plan(blank,band,48000);
+        for(const auto name:{"","N0CALL","ABCDEFGHIJKLMNOP"})for(const auto keyed:{false,true}) {
+            auto carrying=options;carrying.timecode=true;carrying.callsign=name;
+            h::PowerReference reference;
+            if(keyed)reference.time_key=placement_key;
+            const auto actual=h::plan(carrying,band,48000,0,1,&reference);
+            require(actual.frequency_hz==unchanged.frequency_hz&&
+                    actual.low_frequency_hz==unchanged.low_frequency_hz&&
+                    actual.auxiliary_frequency_hz==unchanged.auxiliary_frequency_hz,
+                "metadata waveform changed Helper Carrier tone placement");
+        }
+    }
     rejects([&]{h::plan(options,1000,200,48000);});
     rejects([&]{h::plan(options,1725,200,4000);});
     rejects([&]{h::plan(options,1725,200,48000,-1);});
@@ -171,7 +191,7 @@ void metadata_vectors() {
     h::Generator generator(options,plan);
     const auto pilot=pilot_only(plan);
     for(std::size_t i=0;i<expected.size();++i) {
-        const auto time=.316L+(i+1)*.008L;
+        const auto time=.212L+(i+1)*.020L;
         const auto observed=-auxiliary_baseband(generator,pilot,plan,time,8000);
         require(std::abs(observed-h::apsk_point(expected[i]))<1e-11,
             "strong analytic metadata symbol changed");
@@ -186,12 +206,30 @@ void metadata_vectors() {
         const auto packet=h::metadata_packet(0,callsign);
         const h::Generator fixed(options,plan);
         require(packet.count==9,"metadata did not use a fixed nine-symbol record");
-        require(std::abs(auxiliary_baseband(fixed,pilot,plan,.3159L,8000)+std::complex<double>{1,0})<1e-11,
+        require(std::abs(auxiliary_baseband(fixed,pilot,plan,.2119L,8000)+std::complex<double>{1,0})<1e-11,
             "metadata started before the fixed record interval");
-        require(std::abs(auxiliary_baseband(fixed,pilot,plan,.388L,8000)+h::apsk_point(packet.symbols.back()))<1e-11,
-            "metadata did not finish at 388ms");
-        require(std::abs(auxiliary_baseband(fixed,pilot,plan,.396L,8000)+std::complex<double>{.5,0})<1e-11,
-            "metadata did not return to the auxiliary's underlying inverted state");
+        require(std::abs(auxiliary_baseband(fixed,pilot,plan,.392L,8000)+h::apsk_point(packet.symbols.back()))<1e-11,
+            "metadata did not finish at 392ms");
+        require(std::abs(auxiliary_baseband(fixed,pilot,plan,.396L,8000)+.5*h::apsk_point(packet.symbols.back()))<1e-11,
+            "metadata exit ramp did not retain the final constellation value");
+    }
+    // The exit taper must scale the actual last constellation point, even
+    // when it has a small radius or a phase far from the inverted reference.
+    // No return-to-reference interpolation is allowed inside this taper.
+    for(const auto last:std::array<std::array<unsigned char,2>,4>{{
+            {1,1},{1,64},{127,32},{127,127}}}) {
+        options.callsign=std::string(14,'A');
+        options.callsign+=static_cast<char>(last[0]);
+        options.callsign+=static_cast<char>(last[1]);
+        const auto word=(static_cast<std::uint32_t>(last[0])<<7)|last[1];
+        const h::Generator fixed(options,plan);
+        constexpr std::array<double,4> fall{1,918./1024,.5,106./1024};
+        for(std::size_t i=0;i<fall.size();++i) {
+            const auto at=.392L+.002L*i;
+            require(std::abs(auxiliary_baseband(fixed,pilot,plan,at,8000)+
+                    fall[i]*h::apsk_point(word))<1e-11,
+                "final APSK value was not retained throughout the exit taper");
+        }
     }
 }
 void timecode_generation() {
@@ -202,7 +240,7 @@ void timecode_generation() {
     const auto packet_at=[&](const h::Generator& generator,long double dwell_start) {
         h::MetadataPacket packet;packet.count=9;
         for(std::size_t i=0;i<packet.count;++i) {
-            const auto time=dwell_start+.316L+(i+1)*.008L;
+            const auto time=dwell_start+.212L+(i+1)*.020L;
             const auto observed=-auxiliary_baseband(generator,pilot,plan,time,8000);
             const auto ring=std::clamp(std::llround((std::abs(observed)-.2)*127/.8),0LL,127LL);
             auto phase=std::llround(std::arg(observed)*128/tau)%128;
@@ -289,18 +327,21 @@ void waveform_coordinates() {
         return auxiliary_baseband(generator,pilot,plan,time,8000);
     };
     require(std::abs(baseband(.05L)-std::complex<double>{1,0})<1e-12,"preceding auxiliary tone not pure");
-    require(std::abs(baseband(.215L)-std::complex<double>{1,0})<1e-12,"20ms pre-punctuation guard not pure");
-    for(const auto time:{.244L,.25L,.275999L,.284L,.292L,.304L,.32L,.392L})
+    require(std::abs(baseband(.151L)-std::complex<double>{1,0})<1e-12,"pre-punctuation straight tone not pure");
+    for(const auto time:{.168L,.17L,.18L,.191999L,.20L,.211999L,.28L,.392L})
         require(std::abs(baseband(time)+std::complex<double>{1,0})<1e-12,
                 "single auxiliary punctuation did not retain its inverted underlying state");
-    require(std::abs(baseband(.24L))<1e-12&&std::abs(baseband(.28L)+std::complex<double>{1,0})<1e-12,
-            "auxiliary reversal moved from240ms or unexpectedly restored at280ms");
-    // Independent dyadic values distinguish the new C3 shape from the C2
-    // common ramps without changing the8ms support or its center crossing.
+    require(std::abs(baseband(.16L))<1e-12&&std::abs(baseband(.20L)+std::complex<double>{1,0})<1e-12,
+            "auxiliary reversal is not centered at160ms or inverted through212ms");
+    // Each 8ms half is an independent C3 taper, reaching zero at the
+    // phase reversal with zero slope on both sides.
     constexpr std::array<double,5> blend{0,289./4096,.5,3807./4096,1};
-    for(std::size_t i=0;i<blend.size();++i)
-        require(std::abs(baseband(.236L+.002L*i)-std::complex<double>{1-2*blend[i],0})<1e-11,
-            "auxiliary reversal does not follow its C3 shape");
+    for(std::size_t i=0;i<blend.size();++i) {
+        require(std::abs(baseband(.152L+.002L*i)-std::complex<double>{1-blend[i],0})<1e-11,
+            "auxiliary down-ramp does not follow its C3 shape");
+        require(std::abs(baseband(.160L+.002L*i)+std::complex<double>{blend[i],0})<1e-11,
+            "auxiliary inverted up-ramp does not follow its C3 shape");
+    }
     constexpr std::array<double,5> boundary_blend{0,106./1024,.5,918./1024,1};
     for(std::size_t i=0;i<boundary_blend.size();++i) {
         const auto edge=.002L*i;
@@ -317,15 +358,15 @@ void waveform_coordinates() {
                 "auxiliary boundary shaping changed the independent4ms pilot ramp");
         }
     }
-    const auto late_start=auxiliary_baseband(generator,pilot,plan,.24L,8000,{},.22L);
+    const auto late_start=auxiliary_baseband(generator,pilot,plan,.16L,8000,{},.14L);
     require(std::abs(late_start-std::complex<double>{1,0})<1e-10,
         "partial dwell punctuated without20ms preceding tone");
-    const auto early_end=auxiliary_baseband(generator,pilot,plan,.24L,8000,.26L,0.L);
+    const auto early_end=auxiliary_baseband(generator,pilot,plan,.16L,8000,.18L,0.L);
     require(std::abs(early_end-std::complex<double>{1,0})<1e-10,
         "partial dwell emitted punctuation without its20ms following flank");
     h::Generator live_generator(options,plan,0,false);
-    const auto before_stop=auxiliary_baseband(live_generator,pilot,plan,.249L,8000,.4L,0.L);
-    const auto after_stop=auxiliary_baseband(live_generator,pilot,plan,.25L,8000,.26L,0.L);
+    const auto before_stop=auxiliary_baseband(live_generator,pilot,plan,.169L,8000,.4L,0.L);
+    const auto after_stop=auxiliary_baseband(live_generator,pilot,plan,.17L,8000,.18L,0.L);
     require(std::abs(before_stop-std::complex<double>{1,0})<1e-10&&
         std::abs(after_stop-std::complex<double>{1,0})<1e-10,
         "mutable live endpoint changed unpunctuated auxiliary phase");
@@ -340,7 +381,7 @@ void waveform_coordinates() {
         require(std::abs(whole-generator.mix(i%2?1.f:-1.f,time,8000))==0,"rendering depends on call order");
         require(std::abs(generator.mix(0,time,8000)-
             odd.mix(0,time-1,8000))<1e-6,"physical UTC dwell grid depends on epoch split");
-        if(time>=.02L&&time<.22L) {
+        if(time>=.02L&&time<.14L) {
             const auto main=pilot.mix_analytic({},time,8000);
             const auto auxiliary=generator.mix_analytic({},time,8000)-main;
             pilot_power+=std::norm(main);auxiliary_power+=std::norm(auxiliary);
@@ -361,14 +402,14 @@ void waveform_coordinates() {
         const auto u=static_cast<double>(std::clamp((.4L-time)/.008L,0.L,1.L));
         return u*u*u*(10+u*(-15+6*u));
     };
-    for(std::size_t symbol=0;symbol<=packet.count;++symbol) {
+    for(std::size_t symbol=0;symbol<packet.count;++symbol) {
         const auto previous=symbol?h::apsk_point(packet.symbols[symbol-1]):std::complex<double>{1,0};
-        const auto next=symbol<packet.count?h::apsk_point(packet.symbols[symbol]):std::complex<double>{1,0};
-        const auto begin=.388L-(packet.count-symbol)*.008L;
+        const auto next=h::apsk_point(packet.symbols[symbol]);
+        const auto begin=.212L+symbol*.020L;
         for(std::size_t i=0;i<blend.size();++i)
-            require(std::abs(auxiliary_baseband(metadata,pilot,plan,begin+.002L*i,8000)+
-                (previous+(next-previous)*blend[i])*auxiliary_gate(begin+.002L*i))<1e-11,
-                "auxiliary metadata or return does not follow its C3 shape");
+            require(std::abs(auxiliary_baseband(metadata,pilot,plan,begin+.005L*i,8000)+
+                (previous+(next-previous)*blend[i])*auxiliary_gate(begin+.005L*i))<1e-11,
+                "auxiliary metadata does not follow its 20ms C3 shape");
     }
     const auto check_pilot=[&](long double time,std::complex<double> auxiliary) {
         const auto total=metadata.mix_analytic({},time,8000);
@@ -377,10 +418,10 @@ void waveform_coordinates() {
         require(std::abs((total-aux)/(plan.helper_gain*h::pilot_amplitude_fraction*oscillator(plan.frequency_hz,time))-
             std::complex<double>{1,0})<1e-11,"auxiliary punctuation or metadata reversed the pilot");
     };
-    check_pilot(.235L,{1,0});check_pilot(.24L,{});check_pilot(.244L,{-1,0});
-    check_pilot(.28L,{-1,0});check_pilot(.396L,{-.5,0});
+    check_pilot(.152L,{1,0});check_pilot(.16L,{});check_pilot(.168L,{-1,0});
+    check_pilot(.20L,{-1,0});check_pilot(.396L,-.5*h::apsk_point(packet.symbols.back()));
     for(std::size_t i=0;i<packet.count;++i)
-        check_pilot(.388L-(packet.count-i-1)*.008L,-h::apsk_point(packet.symbols[i]));
+        check_pilot(.212L+(i+1)*.020L,-h::apsk_point(packet.symbols[i]));
     require(generator.mix(0,.15L,8000,.15L)==0,"finite transmission lacks final helper ramp");
     require(std::abs(generator.mix_analytic({},.148L,8000,.15L))<=peak*.500000001,
             "finite transmission final4ms envelope wrong");
@@ -393,17 +434,17 @@ void waveform_coordinates() {
         "common4ms ramp changed from its C2 shape");
 }
 void protected_streaming_endpoint() {
-    for(const auto end:{0.L,.1L,.235999L,.268L,.3L,.4L,.635999L})
+    for(const auto end:{0.L,.1L,.151999L,.192L,.3L,.4L,.551999L})
         require(h::protected_endpoint(0,0,end)==end,"helper extends an endpoint outside its punctuation guard");
-    for(const auto end:{.236L,.24L,.25L,.26L,.267999L})
-        require(std::abs(h::protected_endpoint(0,0,end)-.268L)<1e-15,
+    for(const auto end:{.152L,.16L,.17L,.18L,.191999L})
+        require(std::abs(h::protected_endpoint(0,0,end)-.192L)<1e-15,
             "helper streaming stop did not protect the single reversal and its following straight-tone flank");
-    require(std::abs(h::protected_endpoint(0,.212L,.24L)-.268L)<1e-15&&
-        h::protected_endpoint(0,.212001L,.24L)==.24L,
+    require(std::abs(h::protected_endpoint(0,.128L,.16L)-.192L)<1e-15&&
+        h::protected_endpoint(0,.128001L,.16L)==.16L,
         "helper endpoint ignored the preceding clean-tone requirement");
-    require(std::abs(h::protected_endpoint(1,-1.L,.04L)-.068L)<1e-15,
+    require(std::abs(h::protected_endpoint(1,-1.L,-.04L)+.008L)<1e-15,
         "protected endpoint lost the UTC dwell grid at odd epochs");
-    require(std::abs(h::protected_endpoint(2,-2.L,-1.76L)+2-.268L)<1e-15,
+    require(std::abs(h::protected_endpoint(2,-2.L,-1.84L)+2-.192L)<1e-15,
         "protected endpoint depends on the physical epoch split");
     rejects([]{h::protected_endpoint(0,1,0);});
     rejects([]{h::protected_endpoint(0,0,std::numeric_limits<long double>::infinity());});
@@ -411,20 +452,20 @@ void protected_streaming_endpoint() {
     const auto plan=metadata_fixture_plan(options,1000,200,8000);
     h::Generator generator(options,plan);
     const auto pilot=pilot_only(plan);
-    const auto before=generator.mix_analytic({},.25L,8000,.4L,0);
-    const auto after=generator.mix_analytic({},.25L,8000,h::protected_endpoint(0,0,.26L),0);
+    const auto before=generator.mix_analytic({},.17L,8000,.4L,0);
+    const auto after=generator.mix_analytic({},.17L,8000,h::protected_endpoint(0,0,.18L),0);
     require(std::abs(before-after)<1e-15,"streaming stop retroactively changed punctuation phase");
-    for(const auto time:{.244L,.252L,.263999L}) {
-        const auto clean=auxiliary_baseband(generator,pilot,plan,time,8000,.268L,0);
+    for(const auto time:{.168L,.176L,.187999L}) {
+        const auto clean=auxiliary_baseband(generator,pilot,plan,time,8000,.192L,0);
         require(std::abs(clean+std::complex<double>{1,0})<1e-11,
             "protected streaming endpoint lacks20ms inverted auxiliary carrier");
     }
-    require(generator.mix(0,.268L,8000,.268L,0)==0,"protected endpoint did not finish its helper ramp");
+    require(generator.mix(0,.192L,8000,.192L,0)==0,"protected endpoint did not finish its helper ramp");
     // The exact and immediately adjacent representable coordinates must
     // preserve the reversal under either UTC epoch split. Normalized-calendar
     // roundoff may conservatively include an adjacent onset, never erase it.
     for(const auto epoch:{0ULL,1ULL,1800000000ULL}) {
-        const auto origin=epoch%2?-.2L:0.L,begin=origin+.236L,end=origin+.268L;
+        const auto origin=epoch%2?-.2L:0.L,begin=origin+.152L,end=origin+.192L;
         const h::Generator dated(options,plan,epoch);
         long double previous=0;
         for(const auto stop:{std::nextafter(begin,-std::numeric_limits<long double>::infinity()),
@@ -434,7 +475,7 @@ void protected_streaming_endpoint() {
                     (!previous||protected_end+1e-15L>=previous),
                     "adjacent punctuation onset lost monotone reversal protection");
             previous=protected_end;
-            const auto emitted=origin+.25L;
+            const auto emitted=origin+.17L;
             require(dated.mix_analytic({},emitted,8000,origin+.4L,origin)==
                     dated.mix_analytic({},emitted,8000,protected_end,origin),
                     "calendar protection changed an already emitted inverted plateau");
@@ -449,8 +490,8 @@ void protected_streaming_endpoint() {
                 h::protected_endpoint(epoch,origin,begin-.000001L)==begin-.000001L&&
                 h::protected_endpoint(epoch,origin,end+.000001L)==end+.000001L,
                 "punctuation protection changed an exact final or visibly outside endpoint");
-        require(std::abs(h::protected_endpoint(epoch,origin+.212L,begin)-end)<1e-15L&&
-                h::protected_endpoint(epoch,origin+.212001L,begin)==begin,
+        require(std::abs(h::protected_endpoint(epoch,origin+.128L,begin)-end)<1e-15L&&
+                h::protected_endpoint(epoch,origin+.128001L,begin)==begin,
                 "reversal protection lost the latest clean-tone start boundary");
     }
 }

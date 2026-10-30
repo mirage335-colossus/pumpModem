@@ -12,10 +12,10 @@
 namespace datapump::helper {
 namespace {
 constexpr double tau=2*std::numbers::pi;
-constexpr long double dwell=.4L,ramp=.004L,metadata_end=.388L,symbol_time=.008L;
-constexpr long double punctuation_begin=.236L,punctuation_transition=.008L;
+constexpr long double dwell=.4L,ramp=.004L,metadata_end=.392L,symbol_time=.020L;
+constexpr long double punctuation_begin=.152L,punctuation_mid=.160L,punctuation_end=.168L;
 // Literal rational-calendar endpoints avoid accumulated rounding at an exact source sample.
-constexpr long double punctuation_latest_start=.212L,punctuation_protected_end=.268L;
+constexpr long double punctuation_latest_start=.128L,punctuation_protected_end=.192L;
 // The calendar is reduced to [0,2) before dwell subtraction. Allow32
 // long-double epsilons per unit for fmod, division and subtract rounding;
 // even a binary64 long double changes a guard by less than1.5e-14 seconds.
@@ -43,7 +43,16 @@ std::pair<double,double> gains_from_ratio(double power_ratio,double helper_mean,
 }
 std::complex<double> auxiliary_modulation(long double local,
         std::span<const std::complex<double>> symbols,bool punctuate) {
-    const auto reversal=punctuate?1-2*auxiliary_smooth((local-punctuation_begin)/punctuation_transition):1.;
+    // The two taper halves meet at zero with zero derivatives. This makes the
+    // phase change at 160ms while keeping the 152–160 and 160–168ms envelope
+    // transitions independently smooth.
+    double reversal=1;
+    if(punctuate) {
+        if(local<punctuation_mid)
+            reversal=1-auxiliary_smooth((local-punctuation_begin)/(punctuation_mid-punctuation_begin));
+        else
+            reversal=-auxiliary_smooth((local-punctuation_mid)/(punctuation_end-punctuation_mid));
+    }
     std::complex<double> result{reversal,0};
     const auto begin=metadata_end-symbols.size()*symbol_time;
     if(!symbols.empty() && local>=begin) {
@@ -52,8 +61,10 @@ std::complex<double> auxiliary_modulation(long double local,
         if(index<symbols.size()) {
             const auto previous=index?symbols[index-1]:std::complex<double>{1,0};
             result*=previous+(symbols[index]-previous)*auxiliary_smooth(position-index);
-        } else if(index==symbols.size()) {
-            result*=symbols.back()+(std::complex<double>{1,0}-symbols.back())*auxiliary_smooth(position-index);
+        } else {
+            // Hold the last APSK value throughout the boundary taper. There is
+            // no return to the inverted straight reference before zero.
+            result*=symbols.back();
         }
     }
     return result;
@@ -61,13 +72,13 @@ std::complex<double> auxiliary_modulation(long double local,
 // Bound the periodic complex envelope's energy in either data sideband. The
 // pilot4ms ramps retain quintic smootherstep (C2), whose Beta(3,3) derivative
 // transform has magnitude <=15*(3+3z+z^2)/z^5, z=pi*f*T, and <=1.
-// The auxiliary8ms transitions use septic smootherstep (C3), with bound
-// 105*(15+15z+6z^2+z^3)/z^7. For z>=10 this is below the old quintic bound;
-// the minimum450Hz planning distance gives z>=11.31 for8ms transitions.
-// Retain the conservative old bound, so shaping changes no planned frequency.
-// The bound retains two unit4ms ramps (the auxiliary now uses8ms C2 ramps),
-// one magnitude-two 8ms reversal, and
-// <=ten magnitude-two metadata transitions. Integration by parts supplies the
+// The auxiliary8ms reversal halves and 20ms symbol transitions use septic
+// smootherstep (C3), with bound 105*(15+15z+6z^2+z^3)/z^7. For z>=10 this
+// is below the old quintic bound; the minimum450Hz planning distance gives
+// z>=11.31 for8ms transitions. Bound the longer 20ms symbol transitions by
+// the same conservative 8ms envelope so the planned frequencies do not move.
+// The bound retains two unit4ms ramps, two unit8ms reversal halves and
+// <=nine magnitude-two metadata transitions. Integration by parts supplies the
 // additional 1/(2*pi*f*dwell). Coefficients therefore fall at least as f^-4;
 // sum their squared bound over the 2.5Hz dwell harmonics. Factor four includes
 // the real carrier's other image and possible constructive addition. This is
@@ -425,10 +436,10 @@ std::complex<double> Generator::mix_analytic(std::complex<double> payload,long d
         envelope*=smooth((seconds-*start_seconds)/ramp);
         auxiliary_envelope*=smooth((seconds-*start_seconds)/ramp);
     }
-    // Only the auxiliary has an 8ms C3 reversal, crossing zero at240ms.
-    // Its inverted state lasts to the zero-amplitude dwell boundary, where it
-    // can reset without an unshaped full-amplitude phase reversal. Metadata
-    // multiplies and returns to this underlying state. Pilot phase is untouched.
+    // Only the auxiliary crosses zero at160ms. Its two independent8ms C3
+    // tapers reverse phase smoothly. Metadata starts at212ms in that inverted
+    // reference and its last value is held through the dwell boundary taper.
+    // The zero-amplitude boundary permits a phase reset; pilot phase is untouched.
     const bool punctuation_fits=punctuate_ &&
         (!start_seconds || (*start_seconds-seconds)+local<=punctuation_latest_start+roundoff) &&
         (!end_seconds || (*end_seconds-seconds)+local+roundoff>=punctuation_protected_end);

@@ -31,8 +31,13 @@ struct Result {std::vector<helper::Reference> updates;};
 // fixtures; this is explicitly not composite-pilot isolation coverage.
 class AuxiliaryFixture {
     helper::Generator composite_,pilot_;
-    double frequency_;
+    double frequency_,amplitude_;
+    std::uint64_t epoch_;
+    helper::Options options_;
+    std::optional<Crypto> key_;
     bool paired_,legacy_metadata_;
+    mutable std::optional<std::uint64_t> legacy_ticks_;
+    mutable helper::MetadataPacket legacy_packet_;
 public:
     AuxiliaryFixture(helper::Options options,double frequency,double amplitude,double data_gain,
                      std::uint64_t epoch,bool punctuate=true,std::optional<Crypto> key={},bool paired=false,
@@ -40,35 +45,44 @@ public:
         :composite_(options,{frequency+helper::auxiliary_pilot_spacing_hz,amplitude,data_gain,options.power_w,frequency},
                     epoch,punctuate&&!paired,key),
          pilot_(options,{frequency+helper::auxiliary_pilot_spacing_hz,amplitude,data_gain,options.power_w},
-                epoch,false,key),frequency_(frequency),paired_(paired),legacy_metadata_(paired||legacy_metadata) {}
+                epoch,false,key),frequency_(frequency),amplitude_(amplitude),epoch_(epoch),options_(options),key_(std::move(key)),
+         paired_(paired),legacy_metadata_(paired||legacy_metadata) {}
     std::complex<double> analytic(long double time,std::uint32_t rate) const {
-        const auto extract=[&](long double at) {
-            auto value=(composite_.mix_analytic({},at,rate)-pilot_.mix_analytic({},at,rate))/
-                helper::auxiliary_amplitude_fraction;
-            if(legacy_metadata_) {
-                const auto local=std::fmod(at,.4L),edge=std::min(local,.4L-local);
-                const auto smooth=[](long double position) {
-                    const auto u=static_cast<double>(std::clamp(position,0.L,1.L));
-                    return u*u*u*(10+u*(-15+6*u));
-                };
-                const auto gate=smooth(edge/.008L);
-                if(gate>0)value*=smooth(edge/.004L)/gate;
-            }
-            return value;
-        };
-        auto value=extract(time);
-        const auto local=std::fmod(time,.4L);
-        // Retain literal C2 legacy fixtures while the production Generator
-        // uses C3. Read its unchanged symbol endpoints, then interpolate them
-        // independently on the original8ms metadata grid.
-        if(legacy_metadata_&&local>=.316L&&local<.396L) {
-            const auto position=(local-.316L)/.008L,index=std::floor(position);
-            const auto u=static_cast<double>(position-index),h=u*u*u*(10+u*(-15+6*u));
-            const auto begin=time-local+.316L+index*.008L,end=begin+.008L;
-            const auto oscillator=[&](long double at) {
-                return std::polar(1.,tau*static_cast<double>(std::fmod(frequency_*at,1.L)));
+        const auto local=std::fmod(static_cast<long double>(epoch_%2)+time,2.L)-
+            .4L*std::floor(std::fmod(static_cast<long double>(epoch_%2)+time,2.L)/.4L);
+        std::complex<double> value;
+        if(legacy_metadata_) {
+            // This paired compatibility waveform is deliberately fixed to the
+            // previous 240/280ms edges and 8ms metadata grid. Reconstruct it
+            // independently of the current Generator's revised dwell window.
+            const auto smooth=[](long double position) {
+                const auto u=static_cast<double>(std::clamp(position,0.L,1.L));
+                return u*u*u*(10+u*(-15+6*u));
             };
-            value=((1-h)*extract(begin)/oscillator(begin)+h*extract(end)/oscillator(end))*oscillator(time);
+            const auto envelope=smooth(std::min(local,.4L-local)/.004L);
+            std::complex<double> modulation{1,0};
+            if((options_.timecode||!options_.callsign.empty())&&local>=.316L) {
+                const auto absolute_dwell=static_cast<long double>(epoch_)+time-local;
+                const auto ticks=static_cast<std::uint64_t>(std::round(absolute_dwell*65536));
+                if(legacy_ticks_!=ticks) {
+                    legacy_packet_=helper::metadata_packet(ticks,options_.callsign,key_?&*key_:nullptr);
+                    legacy_ticks_=ticks;
+                }
+                const auto position=(local-.316L)/.008L;
+                const auto index=static_cast<std::size_t>(std::floor(position));
+                if(index<legacy_packet_.count) {
+                    const auto previous=index?helper::apsk_point(legacy_packet_.symbols[index-1]):std::complex<double>{1,0};
+                    modulation=previous+(helper::apsk_point(legacy_packet_.symbols[index])-previous)*smooth(position-index);
+                } else if(index==legacy_packet_.count) {
+                    const auto last=helper::apsk_point(legacy_packet_.symbols[index-1]);
+                    modulation=last+(std::complex<double>{1,0}-last)*smooth(position-index);
+                }
+            }
+            const auto cycles=std::fmod(static_cast<long double>(frequency_)*time,1.L);
+            value=amplitude_*envelope*modulation*std::polar(1.,tau*static_cast<double>(cycles));
+        } else {
+            value=(composite_.mix_analytic({},time,rate)-pilot_.mix_analytic({},time,rate))/
+                helper::auxiliary_amplitude_fraction;
         }
         if(paired_) {
             const auto first=static_cast<double>(std::clamp((local-.236L)/.008L,0.L,1.L));
@@ -100,7 +114,7 @@ Result run(bool punctuation,std::string callsign,double frequency,double phase,d
             const auto generator_time=repeated_dwell?*repeated_dwell+std::fmod(std::max(0.L,time),.4L):time;
             auto x=time<0?0.:std::real(generator.analytic(generator_time,rate)*std::polar(1.,phase));
             x+=gaussian(rng);
-            if(corrupt_metadata&&std::fmod(std::max(0.L,time),.4L)>.316L)
+            if(corrupt_metadata&&std::fmod(std::max(0.L,time),.4L)>.212L)
                 x+=.005*std::cos(tau*2173*static_cast<double>(time));
             if(quantize)x=std::round(x*32767)/32767;
             samples[j]=static_cast<float>(x);
@@ -221,7 +235,13 @@ void paired_marker_identity_and_missing_return() {
 
 void metadata() {
     // Short and maximum-length callsigns all use the fixed nine-symbol record.
-    for(const auto callsign:{"K","AB","N0CALL/TEST","ABCDEFGHIJKLMNOP"}) {
+    std::vector<std::string> callsigns{"K","AB","N0CALL/TEST","ABCDEFGHIJKLMNOP"};
+    // Exercise both extreme final-symbol radii and opposite phase sectors:
+    // the final value is tapered at the boundary without a return symbol.
+    for(const char radius:{char{1},char{127}})for(const char phase:{char{1},char{65}}) {
+        std::string text(16,'A');text[14]=radius;text[15]=phase;callsigns.push_back(std::move(text));
+    }
+    for(const auto& callsign:callsigns) {
         const auto result=run(true,callsign,2100.37,.81,.03719,137,0,true);
         bool found=false;
         for(const auto& r:result.updates)if(r.metadata) {
@@ -305,7 +325,7 @@ void two_tone_auxiliary_metadata() {
     helper::Generator generator(options,{pilot,.7,.1,100,auxiliary},1800000000,true);
     helper::AuxiliaryMetadataReceiver receiver(rate,geometry.expected,
         geometry.expected+helper::auxiliary_pilot_spacing_hz,{}, {},required);
-    std::array<float,137> input{};Result result;
+    std::array<float,137> input{};Result result;std::size_t marker_count=0;
     const auto total=static_cast<std::uint64_t>(3.2*rate);
     for(std::uint64_t first=0;first<total;first+=input.size()) {
         const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(input.size(),total-first));
@@ -316,6 +336,13 @@ void two_tone_auxiliary_metadata() {
                 std::polar(1.,phase_jumps?phases[dwell%phases.size()]:0.)));
         }
         receiver.push(std::span(input).first(count),first);receiver.advance();
+        const auto marker=receiver.take_punctuation_update();
+        if(marker.known) {
+            check(marker.first_sample<=marker.sample && marker.sample<=marker.last_sample && marker.last_sample<first+count);
+            const auto observed=(static_cast<long double>(marker.sample)+marker.fraction)/rate*clock_scale-geometry.delay;
+            check(std::abs(std::remainder(observed-.160L,.4L))<.00015L);
+            ++marker_count;
+        }
         if(auto update=receiver.take_update()) {
             check(update->sample<first+count);
             check(update->phase_observation_sample<=update->sample);
@@ -336,9 +363,65 @@ void two_tone_auxiliary_metadata() {
     std::cout<<"two-tone auxiliary frequency="<<auxiliary<<" delay="<<geometry.delay
         <<" clock_ppm="<<clock_ppm<<" phase_jumps="<<phase_jumps<<" references="<<result.updates.size()
         <<" metadata="<<decoded<<" workspace_grant="<<required<<'\n';
-    check(decoded>0);metadata_has_no_timing_authority(result);
+    check(marker_count>=3 && decoded>0);metadata_has_no_timing_authority(result);
     }
     }
+}
+
+// The marker window is 16 ms, which does not divide this sample rate into
+// integral 2 ms bins. Its timestamp still comes from actual taper samples.
+void nonintegral_rate_punctuation() {
+    constexpr std::uint32_t rate=44100;
+    constexpr double auxiliary=2100,pilot=2500;
+    helper::Options options;options.power_w=100;options.timecode=false;
+    helper::Generator generator(options,{pilot,.7,.1,100,auxiliary},1800000000,true);
+    helper::AuxiliaryMetadataReceiver receiver(rate,auxiliary,pilot,{}, {},
+        helper::AuxiliaryMetadataReceiver::workspace_required(rate));
+    std::array<float,137> samples{};std::size_t markers=0;
+    for(std::uint64_t first=0;first<rate*4;first+=samples.size()) {
+        const auto n=static_cast<std::size_t>(std::min<std::uint64_t>(samples.size(),rate*4-first));
+        for(std::size_t i=0;i<n;++i)
+            samples[i]=generator.mix(0,static_cast<long double>(first+i)/rate,rate);
+        receiver.push(std::span(samples).first(n),first);receiver.advance();
+        const auto marker=receiver.take_punctuation_update();
+        if(marker.known) {
+            check(marker.first_sample<=marker.sample && marker.sample<=marker.last_sample && marker.last_sample<first+n);
+            const auto time=(static_cast<long double>(marker.sample)+marker.fraction)/rate;
+            check(std::abs(std::remainder(time-.160L,.4L))<.00015L);
+            ++markers;
+        }
+        if(auto update=receiver.take_update())check(!update->metadata);
+    }
+    check(markers>=4);
+}
+
+// A damaged first half in one dwell and a damaged second half in the next may
+// not combine into a completed record. Marker observations remain independent.
+void metadata_does_not_cross_dwells() {
+    constexpr std::uint32_t rate=48000;
+    constexpr double auxiliary=2100,pilot=2500;
+    helper::Options options;options.power_w=100;options.callsign="N0CALL";options.timecode=false;
+    helper::Generator generator(options,{pilot,.7,.1,100,auxiliary},1800000000,true);
+    helper::AuxiliaryMetadataReceiver receiver(rate,auxiliary,pilot,{}, {},
+        helper::AuxiliaryMetadataReceiver::workspace_required(rate));
+    std::array<float,137> samples{};std::size_t markers=0,records=0;
+    for(std::uint64_t first=0;first<rate*4;first+=samples.size()) {
+        const auto n=static_cast<std::size_t>(std::min<std::uint64_t>(samples.size(),rate*4-first));
+        for(std::size_t i=0;i<n;++i) {
+            const auto time=static_cast<long double>(first+i)/rate;
+            const auto dwell=static_cast<std::uint64_t>(std::floor(time/.4L));
+            const auto local=time-dwell*.4L;
+            auto value=generator.mix(0,time,rate);
+            if((dwell%2==0 && local>=.212L && local<.302L) ||
+               (dwell%2==1 && local>=.302L && local<.392L))
+                value+=static_cast<float>(.25*std::cos(tau*2173*static_cast<double>(time)));
+            samples[i]=value;
+        }
+        receiver.push(std::span(samples).first(n),first);receiver.advance();
+        if(receiver.take_punctuation_update().known)++markers;
+        if(auto update=receiver.take_update();update&&update->metadata)++records;
+    }
+    check(markers>=3 && records==0);
 }
 
 // Production three-tone geometry; the low and high pure pilots remain present
@@ -922,11 +1005,11 @@ int main(int argc,char** argv) {
         check(argc<=2);std::cout<<std::unitbuf;
         const std::string_view which=argc==2?argv[1]:"all";
         if(which=="all") {
-            clean_precision();paired_marker_identity_and_missing_return();metadata();metadata_carrier_images();two_tone_auxiliary_metadata();metadata_frozen_work();auxiliary_punctuation_clock();timecodes_and_corruption();encrypted_auxiliary_with_utc_anchor();metadata_with_declared_process();clock_skew();frequency_drift();fallback_and_noise();realistic_frequency();current_frequency_waveforms();weak_timecode_frequency();shifted_frequency();chunks_and_gaps();
+            clean_precision();paired_marker_identity_and_missing_return();metadata();metadata_carrier_images();two_tone_auxiliary_metadata();nonintegral_rate_punctuation();metadata_does_not_cross_dwells();metadata_frozen_work();auxiliary_punctuation_clock();timecodes_and_corruption();encrypted_auxiliary_with_utc_anchor();metadata_with_declared_process();clock_skew();frequency_drift();fallback_and_noise();realistic_frequency();current_frequency_waveforms();weak_timecode_frequency();shifted_frequency();chunks_and_gaps();
         } else if(which=="strong") {
-            clean_precision();paired_marker_identity_and_missing_return();metadata();metadata_carrier_images();two_tone_auxiliary_metadata();metadata_frozen_work();auxiliary_punctuation_clock();timecodes_and_corruption();encrypted_auxiliary_with_utc_anchor();metadata_with_declared_process();clock_skew();frequency_drift();fallback_and_noise();chunks_and_gaps();
+            clean_precision();paired_marker_identity_and_missing_return();metadata();metadata_carrier_images();two_tone_auxiliary_metadata();nonintegral_rate_punctuation();metadata_does_not_cross_dwells();metadata_frozen_work();auxiliary_punctuation_clock();timecodes_and_corruption();encrypted_auxiliary_with_utc_anchor();metadata_with_declared_process();clock_skew();frequency_drift();fallback_and_noise();chunks_and_gaps();
         } else if(which=="pair")paired_marker_identity_and_missing_return();
-        else if(which=="two_tone"){two_tone_auxiliary_metadata();metadata_frozen_work();auxiliary_punctuation_clock();}
+        else if(which=="two_tone"){two_tone_auxiliary_metadata();nonintegral_rate_punctuation();metadata_does_not_cross_dwells();metadata_frozen_work();auxiliary_punctuation_clock();}
         else if(which=="three_tone")three_tone_auxiliary_metadata();
         else if(which=="realistic")realistic_frequency();
         else if(which=="current_frequency")current_frequency_waveforms();

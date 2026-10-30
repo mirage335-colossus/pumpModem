@@ -459,8 +459,13 @@ void actual_corrected_source() {
         if(generated!=observed || observed<=rate*4 || distinct<8)
             throw Error("actual corrected helper source did not expose distinct markers: generated="+
                 std::to_string(generated)+" observed="+std::to_string(observed)+" markers="+std::to_string(distinct));
-        const auto rate_truth=(last_source-first_source)*rate/(generated-1)-1;
+        const auto source_increment=(last_source-first_source)/(generated-1);
+        const auto rate_truth=source_increment*rate-1;
         check(std::abs(rate_truth-correction)<1e-10L,"helper callback did not retain the DATA resampler correction");
+        const auto marker_source=first_source+
+            (static_cast<long double>(first.punctuation.sample)+first.punctuation.fraction)*source_increment;
+        check(std::abs(std::remainder(marker_source-.160L,.4L))<.008L,
+            "actual corrected-source marker did not follow the 160ms reversal");
         h::PunctuationClockRequest q{first.punctuation.sample+100,last.punctuation.sample-100,observed,2ULL*rate,
             h::PunctuationClockModel::constant_rate_over_requested_support,{}};
         const auto fit=clock.qualify({-600.09,600.09},q);

@@ -160,12 +160,12 @@ experiment also produced no metadata at 30, 40 or 60 dB-Hz and selected false
 edges in noise-only controls; those historical results are in the
 [validation record](validation.md#three-tone-helper-carrier-implementation-checkpoint).
 
-The revised metadata waveform and decoder passed focused `test_helper_receiver`
-runs for all six pair, ten two-tone and eight three-tone cases. The three-tone
-cases include four with retained history and four after reset recovery. The
-`live_helper_clock_bridge` checks passed at ±300 ppm and ±550 ppm. A focused
-current-waveform 24 dB-Hz high-pilot test produced 11 references, with the first
-usable reference at 7.99998 seconds; its final sample, frequency and uncertainty
+The earlier 240 ms-reversal metadata waveform and its decoder passed focused
+`test_helper_receiver` runs for all six pair, ten two-tone and eight three-tone
+cases. The three-tone cases included four with retained history and four after
+reset recovery. The `live_helper_clock_bridge` checks passed at ±300 ppm and
+±550 ppm for that earlier waveform. A focused test of its 24 dB-Hz high pilot
+produced 11 references, with the first usable reference at 7.99998 seconds; its final sample, frequency and uncertainty
 matched with 137- and 4096-sample chunks. At the same configured level the 80%
 modulated auxiliary produced no usable narrow reference, while its published
 frequency intervals covered the true frequency. This auxiliary result does not
@@ -173,16 +173,18 @@ qualify the pilot or imply useful metadata sensitivity.
 
 At the configured 20.76 dB-Hz weak encrypted-auxiliary fixture, the original
 HEAD waveform also produced zero references with the unchanged receiver and
-profile, confirming that earlier failure. On the current three-tone waveform,
-the high pilot produced one truth-covering reference with no phase or timing
-authority; the encrypted auxiliary produced zero references. The shifted current
-auxiliary check still fails its requirement for a usable reference within three
-seconds. These focused observations do not establish acquisition qualification.
+profile, confirming that earlier failure. On the earlier 240 ms-reversal
+three-tone waveform, the high pilot produced one truth-covering reference with
+no phase or timing authority; the encrypted auxiliary produced zero references.
+Its shifted auxiliary check failed its requirement for a usable reference within
+three seconds. These focused observations do not qualify the newer dwell waveform
+or establish acquisition qualification.
 
 The supported explicit-oscillator Live raw-tail fixture passed exact 64-bit
-payload, pending progress and scored physical END checks. Its trace also recorded
-a Helper-assisted commit. The fixture uses sampled simulation and does not
-qualify hardware reception or performance across operating conditions. An earlier
+payload, pending progress and scored physical END checks with the earlier
+240 ms-reversal waveform. Its trace also recorded a Helper-assisted commit. The
+fixture uses sampled simulation and does not qualify the revised dwell waveform,
+hardware reception or performance across operating conditions. An earlier
 full non-probability contract run had 36 failures out of 321 tests; the subsequent
 focused checks do not replace a complete rerun. The probability stage timed out
 after 1500 seconds and remains incomplete. Full qualification remains open.
@@ -726,19 +728,20 @@ ramps protect retunes. Transmission start and end remain shaped in either mode.
 The auxiliary retains its dwell-boundary gate and phase reset, shaped reversal,
 and metadata transitions regardless of FHSS.
 
-Only the auxiliary has a shaped reversal, over 236–244 ms and crossing zero at
-240 ms. It stays inverted through the rest of the dwell, including metadata,
-and resets while amplitude is zero at the boundary. Auxiliary reversal and
-metadata blends use a septic smootherstep with three continuous derivatives at
-their endpoints. A waterfall phase column can change sharply as the auxiliary
-passes through zero amplitude, where phase is undefined even though the emitted
-waveform is smooth. The revised receiver templates match this transmitter
-waveform for the focused tests described above; older measurements do not
-establish compatibility or qualify the revised path.
+Only the auxiliary has a shaped reversal. Its amplitude tapers from the straight
+tone to zero over 152–160 ms, then rises in the inverted phase over 160–168 ms.
+The inverted straight tone continues through 212 ms; phase then follows the
+metadata symbols until the boundary. The auxiliary resets while its amplitude
+is zero at the boundary. Auxiliary reversal and metadata blends use a septic
+smootherstep with three continuous derivatives at their endpoints. A waterfall
+phase column can change sharply as the auxiliary passes through zero amplitude,
+where phase is undefined even though the emitted waveform is smooth. Earlier
+240 ms-reversal measurements do not establish compatibility or qualify the
+revised path.
 
 Partial dwells omit punctuation unless its required support fits. Graceful
 streaming stop protects a reversal already begun: helper-only continuation can
-extend to 268 ms, retaining a 20 ms inverted straight flank and final 4 ms ramp.
+extend to 192 ms, retaining a 20 ms inverted straight flank and final 4 ms ramp.
 This adds no Robust bits or progress and does not supply physical END. Immediate
 abort can truncate output. Earlier paired-reversal spectrum measurements apply
 to the superseded single-tone format, not this waveform.
@@ -747,14 +750,27 @@ Metadata decoding is optional and does not qualify the pure-pilot frequency
 reference. Its intended readability is primarily nearby or directly in the
 antenna beam; distant assistance need not support metadata decoding.
 
-Metadata uses APSK-16384 at 125 baud on the auxiliary only. Each record is
-126 bits in nine 14-bit symbols, sent from 316 ms to 388 ms of a complete
-400 ms dwell. The return to the auxiliary's underlying straight-tone state
-completes at 396 ms, overlapping the final 4 ms of its exit ramp. Auxiliary
-transitions use septic interpolation in the complex plane. The high seven bits
-of each symbol select one of 128 radii `0.2 + 0.8 * index / 127`; its low seven
+Metadata uses APSK-16384 at 50 baud on the auxiliary only. Each record is
+126 bits in nine 14-bit symbols, sent from 212 ms to 392 ms of a complete
+400 ms dwell. The final APSK value is held while its amplitude ramps to zero
+from 392 ms to the boundary; there is no return to the inverted straight tone.
+Auxiliary transitions use septic interpolation in the complex plane. The high
+seven bits of each symbol select one of 128 radii `0.2 + 0.8 * index / 127`; its low seven
 bits select one of 128 phases `2*pi*index/128`. This is 80% amplitude modulation
 depth. The next dwell is a hard boundary; records never continue across dwells.
+
+For a complete dwell with punctuation and metadata enabled, the auxiliary
+envelope and symbol windows are:
+
+| Time within dwell | Auxiliary waveform |
+| --- | --- |
+| 0–8 ms | Ramp up from zero |
+| 8–152 ms | Straight tone |
+| 152–160 ms | Taper amplitude to zero |
+| 160–168 ms | Rise from zero in the inverted phase |
+| 168–212 ms | Inverted straight tone |
+| 212–392 ms | Nine 20 ms APSK symbols |
+| 392–400 ms | Ramp the final APSK value to zero; reset at boundary |
 
 The helper format has one record type and no header, transmitted length, CRC or
 authentication tag. All fields are MSB first:
