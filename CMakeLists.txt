@@ -670,6 +670,33 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
   add_test(NAME helper_complete_study COMMAND test_helper_complete_study full 180 1810000001 clean tone 2 hf)
   add_test(NAME helper_complete_tracked_study COMMAND test_helper_complete_study full 180 1810000001 clean tone 2 hf tracked)
   add_test(NAME helper_complete_inversion_study COMMAND test_helper_complete_study short 120 1911000001 no-pilot-ramps tone 2 hf auxiliary)
+
+  # Isolated 3-carrier Robust waveform/receiver research. This target owns its
+  # complex-baseband channel path and does not link the ordinary modem receiver.
+  add_library(triad_experiment STATIC EXCLUDE_FROM_ALL
+    src/crypto.cpp src/triad_modem.cpp src/triad_simulation.cpp src/search_fft.cpp)
+  target_include_directories(triad_experiment PUBLIC include PRIVATE src)
+  target_link_libraries(triad_experiment PUBLIC OpenSSL::Crypto Threads::Threads)
+  if(MSVC)
+    target_compile_options(triad_experiment PRIVATE /W4 /permissive-)
+  else()
+    target_compile_options(triad_experiment PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+    # Match the ordinary receiver's reproducible FFT rounding contract.
+    target_compile_options(triad_experiment PUBLIC -ffp-contract=off -fno-fast-math)
+    if(DATAPUMP_SANITIZERS)
+      target_compile_options(triad_experiment PUBLIC -O1 -fsanitize=address,undefined -fno-omit-frame-pointer)
+      target_link_options(triad_experiment PUBLIC -fsanitize=address,undefined)
+    endif()
+  endif()
+  add_executable(test_triad_modem EXCLUDE_FROM_ALL tests/test_triad_modem.cpp)
+  target_include_directories(test_triad_modem PRIVATE src)
+  target_link_libraries(test_triad_modem PRIVATE triad_experiment)
+  add_executable(triad_study EXCLUDE_FROM_ALL tools/triad-study.cpp)
+  target_include_directories(triad_study PRIVATE src)
+  target_link_libraries(triad_study PRIVATE triad_experiment)
+  add_test(NAME triad_modem COMMAND test_triad_modem)
+  add_test(NAME triad_smoke COMMAND triad_study --suite smoke --trials 1 --threads 2)
+  set_tests_properties(triad_modem triad_smoke PROPERTIES LABELS "triad" TIMEOUT 180)
   add_test(NAME helper_continuation_recovery COMMAND test_helper_continuation_study --recovery-robustness)
   add_test(NAME helper_continuation_gap COMMAND test_helper_continuation_study --gap-robustness)
   add_test(NAME helper_continuation_extended_recovery COMMAND test_helper_continuation_study --extended-recovery-robustness)
@@ -1099,6 +1126,11 @@ if(NOT DATAPUMP_BUILD_WASM)
   foreach(_target IN LISTS _datapump_native_targets)
     get_target_property(_type ${_target} TYPE)
     if(_type STREQUAL "EXECUTABLE")
+      if(_target STREQUAL "test_triad_modem" OR _target STREQUAL "triad_study")
+        # These experiments are self-contained complex-I/Q simulations. Do
+        # not pull the native audio provider or ordinary receiver into them.
+        continue()
+      endif()
       if(_target IN_LIST _datapump_mock_audio_tests OR _target IN_LIST _datapump_direct_audio_tests)
         # These fixtures supply their own hardware implementation. Keep the
         # native capability/clock defaults, compiled with the fixture's platform

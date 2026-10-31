@@ -1,0 +1,13 @@
+Internal ctest changing into directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build/sanitize
+Test project /home/user/___quick/p/_cur/dataPump/pumpModem/build/sanitize
+    Start 421: triad_modem
+    Start 422: triad_smoke
+1/2 Test #421: triad_modem ......................   Passed    2.09 sec
+2/2 Test #422: triad_smoke ......................   Passed    4.43 sec
+
+100% tests passed, 0 tests failed out of 2
+
+Label Time Summary:
+triad    =   6.52 sec*proc (2 tests)
+
+Total Test time (real) =   4.44 sec

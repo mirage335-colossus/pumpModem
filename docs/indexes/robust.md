@@ -34,6 +34,7 @@ retain their individual scope and qualification limits.
 | Document | Context and contents |
 | --- | --- |
 | [Batched iterative search](../search-compute.md) | Implementation reference: FFT acquisition, long-symbol CPU batching, workers, memory boundaries and reproducible workloads. |
+| [Experimental three-carrier modem](../triad-modem.md) | Separate sampled complex-I/Q transmitter/receiver study: adjacent patterned carriers, mandatory twenty-dwell diversity, Added Symbols, burst waits, bounded parallel search, and explicit sensitivity/false-acceptance limits. |
 | [Symbol_Burst](../symbol-burst.md) | Local implementation: whole-symbol UTC scheduling, guarded listening, backlog processing and planner limits; see validation for qualification. |
 | [Symbol_Burst implementation handoff](../symbol-burst-implementation-plan.md) | Historical implementation plan: accepted timing decisions, integration stages and validation obligations. |
 | [Pulse-moment qualification](../pulse-moment-validation.md) | Paired raw-PCM performance, conditional sensitivity statistics, numerical equivalence and coverage limits for high-chip iterative search. |

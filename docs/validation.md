@@ -1,10 +1,29 @@
 # Validation status
 
-Updated 29 October 2026. This page records current qualification, release status,
+Updated 31 October 2026. This page records current qualification, release status,
 coverage limits and useful historical anchors. It is not a session log. Replace
 superseded status here; keep one latest [resource snapshot](ci-resource-results.json)
 and use Git history for comparisons. Detailed studies remain in the
 [evidence index](indexes/evidence.md).
+
+## Separate experimental three-carrier modem
+
+The [triad simulation](triad-modem.md) implements a separate shaped three-carrier
+transmitter, three receiver algorithms and a sampled complex-I/Q channel. Its
+[31 October evidence package](validation-data/triad/2026-10-31/README.md) retains
+805 captures / 2,415 receiver evaluations, source/binary hashes and exact commands.
+The isolated `triad` group passed 2/2 in Release and 2/2 with ASan/UBSan.
+LeakSanitizer failed under tracing; the passing instrumented run disabled leak
+detection, so leak coverage remains unverified.
+
+This is **not an ordinary Robust replacement or qualification**. Differential
+reception handles some oscillator cases well but loses substantially to segmented
+complex reception in low-SNR AWGN; finer frequency search can recover the latter's
+coarse-grid losses. The wide microwave noise-only search falsely accepted
+5/64, 2/64 and 6/64 captures respectively for differential, segmented complex and
+amplitude-only reception. Severe spread also remains a failure mode. The ordinary
+receiver/GUI and their full regressions were deliberately outside this task;
+GPU execution, hardware/SSB qualification and release operations were not done.
 
 ## Three-tone Helper Carrier implementation checkpoint
 

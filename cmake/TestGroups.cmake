@@ -17,6 +17,7 @@ set(_script_tests helper_joint_local_feasibility legacy_boundary fast_boundary v
 set(_aliases
   "helper_live_cable_sim=helper_live_cable_tool"
   "helper_live_cable_calibration=helper_live_cable_tool"
+  "triad_smoke=triad_study"
   "helper_coherent_frequency_study=test_helper_coherent_frequency"
   "helper_frequency_eme_regression=test_helper_measurement_eme"
   "helper_tracking_robustness=test_helper_tracking"
@@ -215,7 +216,8 @@ foreach(_test IN LISTS _tests)
     list(APPEND _labels build)
   elseif(_test MATCHES "^packaging_" OR _test STREQUAL "native_relocation" OR _test STREQUAL "sdk_packaging")
     list(APPEND _labels packaging)
-  elseif(NOT "gui" IN_LIST _labels AND NOT "frontends" IN_LIST _labels AND NOT "web" IN_LIST _labels AND NOT _test STREQUAL "rev_utf8")
+  elseif(NOT "gui" IN_LIST _labels AND NOT "frontends" IN_LIST _labels AND NOT "web" IN_LIST _labels AND
+      NOT _test STREQUAL "rev_utf8" AND NOT _test MATCHES "^triad_")
     list(APPEND _labels regular)
   endif()
   if(_test STREQUAL "rev_utf8")
@@ -280,7 +282,7 @@ add_custom_target(datapump-tests DEPENDS ${_all_test_targets})
 add_custom_target(datapump-tests-ci-core DEPENDS ${_ci_core_targets})
 add_custom_target(datapump-tests-ci-live DEPENDS ${_ci_live_targets})
 add_custom_target(datapump-tests-ci-preparation DEPENDS ${_ci_preparation_targets})
-foreach(_group contract regular fast legacy gui frontends web native packaging build amplitude_probability amplitude_arrival)
+foreach(_group contract regular fast legacy gui frontends web native packaging build amplitude_probability amplitude_arrival triad)
   if(_group STREQUAL "native")
     set(_label native_gui)
   else()

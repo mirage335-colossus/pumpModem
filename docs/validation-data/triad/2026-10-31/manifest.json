@@ -1,0 +1,278 @@
+{
+  "schema": 1,
+  "date": "2026-10-31",
+  "base_revision": "3c24995f2745d08ec93250b61a08477a9abc1a6b",
+  "status": "uncommitted standalone experiment; not release certification",
+  "compiler": "GCC 14.2.0 Release -O3; no fast-math or FP contraction",
+  "cpu": "AMD Ryzen 5 PRO 5650U; 12 logical threads reported",
+  "runs": [
+    {
+      "file": "triad-broad.jsonl.gz",
+      "command": [
+        "build/dev/triad_study",
+        "--suite",
+        "broad",
+        "--trials",
+        "4",
+        "--threads",
+        "8"
+      ],
+      "sha256_gzip": "265bcd28aedce80d523f0ce5a3644bc2b366c25d73bcb6b56a6747d67cba5da4",
+      "sha256_jsonl": "0d785d6044b314fd01e84313331466a88eb654d120de4dc444eca70282521879",
+      "receiver_evaluations": 336
+    },
+    {
+      "file": "triad-broad-low.jsonl.gz",
+      "command": [
+        "build/dev/triad_study",
+        "--suite",
+        "broad",
+        "--trials",
+        "4",
+        "--threads",
+        "8",
+        "--snr",
+        "-5"
+      ],
+      "sha256_gzip": "60c5ee07a467c6e211f4c96be4433cb624eb369f49d5de067f532170d83bba47",
+      "sha256_jsonl": "3edbe33d6aabf5381cb9b035b24a4a4639a397eaf58ffcdb8790287c8b851f14",
+      "receiver_evaluations": 336
+    },
+    {
+      "file": "triad-sensitivity.jsonl.gz",
+      "command": [
+        "build/dev/triad_study",
+        "--suite",
+        "sensitivity",
+        "--trials",
+        "16",
+        "--threads",
+        "8"
+      ],
+      "sha256_gzip": "452d48d87c74fa2080e163a1f01adafcc3594bd5f3d140ab8d60de525ded372e",
+      "sha256_jsonl": "f7a489da96593419c23354536a9c18cb01b5452d1121ffaf6fd5174d0d7a275a",
+      "receiver_evaluations": 1440
+    },
+    {
+      "file": "triad-wide-null.jsonl.gz",
+      "command": [
+        "build/dev/triad_study",
+        "--suite",
+        "broad",
+        "--case",
+        "null-microwave",
+        "--trials",
+        "64",
+        "--threads",
+        "8",
+        "--seed",
+        "1931001001"
+      ],
+      "sha256_gzip": "4fc206b3de4be4ae24fc7fb29e87fd522bd918d494d2ceffc588f6ee1d1aab4e",
+      "sha256_jsonl": "d99adcc7d3b49ee97ab9da06565e1449ba06211f1b2f6ccf41f35ea5cd77900e",
+      "receiver_evaluations": 192
+    },
+    {
+      "file": "triad-rate3600.jsonl.gz",
+      "command": [
+        "build/dev/triad_study",
+        "--suite",
+        "edges",
+        "--rate",
+        "3600",
+        "--bits",
+        "16",
+        "--bits-per-frame",
+        "16",
+        "--trials",
+        "2",
+        "--threads",
+        "8"
+      ],
+      "sha256_gzip": "b4e85991edc103d545864b54b86b5e057916543026e399db18458738ba93321e",
+      "sha256_jsonl": "d69e6df0070dcb03c6ef7ac6d20b200bfa0cb2b4ae7df6b33e55e7e7d6483661",
+      "receiver_evaluations": 48
+    },
+    {
+      "file": "triad-clock-now.jsonl.gz",
+      "command": [
+        "build/dev/triad_study",
+        "--suite",
+        "smoke",
+        "--case",
+        "clean",
+        "--trials",
+        "1",
+        "--threads",
+        "2",
+        "--now"
+      ],
+      "sha256_gzip": "b983b5a680045942ce7f028a70a38a3675721bc993c9b93cd9d5e52018007b2a",
+      "sha256_jsonl": "4598bdbd2ea4e5a55d4c9a8da1f94808c8494e7c93cb587647fcb297a583affe",
+      "receiver_evaluations": 3
+    },
+    {
+      "file": "triad-parallel-1-automatic.jsonl.gz",
+      "command": [
+        "build/dev/triad_study",
+        "--suite",
+        "edges",
+        "--case",
+        "microwave-free",
+        "--trials",
+        "3",
+        "--threads",
+        "1",
+        "--arithmetic",
+        "automatic",
+        "--seed",
+        "1931002001"
+      ],
+      "sha256_gzip": "2bdc730bbbfb77827534e60e54ee26e0b05b3804c65f54fec3adbc0a666108e7",
+      "sha256_jsonl": "37369a81659d6dd7f10408c80320d90611632b847d1cbce65718ca7fe8400fcf",
+      "receiver_evaluations": 9
+    },
+    {
+      "file": "triad-parallel-8-automatic.jsonl.gz",
+      "command": [
+        "build/dev/triad_study",
+        "--suite",
+        "edges",
+        "--case",
+        "microwave-free",
+        "--trials",
+        "3",
+        "--threads",
+        "8",
+        "--arithmetic",
+        "automatic",
+        "--seed",
+        "1931002001"
+      ],
+      "sha256_gzip": "001b212ea88caba2a623425854916919fd6981f7bf1d0c64eddd3e843633a03a",
+      "sha256_jsonl": "f27877a1b84d3999d38649e43e8a16cbeb944582ea0448ac4d7628f07629471b",
+      "receiver_evaluations": 9
+    },
+    {
+      "file": "triad-parallel-32-automatic.jsonl.gz",
+      "command": [
+        "build/dev/triad_study",
+        "--suite",
+        "edges",
+        "--case",
+        "microwave-free",
+        "--trials",
+        "3",
+        "--threads",
+        "32",
+        "--arithmetic",
+        "automatic",
+        "--seed",
+        "1931002001"
+      ],
+      "sha256_gzip": "9ecf25c5e3957604d6eeb71b8c2be4584dbb357315e1a35d781ac22763217560",
+      "sha256_jsonl": "c74d47d92d92bdd0ecd9414c84e81738d82480d7446acc9376278010ea131116",
+      "receiver_evaluations": 9
+    },
+    {
+      "file": "triad-parallel-8-fp64.jsonl.gz",
+      "command": [
+        "build/dev/triad_study",
+        "--suite",
+        "edges",
+        "--case",
+        "microwave-free",
+        "--trials",
+        "3",
+        "--threads",
+        "8",
+        "--arithmetic",
+        "fp64",
+        "--seed",
+        "1931002001"
+      ],
+      "sha256_gzip": "182348c42c9ce2ac647218bdaa65e53091dd90e37995c9a28d48baaf08d0feb6",
+      "sha256_jsonl": "5500aced11b99b2ab85b49a6ef2b076d02220cab5dadf08189eb4e080f92ba8b",
+      "receiver_evaluations": 9
+    },
+    {
+      "file": "triad-hf-fine-25.jsonl.gz",
+      "command": [
+        "build/dev/triad_study",
+        "--suite",
+        "edges",
+        "--case",
+        "hf-free",
+        "--trials",
+        "4",
+        "--threads",
+        "8",
+        "--snr",
+        "-10",
+        "--frequency-step",
+        "25",
+        "--seed",
+        "1931003001"
+      ],
+      "sha256_gzip": "80b3b3287dc27de19cf470f4a5d6ca9522df7022431ccb6dd083a56775a44319",
+      "sha256_jsonl": "e94f9e899748c88f92bf40691ea6d1e7e04208216ddd9895d767b25772ed52ae",
+      "receiver_evaluations": 12
+    },
+    {
+      "file": "triad-hf-fine-1.jsonl.gz",
+      "command": [
+        "build/dev/triad_study",
+        "--suite",
+        "edges",
+        "--case",
+        "hf-free",
+        "--trials",
+        "4",
+        "--threads",
+        "8",
+        "--snr",
+        "-10",
+        "--frequency-step",
+        "1",
+        "--seed",
+        "1931003001"
+      ],
+      "sha256_gzip": "0b2cf4ea38c61f1f7ef148dd0d01f48e0bb6ce456efa1148780237e34476fe2c",
+      "sha256_jsonl": "f1fde10ef002115e37370111feb8bae175a33113b4d5fc6fd6c50bd612b99846",
+      "receiver_evaluations": 12
+    }
+  ],
+  "source_sha256": {
+    "src/triad_modem.cpp": "3eb560ab16ee7d5e615889896457553079ca31c0e6eb3170e391d989f51dd6c2",
+    "src/triad_simulation.cpp": "db51beb66208617939e5bab544a294b7b063b40d0caffef8f4f364ccd553f59e",
+    "include/datapump/triad_modem.hpp": "b8b259ec3ed474541f65655a5e124ff7bb9c699387326715112ecde027f6a05c",
+    "include/datapump/triad_simulation.hpp": "834a523e6ba16d76f07e48a0a7e6bc5c7b7a6af4c8d6eeeca91891f99321805a",
+    "src/crypto.cpp": "d89108ffba168898e45329fa9040c4155d6012711da1a6163b13dc97e9782224",
+    "include/datapump/crypto.hpp": "14e681ae6637b453b05fae4125b300e6bc27ec2ec4c2ee449fa3b2ab97214b74",
+    "include/datapump/types.hpp": "351fc7936aa83b2f2b7df25d54ecccb0b4b9471edd4376b3b842e7ffef10212a",
+    "include/datapump/pattern_pulse.hpp": "f3053ed41fa5cbca182ae4dcf5ff4796b030a3cb15527f617d7a765e7f989312",
+    "src/search_fft.cpp": "b999371b9ec024124d275573d829bf291a94655f505c17f78f59736a637dc9cb",
+    "src/search_fft.hpp": "97451e9d1e2a83be320f1f36ad7a67ea212900298a8821665504ab1c614fb2e9",
+    "src/channel_spread.hpp": "bf98698d574869acb79645fa143af7ae563a2f542868e77c672d89d4fb16bdb0",
+    "src/channel_perturbation.hpp": "710da481e4613abed3e771eccf63659157e6bf2bc478bfea06c5032324cf044c",
+    "tests/test_triad_modem.cpp": "01ce3cd1d71aabb26adc0d4d7efc1c9a451528b76976d005f6f48115a5943d6d",
+    "tools/triad-study.cpp": "15a278530d76c9faf9a6a8027eaf0e8c4c5b7846ff81e7b59215327642dd7eea",
+    "tools/triad-summary.py": "b29378f1138590bfa7541c063771127f27df46d436b04f45347ad86273213cc9",
+    "CMakeLists.txt": "6bca18cae9c466205fa81fd1d72a2c13d56658956c23b7a7ef0f1961953a130c",
+    "cmake/TestGroups.cmake": "483f789d219fb7a36c1f2de8ae44ad58bb71eb2983accc05640339f4765df048",
+    "build.sh": "645779c32a1d7fc8d0dbf38b321ff0392010ffb2de3f64a49f22220620029826"
+  },
+  "binary_sha256": {
+    "build/dev/triad_study": "fe0d0640d0c28be7b611f8e5b08fd9810894c9ad8e66256bb2bc0324704ab587",
+    "build/dev/test_triad_modem": "e1c3e989e025f524a03d5ce575ef8c61c12b31194a9bff2a0717c21a1ef1498a",
+    "build/sanitize/triad_study": "986ec27c85f924f8b654e70e4cea12185b7aa4aab389c40f1642a135731f3729",
+    "build/sanitize/test_triad_modem": "0513c38044df31bfee2a9a20ce052cb635c8df30b7f365fb31caabce2fc8030a"
+  },
+  "validation": {
+    "release_group": "2/2 passed",
+    "asan_ubsan_group": "2/2 passed with ASAN_OPTIONS=detect_leaks=0",
+    "leak_sanitizer": "Original run failed at LSan shutdown: does not work under ptrace. Leak coverage unverified.",
+    "ordinary_robust_regressions": "not run by explicit task scope",
+    "gpu": "not implemented or executed"
+  }
+}
