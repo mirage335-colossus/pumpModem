@@ -167,7 +167,7 @@ Patch parse_arguments(std::span<const std::string> arguments) {
             flag=="--rate"||flag=="--bw"||flag=="--carrier"||flag=="--dsp-workspace"||flag=="--pattern"||
             flag=="--spread-preset"||flag=="--selective-perturbation"||flag=="--rf-oscillator"||flag=="--shift"||flag=="--rf-shift"||flag=="--rf-carrier"||flag=="--search-margin"||
             flag=="--reference"||flag=="--sideband"||flag=="--lf-reference"||
-            flag=="--clock-sync"||flag=="--audio-error"||flag=="--dsss-factor"||flag=="--dsss-version"||flag=="--dsss-mode"||flag=="--search-arithmetic"||flag=="--receiver-strategy"||flag=="--receiver-cpu-budget"||flag=="--doppler"||flag=="--fhss"||flag=="--sched-hop"||flag=="--sched-hop-dilution"||flag=="--sched-frequency-search"||flag=="--fhss-list"||flag=="--fhss-list-file"||flag=="--live-duplex"||
+            flag=="--clock-sync"||flag=="--audio-error"||flag=="--dsss-factor"||flag=="--dsss-version"||flag=="--dsss-mode"||flag=="--search-arithmetic"||flag=="--receiver-strategy"||flag=="--receiver-cpu-budget"||flag=="--doppler"||flag=="--fhss"||flag=="--sched-hop"||flag=="--sched-hop-dilution"||flag=="--sched-frequency-search"||flag=="--fhss-list"||flag=="--fhss-list-file"||flag=="--live-duplex"||flag=="--hardware-channel-test"||
             flag=="--keyfile"||flag=="--key-name"||flag=="--tx-key"||
             flag=="--symbol-burst"||flag=="--symbol-burst-random"||
             flag=="--helper-power"||flag=="--helper-ratio-limit"||flag=="--helper-frequency"||flag=="--helper-callsign";
@@ -235,6 +235,10 @@ Patch parse_arguments(std::span<const std::string> arguments) {
         else if(flag=="--live-duplex") {
             if(value!="yes"&&value!="no")invalid("--live-duplex must be yes or no.");
             result.full_duplex=value=="yes";
+        }
+        else if(flag=="--hardware-channel-test") {
+            if(value!="yes"&&value!="no")invalid("--hardware-channel-test must be yes or no.");
+            result.hardware_channel_test=value=="yes";
         }
         else if(flag=="--fhss-list")result.fhss_list=fhss::list_text(fhss::parse_list(value));
         else if(flag=="--fhss-list-file")result.fhss_list_file=value;
@@ -352,6 +356,7 @@ std::string format(const Patch& settings) {
         add("--receiver-cpu-budget",numeric(*settings.receiver_cpu_budget));
     }
     if(settings.full_duplex)add("--live-duplex",*settings.full_duplex?"yes":"no");
+    if(settings.hardware_channel_test)add("--hardware-channel-test",*settings.hardware_channel_test?"yes":"no");
     if(settings.sched_hop_dilution)add("--sched-hop-dilution",std::string(modem::sched_hop_dilution_id(*settings.sched_hop_dilution)));
     if(settings.sched_hop)add("--sched-hop",std::string(modem::sched_hop_id(*settings.sched_hop)));
     if(settings.sched_frequency_search)add("--sched-frequency-search",numeric(sched_frequency_search(numeric(*settings.sched_frequency_search))));

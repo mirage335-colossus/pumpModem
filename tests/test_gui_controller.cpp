@@ -575,6 +575,38 @@ void spread_controls() {
           "EME preset must choose Each 65 and apply margin");
     controller.close();
 }
+void hardware_channel_test_controls() {
+    using F=ui::Field;
+    Controller controller({true,true});
+    check(!controller.settings().hardware_channel_test,"Hardware channel test must default off");
+    controller.select(F::simulation,"hardware-test");
+    if(controller.settings().simulation||!controller.settings().hardware_channel_test||!controller.field(F::live_duplex).enabled)
+        std::cerr<<"Audio test state: simulation="<<controller.settings().simulation
+                 <<" hardware_test="<<controller.settings().hardware_channel_test
+                 <<" duplex_enabled="<<controller.field(F::live_duplex).enabled
+                 <<" status="<<controller.field(F::status).text<<" inspection="<<controller.field(F::inspection).text<<'\n';
+    check(!controller.settings().simulation&&controller.settings().hardware_channel_test&&
+          controller.field(F::live_duplex).enabled,
+          "Audio test must select physical playback and allow Live/Duplex capture");
+    check(controller.settings().simulation_spread_delay_ms==18&&
+          controller.settings().simulation_spread_doppler_hz==30&&
+          controller.settings().simulation_perturbation_fast_depth==.65,
+          "Audio test lost the selected effective channel model");
+    const auto saved=launch_command::parse(controller.field(F::planner_command).text);
+    check(saved.hardware_channel_test==true,"Audio test was omitted from exported launch settings");
+    controller.select(F::simulation,"no");
+    check(!controller.settings().simulation&&!controller.settings().hardware_channel_test,
+          "Simulation No must bypass hardware channel injection");
+    controller.select(F::simulation,"yes");
+    check(controller.settings().simulation&&!controller.settings().hardware_channel_test,
+          "Sampled simulation must not also inject into hardware playback");
+    controller.edit(F::planner_command,"--hardware-channel-test yes --live-duplex yes");
+    controller.activate(ui::Command::planner_load_command);
+    check(controller.settings().hardware_channel_test&&!controller.settings().simulation&&
+          controller.settings().full_duplex&&controller.field(F::simulation).selected=="hardware-test",
+          "Hardware channel launch did not select Audio test and Live/Duplex");
+    controller.close();
+}
 void oscillator_controls() {
     using F=ui::Field;
     Controller controller({true,true});
@@ -3787,6 +3819,7 @@ int main(int argc,char** argv) {
         }
         if(argc>1&&std::string_view(argv[1])=="--oscillator-model-choices") {oscillator_model_choices();std::cout<<"Oscillator model choices passed\n";return 0;}
         if(argc>1&&std::string_view(argv[1])=="--spread-controls") {spread_controls();std::cout<<"Spread controls passed\n";return 0;}
+        if(argc>1&&std::string_view(argv[1])=="--hardware-channel-test-controls") {hardware_channel_test_controls();std::cout<<"Hardware channel test controls passed\n";return 0;}
         if(argc>1&&std::string_view(argv[1])=="--carrier-controls") {rate_carrier_controls();std::cout<<"Carrier controls passed\n";return 0;}
         if(argc>1&&std::string_view(argv[1])=="--helper-controls") {helper_controls();std::cout<<"Helper controls passed\n";return 0;}
         if(argc>1&&std::string_view(argv[1])=="--fhss-list-controls") {fake_hop_display(true);std::cout<<"FHSS list controls passed\n";return 0;}
@@ -3794,7 +3827,7 @@ int main(int argc,char** argv) {
         datapump::gui::controller_self_check();
         simulation_estimate_controls();
         empty_composer_preview();
-        spread_controls();oscillator_controls();oscillator_model_choices();shift_oscillator_controls();
+        spread_controls();hardware_channel_test_controls();oscillator_controls();oscillator_model_choices();shift_oscillator_controls();
         lpi_estimate_controls();
         revised_reception_ingestion();
         pending_replay_batch();

@@ -30,6 +30,7 @@ struct Patch {
     std::optional<std::string> keyfile,key_name,tx_key;
     std::optional<double> audio_timing_error_seconds;
     std::optional<bool> full_duplex;
+    std::optional<bool> hardware_channel_test;
     std::optional<unsigned> dsss_factor;
     std::optional<unsigned> workspace_percent;
     bool operator==(const Patch&) const=default;

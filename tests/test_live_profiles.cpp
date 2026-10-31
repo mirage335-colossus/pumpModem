@@ -70,6 +70,8 @@ struct CaptureScript {
     // apply the same selected simulation settings before releasing capture.
     std::optional<modem::ChannelConfig> loopback_channel;
     modem::Config loopback_modem;
+    bool buffer_playback=false;
+    std::size_t playback_chunk=0;
     std::vector<float> playback_input;
     std::atomic<bool> playback_started{false},playback_source_finished{false},finish_playback{false};
     std::atomic<std::size_t> played{0};
@@ -1245,6 +1247,88 @@ void duplex_spread_loopback() {
     check(off.decoded && spread.decoded && each.decoded,"virtual duplex did not receive all mild channel cases");
 }
 
+void hardware_channel_loopback() {
+    struct Result {std::vector<float> pcm;bool decoded=false;std::uint32_t rate=0;};
+    const auto run_case=[](bool enabled,double delay,double doppler,double depth,std::size_t chunk) {
+        Configuration geometry{1200.,1500.};
+        auto value=settings({55},geometry);value.transfer.automatic_receive_profiles=false;value.full_duplex=true;
+        value.transfer.search_seconds=1;value.hardware_channel_test=enabled;
+        value.simulation_seed=731;
+        value.simulation_spread_delay_ms=delay;value.simulation_spread_doppler_hz=doppler;
+        value.simulation_perturbation_slow_depth=depth;value.simulation_perturbation_fast_depth=depth;
+        // Simulation-only noise and oscillator settings must not affect
+        // physical output, including its explicit channel test.
+        value.simulation_snr_db=-80;value.simulation_clock_error_ppm=100;
+        value.simulation_frequency_offset_hz=300;value.simulation_phase_noise_degrees_per_sqrt_second=10;
+        CaptureScript capture;capture.rate=value.transfer.modem.sample_rate;capture.loopback=true;
+        capture.buffer_playback=true;capture.playback_chunk=chunk;capture.format_bytes=16384;capture_script=&capture;
+        live::Session session([]{return static_cast<double>(epoch);});session.start(value);
+        const auto await=[&](auto predicate,const char* stage) {
+            testing::CpuWorkBudget budget(40s,stage);
+            while(budget.pending()) {const auto snapshot=session.snapshot();
+                check(snapshot.error.empty(),std::string(stage)+": "+snapshot.error);
+                check(snapshot.dsp_buffered_bytes<=value.dsp_workspace_bytes,"hardware channel exceeded workspace");
+                if(predicate(snapshot))return snapshot;std::this_thread::sleep_for(1ms);
+            }
+            throw Error(std::string(stage)+" timed out");
+        };
+        await([&](const auto&){return capture.capture_opened.load()==1;},"hardware channel capture");
+        session.transmit_bits(Bytes{0,0,1});
+        await([&](const auto&){return capture.playback_source_finished.load();},"hardware channel playback");
+        const auto emitted=capture.playback_input;
+        check(capture.samples==emitted,"hardware loopback test modified playback PCM before capture");
+        capture.samples.resize(capture.samples.size()+12*capture.rate);
+        const auto target=capture.samples.size();bool decoded=false;
+        testing::CpuWorkBudget budget(40s,"hardware channel reception");
+        while(budget.pending()) {
+            const auto snapshot=session.snapshot();check(snapshot.error.empty(),"hardware channel reception: "+snapshot.error);
+            for(const auto& signal:snapshot.signals)
+                if(signal.complete && (signal.binary?signal.text:signal.raw_bits)=="001")decoded=true;
+            const auto delivered=capture.delivered.load();
+            if(delivered<target && delivered>=capture.released.load() && snapshot.buffered_samples==0)
+                capture.released=delivered+std::min<std::size_t>(std::max<std::size_t>(8,capture.rate/10),target-delivered);
+            if(decoded && delivered>=target && snapshot.buffered_samples==0)break;
+            std::this_thread::sleep_for(1ms);
+        }
+        session.cancel_transmit();session.stop();capture_script=nullptr;
+        return Result{emitted,decoded,capture.rate};
+    };
+    const auto plain=run_case(false,0,0,0,113);
+    const auto disabled=run_case(false,6,10,.65,113);
+    const auto zero=run_case(true,0,0,.65,17);
+    check(plain.pcm==disabled.pcm,"disabled hardware test applied selected channel effects");
+    check(plain.pcm==zero.pcm,"zero-reference hardware test changed original playback PCM");
+    const auto spread=run_case(true,.05,.01,0,113);
+    const auto each=run_case(true,.05,.01,.01,113);
+    const auto partitioned=run_case(true,.05,.01,.01,17);
+    const auto differs=[](const auto& a,const auto& b) {
+        const auto n=std::min(a.size(),b.size());double difference=0,energy=0;
+        for(std::size_t i=0;i<n;++i){const auto d=double(a[i])-b[i];difference+=d*d;energy+=double(a[i])*a[i];}
+        return energy>1e-5 && difference>energy*1e-7;
+    };
+    check(differs(plain.pcm,spread.pcm),"production hardware spread did not change emitted PCM");
+    check(differs(spread.pcm,each.pcm),"production hardware modulation did not change emitted PCM");
+    // A depth-dependent fixed headroom gain alone is not evidence that
+    // frequency-selective modulation reached the physical playback stream.
+    double reference_energy=0,cross=0;
+    const auto common=std::min(spread.pcm.size(),each.pcm.size());
+    for(std::size_t i=0;i<common;++i) {
+        reference_energy+=double(spread.pcm[i])*spread.pcm[i];
+        cross+=double(spread.pcm[i])*each.pcm[i];
+    }
+    check(reference_energy>0,"hardware channel reference has no signal energy");
+    const auto fitted_gain=cross/reference_energy;double residual=0;
+    for(std::size_t i=0;i<common;++i) {
+        const auto difference=double(each.pcm[i])-fitted_gain*spread.pcm[i];residual+=difference*difference;
+    }
+    check(residual>reference_energy*1e-8,"hardware modulation only changed a constant output gain");
+    check(each.pcm==partitioned.pcm,"hardware channel changed with playback block partition");
+    check(spread.pcm.size()>=plain.pcm.size()+static_cast<std::size_t>(std::ceil(.00005*plain.rate)),
+          "production playback omitted the delayed channel endpoint");
+    check(plain.decoded && disabled.decoded && zero.decoded && spread.decoded && each.decoded && partitioned.decoded,
+          "production hardware loopback did not decode every mild channel case");
+}
+
 void duplex_transmit_failure(bool after_generation) {
     Configuration geometry{16.,8.};geometry.keyed=true;
     auto value=settings({55},geometry);value.transfer.automatic_receive_profiles=false;
@@ -1363,14 +1447,14 @@ void playback(std::uint32_t rate,const std::string& device,const PlaybackCallbac
     if(script.fail_playback_before_source)throw Error("injected audio output failure");
     if(format)format({rate,rate,rate/2.,32768});
     script.playback_started=true;
-    std::vector<float> output(std::max<std::size_t>(8,rate/50));
+    std::vector<float> output(script.playback_chunk?script.playback_chunk:std::max<std::size_t>(8,rate/50));
     while(!stop.stop_requested()) {
         const auto count=source(output);
         ++script.source_calls;
         if(script.fail_playback_after_source)throw Error("injected audio output failure");
         if(!count)break;
         const auto offset=script.played.load();
-        if(script.loopback_channel) {
+        if(script.loopback_channel || script.buffer_playback) {
             script.playback_input.insert(script.playback_input.end(),output.begin(),output.begin()+count);
             script.played=offset+count;
             continue;
@@ -1382,6 +1466,7 @@ void playback(std::uint32_t rate,const std::string& device,const PlaybackCallbac
     }
     if(script.loopback_channel && !stop.stop_requested())
         script.samples=modem::simulate(script.playback_input,script.loopback_modem,*script.loopback_channel);
+    else if(script.buffer_playback && !stop.stop_requested())script.samples=script.playback_input;
     script.playback_source_finished=true;
     while(!stop.stop_requested() && !script.finish_playback)std::this_thread::sleep_for(1ms);
 }
@@ -1574,8 +1659,9 @@ int main(int argc, char** argv) {
         const std::string suite = argc > 1 ? argv[1] : "all";
         std::optional<audio::trace::Scope> calendar_trace;
         if((suite=="hop_calendar" || suite=="public_amplitude") && argc>2)calendar_trace.emplace(argv[2]);
-        check(suite == "public_amplitude" || suite == "retired" || suite == "all" || suite == "hop_calendar" || suite == "exact_source" || suite == "original" || suite == "matrix" || suite == "long" || suite == "long_fft" || suite == "long_seeds" || suite == "interval_queue" || suite == "monitor" || suite == "health" || suite == "frontier_failure" || suite == "capture_time" || suite == "arrival_time" || suite == "arrival_time_baseline" || suite == "backlog" || suite == "clear" || suite == "duplex" || suite == "duplex_spread" || suite == "arrival_fallback" || suite == "tx_failure",
+        check(suite == "public_amplitude" || suite == "retired" || suite == "all" || suite == "hop_calendar" || suite == "exact_source" || suite == "original" || suite == "matrix" || suite == "long" || suite == "long_fft" || suite == "long_seeds" || suite == "interval_queue" || suite == "monitor" || suite == "health" || suite == "frontier_failure" || suite == "capture_time" || suite == "arrival_time" || suite == "arrival_time_baseline" || suite == "backlog" || suite == "clear" || suite == "duplex" || suite == "duplex_spread" || suite == "hardware_channel" || suite == "arrival_fallback" || suite == "tx_failure",
               "unknown profile test suite");
+        if(suite=="hardware_channel") {context="production hardware channel";hardware_channel_loopback();return 0;}
         if(suite=="duplex_spread") {context="modeled virtual duplex";duplex_spread_loopback();return 0;}
         if(suite=="all" || suite=="public_amplitude") {context="rolling public amplitude arrivals";public_amplitude_rolling_arrivals();if(suite=="public_amplitude")return 0;}
         if(suite=="all" || suite=="retired") {

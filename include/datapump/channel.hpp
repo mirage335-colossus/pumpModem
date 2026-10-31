@@ -7,6 +7,25 @@
 #include <array>
 
 namespace datapump::modem {
+// Deliberate physical-audio test stage. Uses only propagation spread and the
+// additional per-band amplitude modulation, at the original source clock.
+// No synthetic noise, startup, oscillator offset or receiver data is supplied.
+class HardwareTestChannel {
+public:
+    static constexpr std::size_t workspace_bound=24*1024;
+    HardwareTestChannel(Config,ChannelConfig);
+    ~HardwareTestChannel();
+    HardwareTestChannel(HardwareTestChannel&&) noexcept;
+    HardwareTestChannel& operator=(HardwareTestChannel&&) noexcept;
+    bool active() const noexcept;
+    double headroom_gain() const noexcept;
+    std::uint64_t tail_samples() const noexcept;
+    std::uint64_t source_end_sample(const StreamingTransmitter&) const;
+    std::size_t read(StreamingTransmitter&,std::span<float>,std::stop_token = {});
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
 // Receiver-clock PCM from independent, free-running endpoints. The source is
 // interpolated across a seeded fractional startup boundary; no symbol timing
 // or framing metadata is passed to the receiver. Memory is bounded regardless

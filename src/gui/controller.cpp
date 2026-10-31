@@ -374,7 +374,7 @@ struct Controller::Impl {
         for(const auto id:{UiField::snr,UiField::long_snr,UiField::receive_snr,UiField::planner_target})
             for(const auto* s:{"140","120","100","80","60","55","40","32","20","6","-6","-10","-16","-20","-23","-26","-30","-60"}) f(id).options.push_back({s,s});
         f(UiField::receive_snr).text="32, 55";
-        f(UiField::simulation).options={{"no","No"},{"yes","Yes"}};
+        f(UiField::simulation).options={{"no","No"},{"yes","Yes"},{"hardware-test","Audio test"}};
         f(UiField::simulation).selected=options.simulation||options.smoke?"yes":"no";
         // The sampled native smoke retains its established strong test link.
         // Ordinary planning and simulation start from the shared 120 dB loss.
@@ -976,6 +976,9 @@ struct Controller::Impl {
             next.channel_mode=f(UiField::mono).selected=="right"?audio::ChannelMode::right_mono:
                 next.mono?audio::ChannelMode::left_mono:audio::ChannelMode::stereo;
             next.simulation=!(load&&simulation_off)&&f(UiField::simulation).selected=="yes";
+            next.hardware_channel_test=load&&load->hardware_channel_test?*load->hardware_channel_test:
+                !(load&&simulation_off)&&f(UiField::simulation).selected=="hardware-test";
+            if(next.hardware_channel_test)next.simulation=false;
             auto oscillator_id=load&&load->oscillator?*load->oscillator:f(UiField::simulation_oscillator).selected;
             auto shift_oscillator_id=load&&load->rf_oscillator?*load->rf_oscillator:f(UiField::rf_oscillator).selected;
             if(load&&load->reference=="shared-radio") {
@@ -1357,7 +1360,7 @@ struct Controller::Impl {
                 f(UiField::search_margin).text=planner_number(oscillator_policy.margin)+"x";
                 f(UiField::oscillator_reference).selected=reference;
                 f(UiField::dsp_workspace).selected="ram-"+std::to_string(workspace_percent);
-                f(UiField::simulation).selected=next.simulation?"yes":"no";
+                f(UiField::simulation).selected=next.simulation?"yes":next.hardware_channel_test?"hardware-test":"no";
                 f(UiField::live_duplex).checked=next.full_duplex;
                 auto& helper_power=f(UiField::helper_power);
                 const auto loaded_power=next.helper.power_w==0?std::string("0"):planner_number(next.helper.power_w)+" W";
@@ -1568,6 +1571,7 @@ struct Controller::Impl {
         values.receiver_strategy=tuning::receiver_strategy_id(settings.transfer.modem.receiver_strategy);
         values.receiver_cpu_budget=settings.transfer.modem.receiver_cpu_budget;
         values.full_duplex=settings.full_duplex;
+        values.hardware_channel_test=settings.hardware_channel_test;
         values.fhss=f(UiField::fhss).selected;
         values.symbol_burst=modem::parse_symbol_burst_wait(f(UiField::symbol_burst).selected);
         values.symbol_burst_random=modem::parse_symbol_burst_random(f(UiField::symbol_burst_random).selected);
@@ -2339,14 +2343,15 @@ struct Controller::Impl {
             if(!noise_requested)gate.finished();
             transmit_requested=false; noise_requested=false;helper_requested=false;
         }
-        const auto mode=next.simulation?"Simulation / continuous receive":"Listening / "+settings.device;
+        const auto mode=next.simulation?"Simulation / continuous receive":
+            settings.hardware_channel_test?"Live audio channel test / "+settings.device:"Listening / "+settings.device;
         const auto audio_percent=std::to_string(static_cast<int>(std::clamp(next.transmission_fraction,0.0,1.0)*100));
         const auto tx_mode=helper_requested?
             std::string(next.simulation?"Simulating helper / ":"Transmitting helper / ")+seconds_text(next.transmission_seconds)+" elapsed":next.transmitting_noise?
             std::string(next.simulation?"Simulating noise / ":"Transmitting noise / ")+seconds_text(next.transmission_seconds)+" elapsed":
             next.simulation?(next.simulation_receiving_tail?std::string("Checking reception after transmission"):
                 "Simulating / audio "+audio_percent+"%")+" / "+elapsed_text(next.simulation_compute_seconds)+" elapsed":
-            "Transmitting "+audio_percent+"% / "+seconds_text(next.transmission_seconds)+" media";
+            std::string(settings.hardware_channel_test?"Live audio channel test / Transmitting ":"Transmitting ")+audio_percent+"% / "+seconds_text(next.transmission_seconds)+" media";
         receiver_mode(f(UiField::mode),next,next.transmitting?tx_mode:next.simulation_replay?"Simulation replay "+std::to_string(static_cast<int>(std::clamp(next.simulation_sample_fraction,0.0,1.0)*100))+"%":mode);
         ui::publish_backend_status(f(UiField::status),next.status,next.error,next.clock_timing_status,snapshot.error,
             next.simulation_replay||snapshot.simulation_replay||Clock::now()>=notice_until||
@@ -2362,6 +2367,9 @@ struct Controller::Impl {
         if(next.receiver_health.dropped_samples) diagnostics<<" | RX discarded samples "<<next.receiver_health.dropped_samples;
         if(next.simulation) diagnostics<<" | Channel SNR "<<channel_snr<<" dB / media "<<seconds_text(next.virtual_seconds);
         else if(next.hardware_sample_rate) diagnostics<<" | Hardware "<<next.hardware_sample_rate/1000.0<<" kHz";
+        if(settings.hardware_channel_test)diagnostics<<" | TX channel test "
+            <<settings.simulation_spread_doppler_hz<<" Hz / "<<settings.simulation_spread_delay_ms<<" ms"
+            <<" / slow "<<100*settings.simulation_perturbation_slow_depth<<"% / fast "<<100*settings.simulation_perturbation_fast_depth<<'%';
         diagnostics<<" | DSP "<<settings.transfer.modem.sample_rate<<" Hz | Carrier "<<std::defaultfloat<<std::setprecision(6)<<settings.transfer.modem.carrier_hz+settings.transfer.modem.oscillator_search->rf_shift_hz<<" Hz";
         if(settings.transfer.modem.oscillator_search->rf_shift_hz>0)diagnostics<<" | Stream "<<settings.transfer.modem.carrier_hz<<" Hz";
         if((settings.transfer.clock_sync||shared_hop_calendar(settings.transfer.modem))&&!next.simulation) {
@@ -2423,7 +2431,7 @@ struct Controller::Impl {
             pending_key_settings=values;pending_key_simulation_off=simulation_off;
         } else {
             configure(false,false,std::nullopt,&values,simulation_off);
-            sync_launch_command(true);notice("Settings loaded · Simulation No");
+            sync_launch_command(true);notice(settings.hardware_channel_test?"Settings loaded · Live audio channel test":"Settings loaded · Simulation No");
         }
     }
     void planner_example(Command command) {
@@ -2824,9 +2832,9 @@ void Controller::select(UiField field,std::string id) {
     auto& p=*impl_; auto& state=p.f(field); if(!state.enabled) return;
     try {
         bool legacy_budget=false;
-        if(field==UiField::simulation&&id!="yes"&&id!="no") {
+        if(field==UiField::simulation&&id!="yes"&&id!="no"&&id!="hardware-test") {
             // Accept saved/test preset identifiers without exposing them in
-            // the two-choice Simulation selector. They share the same budget.
+            // the Simulation selector. They share the same budget.
             const auto preset=tuning::parse_simulation_preset(id);
             if(preset.enabled) {
                 p.planner_inputs.tx_dbm=preset.transmit_dbm;

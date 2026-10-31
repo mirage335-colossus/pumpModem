@@ -145,6 +145,14 @@ void parsing_and_formatting() {
     check(half_duplex.full_duplex==false && launch_command::parse(launch_command::format(half_duplex))==half_duplex,
         "explicit half duplex was confused with an omitted option");
     check(!launch_command::parse("--rate 1200").full_duplex.has_value(),"older commands must leave duplex unchanged");
+    for(const auto* value:{"yes","no"}) {
+        const auto test=launch_command::parse(std::string("--hardware-channel-test ")+value);
+        check(test.hardware_channel_test==(std::string_view(value)=="yes")&&
+              launch_command::parse(launch_command::format(test))==test,
+              "Hardware channel test selection did not round trip");
+    }
+    check(!launch_command::parse("--rate 1200").hardware_channel_test.has_value(),
+          "Older commands must not opt into physical channel injection");
     check(launch_command::parse(launch_command::format(clock))==clock,"clock and spreading settings must round trip");
     for(const auto* version:{"legacy","interleave"}) {
         const auto patch=launch_command::parse(std::string("--dsss-factor 10 --dsss-version ")+version);
@@ -184,7 +192,8 @@ void parsing_and_formatting() {
     check(!datapump::clock_sync::parse("Default"),"Default clock policy must remain absent");
     for(const auto* command:{"--fhss-list '1MHz'","--fhss-list '1MHz,1MHz'","--fhss-list '1MHz,2MHz' --fhss-list-file file","--fhss genuine","--fhss ic-7100","--dsss-factor 2","--clock-sync GPS_nanms-1ms_region-0ms_offset",
         "--clock-sync GPS_1ms--1ms_region-0ms_offset","--audio-error -1ms",
-        "--audio-error NaNms","--audio-error 61s","--audio-error 30","--live-duplex maybe","--live-duplex 1"})rejects([&]{launch_command::parse(command);},"invalid clock/spreading setting accepted");
+        "--audio-error NaNms","--audio-error 61s","--audio-error 30","--live-duplex maybe","--live-duplex 1",
+        "--hardware-channel-test maybe","--hardware-channel-test 1"})rejects([&]{launch_command::parse(command);},"invalid clock/spreading setting accepted");
     check(launch_command::parse("--audio-error 0ms").audio_timing_error_seconds==0,
         "zero additional audio allowance must remain an explicit supported assumption");
     for(const auto* command:{"--tx-key all","--keyfile=","--key-name=","--tx-key none --key-name none"})

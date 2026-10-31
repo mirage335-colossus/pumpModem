@@ -1513,11 +1513,12 @@ void shared_link_controls_visibility() {
         check(found!=screen.end(),"Shared link control is missing from the native declaration");return *found;
     };
     const auto& simulation=app.field(F::simulation);
-    check(simulation.selected=="no"&&simulation.options.size()==2&&
+    check(simulation.selected=="no"&&simulation.options.size()==3&&
           std::any_of(simulation.options.begin(),simulation.options.end(),[](const auto& option){return option.id=="yes";})&&
-          std::any_of(simulation.options.begin(),simulation.options.end(),[](const auto& option){return option.id=="no";}),
-          "Simulation must offer the simple Yes/No choices");
-    for(const auto& page:ui::pages())for(const auto* mode:{"no","yes"}) {
+          std::any_of(simulation.options.begin(),simulation.options.end(),[](const auto& option){return option.id=="no";})&&
+          simulation.options[2].id=="hardware-test"&&simulation.options[2].label=="Audio test",
+          "Simulation must offer No, Yes and explicit physical Audio test choices");
+    for(const auto& page:ui::pages())for(const auto* mode:{"no","yes","hardware-test"}) {
         app.select_page(page.id);app.select(F::simulation,mode);
         const bool simulated=std::string_view(mode)=="yes";
         for(const auto field:{F::link_power,F::link_loss,F::link_noise}) {
@@ -2909,6 +2910,9 @@ void document_semantics_layout_and_plots() {
 }
 int main(int argc,char** argv) {
     try {
+        if(argc==2&&std::string_view(argv[1])=="--channel-controls-only") {
+            shared_link_controls_visibility();std::cout<<"Shared channel controls visibility passed\n";return 0;
+        }
         if(argc==2&&std::string_view(argv[1])=="--async-edits-only") {
             asynchronous_planner_edits();std::cout<<"Asynchronous planner input snapshots passed\n";return 0;
         }

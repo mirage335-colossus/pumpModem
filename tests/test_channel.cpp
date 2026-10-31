@@ -373,5 +373,56 @@ void invalid(){
     m::SimulationChannel channel(cfg,ideal());rejects([&]{channel.process({{1,0},0});},"zeroobservationaccepted");
     require(m::ChannelConfig{}.clock_error_ppm==100 && m::ChannelConfig{}.phase_noise_degrees_per_sqrt_second==.5,"simulationdefaultsarenotbadcrystalmodel");
 }
+void hardware_test_channel() {
+    auto cfg=config();cfg.bandwidth_hz=1200;cfg.integration_seconds=.02;cfg.stream_epoch=1800000001;
+    const m::RawBits bits{{0,0,1}};
+    const auto read_all=[](m::HardwareTestChannel& channel,m::StreamingTransmitter& source,std::size_t block) {
+        std::vector<float> output,chunk(block);
+        while(const auto count=channel.read(source,chunk))output.insert(output.end(),chunk.begin(),chunk.begin()+count);
+        return output;
+    };
+    m::StreamingTransmitter raw(bits,cfg),bypass_source(bits,cfg);
+    std::vector<float> expected(raw.total_samples());std::size_t written=0;
+    while(written<expected.size())written+=raw.read(std::span(expected).subspan(written));
+    auto zero=ideal();zero.perturbation_slow_depth=zero.perturbation_fast_depth=.65;
+    zero.snr_db=-80;zero.clock_error_ppm=100;zero.frequency_offset_hz=300;
+    m::HardwareTestChannel bypass(cfg,zero);
+    require(!bypass.active() && bypass.headroom_gain()==1,"zero-reference hardware test instantiated processing");
+    require(read_all(bypass,bypass_source,29)==expected,"hardware bypass changed original source PCM");
+
+    auto model=ideal();model.spread_delay_ms=.05;model.spread_doppler_hz=.1;
+    model.perturbation_slow_depth=model.perturbation_fast_depth=.65;
+    m::StreamingTransmitter source_a(bits,cfg),source_b(bits,cfg);
+    m::HardwareTestChannel one(cfg,model),many(cfg,model);
+    const auto a=read_all(one,source_a,4096),b=read_all(many,source_b,17);
+    require(one.active() && one.headroom_gain()>0 && one.headroom_gain()<1,"active hardware channel omitted headroom");
+    require(a==b,"hardware stage changed seeded waveform with block partition");
+    require(a.size()==one.source_end_sample(source_a),"hardware channel endpoint omitted its tail");
+    require(std::all_of(a.begin(),a.end(),[](float value){return std::isfinite(value) && std::abs(value)<=1;}),
+            "hardware channel exceeded full-scale output");
+
+    m::StreamingTransmitter delayed_source(bits,cfg);
+    const auto source_end=delayed_source.total_samples();
+    const auto begin=delayed_source.physical_payload_begin()-delayed_source.physical_output_origin();
+    auto delayed=ideal();delayed.spread_delay_ms=1000.*(source_end+cfg.sample_rate)/cfg.sample_rate;
+    m::HardwareTestChannel delayed_channel(cfg,delayed);
+    const auto delayed_output=read_all(delayed_channel,delayed_source,257);
+    const auto delay_samples=source_end+cfg.sample_rate;
+    const auto data_begin=begin+delay_samples+8,data_end=begin+delay_samples+m::symbol_sample_count(cfg)-8;
+    require(data_begin>source_end && data_begin<data_end && data_end<delayed_output.size(),"delayed DATA interval was not drained");
+    double energy=0;
+    for(auto i=data_begin;i<data_end;++i)energy+=double(delayed_output[i])*delayed_output[i];
+    require(energy>1e-8,"hardware channel omitted delayed DATA after original source end");
+
+    for(const bool before:{true,false}) {
+        m::StreamingTransmitter source(m::RawBits{Bytes(12,0)},cfg);
+        m::HardwareTestChannel channel(cfg,model);std::array<float,137> chunk{};
+        std::uint64_t emitted=before?0:channel.read(source,chunk);
+        source.request_finish();
+        while(const auto count=channel.read(source,chunk))emitted+=count;
+        require(emitted==channel.source_end_sample(source),"graceful hardware stop did not drain its new endpoint");
+        require(!before || emitted==0,"hardware stop before output created a delayed burst");
+    }
 }
-int main(){try{clock_and_carrier();long_coherence();phase_diffusion();pcm_clock();analytic_source_matches_hardware_pcm();sampled_startup_and_carrier();sampled_chunking_and_idle();stream_and_preview();preview_interpolation_edges();graceful_endpoint();selective_perturbation();spread_helper_tail();bulk_spread_and_perturbation();invalid();std::cout<<"channel tests passed\n";return 0;}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}
+}
+int main(){try{clock_and_carrier();long_coherence();phase_diffusion();pcm_clock();analytic_source_matches_hardware_pcm();sampled_startup_and_carrier();sampled_chunking_and_idle();stream_and_preview();preview_interpolation_edges();graceful_endpoint();selective_perturbation();spread_helper_tail();bulk_spread_and_perturbation();hardware_test_channel();invalid();std::cout<<"channel tests passed\n";return 0;}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

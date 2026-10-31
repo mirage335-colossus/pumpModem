@@ -119,7 +119,7 @@ Doppler calculator. The supplied presets are illustrative simulation inputs:
 | EME worldwide — Focused, 1296 MHz reference | 0.5 ms | 6 Hz |
 
 HF Moderate is the default. Margin multiplies both selected spread values
-once for simulation. The simulated propagation is an illustrative equal-power
+once for simulation and Audio test. The modeled propagation is an illustrative equal-power
 two-ray channel: the selected delay is the excess delay between the rays and
 the selected Doppler is their frequency separation. These are not RMS delay
 and a calibrated scattering spectrum, respectively. The delayed source is
@@ -129,8 +129,27 @@ perturbation effects and do not predict performance in this channel.
 The sampled Live simulation, transfer simulation and bulk PCM simulation apply
 the selected effects. The accelerated symbol-observation channel cannot represent
 frequency-selective samples and explicitly rejects nonzero propagation spread;
-use a sampled path for these channel models. Ordinary physical audio is not
-modified by selecting simulation settings.
+use a sampled path for these channel models. In the GUI, **Simulation → Audio
+test** explicitly applies the same selected spread and additional modulation to
+outgoing physical audio. Use **Live/Duplex** for a same-instance speaker/microphone
+or cable loopback. The input capture is not processed a second time; noise,
+oscillator error and path-loss simulation are not added to this hardware test.
+The effects apply to Robust message/data transmissions; standalone tuning-noise
+and Helper-only actions retain their original output.
+**Simulation → No** leaves physical audio unmodified by these models.
+Audio test reserves output headroom with one fixed gain for the chosen model,
+so the extra modulation does not introduce clipping or per-block normalization.
+This lowers the outgoing audio level, including Helper when enabled, while
+preserving the nominal Helper/DATA power ratio. The trace records the gain, injection
+location and retained tail alongside the seeded modulation parameters. The
+ordinary playback volume control remains applicable.
+Playback retains the selected delayed tail and, when the amplitude filter bank
+is enabled, extra zero-input samples for its pole decay to fall by a factor of
+one million. This is a relative filter-state decay criterion, not an absolute
+audio silence threshold. Receiver completion still requires scored absence.
+Active Audio test effects are unavailable with smooth-ramp FHSS because a
+delayed/filtered waveform would invalidate that path's output guard. Selecting
+None/Off bypasses the channel stage and retains ordinary FHSS behavior.
 
 **Additional frequency-selective perturbation** defaults to Off for None and
 Sub-9 kHz, and Each 65% for HF, Aurora and EME. Selecting a new spread preset

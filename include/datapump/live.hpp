@@ -57,6 +57,9 @@ struct Settings {
     double simulation_spread_doppler_hz = 0;
     double simulation_perturbation_slow_depth = 0;
     double simulation_perturbation_fast_depth = 0;
+    // Explicit physical-audio channel test: affect outgoing Robust DATA before
+    // playback. The actual audio route supplies noise and clock behavior.
+    bool hardware_channel_test = false;
     // Selecting a transmit key restricts reception to matching keyed streams.
     // Pattern-only raw results carry no separate authentication tag.
     bool permits_plaintext() const noexcept {

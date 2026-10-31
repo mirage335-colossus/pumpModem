@@ -1508,7 +1508,8 @@ struct Session::Impl {
             !value.transfer.modem.symbol_burst.enabled();
     }
     std::string idle_status() const {
-        return settings.simulation ? "Simulated independent radios; sampled audio, clock error and phase noise" : "Listening to audio input";
+        return settings.simulation ? "Simulated independent radios; sampled audio, clock error and phase noise" :
+            settings.hardware_channel_test?"Listening to audio input; selected channel effects apply to outgoing Live audio tests":"Listening to audio input";
     }
     void update_simulation_elapsed() {
         if(simulation_compute_started)
@@ -13727,6 +13728,7 @@ struct Session::Impl {
                     current.status = wave->noise ? (value.simulation ? "Simulating continuous noise; stop when finished" :
                         "Transmitting continuous noise; stop when finished") :
                         value.simulation ? "Transmitting sampled audio to an independent receiver" :
+                        value.hardware_channel_test?"Transmitting Live audio channel test; fixed peak headroom applied":
                         value.full_duplex ? "Transmitting; duplex audio receiver active" : "Transmitting; audio input paused";
                 }
                 source_active=true;
@@ -14175,6 +14177,16 @@ struct Session::Impl {
                     std::optional<helper::Generator> helper_generator;
                     std::optional<helper::Plan> helper_output_plan;
                     std::uint64_t helper_output_frames=0;
+                    std::unique_ptr<modem::HardwareTestChannel> hardware_channel;
+                    if(value.hardware_channel_test && !wave->noise && !wave->helper_only) {
+                        hardware_channel=std::make_unique<modem::HardwareTestChannel>(transmit_modem,channel_config(value));
+                        if(hardware_channel->active() && transmit_modem.fake_hopping && transmit_modem.fake_hopping->smooth_ramps)
+                            throw Error("Live audio channel test does not support the post-source FHSS output envelope; turn FHSS off for this test");
+                        audio::trace::record("hardware_channel_test_transmission",[&](auto& f) {
+                            f.add("transmission_id",wave->serial);f.add("active",hardware_channel->active());
+                            f.add("headroom_gain",hardware_channel->headroom_gain());
+                        });
+                    }
                     bool helper_transmit=helper::effective_helper_power(value.helper)>0&&wave->helper_envelope_available,output_started=false;
                     wave->hardware_helper_enabled=helper_transmit;
                     const auto disable_helper=[&](const std::string& reason) {
@@ -14202,7 +14214,7 @@ struct Session::Impl {
                     };
                     const auto helper_source_end=[&]() -> std::optional<std::uint64_t> {
                         if(!wave->transmitter || (wave->noise&&!wave->graceful))return {};
-                        const auto total=wave->transmitter->total_samples();
+                        const auto total=hardware_channel?hardware_channel->source_end_sample(*wave->transmitter):wave->transmitter->total_samples();
                         const auto wrapped=add_helper_frames(wave->hardware_helper_leading_samples,total);
                         if(!helper_transmit && !wave->hardware_helper_leading_samples && !wave->hardware_helper_trailing_samples)return total;
                         const auto origin=helper_origin();
@@ -14245,13 +14257,19 @@ struct Session::Impl {
                             const auto origin=helper_origin();
                             const auto start=origin-helper_lead_seconds();
                             const auto end=helper_source_end();
-                            return helper_generator->mix(wave->helper_only?0.f:payload,start+seconds,rate,
-                                end?std::optional<long double>(start+static_cast<long double>(*end)/c.sample_rate):std::nullopt,start);
+                            // The static test headroom applies to the composite
+                            // so it preserves the nominal Helper/DATA ratio.
+                            const auto headroom=hardware_channel?hardware_channel->headroom_gain():1.;
+                            return static_cast<float>(headroom*helper_generator->mix(wave->helper_only?0.f:
+                                static_cast<float>(payload/headroom),start+seconds,rate,
+                                end?std::optional<long double>(start+static_cast<long double>(*end)/c.sample_rate):std::nullopt,start));
                         };
                     }
                     output_options.maximum_utc_error_seconds=clock_sync::audio_lag_radius(value.transfer.audio_timing_error_seconds);
                     output_options.presentation_lag_seconds=clock_sync::audio_lag_radius(value.transfer.audio_timing_error_seconds);
                     output_options.timing_stop_duration_seconds=wave->timing_stop_seconds;
+                    if(hardware_channel && output_options.timing_stop_duration_seconds>0)
+                        output_options.timing_stop_duration_seconds+=static_cast<double>(hardware_channel->tail_samples())/transmit_modem.sample_rate;
                     if(helper_transmit && wave->timing_stop_seconds>0) {
                         // Preparation precedes the final keyed origin. Reserve
                         // the maximum dwell alignment plus the independent tail.
@@ -14283,7 +14301,9 @@ struct Session::Impl {
                             if(!wave->transmitter)return std::nullopt;
                             const auto lead=wave->hardware_helper_leading_samples;
                             const auto source_frontier=frontier>lead?frontier-lead:0;
-                            return add_helper_frames(lead,wave->transmitter->predicted_physical_valid_payload_end(source_frontier));
+                            auto end=wave->transmitter->predicted_physical_valid_payload_end(source_frontier);
+                            if(hardware_channel)end=add_helper_frames(end,hardware_channel->tail_samples());
+                            return add_helper_frames(lead,end);
                         };
                     }
                     output_options.timing_source_end=[&]() -> std::optional<std::uint64_t> {
@@ -14384,9 +14404,12 @@ struct Session::Impl {
                             std::fill_n(output.begin(),count,0.f);
                             helper_output_frames=add_helper_frames(helper_output_frames,count);
                         }
-                        if(count<output.size() && !wave->transmitter->finished()) {
+                        if(count<output.size() && (!wave->transmitter->finished() ||
+                           (hardware_channel && helper_output_frames-wave->hardware_helper_leading_samples<
+                               hardware_channel->source_end_sample(*wave->transmitter)))) {
                             prepare_source_read(*wave);
-                            const auto payload=wave->transmitter->read(output.subspan(count),wave->stop);
+                            const auto payload=hardware_channel?hardware_channel->read(*wave->transmitter,output.subspan(count),wave->stop):
+                                wave->transmitter->read(output.subspan(count),wave->stop);
                             count+=payload;helper_output_frames=add_helper_frames(helper_output_frames,payload);
                         }
                         if(wave->transmitter->finished() && (helper_transmit ||

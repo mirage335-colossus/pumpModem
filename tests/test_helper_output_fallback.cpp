@@ -1,5 +1,6 @@
 #include "datapump/live.hpp"
 #include "datapump/resampler.hpp"
+#include "datapump/channel.hpp"
 #include "../src/helper_power_reference.hpp"
 #include "../src/live_helper.hpp"
 #include "../src/transmit_timing.hpp"
@@ -280,6 +281,54 @@ void explicit_past_declines_at_calibrated_amplitude() {
           declined.snapshot.helper_status.find("lead does not fit")!=std::string::npos,
           "past explicit helper epoch changed key exposure or omitted its decline reason");
 }
+void hardware_channel_helper_transform() {
+    auto plain_settings=settings();plain_settings.transfer.timestamp=epoch+100;
+    auto stressed_settings=plain_settings;stressed_settings.hardware_channel_test=true;
+    stressed_settings.simulation_spread_delay_ms=250;stressed_settings.simulation_spread_doppler_hz=.1;
+    stressed_settings.simulation_perturbation_slow_depth=stressed_settings.simulation_perturbation_fast_depth=.65;
+    modem::ChannelConfig effects;effects.spread_delay_ms=250;effects.spread_doppler_hz=.1;
+    effects.perturbation_slow_depth=effects.perturbation_fast_depth=.65;
+    const modem::HardwareTestChannel stage(stressed_settings.transfer.modem,effects);
+    const auto plain=run(plain_settings),stressed=run(stressed_settings);
+    check(!plain.snapshot.transmission_failed && !stressed.snapshot.transmission_failed &&
+          plain.snapshot.transmission_fraction==1 && stressed.snapshot.transmission_fraction==1,
+          "Helper hardware channel transmission did not complete");
+    check(plain.accepted_utc && stressed.accepted_utc && plain.accepted_utc==stressed.accepted_utc,
+          "Helper comparison changed the planned source clock");
+    check(!stressed.requested_rates.empty() &&
+          stressed.output_rate>=*std::max_element(stressed.requested_rates.begin(),stressed.requested_rates.end()),
+          "Helper fixture did not satisfy the requested physical sample-rate floor");
+    const auto logical_rate=stressed_settings.transfer.modem.sample_rate;
+    const auto lead=38ULL*logical_rate;
+    check(plain.logical_pcm.size()>lead && stressed.logical_pcm.size()>lead &&
+          std::all_of(plain.logical_pcm.begin(),plain.logical_pcm.begin()+lead,[](float x){return x==0;}) &&
+          std::all_of(stressed.logical_pcm.begin(),stressed.logical_pcm.begin()+lead,[](float x){return x==0;}),
+          "Helper channel test lost the fixed observation lead");
+    // These physical samples contain Helper alone; the real output transform
+    // must apply the same fixed headroom as it applies to DATA.
+    const auto first=plain.output_rate;const auto last=2ULL*plain.output_rate;
+    check(last<plain.pcm.size() && last<stressed.pcm.size(),"Helper leading comparison is unavailable");
+    double reference_energy=0,error=0;
+    for(auto i=first;i<last;++i) {
+        reference_energy+=double(plain.pcm[i])*plain.pcm[i];
+        const auto difference=double(stressed.pcm[i])-stage.headroom_gain()*plain.pcm[i];error+=difference*difference;
+    }
+    check(reference_energy>1e-8 && error<reference_energy*1e-10,
+          "physical Helper transform did not preserve composite headroom");
+    const auto last_signal=[](const auto& pcm) {
+        const auto last=std::find_if(pcm.rbegin(),pcm.rend(),[](float x){return std::abs(x)>1e-8F;});
+        return last==pcm.rend()?std::size_t{0}:pcm.size()-static_cast<std::size_t>(last-pcm.rbegin());
+    };
+    check(last_signal(stressed.logical_pcm)>=last_signal(plain.logical_pcm)+logical_rate/4-16,
+          "Helper wrapper discarded the delayed ordinary signal");
+    check(stressed.logical_pcm.size()>plain.logical_pcm.size() && stressed.pcm.size()>plain.pcm.size(),
+          "Helper physical output did not extend for the channel tail");
+    check(std::all_of(stressed.pcm.begin(),stressed.pcm.end(),[](float x){return std::isfinite(x) && std::abs(x)<=1;}),
+          "Helper channel composition exceeded hardware full scale");
+    check(!stressed.reads.empty() && stressed.reads.back().source_end==stressed.logical_pcm.size(),
+          "Helper protected source end omitted the channel tail");
+}
+
 void hardware_helper_envelope(bool fresh) {
     // The explicit timestamp case must leave enough future time to emit the
     // complete fixed38-second lead before its payload origin.
@@ -480,7 +529,7 @@ std::vector<float> record(double,std::uint32_t,const std::string&,std::size_t,st
 int main(int argc,char** argv) {
     try {
         if(argc!=1) {
-            if(argc!=2)throw Error("expected only --placement-high or --placement-gated");
+            if(argc!=2)throw Error("expected one focused Helper selector");
             const auto selector=std::string_view(argv[1]);
             if(selector=="--placement-high") {
                 unavailable_geometry_retains_ordinary();
@@ -488,13 +537,17 @@ int main(int argc,char** argv) {
             } else if(selector=="--placement-gated") {
                 gated_geometry_retains_ordinary();
                 std::cout<<"Gated placement fallback subset passed\n";
-            } else throw Error("expected only --placement-high or --placement-gated");
+            } else if(selector=="--hardware-channel") {
+                hardware_channel_helper_transform();
+                std::cout<<"Helper hardware channel transform passed\n";
+            } else throw Error("expected --placement-high, --placement-gated or --hardware-channel");
             return 0;
         }
         malformed_helper_settings_are_rejected();rate_failure_retries_ordinary();unavailable_geometry_retains_ordinary();gated_geometry_retains_ordinary();emitted_gap_is_never_retried();
         helper_only_cannot_succeed_without_helper();
         explicit_past_declines_at_calibrated_amplitude();
         hardware_helper_envelope(false);hardware_helper_envelope(true);
+        hardware_channel_helper_transform();
         fhss_output_uses_one_gate_allowance();
         std::cout<<"Helper calibrated decline, exact keyed PCM, hardware envelope, protected frontiers, discontinuity and FHSS placement passed\n";
         return 0;

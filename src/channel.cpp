@@ -69,6 +69,117 @@ std::unique_ptr<Perturbation> make_perturbation(const Config& config,const Chann
     return result;
 }
 }
+struct HardwareTestChannel::Impl {
+    Config config;
+    std::unique_ptr<SpreadRay> spread;
+    std::unique_ptr<Perturbation> perturbation;
+    std::array<Complex,1024> input{};
+    std::array<double,16> coefficients{};
+    long double delay=0;
+    std::uint64_t emitted=0,tail=0;
+    double gain=1;
+    bool integer_delay=true;
+    Impl(Config value,ChannelConfig channel):config(value) {
+        validate(config);validate_channel(config,channel);
+        // These fields belong to the real audio devices and physical path.
+        channel.clock_error_ppm=channel.frequency_offset_hz=channel.phase_noise_degrees_per_sqrt_second=0;
+        spread=make_spread(config,channel,config.sample_rate);
+        perturbation=make_perturbation(config,channel,config.sample_rate);
+        if(!spread && !perturbation)return;
+        delay=static_cast<long double>(channel.spread_delay_ms)*config.sample_rate/1000;
+        if(!std::isfinite(delay)||delay>=std::ldexp(1.L,64))throw Error("hardware channel delay exceeds sample coordinate");
+        integer_delay=delay==std::floor(delay);
+        double delayed_bound=1;
+        if(!integer_delay) {
+            const auto fractional=std::ceil(delay)-delay;
+            const auto phase=static_cast<std::size_t>(fractional*256);
+            const auto blend=static_cast<double>(fractional*256-phase);
+            const auto row=[](std::size_t p) {
+                std::array<double,16> result{};double sum=0;
+                for(std::size_t tap=0;tap<16;++tap) {
+                    const auto distance=static_cast<double>(p)/256-static_cast<double>(tap)+7;
+                    const auto window=.42+.5*std::cos(std::numbers::pi*distance/8)+.08*std::cos(std::numbers::pi*distance/4);
+                    result[tap]=sinc(std::numbers::pi*distance)*window;sum+=result[tap];
+                }
+                for(auto& v:result)v/=sum;
+                return result;
+            };
+            const auto first=row(phase),second=row(phase+1);delayed_bound=0;
+            for(std::size_t i=0;i<16;++i) {
+                coefficients[i]=first[i]+blend*(second[i]-first[i]);
+                delayed_bound+=std::abs(coefficients[i]);
+            }
+        }
+        // Static, reproducible headroom preserves the relative modulation.
+        // Each all-pass low band has impulse l1<=1; the remainder has l1<=3.
+        const auto depth=perturbation?channel.perturbation_slow_depth+channel.perturbation_fast_depth:0.;
+        gain=1/((spread?(1+delayed_bound)/std::sqrt(2.):1)*(1+5*depth));
+        long double filter_tail=0;
+        if(perturbation) {
+            const auto cutoff=std::min(helper::placement_band(config).waveform_bandwidth_hz/6,config.sample_rate*.24);
+            const auto k=std::tan(std::numbers::pi*cutoff/config.sample_rate);
+            const auto pole=std::abs((k-1)/(k+1));
+            if(pole>0 && pole<1)filter_tail=std::ceil(std::log(1e-6)/std::log(pole));
+        }
+        const auto ending=std::ceil(delay)+filter_tail;
+        if(!std::isfinite(ending)||ending>=std::ldexp(1.L,64))throw Error("hardware channel tail exceeds sample coordinate");
+        tail=static_cast<std::uint64_t>(ending);
+        audio::trace::record("hardware_channel_test",[&](auto& f) {
+            f.add("injection","playback_data_before_helper");f.add("seed",channel.seed);
+            f.add("headroom_gain",gain);f.add("tail_samples",tail);f.add("sample_rate",config.sample_rate);
+            f.add("delay_ms",channel.spread_delay_ms);f.add("doppler_hz",channel.spread_doppler_hz);
+        });
+    }
+    Complex delayed(StreamingTransmitter& source,std::uint64_t sample,std::stop_token stop)const {
+        const auto position=static_cast<long double>(sample)-delay;
+        const auto total=source.total_samples();
+        if(position<0 || position>=static_cast<long double>(total))return {};
+        const auto center=static_cast<std::uint64_t>(std::floor(position));
+        if(integer_delay)return source.preview_analytic_at(center,stop);
+        Complex value{};
+        for(std::size_t tap=0;tap<16;++tap) {
+            if((tap<7&&center<7-tap)||(tap>=7&&total-center<=tap-7))continue;
+            const auto index=tap<7?center-(7-tap):center+(tap-7);
+            value+=source.preview_analytic_at(index,stop)*coefficients[tap];
+        }
+        return value;
+    }
+};
+HardwareTestChannel::HardwareTestChannel(Config config,ChannelConfig channel):impl_(std::make_unique<Impl>(config,channel)) {
+    static_assert(sizeof(Impl)+sizeof(HardwareTestChannel)+sizeof(SpreadRay)+sizeof(Perturbation)<=workspace_bound);
+}
+HardwareTestChannel::~HardwareTestChannel()=default;
+HardwareTestChannel::HardwareTestChannel(HardwareTestChannel&&)noexcept=default;
+HardwareTestChannel& HardwareTestChannel::operator=(HardwareTestChannel&&)noexcept=default;
+bool HardwareTestChannel::active()const noexcept{return impl_->spread || impl_->perturbation;}
+double HardwareTestChannel::headroom_gain()const noexcept{return impl_->gain;}
+std::uint64_t HardwareTestChannel::tail_samples()const noexcept{return impl_->tail;}
+std::uint64_t HardwareTestChannel::source_end_sample(const StreamingTransmitter& source)const {
+    if(source.total_samples()==0)return 0;
+    // Open-ended sources acquire a finite protected endpoint on request_finish.
+    if(source.total_samples()==UINT64_MAX)return UINT64_MAX;
+    if(source.total_samples()>UINT64_MAX-impl_->tail)throw Error("hardware channel source endpoint exhausted");
+    return source.total_samples()+impl_->tail;
+}
+std::size_t HardwareTestChannel::read(StreamingTransmitter& source,std::span<float> output,std::stop_token stop) {
+    auto& s=*impl_;
+    if(!active())return source.read(output,stop);
+    std::size_t count=0;
+    while(count<output.size() && s.emitted<source_end_sample(source)) {
+        if(stop.stop_requested())throw Error("hardware channel test cancelled");
+        auto size=static_cast<std::size_t>(std::min<std::uint64_t>(std::min(s.input.size(),output.size()-count),source_end_sample(source)-s.emitted));
+        const auto direct=source.finished()?0:source.read_analytic(std::span(s.input).first(size),stop);
+        // A source can discover its protected finite endpoint during this read.
+        size=static_cast<std::size_t>(std::min<std::uint64_t>(size,source_end_sample(source)-s.emitted));
+        for(std::size_t i=0;i<size;++i) {
+            auto value=i<direct?s.input[i]:Complex{};
+            if(s.spread)value=s.spread->process(value,s.delayed(source,s.emitted,stop));
+            if(s.perturbation)value=s.perturbation->process(value);
+            output[count++]=static_cast<float>(s.gain*value.real());++s.emitted;
+        }
+    }
+    return count;
+}
 struct SampledLegacy {
     static constexpr std::size_t taps=16,phases=256,stored_phases=249;
     Config config;

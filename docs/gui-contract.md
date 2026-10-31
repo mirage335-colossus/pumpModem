@@ -798,6 +798,18 @@ TX cancellation does not stop duplex capture. Audio conversion buffers share the
 configured DSP reservation; the additional native capture thread has ordinary OS
 thread overhead outside that reservation.
 
+Select **Simulation → Audio test** to apply the selected Doppler/delay spread
+and additional frequency-selective amplitude modulation to outgoing Robust
+samples before the physical playback device. This is an explicit hardware test
+mode; **No** retains ordinary audio and **Yes** uses the simulated link. For
+a same-instance cable or speaker/microphone loopback, also enable **Live/Duplex**.
+Audio test can also send to a separate receiver without local duplex capture.
+It does not add modeled noise, oscillator errors or link-budget attenuation,
+and does not reapply the effects to captured audio. The mode and selected values
+appear in the GUI status/diagnostics. It exports as
+`--hardware-channel-test yes`; an older imported command without that option
+returns to ordinary hardware mode, as with the established Simulation-off import.
+
 **Clear received** cancels in-flight receiver work, drops queued capture PCM and
 starts fresh acquisition. It clears late/backlog and dropping indicators together
 with received content. It preserves any active transmission and its private-key
