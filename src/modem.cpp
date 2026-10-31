@@ -601,7 +601,9 @@ std::vector<float> simulate(std::span<const float> samples, const Config& c, con
     const auto startup=channel.delay_samples+std::floor((.05L+.25L*uniform())*c.sample_rate)+.05L+.9L*uniform();
     const auto delay=spread_enabled && !samples.empty()?
         static_cast<long double>(channel.spread_delay_ms)*c.sample_rate/1000:0;
-    const auto receiver_count=std::ceil(startup+static_cast<long double>(samples.size())/rate+delay);
+    const auto filter_tail=perturbation_enabled && !samples.empty()?
+        detail::FrequencySelectivePerturbation::decay_samples(c.sample_rate,occupied*rate):0;
+    const auto receiver_count=std::ceil(startup+static_cast<long double>(samples.size())/rate+delay+filter_tail);
     check(receiver_count<=c.memory_limit/sizeof(float),"simulation duration exceeds memory limit");
     const auto count=static_cast<std::size_t>(receiver_count);
     budget(c.memory_limit, {{samples.size(),sizeof(float)}, {count,sizeof(float)}});

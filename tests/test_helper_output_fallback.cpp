@@ -34,8 +34,9 @@ struct Provider {
     bool reject_helper_rate=false,fail_after_pcm=false,accept_buffered_utc=false,timing_reported=false;
     std::optional<long double> accepted_utc;
     std::uint32_t output_rate=0;
+    bool output_gain=false;
     std::vector<std::uint32_t> requested_rates;
-    std::vector<float> pcm,logical_pcm;
+    std::vector<float> pcm,logical_pcm,physical_data;
     std::vector<ReadObservation> reads;
     std::function<live::Snapshot()> snapshot;
 };
@@ -59,8 +60,9 @@ struct Result {
     bool timing_reported=false;
     std::optional<long double> accepted_utc;
     std::uint32_t output_rate=0;
+    bool output_gain=false;
     std::vector<std::uint32_t> requested_rates;
-    std::vector<float> pcm,logical_pcm;
+    std::vector<float> pcm,logical_pcm,physical_data;
     std::vector<ReadObservation> reads;
 };
 Result run(live::Settings value,bool reject_rate=false,bool gap=false,bool helper_only=false,
@@ -93,9 +95,11 @@ Result run(live::Settings value,bool reject_rate=false,bool gap=false,bool helpe
     result.opened=script.opened;result.closed=script.closed;
     result.formats=script.formats;result.source_calls=script.source_calls;
     result.output_rate=script.output_rate;
+    result.output_gain=script.output_gain;
     result.timing_reported=script.timing_reported;result.accepted_utc=script.accepted_utc;
     result.requested_rates=std::move(script.requested_rates);result.pcm=std::move(script.pcm);
     result.logical_pcm=std::move(script.logical_pcm);result.reads=std::move(script.reads);
+    result.physical_data=std::move(script.physical_data);
     return result;
 }
 std::shared_ptr<modem::FhssPlan> fhss_hops() {
@@ -321,14 +325,95 @@ void hardware_channel_helper_transform() {
     };
     check(last_signal(stressed.logical_pcm)>=last_signal(plain.logical_pcm)+logical_rate/4-16,
           "Helper wrapper discarded the delayed ordinary signal");
-    check(stressed.logical_pcm.size()>plain.logical_pcm.size() && stressed.pcm.size()>plain.pcm.size(),
-          "Helper physical output did not extend for the channel tail");
+    auto reference=transfer::binary_transmitter(Bytes{0,0,1},plain_settings.transfer);
+    check(stressed.logical_pcm.size()==std::max<std::uint64_t>(plain.logical_pcm.size(),
+              lead+reference->total_samples()+stage.tail_samples()),
+          "Helper output did not retain the maximum of its original envelope and the DATA channel tail");
     check(std::all_of(stressed.pcm.begin(),stressed.pcm.end(),[](float x){return std::isfinite(x) && std::abs(x)<=1;}),
           "Helper channel composition exceeded hardware full scale");
     check(!stressed.reads.empty() && stressed.reads.back().source_end==stressed.logical_pcm.size(),
           "Helper protected source end omitted the channel tail");
 }
 
+void fhss_hardware_channel_transform() {
+    auto plain_settings=settings();plain_settings.transfer.timestamp=0;
+    plain_settings.transfer.audio_timing_error_seconds=0;
+    plain_settings.transfer.modem.pulse_shaping=true;
+    plain_settings.transfer.modem.spreading_factor=64;
+    const auto hops=fhss_hops();
+    auto stressed_settings=plain_settings;stressed_settings.hardware_channel_test=true;
+    stressed_settings.simulation_spread_delay_ms=80;stressed_settings.simulation_spread_doppler_hz=.1;
+    stressed_settings.simulation_perturbation_slow_depth=stressed_settings.simulation_perturbation_fast_depth=.05;
+    auto options=plain_settings.transfer;
+    options.modem.fake_hopping=transfer::transmit_hopping(*hops,options);
+    const auto rate=options.modem.sample_rate;
+    modem::ChannelConfig effects;effects.spread_delay_ms=80;effects.spread_doppler_hz=.1;
+    effects.perturbation_slow_depth=effects.perturbation_fast_depth=.05;
+    const modem::HardwareTestChannel stage(options.modem,effects);
+    const auto plain=run(plain_settings,false,false,false,hops);
+    const auto stressed=run(stressed_settings,false,false,false,hops);
+    if(plain.snapshot.transmission_failed || stressed.snapshot.transmission_failed)
+        std::cerr<<"FHSS physical channel errors: plain='"<<plain.snapshot.error<<"' stressed='"
+                 <<stressed.snapshot.error<<"'\n";
+    check(!plain.snapshot.transmission_failed && !stressed.snapshot.transmission_failed &&
+          plain.snapshot.transmission_fraction==1 && stressed.snapshot.transmission_fraction==1,
+          "FHSS physical channel test failed to complete");
+    check(plain.output_gain && !stressed.output_gain,
+          "processed DATA retained a second hardware FHSS envelope");
+    check(plain.accepted_utc && stressed.accepted_utc && plain.accepted_utc==stressed.accepted_utc,
+          "FHSS Audio test changed the original transmitter scheduling");
+    const auto lead=38ULL*rate;
+    const auto prefix=modem::training_sample_count(options.modem)+modem::pattern_pulse_padding_samples(options.modem);
+    const auto payload=*plain.accepted_utc+38+static_cast<long double>(prefix)/rate;
+    options.timestamp=static_cast<std::uint64_t>(std::floor(payload));
+    auto phase=static_cast<std::uint64_t>(std::llround((payload-options.timestamp)*rate));
+    if(phase==rate){++options.timestamp;phase=0;}
+    options.modem.stream_phase_samples=static_cast<std::uint32_t>(phase);
+    auto reference=transfer::binary_transmitter(Bytes{0,0,1},options);
+    const auto origin=reference->physical_output_origin();
+    const auto data_begin=reference->physical_payload_begin()-origin;
+    const auto data_end=data_begin+modem::symbol_sample_count(options.modem);
+    check(plain.output_rate==stressed.output_rate && stressed.output_rate>=48000 &&
+          plain.physical_data.size()==plain.pcm.size() && stressed.physical_data.size()==stressed.pcm.size(),
+          "FHSS fixture did not observe the actual physical-rate output transform");
+    double helper_energy=0,helper_error=0;
+    for(std::size_t i=plain.output_rate;i<2ULL*plain.output_rate;++i) {
+        helper_energy+=double(plain.pcm[i])*plain.pcm[i];
+        const auto d=double(stressed.pcm[i])-stage.headroom_gain()*plain.pcm[i];helper_error+=d*d;
+    }
+    check(helper_energy>1e-8 && helper_error<helper_energy*1e-10,
+          "FHSS Helper branch lost its original envelope or common headroom");
+    const auto quiet=options.modem.fake_hopping->power_clock_region_seconds();
+    const auto ramp=options.modem.fake_hopping->ramp_seconds;
+    const auto distance=[](long double time) {
+        auto local=std::fmod(time, .4L);if(local<0)local+=.4L;
+        return std::min(local,.4L-local);
+    };
+    double original_energy=0,echo_energy=0;std::size_t echo_count=0;
+    // This observation is after the production resampler's output gain but
+    // before Helper mixing. A Helper pilot cannot masquerade as a DATA echo.
+    const auto hardware=stressed.output_rate;
+    for(std::size_t i=0;i<std::min(plain.physical_data.size(),stressed.physical_data.size());++i) {
+        const auto source=static_cast<long double>(i)*rate/hardware-lead;
+        if(source<data_begin+.08L*rate+32 || source>=data_end-32)continue;
+        const auto emission=static_cast<long double>(origin% (2ULL*rate))/rate+source/rate;
+        if(distance(emission)<quiet-.004L && distance(emission-.08L)>quiet+ramp+.004L) {
+            ++echo_count;original_energy+=double(plain.physical_data[i])*plain.physical_data[i];
+            echo_energy+=double(stressed.physical_data[i])*stressed.physical_data[i];
+        }
+    }
+    check(echo_count>32 && original_energy<1e-16 && echo_energy>1e-8,
+          "production physical playback re-gated the delayed DATA echo in a transmitter quiet interval");
+    check(stressed.logical_pcm.size()==std::max<std::uint64_t>(plain.logical_pcm.size(),
+              lead+reference->total_samples()+stage.tail_samples()),
+          "FHSS Audio test omitted the complete delayed/filter tail or extended Helper timing");
+    check(stressed.snapshot.transmit_trace.wire_bits==plain.snapshot.transmit_trace.wire_bits &&
+          stressed.snapshot.transmit_trace.generated_bits==plain.snapshot.transmit_trace.generated_bits &&
+          stressed.snapshot.transmission_seconds==plain.snapshot.transmission_seconds,
+          "channel echoes changed original source bits or transmit progress");
+    check(std::all_of(stressed.pcm.begin(),stressed.pcm.end(),[](float x){return std::isfinite(x)&&std::abs(x)<=1;}),
+          "combined FHSS/channel/Helper output exceeded fixed headroom");
+}
 void hardware_helper_envelope(bool fresh) {
     // The explicit timestamp case must leave enough future time to emit the
     // complete fixed38-second lead before its payload origin.
@@ -475,8 +560,12 @@ void playback(std::uint32_t logical,const std::string&,const PlaybackCallback& s
     const auto hardware=48000u;
     script.output_rate=hardware;
     Resampler converter(logical,hardware);
+    script.output_gain=static_cast<bool>(options.playback_output_gain);
     converter.set_output_gain(options.playback_output_gain);
-    converter.set_output_transform(options.playback_output_transform);
+    converter.set_output_transform([&](float sample,long double seconds,std::uint32_t rate) {
+        script.physical_data.push_back(sample);
+        return options.playback_output_transform?options.playback_output_transform(sample,seconds,rate):sample;
+    });
     // Like the existing timed-provider fixture, accept the synthetic UTC
     // presentation target without waiting against the host's unrelated clock.
     // This accepts presentation targets without using a physical device.
@@ -540,6 +629,9 @@ int main(int argc,char** argv) {
             } else if(selector=="--hardware-channel") {
                 hardware_channel_helper_transform();
                 std::cout<<"Helper hardware channel transform passed\n";
+            } else if(selector=="--fhss-channel") {
+                fhss_hardware_channel_transform();
+                std::cout<<"FHSS hardware channel transform passed\n";
             } else throw Error("expected --placement-high, --placement-gated or --hardware-channel");
             return 0;
         }
@@ -548,6 +640,7 @@ int main(int argc,char** argv) {
         explicit_past_declines_at_calibrated_amplitude();
         hardware_helper_envelope(false);hardware_helper_envelope(true);
         hardware_channel_helper_transform();
+        fhss_hardware_channel_transform();
         fhss_output_uses_one_gate_allowance();
         std::cout<<"Helper calibrated decline, exact keyed PCM, hardware envelope, protected frontiers, discontinuity and FHSS placement passed\n";
         return 0;

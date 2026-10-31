@@ -144,10 +144,6 @@ Settings normalized_layout(Settings value) {
     modem::validate_channel(value.transfer.modem, channel_config(value));
     if(value.simulation && value.hardware_channel_test)
         throw Error("Live audio channel test and synthetic simulation are separate modes");
-    if(value.hardware_channel_test &&
-       (value.simulation_spread_delay_ms!=0 || value.simulation_spread_doppler_hz!=0) &&
-       value.transfer.modem.fake_hopping && value.transfer.modem.fake_hopping->smooth_ramps)
-        throw Error("Live audio channel test does not support the post-source FHSS output envelope; turn FHSS off for this test");
     if (value.receive_keys.size() > 128) throw Error("continuous receiver supports at most 128 loaded keys");
     // Explicit epochs retain their requested radius. Automatic admission and
     // pure estimates use the SAME normalized clock/propagation/audio bound.

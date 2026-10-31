@@ -45,7 +45,9 @@ private:
 
 // Use the same polyphase interpolation geometry as the direct streaming ray.
 // preview_analytic_at reconstructs the actual source waveform at a physical
-// source coordinate and does not advance the transmitter.
+// source coordinate and does not advance the transmitter. Its original FHSS
+// envelope is already included at that emission coordinate. No arrival-time
+// transmitter envelope may be applied to the returned delayed ray.
 template<class Source,class CoefficientRow>
 std::complex<double> preview_spread_ray(Source& source,long double position,
                                         std::uint64_t total,CoefficientRow coefficient_row,

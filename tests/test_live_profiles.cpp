@@ -71,6 +71,8 @@ struct CaptureScript {
     std::optional<modem::ChannelConfig> loopback_channel;
     modem::Config loopback_modem;
     bool buffer_playback=false;
+    bool accept_buffered_utc=false;
+    std::optional<long double> playback_utc;
     std::size_t playback_chunk=0;
     std::vector<float> playback_input;
     std::atomic<bool> playback_started{false},playback_source_finished{false},finish_playback{false};
@@ -1247,12 +1249,22 @@ void duplex_spread_loopback() {
     check(off.decoded && spread.decoded && each.decoded,"virtual duplex did not receive all mild channel cases");
 }
 
-void hardware_channel_loopback() {
+void hardware_channel_loopback(bool fhss=false) {
     struct Result {std::vector<float> pcm;bool decoded=false;std::uint32_t rate=0;};
-    const auto run_case=[](bool enabled,double delay,double doppler,double depth,std::size_t chunk) {
-        Configuration geometry{1200.,1500.};
+    const auto run_case=[fhss](bool enabled,double delay,double doppler,double depth,std::size_t chunk) {
+        Configuration geometry{1200.,1500.};geometry.keyed=fhss;
         auto value=settings({55},geometry);value.transfer.automatic_receive_profiles=false;value.full_duplex=true;
         value.transfer.search_seconds=1;value.hardware_channel_test=enabled;
+        std::shared_ptr<const modem::FhssPlan> hopping;
+        if(fhss) {
+            auto plan=std::make_shared<modem::FhssPlan>();plan->channels=2;
+            plan->shifts[1]=30000000;plan->dwell_seconds=.4;
+            value.transfer.modem.pulse_shaping=true;
+            value.transfer.timestamp=0;
+            value.transfer.audio_timing_error_seconds=0;
+            value.transfer.modem.fake_hopping=transfer::transmit_hopping(*plan,value.transfer);
+            hopping=std::move(plan);
+        }
         value.simulation_seed=731;
         value.simulation_spread_delay_ms=delay;value.simulation_spread_doppler_hz=doppler;
         value.simulation_perturbation_slow_depth=depth;value.simulation_perturbation_fast_depth=depth;
@@ -1262,6 +1274,12 @@ void hardware_channel_loopback() {
         value.simulation_frequency_offset_hz=300;value.simulation_phase_noise_degrees_per_sqrt_second=10;
         CaptureScript capture;capture.rate=value.transfer.modem.sample_rate;capture.loopback=true;
         capture.buffer_playback=true;capture.playback_chunk=chunk;capture.format_bytes=16384;capture_script=&capture;
+        capture.accept_buffered_utc=fhss;
+        if(fhss)capture.timing=[&](std::size_t sample) {
+            check(capture.playback_utc.has_value(),"FHSS loopback lost its actual playback UTC origin");
+            return audio::TimePrediction{*capture.playback_utc+static_cast<long double>(sample)/capture.rate,
+                .00001,1./capture.rate,audio::TimingQuality::bounded,1e-9};
+        };
         live::Session session([]{return static_cast<double>(epoch);});session.start(value);
         const auto await=[&](auto predicate,const char* stage) {
             testing::CpuWorkBudget budget(40s,stage);
@@ -1273,7 +1291,7 @@ void hardware_channel_loopback() {
             throw Error(std::string(stage)+" timed out");
         };
         await([&](const auto&){return capture.capture_opened.load()==1;},"hardware channel capture");
-        session.transmit_bits(Bytes{0,0,1});
+        session.transmit_bits(Bytes{0,0,1},false,hopping);
         await([&](const auto&){return capture.playback_source_finished.load();},"hardware channel playback");
         const auto emitted=capture.playback_input;
         check(capture.samples==emitted,"hardware loopback test modified playback PCM before capture");
@@ -1408,12 +1426,37 @@ void capture(std::uint32_t rate,const std::string& device,const CaptureCallback&
         }
         return;
     }
-    capture(rate,device,callback,stop,std::move(format));
+    if(capture_script && capture_script->accept_buffered_utc) {
+        auto& script=*capture_script;
+        if(options.timing_status)options.timing_status({options.follow_system_clock,.00001,.00001,
+            "fixture buffered loopback UTC accepted"});
+        capture(rate,device,[&](std::span<const float> samples) {
+            if(script.timing && options.capture_timing)options.capture_timing(script.timing(script.delivered.load()));
+            return callback(samples);
+        },stop,std::move(format));
+    } else capture(rate,device,callback,stop,std::move(format));
 }
 void playback(std::uint32_t rate,const std::string& device,const PlaybackCallback& callback,
               std::stop_token stop,StreamFormatCallback format,ChannelMode channels,Options options) {
     validate_options(options);
-    playback(rate,device,callback,stop,std::move(format),channels);
+    const auto buffered=capture_script && capture_script->accept_buffered_utc;
+    detail::UtcPlaybackScope schedule(buffered);
+    if(buffered && options.timing_status)options.timing_status({options.follow_system_clock,.00001,.00001,
+        "fixture buffered playback UTC accepted"});
+    auto observed_format=[&](const StreamFormat& stream) {
+        if(format)format(stream);
+        if(buffered)capture_script->playback_utc=detail::utc_playback_epoch;
+    };
+    std::uint64_t frame=0;
+    playback(rate,device,[&](std::span<float> output) {
+        const auto count=callback(output);
+        for(std::size_t i=0;i<count;++i,++frame) {
+            const auto seconds=static_cast<long double>(frame)/rate;
+            if(options.playback_output_gain)output[i]*=options.playback_output_gain(seconds);
+            if(options.playback_output_transform)output[i]=options.playback_output_transform(output[i],seconds,rate);
+        }
+        return count;
+    },stop,observed_format,channels);
 }
 std::vector<Device> devices() { return {{"controlled profile capture", "deterministic test input"}}; }
 void capture(std::uint32_t rate, const std::string& device, const CaptureCallback& on_chunk,
@@ -1659,9 +1702,10 @@ int main(int argc, char** argv) {
         const std::string suite = argc > 1 ? argv[1] : "all";
         std::optional<audio::trace::Scope> calendar_trace;
         if((suite=="hop_calendar" || suite=="public_amplitude") && argc>2)calendar_trace.emplace(argv[2]);
-        check(suite == "public_amplitude" || suite == "retired" || suite == "all" || suite == "hop_calendar" || suite == "exact_source" || suite == "original" || suite == "matrix" || suite == "long" || suite == "long_fft" || suite == "long_seeds" || suite == "interval_queue" || suite == "monitor" || suite == "health" || suite == "frontier_failure" || suite == "capture_time" || suite == "arrival_time" || suite == "arrival_time_baseline" || suite == "backlog" || suite == "clear" || suite == "duplex" || suite == "duplex_spread" || suite == "hardware_channel" || suite == "arrival_fallback" || suite == "tx_failure",
+        check(suite == "public_amplitude" || suite == "retired" || suite == "all" || suite == "hop_calendar" || suite == "exact_source" || suite == "original" || suite == "matrix" || suite == "long" || suite == "long_fft" || suite == "long_seeds" || suite == "interval_queue" || suite == "monitor" || suite == "health" || suite == "frontier_failure" || suite == "capture_time" || suite == "arrival_time" || suite == "arrival_time_baseline" || suite == "backlog" || suite == "clear" || suite == "duplex" || suite == "duplex_spread" || suite == "hardware_channel" || suite == "hardware_fhss" || suite == "arrival_fallback" || suite == "tx_failure",
               "unknown profile test suite");
         if(suite=="hardware_channel") {context="production hardware channel";hardware_channel_loopback();return 0;}
+        if(suite=="hardware_fhss") {context="production FHSS channel";hardware_channel_loopback(true);return 0;}
         if(suite=="duplex_spread") {context="modeled virtual duplex";duplex_spread_loopback();return 0;}
         if(suite=="all" || suite=="public_amplitude") {context="rolling public amplitude arrivals";public_amplitude_rolling_arrivals();if(suite=="public_amplitude")return 0;}
         if(suite=="all" || suite=="retired") {

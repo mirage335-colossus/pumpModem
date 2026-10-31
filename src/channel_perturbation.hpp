@@ -1,4 +1,6 @@
 #pragma once
+#include "datapump/types.hpp"
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <complex>
@@ -31,6 +33,20 @@ class FrequencySelectivePerturbation {
         x=(x^(x>>27))*0x94d049bb133111ebULL;return x^(x>>31);
     }
 public:
+    // A finite zero-input drain after the final delayed DATA sample. The
+    // filter is IIR, so this bounds relative pole-state decay rather than
+    // declaring an absolute acoustic silence threshold. Keep the same policy
+    // in sampled simulation, bulk PCM and physical Audio test playback.
+    static std::uint64_t decay_samples(double sample_rate,double bandwidth_hz) {
+        const auto cutoff=std::min(bandwidth_hz/6,sample_rate*.24);
+        const auto k=std::tan(std::numbers::pi*cutoff/sample_rate);
+        const auto pole=std::abs((k-1)/(k+1));
+        if(!(pole>=0 && pole<1))throw Error("frequency-selective filter has no finite decay at this sample clock");
+        const auto count=pole>0?std::ceil(std::log(1e-6L)/std::log(static_cast<long double>(pole))):0.L;
+        if(!std::isfinite(count) || count>=std::ldexp(1.L,64))
+            throw Error("frequency-selective filter tail exceeds sample coordinate");
+        return static_cast<std::uint64_t>(count);
+    }
     std::array<std::array<double,2>,3> initial_phases{};
     std::array<double,2> rates_hz{};
     std::array<double,3> band_centers_hz{};

@@ -2,6 +2,7 @@
 #include "../src/channel_perturbation.hpp"
 #include "datapump/stream_codec.hpp"
 #include "datapump/transfer.hpp"
+#include "datapump/symbol_schedule.hpp"
 #include "resource_test_margin.hpp"
 #include <algorithm>
 #include <array>
@@ -348,8 +349,8 @@ void bulk_spread_and_perturbation() {
     const auto modulated=m::simulate(source,cfg,both);
     require(spread_pcm==m::simulate(source,cfg,spread) && modulated==m::simulate(source,cfg,both),
             "bulk propagation or modulation was not reproducible");
-    require(spread_pcm.size()==reference.size()+cfg.sample_rate/5 && modulated.size()==spread_pcm.size(),
-            "bulk spread did not retain the delayed ray's complete tail");
+    require(spread_pcm.size()==reference.size()+cfg.sample_rate/5 && modulated.size()>spread_pcm.size(),
+            "bulk channel did not retain both the delayed ray and modulation-filter tail");
     double tail_energy=0,spread_difference=0,modulation_difference=0;
     for(std::size_t i=0;i<reference.size();++i) {
         const auto a=static_cast<double>(spread_pcm[i])-reference[i];
@@ -424,5 +425,113 @@ void hardware_test_channel() {
         require(!before || emitted==0,"hardware stop before output created a delayed burst");
     }
 }
+void fhss_channel_order() {
+    auto cfg=config();cfg.carrier_hz=2000;cfg.bandwidth_hz=200;
+    cfg.scramble=true; // FHSS uses the production private shaped waveform.
+    cfg.spreading_factor=64;cfg.stream_epoch=1800000001;cfg.stream_phase_samples=137;
+    cfg.data_key.emplace(Bytes(32,0x65));
+    m::FhssPlan hops;hops.channels=2;hops.shifts[1]=30000000;hops.dwell_seconds=.4;
+    hops.clock_error_seconds=.01;hops.peer_clock_error_seconds=.01;hops.audio_error_seconds=0;
+    cfg.fake_hopping=m::resolve_fhss_power(hops,cfg);
+    require(cfg.fake_hopping->smooth_ramps,"FHSS channel fixture did not select smooth transmitter ramps");
+    const m::RawBits bits{{0,0,1}};
+    m::StreamingTransmitter transmitter(bits,cfg);
+    const auto total=transmitter.total_samples();
+    const auto origin=transmitter.physical_output_origin();
+    const auto data_begin=transmitter.physical_payload_begin()-origin;
+    const auto data_end=data_begin+m::symbol_sample_count(cfg);
+    std::vector<float> sent(total);transmitter.read(sent);
+    // Independent UTC distance oracle: this is the TRANSMITTER guard, not a
+    // requirement that a propagated echo vanish at its arrival coordinate.
+    const auto distance=[&](long double sample) {
+        const auto local=std::fmod(static_cast<long double>(origin% (2ULL*cfg.sample_rate))+sample,
+                                  static_cast<long double>(cfg.sample_rate)*.4L);
+        return std::min(local,static_cast<long double>(cfg.sample_rate)*.4L-local);
+    };
+    const auto quiet=std::ceil(cfg.sample_rate*cfg.fake_hopping->power_clock_region_seconds());
+    std::size_t guarded=0;
+    for(std::size_t i=0;i<sent.size();++i)if(distance(i)<quiet-2) {
+        ++guarded;require(sent[i]==0,"original transmitter violated its FHSS quiet guard");
+    }
+    require(guarded>100,"FHSS transmitter guard oracle covered no samples");
+    auto model=ideal();model.spread_delay_ms=80;model.spread_doppler_hz=.1;
+    const auto delay=static_cast<std::uint64_t>(.08*cfg.sample_rate);
+    const auto collect=[&](const m::ChannelConfig& effect,std::size_t block) {
+        m::StreamingTransmitter source(bits,cfg);m::HardwareTestChannel channel(cfg,effect);
+        std::vector<float> output,chunk(block);
+        while(const auto count=channel.read(source,chunk))output.insert(output.end(),chunk.begin(),chunk.begin()+count);
+        require(source.samples_emitted()==total,"channel echo advanced the original transmitter source");
+        require(output.size()==channel.source_end_sample(source),"FHSS channel tail was truncated");
+        return output;
+    };
+    auto zero=ideal();zero.perturbation_slow_depth=zero.perturbation_fast_depth=.65;
+    // Exact bypass compares the same source read partition: the established
+    // source's floating carrier reconstruction need not be bit-identical
+    // between a whole-wave read and short callback reads.
+    m::StreamingTransmitter bypass_reference(bits,cfg);std::vector<float> bypass_pcm;
+    std::array<float,31> bypass_block{};
+    while(const auto count=bypass_reference.read(bypass_block))
+        bypass_pcm.insert(bypass_pcm.end(),bypass_block.begin(),bypass_block.begin()+count);
+    require(collect(zero,31)==bypass_pcm,"FHSS zero-reference bypass changed transmitter samples");
+    const auto spread=collect(model,4096);
+    auto each=model;each.perturbation_slow_depth=each.perturbation_fast_depth=.25;
+    const auto modulated=collect(each,4096);
+    const auto partitioned=collect(each,17);
+    require(partitioned==collect(each,17),"FHSS channel did not reproduce its seeded waveform");
+    require(modulated.size()==partitioned.size(),"FHSS channel partition changed output extent");
+    double partition_error=0,peak=0;
+    for(std::size_t i=0;i<modulated.size();++i) {
+        partition_error=std::max(partition_error,std::abs(double(modulated[i])-partitioned[i]));
+        peak=std::max(peak,std::abs(double(modulated[i])));
+    }
+    // The private source reconstructs its carrier per read; double roundoff
+    // can cross a final float rounding boundary. Allow only that precision,
+    // not a discontinuity or a restarted modulation/filter state.
+    require(partition_error<=std::numeric_limits<float>::epsilon()*peak,
+            "FHSS channel state reset at a block or hop boundary");
+    double delayed_data_energy=0,history_energy=0,modulated_energy=0;
+    std::size_t echoes=0;
+    std::vector<std::size_t> echo_samples;
+    for(std::size_t i=data_begin+delay+16;i<data_end;++i) {
+        if(distance(i)<quiet-8 && distance(i-delay)>quiet+cfg.sample_rate*.01+8) {
+            ++echoes;echo_samples.push_back(i);
+            require(sent[i]==0,"echo window was not in original transmitter silence");
+            history_energy+=double(sent[i-delay])*sent[i-delay];
+            delayed_data_energy+=double(spread[i])*spread[i];
+            modulated_energy+=double(modulated[i])*modulated[i];
+        }
+    }
+    require(echoes>16 && history_energy>1e-6,"FHSS delayed DATA oracle has no populated boundary window");
+    require(delayed_data_energy>1e-6 && modulated_energy>1e-6,
+            "a second FHSS gate erased delayed DATA in the transmitter quiet interval");
+    // The seeded sampled simulator has fractional startup/carrier phase but
+    // must retain the same emission-time gate on each propagation ray.
+    m::SampledSimulationChannel normal(cfg,ideal()),simulated(cfg,model),perturbed(cfg,each);
+    m::StreamingTransmitter plain_source(bits,cfg),spread_source(bits,cfg),each_source(bits,cfg);
+    const auto plain=capture(normal,plain_source,137),sim=capture(simulated,spread_source,137),amp=capture(perturbed,each_source,137);
+    require(amp.size()>sim.size() && sim.size()>=plain.size()+delay,
+            "sampled FHSS channel omitted delayed or modulation-filter output tail");
+    double plain_energy=0,sim_energy=0,amp_energy=0;
+    for(const auto i:echo_samples) {
+        const auto receiver=static_cast<std::size_t>(std::llround(normal.startup_offset_samples()+i));
+        require(receiver<plain.size() && receiver<sim.size() && receiver<amp.size(),"sampled FHSS echo window missing");
+        plain_energy+=double(plain[receiver])*plain[receiver];
+        sim_energy+=double(sim[receiver])*sim[receiver];amp_energy+=double(amp[receiver])*amp[receiver];
+    }
+    require(plain_energy<1e-16 && sim_energy>1e-6 && amp_energy>1e-6,
+            "sampled simulation suppressed a delayed DATA echo with the current hop gate");
+    const auto bulk_plain=m::simulate(sent,cfg,ideal()),bulk_spread=m::simulate(sent,cfg,model),bulk_amp=m::simulate(sent,cfg,each);
+    double bulk_before=0,bulk_echo=0,bulk_modulated=0;
+    for(const auto i:echo_samples) {
+        const auto receiver=static_cast<std::size_t>(std::llround(normal.startup_offset_samples()+i));
+        bulk_before+=double(bulk_plain[receiver])*bulk_plain[receiver];
+        bulk_echo+=double(bulk_spread[receiver])*bulk_spread[receiver];
+        bulk_modulated+=double(bulk_amp[receiver])*bulk_amp[receiver];
+    }
+    // The bulk Hilbert representation has finite-record leakage, so compare
+    // the channel echo to that independently retained source-only floor.
+    require(bulk_echo>1e-6 && bulk_echo>100*bulk_before && bulk_modulated>1e-6,
+            "bulk PCM channel re-gated the delayed FHSS DATA echo");
 }
-int main(){try{clock_and_carrier();long_coherence();phase_diffusion();pcm_clock();analytic_source_matches_hardware_pcm();sampled_startup_and_carrier();sampled_chunking_and_idle();stream_and_preview();preview_interpolation_edges();graceful_endpoint();selective_perturbation();spread_helper_tail();bulk_spread_and_perturbation();hardware_test_channel();invalid();std::cout<<"channel tests passed\n";return 0;}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}
+}
+int main(int argc,char** argv){try{if(argc==2 && std::string_view(argv[1])=="--fhss-channel") {fhss_channel_order();std::cout<<"FHSS channel ordering passed\n";return 0;}require(argc==1,"unknown channel test selector");clock_and_carrier();long_coherence();phase_diffusion();pcm_clock();analytic_source_matches_hardware_pcm();sampled_startup_and_carrier();sampled_chunking_and_idle();stream_and_preview();preview_interpolation_edges();graceful_endpoint();selective_perturbation();spread_helper_tail();bulk_spread_and_perturbation();hardware_test_channel();fhss_channel_order();invalid();std::cout<<"channel tests passed\n";return 0;}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

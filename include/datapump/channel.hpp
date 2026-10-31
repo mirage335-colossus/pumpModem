@@ -10,6 +10,9 @@ namespace datapump::modem {
 // Deliberate physical-audio test stage. Uses only propagation spread and the
 // additional per-band amplitude modulation, at the original source clock.
 // No synthetic noise, startup, oscillator offset or receiver data is supplied.
+// StreamingTransmitter owns the emitted FHSS ramps/gaps. Both direct reads and
+// delayed previews consume that same shaped waveform; never gate this class's
+// output by the current transmitter hop, since echoes may outlast its guard.
 class HardwareTestChannel {
 public:
     static constexpr std::size_t workspace_bound=24*1024;

@@ -31,6 +31,15 @@ double preview_normal(std::uint64_t seed,std::uint64_t sample) {
 namespace {
 using Perturbation=detail::FrequencySelectivePerturbation;
 using SpreadRay=detail::SpreadRay;
+long double data_channel_tail_samples(const Config& config,const ChannelConfig& channel,double sample_rate) {
+    const bool spread=channel.spread_delay_ms!=0 || channel.spread_doppler_hz!=0;
+    const bool modulation=channel.spread_doppler_hz!=0 &&
+        (channel.perturbation_slow_depth!=0 || channel.perturbation_fast_depth!=0);
+    if(!spread && !modulation)return 0;
+    const auto bandwidth=helper::placement_band(config).waveform_bandwidth_hz*(1+channel.clock_error_ppm*1e-6);
+    return (spread?static_cast<long double>(channel.spread_delay_ms)*sample_rate/1000:0)+
+        (modulation?Perturbation::decay_samples(sample_rate,bandwidth):0);
+}
 std::unique_ptr<SpreadRay> make_spread(const Config& config,const ChannelConfig& channel,double sample_rate) {
     if(channel.spread_doppler_hz==0 && channel.spread_delay_ms==0)return {};
     const auto clock=1+channel.clock_error_ppm*1e-6;
@@ -46,6 +55,7 @@ std::unique_ptr<SpreadRay> make_spread(const Config& config,const ChannelConfig&
     audio::trace::record("simulation_two_ray_spread",[&](auto& f) {
         f.add("seed",channel.seed);f.add("delay_ms",channel.spread_delay_ms);
         f.add("doppler_hz",result->doppler_hz());f.add("phase_rad",result->phase_radians());
+        f.add("input","transmitter_shaped_data");
     });
     return result;
 }
@@ -114,13 +124,8 @@ struct HardwareTestChannel::Impl {
         // Each all-pass low band has impulse l1<=1; the remainder has l1<=3.
         const auto depth=perturbation?channel.perturbation_slow_depth+channel.perturbation_fast_depth:0.;
         gain=1/((spread?(1+delayed_bound)/std::sqrt(2.):1)*(1+5*depth));
-        long double filter_tail=0;
-        if(perturbation) {
-            const auto cutoff=std::min(helper::placement_band(config).waveform_bandwidth_hz/6,config.sample_rate*.24);
-            const auto k=std::tan(std::numbers::pi*cutoff/config.sample_rate);
-            const auto pole=std::abs((k-1)/(k+1));
-            if(pole>0 && pole<1)filter_tail=std::ceil(std::log(1e-6)/std::log(pole));
-        }
+        const auto filter_tail=perturbation?Perturbation::decay_samples(config.sample_rate,
+            helper::placement_band(config).waveform_bandwidth_hz):0;
         const auto ending=std::ceil(delay)+filter_tail;
         if(!std::isfinite(ending)||ending>=std::ldexp(1.L,64))throw Error("hardware channel tail exceeds sample coordinate");
         tail=static_cast<std::uint64_t>(ending);
@@ -172,6 +177,9 @@ std::size_t HardwareTestChannel::read(StreamingTransmitter& source,std::span<flo
         // A source can discover its protected finite endpoint during this read.
         size=static_cast<std::size_t>(std::min<std::uint64_t>(size,source_end_sample(source)-s.emitted));
         for(std::size_t i=0;i<size;++i) {
+            // read_analytic and delayed preview share the transmitter's
+            // original FHSS ramps/quiet intervals at each emission sample.
+            // There is deliberately no current-hop gate on channel output.
             auto value=i<direct?s.input[i]:Complex{};
             if(s.spread)value=s.spread->process(value,s.delayed(source,s.emitted,stop));
             if(s.perturbation)value=s.perturbation->process(value);
@@ -591,7 +599,7 @@ struct SampledPhysical {
         next_end=helper::protected_endpoint(next_epoch,next_start,next_end);
         const auto duration=std::max(next_startup+(next_end-next_origin)*config.sample_rate/rate,
             next_startup+static_cast<long double>(next_total)/rate+
-                (spread?static_cast<long double>(channel.spread_delay_ms)*config.sample_rate/1000:0));
+                data_channel_tail_samples(config,channel,physical_rate)/factor);
         if(!std::isfinite(next_startup)||next_startup<0||origin>=limit||
            !std::isfinite(duration)||duration<0||
            std::ceil(duration)+group_delay()+1>=static_cast<long double>(limit-origin))
@@ -810,7 +818,7 @@ struct SampledPhysical {
         const auto payload_end=startup+static_cast<long double>(total)/rate;
         const auto helper_end_sample=startup+(helper_end-helper_origin)*config.sample_rate/rate;
         const auto end=std::max(helper_end_sample,payload_end+
-            (spread?channel.spread_delay_ms*config.sample_rate/1000:0));
+            data_channel_tail_samples(config,channel,physical_rate)/factor);
         const bool reach_payload_end=static_cast<long double>(received-origin)<payload_end;
         std::size_t written=0;
         while(written<output.size()) {
@@ -1019,7 +1027,7 @@ std::size_t SampledSimulationChannel::read(StreamingTransmitter& source,std::spa
             s.helper_generator.emplace(s.helper_options,*s.helper_plan,origin/s.config.sample_rate,false,impl_->time_key);
         }
         const auto duration=std::ceil(s.startup+static_cast<long double>(s.total)/s.rate+
-            (s.spread?static_cast<long double>(s.channel.spread_delay_ms)*s.config.sample_rate/1000:0));
+            data_channel_tail_samples(s.config,s.channel,s.config.sample_rate));
         if(duration>=static_cast<long double>(std::numeric_limits<std::uint64_t>::max()-s.origin))
             throw Error("sampled simulation duration exceeds the receiver counter");
     } else if(s.source!=&source || source.samples_emitted()!=s.buffer_start+s.buffer_count)
@@ -1031,12 +1039,13 @@ std::size_t SampledSimulationChannel::read(StreamingTransmitter& source,std::spa
         throw Error("sampled simulation source endpoint changed incompatibly");
     s.total=endpoint;
     if(!s.total){s.complete=true;return 0;}
+    const auto tail=data_channel_tail_samples(s.config,s.channel,s.config.sample_rate)*s.rate;
     std::size_t written=0;
     while(written<output.size()) {
         if((written&4095U)==0 && stop.stop_requested())throw Error("modem operation cancelled");
         const auto position=(static_cast<long double>(s.received-s.origin)-s.startup)*s.rate;
         const auto delay=s.spread?s.channel.spread_delay_ms*s.config.sample_rate*s.rate/1000:0;
-        if(position>=s.total+delay){s.complete=true;break;}
+        if(position>=s.total+tail){s.complete=true;break;}
         auto value=position<0 || position>=s.total?Complex{}:s.interpolate(source,position,stop);
         if(s.spread) {
             const auto delayed=delay==0?value:detail::preview_spread_ray(source,position-delay,s.total,[&](std::size_t phase) {

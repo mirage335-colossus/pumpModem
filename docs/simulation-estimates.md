@@ -143,13 +143,36 @@ This lowers the outgoing audio level, including Helper when enabled, while
 preserving the nominal Helper/DATA power ratio. The trace records the gain, injection
 location and retained tail alongside the seeded modulation parameters. The
 ordinary playback volume control remains applicable.
-Playback retains the selected delayed tail and, when the amplitude filter bank
+Sampled simulation, bulk PCM and Audio test retain the selected delayed tail and, when the amplitude filter bank
 is enabled, extra zero-input samples for its pole decay to fall by a factor of
 one million. This is a relative filter-state decay criterion, not an absolute
 audio silence threshold. Receiver completion still requires scored absence.
-Active Audio test effects are unavailable with smooth-ramp FHSS because a
-delayed/filtered waveform would invalidate that path's output guard. Selecting
-None/Off bypasses the channel stage and retains ordinary FHSS behavior.
+
+With smooth-ramp FHSS, the channel input is the existing transmitter-shaped
+Robust DATA waveform, including its original ramps and quiet intervals. Both
+the direct and delayed rays use the envelope at the sample's **emission** time.
+Propagation is followed by the additional frequency-selective modulation;
+there is no arrival-time hop gate on this channel output. Consequently, echoes
+and filter decay can extend across a hop boundary into an original transmitter
+quiet interval. This does not change source bits, source timing or the hop schedule.
+Active Audio test bypasses the later hardware post-resampling quiet enforcement,
+which would otherwise erase that energy. The complete None/Off bypass retains
+the historical hardware path exactly, including its additional device-side
+guard. Bulk PCM simulation treats its input as the already-generated transmitted
+waveform and does not insert another FHSS envelope.
+
+These propagation and additional modulation stages apply to **Robust DATA**,
+not Helper. Helper retains its own transmitter envelope and original endpoint
+and is mixed separately. Playback drains until both the original Helper output
+and the DATA channel tail are finished; DATA echoes do not extend Helper's own
+transmission. The fixed common Audio test headroom still scales both branches.
+
+Fake FHSS here models an audio envelope and keyed hop metadata, not physical RF
+retuning. No receive tuner/selectivity or multipath equalizer is added. Existing
+receiver timing/template support can make cross-hop echoes unusable or harmful;
+a correct channel waveform does not promise decoding. A separately enabled
+laboratory RF-retune/settling model can still discard unavailable receiver
+samples. It is not activated by selecting ordinary GUI Fake FHSS.
 
 **Additional frequency-selective perturbation** defaults to Off for None and
 Sub-9 kHz, and Each 65% for HF, Aurora and EME. Selecting a new spread preset

@@ -243,6 +243,15 @@ difference. Their configured values, launch exports, audio frequency
 and radio tuning stay fixed; the configured displays return after completion
 or cancellation. No access protocol or actual RF hopping is implemented.
 
+For simulated propagation and **Simulation → Audio test**, the unchanged
+smooth-ramp source is followed by Doppler/delay spread and the optional
+frequency-selective amplitude modulation. The channel output may contain
+delayed DATA during an original transmitter quiet interval; the transmitter
+guard applies before propagation and is not reapplied afterward. Helper uses
+its separate original envelope. These effects add neither RF retuning nor an
+echo equalizer; existing receiver templates may not recover cross-hop echoes.
+See [channel ordering and limits](simulation-estimates.md#propagation-spread-and-additional-perturbation).
+
 ### Fresh cycle addresses and bounded work
 
 For hop `h` and channel count `N`, cycle `c = floor(h/N)` owns byte region

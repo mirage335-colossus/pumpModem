@@ -14180,11 +14180,12 @@ struct Session::Impl {
                     std::unique_ptr<modem::HardwareTestChannel> hardware_channel;
                     if(value.hardware_channel_test && !wave->noise && !wave->helper_only) {
                         hardware_channel=std::make_unique<modem::HardwareTestChannel>(transmit_modem,channel_config(value));
-                        if(hardware_channel->active() && transmit_modem.fake_hopping && transmit_modem.fake_hopping->smooth_ramps)
-                            throw Error("Live audio channel test does not support the post-source FHSS output envelope; turn FHSS off for this test");
                         audio::trace::record("hardware_channel_test_transmission",[&](auto& f) {
                             f.add("transmission_id",wave->serial);f.add("active",hardware_channel->active());
                             f.add("headroom_gain",hardware_channel->headroom_gain());
+                            f.add("fhss_source_shaped",transmit_modem.fake_hopping && transmit_modem.fake_hopping->smooth_ramps);
+                            f.add("post_channel_fhss_gate",!hardware_channel->active() &&
+                                transmit_modem.fake_hopping && transmit_modem.fake_hopping->smooth_ramps);
                         });
                     }
                     bool helper_transmit=helper::effective_helper_power(value.helper)>0&&wave->helper_envelope_available,output_started=false;
@@ -14214,7 +14215,9 @@ struct Session::Impl {
                     };
                     const auto helper_source_end=[&]() -> std::optional<std::uint64_t> {
                         if(!wave->transmitter || (wave->noise&&!wave->graceful))return {};
-                        const auto total=hardware_channel?hardware_channel->source_end_sample(*wave->transmitter):wave->transmitter->total_samples();
+                        // Helper is an independent transmitted branch. DATA
+                        // echoes must not extend its original source envelope.
+                        const auto total=wave->transmitter->total_samples();
                         const auto wrapped=add_helper_frames(wave->hardware_helper_leading_samples,total);
                         if(!helper_transmit && !wave->hardware_helper_leading_samples && !wave->hardware_helper_trailing_samples)return total;
                         const auto origin=helper_origin();
@@ -14226,6 +14229,13 @@ struct Session::Impl {
                         const auto frames=std::ceil((end-origin+helper_lead_seconds())*wave->modem.sample_rate);
                         if(!std::isfinite(frames)||frames<0||frames>=std::ldexp(1.L,64))throw Error("Helper Carrier stop coordinate exhausted");
                         return std::max(wrapped,static_cast<std::uint64_t>(frames));
+                    };
+                    const auto playback_source_end=[&]() -> std::optional<std::uint64_t> {
+                        const auto helper_end=helper_source_end();
+                        if(!helper_end || !hardware_channel)return helper_end;
+                        const auto data_end=add_helper_frames(wave->hardware_helper_leading_samples,
+                            hardware_channel->source_end_sample(*wave->transmitter));
+                        return std::max(*helper_end,data_end);
                     };
                     channels=wave->output_channels;
                     output_options={wave->output_gain,value.exclusive};
@@ -14257,6 +14267,10 @@ struct Session::Impl {
                             const auto origin=helper_origin();
                             const auto start=origin-helper_lead_seconds();
                             const auto end=helper_source_end();
+                            // DATA arrives here after its source FHSS envelope,
+                            // propagation and additional modulation. Helper has
+                            // its own transmit-time envelope in Generator and
+                            // is not passed through that DATA-only channel.
                             // The static test headroom applies to the composite
                             // so it preserves the nominal Helper/DATA ratio.
                             const auto headroom=hardware_channel?hardware_channel->headroom_gain():1.;
@@ -14309,9 +14323,17 @@ struct Session::Impl {
                     output_options.timing_source_end=[&]() -> std::optional<std::uint64_t> {
                         // Identical termination accounting for message/noise.
                         // No source callbacks or keystream addresses advance.
-                        return helper_source_end();
+                        return playback_source_end();
                     };
-                    if(transmit_modem.fake_hopping && transmit_modem.fake_hopping->smooth_ramps) {
+                    // Ordinary playback keeps its final-rate transmitter mask
+                    // after resampling. An active Audio test instead carries
+                    // channel output: StreamingTransmitter already shaped both
+                    // the direct and regenerated delayed DATA at their emission
+                    // coordinates. Applying the mask here would erase echoes
+                    // in the transmitter's quiet intervals. Helper composition
+                    // follows this callback and retains its own source envelope.
+                    if(transmit_modem.fake_hopping && transmit_modem.fake_hopping->smooth_ramps &&
+                       !(hardware_channel && hardware_channel->active())) {
                         const modem::FhssPowerShape shape(*transmit_modem.fake_hopping,transmit_modem.sample_rate,
                             modem::pattern_pulse_padding_samples(transmit_modem),modem::symbol_sample_count(transmit_modem));
                         output_options.playback_output_gain=[&,shape](long double seconds) {
@@ -14414,7 +14436,7 @@ struct Session::Impl {
                         }
                         if(wave->transmitter->finished() && (helper_transmit ||
                            wave->hardware_helper_leading_samples || wave->hardware_helper_trailing_samples)) {
-                            if(const auto end=helper_source_end();end && helper_output_frames<*end) {
+                            if(const auto end=playback_source_end();end && helper_output_frames<*end) {
                                 const auto padding=static_cast<std::size_t>(std::min<std::uint64_t>(output.size()-count,*end-helper_output_frames));
                                 std::fill_n(output.begin()+static_cast<std::ptrdiff_t>(count),padding,0.f);
                                 count+=padding;helper_output_frames=add_helper_frames(helper_output_frames,padding);

@@ -810,6 +810,14 @@ appear in the GUI status/diagnostics. It exports as
 `--hardware-channel-test yes`; an older imported command without that option
 returns to ordinary hardware mode, as with the established Simulation-off import.
 
+Audio test supports smooth-ramp FHSS. Its DATA source already contains the
+transmitter ramps and quiet intervals; propagation and additional amplitude
+modulation follow that source shaping. No later playback gate suppresses
+channel echoes in a transmitter quiet interval. Helper keeps its independent
+transmitter envelope and endpoint. These are audio-channel tests, not physical
+RF retuning; existing receive-hop/template limitations remain. See
+[simulation channel ordering](simulation-estimates.md#propagation-spread-and-additional-perturbation).
+
 **Clear received** cancels in-flight receiver work, drops queued capture PCM and
 starts fresh acquisition. It clears late/backlog and dropping indicators together
 with received content. It preserves any active transmission and its private-key
