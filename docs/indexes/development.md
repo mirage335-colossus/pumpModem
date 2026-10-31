@@ -15,6 +15,7 @@
 | [Release guide](../releases.md) | Publication, exact source/binary assurance, reusable dependency recipes and certification policy. |
 | [Validation ledger](../validation.md) | Current qualification, coverage limits and links to historical evidence. |
 | [Development contract](../development.md) | Compatibility and preservation tests required by implementation changes. |
+| [Simulation channel integration](../channel-models.md) | Required starting point for new Robust sampled simulations: Doppler/delay spread, additional frequency-selective amplitude modulation, implementation APIs and focused checks. |
 | [Contributor requirements](../../AGENTS.md) | Repository instructions and testing stages. |
 
 ## Dependencies and provenance

@@ -817,7 +817,7 @@ modulation follow that source shaping. No later playback gate suppresses
 channel echoes in a transmitter quiet interval. Helper keeps its independent
 transmitter envelope and endpoint. These are audio-channel tests, not physical
 RF retuning; existing receive-hop/template limitations remain. See
-[simulation channel ordering](simulation-estimates.md#propagation-spread-and-additional-perturbation).
+[simulation channel integration and ordering](channel-models.md).
 
 **Clear received** cancels in-flight receiver work, drops queued capture PCM and
 starts fresh acquisition. It clears late/backlog and dropping indicators together

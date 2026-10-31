@@ -107,94 +107,15 @@ acquisition coverage without multiplying the simulated impairment.
 
 ## Propagation spread and additional perturbation
 
-The **Doppler/delay spread** selector is separate from the static radial
-Doppler calculator. The supplied presets are illustrative simulation inputs:
-
-| Preset | Delay | Doppler |
-| --- | ---: | ---: |
-| None | 0 ms | 0 Hz |
-| Sub-9 kHz worldwide — Best / Moderate / Worst | 0.005 / 0.05 / 5 ms | 0.001 / 0.005 / 0.05 Hz |
-| HF worldwide — Best / Moderate / Worst | 0.5 / 6 / 7 ms | 0.1 / 10 / 30 Hz |
-| Aurora worldwide — Best / Worst | 3 / 11 ms | 10 / 55 Hz |
-| EME worldwide — Focused, 1296 MHz reference | 0.5 ms | 6 Hz |
-
-None is the default, with additional modulation Off. Margin multiplies both
-selected spread values once for simulation and physical output. The modeled propagation is an illustrative equal-power
-two-ray channel: the selected delay is the excess delay between the rays and
-the selected Doppler is their frequency separation. These are not RMS delay
-and a calibrated scattering spectrum, respectively. The delayed source is
-regenerated with bounded memory; this adds computation. The analytical Link
-planner and receive probability estimates do not model these spread or
-perturbation effects and do not predict performance in this channel.
-The sampled Live simulation, transfer simulation and bulk PCM simulation apply
-the selected effects. The accelerated symbol-observation channel cannot represent
-frequency-selective samples and explicitly rejects nonzero propagation spread;
-use a sampled path for these channel models. The selected spread and additional
-modulation apply whenever enabled: **Simulation → Yes** uses the simulated link;
-**Simulation → No** applies them to outgoing physical audio. There is no separate
-Audio test mode. Use **Live/Duplex** for a same-instance speaker/microphone or
-cable loopback. The input capture is not processed a second time; modeled noise,
-oscillator error and path-loss simulation are not added to physical output.
-The effects apply to Robust message/data transmissions; standalone tuning-noise
-and Helper-only actions retain their original output.
-Selecting **None** leaves physical audio unmodified by these channel models;
-the zero Doppler reference also bypasses any retained modulation selection.
-Enabled physical processing reserves output headroom with one fixed gain for the chosen model,
-so the extra modulation does not introduce clipping or per-block normalization.
-This lowers the outgoing audio level, including Helper when enabled, while
-preserving the nominal Helper/DATA power ratio. The trace records the gain, injection
-location and retained tail alongside the seeded modulation parameters. The
-ordinary playback volume control remains applicable.
-Sampled simulation, bulk PCM and physical output retain the selected delayed tail and, when the amplitude filter bank
-is enabled, extra zero-input samples for its pole decay to fall by a factor of
-one million. This is a relative filter-state decay criterion, not an absolute
-audio silence threshold. Receiver completion still requires scored absence.
-
-With smooth-ramp FHSS, the channel input is the existing transmitter-shaped
-Robust DATA waveform, including its original ramps and quiet intervals. Both
-the direct and delayed rays use the envelope at the sample's **emission** time.
-Propagation is followed by the additional frequency-selective modulation;
-there is no arrival-time hop gate on this channel output. Consequently, echoes
-and filter decay can extend across a hop boundary into an original transmitter
-quiet interval. This does not change source bits, source timing or the hop schedule.
-An active physical channel bypasses the later hardware post-resampling quiet enforcement,
-which would otherwise erase that energy. The complete None/Off bypass retains
-the historical hardware path exactly, including its additional device-side
-guard. Bulk PCM simulation treats its input as the already-generated transmitted
-waveform and does not insert another FHSS envelope.
-
-These propagation and additional modulation stages apply to **Robust DATA**,
-not Helper. Helper retains its own transmitter envelope and original endpoint
-and is mixed separately. Playback drains until both the original Helper output
-and the DATA channel tail are finished; DATA echoes do not extend Helper's own
-transmission. The fixed common physical-output headroom still scales both branches.
-
-Fake FHSS here models an audio envelope and keyed hop metadata, not physical RF
-retuning. No receive tuner/selectivity or multipath equalizer is added. Existing
-receiver timing/template support can make cross-hop echoes unusable or harmful;
-a correct channel waveform does not promise decoding. A separately enabled
-laboratory RF-retune/settling model can still discard unavailable receiver
-samples. It is not activated by selecting ordinary GUI Fake FHSS.
-
-**Additional frequency-selective perturbation** defaults to Off for None and
-Sub-9 kHz, and Each 65% for HF, Aurora and EME. Selecting a new spread preset
-sets its family default; the perturbation can then be changed independently.
-Slow, Fast and Each offer 1, 5, 10, 25 and 65 percent. The rates are 0.1 and
-1 times the margin-adjusted Doppler spread, respectively. For each of three
-payload frequency ranges the gain is `1 + slow*sin(slow phase) +
-fast*sin(fast phase)`, with each depth relative to nominal amplitude. Thus
-Each 65% can temporarily invert the gain. The seeded phases are distinct per
-range and component and continue across processing blocks. Off bypasses the
-filter bank, as does a zero Doppler reference. The GUI's `--verbose` or
-`--verbose-file` simulation trace records the seed, ranges, actual rates and
-phases for reproduction. The `pump simulate` and `pump listen` CLI
-accept `--spread-preset` and `--selective-perturbation`; their omission keeps
-the earlier no-spread default. `--simulation-trace PATH` records the actual
-channel events in a new JSONL file without changing standard output.
-The obsolete `--hardware-channel-test yes|no` GUI launch option is accepted for
-compatibility but has no effect and is no longer exported. Explicitly saved
-non-None presets therefore also affect physical output when that old option was
-`no`; disable the effects with the channel controls instead.
+Spread is distinct from static radial Doppler. Fresh GUI and omitted CLI
+defaults are **None/Off**; presets are nominal, margin is applied once, and the
+additional frequency-selective amplitude modulation has family defaults and
+can be changed independently. These impairments are applied
+by sampled, bulk PCM and selected physical DATA paths; analytical planner and
+receive-probability estimates do not model them. The accelerated symbol-only
+path does not support spread. For the preset table, gain/rate conventions,
+FHSS ordering, path selection, tail rules, and focused evidence, see the
+authoritative [sampled channel models guide](channel-models.md).
 
 The local outer-DSSS candidate accounts for actual chip count, sampled bandwidth
 and symbol duration in compute estimates. Legacy outer DSSS can show a numerical

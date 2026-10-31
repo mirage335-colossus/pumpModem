@@ -5,6 +5,19 @@ Current compatibility requirements are in [the development contract](docs/develo
 build and test stages are in [the build guide](docs/building.md#testing-stages).
 Search `src/`, `include/`, `tests/` and `cmake/` first when locating implementation.
 
+## Simulation channel models
+
+Before adding or changing Robust simulation software, read the
+[Doppler/delay spread and frequency-selective amplitude modulation guide](docs/channel-models.md).
+Use the shared sampled channel implementations and preserve selected effects;
+do not silently omit them in a new simulation path. None/Off is a valid explicit
+baseline. The guide defines presets, effective parameters and seeds, exact bypass,
+continuous state, DATA/Helper composition, fixed headroom and complete tails.
+For FHSS, propagate the already-shaped transmitted waveform and retain echoes
+across hop guards; never gate the channel output again to enforce transmitter
+silence. Keep model metadata and software-test evidence distinct from physical
+device measurements.
+
 ## Helper Carrier priority
 
 For current integration constraints, measured inexpensive frequency/phase

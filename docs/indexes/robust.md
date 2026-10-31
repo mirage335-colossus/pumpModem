@@ -42,6 +42,7 @@ retain their individual scope and qualification limits.
 | [Robust CPU costs](../robust-cpu-costs.md) | Paired receive-hardening overhead measurements and estimate coefficients; not a whole-DSP bottleneck profile. |
 | [Alternate Robust receiver study](../robust-alternate-receiver.md) | Proposed independent chain: FIR/IIR/FFT tradeoffs, reference reuse, carrier/clock search, CPU efficiency at low expected SNR, GUI/TX isolation and experimental criteria. Source assessment dated 2026-09-30; speedup and sensitivity targets are unmeasured. |
 | [Simulation estimates](../simulation-estimates.md) | Reference and models: whole-draft receive probability, reference-machine compute estimates and unsupported coverage. |
+| [Simulation channel models](../channel-models.md) | Implementation guide for new simulations: Doppler/delay spread, additional frequency-selective amplitude modulation, shared APIs, FHSS/Helper ordering, reproducibility, bypass and delayed tails. |
 | [Receive-processing hardening](../receive-processing-hardening.md) | Implemented mitigations, audit scope and limitations; complements the CPU-cost measurements. |
 
 These documents cover both signal acquisition and post-reception recovery.

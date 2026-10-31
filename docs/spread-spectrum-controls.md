@@ -250,7 +250,8 @@ delayed DATA during an original transmitter quiet interval; the transmitter
 guard applies before propagation and is not reapplied afterward. Helper uses
 its separate original envelope. These effects add neither RF retuning nor an
 echo equalizer; existing receiver templates may not recover cross-hop echoes.
-See [channel ordering and limits](simulation-estimates.md#propagation-spread-and-additional-perturbation).
+See the [channel-model integration guide](channel-models.md) for processing order,
+model parameters, shared APIs and limits when developing simulations.
 
 ### Fresh cycle addresses and bounded work
 

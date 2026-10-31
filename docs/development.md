@@ -18,6 +18,15 @@ integration constraints and measured, inexpensive search-space narrowing approac
 [Helper integration guide](helper-integration.md); its algorithm comparisons
 are evidence and options, not additional universal receiver requirements.
 
+When adding or changing Robust simulations, follow the
+[Doppler/delay spread and frequency-selective amplitude modulation guide](channel-models.md).
+Reuse the shared sampled channel paths, honor selected effects, and identify
+None/Off baselines explicitly. Preserve source timing separately from channel
+output: delayed DATA may extend across FHSS guards and beyond source completion.
+The guide defines the integration, bypass, reproducibility and tail requirements;
+an analytical or symbol-only estimate must not be presented as a sampled test of
+effects it cannot represent.
+
 Preserve the restricted received-byte presentation and the selected index and
 validation-boundary protections documented in
 [receive processing hardening](receive-processing-hardening.md). Keep ordinary

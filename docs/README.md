@@ -4,12 +4,18 @@ Start with the maintained guides for current behavior and procedures. Topic page
 link relevant studies and historical material; check their dates, source revisions,
 assumptions and limits before applying their findings.
 
+**Developing Robust simulation software:** start with the
+[Doppler/delay spread and frequency-selective amplitude modulation guide](channel-models.md).
+It documents the shared APIs, model presets, processing order, bypass rules,
+reproducibility and focused integration checks for new simulation paths.
+
 ## Topic map
 
 | Topic | Explore |
 | --- | --- |
 | Product scope and operation | [Project overview](../README.md), [requirements and qualification limits](requirements.md), [version scope](original-specification.md), [manuals](#command-and-interface-manuals) |
 | Helper Carrier integration | [Current integration guide](helper-integration.md): transmission facts, inexpensive search-space narrowing and complete-stream correction, [retained experimental results](validation-data/helper/README.md) and remaining Robust integration work. |
+| Simulation channel models | [Doppler/delay spread and additional frequency-selective amplitude modulation](channel-models.md): current sampled/PCM/Live integration, FHSS echoes, Helper composition, defaults and model limits. |
 | Build, test, install and release | [Development and delivery](indexes/development.md): native/SDK/browser builds, test groups, packaging, offline use and dependency provenance; [shell script inventory and compatibility](shell-scripts.md) |
 | Robust Modem | [Waveform, receiver and weak-signal topics](indexes/robust.md): protocol, iterative search, CPU efficiency at low expected SNR, link planning, measurements and alternate-receiver research |
 | Scheduled Robust bursts | [Symbol_Burst](symbol-burst.md): complete symbols with guarded backlog time; [Sched_Hop](scheduled-hops.md): keyed active/null scheduling, split long symbols, dilution, frequency-search widening, workspace and qualification limits; fullscreen configured search-band waterfall |
