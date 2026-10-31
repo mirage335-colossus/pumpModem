@@ -315,6 +315,110 @@ void late_phase_authority_control() {
     require(!receiver.phase_supported_at(before_replacement),"replacement phase incorrectly authorized past samples");
 }
 
+// Changing caller chunk sizes and output capacity must not change the
+// committed mixer state when the resampler accepts only a prefix. Fresh hop
+// anchors and a mid-hop replacement are deliberate; no phase continuity is
+// assumed. All dates come from the production resampler, not a tone fit.
+void mixer_chunk_invariance_control() {
+    struct Collected {std::vector<Sample> value;std::vector<long double> date;std::vector<unsigned char> support;};
+    const auto run=[](bool tiny_output,bool recursive) {
+        h::HelperStreamConditioner::Config config{hp::sample_rate,0,0,0,0};
+        config.use_recursive_oscillator=recursive;
+        h::HelperStreamConditioner receiver(config,{1,0,.001});
+        std::vector<Sample> input(8*hp::dwell_samples);std::array<Sample,256> output{};std::array<long double,256> dates{};
+        std::mt19937 rng(816);std::uniform_real_distribution<float> random(-1,1);
+        for(auto& x:input)x={random(rng),random(rng)};
+        constexpr std::array<double,8> offsets{0,.0001,24,-24,11900,-11900,127,-127};
+        Collected out;std::uint64_t position=0;
+        for(unsigned hop=0;hop<offsets.size();++hop){
+            const auto first=static_cast<std::uint64_t>(hop)*hp::dwell_samples;
+            receiver.update({1.+(static_cast<double>(hop)-3)*1e-6,offsets[hop],.001});
+            const h::HelperStreamConditioner::LocalPhase phase{static_cast<long double>(first+4800),.17+hop*.37,
+                first+480,first+hp::dwell_samples-480,first+hp::dwell_samples};
+            require(receiver.set_phase(phase),"mixer chunk control phase rejected");
+            for(unsigned half=0;half<2;++half){
+                if(half){const auto middle=receiver.next_input_sample();
+                    const h::HelperStreamConditioner::LocalPhase replace{static_cast<long double>(middle+200),-.3+hop*.21,
+                        middle,middle+2000,first+hp::dwell_samples};
+                    require(receiver.set_phase(replace),"mixer chunk control replacement rejected");}
+                const auto end=first+static_cast<std::uint64_t>(half+1)*(hp::dwell_samples/2);
+                while(position<end){
+                    const auto n=std::min<std::size_t>(tiny_output?173:251,static_cast<std::size_t>(end-position));
+                    const auto capacity=tiny_output?std::size_t{13}:output.size();
+                    const auto p=receiver.process(std::span<const Sample>(input.data()+position,n),std::span<Sample>(output.data(),capacity),position,false,dates);
+                    require(p.consumed||p.produced,"mixer chunk control stalled");
+                    for(std::size_t i=0;i<p.produced;++i){out.value.push_back(output[i]);out.date.push_back(dates[i]);
+                        out.support.push_back(static_cast<unsigned char>(receiver.phase_supported_at(dates[i])&&
+                            receiver.timing_supported_at(dates[i],p.output_first_sample+i)));}
+                    position+=p.consumed;
+                }
+            }
+        }
+        return out;
+    };
+    const auto a=run(false,true),b=run(true,true),old=run(false,false),old_tiny=run(true,false);
+    require(a.value.size()==b.value.size()&&a.value.size()==old.value.size()&&a.value.size()==old_tiny.value.size(),
+        "mixer chunk output count changed");
+    double chunk_worst=0,scalar_worst=0;for(std::size_t i=0;i<a.value.size();++i){
+        chunk_worst=std::max(chunk_worst,std::abs(C(a.value[i])-C(b.value[i])));
+        scalar_worst=std::max(scalar_worst,std::abs(C(a.value[i])-C(old.value[i])));
+        require(std::abs(a.date[i]-b.date[i])<1e-12L&&std::abs(a.date[i]-old.date[i])<1e-12L&&
+            std::abs(a.date[i]-old_tiny.date[i])<1e-12L,"mixer source dates changed");
+        require(a.support[i]==b.support[i]&&a.support[i]==old.support[i]&&a.support[i]==old_tiny.support[i],
+            "mixer support changed");
+        require(std::abs(C(old.value[i])-C(old_tiny.value[i]))<1e-6,"scalar mixer depends on chunk size");
+    }
+    require(chunk_worst<1e-6,"mixer phase depends on partial consumption/chunk size");
+    require(scalar_worst<1e-6,"recursive mixer differs excessively from scalar reference");
+    std::cout<<"helper_mixer_chunk samples="<<a.value.size()<<" max_chunk_error="<<chunk_worst
+             <<" max_scalar_error="<<scalar_worst<<'\n';
+}
+
+// Full-dwell best effort installs each observed hop phase at the start of its
+// captured block. A missing fresh phase must not reuse the prior random hop's
+// multiplier; its samples still flow, explicitly without phase authority.
+void full_dwell_missing_phase_control() {
+    struct Collected {std::vector<Sample> value;std::vector<long double> date;std::vector<unsigned char> authority;};
+    const auto run=[](bool recursive,std::size_t cap){
+        h::HelperStreamConditioner::Config cfg{hp::sample_rate,0,0,0,0};cfg.use_recursive_oscillator=recursive;
+        h::HelperStreamConditioner receiver(cfg,{1,0,.001});Collected result;
+        std::array<Sample,256> input{},out{};std::array<long double,256> date{};
+        input.fill(Sample{1,0});
+        constexpr std::size_t block=2400;constexpr std::array<double,4> phase{1.1,0,-.7,0};
+        std::uint64_t position=0;
+        for(std::size_t hop=0;hop<phase.size();++hop){
+            const auto first=static_cast<std::uint64_t>(hop*block),end=first+block;
+            receiver.clear_phase_and_multiplier();
+            if(hop%2==0){const h::HelperStreamConditioner::LocalPhase p{static_cast<long double>(first+block/2),phase[hop],first,end,end};
+                require(receiver.set_phase(p),"full-dwell fresh phase rejected");}
+            while(position<end){const auto n=std::min<std::size_t>(173,static_cast<std::size_t>(end-position));
+                const auto p=receiver.process(std::span<const Sample>(input.data(),n),std::span<Sample>(out.data(),cap),position,false,date);
+                require(p.consumed||p.produced,"full-dwell missing-phase control stalled");
+                for(std::size_t i=0;i<p.produced;++i){result.value.push_back(out[i]);result.date.push_back(date[i]);
+                    result.authority.push_back(static_cast<unsigned char>(receiver.phase_supported_at(date[i])));}
+                position+=p.consumed;
+            }
+        }
+        return result;
+    };
+    const auto a=run(true,13),b=run(true,256),c=run(false,13);
+    require(a.value.size()==b.value.size()&&a.value.size()==c.value.size(),"full-dwell phase output count changed");
+    std::array<unsigned,4> checked{};
+    for(std::size_t i=0;i<a.value.size();++i){
+        require(a.date[i]==b.date[i]&&a.date[i]==c.date[i],"full-dwell phase source dates changed");
+        require(std::abs(C(a.value[i])-C(b.value[i]))<1e-6&&std::abs(C(a.value[i])-C(c.value[i]))<1e-6,
+            "full-dwell phase depends on chunking or mixer mode");
+        const auto hop=static_cast<std::size_t>(a.date[i]/2400);
+        if(hop>=4||a.date[i]-hop*2400<300||a.date[i]-hop*2400>=2100)continue;
+        constexpr std::array<double,4> phase{1.1,0,-.7,0};
+        require(std::abs(C(a.value[i])-std::polar(1.,phase[hop]))<1e-4,"fresh or missing-hop multiplier incorrect");
+        require(static_cast<bool>(a.authority[i])==(hop%2==0),"missing hop acquired phase authority");
+        ++checked[hop];
+    }
+    for(auto n:checked)require(n>1000,"full-dwell phase control did not cover a hop");
+    std::cout<<"helper_full_dwell_phase_control samples="<<a.value.size()<<" unknown_hops=2\n";
+}
+
 void rate_slew_control(double next_audio,bool expect_large_error) {
     // Drive a real paired production resampler across a commanded clock step.
     // These are explicit component-control inputs, never measured from probe.
@@ -843,6 +947,7 @@ void scenario(const char* label,hp::Config c,bool expect_qualified,bool expect_f
 
 void run_suite() {
     late_phase_authority_control();
+    mixer_chunk_invariance_control();
     rate_slew_control(1.0005,true);
     rate_slew_control(1.000001,false);
     phase_clock_controls();
@@ -889,6 +994,7 @@ void run_suite() {
 }
 
 void run_probe() {
+    full_dwell_missing_phase_control();
     hp::Config c;c.helper_w=4000;c.probe_w=4000;c.path_loss_db=180;
     hp::Source source(c);
     h::HelperMeasurement receiver({fs,550,2400,2300,2500,300,.05*std::numbers::pi/180});

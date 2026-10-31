@@ -34,6 +34,9 @@ public:
         // clock and the ACTUAL production resampler output map. This is not
         // an estimate of the Helper clock's physical uncertainty.
         double maximum_clock_error_seconds=1e-8;
+        // Optional standalone A/B baseline. False retains the original
+        // scalar phase calculation; true uses a bounded unit-phasor recurrence.
+        bool use_recursive_oscillator=true;
     };
     struct Correction {
         double audio_scale=1,common_frequency_hz=0;
@@ -71,6 +74,10 @@ public:
     // these numeric fields cannot establish that physical evidence themselves.
     bool set_phase(const LocalPhase&) noexcept;
     void clear_phase() noexcept;
+    // Remove both authority and the old hop's multiplier. The following
+    // phase is unknown until set_phase supplies a fresh one; the caller must
+    // explicitly mark output in that interval as phase-uncorrected.
+    void clear_phase_and_multiplier() noexcept;
     long double clock_time_at_input(long double absolute_input_sample) const;
     bool phase_supported_at(long double source_input_sample) const noexcept;
     // Signed Helper-intended clock minus nominal output date, using the
@@ -96,7 +103,8 @@ public:
     std::size_t workspace_bytes() const noexcept;
 private:
     struct MixerState {
-        double phase=0;
+        std::complex<double> phasor{1,0};
+        double phase=0; // used only by the scalar comparison path
         bool pending=false,active=false;
         LocalPhase phase_reference{};
         std::uint64_t active_first=0,active_end=0;

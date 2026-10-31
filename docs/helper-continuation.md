@@ -14,7 +14,10 @@ that point, and uses the fixed 38-second lead before probes in seconds 38–40.
 A later dwell can provide a fresh phase or update the current frequency model,
 but cannot improve a result labeled available after 36 seconds. Each hop has an
 independent common RF phase. A dwell-based correction uses approximately 0.4
-seconds of buffering; it must not use phase from a future hop.
+seconds of buffering in the earlier experiments. The current complete-stream
+path defaults to two seconds and may use later Helper observations for clock
+and frequency evolution. Each dwell still uses its own fresh RF phase; it
+does not borrow a neighboring hop's phase or assume RF phase continuity.
 
 The 40 W examples specify total active-mean Helper waveform power and an
 independent probe power. A simultaneous 40 W Helper and 40 W probe represents
@@ -22,6 +25,682 @@ independent probe power. A simultaneous 40 W Helper and 40 W probe represents
 noise temperature, noise figure, path loss, audio-clock errors, shift-oscillator
 errors, and phase diffusion are explicit simulation inputs. These are modeled
 link conditions, not physical sensitivity or hardware-qualification claims.
+
+## Practical path prepared for integration
+
+The current objective is a complete, corrected, timestamped baseband stream.
+Approximately ±0.1 Hz was a desired scale for frequency narrowing, not a hard
+admission or integration threshold. Use the measured frequency estimate and
+its honest conditional uncertainty; a useful ±0.117 Hz estimate must not block
+delivery merely because it is wider than ±0.1 Hz. Preserve genuine detection,
+model-consistency and reference checks. They determine what correction is
+available and how it is described, not whether captured samples disappear.
+
+The demonstrated standalone building blocks are:
+
+| Building block | Behavior to carry into the eventual adapter | Evidence and remaining scope |
+| --- | --- | --- |
+| Complete-dwell delayed correction | Buffer complete captured dwells, obtain their fresh phase and available frequency/clock estimates, and extrapolate those corrections back to the beginning and forward to the end before release. | `HelperCompleteConditioner` tests verify the actual complex output before, inside and after the pilot aperture, including phase-extrapolation signs and irregular capture chunks. The v9 noisy studies exercise this in the receiver chain. |
+| Continuous delivery | Release the corrected/resampled stream chronologically, including uncertain intervals. Confidence does not blank, fade, shorten or suppress output. Explicit missing-input events preserve real gaps. | All 30,720,000 captured inputs in the 32 fresh v9 clean cases were processed in both nominal and tracked arms. Phase and clock correction were applied to all 30,721,548 emitted resampled outputs. The experimental tracked arm's reported 18.45% conservative `well_supported` label is **not** the fraction corrected or delivered. |
+| Retained reference and later evidence | Keep one initial relative timing/phase reference. Later clock evidence may improve unreleased samples without selecting a new reference or smoothing RF phase across hops. | Gap, reference, clock-servo and future-observation checks are implemented. Arbitrary differential channel phase and whole-cycle timing ambiguity remain unresolved. |
+| Time-preserving consumer interface | Carry fractional input sample coordinates, original capture UTC/monotonic time and epoch, actual release time, relative source time, and the latest Helper observation used. Select time-dependent patterns from capture time. | Deterministic tests cover startup/drain, clock changes and missing input. Hardware capture-clock accuracy and Robust's own pattern/time interface still need integration testing. |
+| Useful frequency and fresh-phase estimates | Keep the 36-second frequency snapshot separate from later per-hop phase/clock updates. Use both pilots with their shared-observation covariance, and retain acquisition/fallback. | The fresh 180 dB set had 0.0150 Hz frequency-error RMS and a median conditional half-width of ±0.1165 Hz in 31 available cases; all 31 intervals covered. This is useful measured narrowing, not a failed delivery condition or a universal coverage guarantee. |
+
+Use the receiver's known dwell schedule as the default correction calendar.
+If dwell timing is adjusted, the intended evidence is the **auxiliary-tone
+phase reversal**, rather than the pilot-envelope ramp experiment. The existing
+transmitter places this marker at 160 ms into each 400 ms dwell on the 950 Hz
+auxiliary only: it tapers through zero over 152–168 ms and emerges inverted.
+The high and low pilots do not reverse. The existing auxiliary receiver fits
+the marker and checks successive-dwell cadence; auxiliary payload decoding is
+not a requirement for useful pilot correction. See the
+[waveform timing contract](helper-carrier.md#dwell-waveform-and-metadata).
+
+The optional `HelperInversionTiming` adapter now publishes this receiver's
+actual marker observations, and the complete-stream study can select them
+with `auxiliary` boundary mode. It uses measured pilot frequencies to locate
+the auxiliary, requires no payload decode, and works without pilot ramps.
+The matched 40 W / 180 dB checks accepted no markers: boundary accuracy at that
+weak-signal operating point remains unestablished. Until marker evidence is
+available and consistent, retain schedule timing and its uncertainty.
+The v9 `tracked` mode remains a selectable ramp-based experiment for the
+recorded comparisons, not the recommended boundary-adjustment mechanism for
+integration. A transmitted marker also does not independently measure a
+receiver RF retune that occurs earlier or later than the signal's dwell date.
+
+Accurate boundary timing prevents a sample receiving the neighboring hop's
+phase correction. The useful settled-dwell estimate can then be extrapolated
+through the whole assigned dwell. Finite estimation error and physical
+settling/phase disturbances can still leave residual error; all such samples
+remain delivered and included in complete-stream measurements. Neither
+imperfect timing nor residual uncertainty is a reason to gate the entire
+baseband stream. A missing fresh phase must be reported as unavailable while
+other available corrections and the captured samples continue through.
+
+The prepared path is the known-schedule, two-second complete-dwell conditioner
+with current pilot/joint-clock estimates, permanent reference and explicit
+capture-time mapping. The remaining integration work is the actual receiver
+adapter, validation of the optional auxiliary-marker timing bridge, the downstream bandwidth and
+resampling contract, and validation against Robust's time-based pattern
+selection. The current linear interpolator was evaluated for the 1600 Hz tone
+and 360 Hz shaped APSK band; it is not transparent across the full 24 ksample/s
+Nyquist band. No ordinary Robust integration, GUI changes, hardware access or
+full Robust campaign is part of this preparation.
+
+The [v9 implementation and complete-stream results](#incremental-complete-capture-conditioner-v9)
+below retain the exact comparisons, failure cases, CPU, latency and memory
+measurements. Earlier failed candidates and exact ±0.1 Hz counts remain
+experimental evidence; they do not replace this practical readiness criterion.
+
+### Auxiliary phase-inversion timing accuracy
+
+A small follow-up measured the current 160 ms reversal detector using the
+existing `AuxiliaryFixture` and `Receiver`, rather than treating the existing
+8 ms test tolerance as measured accuracy. Each run supplied six seconds of
+the isolated, normalized production auxiliary shape with +100 ppm constant
+source/capture rate error. There were no other tones, RF hops, phase noise,
+capture offset or physical radio effects. The noise tests added white real
+noise at a stated **steady auxiliary C/N0**, not a whole-Helper SNR. One fixed
+noise seed was used; these are component smoke checks, not a sensitivity or
+coverage campaign.
+
+| Sample rate / auxiliary C/N0 | Distinct accepted markers | Timing RMS / maximum absolute error | Reported per-marker radius |
+| --- | ---: | ---: | ---: |
+| 20 ksample/s, noiseless | 14 | 0.0777 / 0.109 µs | ±50.0 µs |
+| 24 ksample/s, noiseless | 14 | 0.0777 / 0.109 µs | ±41.7 µs |
+| 24 ksample/s, 80 dB-Hz | 14 | 3.02 / 4.99 µs | ±41.7 µs |
+| 24 ksample/s, 60, 40 or 18.88 dB-Hz | 0 in each run | Unavailable | No accepted marker |
+
+The very small noiseless error measures numerical/template agreement, not
+radio accuracy. Fractional-sample fitting permits sub-sample point estimates;
+the implementation's reported uncertainty has a one-sample floor and is not
+a calibrated weak-signal guarantee. All 14 accepted strong-signal markers were
+inside their reported radii in these checks. At 24 ksample/s and 80 dB-Hz,
+their 5.19948-second span gave a conditional audio-clock interval of
+[83.8013, 115.8590] ppm, containing the injected +100 ppm. The existing clock
+fitter retains at most 16 observations (about six seconds at full cadence),
+so this is not a demonstrated 36-second timing fit.
+
+Zero detections at the three lower C/N0 settings describe this detector and
+these particular inputs; they do not establish a physical timing limit or
+rule out pilot-aided marker correlation. No marker timing accuracy has yet
+been established at 40 W Helper / 180 dB through random FHSS in the complete
+standalone receiver. The older private likelihood experiment's 0.230 ms RMS
+result used the former 240 ms marker and cannot qualify this current waveform.
+
+The timing information can provide a measured dwell offset modulo 400 ms and,
+from successive distinct, dated reversals, a relative audio-clock rate.
+That can complement the two-pilot clock estimate and place correction epochs
+for a future downstream receiver. Auxiliary payload decoding is unnecessary.
+A constant propagation delay cancels in the rate estimate, but a changing
+delay can imitate clock evolution. The periodic marker alone supplies neither
+absolute UTC/whole-cycle identification nor the receiver's physical RF retune
+time. Only actual dated observations count; republishing or extrapolating a
+marker must not add independent clock evidence.
+
+The diagnostic source and per-marker errors are retained in
+`local-evidence/helper-continuation/marker_accuracy_probe.cpp` and
+`marker-accuracy-*.log`. Reproduce the component measurement with:
+
+```sh
+g++ -std=c++20 -O3 -DNDEBUG -fno-fast-math -ffp-contract=off -I. -Iinclude -Itests -Ithird_party/xz/src/liblzma/api local-evidence/helper-continuation/marker_accuracy_probe.cpp build/dev/libdatapump.a build/dev/libdatapump.a build/dev/third_party/xz/liblzma.a -lcrypto -ldl -lpthread -o /tmp/helper-marker-accuracy
+/tmp/helper-marker-accuracy 24000
+for cn0 in 80 60 40 18.88; do /tmp/helper-marker-accuracy 24000 "$cn0"; done
+```
+
+### Standalone inversion measurement and complete-stream bridge
+
+The side conversation's `HelperInversionTiming` implementation is reused, not
+duplicated. It adapts the existing production auxiliary detector into a bounded
+standalone measurement interface. Each publication contains the fractional
+capture-sample date, uncertainty, generation and the complete raw FIR evidence
+interval. It measures the current **160 ms auxiliary reversal**. Neither pilot
+ramps nor successful auxiliary metadata decoding are prerequisites. The decoder
+and marker-discovery states are separate; successful decoding does not stop
+marker publication.
+
+The complete-stream study now accepts `nominal` (unchanged default), `tracked`
+(existing ramp experiment), `auxiliary`, or `combined` as its boundary method.
+`auxiliary` uses measured high/low pilot frequencies to center the auxiliary
+detector. An accepted marker gives a dwell-start estimate by subtracting
+160 ms at the estimated source/capture clock ratio. Clock uncertainty is added
+conservatively, without treating that prediction as independent timing evidence.
+Only a measured point consistent with the existing ±8 ms schedule prior is
+selected; otherwise the known schedule remains in force. `combined` falls back
+to the ramp experiment. The marker's raw evidence date participates in the
+delayed correction's latest-observation metadata. The first sample assigned to
+the new hop is the ceiling of its fractional boundary date.
+
+This bridge adjusts individual observed boundaries. It does not yet fit a
+marker-derived clock or extrapolate an accepted marker through subsequent
+unobserved boundaries. It never reingests the marker/pilot prediction as another
+joint-clock observation, resets the permanent reference, assumes RF phase
+continuity, or drops uncertain output. The physical-retune allowance remains
+separate: a transmitted marker cannot determine an independently early/late
+receiver retune. Drain the adapter's update queue before explicit gaps or resets;
+those reset its optional local history and clear pending publications.
+
+Eight matched 40-second HF cases used distinct verified expanded schedule keys
+1911000001–1911000008 and thermal seeds equal to key seed +20,000,000. The first
+case was used for feasibility before the full comparison; this is a matched
+screen, not 32 fresh holdouts. Each has cryptographic random 50-channel/50-kHz
+hops, independent RF/audio errors, 290 K noise temperature, 10 dB noise figure,
+the unchanged 36-second frequency freeze and 38-second probe lead. The normal
+180 dB case uses **40 W Helper plus a separate 40 W probe: 80 W combined** when
+both transmit. The strong 120 dB `no-pilot-ramps` counterexample retains the
+standard 40 W normalization and pilot amplitudes but removes their dwell ramps;
+its changed total waveform energy is **not** renormalized to exactly 40 W.
+
+| Matched result, eight cases | 180 dB normal waveform | 120 dB, pilot ramps absent |
+| --- | ---: | ---: |
+| Accepted inversion markers / nominal dwells | 0 / 800 | 199 / 800 |
+| Accepted markers available by 36 s | 0 | 193 |
+| Marker timing RMS / worst absolute error | Unavailable | 8.54 / 49.09 µs |
+| Accepted errors inside reported approximately ±41.7 µs radii | Unavailable | 198 / 199 |
+| Wrong-hop assignments, schedule → auxiliary | 41,719 → 41,719 | 41,592 → 30,752 |
+| Complete 0–40 s synthetic clean-twin phase RMS | 8.450° → 8.450° | 7.693° → 6.490° |
+| Complete output samples, either method | 7,680,388 | 7,680,384 |
+| Conservatively well-supported samples, either method | 1,539,763 | 5,385,184 |
+| Capture timestamp / permanent-reference mismatches | 0 / 0 | 0 / 0 |
+
+The gain comes from correcting some previously uncertain boundary samples,
+not discarding difficult samples or increasing the support mask. Worst
+complete-stream errors still approach 180° where boundaries are unmeasured.
+At 180 dB, all reported scientific outputs match the unchanged schedule path;
+the optional measurement added cost without improving this weak-link screen.
+The 36-second frequency result is also unchanged: 0.01921 Hz RMS, median
+conditional half-width ±0.12070 Hz, 8/8 conditional intervals covering. This does
+not establish reliable ±0.1 Hz narrowing, and the approximate target does not
+gate delivery. The strong variant's marker adjustment did not measurably improve
+the held-out 38–40 s probe boundaries in this screen. Its all-sample held-out
+beginning/interior/end clean phase RMS remained 11.97° / 0.0565° / 1.431°.
+The 180 dB counterparts were 12.22° / 2.186° / 2.912°.
+
+One matched 360 Hz APSK probe case at each loss also showed no held-out gain:
+clean-twin / noisy-composite EVM was 6.34% / 56.34% at 180 dB, and
+4.94% / 4.70% in the strong ramp-free variant, for either method. These are
+584 measured symbols per case, not a sensitivity campaign. The clean twin is
+evaluated independently; no probe alignment or parameter selection feeds back.
+The APSK evaluator reported its 4–6 non-grid endpoint samples separately;
+the conditioner still released those samples.
+
+These are **clean-twin correction errors**, using one fixed evaluator reference;
+they are not noisy-probe measurement precision or an oracle bound. All uncertain
+samples remain in these primary totals. Per-region tails, noisy composite
+measurements, timing drift and cycle-error counters are retained in the logs.
+The one 49 µs accepted error demonstrates that the detector's sample-floor
+radius is not a calibrated universal guarantee. A six-second non-FHSS received
+waveform check accepted 14 markers at 120 dB (9.64 µs RMS, 29.09 µs worst), and
+the explicit-gap check recovered. Straight-auxiliary, absent-auxiliary and
+noise-only controls selected no inversion boundaries. The specific FHSS
+decline gates have not been instrumented; coherent-flank, cadence/notch and
+frequency-acquisition requirements are possible causes, not established ones.
+
+All timing below is process CPU including threads, measured separately from
+simulation and metrology. At 180 dB the median optional detector cost was
+0.467 s for the full **40 s capture**, with 238,140 bytes of prepaid adapter/
+detector workspace plus the bridge's bounded 16-record history. Existing
+complete buffering/conditioning used 1,847,632 bytes. The full-stream
+conditioner plus output instrumentation cost 0.524 s/40 s; startup, aided
+tracking, fallback and history/fit cost 0.0268, 0.2098, 0 and 0.0073 s over the
+40 s run. Total receiver cost was 1.081 s at the 36 s capture frontier
+(34 s already conditioned), and 1.237 s for 40 s plus drain. Generation and
+metrology were separately 0.448 and 0.542 s/40 s. The schedule-only totals were
+0.680 s at 36 s and 0.782 s through drain. These instrumented costs exceed the
+preferred budget; the optional strong-signal detector remains off by default.
+With a configured 2 s buffer, measured capture-to-release latency ranged from
+about 2.000 to 2.800 s because complete blocks and interpolation dependencies
+must become available. Captures retain their original dates through drain.
+There were five 0.36 s broad apertures and 95 aided 0.36 s apertures in the
+representative full run; the optional marker worker processed all 40 s.
+
+Short 0.4, 1, 2 and 3 s delay checks selected the same two strong HF markers;
+extra delay did not add marker information in those captures. Measured latency
+ranges were approximately 0.4–1.2, 1.2–1.6, 2.0–2.8 and 3.2–3.6 s. Full-run
+explicit-gap and system-clock-step cases preserved the original reference and
+capture timestamps; the missing 9,600-sample dwell was reported as one gap.
+Early/late RF-retune checks still had wrongly assigned samples, as expected
+when the physical retune differs from the transmitted marker calendar.
+A full physical phase-pulse check (`transient-v9held-interior-phase`) accepted
+22 markers within their reported radii, preserved timestamps/reference, and
+reported zero evaluator timing-cycle crossings; it does not establish that
+the phase pulse itself is corrected. An initially mistyped diagnostic profile
+(`transient-phase-pulse`) failed argument validation and was rerun under the
+existing profile name, rather than counted as a passing impairment test.
+Both four-second strong 5.8 GHz fixtures accepted nine markers, with five
+wrong-hop assignments and zero timestamp/reference errors. Their worst marker
+error was also 49.09 µs, so these checks do not resolve uncertainty calibration.
+
+Fifteen focused CTest checks passed, including the original complete-stream
+clock regression and new actual-chain inversion regression. The latter verifies
+real boundary selection without ramp tracking, complete sample accounting,
+absence controls and unchanged weak-link fallback. No ordinary Robust, GUI or
+hardware tests were run. There was no weak-link timing improvement warranting
+a 32-case finalist expansion or a claim of physical sensitivity limits.
+Pilot-aided weak-signal marker estimation and marker-clock fusion remain open;
+this adapter's availability does not rule out those approaches.
+
+Reproduce with the existing `build/dev` profile:
+
+```sh
+./build.sh configure --build-dir build/dev --cli
+cmake --build build/dev --target test_helper_inversion_timing test_helper_inversion_study test_helper_complete_study test_helper_auxiliary_timing_fixture -j 2
+ctest --test-dir build/dev --output-on-failure -R 'helper_(inversion|complete_inversion|auxiliary_timing)'
+build/dev/test_helper_inversion_study 120 plain 1910000001 15
+build/dev/test_helper_inversion_study 120 gap 1910000001 15
+build/dev/test_helper_inversion_study 120 noise 1910000001 15
+for seed in $(seq 1911000001 1911000008); do
+  for method in nominal auxiliary; do
+    build/dev/test_helper_complete_study full 180 "$seed" clean tone 2 hf "$method"
+    build/dev/test_helper_complete_study full 120 "$seed" no-pilot-ramps tone 2 hf "$method"
+  done
+done
+```
+
+Exact commands, binary hashes, per-marker dates, focused check output and
+aggregates are retained under `local-evidence/helper-continuation/inversion-*`.
+The final auxiliary comparisons include the reviewed first-new-hop-sample
+rounding repair; pre-repair logs are explicitly suffixed `.preceil`.
+
+### Measured path-loss range of the strict per-dwell inversion detector
+
+A subsequent loss sweep kept the receiver and every threshold unchanged and
+used the **standard 40 W Helper waveform**, including its usual pilot ramps.
+This removes the ramp-free variant's energy caveat from the link-budget
+comparison. Conditions were random HF50 hops at 50 kHz spacing around 30 MHz,
+290 K and 10 dB noise figure, +37/−13 ppm independent transmitter/receiver audio
+clocks, 0.8 ppm relative RF error and the existing phase-noise model. A separate
+40 W tone probe occupies seconds 38–40 (80 W combined during that interval).
+The receiver has the usual 36-second frequency snapshot, 38-second lead and
+2-second complete-stream buffer; the table concerns **actual inversion-marker
+measurements**, not general Helper pilot tracking or predicted boundaries.
+
+Eight expanded schedule keys 1920000001–1920000008 and independent thermal
+seeds +20,000,000 were reserved and checked as actual distinct 32-byte keys
+before the sweep. The same impaired realizations were reused across losses.
+Four-second screens preceded the following eight **40-second captures per
+loss**, using the actual complete receiver chain. No estimator was tuned, and
+the separately reserved validation keys remain unused.
+
+| Loss | Captures with a marker / 8 | Markers / 800 nominal dwells | Markers available by 36 s | Accepted timing RMS / p95 / worst |
+| --- | ---: | ---: | ---: | ---: |
+| 120 dB | 8 | 171 (21.4%) | 162 | 7.47 / 13.51 / 29.09 µs |
+| 124 dB | 8 | 57 (7.1%) | 54 | 7.84 / 15.75 / 19.33 µs |
+| 126 dB | 5 | 5 (0.63%) | 4 | 13.56 / 23.80 / 23.80 µs |
+| 128 dB | 1 | 1 (0.13%) | 1 | One error: 14.58 µs |
+| 130 dB | 0 | 0 | 0 | Unavailable |
+| 140 dB | 0 | 0 | 0 | Unavailable |
+| 150 dB | 0 | 0 | 0 | Unavailable |
+| 160 dB | 0 | 0 | 0 | Unavailable |
+| 170 dB | 0 | 0 | 0 | Unavailable |
+| 180 dB | 0 | 0 | 0 | Unavailable |
+
+Thus the current detector supplies repeatable **occasional** timing evidence
+around 120–124 dB under this model; 126–128 dB is sporadic, and no measurement
+appeared at the tested losses of 130 dB or higher. It has not demonstrated
+fresh timing on every hop even at 120 dB. Individual 120 dB runs yielded
+12–33 markers, with a longest marker-free interval of 13.60 s; 124 dB runs
+yielded 4–14, with an 18.00 s interval. These intervals use capture dates and
+include capture edges, not inferred processing/publication latency. The first
+accepted marker's capture date ranged from 0.56–1.36 s at 120 dB and
+0.56–10.96 s at 124 dB. At 126 dB each successful capture supplied only one
+marker, insufficient on its own for an independent clock-rate fit.
+
+All 234 accepted errors in this sweep were inside their reported radii. This
+does not erase the earlier 49 µs outlier or establish universal interval
+coverage: observations within a capture are correlated, and the accuracy
+statistics are conditional on acceptance. All 80 full captures preserved
+timestamps and the permanent reference. At 124 dB, eight four-second captures
+each with straight auxiliary, absent auxiliary or noise-only input selected
+zero inversion boundaries. These are focused controls, not a lifetime
+false-alarm calibration.
+
+A separate six-second, non-FHSS cross-check used the existing
+`test_helper_inversion_study` frontend (broad per-dwell pilot acquisition, not
+the complete chain's aided tracking). Across eight captures it accepted
+112/120 nominal-dwell markers at 120 dB, 78/120 at 124 dB, 3/120 at 128 dB,
+and none at 130 or 140 dB. This supports the strong-signal sensitivity result;
+different frontends and durations prevent treating it as a clean quantitative
+isolation of FHSS alone.
+
+The limitation belongs to this strict strong-signal auxiliary detector.
+Useful pilot frequency/phase tracking at 180 dB remains demonstrated separately.
+These results neither establish a physical sensitivity limit nor reject a
+more sensitive pilot-aided inversion estimator. The auxiliary is 9 dB below
+the high pilot: at this noise figure its approximate steady C/N0 is 78.9 dB-Hz
+at 120 dB loss and 18.9 dB-Hz at 180 dB. No receiver or waveform changes were
+made for this sweep, and no Robust, GUI or hardware tests were run.
+
+Reproduce the full accuracy/availability comparison:
+
+```sh
+for loss in 120 124 126 128 130 140 150 160 170 180; do
+  for seed in $(seq 1920000001 1920000008); do
+    build/dev/test_helper_complete_study full "$loss" "$seed" clean tone 2 hf auxiliary
+  done
+done
+```
+
+Commands, key bytes, binary hash, individual marker errors and aggregates are
+in `local-evidence/helper-continuation/inversion-loss/`. The unchanged complete
+study binary SHA-256 is
+`7f73fcaed8e9c4732136aba0db3aa09862be4acf5723414e67709fb47933771b`.
+At most two simulations ran concurrently; this sweep is an accuracy study,
+not a new receiver CPU benchmark.
+
+### Sensitive pooled inversion timing (experimental)
+
+`HelperInversionProfile` and the selectable complete-study boundary mode
+`pooled-inversion` trade unnecessary microsecond precision for sensitivity.
+The existing `nominal`, ramp `tracked`, and strict `auxiliary` paths remain
+selectable. The transmitter waveform, pilot power split and payload format
+are unchanged. This is an actual receiver/correction-chain experiment:
+accepted timing changes the sample-to-hop association before buffered output
+is corrected and released. It does not merely enlarge a diagnostic mask.
+
+The receiver uses the measured pilot frequencies to mix an 80 ms window around
+the existing 160 ms reversal. It projects out both neighboring pilots, forms
+disjoint 250 µs complex correlation bins, and compares the known tapered
+reversal with a straight auxiliary tone. It fits a separate complex auxiliary
+gain in every dwell, so random hop phase is never coherently joined across
+hops. A bounded three-frequency check retains prediction mismatch detection.
+The timing grid has 129 points at 125 µs spacing within the existing ±8 ms
+calendar prior. Received residuals supply the noise estimate; simulator SNR,
+the probes and clean twins do not choose timing, thresholds or corrections.
+
+Weak dwells retain their complete data likelihood rather than having to pass
+the strict per-dwell detector. Up to 96 disjoint profiles are reexpressed under
+the accumulated two-pilot relative clock and combined once. Predictions and
+repeated queries do not add independent observations. Clock/model uncertainty
+is shared, not divided by the number of dwells. Disjoint early/late groups can
+reject a contradictory clock map when each group has sufficient evidence;
+weak groups need not independently detect the marker. A strong per-dwell
+result remains available before the clock history is ready. There is no new
+clock feedback loop, reference reset, auxiliary decoding prerequisite, or
+assumed RF phase continuity.
+
+The result distinguishes marker evidence from conditional timing qualification,
+and exposes the marker date, inferred dwell-start date, interval, original
+reference and latest actual observation used. Source-clock offset intervals
+and capture-time intervals have distinct units. The source-clock model before
+its initial accepted phase center is a bounded extrapolation, not independent
+timing evidence. The inference locates the repeated calendar modulo 400 ms;
+it does not decode absolute UTC or remove whole-cycle/reference ambiguity.
+
+The complete-stream adapter uses qualified estimates only within the original
+boundary prior, preserves the ±8 ms physical-boundary uncertainty enclosure,
+and never changes sample delivery based on confidence. It preserves capture
+timestamps and applies each hop's own phase to both sides of its guarded
+estimation aperture. An observation-provenance bug found during this work was
+also corrected: the profile must report the last actual Helper support, not
+the end of an entire capture block that it did not observe. Overstating that
+endpoint could make the conditioner correctly refuse an otherwise available
+correction. The matched tests assert phase/clock application over all clean
+output, not just timestamp availability or masks.
+
+#### Matched loss screen
+
+Eight reserved HF50 schedules per loss used keys 1930000001–1930000008 and
+independent noise seeds +20,000,000. The actual 32-byte keys were checked for
+uniqueness before tuning. These are standard 40 W Helper captures at 290 K,
+10 dB noise figure, independent +37/−13 ppm audio clocks, 0.8 ppm relative RF
+error and the existing phase-noise model. The separate 40 W probe in seconds
+38–40 makes 80 W combined during the probe. Each capture lasts 40 seconds,
+with the frequency and timing snapshot frozen at exactly 36 seconds, fixed
+38-second lead and a two-second complete-dwell buffer.
+At 180 dB the auxiliary has approximately 19 dB-Hz C/N₀, or about −25 dB
+signal-to-noise ratio per 24 kHz complex sample. Accumulating known reversal
+structure is what makes this timing estimate useful below the sample noise.
+
+| Loss | Qualified timing at 36 s | Timing error RMS / worst | Median conditional half-width | First qualified calendar, median | Complete-output clean-twin phase RMS, nominal → pooled |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 180 dB | 8/8 | 276 / 540 µs | ±2.169 ms | 8.8 s | 8.592° → 6.054° |
+| 175 dB | 8/8 | 179 / 289 µs | ±1.265 ms | 6.4 s | 8.076° → 4.325° |
+| 170 dB | 8/8 | 100 / 164 µs | ±0.748 ms | 6.4 s | 7.898° → 3.742° |
+| 165 dB | 8/8 | 55 / 87 µs | ±0.550 ms | 6.4 s | 7.833° → 2.281° |
+| 160 dB | 8/8 | 47 / 87 µs | ±0.356 ms | 6.4 s | 7.813° → 1.492° |
+
+All 40 frozen timing intervals covered in this screen. These are conditional
+engineering likelihood intervals, **not calibrated universal guarantees**;
+the internal noise/search tail setting is not a proven false-alarm rate with
+estimated noise and a conditioned clock. Point-error precision and reported
+uncertainty must not be conflated. In particular this does not establish
+25 µs or 125 µs reliable timing at 180 dB. At that loss no individual dwell
+qualified: the sensitivity gain comes from accumulated inversion evidence,
+not a claimed precise new marker measurement on every hop. The existing
+±8 ms prior alone also does not count as newly measured 10 ms timing.
+
+At 180 dB, wrong-hop sample assignments fell from 41,730 to 16,483 across
+7,680,383 emitted samples in each arm. Every clean output received phase and
+clock correction in both arms; no output was removed to obtain the gain.
+Beginning/interior/end clean-twin phase RMS changed from
+20.432° / 3.559° / 3.980° to 13.114° / 3.559° / 3.657°.
+The boundary-region RMS changed from 14.717° to 9.625°. Residual errors near
+hops remain substantial even with better timing. The frequency snapshot was
+identical in all 40 matched pairs; this timing method supplies no additional
+evidence for a narrower frequency interval.
+
+#### Fresh 180 dB holdouts and complete output
+
+After the screen, the unchanged estimator was evaluated on 32 fresh reserved
+keys 1930100001–1930100032, again with distinct noise seeds +20,000,000.
+All 32 calendar estimates qualified at 36 seconds and all intervals covered:
+timing RMS **441 µs**, worst **965 µs**, median conditional half-width
+**±2.050 ms** (range ±1.919–3.049 ms). Point errors met 25 µs / 125 µs /
+1 ms / 10 ms in 0 / 8 / 32 / 32 cases; reported half-widths met those scales
+in 0 / 0 / 0 / 32 cases. The 125 µs grid and 250 µs bins themselves contribute
+a 187.5 µs discretization allowance before likelihood and clock uncertainty.
+This configuration intentionally does not promise microsecond precision.
+
+First calendar qualification occurred at 6.4–19.6 seconds, median 9.4 seconds.
+There were no independently qualified individual markers at 180 dB. All
+2,375 qualified rolling calendar updates covered, with worst admitted error
+1.964 ms; these share history and are **not** 2,375 independent trials. A
+two-second buffer cannot retroactively change samples released before this
+weak-signal acquisition completes. Their original best-effort correction and
+uncertainty remain in the complete-output measurements.
+
+| Complete-output metric, 32 matched captures | Nominal calendar | Pooled inversion |
+| --- | ---: | ---: |
+| Wrong-hop output samples | 166,929 | 76,553 |
+| All-output clean-twin phase RMS | 8.843° | 6.859° |
+| Beginning / interior / end RMS | 20.074° / 4.5255° / 4.805° | 14.045° / 4.5256° / 4.575° |
+| Boundary-region RMS | 14.593° | 10.443° |
+| Within 0.5 ms of the physical hop, RMS | 72.076° | 62.396° |
+| 0.5–2 ms from the physical hop, RMS | 68.552° | 38.734° |
+| 2–8 ms from the physical hop, RMS | 18.415° | 14.358° |
+| Worst complete-output phase error | approximately 180° | approximately 180° |
+| Emitted samples with phase and clock applied | 30,721,545 | 30,721,545 |
+| Conservative `well_supported` label | 6,069,369 | 6,069,369 |
+| Timestamp / reference errors | 0 / 0 | 0 / 0 |
+
+All captured input is processed; confidence does not remove uncertain samples.
+Undefined phase at 3,451 pretransmission/zero-clean-energy samples is counted
+explicitly rather than scored as zero phase error. Region counts differ by
+one interpolated sample at one boundary. The unchanged large interior sample
+set has effectively unchanged accuracy, so the improvement is from boundary
+assignment, not discarding difficult observations. The median of each case's
+boundary p95/p99 was 9.0°/78.125° for nominal versus 7.875°/20.125° for pooled;
+these are **case-percentile medians**, not a fabricated pooled percentile.
+The embedded v8 common-support diagnostic is available in only 2/32 cases
+(42,078 samples); it is not a full direct nominal/profile intersection study.
+
+Fresh local pilot phase RMS/worst remained 2.625°/12.713° across 3,200 dwells.
+Maximum evaluated relative-clock error remained 19.45 µs, with zero observed
+timing-cell slips in these clean cases. The unchanged frozen frequency result
+was available and covered in 31/32 cases: RMS 0.01357 Hz, worst 0.02887 Hz,
+median conditional half-width ±0.11695 Hz. Key 1930100026 was unavailable.
+This does not establish generally reliable ±0.1 Hz bounds, and that approximate
+goal does not gate complete-stream delivery.
+
+The held-out tone at capture dates 38–40 seconds improved clean-twin phase RMS
+5.843°→3.983°, boundary-region RMS 9.926°→6.125° and boundary fixed-lag
+per-dwell residual frequency RMS 0.20287→0.07903 Hz. Interior residual
+frequency RMS stayed 0.01320 Hz. The noisy composite's sample-phase RMS stayed
+about 90°; it is not the clean-twin tracking measurement. A separate matched
+40 W, 360 Hz shaped APSK probe check on key 1930000001 gave clean-twin EVM
+5.796%→5.144% at 180 dB, while noisy composite EVM was 55.321%→55.516%.
+At 160 dB, clean/noisy EVM changed 3.376%/6.276%→1.855%/5.809%.
+All 584 evaluable symbols were used with one fixed evaluator reference;
+the interpolation endpoint exclusions (5 and 4 samples respectively) are
+reported separately. Neither probe supplies synchronization or alignment.
+No oracle supplies receiver decisions, and this is not a decoding result.
+
+#### Limits, controls and latency
+
+Thirteen matched impairment pairs used the reserved 1930200001–1930200004
+keys, including the previously unseen 23 ms phase pulse, 51 ms gain change
+and 61 ms frequency-settling combinations. Their wrong-hop counts decreased
+5,218→1,965, 5,248→1,581 and 5,256→2,330 respectively, without claiming that
+calendar timing repaired the physical disturbances. All 896 admitted rolling
+calendar intervals covered across these tests, again with correlated history.
+The original 48 ms transient and whole-cycle/differential-phase counterexamples
+remain in the unchanged fixtures and focused tests.
+The same three transient combinations were also compared at 160 dB. Wrong-hop
+counts changed 5,199→212, 5,215→200 and 5,206→490. All 300 qualified individual
+intervals and all 220 qualified rolling calendar intervals covered, but worst
+individual error reached 1.288 ms. Strong clean pooled precision is therefore
+not a promise of equal precision for every disturbed individual dwell.
+
+Four separately reserved keys 1930200005–1930200008 each tested a straight
+auxiliary, absent auxiliary and noise-only capture at 160 and 180 dB:
+**0 individual qualifications, 0 pooled qualifications and 0 selected
+boundaries in all 24 full-duration controls**. This is measured finite control
+coverage, not proof of a universal false-alarm probability.
+
+Important failures and assumptions remain:
+
+- The marker locates the transmitted calendar. An independent RF retune 2 ms
+  early worsened wrong-hop assignments 1,224→4,976 and complete-stream phase
+  RMS 5.40°→8.31°, despite accurate marker timing. A 2 ms late retune improved
+  9,941→5,426 but retained the independent displacement. RF retune delay must
+  be known, measured separately or kept uncertain; a marker is not proof of
+  the physical RF transition date.
+- A 9.8 ms arrival outside the ±8 ms search prior selected no boundaries. Its
+  edge optimum was explicitly unqualified, not reported as covered timing.
+- Curvature and whole-cycle gap cases lost pooled-clock qualification.
+  Curvature, gap-cycle and frequency-step cases retained severe held-out
+  phase errors (roughly 116°/119°/103°). Arbitrary differential pilot phase
+  can imitate clock changes; this detector has not generally solved that
+  ambiguity. No new clock evolution model was introduced in this iteration.
+- The missing-ADC case retained its explicit 9,600-sample loss and released
+  all other captured samples, including 78 with no available phase correction.
+  UTC discontinuity tests preserved capture-time pattern lookup and reference.
+  No new absolute source-time reference was silently selected.
+
+On the single matched HF key 1930000001, delays 0.4 / 1 / 2 / 3 seconds gave
+wrong-hop counts 3,226 / 3,117 / 3,029 / 2,836, and complete clean phase RMS
+7.059° / 7.280° / 6.531° / 6.481°. More delay did not uniformly improve every
+metric. Actual capture-to-release ranges were about 0.4–1.2 / 1.2–1.6 /
+2.0–2.8 / 3.2–3.6 seconds because processing and release use complete dwells
+and boundary look-ahead. The frozen 36-second timing estimate was identical
+at all delays. Later evidence only changes still-buffered output, whose
+original capture dates and latest observation dates remain explicit.
+
+One matched case each of the existing 5.8 GHz FCC100 and EU20 wide-hop
+geometries qualified at 36 seconds with approximately −1.213 ms timing error
+inside ±2.117 ms conditional intervals. Whole-stream phase RMS changed
+9.210°→7.928° and 9.261°→7.987°. This small fixture check is not broad
+microwave qualification or regulatory certification. Removing pilot ramps
+also retained the pooled result at 180 and 160 dB on key 1930000001; those
+waveform variants retain the standard power normalization, so their changed
+total energy is explicitly labeled rather than called identical 40 W links.
+
+#### Work bounds, checks and reproduction
+
+The detector has fixed 267,408-byte storage, at most 96 retained data profiles,
+129 timing candidates, three residual-frequency candidates and 384 correlation
+bins. Method stack frames were separately checked below 16 KiB in optimized
+compilation. The adapter's individual fallback ring has 16 records. It borrows
+the already-buffered aperture instead of copying the full stream. The existing
+complete conditioner allocates 1,847,632 bytes with its 115,200-sample,
+12-block maximum (4.8 seconds at 24 kHz); this is not a claim that all receiver
+or evaluator memory is included in that allocation figure.
+
+Three serialized runs of each method on key 1930100001, after all task build
+and simulation jobs finished, measured total process CPU across threads.
+Candidate tracking and history, **including inversion observation**, consumed
+0.336–0.374 CPU seconds over exactly 36 seconds. Its median components were
+0.2109 seconds for the existing measurement/history path and 0.1374 seconds
+for inversion timing. Earlier runs with a background sanitizer build consumed
+0.393–0.435 seconds; both sets are retained, not presented as hardware certification.
+This meets the preferred 0.5-second **tracking** scale in these measurements;
+it does not establish 0.5 seconds for the entire conditioning path.
+
+At the 36-second capture frontier, 34 seconds of delayed input had actually
+been conditioned: total receiver CPU including that conditioning and output
+instrumentation was 0.592–0.654 seconds (median 0.616). For the complete
+40-second capture plus drain, median total receiver CPU was 0.703 seconds,
+versus 0.507 seconds nominal. Complete 40-second component medians were:
+
+| Component | CPU seconds | Signal processed |
+| --- | ---: | --- |
+| Pilot startup / aided tracking / fallback | 0.0222 / 0.2039 / 0 | 40 s capture, existing guarded pilot apertures |
+| Local fit / joint history | 0.00107 / 0.00579 | Same 40 s capture; implementation counters overlap portions of receiver total and must not all be added again |
+| Inversion observation and pooling | 0.1542 | 100 windows over 40 s, 7.996083 s of actual retained aperture samples |
+| Full-stream buffer/conditioning/provider/consumer | 0.3158 | All 40 s of captured input, including drain |
+| Of that conditioning: profile release queries | 0.0249 | Bounded retrospective calendar queries; already included above |
+| Of that conditioning: buffer push | 0.00142 | All 40 s; already included above |
+| Simulation generation | 0.3752 | 40 s capture, excluded from receiver CPU |
+| Extra evaluator-only synthetic probe generation | 0.0288 | Pre-probe clean twin, excluded from receiver CPU |
+| Clean-twin conditioning / metrology | 0.2820 / 0.4745 | Complete evaluated capture and held-out probes, excluded from receiver CPU |
+
+The 144 matched loss/holdout runs, 56 impairment/control runs and delay/RF/probe
+variants used frozen binary SHA-256
+`df88e4cfa9c93c7338ad15feed3fca6a4f561daf796c68990425d77c6c8ece98`.
+Afterward, only work accounting was corrected to count apertures rejected by
+the frequency witness, and exact 36-second CPU partitions were added. The
+accounting build SHA is
+`049d8b01b1c41df9260c8d58c5b15accd46af73d4710c1839770ae8e90b16e67`.
+Every pre-existing non-CPU output field matched the frozen binary on the
+complete nominal/profile comparison for key 1930100001. No estimator,
+threshold, selection or correction changed after the held-out results.
+
+The 17 focused Helper checks passed. The new component and actual-chain
+regression passed again after accounting changes. The regression covers weak
+pooled acquisition, stronger individual fallback, unchanged frozen frequency,
+real complete-output correction, original timestamps and absent/straight-marker
+controls. The original baselines and their tests remain intact.
+Both focused ASan/UBSan/LeakSanitizer checks (`helper_inversion_profile` and
+`helper_complete_conditioner`) also passed. The first sandboxed invocation
+failed because LeakSanitizer cannot operate under the sandbox's process tracer;
+the same two synthetic tests passed outside that restriction, with leak
+detection retained. No audio hardware was accessed.
+
+```sh
+CCACHE_DIR=/tmp/pumpmodem-helper-ccache ./build.sh configure
+CCACHE_DIR=/tmp/pumpmodem-helper-ccache cmake --build build/dev --parallel 2 \
+  --target test_helper_inversion_profile test_helper_complete_study test_helper_transient_fixture
+ctest --test-dir build/dev --output-on-failure --parallel 1 \
+  -R '^(helper_inversion_profile|helper_complete_profile_regression|helper_transient_fixture)$'
+
+# Single matched complete-chain capture. Both use Helper 40 W plus probe 40 W.
+build/dev/test_helper_complete_study full 180 1930100001 clean tone 2 hf nominal
+build/dev/test_helper_complete_study full 180 1930100001 clean tone 2 hf pooled-inversion
+
+# Reproduce the eight-case loss screen; use 1930100001..1930100032 at 180 dB
+# for the recorded 32-case holdout comparison (now regression cases).
+for loss in 180 175 170 165 160; do
+  for seed in $(seq 1930000001 1930000008); do
+    for boundary in nominal pooled-inversion; do
+      build/dev/test_helper_complete_study full "$loss" "$seed" clean tone 2 hf "$boundary"
+    done
+  done
+done
+```
+
+Change `tone` to `apsk`, delay to `0.4`, `1` or `3`, RF geometry to
+`microwave`/`microwave-eu`, or mode to `straight-auxiliary`, `no-auxiliary`,
+`noise`, `adc-gap`, `clock-adjust`, `curvature`, `gap-clock-cycle`,
+`differential-large`, `rf-retune-early`, `rf-retune-late`, or
+`transient-inversion-held-phase23`/`gain51`/`settle61` for the corresponding
+checks. Compact raw logs, verified reservations, exact commands and summaries
+are in ignored `local-evidence/helper-continuation/inversion-profile/`.
+No ordinary Robust integration, full regression campaign, GUI change, audio
+hardware access, successful decoding claim or physical sensitivity bound is
+part of this work.
+
+## Covariance for the existing four-window estimator
 
 ## Covariance for the existing four-window estimator
 
@@ -1334,6 +2013,772 @@ For a 44 ms frequency event, neither method admitted marked samples, but
 marked coincidence and withheld clean samples do not establish probe
 contamination or usable recovered samples by themselves.
 
+## Delayed Helper-only buffering and retrospective fit v7
+
+This standalone experiment buffers raw baseband blocks before applying
+Helper-derived conditioning; it does not involve the GUI, audio hardware or
+ordinary Robust. The bounded queue preserves capture sample indices, capture
+system and monotonic times, schedule slot and clock epoch separately from
+release time. It releases a whole block only after its last sample is captured
+and the configured monotonic delay has elapsed, with supplied timestamp and
+period uncertainty included. System-clock changes are reported as capture
+discontinuities rather than used as a release clock. The producer must split
+blocks at hop or known clock-epoch boundaries, report missing samples and
+provide a conservative actual Helper-observation frontier; wall time alone
+does not establish contiguous Helper evidence.
+
+Transmitter-time metadata is a conditional affine estimate with uncertainty
+and one retained receiver-defined relative reference, including its fractional
+sample identity. It is not an absolute transmitter-time acquisition. A
+reference mismatch is reported rather than silently rebasing the stream.
+Fractional output samples map back to the original capture-clock epoch, not
+the release timestamp; capture-clock changes, missing mappings and partial
+end-of-stream lookahead must be reported. These guarantees are conditional on
+the caller's clock, uncertainty, epoch and observation-frontier metadata. The
+simulation must generate capture timestamps using the modeled physical ADC
+clock, including audio-clock error. Schedule mapping additionally depends on
+an independent ±8 ms schedule-epoch bound and must report ambiguity rather
+than assume an arbitrary system-clock mapping.
+
+The retrospective smoother uses one joint estimator snapshot available at the
+actual observed frontier. Its support-start, anchor and support-end estimates
+must have the same history and retained reference; their uncertainties are
+enclosed without treating correlated predictions as independent evidence. A
+fresh qualified phase for the target dwell remains mandatory: the smoother
+does not carry a common RF phase across random hops, invent observations after
+the stream ends, resolve an ambiguity, or reset the reference after a dropout.
+It supplies correction and bounded transport information to the same
+conditional input-phase guard and actual interpolation-halo accounting
+described above, not a universal FIR output-error guarantee.
+
+The study tests configured delays of 0.4, 1, 2 and 3 seconds with 0.4-second
+capture blocks. Since release waits for the complete block as well as the
+configured delay, the first sample waits at least the delay plus one block,
+and block-quantized processing can add further latency. The underlying model
+still freezes the 36-second frequency result, uses the fixed 38-second lead
+and observes held-out probes through 40 seconds. Independent 40 W Helper and
+40 W probe signals mean 80 W combined; thermal noise and independent
+oscillator errors retain the previous assumptions. Probe data supplies no
+synchronization, branch selection or correction coefficients.
+
+The test compares the baseline support with two wider edge choices. A channel
+fixture separately removes the physical Helper and probe for the first 30 ms
+or 45 ms of each dwell while preserving the thermal-noise realization. The
+45 ms case is a counterexample to assuming that samples are valid merely
+because the shorter erasure ended: a wider admitted edge may overlap the longer
+physical interruption and the resampler halo. Delay and a more precise clock
+fit alone do not identify that interruption. An earlier timestamp fixture used
+nominal 24 kHz despite modeled audio-clock error; the corrected fixture uses the
+modeled physical ADC clock. Preliminary results from the earlier fixture must
+not be treated as corrected measurements. The earlier 34 focused Helper
+checks and the delayed-buffer, smoother and study checks passed.
+
+The following matched campaign was run before a subsequent end-of-stream
+conditioner-tail fix. An initial post-fix smoke test appended 48 unsupported
+outputs without changing supported counts; timestamps at or beyond capture
+were unavailable. Those padding-derived outputs are unsupported and their
+physical disturbance classification is unknown, not clean.
+
+Across 32 freshly reserved held-out HF captures at 180 dB, edge30 supported
+18,447,982 of 26,111,776 pre-drain conditioned outputs versus 16,177,723 for
+the interior baseline. Boundary-bin support was 2,083,483 of 7,832,452 versus
+zero. These totals exclude 144,000 raw unsupported startup samples per case.
+On 1,051,866 common tone samples, the methods had identical mean per-case
+clean-twin phase RMS of 2.321° and frequency RMS of 0.01229 Hz. Fresh-hop phase
+RMS pooled over the equal-length cases was 2.626°, the median per-case 99th
+percentile was 6.617°, and the worst hop was 9.743°. All 32 frozen 36-second
+intervals covered their point errors: frequency-error RMS was 0.01404 Hz,
+maximum absolute error 0.03451 Hz and median conditional half-width ±0.11979
+Hz. None qualified ±0.1 Hz. These finite clean-model samples do not establish
+coverage under arbitrary model mismatch. The separately evaluated frozen-model
+frequency error over later held-out dwells had pooled RMS 0.01597 Hz; later
+Helper updates are not used to revise the frozen result. No reference resets,
+timestamp failures or supported schedule mismatches were observed.
+For example, in seed 1710100001, 100 dwell measurements were valid and 84
+had qualified clock authority; supported output spanned capture dates
+6.57199–39.96286 s with gaps. The five held-out dwell supports were
+38.03712–38.36286, 38.43710–38.76284, 38.86196–39.13799,
+39.23711–39.56284 and 39.63709–39.96286 s, with 7,819, 7,819, 6,626,
+7,819 and 7,820 supported samples respectively. Relative timing error reached
+6.95 µs in that case, with a −2.41 µs change and zero counted slips; these
+dates do not imply the gaps were supported.
+
+The eight-case clean screen at 175, 170, 165 and 160 dB had median frozen
+half-widths ±0.06603, ±0.03765, ±0.02156 and ±0.01251 Hz respectively, with
+8/8 intervals covering in each group. These are small conditional screens,
+not a physical sensitivity boundary or a general reliability guarantee.
+
+On eight matched 180 dB tuning captures, the 0.4, 1, 2 and 3 second delay
+settings supported mean boundary-bin counts of 20,158, 51,060, 67,242 and
+70,190 per capture respectively; their interior counts were 231,822, 491,727,
+515,606 and 511,932. Four 0.4-second cases had no supported boundary samples;
+the stringent conditioner time-map gate rejected phase-eligible samples. The
+longer delay did not uniformly improve phase accuracy or availability.
+At the 2-second setting the observed first-sample ages were 2.400–2.800 s and
+last-sample ages 2.000–2.400 s, including 0.4-second block quantization.
+
+An isolated post-drain 180 dB run of held-out seed 1710100001 used 0.859 s
+process CPU through the 36-second capture frontier, including 28 seconds of
+conditioned input, and 1.020 s through the 40-second capture plus drain,
+including 34 seconds conditioned and the first six seconds released raw and
+unsupported. Process timing includes timestamp, schedule and trace
+instrumentation; it is not an uninstrumented throughput claim. Within that
+40-second run, measured startup was 0.022 s, correlation tracking 0.210 s
+(including 0.004 s fallback), full 34-second instrumented conditioning 0.770
+s, buffering 0.0033 s and smoothing 0.0019 s; these overlapping component
+timings must not be summed as independent totals. Simulation generation was
+0.363 s and the separate reported metrology including reporting was 0.276 s.
+The full-stream conditioned cost is not established: the six-second startup
+portion was not conditioned in that receiver run. A separate conditioner-only
+benchmark did process and drain 40 seconds (960,000 input samples) with
+preset independent hop anchors: recursive and scalar CPU were 0.463 and 0.538
+seconds respectively in one fixed-order run. It includes output arrays and
+support queries, but excludes signal generation and all tracking; the preset
+anchors are not a receiver and this is not end-to-end throughput. The output
+values differed by at most 5.96e-8, with identical source dates and support
+masks. For the delayed configuration the bounded buffer reserved
+924,864 bytes, its peak was 57,600 complex samples, scratch was 76,800 bytes,
+plans 10,800 bytes, metadata 324,744 bytes and one conditioner workspace
+234,784 bytes, excluding tracker history, allocator overhead and evaluator
+arrays. A clean twin additionally used up to 460,800 bytes of queued samples;
+the evaluator's input-date trace is separate.
+
+The conditioner drain appended 48 padding-dependent unsupported samples in
+the post-fix check. An end-of-capture phase-pulse manual check exercised that
+path, and an asserting focused probe verifies unknown physical classifications
+are not counted as clean or disturbed. This does not validate actual missing
+ADC samples or time-varying ADC-clock drift through the full chain.
+
+A two-case frequency-step check froze a covered 36-second result before the
+1.2 Hz step at 36.8 seconds; the frozen model's later frequency error was
+1.222 Hz RMS and all ten held-out windows were withheld. Two moderate
+curvature cases lost clock-model consistency and did not qualify a 36-second
+frequency result or held-out output. These demonstrate availability limits,
+not calibrated failure probabilities. Eight noise-only cases qualified no
+frequency or supported samples. A whole-cycle gap withheld all 40 held-out
+windows in eight cases, while pre-gap support remained; it did not resolve
+the ambiguity.
+
+On eight matched HF tuning captures at 180 dB in that campaign, the
+30 ms edge option versus the baseline supported 4,662,785 versus 4,076,130
+samples over the 40-second captures; boundary-bin support was 537,939 versus
+zero. Each capture had 144,000 startup raw samples without correction support,
+and 34 seconds were conditioned. Across held-out intervals the edge option
+admitted 20,898 early and 20,861 late samples, with worst clean-twin phase
+errors of 5.34° and 7.40°. On 259,600 common samples, both methods had 2.779°
+clean-twin phase RMS and 0.00807 Hz frequency RMS. All eight frozen 36-second
+intervals covered, with median half-width 0.11663 Hz and minimum 0.10751 Hz;
+none provided ±0.1 Hz narrowing. No slips, timestamp errors or schedule
+errors were observed in these cases. In eight cases at 175 dB, median frozen
+half-width was 0.0660 Hz and all eight were at or below 0.1 Hz.
+
+A four-seed tuning comparison of recursive versus scalar conditioner modes
+had non-CPU fields agree within 10⁻⁶. Mean reported edge30 process CPU through
+36 seconds was 1.590 versus 1.715 seconds, and through 40 seconds 1.895 versus
+2.053 seconds; mean CPU for 34 seconds of conditioning was 1.409 versus 1.502
+seconds. These concurrent runs include instrumentation and do not establish a
+fixed speedup or uninstrumented throughput. The first six seconds of raw
+input were unsupported at startup.
+
+In four matched 30 ms physical retune-erasure cases, the 30 ms edge option
+admitted no disturbed early samples while the 20 ms option admitted 2,203;
+their worst early sample-phase errors were 5.36° and 178.58°. The 30 ms
+option withheld 2,950 clean early samples. The 45 ms erasure defeated the
+assumption behind both wider edges: 8,640 halo-marked disturbed early samples
+across eight cases were admitted, with worst phase error 179.20° among
+phase-evaluable samples. These finite
+channel-fixture controls do not validate wider support under arbitrary retune
+behavior.
+
+Eight unseen end-of-dwell frequency-settling cases admitted 4,252 physically
+marked late samples among 19,928 supported late samples, with pooled 7.43°
+late RMS and worst error 26.45°, despite the 30 ms retune-erasure assumption.
+The baseline withheld all late samples; edge30 withheld 30,021 clean late
+samples versus 45,697 for baseline. A four-seed 15 ms phase-pulse
+control admitted 1,841 disturbed samples and reached 50.59° worst sample
+phase. Eight excessive differential-phase cases remained admitted and reached
+23.83° worst fresh-hop error. A bound on physical retune erasure does not bound
+unmodeled in-dwell frequency settling or phase pulses. The pre-fix campaign did
+not establish that every conditioned output was flushed.
+
+On eight held-out 5.8 GHz EU20 captures, edge30 versus baseline supported
+1,185,921 versus 1,190,759 samples, including 131 versus zero boundary-bin
+samples; no held-out early or late edge samples were admitted. All eight
+frozen frequency intervals covered, with point-error RMS 0.02415 Hz, median
+half-width 0.19652 Hz and maximum 0.20628 Hz. Mean hop-phase RMS was 2.982°,
+worst hop phase 12.517°, and there were no slips, timestamp errors or
+supported-sample schedule errors. Instrumented concurrent mean/maximum
+process CPU through 36 seconds was 1.927/1.990 seconds, with 15 unsupported
+startup blocks. These are fixture results, not hardware or regulatory
+qualification.
+
+On eight pre-fix FCC100 microwave captures, edge30 versus baseline supported
+968,914 versus 972,817 samples, with no supported boundary-bin samples for
+either. Both covered all eight frozen intervals; mean and maximum conditional
+half-width were 0.20673 and 0.22494 Hz, mean hop-phase RMS was 2.765°, and no
+slips or timestamp failures were reported. These are fixture results, not
+hardware or regulatory qualification.
+
+In eight pre-fix HF APSK cases, edge30 versus baseline supported 2,818 versus
+2,595 symbols. Their method-selected mean noisy EVM was 0.54194 versus 0.54344
+and clean-twin EVM 0.03919 versus 0.03909. On the same 2,595 common symbols,
+both noisy EVM values were 0.54344. The probe supplied no synchronization or
+adaptive alignment. Symbol availability and EVM are waveform diagnostics, not
+evidence that the unflushed tail was delivered.
+
+Expanded-key reservations are tuning 1710000001–1710000008, HF held-out
+1710100001–1710100032, FCC 1710200001–1710200008 and EU
+1710300001–1710300008. The fixture checks their keys against scanned prior
+reservations; key distinction does not prove every finite hop prefix differs
+or cover unlogged history.
+
+## Complete-dwell delayed correction v8
+
+The selectable standalone `full` arm applies an available fresh same-hop
+Helper phase across the nominal capture dwell, including outside the guarded
+pilot-estimation aperture. Application is separate from the existing
+conditional support decision: samples with uncertain correction still leave
+the conditioner. When a fresh phase is unavailable, the previous hop's phase
+multiplier is cleared and the output is explicitly unqualified. Output
+segments distinguish fresh phase applied, no fresh phase, and a filter
+footprint crossing a nominal hop, with schedule-boundary ambiguity recorded
+independently. This does not assume RF phase continuity between hops or reset
+the retained relative time reference.
+
+The boundary estimate remains the supplied nominal schedule epoch with a
+conditional ±8 ms uncertainty; it is not refined from independent Helper
+evidence. The resampler's conservative 50-input-sample halo (about 2.083 ms
+at 24 kHz) is considered for support, but the best-effort uncertain output
+can mix samples from independent hop phases. No simulator truth or probe
+samples select the correction, support, schedule or branch. The receiver
+cannot infer from the modeled physical erasure alone that an ADC sample is
+missing. Source, timestamp and uncertainty metadata remain separate from
+release time; a transmitter-time map is relative to one retained unknown
+constant time/phase reference, not an absolute clock acquisition.
+
+This is a standalone test-consumer path, not a complete downstream streaming
+API. Startup capture blocks that precede usable tracking are stored and
+released raw and uncorrected with their capture metadata. A subsequent
+test-only unified consumer emits them in order with the conditioned trace and
+captured raw filter-edge margins, and excludes synthetic drain padding. It
+runs only after end-of-capture drain: the buffer's two-second readiness is not
+a demonstrated two-second consumer delivery latency. The conditioned trace
+has its own resampled grid and explicit capture coordinates; monotonicity and
+spacing checks are smoke checks, not proof of one-to-one sample identity or
+that no information is lost. The conditioner starts with zero-padded history
+rather than the preceding raw capture, so those transition outputs are
+unsupported. Real missing ADC
+samples and time-varying ADC drift have not yet been exercised through the
+conditioner. Focused buffer tests cover caller-declared missing blocks, sample
+index gaps, clock drift, caller-marked epoch changes, ordering and drain;
+schedule labels and missing-data flags are caller supplied. No Robust
+interoperability or decoding has been established.
+
+The fresh matched tone campaign used frozen executable SHA-256
+`31c88490588c5ae745bff377f10feb347c93e6ba0afdc8e65ecf1a9c9af96b17`,
+40 W Helper and a separate 40 W probe (80 W combined), 180 dB loss, 290 K,
+10 dB noise figure, random keyed HF50 hops at 50 kHz spacing, a 36-second
+observation, 38-second lead and 40-second capture. It used exactly one fixed
+evaluator-only relative gauge, with no per-hop or per-window alignment. The
+physical tone and APSK probes exist only at 38–40 s; an additional synthetic
+clean twin before 38 s is evaluator-only and begins with the conditioned
+portion, not the raw startup. Nominal beginning/end bins are the first/last
+60 ms of each receiver-schedule dwell, not measured physical retune dates.
+Physical class `disturbed` includes signal erasure and filter halo, not a
+missing ADC sample. Noisy instantaneous phase is the unfiltered Helper,
+probe and noise composite. The clean-twin fixed-lag frequency diagnostic
+aliases outside ±93.75 Hz.
+
+Across 32 fresh held-out HF captures, all 960,000 captured input samples per
+case were accounted for; typically 144,000 startup samples per case were
+stored raw and uncorrected. In the 38–40 s nominal boundary bins, full-dwell
+versus delayed interior baseline clean-twin phase RMS was **11.10° versus
+74.19°**, but the full-dwell worst error was **179.93°**. The median per-case
+95th and 99th percentile absolute errors were 4.75° and 29.5°; percentile
+bins have 0.25° resolution. The mean per-case boundary residual-frequency
+RMS was 0.227 Hz and the worst reported dwell frequency was 0.374 Hz. The full arm
+classified 162,747 of 460,832 boundary outputs as supported; their RMS was
+2.79° and worst error 8.28°. The 298,085 uncertain outputs included 1,536
+unknown EOF-padding outputs; among the phase-evaluable uncertain outputs RMS
+was 13.65°, with the 179.93° worst error. For the full arm, beginning,
+interior and end all-output clean-twin phase RMS was 15.33°, 2.67° and
+3.23°, respectively. On approximately 1.05 million common supported
+interior samples both arms had about 2.66° phase RMS and 0.0126 Hz residual
+frequency RMS; the two directional common counts differed slightly, so this
+is not a claim of exactly identical selected samples. Capture-coordinate and
+gauge mismatches were reported as zero in these comparisons.
+
+The frozen 36-second frequency result was available in 31/32 cases and all 31
+intervals covered: point-error RMS 0.01758 Hz, maximum absolute error
+0.04348 Hz, and median conditional half-width ±0.11921 Hz. None qualified
+±0.1 Hz. The pooled fresh-hop RMS was 2.58°, worst hop 9.86°, and maximum
+relative timing error 16.11 µs; no slips were counted in these clean cases.
+Later Helper observations used for delayed correction do not improve the
+reported frozen 36-second result. Eight-case clean screens at 175, 170, 165
+and 160 dB had median half-widths ±0.06680, ±0.03798, ±0.02172 and ±0.01258
+Hz, with 8/8 empirical coverage in each group. These finite conditional
+screens are not a sensitivity limit or general confidence guarantee.
+
+At 5.8 GHz, eight cases per fixture showed all-output nominal-boundary RMS of
+11.07° versus 88.88° baseline for the FCC geometry and 10.34° versus 70.05°
+for the EU geometry; full-arm worst errors were 178.0° and 179.89°. Neither
+fixture qualified any boundary output as supported. The 36-second median
+conditional half-widths were ±0.2176 and ±0.2009 Hz. These fixtures do not
+establish regulatory compliance. An eight-case HF APSK run on this frozen
+executable used only supported symbol footprints: full versus baseline
+supported 2,804 versus 2,574 symbols, and common-symbol noisy composite EVM
+was 55.05% for both. It does not measure uncertain or edge-symbol EVM.
+
+Four matched bounded/excessive differential-phase cases showed that excessive
+changes can remain admitted: supported interior clean-twin phase RMS changed
+from 2.68° to 5.27°, worst 12.24°, and worst fresh-hop error reached 24.71°.
+The frozen frequency intervals precede that impairment. In two 45 ms physical
+retune-loss controls, the 30 ms support model still admitted halo-marked
+affected samples, with phase errors up to approximately 178°; ADC noise
+samples were present. In two whole-cycle gap controls the 36-second result
+was unavailable; later samples were passed with explicit missing-phase
+provenance, and a counted cycle change in best-effort anchors does not show
+recovery. A post-snapshot 1.2 Hz frequency step and moderate curvature caused
+large complete-output errors and loss of support. Arbitrary differential
+channel phase can imitate clock evolution and remains unresolved.
+
+A separate bounded two-pilot boundary-profile feasibility test used five
+boundaries per capture and eight fresh keys, independent per-side complex
+gains, assumed audio/RF predictions and a 4 ms-centered ±8 ms prior. At 180 dB
+and 3.21 ms arrival its boundary RMS error was 3.07 ms versus 0.85 ms for the
+prior center; near either edge it improved modestly. A provisional threshold
+admitted only 1–3 of eight signal cases per offset and no noise controls, with
+the same noise seeds reused across offsets. It did not justify integration;
+it does not rule out other pooled or change-point methods. Its predictions are
+optimistic and no added settling was tested.
+
+Expanded fixture-key reservations were tuning 1720000001–1720000008, HF
+held-out 1720100001–1720100032, FCC 1720200001–1720200008 and EU
+1720300001–1720300008. All 56 keys were checked for byte uniqueness against
+256 legacy keys and 280 previously reserved expanded keys; the scoped
+historical scan cannot rule out unlogged use. The separate thermal-noise seed
+is the schedule seed plus 10,000,000; the seeds are distinct but paired,
+not an independent factorial sweep. The newer rebuilt executable
+`4caccc1d1936dfe47205a7a724bff9d38a3446086cbd61fb0c1c90247be221e8`
+adds complete APSK metrology and newly predeclared impairment fixtures; its
+results must not be silently mixed with the frozen campaign above. Fresh
+impairment profiles were reserved after initial clean v8 exploration, but
+before evaluation or tuning on those profiles.
+
+In eight matched HF APSK runs on this newer executable, all 4,672 eligible
+held-out symbols were evaluated. Mean per-case clean-twin EVM was 6.592%
+for full dwell versus 50.858% for the delayed baseline, and noisy composite
+EVM was 55.167% versus 74.684%. The full arm classified 3,176 symbols as
+supported and 1,496 as uncertain. On 2,574 common supported symbols, both
+had 5.007% clean-twin and 55.054% noisy composite EVM. All 1,312 nominal
+boundary-centered symbols were uncertain: clean-twin EVM was 9.337% versus
+95.332% baseline. Across each arm, 512 matched-filter footprints crossed
+nominal hops, 712 were boundary-ambiguous and none were unavailable. These
+are means of per-case EVM, not power-pooled values. The probe remained present
+only during 38–40 seconds and provided no receiver alignment or decisions.
+The existing evaluator-only oracle used true clock, frequency and hop phase;
+its supported-footprint clean APSK EVM averaged 1.033%. Its unavailable
+knowledge and narrower footprint make it neither a receiver comparison nor a
+proven physical bound.
+
+Two cases per newly reserved impairment profile were also run. In the
+end-phase profile, the full arm classified 5,491 end-bin samples supported,
+including 190 evaluator-marked disturbed samples; the combined supported set
+had 8.13° phase RMS and 64.89° worst error. For interior frequency settling,
+all 67,204 interior outputs were marked supported, including 8,117 marked
+disturbed; their combined RMS was 8.90° with 24.68° worst phase error and
+0.437 Hz worst reported within-dwell residual frequency. These errors mix
+clean and disturbed samples. Only dwell 95 of the five held-out probe dwells
+was impaired; the frequency-pulse phase resets at the nominal receiver dwell,
+and the high-pilot additive profile does not change the probe. No ADC samples
+were missing. A 36-second interval was available and covered in all eight
+impairment cases, with half-widths ±0.1401–0.1539 Hz.
+
+In eight matched tuning captures per setting, configured delays of 0.4, 1,
+2 and 3 seconds gave held-out all-output boundary clean-twin phase RMS of
+11.147°, 10.639°, 10.422° and 10.456° respectively; worst errors were
+177.92°, 178.15°, 176.68° and 172.21°. The respective supported boundary
+counts were 19,027, 34,071, 40,749 and 40,709; uncertain counts were 96,175,
+81,134, 74,459 and 74,498. These supported subsets differ. Actual
+first-sample release ages were 0.8–1.2, 1.6, 2.4–2.8 and 3.6 seconds;
+last-sample ages were 0.4–0.8, 1.2, 2.0–2.4 and 3.2 seconds. Block
+quantization and the physical sample clock produce these ranges. No tested
+delay resolves a physical retune loss or random phase ambiguity.
+
+An isolated instrumented 180 dB full-dwell case on the newer executable used
+1.467 s process CPU through the 36-second capture frontier, including 28 s
+conditioned, and 1.762 s through the 40-second capture plus drain, including
+34 s conditioned and 6 s raw. Startup used 0.0216 s, correlations 0.2100 s
+(fallback was zero for that case), instrumented conditioning 1.516 s,
+buffering 0.00316 s and smoothing 0.00204 s; components overlap and should
+not be summed. Generation was 0.378 s for the 40-second capture. Separate
+reported metrology including output/reporting was 0.967 s, with 0.207 s of
+full-stream regional metrology. The receiver timing includes metadata and
+trace instrumentation and is not an uninstrumented throughput claim.
+
+The buffer reserved 924,864 bytes and peaked at 57,600 complex samples;
+additional raw scratch, plans, metadata and one conditioner workspace were
+76,800, 10,800, 324,744 and 234,784 bytes respectively. The startup consumer
+vector reserved 1,228,800 bytes in the clean case; a noise-only control that
+never initialized the conditioner reserved 9,830,400 bytes for all raw
+samples. These figures exclude tracker history, allocator overhead and
+evaluator arrays. The 40-second receiver capture is not fully conditioned
+because its initial startup blocks are released raw. A separate 40-second
+preset-anchor conditioner-only test is described in v7; it excludes receiver
+tracking and does not establish end-to-end throughput.
+
+The later unified-consumer change was checked with clean, noise-only,
+missing-Helper and clock-adjustment captures; it does not change the earlier
+frozen campaign. In an isolated clean case the 960,000 capture inputs were
+accounted for and the deferred consumer emitted 960,041 events: 144,000 raw
+startup samples, 50 raw samples at each filter edge, and 815,941 conditioned
+samples. It excluded 48 drain-padding outputs and 52 filter-edge outputs.
+The event count is not an ADC sample count. Its maximum capture-coordinate
+step was 1.690 samples, a spacing smoke check only. All capture timestamps
+were available; transmitter-time mapping was unavailable for the 144,000 raw
+startup events. Consumer delivery was after drain, not at the buffer's
+two-second eligibility date. This final executable used 1.556 s receiver CPU
+through the 36-second capture frontier, including 28 seconds conditioned;
+through capture and drain it used 1.877 s plus 0.124 s deferred consumer CPU
+including test validation, for 2.001 s combined. These figures include
+instrumentation and do not measure a real-time streaming API. Generation was
+0.468 s for 40 seconds; full regional metrology was 0.310 s and separately
+reported total metrology including reporting was 0.831 s. The earlier
+instrumented CPU results remain historical measurements of the previous
+executable. The later source was checked by independent review and clean,
+noise-only, missing-Helper and clock-adjustment runs; missing ADC samples
+through the conditioner remain untested.
+
+## Incremental complete-capture conditioner v9
+
+An audit of v8 found that its support mask and the actual operation were
+different: the `full` arm applied fresh phase beyond its guarded aperture and
+then separately labelled the output's authority. Its raw startup and later
+resampled trace were separate test-consumer paths, rather than one incremental
+stream. The selectable v8 implementation remains available for matched
+comparison; its support labels alone do not prove that every sample was
+correctly transformed.
+
+The standalone v9 `HelperCompleteConditioner` consumes bounded delayed
+capture blocks and releases corrected events incrementally while capture
+continues. It uses a two-point linear interpolator after per-input-sample
+mixing, not the earlier band-limited resampler. A plan provides the estimated
+boundary, phase, frequency and clock information for each hop; a support
+interval labels confidence and does not limit where an available correction
+is applied. Missing captured samples produce explicit gap events, with no
+invented payload or interpolation across the gap. Events retain capture
+sample coordinates and capture UTC/monotonic timestamps separately from the
+release timestamp and an optional estimated transmitter-time map.
+
+The source-clock servo retains a single original relative reference and
+adjusts its continuous map toward later available fits. It does not silently
+choose a new reference after a dropout. One earlier late-map implementation
+produced a roughly 56.75° fixed-gauge error; that failed candidate is not a
+validation of the revised servo. The revised path exposes the discrepancy
+between its integrated clock and the fitted map rather than absorbing it
+through evaluator alignment. A mismatch can prevent a sample being labelled
+well supported. Unit checks exercise known and unknown phases, chunking,
+explicit and implicit sample gaps, source-clock recovery, drift, original
+timestamps, startup, drain and system-clock discontinuities, including an
+unannounced wall-clock step. They do not establish Robust interoperability.
+
+The initial 32-case v9 held-out comparison revealed two further large clean
+interior errors, 42.2° and 34.1°, despite Helper clock errors of roughly 11
+and 8 µs. The cause was a `missing_phase` smoother gate: the target's joint
+observation failed qualification even though its fresh phase and accumulated
+joint clock point were available. The correction path then substituted a
+broader clock fallback, injecting approximately 417 and 353 µs of error. The
+repair uses a valid, consistent joint clock point independently of phase
+qualification. For short delays, it transports the joint curve into the
+original reference with explicitly broad uncertainty; it does not reset the
+reference or count the prediction as an independent observation. The frozen
+36-second frequency estimate is unchanged by this correction. The continuous
+clock servo applies a bounded correction of at most ±1,000 ppm; this is an
+implementation bound, not a claim about the actual clock error or accuracy.
+
+These initially examined 32 cases are now regression cases, not fresh
+holdouts. On matched post-repair regressions, the two affected seeds 13 and
+23 had 2.323° and 2.541° held-out interior RMS respectively; one aligned
+case changed from 63.7° to 1.008°, and a 0.4-second delay case from 104° to
+2.33°. Those are targeted corrections, not calibrated reliability evidence.
+No event timestamp or reference errors were reported in those checks. The
+earlier 80-run screen preceded this repair and used the old guarded v8
+comparator; its comparisons must not be labelled final results for the
+repaired candidate or the later full-dwell baseline.
+
+The interpolation choice materially limits signal bandwidth. A one-second
+tone check with 24 kHz sampling and a 100 ppm rate conversion measured about
+1.94% EVM at 1,780 Hz and about 60% at 10,800 Hz. These are conditioned-tone
+checks, not a guarantee for arbitrary baseband spectra. No filtering operation
+creates additional information, and the two-point interpolator should not be
+assumed transparent across the full Nyquist band.
+
+The optional actual-chain boundary tracker scores 65 candidate offsets within
+the supplied ±8 ms prior and retains at most 16 boundary profiles. It uses
+independently correlated settled pilot gains from each side and never assumes
+random-hop RF phase continuity. Adjacent profiles share noisy pilot templates;
+their curvature is not treated as calibrated uncertainty. Boundary uncertainty
+remains explicit and is not a
+universal bound on retune or settling behavior. `nominal` and `tracked`
+boundary modes remain selectable; the tracker must not use probe samples or
+simulator truth to select a correction. The tracker is a new candidate, not
+proof that arbitrary channel phase and clock motion are distinguishable.
+
+One matched pre-repair 40-second clean feasibility capture at 40 W Helper and separate
+40 W tone probe (80 W combined), 180 dB loss, 290 K, 10 dB noise figure and
+keyed-random HF50 hops produced held-out 38–40 s interior clean-twin phase
+RMS of 2.20°. Over nominal boundary bins, tracked versus nominal v9 phase RMS
+was 8.64° versus 10.62°; the v8 guarded comparator was 63.45°. Worst tracked
+boundary error was 164.21°, so the average gain does not establish reliable
+boundary correction. The evaluator counted 771 wrong physical-hop
+assignments in tracked mode versus 5,251 for nominal, with zero such
+assignments labelled well supported in this particular capture. Actual
+physical hop dates are evaluator-only; the receiver uses the assumed schedule
+and Helper observations. These counts include the whole capture and are not a
+calibrated probability or a claim that out-of-bound retunes are detected.
+
+In that same capture, the 36-second frequency result had error 0.00527 Hz and
+conditional half-width ±0.12197 Hz; it covered the error but did not qualify
+±0.1 Hz. The result was frozen at 36 seconds. Retrospective correction of
+earlier samples can use later captured Helper observations, and must not be
+presented as additional information available at the 36-second snapshot.
+The clean-trace relative timing error reached 138.7 µs and its integrated
+clock differed from the conditional fit by up to 132.3 µs; no evaluator
+truth-error-cell crossings were counted in this single case. This counter
+is not an inference of physical branch slips and can count crossings in
+noise-only cases. These quantities are not removed by per-hop or per-window
+fitting.
+
+At the default two-second configured buffer delay, whole 400 ms blocks were
+released with observed capture-to-release sample ages of approximately
+2.0–2.8 seconds. A clean run processed 960,000 captured inputs and emitted
+960,046 resampled outputs; the number of outputs need not equal the number of
+inputs. Its measured conditioner/buffer component allocated 1,847,632 bytes,
+plus approximately 166 KB for the boundary tracker; evaluator traces and
+pending diagnostics are separate. The single instrumented tracked run used
+0.769 seconds of receiver process CPU through the 36-second capture frontier
+and 0.916 seconds through capture and drain. It included output instrumentation
+and was not a complete isolated throughput qualification. One case does not
+establish coverage, false qualification rates, a physical sensitivity limit,
+or diminishing returns.
+
+At drain the linear interpolator emits the actual captured endpoint; it does
+not add a synthetic padding sample as captured signal. The explicit missing
+events and emitted samples account for the captured stream, while output
+counts can differ from input counts because of the clock mapping.
+
+Before v9 tuning, the expanded-key sets 1810000001–1810000008 (tuning),
+1810100001–1810100032 (HF held-out), 1810200001–1810200008 (FCC fixture),
+and 1810300001–1810300008 (EU fixture) were reserved. Their 56 schedule keys
+were byte-checked against 592 prior keys with no overlap. Separately seeded
+thermal noise uses the schedule seed plus 20,000,000; these deterministic
+pairings are not an independent factorial sweep. Scanning recorded history
+cannot establish uniqueness against unlogged runs or prove distinct finite
+hop prefixes. A replacement fresh held-out range 1810400001–1810400032 and
+noise range 1830400001–1830400032 was reserved before tuning the gate repair.
+All 32 expanded keys were unique against 648 prior keys, with 1,282 recorded
+files scanned; finite hop-prefix uniqueness and unlogged history remain
+unverified. The original 1810100001–1810100032 set is regression evidence.
+The following final matched campaigns use the repaired executable SHA-256
+`e3e4b620825a32bb00fbe09319a26f4f4996650f8dc23efea8e02fda62578598`.
+Successful execution means that a simulation completed; the accuracy and
+qualification outcomes are given separately below.
+
+The HF clean fixture uses 24 ksample/s complex capture, 290 K and 10 dB noise
+figure, independent +37 ppm transmitter and −13 ppm receiver audio clocks,
+0.8 ppm relative RF error, 0.05°/√s RF phase noise, and cryptographic-keystream
+random selection among 50 channels spaced 50 kHz about 30 MHz. Each hop has a
+fresh random RF phase. Default clock drift is zero; separate drift, curvature,
+step and retune controls exercise model mismatch. Helper and probe each use
+40 W, so their simultaneous power is 80 W. The probe does not contribute
+measurements to the receiver.
+
+Across 32 fresh HF captures at 40 W Helper / 180 dB, the tracked and nominal
+paths each processed 30,720,000 captured input samples and emitted 30,721,548
+resampled outputs. No ADC samples were missing in these clean cases. The
+tracked path marked 5,668,937 outputs, or 18.45%, as conditionally supported;
+25,052,611 were uncertain and still passed along. Zero timestamp failures,
+unavailable timestamps, reference mismatches, supported schedule mismatches
+or evaluator truth-error-cell crossings were reported. These are conditional
+support labels, not a guarantee against unmodeled impairments. Capture UTC
+and monotonic timestamps refer to the physical capture clock, release time is
+separate, and estimated transmitter time retains its original relative
+reference. The conditioner handles caller-declared ADC gaps as explicit
+missing events and does not fabricate samples.
+Capture timestamps are the caller's ADC-clock anchors, with an affine period
+and uncertainty within each block. UTC steps must split those anchors into
+clock epochs; detected unannounced steps invalidate interpolation of UTC
+across the discontinuity. Release deadlines use monotonic time. The test
+consumer derives time-pattern slots from capture UTC, never release time;
+irregular-chunk deterministic checks preserve that lookup within 3 ns of the
+supplied clock. This does not establish that a hardware ADC timestamp is
+accurate, resolve absolute transmitter time, or test Robust's pattern epoch.
+The queue rejects overflow explicitly rather than dropping input. Its default
+capacity is 115,200 complex samples and 12 blocks; a producer with smaller
+chunks must provision enough block slots or handle backpressure.
+
+The full 0–40 s clean twin is evaluator-only: the real diagnostic probe is
+present only during 38–40 s. The following phase RMS values pool evaluable
+samples; all-output rows include uncertain samples, and a zero-energy twin
+is excluded from phase denominators but is not missing ADC data. The boundary
+row combines the first and last nominal 60 ms of each 400 ms capture dwell;
+it is not an independently known physical boundary. Worst errors are included
+because an RMS gain does not establish that every output is accurate.
+
+| Scope and region | Nominal phase RMS | Tracked phase RMS | Tracked worst |
+| --- | ---: | ---: | ---: |
+| Synthetic twin, 0–40 s, all outputs | 8.66° | 4.76° | 180.00° |
+| Synthetic twin, beginning | 20.25° | 7.98° | 180.00° |
+| Synthetic twin, interior | 3.90° | 3.90° | 42.90° |
+| Synthetic twin, end | 4.37° | 4.02° | 34.33° |
+| Synthetic twin, boundary combined | 14.65° | 6.32° | 180.00° |
+| Held-out tone clean twin, 38–40 s, beginning | 13.04° | 8.20° | 179.99° |
+| Held-out tone clean twin, interior | 2.33° | 2.33° | 7.38° |
+| Held-out tone clean twin, end | 2.92° | 2.53° | 7.85° |
+| Held-out tone clean twin, boundary combined | 9.44° | 6.06° | 179.99° |
+
+For the held-out tone the tracked boundary had 22,175 supported and 438,649
+uncertain outputs; their RMS values were 2.05° and 6.19° respectively. Across
+all 0–40 s synthetic-tone outputs, corresponding values were 2.39° and 5.15°.
+These are distinct subsets, not evidence that discarding uncertain samples
+improves the whole stream. The evaluator-only physical-bin check within
+0.5 ms of a true boundary gave 57.01° tracked versus 62.57° nominal phase
+RMS, with 1,368 versus 1,920 wrong-hop assignments among 4,224 output
+positions. Whole-capture wrong-hop counts were 20,725 versus 167,170, with
+none labelled supported in this clean set. True boundary dates are used only
+for evaluation. For the held-out tracked beginning, interior, end and
+combined boundary, local per-dwell fixed-lag residual-frequency RMS was
+0.1822, 0.01477, 0.01484 and 0.09094 Hz respectively; this diagnostic is
+unaliased only within ±93.75 Hz. For tracked combined boundary outputs,
+the median and maximum per-case 99th-percentile phase errors were 4.625°
+and 8.00°; these are not pooled percentiles.
+These residual phase/frequency values use the noiseless, identically impaired
+twin after the receiver's unchanged correction. The separately logged raw
+noisy-tone phase includes Helper and thermal noise and is not an isolated
+tone-frequency measurement. The existing idealized pilot oracle was not used
+for correction or rerun as a new physical bound.
+
+The frozen 36-second frequency result was available and covered in 31 of
+32 cases; one case was unavailable, and the particular failed qualification
+predicate was not isolated. Point-error RMS was 0.01504 Hz, maximum absolute
+error 0.03268 Hz and median conditional half-width ±0.11653 Hz; none of the
+31 intervals qualified ±0.1 Hz. Fresh-hop phase RMS was 2.51°, worst 11.50°;
+the maximum relative timing error was 168.80 µs. Frozen-model held-out
+frequency RMS was 0.01725 Hz. Later Helper samples used for delayed
+correction did not revise the frozen result. No truth-error-cell crossings
+were counted in these clean cases; this counter is not a physical slip
+detector.
+For example, the two-second path can correct samples captured before 36 s
+using Helper through 38.38 s; held-out samples can use Helper through 39.98 s.
+The event metadata records that frontier separately from the samples' dates.
+Such retrospective output is not a result available at 36 s.
+
+Eight matched HF tuning captures were screened at each loss below. Phase is
+the pooled clean-twin RMS of all 38–40 s nominal-boundary outputs; interval
+coverage is conditional on the modeled clean channel. Large boundary worst
+errors remained at every loss, so lower median intervals alone do not
+establish arbitrary-channel reliability.
+
+| Path loss | Nominal boundary RMS | Tracked boundary RMS | Tracked worst | Median 36 s half-width | Covered |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 180 dB | 10.52° | 6.09° | 178.58° | ±0.11550 Hz | 8/8 |
+| 175 dB | 10.30° | 4.60° | 179.83° | ±0.06608 Hz | 8/8 |
+| 170 dB | 10.22° | 2.62° | 173.26° | ±0.03765 Hz | 8/8 |
+| 165 dB | 10.21° | 2.52° | 174.61° | ±0.02153 Hz | 8/8 |
+| 160 dB | 10.21° | 1.78° | 174.08° | ±0.01247 Hz | 8/8 |
+
+Common-support v9/v8 comparison was available in only four of 32 fresh
+cases: 82,802 samples had 2.386° versus 2.621° phase RMS. The maximum capture
+date difference was 0.0456 input sample under the predeclared 0.05-sample
+matching tolerance; no per-window fit or adaptive alignment was performed.
+Unavailable common comparisons are not evidence of equality. The v8 full
+comparator uses a separate resampled grid and a different support mask.
+Its all-output held-out boundary clean-twin RMS on the same 32 captures was
+10.60° versus 6.06° for v9 tracked, but that aggregate is not a common-grid
+comparison. The earlier guarded baseline remains selectable separately.
+
+The eight-case matched tracked-delay experiment gave the following held-out
+boundary results. Ages include whole-block buffering and are means of the
+per-case extrema, not hard bounds. All output is delivered; the supported
+count identifies conditional authority rather than discarded samples.
+
+| Requested delay | Boundary RMS | Worst | Supported boundary outputs | Capture-to-release age |
+| --- | ---: | ---: | ---: | ---: |
+| 0.4 s | 6.17° | 177.51° | 0 | 0.40–1.20 s |
+| 1 s | 6.03° | 177.85° | 0 | 1.20–1.60 s |
+| 2 s | 6.09° | 178.58° | 5,798 | 2.00–2.80 s |
+| 3 s | 6.06° | 174.45° | 5,797 | 3.20–3.60 s |
+
+The 5.8 GHz eight-case fixtures reduced held-out nominal-boundary RMS from
+9.47° to 4.90° in the FCC geometry and from 10.69° to 5.75° in the EU
+geometry. Neither fixture labelled boundary samples as supported, and worst
+tracked errors remained approximately 179°. Their frozen 36-second median
+half-widths were ±0.2076 and ±0.2090 Hz. These geometry fixtures do not
+certify regulatory compliance or radio performance.
+
+For eight HF APSK cases at 40 W Helper plus 40 W probe, the tracked path's
+4,672 available symbols had a mean per-case clean-twin EVM of 5.09% and
+noisy matched-filter composite EVM of 54.93%; the nominal values were 6.93%
+and 55.12%. The noisy result includes Helper plus probe plus thermal noise.
+The v8/v9 support masks differ, and no direct common-support APSK comparison
+was established. V9 nominal and tracked modes have identical supported-symbol
+counts in this clean set. Footprints that include unavailable or
+unknown samples are excluded and counted. This does not establish successful
+ordinary Robust decoding.
+
+Two-case impairment checks expose important failure modes. A physical retune
+2 ms early worsened tracked nominal-boundary RMS from 7.74° to 12.13° relative
+to nominal scheduling. Excessive differential phase left held-out interior
+RMS at 7.15° with a 13.66° worst error. A 48 ms phase disturbance produced
+15.89° interior RMS and an 83.45° worst error. Frequency step, moderate
+curvature and a whole-cycle gap produced very large best-effort errors and/or
+unavailable frozen results. Noise-only controls did not qualify a frequency
+result, but their truth-error-cell crossings are not physical slip claims.
+An actual caller-marked ADC-dwell gap emitted explicit missing events and
+preserved sample indices; physical RF loss with present noise is a different
+fixture. These limited checks do not resolve arbitrary differential-channel
+phase or guarantee retune detection.
+
+The final focused Helper checks passed 15/15. AddressSanitizer and
+UndefinedBehaviorSanitizer component checks also passed with leak detection
+disabled; leaks were not tested because the execution environment's tracing
+restriction prevents the leak check. No GUI, audio hardware, ordinary Robust
+integration or full Robust regression was involved.
+
+In sequential isolated single-case measurements on a Ryzen 5 PRO 5650U,
+tracked two-second buffering used 0.551 seconds of receiver process CPU across
+all threads through the 36-second capture frontier, processing 34 seconds of
+conditioner input by that frontier. Through the full 40-second capture and
+drain it used 0.627 seconds. The nominal-boundary mode used 0.450 and 0.517
+seconds respectively. The full tracked receiver therefore exceeded the
+preferred 0.5-second budget, although Helper aided tracking alone was below
+it. These measurements are not hardware qualification over all operating
+conditions.
+
+For the complete tracked two-second run, startup was 0.0278 seconds for five
+broad 0.36-second apertures, aided tracking was 0.2151 seconds for 95
+0.36-second apertures, fallback was zero, global fit was 0.00124 seconds,
+joint fitting was 0.00621 seconds and boundary tracking was 0.0708 seconds
+for 99 boundaries. Buffer pushes used 0.00150 seconds, while release, plan,
+conditioning and instrumented consumer work together used 0.3041 seconds for
+the full 40-second capture. The component timers overlap the inclusive
+receiver time and must not be added as independent costs. Generation used
+0.4605 seconds for 40 seconds, clean-twin processing 0.2979 seconds and
+metrology 0.4698 seconds; setup was 0.0692 seconds. Total experiment process
+user plus system CPU was 3.993 seconds including the v8 baseline, twins and
+evaluation. Whole-process peak RSS was 126,560 KiB and is not the receiver
+buffer footprint: the conditioner and buffer allocated 1,847,632 bytes,
+the boundary tracker 166,248 bytes, with bounded metadata additional;
+evaluator trace and pending capacities of 67,108,864 and 4,980,736 bytes are
+separate.
+
+For the same isolated capture, the tracked 0.4, 1, 2 and 3 second delays used
+0.554, 0.521, 0.551 and 0.522 seconds of receiver CPU through 36 seconds,
+with 35.6, 34.8, 34 and 32.8 seconds of conditioner input processed by that
+frontier. Their full-capture-plus-drain receiver CPU was 0.615, 0.590, 0.627
+and 0.601 seconds. These isolated timing values are separate from the
+eight-case accuracy and coverage aggregates above.
+
 ## Reproduction
 
 Build the development profile and the standalone targets before running the
@@ -1341,7 +2786,10 @@ short check and matched cases:
 
 ```sh
 CCACHE_DISABLE=1 ./build.sh --jobs 2
-CCACHE_DISABLE=1 cmake --build build/dev --target test_resampler test_helper_measurement test_helper_measurement_hops test_helper_live_probe test_helper_tracking test_helper_aided_phase test_helper_relative_clock test_helper_ingest test_helper_envelope_feasibility test_helper_joint_estimator test_helper_frequency_recovery test_helper_dual_pilot_phase test_helper_joint_dwell test_helper_soft_joint_dwell test_helper_evolving_clock test_helper_piecewise_dwell test_helper_refinement_study test_helper_continuation_study test_helper_pilot_oracle test_helper_taper_feasibility test_helper_transient_fixture test_helper_pooled_transient_feasibility test_helper_joint_soft_feasibility test_helper_transient_glrt_v4 test_helper_diff_segment_v4 test_helper_joint_split_v4 --parallel 2
+CCACHE_DISABLE=1 cmake --build build/dev --target test_resampler test_helper_measurement test_helper_measurement_hops test_helper_live_probe test_helper_tracking test_helper_aided_phase test_helper_relative_clock test_helper_ingest test_helper_envelope_feasibility test_helper_joint_estimator test_helper_frequency_recovery test_helper_dual_pilot_phase test_helper_joint_dwell test_helper_soft_joint_dwell test_helper_evolving_clock test_helper_piecewise_dwell test_helper_delayed_buffer test_helper_delayed_smoother test_helper_delayed_study test_helper_refinement_study test_helper_continuation_study test_helper_pilot_oracle test_helper_taper_feasibility test_helper_transient_fixture test_helper_pooled_transient_feasibility test_helper_joint_soft_feasibility test_helper_transient_glrt_v4 test_helper_diff_segment_v4 test_helper_joint_split_v4 --parallel 2
+g++ -std=c++20 -O3 -DNDEBUG -ffp-contract=off -fno-fast-math -Iinclude -Itests -Ithird_party/xz/src/liblzma/api tests/helper_full_stream_cost.cpp src/helper_stream_conditioner.cpp build/dev/libdatapump.a build/dev/libdatapump_fast.a build/dev/libdatapump.a build/dev/third_party/xz/liblzma.a -lcrypto -lpthread -ldl -o /tmp/helper_full_stream_cost_v7
+/tmp/helper_full_stream_cost_v7 2
+/tmp/helper_full_stream_cost_v7 100
 build/dev/test_helper_continuation_study --probe
 build/dev/test_helper_continuation_study --case 180 901 hf clean tone 40 all
 build/dev/test_helper_continuation_study --case 180 901 hf clean apsk 40 all
@@ -1368,6 +2816,72 @@ build/dev/test_helper_continuation_study --case 180 1690100001 hf-v3 step tone 4
 build/dev/test_helper_continuation_study --case 180 1700000001 hf-v3 transient-phase15 tone 40 piecewise-v6
 build/dev/test_helper_continuation_study --case 180 1700000001 hf-v3 clean tone 40 evolve-v6
 build/dev/test_helper_continuation_study --case 180 1700000001 hf-v3 clean tone 40 cache-pair-v6
+build/dev/test_helper_delayed_study 180 1710000001 clean tone 2 hf
+build/dev/test_helper_delayed_study 180 1710000001 retune-erasure tone 2 hf
+build/dev/test_helper_delayed_study 180 1710000001 retune-erasure-45 tone 2 hf
+build/dev/test_helper_delayed_study 180 1710100001 transient-end-phase tone 2 hf
+ctest --test-dir build/dev --output-on-failure -R '^helper_delayed_(buffer|smoother|study)$'
+build/dev/test_helper_delayed_study 180 1720000001 clean tone 2 hf full
+build/dev/test_helper_delayed_study 180 1720000001 retune-erasure-45 tone 2 hf full
+build/dev/test_helper_delayed_study 180 1720100001 clean apsk 2 hf full
+CCACHE_DISABLE=1 ./build.sh configure --build-dir build/dev --cli
+CCACHE_DISABLE=1 cmake --build build/dev --target test_helper_complete_conditioner test_helper_boundary_tracker test_helper_complete_study test_helper_delayed_buffer test_helper_delayed_smoother test_helper_delayed_study test_helper_complete_stream_metrics test_helper_complete_apsk_metrics test_helper_noise_seed test_helper_retune_offset test_helper_transient_fixture test_helper_live_probe --parallel 2
+ctest --test-dir build/dev --output-on-failure -R '^(helper_live_probe|helper_transient_fixture|helper_delayed_buffer|helper_delayed_smoother|helper_delayed_study|helper_delayed_full_study|helper_complete_stream_metrics|helper_complete_apsk_metrics|helper_noise_seed|helper_retune_offset|helper_complete_conditioner|helper_boundary_tracker|helper_complete_study|helper_complete_tracked_study|helper_complete_clock_regression)$'
+build/dev/test_helper_complete_study short 180 1810000001 clean tone 2 hf tracked
+build/dev/test_helper_complete_study full 180 1810000001 clean tone 2 hf nominal
+build/dev/test_helper_complete_study full 180 1810000001 clean tone 2 hf tracked
+build/dev/test_helper_complete_study full 180 1810000001 clean apsk 2 hf tracked
+build/dev/test_helper_complete_study full 180 1810000001 clean tone 2 hf tracked guarded
+for delay in 0.4 1 2 3; do
+  for seed in $(seq 1810000001 1810000008); do
+    build/dev/test_helper_complete_study full 180 "$seed" clean tone "$delay" hf tracked full
+  done
+done
+for loss in 180 175 170 165 160; do
+  for seed in $(seq 1810000001 1810000008); do
+    for boundary in nominal tracked; do
+      build/dev/test_helper_complete_study full "$loss" "$seed" clean tone 2 hf "$boundary" full
+    done
+  done
+done
+for seed in $(seq 1810400001 1810400032); do
+  for boundary in nominal tracked; do
+    build/dev/test_helper_complete_study full 180 "$seed" clean tone 2 hf "$boundary" full
+  done
+done
+build/dev/test_helper_delayed_study 180 1720100001 transient-v8held-end-phase tone 2 hf full
+build/dev/test_helper_delayed_study 180 1720100001 transient-v8held-interior-decay tone 2 hf full
+for delay in 0.4 1 2 3; do
+  for seed in $(seq 1720000001 1720000008); do
+    build/dev/test_helper_delayed_study 180 "$seed" clean tone "$delay" hf full
+  done
+done
+for seed in $(seq 1720200001 1720200008); do
+  build/dev/test_helper_delayed_study 180 "$seed" clean tone 2 microwave full
+done
+for seed in $(seq 1720300001 1720300008); do
+  build/dev/test_helper_delayed_study 180 "$seed" clean tone 2 microwave-eu full
+done
+for seed in $(seq 1720100001 1720100032); do
+  build/dev/test_helper_delayed_study 180 "$seed" clean tone 2 hf full
+done
+for loss in 180 175 170 165 160; do
+  for seed in $(seq 1720000001 1720000008); do
+    build/dev/test_helper_delayed_study "$loss" "$seed" clean tone 2 hf full
+  done
+done
+ctest --test-dir build/dev --output-on-failure -R '^(helper_delayed_full_study|helper_complete_stream_metrics|helper_complete_apsk_metrics|helper_noise_seed)$'
+for loss in 180 175 170 165 160; do
+  for seed in $(seq 1710000001 1710000008); do
+    build/dev/test_helper_delayed_study "$loss" "$seed" clean tone 2 hf
+  done
+done
+for seed in $(seq 1710100001 1710100032); do
+  build/dev/test_helper_delayed_study 180 "$seed" clean tone 2 hf
+done
+for delay in 0.4 1 2 3; do
+  build/dev/test_helper_delayed_study 180 1710000001 clean tone "$delay" hf
+done
 build/dev/test_helper_continuation_study --case 180 1690000001 hf-v3 clean tone 40 soft-v5
 build/dev/test_helper_pooled_transient_feasibility 1666973697 8 phase15 3.5
 build/dev/test_helper_joint_soft_feasibility 180 1666973697 100 clean 0 0
@@ -1382,7 +2896,7 @@ build/dev/test_helper_pilot_oracle 180 1680100001 100 apsk-v3
 build/dev/test_helper_taper_feasibility short 32 901
 build/dev/test_helper_taper_feasibility settle-mid 32 933
 python3 tests/test_helper_joint_local_feasibility.py
-ctest --test-dir build/dev --output-on-failure -R '^(resampler|helper_(measurement|measurement_hops|live_probe|tracking|tracking_robustness|aided_phase|relative_clock|ingest|envelope_feasibility|joint_estimator|frequency_recovery|dual_pilot_phase|joint_dwell|soft_joint_dwell|evolving_clock|piecewise_dwell|refinement_study|refinement_robustness|continuation_study|continuation_recovery|continuation_gap|continuation_extended_recovery|pilot_oracle|taper_feasibility|joint_local_feasibility|transient_fixture|pooled_transient_feasibility|joint_soft_feasibility|transient_glrt_v4|diff_segment_v4|joint_split_v4))$'
+ctest --test-dir build/dev --output-on-failure -R '^(resampler|helper_(measurement|measurement_hops|live_probe|tracking|tracking_robustness|aided_phase|relative_clock|ingest|envelope_feasibility|joint_estimator|frequency_recovery|dual_pilot_phase|joint_dwell|soft_joint_dwell|evolving_clock|piecewise_dwell|delayed_buffer|delayed_smoother|delayed_study|refinement_study|refinement_robustness|continuation_study|continuation_recovery|continuation_gap|continuation_extended_recovery|pilot_oracle|taper_feasibility|joint_local_feasibility|transient_fixture|pooled_transient_feasibility|joint_soft_feasibility|transient_glrt_v4|diff_segment_v4|joint_split_v4))$'
 ```
 
 The case arguments specify path loss in dB, deterministic seed, RF fixture,

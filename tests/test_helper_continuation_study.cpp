@@ -17,6 +17,7 @@
 #include <complex>
 #include <cstdint>
 #include <ctime>
+#include <functional>
 #include <iomanip>
 #include <iostream>
 #include <limits>
@@ -424,6 +425,9 @@ struct Receiver {
 struct Trace {
     std::uint64_t first=0;
     std::vector<S> noisy,clean;
+    // Optional evaluator-only output-to-input coordinates. Disabled in the
+    // baseline; delayed studies use the actual production resampler map.
+    std::vector<long double> input_dates;
     std::vector<unsigned char> supported;
     // Evaluator-only physical channel disturbance mask on the output grid.
     std::vector<unsigned char> physically_disturbed;
@@ -444,7 +448,19 @@ struct Stream {
     Trace trace;
     double cpu_seconds=0,cpu36=0,reference_input=0,gauge=0,evaluator_mask_cpu_seconds=0,evaluator_stream_cpu_seconds=0;
     unsigned anchors=0,timing_rejections=0,model_rejections=0,guard_rejections=0,guard_shortened=0;
-    bool conditional_guard=false;
+    bool conditional_guard=false,store_input_dates=false,count_output_rejections=false,use_recursive_oscillator=true;
+    // Opt-in: mix each whole dwell with its fresh measured phase, but keep
+    // the original guarded support as a separate, conservative output flag.
+    bool best_effort_full_dwell=false;
+    // Receiver-observation provenance by nominal capture block. This is not
+    // support authority and never uses simulated channel truth.
+    std::array<bool,100> fresh_phase_by_dwell{};
+    std::uint64_t output_phase_rejected=0,output_timing_rejected=0,output_metadata_rejected=0,output_guard_rejected=0;
+    // Optional receiver-owned metadata-availability gate, evaluated on the
+    // actual fractional input coordinate before the sample is exposed.
+    std::function<bool(long double)> output_metadata_valid;
+    // Optional output consumer; receives the final post-guard support flag.
+    std::function<void(long double,bool)> output_metadata_deliver;
     unsigned heldout_anchor_mask=0;
     std::uint64_t supported_samples=0,output_samples=0,input_samples=0;
     std::optional<long double> first_supported_input,last_supported_input;
@@ -466,7 +482,8 @@ struct Stream {
     }
     void initialize(std::uint64_t first,Coeff c,double source,double reference,const ContinuationSource& simulator){
         const auto initialized_started=cpu();first_input_seconds=static_cast<double>(first)/fs;
-        const auto cfg=stream_config(first,c.audio,source);
+        auto cfg=stream_config(first,c.audio,source);
+        cfg.use_recursive_oscillator=use_recursive_oscillator;
         noisy=std::make_unique<h::HelperStreamConditioner>(cfg,h::HelperStreamConditioner::Correction{c.audio,c.offset,.001});
         const auto clean_started=cpu();clean=std::make_unique<h::HelperStreamConditioner>(cfg,h::HelperStreamConditioner::Correction{c.audio,c.offset,.001});
         const double clean_elapsed=cpu()-clean_started;
@@ -481,9 +498,13 @@ struct Stream {
         const auto feed_started=cpu();double excluded_cpu=0;
         require(initialized,"uninitialized stream");
         const auto first=static_cast<std::uint64_t>(std::llround(d.first_seconds*fs));
-        noisy->update({c.audio,c.offset,.001});noisy->clear_phase();
-        const auto clean_update=cpu();clean->update({c.audio,c.offset,.001});clean->clear_phase();excluded_cpu+=cpu()-clean_update;
+        noisy->update({c.audio,c.offset,.001});
+        if(best_effort_full_dwell)noisy->clear_phase_and_multiplier();else noisy->clear_phase();
+        const auto clean_update=cpu();clean->update({c.audio,c.offset,.001});
+        if(best_effort_full_dwell)clean->clear_phase_and_multiplier();else clean->clear_phase();excluded_cpu+=cpu()-clean_update;
         bool allow=model_valid&&phase.valid&&std::isfinite(phase.high_sigma)&&phase.high_sigma*3<.5;
+        const bool best_effort_phase=best_effort_full_dwell&&phase.valid&&
+            std::isfinite(phase.high)&&std::isfinite(phase.date)&&phase.date>=d.first_seconds&&phase.date<d.first_seconds+hp::dwell_seconds;
         double guard_anchor_budget=0;
         if(!model_valid)++model_rejections;
         const long double anchor=phase.date*fs;
@@ -492,14 +513,15 @@ struct Stream {
             const double mismatch=std::abs(clock-joint->source_seconds);
             if(!joint->valid||!joint->reference_preserved||mismatch>joint->source_half_width_seconds){allow=false;++timing_rejections;}
         }
-        if(allow){
+        std::uint64_t supported_first=0,supported_end=0;
+        if(allow||best_effort_phase){
             const double clock=static_cast<double>(noisy->clock_time_at_input(anchor));
             const bool selected=phase.support_end>phase.support_first;
             auto support_first=selected?first+phase.support_first:first+settle+phase_margin;
             auto support_end=selected?first+phase.support_end:first+settle+aperture-phase_margin;
             if(selected&&(phase.support_end>d.samples.size()||phase.support_first>=phase.support_end))
                 throw std::invalid_argument("invalid receiver-selected phase support");
-            if(conditional_guard){
+            if(conditional_guard&&allow){
                 if(!joint||!joint->valid||!phase.transport_budget_valid||anchor<support_first||anchor>=support_end){
                     allow=false;
                 }else{
@@ -524,11 +546,14 @@ struct Stream {
                 }
                 if(!allow)++guard_rejections;
             }
-            if(allow){
+            supported_first=support_first;supported_end=support_end;
+            if(allow||best_effort_phase){
             const h::HelperStreamConditioner::LocalPhase p{anchor,wrap(tau*2400*clock-phase.high),
-                support_first,support_end,first+hp::dwell_samples};
+                best_effort_full_dwell?first:support_first,best_effort_full_dwell?first+hp::dwell_samples:support_end,first+hp::dwell_samples};
             const bool accepted=noisy->set_phase(p);
             const auto clean_phase=cpu();require(accepted==clean->set_phase(p),"paired local phase acceptance mismatch");excluded_cpu+=cpu()-clean_phase;
+            if(best_effort_full_dwell){const auto dwell=static_cast<std::size_t>(std::llround(d.first_seconds/hp::dwell_seconds));
+                if(dwell<fresh_phase_by_dwell.size())fresh_phase_by_dwell[dwell]=accepted;}
             if(accepted&&d.first_seconds>=38){++anchors;
                 const auto dwell=static_cast<unsigned>(std::llround(d.first_seconds/.4));
                 if(dwell>=95&&dwell<100)heldout_anchor_mask|=1U<<(dwell-95);}
@@ -556,7 +581,18 @@ struct Stream {
                 require(p.consumed==q.consumed&&p.produced==q.produced&&p.output_first_sample==q.output_first_sample,"paired stream map mismatch");
                 require(p.consumed||p.produced,"stream conditioner stalled");
                 for(std::size_t j=0;j<p.produced;++j){
-                    bool support=noisy->phase_supported_at(dates[j])&&noisy->timing_supported_at(dates[j],p.output_first_sample+j);
+                    const bool phase_ok=noisy->phase_supported_at(dates[j]);
+                    const bool timing_ok=noisy->timing_supported_at(dates[j],p.output_first_sample+j);
+                    bool support=phase_ok&&timing_ok;
+                    if(best_effort_full_dwell){
+                        const long double halo=std::ceil(noisy->lookahead_seconds()*fs);
+                        // This is authority, not the range over which the
+                        // current-hop correction was applied. Cross-boundary
+                        // and uncertain portions still leave the conditioner.
+                        support=support&&allow&&dates[j]-halo>=supported_first&&dates[j]+halo<supported_end;
+                    }
+                    if(count_output_rejections){if(!phase_ok)++output_phase_rejected;else if(!timing_ok)++output_timing_rejected;}
+                    if(support&&output_metadata_valid&&!output_metadata_valid(dates[j])){support=false;if(count_output_rejections)++output_metadata_rejected;}
                     if(support&&conditional_guard){
                         const auto map_error=noisy->timing_error_at(dates[j],p.output_first_sample+j);
                         const double dt=(std::abs(static_cast<double>(dates[j]-anchor))+std::ceil(noisy->lookahead_seconds()*fs))/fs;
@@ -565,7 +601,9 @@ struct Stream {
                     }
                     if(trace.noisy.empty())trace.first=p.output_first_sample;
                     require(p.output_first_sample+j==trace.first+trace.noisy.size(),"noncontiguous output trace");
+                    if(output_metadata_deliver)output_metadata_deliver(dates[j],support);
                     trace.noisy.push_back(x[j]);trace.supported.push_back(static_cast<unsigned char>(support));
+                    if(store_input_dates)trace.input_dates.push_back(dates[j]);
                     ++output_samples;if(support){++supported_samples;
                         if(!first_supported_input)first_supported_input=dates[j];
                         last_supported_input=dates[j];
@@ -589,7 +627,7 @@ struct Stream {
     }
 };
 
-struct Metrics {unsigned windows=0,noisy_windows=0,full_windows=0;std::uint64_t sample_count=0,physically_disturbed_supported=0,physically_clean_supported=0,physically_disturbed_withheld=0,physically_clean_withheld=0;double frequency_rms=0,frequency_max=0,phase_rms=0,phase_max=0,noisy_frequency_rms=0,noisy_fit_se=0,sample_phase_rms=0,sample_phase_max=0;};
+struct Metrics {unsigned windows=0,noisy_windows=0,full_windows=0;std::uint64_t sample_count=0,physically_disturbed_supported=0,physically_clean_supported=0,physically_disturbed_withheld=0,physically_clean_withheld=0,physically_unknown_supported=0,physically_unknown_withheld=0;double frequency_rms=0,frequency_max=0,phase_rms=0,phase_max=0,noisy_frequency_rms=0,noisy_fit_se=0,sample_phase_rms=0,sample_phase_max=0;};
 Metrics tone_metrics(const Trace& t,double gauge,const Trace* other=nullptr){
     Metrics out;constexpr std::uint64_t lag=128;
     const auto supported=[&](std::uint64_t n){return t.support(n)&&(!other||other->support(n));};
@@ -628,12 +666,18 @@ Metrics tone_metrics(const Trace& t,double gauge,const Trace* other=nullptr){
     for(std::size_t i=0;i<t.noisy.size();++i){
         const auto n=t.first+i;const double source_date=static_cast<double>(n)/fs-gauge;
         if(source_date<38.02||source_date>39.98)continue;
-        const bool disturbed=i<t.physically_disturbed.size()&&t.physically_disturbed[i];
+        // Classification: 0=known clean, 1=known disturbed, 2=unknown
+        // (e.g. an output depending on synthetic end padding).
+        const auto classification=i<t.physically_disturbed.size()?t.physically_disturbed[i]:0;
         if(!supported(n)){
-            if(disturbed)++out.physically_disturbed_withheld;else ++out.physically_clean_withheld;
+            if(classification==2)++out.physically_unknown_withheld;
+            else if(classification==1)++out.physically_disturbed_withheld;
+            else ++out.physically_clean_withheld;
             continue;
         }
-        if(disturbed)++out.physically_disturbed_supported;else ++out.physically_clean_supported;
+        if(classification==2)++out.physically_unknown_supported;
+        else if(classification==1)++out.physically_disturbed_supported;
+        else ++out.physically_clean_supported;
         const auto value=t.at(n,true);if(std::norm(value)<1e-12)continue;
         const double error=std::arg(value*std::polar(1.,-tau*std::remainder(hp::probe_frequency_hz*n/fs,1.)-fixed_phase));
         ++out.sample_count;out.sample_phase_rms+=error*error;out.sample_phase_max=std::max(out.sample_phase_max,std::abs(error));
@@ -1172,7 +1216,7 @@ double quantile(std::vector<double> values,double p){
 }
 std::string dwell_mask(const std::array<bool,100>& flags){std::string out;out.reserve(flags.size());for(bool x:flags)out+=x?'1':'0';return out;}
 void print_chain(Chain& chain,const ContinuationSource& source,const std::string& impairment,
-                 double generation,double generation_setup,double metrology,const Metrics& m,const Evm& evm){
+                 double generation,double generation_setup,double metrology,const Metrics& m,const Evm& evm,bool delayed_context=false){
     const auto& r=chain.receiver;const auto& stream=chain.stream;
     std::cout<<std::setprecision(10)<<"helper_continuation method="<<chain.name<<" mode="<<impairment
         <<" seed="<<source.config().seed<<" loss_db="<<source.config().path_loss_db<<" schedule="<<schedule(source.config())
@@ -1189,7 +1233,8 @@ void print_chain(Chain& chain,const ContinuationSource& source,const std::string
         <<" simulator_audio_jump_seconds="<<source.audio_jump()
         <<" simulator_audio_stress_rf_calendar=independent_retained_key_calendar"
         <<" local_frequency_truth="<<(impairment.starts_with("transient-")?"instantaneous_not_aperture_average_for_disturbed_dwells":"modeled_instantaneous")
-        <<" observation_seconds=36 lead_seconds=38 capture_seconds=40 buffering_latency_seconds=.4"
+        <<" observation_seconds=36 lead_seconds=38 capture_seconds=40"
+        <<(delayed_context?" phase_observation_dwell_seconds=.4 actual_latency=see_helper_delayed_study":" buffering_latency_seconds=.4")
         <<" broad_calls="<<r.broad_calls<<" aided_calls="<<r.aided_calls<<" fallback_calls="<<r.fallbacks
         <<" joint_window_uncached="<<r.use_uncached_joint
         <<" joint_dwell_enabled="<<r.use_joint_dwell<<" joint_dwell_attempts="<<r.joint_dwell_attempts
@@ -1310,6 +1355,8 @@ void print_chain(Chain& chain,const ContinuationSource& source,const std::string
         <<" evaluator_physical_clean_supported_samples="<<m.physically_clean_supported
         <<" evaluator_physical_disturbance_withheld_samples="<<m.physically_disturbed_withheld
         <<" evaluator_physical_clean_withheld_samples="<<m.physically_clean_withheld
+        <<" evaluator_physical_unknown_supported_samples="<<m.physically_unknown_supported
+        <<" evaluator_physical_unknown_withheld_samples="<<m.physically_unknown_withheld
         <<" noisy_tone_windows="<<m.noisy_windows<<" noisy_frequency_rms_hz="<<m.noisy_frequency_rms<<" noisy_frequency_fit_se_hz="<<m.noisy_fit_se
         <<" apsk_symbols="<<evm.symbols<<" noisy_apsk_evm="<<evm.noisy<<" twin_apsk_evm="<<evm.clean
         <<" frozen_model_heldout_count="<<chain.heldout_count
@@ -1663,6 +1710,14 @@ void short_probe(){
     verify_namespace(1700100001U,32);  // v6 HF held-out
     verify_namespace(1700200001U,8);   // v6 FCC held-out
     verify_namespace(1700300001U,8);   // v6 EU held-out
+    verify_namespace(1710000001U,8);   // v7 tuning only
+    verify_namespace(1710100001U,32);  // v7 HF held-out
+    verify_namespace(1710200001U,8);   // v7 FCC held-out
+    verify_namespace(1710300001U,8);   // v7 EU held-out
+    verify_namespace(1720000001U,8);   // v8 tuning only
+    verify_namespace(1720100001U,32);  // v8 HF held-out
+    verify_namespace(1720200001U,8);   // v8 FCC held-out
+    verify_namespace(1720300001U,8);   // v8 EU held-out
     const auto legacy_schedule=helper_measurement_hops::hf50(901);
     const auto legacy_repeat=helper_measurement_hops::hf50(1157);
     require(legacy_schedule.order==legacy_repeat.order,"legacy keyed Helper schedule changed");
@@ -1677,6 +1732,11 @@ void short_probe(){
         a.noisy.push_back(sample);a.clean.push_back(sample);a.supported.push_back(1);
         b.noisy.push_back(sample);b.clean.push_back(sample);b.supported.push_back(i>=static_cast<std::uint64_t>(fs));
     }
+    Trace unknown;unknown.first=static_cast<std::uint64_t>(38.1*fs);unknown.noisy.push_back({});unknown.clean.push_back({});
+    unknown.supported.push_back(0);unknown.physically_disturbed.push_back(2);
+    const auto unknown_metric=tone_metrics(unknown,0);
+    require(unknown_metric.physically_unknown_withheld==1&&unknown_metric.physically_clean_withheld==0&&
+        unknown_metric.physically_disturbed_withheld==0,"unknown padded sample misclassified");
     const auto native=tone_metrics(a,0),shared_a=tone_metrics(a,0,&b),shared_b=tone_metrics(b,0,&a);
     require(shared_a.sample_count>0&&shared_a.sample_count<native.sample_count&&shared_a.sample_count==shared_b.sample_count,
         "common-support tone metrology did not intersect masks symmetrically");

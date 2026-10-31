@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <limits>
 #include <numbers>
+#include <optional>
 #include <random>
 #include <stdexcept>
 #include <string>
@@ -63,6 +64,23 @@ struct Config {
     // Explicitly opt into new public test keys; legacy schedules remain the
     // default for every numeric seed, including previously used large seeds.
     bool expanded_schedule_key = false;
+    // An optional independent thermal-noise stream. Omitting this field keeps
+    // the historical interleaved RNG and its exact numerical realizations.
+    // With a value, random hop phase and oscillator phase noise continue to
+    // use seed; the new seed affects only thermal I/Q noise.
+    std::optional<std::uint64_t> noise_seed;
+    // Simulator-only shift of the physical RF retune calendar relative to the
+    // unchanged transmitted Helper/probe calendar. Positive means RF retunes
+    // later in physical seconds. Never supplied to receiver correction.
+    double rf_retune_offset_seconds = 0;
+    // Test-only waveform counterexamples. Empty preserves the historical
+    // hopping-dependent pilot gate; the auxiliary controls affect only the
+    // corresponding production Generator component. The fixture retains its
+    // standard high-pilot normalization when these alter total Helper power;
+    // high/low pilot levels are not recalibrated for auxiliary counterexamples.
+    std::optional<bool> pilot_dwell_ramps;
+    bool auxiliary_enabled = true;
+    bool auxiliary_punctuation = true;
 };
 
 struct Dwell {
@@ -78,7 +96,9 @@ struct Dwell {
     std::vector<std::complex<float>> settled_common_phasor;
 };
 
-// Mean power of the actual shaped Helper waveform on the same 40 s calendar.
+// Mean power of the standard shaped Helper waveform on the same 40 s calendar.
+// Experimental ramp/auxiliary overrides keep this reference and pilot gain;
+// their changed total energy is not renormalized to the configured Helper W.
 // This is a simulation link-budget reference; it is not an RF power reading.
 inline double high_pilot_fraction(const Config& c) {
     h::Options options;
@@ -101,7 +121,7 @@ inline double high_pilot_fraction(const Config& c) {
 class Source {
 public:
     explicit Source(Config c)
-        : c_(std::move(c)), rng_(c_.seed),
+        : c_(std::move(c)), rng_(c_.seed), noise_rng_(c_.noise_seed.value_or(c_.seed)),
           hops_(c_.hopping ? (c_.shift_center_hz > 1e9
               ? (c_.microwave_eu20
                   ? helper_measurement_hops::eu20(c_.seed,c_.expanded_schedule_key)
@@ -122,6 +142,8 @@ public:
             c_.phase_noise_degrees_per_sqrt_second < 0 ||
             !std::isfinite(c_.arrival_offset_seconds) ||
             c_.arrival_offset_seconds < 0 || c_.arrival_offset_seconds > .01 ||
+            !std::isfinite(c_.rf_retune_offset_seconds) ||
+            std::abs(c_.rf_retune_offset_seconds) > .01 ||
             !std::isfinite(c_.fractional_input_sample) ||
             !std::isfinite(c_.initial_rf_phase_radians) ||
             std::abs(c_.fractional_input_sample) >= 1 ||
@@ -168,6 +190,16 @@ public:
         return t * (1 + c_.tx_audio_ppm * 1e-6) +
                .5e-6 * c_.tx_audio_drift_ppm_per_second * t * t;
     }
+    // Evaluator-only actual RF calendar, with -1 denoting the pre-transmission
+    // interval. The zero-offset branch preserves the historical calculation
+    // exactly. When hopping is disabled this still describes the calendar,
+    // even though the RF frequency and phase do not randomly hop.
+    int rf_hop_at_input(double nominal_receiver_seconds) const noexcept {
+        const double shifted = c_.rf_retune_offset_seconds == 0 ? nominal_receiver_seconds :
+            nominal_receiver_seconds - c_.rf_retune_offset_seconds * rx_scale();
+        const double tx = tx_time(shifted);
+        return tx < 0 ? -1 : std::min(99, static_cast<int>(std::floor(tx / dwell_seconds)));
+    }
     double audio_scale_at(double nominal_receiver_seconds) const noexcept {
         const double t = (nominal_receiver_seconds + c_.fractional_input_sample / sample_rate) / rx_scale()
                          - c_.arrival_offset_seconds;
@@ -213,6 +245,7 @@ public:
         out.clean_probe.resize(dwell_samples);
         out.common_phasor.resize(dwell_samples);
         std::normal_distribution<double> normal;
+        std::normal_distribution<double> noise_normal;
         std::uniform_real_distribution<double> uniform(-std::numbers::pi, std::numbers::pi);
         const double q = c_.phase_noise_degrees_per_sqrt_second * std::numbers::pi / 180;
         const double phase_step = q / std::sqrt(sample_rate * rx_scale());
@@ -228,15 +261,16 @@ public:
             const double discriminant = tx_rate * tx_rate +
                 2e-6 * c_.tx_audio_drift_ppm_per_second * boundary;
             if (!(discriminant > 0)) throw std::invalid_argument("invalid TX clock drift for dwell calendar");
-            return c_.arrival_offset_seconds + (hop == 0 ? 0 :
+            return c_.arrival_offset_seconds + c_.rf_retune_offset_seconds + (hop == 0 ? 0 :
                 2 * boundary / (tx_rate + std::sqrt(discriminant)));
         };
         for (unsigned i = 0; i < dwell_samples; ++i) {
             const double nominal = out.first_seconds + static_cast<double>(i) / sample_rate;
             const double physical = (nominal + c_.fractional_input_sample / sample_rate) / rx_scale();
             const double tx = tx_time(nominal);
-            const int hop = tx < 0 ? -1 : std::min(99, static_cast<int>(std::floor(tx / dwell_seconds)));
-            if ((i == 480 || i == 9119) && hop != static_cast<int>(dwell))
+            const int pilot_hop = tx < 0 ? -1 : std::min(99, static_cast<int>(std::floor(tx / dwell_seconds)));
+            const int hop = c_.rf_retune_offset_seconds == 0 ? pilot_hop : rf_hop_at_input(nominal);
+            if ((i == 480 || i == 9119) && pilot_hop != static_cast<int>(dwell))
                 throw std::invalid_argument("TX clock/arrival leaves settled Helper aperture");
             if (!have_previous_sample_) {
                 active_hop_ = hop;
@@ -265,8 +299,16 @@ public:
             const auto combined = (helper + signal) * common;
             out.common_phasor[i] = {static_cast<float>(common.real()), static_cast<float>(common.imag())};
             out.clean_probe[i] = {static_cast<float>(clean.real()), static_cast<float>(clean.imag())};
-            out.samples[i] = {static_cast<float>(combined.real() + sigma_ * normal(rng_)),
-                              static_cast<float>(combined.imag() + sigma_ * normal(rng_))};
+            // Preserve the legacy interleaving (two thermal draws, then one
+            // oscillator draw) even when using a separate thermal stream. In
+            // particular, changing only noise_seed must not change subsequent
+            // random hop phases or oscillator phase-noise history.
+            const double legacy_i = normal(rng_);
+            const double legacy_q = normal(rng_);
+            const double thermal_i = c_.noise_seed ? noise_normal(noise_rng_) : legacy_i;
+            const double thermal_q = c_.noise_seed ? noise_normal(noise_rng_) : legacy_q;
+            out.samples[i] = {static_cast<float>(combined.real() + sigma_ * thermal_i),
+                              static_cast<float>(combined.imag() + sigma_ * thermal_q)};
             phase_brownian_ += phase_step * normal(rng_);
         }
         return out;
@@ -287,11 +329,12 @@ private:
         options.data_power_w = 1;
         options.callsign = c_.callsign;
         // Standalone diagnostic plan, not a Robust placement calculation.
-        const h::Plan plan{high_frequency_hz, .4, 0, c_.helper_w, 950, 550, c_.hopping};
-        return h::Generator(options, plan, c_.epoch, true);
+        const h::Plan plan{high_frequency_hz, .4, 0, c_.helper_w,
+            c_.auxiliary_enabled ? 950. : 0., 550., c_.pilot_dwell_ramps.value_or(c_.hopping)};
+        return h::Generator(options, plan, c_.epoch, c_.auxiliary_punctuation);
     }
     Config c_;
-    std::mt19937_64 rng_;
+    std::mt19937_64 rng_, noise_rng_;
     helper_measurement_hops::Profile hops_;
     std::vector<std::complex<double>> points_;
     h::Generator generator_;

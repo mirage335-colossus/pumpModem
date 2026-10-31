@@ -18,6 +18,25 @@ GPSDO at microwave frequencies. Assess work by its contribution to that ordinary
 receiver, including its actual acquisition and search costs and the limits of
 the evidence.
 
+Prepare the demonstrated standalone techniques for integration by delivering
+complete, corrected baseband dwells with their original capture timestamps.
+Buffering lets settled Helper observations and accumulated clock/frequency
+estimates correct the whole dwell by interpolation or reasonable extrapolation;
+the pilot-estimation aperture must not become a delivery mask. Use the known
+dwell schedule, with any timing adjustment based on the auxiliary-tone phase
+reversal. Keep correction uncertainty and actual missing input explicit while
+passing along captured samples. Approximately ±0.1 Hz is an intended scale for
+useful narrowing, not a hard threshold for baseband delivery or integration
+readiness. The current evidence, prepared components and remaining adapter
+work are in [standalone integration preparation](helper-continuation.md#practical-path-prepared-for-integration).
+The optional [auxiliary inversion measurement](helper-continuation.md#standalone-inversion-measurement-and-complete-stream-bridge)
+now exposes actual dated reversals without requiring pilot ramps or payload
+decoding; weak-link availability and its uncertainty calibration remain limited.
+The optional [pooled inversion timing experiment](helper-continuation.md#sensitive-pooled-inversion-timing-experimental)
+combines weak reversal evidence across independently phased dwells using the
+retained relative clock. Its tested millisecond-scale timing is distinct from
+strict per-dwell microsecond detection and from arbitrary RF retune delay.
+
 The auxiliary APSK carries identification for a regulatory purpose. Its inability
 to decode except at point-blank conditions, perhaps around 40 dB total path loss
 or an even more extreme link budget, is of no consequence to this priority; that

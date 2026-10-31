@@ -113,14 +113,19 @@ bool HelperStreamConditioner::set_phase(const LocalPhase& reference) noexcept {
     return true;
 }
 void HelperStreamConditioner::clear_phase() noexcept {mixer_.pending=false;mixer_.active=false;}
+void HelperStreamConditioner::clear_phase_and_multiplier() noexcept {
+    clear_phase();mixer_.phasor={1,0};mixer_.phase=0;
+}
 
 void HelperStreamConditioner::advance(MixerState& state,std::uint64_t sample) const noexcept {
     if(state.pending && sample>=state.phase_reference.support_first_sample) {
         const auto& reference=state.phase_reference;
         if(sample<reference.support_end_sample) {
-            state.phase=wrapped(reference.correction_phase_radians-
+            const double phase=wrapped(reference.correction_phase_radians-
                 static_cast<long double>(tau)*correction_.common_frequency_hz*
                 (static_cast<long double>(sample)-reference.anchor_input_sample)/config_.sample_rate);
+            if(config_.use_recursive_oscillator)state.phasor=std::polar(1.,phase);
+            else state.phase=phase;
             // Earlier samples may already be mixed and retained in the
             // resampler's lookahead/history. A late/replacement anchor gives
             // no authority over them, even if its observation began earlier.
@@ -147,13 +152,34 @@ HelperStreamConditioner::Progress HelperStreamConditioner::process(
         throw Error("Helper stream input counter overflow");
     MixerState state=mixer_;
     const double increment=-tau*correction_.common_frequency_hz/config_.sample_rate;
-    for(std::size_t i=0;i<available;++i) {
-        const auto z=input[i];
-        if(!std::isfinite(z.real()) || !std::isfinite(z.imag()))throw Error("nonfinite Helper stream input");
-        advance(state,next_input_sample_+i);
-        const auto mixed=std::complex<double>(z)*std::polar(1.,state.phase);
-        real_input_[i]=static_cast<float>(mixed.real());imaginary_input_[i]=static_cast<float>(mixed.imag());
-        state.phase=wrapped(state.phase+increment);after_[i]=state;
+    if(config_.use_recursive_oscillator){
+        // One phasor per contiguous mixer state. A fresh RF-hop anchor resets
+        // it; update() changes the increment without resetting phase. Phasor
+        // state is snapshotted for speculative input, so only the consumed
+        // prefix commits. The re-normalization cadence is absolute-indexed,
+        // independent of chunking, and limits magnitude rather than phase
+        // drift. Long-run phase error remains a numerical measurement.
+        const auto step=std::polar(1.,increment);
+        for(std::size_t i=0;i<available;++i) {
+            const auto z=input[i];
+            if(!std::isfinite(z.real()) || !std::isfinite(z.imag()))throw Error("nonfinite Helper stream input");
+            advance(state,next_input_sample_+i);
+            const auto mixed=std::complex<double>(z)*state.phasor;
+            real_input_[i]=static_cast<float>(mixed.real());imaginary_input_[i]=static_cast<float>(mixed.imag());
+            state.phasor*=step;
+            if(((next_input_sample_+i)&255U)==255U)state.phasor/=std::abs(state.phasor);
+            after_[i]=state;
+        }
+    }else{
+        // Selectable original scalar path for matched comparisons.
+        for(std::size_t i=0;i<available;++i) {
+            const auto z=input[i];
+            if(!std::isfinite(z.real()) || !std::isfinite(z.imag()))throw Error("nonfinite Helper stream input");
+            advance(state,next_input_sample_+i);
+            const auto mixed=std::complex<double>(z)*std::polar(1.,state.phase);
+            real_input_[i]=static_cast<float>(mixed.real());imaginary_input_[i]=static_cast<float>(mixed.imag());
+            state.phase=wrapped(state.phase+increment);after_[i]=state;
+        }
     }
     real_dates_=imaginary_dates_=0;
     const bool local_end=end && available==input.size();

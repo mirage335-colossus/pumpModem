@@ -81,6 +81,37 @@ inline Profile named(std::string_view name, unsigned dwell) {
     if (name == "v6held-frequency44") return {dwell,.122,.044,1.,0.,6.,0.};
     if (name == "v6held-decay145") return {dwell,.093,.145,1.,0.,-4.25,.047};
     if (name == "v6held-combined37") return {dwell,.284,.037,.57,.65,1.3,0.};
+    // V7 boundary-specific held-out profiles: fixed before delayed-receiver
+    // tuning. These exercise both sides of the retune and taper guards; the
+    // channel shapes are evaluator-only and never select a correction.
+    if (name == "v7held-start-phase") return {dwell,.0015,.0175,.83,.94,0.,0.};
+    if (name == "v7held-end-phase") return {dwell,.379,.020,.71,-.83,0.,0.};
+    if (name == "v7held-start-add") return {dwell,.003,.021,1.05,-1.4,0.,0.,true};
+    if (name == "v7held-end-add") return {dwell,.371,.027,.67,1.3,0.,0.,true};
+    if (name == "v7held-start-gain") return {dwell,.008,.034,.44,0.,0.,0.};
+    if (name == "v7held-end-gain") return {dwell,.354,.042,.52,0.,0.,0.};
+    if (name == "v7held-start-freq") return {dwell,.006,.070,1.,0.,3.2,.025};
+    if (name == "v7held-end-freq") return {dwell,.333,.062,1.,0.,-4.1,.020};
+    // V8 holdouts were reserved after clean-case exploration and before
+    // evaluation or tuning against these profiles. Times are relative to the
+    // nominal receiver dwell, not a detected RF hop boundary.
+    // Physical signal modifications leave the captured ADC noise in place;
+    // the high-only additive profile does not disturb the probe waveform.
+    if (name == "v8held-start-combined") return {dwell,.0045,.032,.58,-.67,2.2,.018};
+    if (name == "v8held-end-phase") return {dwell,.361,.034,1.22,1.05,0.,0.};
+    if (name == "v8held-interior-decay") return {dwell,.173,.087,1.,0.,-3.7,.036};
+    if (name == "v8held-interior-add") return {dwell,.287,.049,.73,-1.55,0.,0.,true};
+    // V9 holdouts were reserved before evaluation or tuning against these
+    // profiles. For additive_high, gain is the added high-pilot amplitude,
+    // not the signal path gain.
+    if (name == "v9held-start-combined") return {dwell,.011,.028,.61,1.08,0.,0.};
+    if (name == "v9held-end-settling") return {dwell,.343,.054,1.,0.,-5.2,.021};
+    if (name == "v9held-interior-phase") return {dwell,.153,.019,.77,-1.23,0.,0.};
+    if (name == "v9held-end-add") return {dwell,.356,.037,1.12,1.44,0.,0.,true};
+    // Inversion holdouts were reserved before candidate evaluation.
+    if (name == "inversion-held-phase23") return {dwell,.1465,.023,.79,.93,0.,0.};
+    if (name == "inversion-held-gain51") return {dwell,.131,.051,.43,0.,0.,0.};
+    if (name == "inversion-held-settle61") return {dwell,.117,.061,1.,0.,3.8,.014};
     throw std::invalid_argument("unknown Helper transient profile");
 }
 
