@@ -20,7 +20,7 @@ coverage and decoded-message reliability are related but distinct quantities.
 | [Modem inspection](../inspection.md) | Reference: flow views, plots and interpretation boundaries. |
 | [Clock synchronization](../clock-sync.md) | Local candidate: independent GPS arrival controls, timing evidence, narrow-search prerequisites and hardware limitations. |
 | [Spread controls](../spread-spectrum-controls.md) | Local candidate: separate outer DSSS factors, Fake FHSS illustration and unqualified acquisition/regulatory scope. |
-| [Helper Carrier](../helper-carrier.md) | Experimental independent tone, optional frequency/phase/dwell-timing assistance, time phase and clear or encrypted callsign metadata, Live/duplex and physical simulation; [standalone two-pilot measurement](../helper-measurement.md); original-search and hardware qualification limits in the [implementation plan](../helper-carrier-plan.md). |
+| [Helper Carrier](../helper-carrier.md) | Experimental independent tone, optional frequency/phase/dwell-timing assistance, time phase and clear or encrypted callsign metadata, Live/duplex and physical simulation; [standalone measurement](../helper-measurement.md), [Live-style probe](../helper-live-probe.md), [tracking study](../helper-tracking.md), [frequency refinement](../helper-frequency-refinement.md), [tracking continuation](../helper-continuation.md), and [EME study](../helper-eme-measurement.md); original-search and hardware qualification limits in the [implementation plan](../helper-carrier-plan.md). |
 | [Packetless stream plan](../packetless-stream-plan.md) | Historical code audit and migration plan for the now-implemented fixed-interval transport. |
 
 ## Computation, iterative search and receiver alternatives

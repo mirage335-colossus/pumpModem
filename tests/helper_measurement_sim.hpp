@@ -2,6 +2,7 @@
 
 // Independent sample-level physical-time source for the Helper measurement
 // tests. This fixture does not call the receiver or use its search results.
+#include "helper_measurement_hops.hpp"
 #include <algorithm>
 #include <cmath>
 #include <complex>
@@ -29,11 +30,11 @@ struct Link {
     double shift_drift_ppm_per_s = 0;
     double phase_noise_degrees_per_sqrt_s = .5;
     bool noise = true;
+    bool signal_enabled = true;
     bool auxiliary = true;
     bool hopping = true;
     std::uint64_t seed = 173;
     double shift_center_hz = 30e6;
-    double hop_step_hz = 600000;
 };
 struct Dwell {
     std::vector<std::complex<float>> samples;
@@ -52,19 +53,24 @@ inline double noise_density_dbm_hz(const Link& c) {
 inline double high_cn0_db_hz(const Link& c) {
     return c.transmit_high_dbm-c.path_loss_db-noise_density_dbm_hz(c);
 }
-inline double hop_frequency(const Link& c, unsigned dwell) {
-    // A known commanded RF calendar, deliberately independent of impairment.
-    constexpr int hop[]{-2, 1, -1, 2, 0};
-    return c.shift_center_hz + (c.hopping ? hop[dwell%5]*c.hop_step_hz : 0);
+// The configured prior must cover the entire keyed FHSS schedule, including
+// channels not used in a particular seeded realization.
+inline double max_shift_hz(const Link& c) {
+    return c.hopping ? (c.shift_center_hz > 1e9 ? 5868.4e6 : 31.225e6)
+                     : c.shift_center_hz;
 }
 class Source {
 public:
-    explicit Source(Link config): c_(config), rng_(config.seed) {}
+    explicit Source(Link config): c_(config), rng_(config.seed),
+        hops_(c_.hopping ? (c_.shift_center_hz > 1e9
+            ? helper_measurement_hops::eu20(static_cast<unsigned>(c_.seed))
+            : helper_measurement_hops::hf50(static_cast<unsigned>(c_.seed)))
+            : helper_measurement_hops::Profile{}) {}
     Dwell generate(unsigned dwell) {
         Dwell d;
         // Observe the settled central 360 ms of each 400 ms dwell.
         d.first_seconds = dwell*.4+.02;
-        d.shift_hz = hop_frequency(c_,dwell);
+        d.shift_hz = c_.hopping ? hops_.frequency(dwell) : c_.shift_center_hz;
         const auto n = static_cast<std::size_t>(std::llround(c_.sample_rate*.36));
         d.samples.resize(n);
         if(dwell!=next_dwell_++) throw std::invalid_argument("simulated dwells must be generated in order");
@@ -90,10 +96,7 @@ public:
             return hz*1e-6*((c_.tx_shift_ppm-c_.rx_shift_ppm)*(t1-t0)+
                 .5*c_.shift_drift_ppm_per_s*(t1*t1-t0*t0));
         };
-        double rf_cycles=0;
-        for(unsigned prior=0;prior<dwell;++prior) {
-            rf_cycles+=rf_integral(hop_frequency(c_,prior),prior*.4/rx_scale,(prior+1)*.4/rx_scale);
-        }
+        double rf_cycles=rf_cycles_before_dwell_;
         rf_cycles+=rf_integral(d.shift_hz,dwell*.4/rx_scale,start_physical);
         const auto phase_at_start=[&](double nominal,double fixed_phase) {
             const double audio_cycles=nominal*(start_physical*(1+c_.tx_audio_ppm*1e-6)+
@@ -113,8 +116,9 @@ public:
         const double diffusion=phase_noise/std::sqrt(c_.sample_rate*rx_scale);
         constexpr double low_amp=0.7079457843841379; // -3 dB power
         for(std::size_t i=0;i<n;++i) {
-            auto signal=std::polar(1.,phase_high)+std::polar(low_amp,phase_low);
-            if(c_.auxiliary) {
+            auto signal=c_.signal_enabled ? std::polar(1.,phase_high)+std::polar(low_amp,phase_low)
+                                          : std::complex<double>{};
+            if(c_.signal_enabled && c_.auxiliary) {
                 // Independent representative auxiliary modulation: 8ms dwell
                 // boundary gates, smooth reversal 152–168ms, and nine 20ms
                 // APSK-like transitions after 212ms. It is deliberately not
@@ -151,14 +155,17 @@ public:
             phase_aux +=tau*instantaneous(950.,t+.5/(c_.sample_rate*rx_scale))/c_.sample_rate+random_phase;
         }
         brownian_time_=(d.first_seconds+n/c_.sample_rate)/rx_scale;
+        rf_cycles_before_dwell_+=rf_integral(d.shift_hz,dwell*.4/rx_scale,(dwell+1)*.4/rx_scale);
         return d;
     }
 private:
     Link c_;
     std::mt19937_64 rng_;
+    helper_measurement_hops::Profile hops_;
     unsigned next_dwell_=0;
     double hop_phase_=.13;
     double brownian_phase_=0;
     double brownian_time_=0;
+    double rf_cycles_before_dwell_=0;
 };
 } // namespace helper_measurement_sim

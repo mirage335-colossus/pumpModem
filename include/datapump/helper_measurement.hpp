@@ -43,6 +43,11 @@ struct HelperDwellMeasurement {
 
 struct HelperMeasurementSnapshot {
     bool valid = false;
+    // A dated point estimate can remain available after residual evidence
+    // contradicts the fitted linear clock model. valid then remains false:
+    // covariance/precise corrections must not conceal the discrepancy.
+    bool model_consistent = false;
+    double model_consistency_score = 0, model_consistency_threshold = 0;
     std::size_t dwell_count = 0;
     double time_seconds = 0;
     // At time_seconds: f_observed = (1 + audio_ppm*1e-6)*f_nominal
@@ -90,12 +95,78 @@ public:
     explicit HelperMeasurement(HelperMeasurementConfig config);
     HelperDwellMeasurement observe(std::span<const std::complex<float>> samples,
                                    double shift_hz, double first_sample_time_seconds);
+    // Admit an independently acquired two-pilot measurement to the same clock
+    // fit without repeating spectral acquisition. Dates, capture geometry and
+    // finite, nonsingular errors and prospective weighted-fit arithmetic are
+    // checked; invalid/overlapping observations leave the fit unchanged.
+    // Storage is bounded to 256 accepted apertures.
+    // The caller remains responsible for detection, unbiased local frequency
+    // errors and the declared common-process covariance. In particular, a
+    // prediction alone is not a new independent frequency observation.
+    bool ingest(const HelperDwellMeasurement& measurement);
     HelperMeasurementSnapshot snapshot() const;
     HelperFrequencyPrediction predict(double nominal_hz, double shift_hz,
         double time_seconds, double aperture_seconds = 0) const;
     void reset();
 private:
+    HelperMeasurementSnapshot compute_snapshot() const;
     HelperMeasurementConfig config_;
     std::vector<HelperDwellMeasurement> observations_;
+    mutable std::optional<HelperMeasurementSnapshot> snapshot_cache_;
+};
+
+// Pooled acquisition for a declared narrow prior (at most 64 Hz). Each dwell's
+// phase is an independent nuisance. The caller supplies a physical capture
+// timeline watermark; omitted boundary samples never count as continuous data.
+struct HelperPooledConfig {
+    HelperMeasurementConfig measurement;
+    double max_audio_drift_ppm_per_second = 1;
+    double max_shift_drift_hz_per_second = .01;
+    double minimum_observation_seconds = 36;
+    std::size_t max_dwells = 100;
+    double observation_begin_seconds = 0;
+    // Elapsed capture time cannot stand in for sampled support. These bounds
+    // tolerate isolated missing/short apertures while declining long gaps.
+    double minimum_sampled_fraction = .8;
+    double maximum_unobserved_seconds = .8;
+};
+struct HelperPooledSnapshot {
+    bool valid = false;
+    // A configured search can be representable but too expensive for this
+    // lightweight receiver. It is declined before likelihood enumeration.
+    bool work_limited = false;
+    std::size_t projected_sample_products = 0;
+    // A constrained optimum can establish a pooled tone while its local
+    // Gaussian covariance is unavailable. In that case clock.valid is false;
+    // its point fields remain the explicitly constrained model estimate.
+    bool boundary_limited = false, uncertainty_valid = false;
+    std::size_t dwell_count = 0;
+    double observation_seconds = 0;
+    // Raw finite samples establish capture coverage; modeled_seconds reports
+    // the retained complete decimation groups used by the likelihood.
+    double sampled_seconds = 0, modeled_seconds = 0, largest_unobserved_seconds = 0;
+    HelperMeasurementSnapshot clock;
+    double high_cn0_db_hz = 0, low_cn0_db_hz = 0;
+    double high_evidence = 0, low_evidence = 0, evidence_threshold = 0;
+};
+class HelperPooledMeasurement {
+public:
+    explicit HelperPooledMeasurement(HelperPooledConfig config);
+    bool observe(std::span<const std::complex<float>> samples,
+                 double shift_hz, double first_sample_time_seconds);
+    HelperPooledSnapshot snapshot(double observed_until_seconds) const;
+    HelperPooledSnapshot snapshot() const;
+    void reset();
+private:
+    bool snapshot_support(double observed_until_seconds, HelperPooledSnapshot& result) const;
+    HelperPooledSnapshot compute_snapshot(double observed_until_seconds) const;
+    struct Aperture {
+        double start = 0, end = 0, center = 0, shift_hz = 0;
+        double sample_step = 0, noise_variance = 0;
+        std::vector<std::complex<double>> high, low;
+    };
+    HelperPooledConfig config_;
+    std::vector<Aperture> apertures_;
+    mutable std::optional<HelperPooledSnapshot> snapshot_cache_;
 };
 }
