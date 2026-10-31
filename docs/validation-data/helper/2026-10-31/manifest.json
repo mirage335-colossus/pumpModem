@@ -1,0 +1,99 @@
+{
+  "schema_version": 1,
+  "recorded_study_date": "2026-10-31",
+  "purpose": "Repository-retained selected standalone Helper results; not product qualification",
+  "export_commit": "f6723f750e3427cf482d16a9a238f6ca34a74ecc",
+  "case_counts": {
+    "screen": 80,
+    "heldout": 64,
+    "mismatch": 50,
+    "strong-transients": 6,
+    "variants": 16,
+    "cpu": 6
+  },
+  "binary_provenance": {
+    "campaign_sha256": "df88e4cfa9c93c7338ad15feed3fca6a4f561daf796c68990425d77c6c8ece98",
+    "accounting_sha256": "049d8b01b1c41df9260c8d58c5b15accd46af73d4710c1839770ae8e90b16e67",
+    "strict_detector_sha256": "7f73fcaed8e9c4732136aba0db3aa09862be4acf5723414e67709fb47933771b",
+    "binaries_included": false
+  },
+  "source_provenance": {
+    "campaign_recorded_file_sha256": {
+      "src/helper_inversion_profile.cpp": "327001a3be4c7906b0ed0c1e11acb40daa76fe4edae3973cc37b92d8fa2567af",
+      "include/datapump/helper_inversion_profile.hpp": "73db9d4da779552732614b8cf377b057788b5909e24fe9129c54a76a3a04cd67",
+      "tests/test_helper_complete_study.cpp": "6b43049a509eeb4d6b493501d5acbeaab9d5a24eb1cebd3ab507dd37867c9c33",
+      "tests/helper_transient_fixture.hpp": "c802bd5688df7f8a63da7ea46f10274bfedf56022c0849e26c546b2faad1334b"
+    },
+    "export_time_file_sha256": {
+      "src/helper_inversion_profile.cpp": "2ab21344996660f390c7f308ad024ee863a4b825f0f896ea930aa459b78fb4bb",
+      "include/datapump/helper_inversion_profile.hpp": "73db9d4da779552732614b8cf377b057788b5909e24fe9129c54a76a3a04cd67",
+      "tests/test_helper_complete_study.cpp": "10cffe5eb28d08593750018fd2c51bf0c9a25f03775deeacbc2592b605600ade",
+      "tests/helper_transient_fixture.hpp": "c802bd5688df7f8a63da7ea46f10274bfedf56022c0849e26c546b2faad1334b",
+      "tests/helper_live_probe_fixture.hpp": "316891739c6c56a9ff3993d967b8eb60adb9ea4a229430088043f8b90e3fbd78",
+      "tests/helper_measurement_hops.hpp": "eff12f32e3d73c48d76cb51cfeb37b4acf71458babe338d2fa0e2242974cbbfd",
+      "tests/test_helper_inversion_profile.cpp": "bb0d8afd153e405da7ad43b69a916150da9ceb7fcfdaee41bc5960ab8d01c19f",
+      "CMakeLists.txt": "898e68e7d7465a1c655136b92f9782a668d301c6da65103b194f4a86b4a21ed2"
+    },
+    "limits": [
+      "A complete source/compiler/environment manifest was not recorded for the original campaign; these partial hashes do not establish a complete build identity.",
+      "The accounting build only changed processed-aperture counters and 36-second CPU partitions. Every pre-existing non-CPU output field matched the frozen build on the full nominal/profile key1930100001 comparison. This is one regression comparison, not a complete historical source binding.",
+      "Rebuild the current tracked sources for new experiments; matching command arguments does not promise the historical binary hash."
+    ]
+  },
+  "configuration": {
+    "sample_rate_hz": 24000,
+    "capture_seconds": 40,
+    "frequency_snapshot_seconds": 36,
+    "helper_lead_seconds": 38,
+    "helper_w": 40,
+    "probe_w": 40,
+    "simultaneous_combined_w": 80,
+    "temperature_kelvin": 290,
+    "noise_figure_db": 10,
+    "hf_channels": 50,
+    "hf_spacing_hz": 50000,
+    "hf_center_hz": 30000000,
+    "tx_audio_ppm": 37,
+    "rx_audio_ppm": -13,
+    "hf_relative_shift_ppm": 0.8,
+    "hf_phase_noise_degrees_per_sqrt_second": 0.05,
+    "arrival_offset_seconds": 0.00321,
+    "fractional_input_sample": 0.31,
+    "default_delay_seconds": 2,
+    "mode_overrides": "Each argv selects source-mode overrides in tracked tests/test_helper_complete_study.cpp and tests/helper_transient_fixture.hpp; do not assume these defaults override those modes.",
+    "waveform_variants": "no-pilot-ramps / absent or straight auxiliary retain standard normalization; changed energy is labeled by helper_power_reference in each summary."
+  },
+  "records": {
+    "cases.jsonl": "216 full-capture experiment arms plus six serialized CPU repeats; all per-case summary fields, all-selection complete-output metrics, common-v8 diagnostic and correlated profile-reason counts.",
+    "reservations.json": "48 distinct fixture schedule keys/noise seeds and impairment combinations reserved before tuning. Reused cases across methods/losses are matched comparisons, not independent keys.",
+    "strict-inversion.json": "80 earlier full-capture strict individual-marker arms, including per-marker errors/intervals; different binary and implementation from pooled study."
+  },
+  "aggregation_rules": [
+    "Independent timing/frequency comparisons use one frozen 36-second result per capture, conditional on availability/qualification.",
+    "RMS combines squared errors; phase RMS across regions/cases is weighted by phase_samples. Beginning/interior/end are disjoint; boundary overlaps them and must not be added again.",
+    "Per-case p95/p99 values cannot reconstruct a pooled percentile. Report their median/range explicitly instead.",
+    "Repeated calendar updates share history; their count/coverage is not an independent sample count.",
+    "Noisy probe, clean twin, and evaluator-only pre-probe synthetic tone have separate labels.",
+    "Complete-output metrics include uncertain output. Undefined phase at zero clean energy is separately counted.",
+    "CPU counters overlap: total receiver and exact36 components are authoritative; profile_release is included in conditioner. Simulation, clean twin, and metrology are separate."
+  ],
+  "omissions": [
+    "Raw PCM, binaries, bulk logs, per-dwell likelihood curves, and most chronological debug rows are not included.",
+    "Earlier pilot/refinement/EME results remain in tracked narrative studies and tracked reproducer sources; this is not an archive of every historical experiment.",
+    "The reserved schedule keys are public test fixtures, not operational secrets."
+  ],
+  "original_local_result_sha256": {
+    "screen-results.json": "3568bcd4f9b9ae84f33bc248c5eea0eaa46e9bb9e6f6bd5f72ec2533597c013f",
+    "heldout-results.json": "efca79929f3335f8f2cc9b328f408765f8f9b04dd0659e409f0955bd8f2e41b7",
+    "mismatch/results.json": "452d26da21abca7122b3a2d0b29a75f62bd8b437ec86bb8d2620b5f197e1a131",
+    "mismatch/strong-results.json": "f9f999fd1e6ac2ffb7e74169685783d8a28b1668fb656187452377d1d7b62817",
+    "variants/results.json": "7bc178d73e59aacc9afad589f4b1aa1951c2ab4bafaa0ac5c0780d800b3e8073",
+    "cpu-isolated/results.json": "58ceaf73e6c7fddafa666db36117e4d525077e139269c72ca10a993a494790b9",
+    "../inversion-loss/full-screen.json": "220479e1ae48d90716ecb8e02230bc28c70ac120c319f47f59bada5259d0fa44"
+  },
+  "files_sha256": {
+    "cases.jsonl": "841fcc149e69750ae7e550b09f1fb6566667af8b8f53ddfdd2b464f6939d8047",
+    "reservations.json": "b7206ea9bd137396c3ec9fcb00975a250786b2c67d3e829829118b614799c3e1",
+    "strict-inversion.json": "7a140fe69b928018c895c08438168f7c209e82a21484685053913d159ad35469"
+  }
+}

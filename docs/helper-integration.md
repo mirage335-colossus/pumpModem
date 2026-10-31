@@ -5,7 +5,10 @@ Carrier. It brings together the inexpensive **implemented and tested standalone
 techniques**. Read this before treating the older Live receiver's architecture
 or qualification history as a design requirement. The waveform contract is in
 [Helper Carrier](helper-carrier.md); detailed experiments and reproducible
-results are in [the continuation study](helper-continuation.md).
+results are in [the continuation study](helper-continuation.md). The
+[repository evidence package](validation-data/helper/README.md) preserves
+selected per-case results, failure cases, controls, fixture keys and provenance
+without depending on ignored local logs or a temporary executable.
 
 The objective is useful frequency narrowing and a complete, corrected,
 timestamped baseband stream. No particular FFT, filter, tracker, estimator,
@@ -18,6 +21,25 @@ Useful assistance can be frequency-only, relative clock/phase correction, or
 the complete buffered combination. Offer the information actually supported
 and retain ordinary search/recovery for unresolved quantities; do not require
 every optional capability to qualify before exposing any useful measurement.
+
+## Transmission facts needed by a receiver
+
+The [waveform specification](helper-carrier.md#dwell-waveform-and-metadata) is
+authoritative; this is a navigation aid, not a separate wire format.
+
+| Feature | Receiver consequence |
+| --- | --- |
+| 400 ms physical dwells, with or without FHSS; fixed 38 s lead including 36 s observation | Keep the capture calendar and the frozen observation frontier separate from delayed output release. |
+| Low pilot 550 Hz at −3 dB, auxiliary 950 Hz at −9 dB, relative to high-pilot steady-tone power; high pilot at least 2400 Hz, raised for the configured payload guard | Use the configured actual frequencies and power normalization. Both straight pilots supply frequency/clock evidence; the auxiliary is a distinct component. |
+| Auxiliary-only shaped phase inversion at 160 ms, tapering through zero over 152–168 ms | Timing can be measured without payload decoding or pilot ramps. Low/high pilots never perform this inversion. Fit the shaped waveform, not an instantaneous phase step. |
+| Pilot boundary ramps for FHSS; continuous pilot phase/amplitude at internal boundaries with FHSS disabled | No-FHSS coherent techniques have a narrower operating model. Random RF hop phase must be re-estimated on every hop. Auxiliary gating/reset remains present in either mode. |
+| Auxiliary APSK-16384, 50 baud, nine symbols at 212–392 ms: 14-bit modulo-time phase plus 112 callsign bits | This optional metadata is separate from inversion timing and from the standalone 360 Hz shaped test probe. Decoding it is not required for frequency/phase correction. |
+| Modulo-time record, optional station-key encryption, no authentication tag | Do not interpret decoded metadata as absolute time, GPS qualification or proof of shared transmitter identity; follow the full format and capture-time requirements if using it. |
+
+The transmitter implementation is
+[`helper_carrier.hpp`](../include/datapump/helper_carrier.hpp) and its matching
+source; the waveform, encrypted metadata and physical completion rules remain
+unchanged by the experimental receiver paths.
 
 ## Recommended starting composition
 
@@ -69,6 +91,9 @@ also cover 175/170/165/160 dB, negative controls, transients, different delays
 and the existing wide-hop microwave fixtures. **Measured error and reported
 uncertainty are different quantities.** Keep the limited seed counts and
 conditional model visible when reusing these numbers.
+The [retained case data](validation-data/helper/2026-10-31/README.md) includes
+the unsuccessful cases and supports recomputing the comparisons with
+`python3 tools/helper-evidence.py summary`. Verification needs no simulator run.
 
 Other inexpensive choices have separate evidence. The
 [pilot-measurement study](helper-measurement.md) recorded roughly 0.407–0.420 s
@@ -169,6 +194,10 @@ includes the loss/seed matrix, other delays, APSK, microwave geometry, controls
 and CPU partitions. The registered Python regressions require Python at
 configuration time. Earlier pilot, frequency-refinement, tracking and EME
 studies each retain their own commands and assumptions.
+For an exact recorded case, the [evidence utility](../tools/helper-evidence.py)
+also replays its argument list into a new output directory and records the
+current binary hash. Historical source binding is partial and documented;
+newly replayed results must not be presented as the original campaign binary.
 
 For actual integration, connect the real capture/retune metadata to the dated
 measurement and correction interfaces, then connect the resulting complete

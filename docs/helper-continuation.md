@@ -4,6 +4,8 @@
 It identifies the current inexpensive composition and separates required
 behavior from implementation choices. This page retains detailed experiments;
 earlier failed candidates and guards are not universal architecture requirements.
+Selected [machine-readable results and reproduction inputs](validation-data/helper/README.md)
+are retained in the repository; they do not require ignored local evidence.
 
 This study continues the independent Helper-only simulations described in
 [frequency refinement](helper-frequency-refinement.md). It does not integrate
@@ -389,8 +391,11 @@ for loss in 120 124 126 128 130 140 150 160 170 180; do
 done
 ```
 
-Commands, key bytes, binary hash, individual marker errors and aggregates are
-in `local-evidence/helper-continuation/inversion-loss/`. The unchanged complete
+Commands, binary hash and individual marker errors for all 80 full-capture
+cases are retained in the repository's
+[strict-detector record](validation-data/helper/2026-10-31/strict-inversion.json).
+Original logs and derived aggregates remain in
+`local-evidence/helper-continuation/inversion-loss/`. The unchanged complete
 study binary SHA-256 is
 `7f73fcaed8e9c4732136aba0db3aa09862be4acf5723414e67709fb47933771b`.
 At most two simulations ran concurrently; this sweep is an accuracy study,
@@ -702,8 +707,14 @@ Change `tone` to `apsk`, delay to `0.4`, `1` or `3`, RF geometry to
 `noise`, `adc-gap`, `clock-adjust`, `curvature`, `gap-clock-cycle`,
 `differential-large`, `rf-retune-early`, `rf-retune-late`, or
 `transient-inversion-held-phase23`/`gain51`/`settle61` for the corresponding
-checks. Compact raw logs, verified reservations, exact commands and summaries
-are in ignored `local-evidence/helper-continuation/inversion-profile/`.
+checks. The repository's
+[evidence package](validation-data/helper/2026-10-31/README.md) retains verified
+reservations, exact arguments, selected per-case results, failure/control cases,
+CPU repeats and available provenance. Run `python3 tools/helper-evidence.py verify`
+or `summary` to inspect it without rebuilding or reading ignored files.
+Raw logs and omitted debug rows remain in ignored
+`local-evidence/helper-continuation/inversion-profile/`; they are not required
+to use the documented techniques or recompute the retained comparisons.
 No ordinary Robust integration, full regression campaign, GUI change, audio
 hardware access, successful decoding claim or physical sensitivity bound is
 part of this work.

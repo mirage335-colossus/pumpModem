@@ -5,6 +5,17 @@ and release status. [Latest resource measurements](../ci-resource-results.json)
 are one bounded snapshot; Git keeps prior versions. Historical results are not
 qualification of new source or binaries.
 
+## Helper Carrier
+
+The [integration guide](../helper-integration.md) maps implemented inexpensive
+frequency narrowing, clock/phase correction, complete-dwell buffering and
+auxiliary inversion timing to source and focused tests. The
+[retained evidence package](../validation-data/helper/README.md) includes selected
+per-case results, failures, exact inputs, available provenance and a portable
+checker; ignored local logs are not required. Detailed conclusions and older
+experiments remain in the [continuation study](../helper-continuation.md) and
+its linked studies. Standalone results do not qualify ordinary Robust integration.
+
 ## Robust and receive processing
 
 [Retained receiver data](../validation-data/robust/) supports the
