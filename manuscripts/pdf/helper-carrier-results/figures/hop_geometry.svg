@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE svg
+  PUBLIC '-//W3C//DTD SVG 1.0//EN'
+  'http://www.w3.org/TR/2001/REC-SVG-20010904/DTD/svg10.dtd'>
+<svg width="504" height="248" preserveAspectRatio="xMinYMin meet" viewBox="0 0 504 248" xmlns="http://www.w3.org/2000/svg" version="1.0" fill-rule="evenodd" xmlns:xlink="http://www.w3.org/1999/xlink">
+	<title>...</title>
+	<desc>...</desc>
+	<clipPath id="clip">
+		<rect x="0" y="0" width="504" height="248"/>
+	</clipPath>
+	<g id="group" transform="scale(1,-1) translate(0,-248)" style="clip-path: url(#clip)">
+		<g transform="">
+			<text x="0" y="232" style="font-family: Sans-Bold; font-size: 9.5px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,464) scale(1,-1)">A. Illustrative RF tuning commands</text>
+			<path d="M 55,119 L 487,119 Z" style="stroke: rgb(90%,92%,94%); stroke-linecap: butt; stroke-width: 1;"/>
+			<text x="39.88671875" y="117" style="font-family: Sans; font-size: 8px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,234) scale(1,-1)">-1</text>
+			<path d="M 55,158 L 487,158 Z" style="stroke: rgb(90%,92%,94%); stroke-linecap: butt; stroke-width: 1;"/>
+			<text x="37.87890625" y="156" style="font-family: Sans; font-size: 8px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,312) scale(1,-1)">+0</text>
+			<path d="M 55,197 L 487,197 Z" style="stroke: rgb(90%,92%,94%); stroke-linecap: butt; stroke-width: 1;"/>
+			<text x="37.87890625" y="195" style="font-family: Sans; font-size: 8px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,390) scale(1,-1)">+1</text>
+			<text x="55" y="216" style="font-family: Sans; font-size: 8px;fill: rgb(36%,41%,44%); stroke:none;" transform="translate(0,432) scale(1,-1)">RF offset from 30 MHz (MHz)</text>
+			<path d="M 58,180.425 L 106,180.425 Z" style="stroke: rgb(10%,36%,47%); stroke-linecap: butt; stroke-width: 3;"/>
+			<text x="73.315673828125" y="187.425" style="font-family: Sans; font-size: 7.1px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,374) scale(1,-1)">ch 36</text>
+			<path d="M 112,141.425 L 160,141.425 Z" style="stroke: rgb(10%,36%,47%); stroke-linecap: butt; stroke-width: 3;"/>
+			<text x="127.315673828125" y="148.425" style="font-family: Sans; font-size: 7.1px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,296) scale(1,-1)">ch 16</text>
+			<path d="M 166,192.125 L 214,192.125 Z" style="stroke: rgb(10%,36%,47%); stroke-linecap: butt; stroke-width: 3;"/>
+			<text x="181.315673828125" y="199.125" style="font-family: Sans; font-size: 7.1px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,398) scale(1,-1)">ch 42</text>
+			<path d="M 220,153.125 L 268,153.125 Z" style="stroke: rgb(10%,36%,47%); stroke-linecap: butt; stroke-width: 3;"/>
+			<text x="235.315673828125" y="160.125" style="font-family: Sans; font-size: 7.1px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,320) scale(1,-1)">ch 22</text>
+			<path d="M 274,147.275 L 322,147.275 Z" style="stroke: rgb(10%,36%,47%); stroke-linecap: butt; stroke-width: 3;"/>
+			<text x="289.315673828125" y="154.275" style="font-family: Sans; font-size: 7.1px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,308) scale(1,-1)">ch 19</text>
+			<path d="M 328,114.125 L 376,114.125 Z" style="stroke: rgb(10%,36%,47%); stroke-linecap: butt; stroke-width: 3;"/>
+			<text x="345.2900146484375" y="121.125" style="font-family: Sans; font-size: 7.1px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,242) scale(1,-1)">ch 2</text>
+			<path d="M 382,184.325 L 430,184.325 Z" style="stroke: rgb(10%,36%,47%); stroke-linecap: butt; stroke-width: 3;"/>
+			<text x="397.315673828125" y="191.325" style="font-family: Sans; font-size: 7.1px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,382) scale(1,-1)">ch 38</text>
+			<path d="M 436,168.725 L 484,168.725 Z" style="stroke: rgb(10%,36%,47%); stroke-linecap: butt; stroke-width: 3;"/>
+			<text x="451.315673828125" y="175.725" style="font-family: Sans; font-size: 7.1px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,351) scale(1,-1)">ch 30</text>
+			<text x="0" y="95" style="font-family: Sans-Bold; font-size: 9.5px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,190) scale(1,-1)">B. Nominal audio coordinates after tuning to each hop</text>
+			<text x="32.65234375" y="30" style="font-family: Sans; font-size: 8px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,60) scale(1,-1)">550</text>
+			<path d="M 57,32 L 107,32 Z" style="stroke: rgb(12%,54%,51%); stroke-linecap: butt; stroke-width: 2;"/>
+			<path d="M 111,32 L 161,32 Z" style="stroke: rgb(12%,54%,51%); stroke-linecap: butt; stroke-width: 2;"/>
+			<path d="M 165,32 L 215,32 Z" style="stroke: rgb(12%,54%,51%); stroke-linecap: butt; stroke-width: 2;"/>
+			<path d="M 219,32 L 269,32 Z" style="stroke: rgb(12%,54%,51%); stroke-linecap: butt; stroke-width: 2;"/>
+			<path d="M 273,32 L 323,32 Z" style="stroke: rgb(12%,54%,51%); stroke-linecap: butt; stroke-width: 2;"/>
+			<path d="M 327,32 L 377,32 Z" style="stroke: rgb(12%,54%,51%); stroke-linecap: butt; stroke-width: 2;"/>
+			<path d="M 381,32 L 431,32 Z" style="stroke: rgb(12%,54%,51%); stroke-linecap: butt; stroke-width: 2;"/>
+			<path d="M 435,32 L 485,32 Z" style="stroke: rgb(12%,54%,51%); stroke-linecap: butt; stroke-width: 2;"/>
+			<text x="32.65234375" y="44" style="font-family: Sans; font-size: 8px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,88) scale(1,-1)">950</text>
+			<path d="M 57,46 L 107,46 Z" style="stroke: rgb(72%,41%,15%); stroke-linecap: butt; stroke-width: 2;"/>
+			<path d="M 111,46 L 161,46 Z" style="stroke: rgb(72%,41%,15%); stroke-linecap: butt; stroke-width: 2;"/>
+			<path d="M 165,46 L 215,46 Z" style="stroke: rgb(72%,41%,15%); stroke-linecap: butt; stroke-width: 2;"/>
+			<path d="M 219,46 L 269,46 Z" style="stroke: rgb(72%,41%,15%); stroke-linecap: butt; stroke-width: 2;"/>
+			<path d="M 273,46 L 323,46 Z" style="stroke: rgb(72%,41%,15%); stroke-linecap: butt; stroke-width: 2;"/>
+			<path d="M 327,46 L 377,46 Z" style="stroke: rgb(72%,41%,15%); stroke-linecap: butt; stroke-width: 2;"/>
+			<path d="M 381,46 L 431,46 Z" style="stroke: rgb(72%,41%,15%); stroke-linecap: butt; stroke-width: 2;"/>
+			<path d="M 435,46 L 485,46 Z" style="stroke: rgb(72%,41%,15%); stroke-linecap: butt; stroke-width: 2;"/>
+			<text x="28.203125" y="74" style="font-family: Sans; font-size: 8px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,148) scale(1,-1)">2400</text>
+			<path d="M 57,76 L 107,76 Z" style="stroke: rgb(10%,36%,47%); stroke-linecap: butt; stroke-width: 2;"/>
+			<path d="M 111,76 L 161,76 Z" style="stroke: rgb(10%,36%,47%); stroke-linecap: butt; stroke-width: 2;"/>
+			<path d="M 165,76 L 215,76 Z" style="stroke: rgb(10%,36%,47%); stroke-linecap: butt; stroke-width: 2;"/>
+			<path d="M 219,76 L 269,76 Z" style="stroke: rgb(10%,36%,47%); stroke-linecap: butt; stroke-width: 2;"/>
+			<path d="M 273,76 L 323,76 Z" style="stroke: rgb(10%,36%,47%); stroke-linecap: butt; stroke-width: 2;"/>
+			<path d="M 327,76 L 377,76 Z" style="stroke: rgb(10%,36%,47%); stroke-linecap: butt; stroke-width: 2;"/>
+			<path d="M 381,76 L 431,76 Z" style="stroke: rgb(10%,36%,47%); stroke-linecap: butt; stroke-width: 2;"/>
+			<path d="M 435,76 L 485,76 Z" style="stroke: rgb(10%,36%,47%); stroke-linecap: butt; stroke-width: 2;"/>
+			<path d="M 55,22 L 55,82 Z" style="stroke: rgb(90%,92%,94%); stroke-linecap: butt; stroke-width: 1; stroke-dasharray: 2, 2;"/>
+			<path d="M 109,22 L 109,82 Z" style="stroke: rgb(90%,92%,94%); stroke-linecap: butt; stroke-width: 1; stroke-dasharray: 2, 2;"/>
+			<path d="M 163,22 L 163,82 Z" style="stroke: rgb(90%,92%,94%); stroke-linecap: butt; stroke-width: 1; stroke-dasharray: 2, 2;"/>
+			<path d="M 217,22 L 217,82 Z" style="stroke: rgb(90%,92%,94%); stroke-linecap: butt; stroke-width: 1; stroke-dasharray: 2, 2;"/>
+			<path d="M 271,22 L 271,82 Z" style="stroke: rgb(90%,92%,94%); stroke-linecap: butt; stroke-width: 1; stroke-dasharray: 2, 2;"/>
+			<path d="M 325,22 L 325,82 Z" style="stroke: rgb(90%,92%,94%); stroke-linecap: butt; stroke-width: 1; stroke-dasharray: 2, 2;"/>
+			<path d="M 379,22 L 379,82 Z" style="stroke: rgb(90%,92%,94%); stroke-linecap: butt; stroke-width: 1; stroke-dasharray: 2, 2;"/>
+			<path d="M 433,22 L 433,82 Z" style="stroke: rgb(90%,92%,94%); stroke-linecap: butt; stroke-width: 1; stroke-dasharray: 2, 2;"/>
+			<path d="M 487,22 L 487,82 Z" style="stroke: rgb(90%,92%,94%); stroke-linecap: butt; stroke-width: 1; stroke-dasharray: 2, 2;"/>
+			<text x="76.8804931640625" y="10" style="font-family: Sans; font-size: 8.5px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,20) scale(1,-1)">φ1</text>
+			<text x="130.8804931640625" y="10" style="font-family: Sans; font-size: 8.5px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,20) scale(1,-1)">φ2</text>
+			<text x="184.8804931640625" y="10" style="font-family: Sans; font-size: 8.5px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,20) scale(1,-1)">φ3</text>
+			<text x="238.8804931640625" y="10" style="font-family: Sans; font-size: 8.5px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,20) scale(1,-1)">φ4</text>
+			<text x="292.8804931640625" y="10" style="font-family: Sans; font-size: 8.5px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,20) scale(1,-1)">φ5</text>
+			<text x="346.8804931640625" y="10" style="font-family: Sans; font-size: 8.5px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,20) scale(1,-1)">φ6</text>
+			<text x="400.8804931640625" y="10" style="font-family: Sans; font-size: 8.5px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,20) scale(1,-1)">φ7</text>
+			<text x="454.8804931640625" y="10" style="font-family: Sans; font-size: 8.5px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,20) scale(1,-1)">φ8</text>
+			<text x="0" y="10" style="font-family: Sans; font-size: 8px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,20) scale(1,-1)">Fresh phase:</text>
+		</g>
+	</g>
+</svg>

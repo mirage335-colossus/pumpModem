@@ -1,0 +1,10 @@
+{
+  "pages": 15,
+  "tables": 6,
+  "figures": 3,
+  "pdf_sha256": "3cb5048a79d8f03730423728f1392d44f9d7eab1b78bd7d4c4950fe9b70c91bb",
+  "visual_review": "All final pages reviewed directly or pixel-identical to reviewed rendering; changed pages rechecked.",
+  "text_bounds": "No out-of-page text or replacement characters detected.",
+  "evidence": "Source hashes unchanged during authoring; 32 distinct extracted holdout IDs; key-error and reduction calculations rechecked.",
+  "receiver_experiments_run_for_article": false
+}

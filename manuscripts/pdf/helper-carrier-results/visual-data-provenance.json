@@ -1,0 +1,34 @@
+{
+  "description": "Archived non-FHSS analog cable recording; no new hardware acquisition or RF path-loss simulation.",
+  "capture_sha256": "cd15730de6c0b67b2ce69f2e08e9d6c33fdef7724f5ec2a7ed074f819a56a405",
+  "compressed_sha256": "0282f0b929443b61ac582d504e8832af3fcc5403e8200162dadd55b0f17b5b0f",
+  "sample_rate_hz": 48000,
+  "samples": 2005310,
+  "duration_seconds": 41.77729166666666,
+  "overview": {
+    "window": "symmetric Hann",
+    "samples": 4096,
+    "hop_samples": 960,
+    "window_ms": 85.33333333333333,
+    "fft_spacing_hz": 11.71875
+  },
+  "zoom": {
+    "window": "symmetric Hann",
+    "samples": 1024,
+    "hop_samples": 96,
+    "window_ms": 21.333333333333332,
+    "fft_spacing_hz": 46.875,
+    "capture_seconds": [
+      10.8,
+      12.4
+    ]
+  },
+  "color_scale": "-75 to 0 dB relative to maximum overview one-sided PSD; same reference in both panels.",
+  "time_axis": "Original capture-file seconds; no onset, phase, frequency or timing correction applied.",
+  "limits": [
+    "Window duration limits time resolution; FFT spacing is not a calibrated timing resolution.",
+    "A magnitude spectrogram cannot distinguish the sign of a steady auxiliary tone.",
+    "Recorded historical waveform; not a new test of the current optional no-ramp mode.",
+    "No RF hopping, 180 dB path loss, or comparison with new receiver corrections is represented."
+  ]
+}

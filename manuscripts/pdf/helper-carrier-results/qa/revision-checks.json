@@ -1,0 +1,10 @@
+{
+  "pages": 22,
+  "figures": 8,
+  "tables": 7,
+  "pdf_sha256": "cdc2302241391e84dea57216aa3c0cfd0fc7ce3192e7f027ca65495fc38cb6f5",
+  "visual_review": "All 22 final pages reviewed from Poppler render.",
+  "checks": "Text bounds, figure/table numbering, framing and archive integrity passed.",
+  "revision": "Successful techniques and recommended practices lead; approximate +/-0.1 Hz is an aspirational guide. Empirical measurements unchanged.",
+  "source_archive_files": 31
+}

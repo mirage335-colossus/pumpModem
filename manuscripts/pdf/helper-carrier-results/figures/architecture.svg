@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE svg
+  PUBLIC '-//W3C//DTD SVG 1.0//EN'
+  'http://www.w3.org/TR/2001/REC-SVG-20010904/DTD/svg10.dtd'>
+<svg width="504" height="278" preserveAspectRatio="xMinYMin meet" viewBox="0 0 504 278" xmlns="http://www.w3.org/2000/svg" version="1.0" fill-rule="evenodd" xmlns:xlink="http://www.w3.org/1999/xlink">
+	<title>...</title>
+	<desc>...</desc>
+	<clipPath id="clip">
+		<rect x="0" y="0" width="504" height="278"/>
+	</clipPath>
+	<g id="group" transform="scale(1,-1) translate(0,-278)" style="clip-path: url(#clip)">
+		<g transform="">
+			<text x="0" y="264" style="font-family: Sans-Bold; font-size: 9.4px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,528) scale(1,-1)">A. Receiver evidence and complete output</text>
+			<rect x="0" y="192" width="106" height="47" rx="3" ry="3" style="stroke: rgb(10%,36%,47%); stroke-linecap: butt; stroke-width: 0.8; fill: rgb(95%,96%,97%); fill-rule: evenodd;"/>
+			<text x="21.553320312500006" y="218.5" style="font-family: Sans; font-size: 8.2px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,437) scale(1,-1)">Captured mixture</text>
+			<text x="15.743652343750007" y="208.5" style="font-family: Sans; font-size: 8.2px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,417) scale(1,-1)">sample index + UTC</text>
+			<rect x="132" y="213" width="162" height="35" rx="3" ry="3" style="stroke: rgb(10%,36%,47%); stroke-linecap: butt; stroke-width: 0.8; fill: rgb(95%,96%,97%); fill-rule: evenodd;"/>
+			<text x="163.99819335937502" y="233.5" style="font-family: Sans; font-size: 8.2px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,467) scale(1,-1)">Guarded pilot observations</text>
+			<text x="162.17641601562502" y="223.5" style="font-family: Sans; font-size: 8.2px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,447) scale(1,-1)">joint clock / fresh hop phase</text>
+			<rect x="132" y="166" width="162" height="35" rx="3" ry="3" style="stroke: rgb(10%,36%,47%); stroke-linecap: butt; stroke-width: 0.8; fill: rgb(95%,96%,97%); fill-rule: evenodd;"/>
+			<text x="167.429541015625" y="186.5" style="font-family: Sans; font-size: 8.2px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,373) scale(1,-1)">Auxiliary reversal profiles</text>
+			<text x="170.376416015625" y="176.5" style="font-family: Sans; font-size: 8.2px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,353) scale(1,-1)">pooled source calendar</text>
+			<rect x="332" y="188" width="172" height="48" rx="3" ry="3" style="stroke: rgb(10%,36%,47%); stroke-linecap: butt; stroke-width: 0.8; fill: rgb(95%,96%,97%); fill-rule: evenodd;"/>
+			<text x="378.12109375" y="220.0" style="font-family: Sans; font-size: 8.2px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,440) scale(1,-1)">Complete-dwell buffer</text>
+			<text x="362.275634765625" y="210.0" style="font-family: Sans; font-size: 8.2px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,420) scale(1,-1)">own-hop mixing + interpolation</text>
+			<text x="364.441748046875" y="200.0" style="font-family: Sans; font-size: 8.2px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,400) scale(1,-1)">capture-time output metadata</text>
+			<path d="M 106,222 L 132,230 Z" style="stroke: rgb(36%,41%,44%); stroke-linecap: butt; stroke-width: 0.85;"/>
+			<polygon points="132 230, 127.9563 226.1401, 126.4859 230.919" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(36%,41%,44%); fill-rule: evenodd;"/>
+			<path d="M 106,202 L 132,183 Z" style="stroke: rgb(36%,41%,44%); stroke-linecap: butt; stroke-width: 0.85;"/>
+			<polygon points="132 183, 126.488 183.9316, 129.4381 187.9686" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(36%,41%,44%); fill-rule: evenodd;"/>
+			<path d="M 294,230 L 332,223 Z" style="stroke: rgb(36%,41%,44%); stroke-linecap: butt; stroke-width: 0.85;"/>
+			<polygon points="332 223, 326.6298 221.4472, 327.5356 226.3644" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(36%,41%,44%); fill-rule: evenodd;"/>
+			<path d="M 294,183 L 332,198 Z" style="stroke: rgb(36%,41%,44%); stroke-linecap: butt; stroke-width: 0.85;"/>
+			<polygon points="332 198, 328.2671 193.8388, 326.4313 198.4896" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(36%,41%,44%); fill-rule: evenodd;"/>
+			<path d="M 53,192 L 53,151 Z" style="stroke: rgb(36%,41%,44%); stroke-linecap: butt; stroke-width: 0.8;"/>
+			<path d="M 53,151 L 418,151 Z" style="stroke: rgb(36%,41%,44%); stroke-linecap: butt; stroke-width: 0.8;"/>
+			<path d="M 418,151 L 418,188 Z" style="stroke: rgb(36%,41%,44%); stroke-linecap: butt; stroke-width: 0.85;"/>
+			<polygon points="418 188, 420.5 183, 415.5 183" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(36%,41%,44%); fill-rule: evenodd;"/>
+			<text x="175" y="155" style="font-family: Sans; font-size: 7.8px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,310) scale(1,-1)">Captured samples retained; no confidence gating</text>
+			<rect x="332" y="94" width="172" height="34" rx="3" ry="3" style="stroke: rgb(10%,36%,47%); stroke-linecap: butt; stroke-width: 0.8; fill: rgb(95%,96%,97%); fill-rule: evenodd;"/>
+			<text x="380.17109375" y="114.0" style="font-family: Sans; font-size: 8.2px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,228) scale(1,-1)">All released samples</text>
+			<text x="357.374853515625" y="104.0" style="font-family: Sans; font-size: 8.2px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,208) scale(1,-1)">phase / clock / confidence / dates</text>
+			<path d="M 494,188 L 494,142 Z" style="stroke: rgb(36%,41%,44%); stroke-linecap: butt; stroke-width: 0.8;"/>
+			<path d="M 494,142 L 471,142 Z" style="stroke: rgb(36%,41%,44%); stroke-linecap: butt; stroke-width: 0.8;"/>
+			<path d="M 471,142 L 471,128 Z" style="stroke: rgb(36%,41%,44%); stroke-linecap: butt; stroke-width: 0.85;"/>
+			<polygon points="471 128, 468.5 133, 473.5 133" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(36%,41%,44%); fill-rule: evenodd;"/>
+			<rect x="0" y="94" width="258" height="34" rx="3" ry="3" style="stroke: rgb(72%,41%,15%); stroke-linecap: butt; stroke-width: 0.8; fill: rgb(98%,96%,93%); fill-rule: evenodd;"/>
+			<text x="52.42128906250001" y="114.0" style="font-family: Sans; font-size: 8.2px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,228) scale(1,-1)">Evaluator only: probe, clean twin and truth</text>
+			<text x="59.48818359375001" y="104.0" style="font-family: Sans; font-size: 8.2px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,208) scale(1,-1)">scores output; no feedback to receiver</text>
+			<path d="M 332,111 L 258,111 Z" style="stroke: rgb(72%,41%,15%); stroke-linecap: butt; stroke-width: 0.85; stroke-dasharray: 3, 2;"/>
+			<polygon points="258 111, 263 113.5, 263 108.5" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(72%,41%,15%); fill-rule: evenodd;"/>
+			<text x="0" y="73" style="font-family: Sans-Bold; font-size: 9.4px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,146) scale(1,-1)">B. Capture time remains distinct from release time</text>
+			<path d="M 18,43 L 475,43 Z" style="stroke: rgb(36%,41%,44%); stroke-linecap: butt; stroke-width: 1;"/>
+			<path d="M 18,39 L 18,48 Z" style="stroke: rgb(36%,41%,44%); stroke-linecap: butt; stroke-width: 1;"/>
+			<text x="12.6640625" y="27" style="font-family: Sans; font-size: 8px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,54) scale(1,-1)">0 s</text>
+			<path d="M 291,39 L 291,48 Z" style="stroke: rgb(36%,41%,44%); stroke-linecap: butt; stroke-width: 1;"/>
+			<text x="283.439453125" y="27" style="font-family: Sans; font-size: 8px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,54) scale(1,-1)">36 s</text>
+			<path d="M 361,39 L 361,48 Z" style="stroke: rgb(36%,41%,44%); stroke-linecap: butt; stroke-width: 1;"/>
+			<text x="353.439453125" y="27" style="font-family: Sans; font-size: 8px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,54) scale(1,-1)">38 s</text>
+			<path d="M 429,39 L 429,48 Z" style="stroke: rgb(36%,41%,44%); stroke-linecap: butt; stroke-width: 1;"/>
+			<text x="421.439453125" y="27" style="font-family: Sans; font-size: 8px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,54) scale(1,-1)">40 s</text>
+			<text x="94.42578125" y="51" style="font-family: Sans; font-size: 8px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,102) scale(1,-1)">Helper observations</text>
+			<text x="268.241748046875" y="62" style="font-family: Sans; font-size: 7.8px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,124) scale(1,-1)">Freeze result</text>
+			<text x="343.78349609375" y="51" style="font-family: Sans; font-size: 7.8px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,102) scale(1,-1)">Lead ends</text>
+			<text x="406.584765625" y="62" style="font-family: Sans; font-size: 7.8px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,124) scale(1,-1)">Capture ends</text>
+			<path d="M 429,43 L 492,43 Z" style="stroke: rgb(36%,41%,44%); stroke-linecap: butt; stroke-width: 0.85;"/>
+			<polygon points="492 43, 487 40.5, 487 45.5" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(36%,41%,44%); fill-rule: evenodd;"/>
+			<text x="484.3607421875" y="28" style="font-family: Sans; font-size: 7.8px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,56) scale(1,-1)">Drain</text>
+			<text x="0" y="7" style="font-family: Sans; font-size: 7.4px;fill: rgb(36%,41%,44%); stroke:none;" transform="translate(0,14) scale(1,-1)">Timeline is schematic; later evidence may correct only output still buffered.</text>
+		</g>
+	</g>
+</svg>

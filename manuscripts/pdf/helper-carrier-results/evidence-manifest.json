@@ -1,0 +1,24 @@
+{
+  "article_date": "2026-10-31",
+  "checkout_head_at_authoring": "147dbc94f1709a7c563814b3d384326bb0e2dfbc",
+  "campaign_binary_sha256": "df88e4cfa9c93c7338ad15feed3fca6a4f561daf796c68990425d77c6c8ece98",
+  "accounting_binary_sha256": "049d8b01b1c41df9260c8d58c5b15accd46af73d4710c1839770ae8e90b16e67",
+  "files": {
+    "docs/helper-continuation.md": "69b11a948ebacd36e295ac0c295b9b306749385a580ccedc9e41ea102576e18d",
+    "docs/helper-frequency-refinement.md": "f564b7707909f37a7610cd137176721481e1306327214ff67b84281bb9d46f57",
+    "docs/helper-tracking.md": "e0920e5ade21a61754a7067df13b2433578f4facb224c03c847b23a40159d5ef",
+    "docs/helper-measurement.md": "db61ce05be25044f5a1ae4cdd194bf7adf3f651d27183aa3c60a21388b61d20d",
+    "docs/helper-carrier.md": "ffd1aab9697bd47dd1b85ba03f78e7503bdbf9bd735a35ac874fc608cb867167",
+    "docs/helper-eme-measurement.md": "8b54f905451299f218f5f38127379bf74a52a4e66aed3c0b3280a186255c3eda",
+    "docs/helper-live-probe.md": "3f99c4a67e349af8f5999896df89615ddf68d6977c5dbc37bfefadf928484d6c",
+    "src/helper_inversion_profile.cpp": "2ab21344996660f390c7f308ad024ee863a4b825f0f896ea930aa459b78fb4bb",
+    "include/datapump/helper_inversion_profile.hpp": "73db9d4da779552732614b8cf377b057788b5909e24fe9129c54a76a3a04cd67",
+    "src/helper_complete_conditioner.cpp": "b6794827efd58aa5fc6d4ca00399e5442f57feadf8cb2a22220a453d26b9bb41",
+    "tests/test_helper_complete_study.cpp": "10cffe5eb28d08593750018fd2c51bf0c9a25f03775deeacbc2592b605600ade",
+    "local-evidence/helper-continuation/inversion-profile/heldout-results.json": "efca79929f3335f8f2cc9b328f408765f8f9b04dd0659e409f0955bd8f2e41b7",
+    "local-evidence/helper-continuation/inversion-profile/heldout-summary.json": "efe0d7ade4225b1b22ec89f3fba2879c38c1f6feb32e3145b5ea99889c3ff2b3",
+    "local-evidence/helper-continuation/inversion-profile/screen-summary.json": "5a3810ad5ceeb55df75d58c1341826863abea4d0dc8a6f235e2257b5250e5e11",
+    "local-evidence/helper-continuation/inversion-profile/cpu-isolated/results.json": "58ceaf73e6c7fddafa666db36117e4d525077e139269c72ca10a993a494790b9",
+    "local-evidence/helper-continuation/inversion-profile/reserved-inputs.json": "b7206ea9bd137396c3ec9fcb00975a250786b2c67d3e829829118b614799c3e1"
+  }
+}

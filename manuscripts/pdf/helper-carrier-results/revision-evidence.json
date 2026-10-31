@@ -1,0 +1,20 @@
+{
+  "revision_date": "2026-10-31",
+  "purpose": "Expanded methods, omitted experiments, illustrations and evidence-based recommendations; no new receiver experiments.",
+  "files": {
+    "docs/helper-continuation.md": "69b11a948ebacd36e295ac0c295b9b306749385a580ccedc9e41ea102576e18d",
+    "docs/helper-tracking.md": "e0920e5ade21a61754a7067df13b2433578f4facb224c03c847b23a40159d5ef",
+    "docs/helper-live-probe.md": "3f99c4a67e349af8f5999896df89615ddf68d6977c5dbc37bfefadf928484d6c",
+    "docs/helper-carrier.md": "ffd1aab9697bd47dd1b85ba03f78e7503bdbf9bd735a35ac874fc608cb867167",
+    "tests/helper_live_probe_fixture.hpp": "316891739c6c56a9ff3993d967b8eb60adb9ea4a229430088043f8b90e3fbd78",
+    "src/fast/modem.cpp": "a8b4dd5c9f4e16fa0a0e2d4d1ccedd59579c0853df1eee079c8470e31e2a7e71",
+    "src/helper_carrier.cpp": "c6ca4954455325fd957eab9288ba22de8098390dc3138c281bf6f55176a476bf",
+    "local-evidence/helper-live-cable/physical-summary.txt": "c7e0a893ab543107d077b98978b6fe3c579a5aabead7167685bea1044c2b20cd",
+    "local-evidence/helper-live-cable/calibration-helper-only.json": "011969cf39157a301f27bdbb1315cb48e392d6a34b0611147fb64223c0c0915d"
+  },
+  "editorial_clarification": {
+    "date": "2026-10-31",
+    "scope": "Emphasize successful techniques, practical adequacy and recommended practices; treat approximate +/-0.1 Hz as an aspirational development guide, not a pass/fail requirement. Preserve recorded numerical evidence and specific operating limits.",
+    "basis": "User clarification of development intent; no new empirical claims or receiver experiments."
+  }
+}

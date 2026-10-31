@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE svg
+  PUBLIC '-//W3C//DTD SVG 1.0//EN'
+  'http://www.w3.org/TR/2001/REC-SVG-20010904/DTD/svg10.dtd'>
+<svg width="504" height="236" preserveAspectRatio="xMinYMin meet" viewBox="0 0 504 236" xmlns="http://www.w3.org/2000/svg" version="1.0" fill-rule="evenodd" xmlns:xlink="http://www.w3.org/1999/xlink">
+	<title>...</title>
+	<desc>...</desc>
+	<clipPath id="clip">
+		<rect x="0" y="0" width="504" height="236"/>
+	</clipPath>
+	<g id="group" transform="scale(1,-1) translate(0,-236)" style="clip-path: url(#clip)">
+		<g transform="">
+			<text x="0" y="220" style="font-family: Sans-Bold; font-size: 9.1px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,440) scale(1,-1)">A. Historical matched tracking comparison</text>
+			<text x="0" y="206" style="font-family: Sans; font-size: 8px;fill: rgb(36%,41%,44%); stroke:none;" transform="translate(0,412) scale(1,-1)">Eight cases; 36 s capture; range shown</text>
+			<text x="273" y="220" style="font-family: Sans-Bold; font-size: 9.1px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,440) scale(1,-1)">B. Complete-stream timing feature</text>
+			<text x="273" y="206" style="font-family: Sans; font-size: 8px;fill: rgb(36%,41%,44%); stroke:none;" transform="translate(0,412) scale(1,-1)">Three repetitions per arm; 40 s plus drain</text>
+			<path d="M 105,54 L 240,54 Z" style="stroke: rgb(36%,41%,44%); stroke-linecap: butt; stroke-width: 0.6;"/>
+			<path d="M 105,54 L 105,51 Z" style="stroke: rgb(36%,41%,44%); stroke-linecap: butt; stroke-width: 0.6;"/>
+			<text x="102.9144287109375" y="41" style="font-family: Sans; font-size: 7.5px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,82) scale(1,-1)">0</text>
+			<path d="M 172.5,54 L 172.5,51 Z" style="stroke: rgb(36%,41%,44%); stroke-linecap: butt; stroke-width: 0.6;"/>
+			<text x="165.201416015625" y="41" style="font-family: Sans; font-size: 7.5px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,82) scale(1,-1)">0.25</text>
+			<path d="M 240,54 L 240,51 Z" style="stroke: rgb(36%,41%,44%); stroke-linecap: butt; stroke-width: 0.6;"/>
+			<text x="234.7869873046875" y="41" style="font-family: Sans; font-size: 7.5px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,82) scale(1,-1)">0.5</text>
+			<text x="148.044921875" y="27" style="font-family: Sans; font-size: 8px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,54) scale(1,-1)">CPU seconds</text>
+			<path d="M 378,54 L 494,54 Z" style="stroke: rgb(36%,41%,44%); stroke-linecap: butt; stroke-width: 0.6;"/>
+			<path d="M 378,54 L 378,51 Z" style="stroke: rgb(36%,41%,44%); stroke-linecap: butt; stroke-width: 0.6;"/>
+			<text x="375.9144287109375" y="41" style="font-family: Sans; font-size: 7.5px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,82) scale(1,-1)">0</text>
+			<path d="M 436,54 L 436,51 Z" style="stroke: rgb(36%,41%,44%); stroke-linecap: butt; stroke-width: 0.6;"/>
+			<text x="430.7869873046875" y="41" style="font-family: Sans; font-size: 7.5px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,82) scale(1,-1)">0.4</text>
+			<path d="M 494,54 L 494,51 Z" style="stroke: rgb(36%,41%,44%); stroke-linecap: butt; stroke-width: 0.6;"/>
+			<text x="488.7869873046875" y="41" style="font-family: Sans; font-size: 7.5px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,82) scale(1,-1)">0.8</text>
+			<text x="411.544921875" y="27" style="font-family: Sans; font-size: 8px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,54) scale(1,-1)">CPU seconds</text>
+			<text x="59.275830078125004" y="159" style="font-family: Sans; font-size: 8.1px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,318) scale(1,-1)">Broad only</text>
+			<path d="M 210.84,161 L 222.99,161 Z" style="stroke: rgb(36%,41%,44%); stroke-linecap: butt; stroke-width: 5;"/>
+			<path d="M 210.84,156 L 210.84,166 Z" style="stroke: rgb(36%,41%,44%); stroke-linecap: butt; stroke-width: 1;"/>
+			<path d="M 222.99,156 L 222.99,166 Z" style="stroke: rgb(36%,41%,44%); stroke-linecap: butt; stroke-width: 1;"/>
+			<text x="195.56343750000002" y="175" style="font-family: Sans; font-size: 8px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,350) scale(1,-1)">0.392-0.437</text>
+			<text x="49.597753906250006" y="101" style="font-family: Sans; font-size: 8.1px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,202) scale(1,-1)">Aided + clock</text>
+			<path d="M 121.2,103 L 123.63,103 Z" style="stroke: rgb(10%,36%,47%); stroke-linecap: butt; stroke-width: 5;"/>
+			<path d="M 121.2,98 L 121.2,108 Z" style="stroke: rgb(10%,36%,47%); stroke-linecap: butt; stroke-width: 1;"/>
+			<path d="M 123.63,98 L 123.63,108 Z" style="stroke: rgb(10%,36%,47%); stroke-linecap: butt; stroke-width: 1;"/>
+			<text x="101.06343749999999" y="117" style="font-family: Sans; font-size: 8px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,234) scale(1,-1)">0.060-0.069</text>
+			<text x="341.65625" y="159" style="font-family: Sans; font-size: 8px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,318) scale(1,-1)">Nominal</text>
+			<rect x="378" y="154" width="73.51499999999999" height="14" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(36%,41%,44%); fill-rule: evenodd;"/>
+			<text x="431.49546875" y="176" style="font-family: Sans; font-size: 8px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,352) scale(1,-1)">0.507</text>
+			<text x="311.8515625" y="101" style="font-family: Sans; font-size: 8px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,202) scale(1,-1)">Pooled inversion</text>
+			<rect x="378" y="96" width="101.935" height="14" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(72%,41%,15%); fill-rule: evenodd;"/>
+			<text x="459.91546875" y="118" style="font-family: Sans; font-size: 8px;fill: rgb(12%,16%,18%); stroke:none;" transform="translate(0,236) scale(1,-1)">0.703</text>
+			<text x="123.490234375" y="3" style="font-family: Sans; font-size: 8px;fill: rgb(36%,41%,44%); stroke:none;" transform="translate(0,6) scale(1,-1)">Different experiments and work scopes; compare within each panel only.</text>
+		</g>
+	</g>
+</svg>
