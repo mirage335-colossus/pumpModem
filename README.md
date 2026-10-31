@@ -8,6 +8,8 @@ for dependencies, stable profiles, focused tests and portable release limits.
 **Documentation:** explore the [topic index](docs/README.md) for modem internals,
 performance studies, interfaces, security, build/release procedures and supporting
 evidence. Existing investigations include both measured results and open proposals.
+For current Robust Helper Carrier integration requirements, measured inexpensive
+approaches and their limits, start with the [Helper integration guide](docs/helper-integration.md).
 
 **Contributors:** read [AGENTS.md](AGENTS.md) for development requirements and
 build/test checks.

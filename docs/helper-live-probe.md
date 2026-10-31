@@ -1,5 +1,10 @@
 # Standalone Helper live-style probe
 
+See the [Helper integration guide](helper-integration.md) for current
+integration constraints and the cross-study view of inexpensive approaches.
+This page reports a focused probe and conditioning experiment, not universal
+Robust receiver requirements.
+
 This focused experiment tests Helper-derived sample conditioning without
 running an ordinary Robust receiver. The sampled simulation and conditioner
 accept complex I/Q. They are separate from the application's existing real-mono

@@ -7,6 +7,12 @@ Search `src/`, `include/`, `tests/` and `cmake/` first when locating implementat
 
 ## Helper Carrier priority
 
+For current integration constraints, measured inexpensive frequency/phase
+search-space narrowing approaches and their limits, start with the
+[Helper integration guide](docs/helper-integration.md). It is the current
+algorithm-neutral entry point; the studies it links describe bounded algorithms
+and results, not universal receiver architecture requirements.
+
 Prioritize Helper Carrier's frequency and phase search-space narrowing for the
 ordinary Robust receiver, especially the HF GPSDO alternative and also microwave
 GPSDO supplementation. Do not make successful Helper auxiliary APSK decoding or

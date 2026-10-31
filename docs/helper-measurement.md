@@ -1,5 +1,10 @@
 # Independent Helper pilot measurement
 
+For the current integration context and cross-study evidence map, see the
+[Helper integration guide](helper-integration.md). This page reports one
+standalone measurement receiver and its bounded results, not a universal Robust
+receiver requirement.
+
 `HelperMeasurement` is a pilot-only experimental receiver in
 [`helper_measurement.hpp`](../include/datapump/helper_measurement.hpp). It is
 separate from the live and ordinary Robust receivers. Its input is signed

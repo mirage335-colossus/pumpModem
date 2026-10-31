@@ -1,5 +1,10 @@
 # Helper Carrier implementation and qualification
 
+**For new implementation or integration, read [Helper integration: start here](helper-integration.md).**
+This page preserves earlier product/Live integration checkpoints and their
+source-bound acceptance limits. It is not a mandatory receiver architecture,
+a current inventory of standalone capabilities, or a freeze on cheaper methods.
+
 **Development priority:** Improve Helper Carrier frequency and phase
 search-space narrowing for the ordinary Robust receiver, first for the HF GPSDO
 alternative and also for microwave GPSDO supplementation. Successful auxiliary
@@ -44,24 +49,30 @@ No full-contract/platform/hardware qualification follows.
   separation. Helper Carrier Power is the simultaneous active composite average;
   Robust power specifies its allocation. Modulation and gating affect helper
   average power, and the ratio limit remains in force.
-- Receiver acquisition, tracking and decoding updates for this waveform are
-  deferred. The following receiver observations and source-bound evidence concern
-  the earlier two-tone implementation and are not qualification of the new
-  transmitter waveform.
-- Full oscillator/capture-derived discovery precedes local refinement. Earlier
+- At this checkpoint, the product receiver's updates for the new waveform were
+  deferred. The observations below concern the earlier two-tone integration;
+  they do not describe the subsequently implemented standalone receiver, nor
+  qualify an ordinary Robust adapter for it.
+- That receiver used full oscillator/capture-derived discovery before local
+  refinement. This order is not mandatory when a different receiver has a valid
+  bounded prior and suitable recovery coverage. Earlier
   200 ms contexts are software apertures, not a continuous-tone physical limit.
   Settled 384 ms fits and dated continuous numeric support remain bounded.
   Proper-Q component coverage improves while startup escapes remain; no
   calibrated operational-confidence guarantee follows. Numeric retention is
-  separate from the 36-second extra-lead cap.
-  Unknown retune phases remain independent; raw staging stays bounded at 400 ms.
-- One ordinary Robust bank narrows existing and new RF candidates while
+  separate from the transmit lead.
+  Unknown retune phases remain independent; that implementation's raw staging
+  was bounded at 400 ms, not a limit on complete-dwell delayed receivers.
+- The recorded integration used one ordinary Robust bank to narrow RF candidates while
   retaining unresolved clock/timing alternatives. Every committed payload sample
   and date remains required. Phase needs local support; later frequency cannot
-  manufacture earlier phase or advance the processed frontier.
+  manufacture an unmeasured hop phase or advance the processed frontier. Later
+  same-hop phase evidence may correct still-buffered samples with explicit
+  uncertainty and capture/observation timestamps.
 - Planner separates total/pilot C/N0, uninterrupted/segmented reference scales,
-  practical prediction, baseline lead and at most 36 additional seconds. The
-  ±0.1 Hz milestone does not qualify every 128-second configuration. CPU prices
+  practical prediction and receiver costs. The current lead is the fixed
+  38-second schedule above. Approximately ±0.1 Hz is a comparison milestone,
+  not a mandatory admission gate or qualification of every 128-second configuration. CPU prices
   remain conditional on existing receiver work and unresolved geometry.
 
 Physical audio/RF calibration and passband margin remain necessary. Previous
@@ -121,15 +132,17 @@ wire/framing, progress, identity and END requirements are unchanged.
 
 ## Bounded architecture decision
 
-Freeze Q, lag/history, uncertainty multipliers and additional lead. Preserve the
-funded minimum provenance and validated additive constructor headroom before more
-estimator tuning. Accept measured HF40 reference quality as useful on the stated
+This historical decision froze Q, lag/history, uncertainty multipliers and lead
+for the earlier source binding while preserving its funded minimum provenance
+and validated constructor headroom. It does not prohibit new estimators,
+buffer lengths or narrower processing paths. The measured HF40 reference
+quality was accepted as useful on the stated
 six-physical-core/2 GiB simulator, without a GPSDO-specification or CRLB target
 criterion; a modest residual RF penalty can still be useful. A whole instantaneous
 hull is sufficient for that conservative design
 but not proved necessary for a score; accumulated phase, FIR support and
 correlations require proof before substituting or retrodating a later average. Preserve unresolved LF/UTC/key and
-independent hop phase. See the [architecture/error review](helper-carrier.md#receiver-architecture-decision)
+independent hop phase. See the [architecture/error review](helper-carrier.md#earlier-receiver-architecture-decision)
 for primary references and the three short discriminators, with the compact
 [reference/error-work budget](../local-evidence/helper-two-tone/architecture-review-r1/reference-budget.json).
 Targeted passes do not establish general safety or full practical acceptance.

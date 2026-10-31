@@ -1,5 +1,11 @@
 # Helper Carrier
 
+**Implementing or integrating a receiver? Start with the
+[Helper integration guide](helper-integration.md).** It maps the inexpensive
+standalone algorithms, actual correction-chain entry points, measured results
+and remaining limits. Older Live receiver details below describe particular
+implementations; they do not prescribe the architecture of every Helper receiver.
+
 Helper Carrier is an experimental independent three-tone reference for propagation
 diagnostics and optional assistance to Robust reception, including operation
 without GPSDO hardware. It can accompany an ordinary transmission or transmit
@@ -27,8 +33,9 @@ dwell schedule, with any timing adjustment based on the auxiliary-tone phase
 reversal. Keep correction uncertainty and actual missing input explicit while
 passing along captured samples. Approximately ±0.1 Hz is an intended scale for
 useful narrowing, not a hard threshold for baseband delivery or integration
-readiness. The current evidence, prepared components and remaining adapter
-work are in [standalone integration preparation](helper-continuation.md#practical-path-prepared-for-integration).
+readiness. The [integration guide](helper-integration.md) identifies the current
+capabilities and contracts; [standalone integration preparation](helper-continuation.md#practical-path-prepared-for-integration)
+retains detailed evidence and remaining adapter work.
 The optional [auxiliary inversion measurement](helper-continuation.md#standalone-inversion-measurement-and-complete-stream-bridge)
 now exposes actual dated reversals without requiring pilot ramps or payload
 decoding; weak-link availability and its uncertainty calibration remain limited.
@@ -61,8 +68,11 @@ start ordinary Robust acquisition merely because an earlier precision estimate
 looks useful. The Helper-only transmit lead is fixed at exactly 95 dwells of
 400 ms each, or 38 seconds, whether FHSS is enabled or disabled. It provides
 90 dwells (36 seconds) for observation and five dwells (two seconds) for initial
-Helper detection. In the intended use cases the Helper is well above the noise
-floor, and this detection margin is considered excellent.
+Helper detection. This scheduled margin is not a universal detection guarantee.
+Weak auxiliary timing can require accumulated evidence over many dwells, even
+while pilot tracking is useful; the standalone studies explicitly include
+signals below the sample noise floor. Do not require a strong individual
+auxiliary-marker detection within those two seconds.
 
 Plan operation around a listener being present for the full lead-in. The
 waveform has no mandatory cue identifying the start of that lead, so straight
@@ -111,16 +121,24 @@ carrier and rate must leave enough space for them. These frequency and power
 ratios describe the transmitted audio waveform; actual RF ratios depend on the
 radio and audio chain.
 
-This transmitter change is not a receiver qualification. Acquisition, tracking
-and decoding for the new waveform remain under development. The Live high-pilot
-path reacquires phase within each supported actual-retune dwell. An in-progress,
-separately funded worker also measures the low pilot on matching high-pilot
-apertures and publishes conditional diagnostics; it does not yet use those
-measurements for ordinary receiver frequency or phase correction. Earlier
-two-tone receiver measurements and binary bindings in
+The current three-tone waveform has implemented and tested standalone pilot
+acquisition, clock/frequency/phase tracking, complete-dwell correction and
+auxiliary timing; see the [capability map](helper-integration.md#recommended-starting-composition).
+Those results do not by themselves qualify the application's ordinary Robust
+adapter. The following product-path notes describe that separate integration:
+the Live high-pilot path reacquires phase within each supported actual-retune
+dwell, and a separately budgeted low-pilot worker publishes conditional
+diagnostics. Its restrictions do not apply to the standalone joint-pilot
+correction chain. Earlier two-tone receiver measurements and binary bindings in
 [validation](validation.md) apply only to their stated source and waveform, not
 to this transmitter. Physical display, audio and radio testing and full
 regression qualification remain open.
+
+### Existing product-path evidence
+
+These source-bound Live and ordinary-receiver results retain their original
+passes and failures. Their CPU totals include ordinary receiver work and must
+not be substituted for standalone Helper tracking cost.
 
 The [29 October development checkpoint](validation.md#three-tone-helper-carrier-implementation-checkpoint)
 includes a rebuilt GUI and focused measurements for the earlier waveform. Its
@@ -249,11 +267,16 @@ retains these outcomes and their limits.
 ## Manual reception
 
 The following receiver behavior and observations describe the earlier two-tone
-waveform and are not yet validated for the new transmitter. Helper reception is
+product integration and are not a required design for the newer standalone
+receiver. Its 400 ms staging, 0.5 s freshness and one-bank choices below are
+implementation-specific. Current integration choices and complete-dwell delayed
+correction are described in the [integration guide](helper-integration.md).
+Helper reception is
 manually enabled. On quiet spectrum, the receiver accepts
 the strongest qualifying straight tone inside the oscillator-derived expected
 pilot range, bounded by actual capture geometry. There is no artificial ±100 Hz
-cap. Discovery and isolation precede local tracking. Auxiliary detection or
+cap. This implementation performed discovery and isolation before local tracking.
+Other bounded acquisition and prior-aided methods remain available. Auxiliary detection or
 metadata decoding does not qualify frequency assistance or authenticate the
 transmitter. Auxiliary clock/timing information requires its own measured
 qualification; its modulation is never applied to payload phase.
@@ -274,9 +297,10 @@ an earlier phase observation or advance the processed frontier.
 Uninterrupted pilots can retain dated continuous numeric support. After actual
 retuning, each hop's phase is independent: usable dwell frequency measurements
 enter the RF/audio model using actual RF and sideband, and local pilot phase
-must be reacquired. The raw stage is bounded at 400 ms. Model frequency
-availability is bounded to 0.5 seconds from independent evidence; retuning cannot
-renew that witness. The current RF/audio evolution assumptions through 54 MHz
+must be measured independently. That implementation bounded its raw stage at
+400 ms and model frequency availability to 0.5 seconds from independent
+evidence; retuning could not renew that witness. These are not universal buffer
+or prediction limits. Its RF/audio evolution assumptions through 54 MHz
 are explicit and uncalibrated. Numeric retention is separate from the fixed
 transmit lead and must not retroactively establish phase support.
 
@@ -350,9 +374,10 @@ private. See
 
 ## Earlier receiver architecture decision
 
-For the earlier two-tone source, the bounded code/evidence review, including Astra,
-froze estimator tuning:
-Q, lag/history, uncertainty multipliers and extra lead remain unchanged. The
+For the earlier two-tone source, the source-bound code/evidence review froze
+that implementation's Q, lag/history, uncertainty multipliers and lead while
+its integration defects were diagnosed. This historical decision does not
+freeze tuning or require that architecture in newer standalone receivers. The
 HF40 reference quality and its modest residual RF penalty are accepted as useful
 on the stated six-physical-core/2 GiB simulator; matching GPSDO specifications or
 an ideal CRLB is not the acceptance criterion. Complete platform acceptance remains unproved. Minimum
@@ -383,6 +408,10 @@ Drift, random phase and correction modulation can reduce coherence, which extra
 constant-frequency lanes cannot restore. LF, UTC and key alternatives remain.
 Unknown hop phase needs qualified local phase correction or the ordinary
 sectioned mechanism; the RF/audio model carries frequency, not phase continuity.
+This score-level limitation does not prohibit delayed correction of captured
+samples using later observations of the **same hop**. The complete conditioner
+does that under an explicit phase/clock model, preserves observation provenance
+and reports uncertainty separately from delivering all captured samples.
 
 Offset, drift and random instability are different quantities; static ppm is
 not a drift rate. [NIST's oscillator characterization](https://tf.nist.gov/phase/Properties/three.htm)
@@ -623,20 +652,26 @@ uncertainty cannot shorten or extend this lead. The tail retains at least two
 seconds and any greater filter, initial-FFT, pulse-support and physical-absence
 obligations; expected message length never supplies completion authority.
 
-The receiver-local admission rule requires both a minimum **36 seconds after
-causal Helper presence detection and the beginning of reference observation**
-and actual measured precision sufficient for useful narrowed acquisition. The
-fixed transmit lead offers up to two seconds for initial detection before that
-observation interval. This margin still needs demonstration for the intended
-three-tone cases. A listener without the full observation interval cannot infer
-an earlier onset or use an early precision estimate to enter sooner; supporting
-late joining is not a development priority, as described in the
-[lead-in operating requirement](#lead-in-operating-requirement). Brief fades do not restart the timer,
-but contribute no measurement support. Elapsed time and predicted C/N0 alone
-do not qualify a reference. If measured precision is inadequate, new ordinary
-acquisition remains gated, while established reception retains ordinary draining
-and fully scored physical completion after Helper loss. This is the required
-policy; its three-tone integration and validation remain in progress.
+Assisted acquisition requires the full **36 seconds of actual Helper
+observation** and a dated measurement with its applicable uncertainty. Elapsed
+time or predicted C/N0 alone does not qualify a reference, and an early precise
+estimate does not shorten the observation requirement. A receiver may retain
+weak observations and qualify their pooled evidence later; it need not discard
+them or restart observation at the first independently decoded auxiliary marker.
+The older Live implementation started its timer after causal presence detection;
+that state-machine choice does not prescribe the evidence handling of every
+receiver. A listener without the full observation interval cannot invent earlier
+observations; late joining is not a priority, as described in the
+[lead-in requirement](#lead-in-operating-requirement). Fades supply no missing
+measurement evidence and remain explicitly represented.
+
+Use the available frequency/clock information to select a defensible search
+range, retaining unresolved alternatives. Useful assistance need not meet an
+exact ±0.1 Hz gate or resolve absolute timing. Lack of usable evidence or model
+contradictions must be explicit; it must not silently remove captured samples.
+Established reception retains ordinary draining and fully scored physical
+completion after Helper loss. The actual three-tone Robust consumer and its
+admission behavior still require integration validation.
 
 The forecast separates received pilot C/N0, independent coherent apertures,
 configured phase noise and estimator/model assumptions. Predicted ±0.1 Hz
@@ -652,9 +687,11 @@ compatible RF and sideband context. Their separation and measurement covariance
 determine the uncertainty in the correction at a payload frequency. Two tones
 do not separately identify every transmitter and receiver oscillator; a single
 qualified pilot leaves additional clock uncertainty. Each retune can introduce
-an independent phase, so only compatible, dated frequency observations are
-combined across hops and the current phase must be reacquired. This model does
-not make auxiliary metadata a prerequisite for frequency assistance.
+an independent common RF phase, which must be freshly measured for that hop.
+Compatible dated frequencies and the two-pilot phase difference can contribute
+to a shared relative-clock model without assuming common RF phase continuity.
+The [joint standalone estimator](helper-integration.md#recommended-starting-composition)
+implements that distinction. Auxiliary metadata is not a prerequisite.
 
 For pilot C/N0 in linear Hz, the ideal uninterrupted noise-only three-times-CRLB
 standard-deviation scale is
@@ -842,8 +879,9 @@ real quiet capture after both components end.
 
 ## Evidence and remaining qualification
 
-[Validation](validation.md) retains current focused observations and separately
-bound historical failures. The current 20 dB-Hz component declines qualification;
+[Validation](validation.md) retains product-integration observations and separately
+bound historical failures; [the integration guide](helper-integration.md) maps
+the newer standalone results. The earlier 20 dB-Hz component declined qualification;
 a short-window gate, poor bootstrap or inefficient aperture is not proof of a
 physical precision limit. The actual-waveform matrix and seeded uncertainty
 escapes must be resolved before operational interval claims. Capture passband,

@@ -1,5 +1,10 @@
 # Standalone Helper frequency study for Earth–Moon–Earth budgets
 
+See the [Helper integration guide](helper-integration.md) for current
+integration constraints and the cross-study view of inexpensive approaches.
+This page reports a bounded EME link-budget study, not universal Robust
+receiver requirements.
+
 This is an independent, sample-level Helper Carrier study of two illustrative
 5.8 GHz link budgets. It does not run the ordinary Robust receiver, establish
 that a particular Robust search width is sufficient, or qualify a radio or a

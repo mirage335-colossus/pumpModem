@@ -12,7 +12,11 @@ This is a maintenance contract for the existing implementation. The
 [version 001_00 scope record](original-specification.md) describes the product
 scope. The [migration plan](packetless-stream-plan.md) and older validation
 entries describe historical designs; they do not override these current
-requirements.
+requirements. For Helper assistance, preserving these compatibility requirements
+does not mandate the existing Helper receiver architecture. For current
+integration constraints and measured, inexpensive search-space narrowing approaches, see the
+[Helper integration guide](helper-integration.md); its algorithm comparisons
+are evidence and options, not additional universal receiver requirements.
 
 Preserve the restricted received-byte presentation and the selected index and
 validation-boundary protections documented in

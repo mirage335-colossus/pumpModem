@@ -1,5 +1,10 @@
 # Standalone Helper tracking experiments
 
+See the [Helper integration guide](helper-integration.md) for current
+integration constraints and the cross-study view of inexpensive approaches.
+This page reports specific tracking algorithms and experiments, not universal
+Robust receiver requirements.
+
 This page describes pilot-only receiver components and simulation experiments.
 They do not integrate the ordinary Robust receiver or claim Robust acquisition
 or decoding. The fixed lead is 36 seconds of Helper observation and another two

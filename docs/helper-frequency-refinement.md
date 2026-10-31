@@ -1,5 +1,10 @@
 # Standalone Helper frequency refinement
 
+See the [Helper integration guide](helper-integration.md) for current
+integration constraints and the cross-study view of inexpensive approaches.
+This page reports specific refinement algorithms and experiments, not
+universal Robust receiver requirements.
+
 This study compares inexpensive Helper-only tracking methods on the same
 simulated captures. It does not integrate or test ordinary Robust reception.
 The existing [Helper tracking study](helper-tracking.md) describes the prior

@@ -1,5 +1,10 @@
 # Standalone Helper covariance and recovery experiments
 
+**Integration entry point: [Helper integration: start here](helper-integration.md).**
+It identifies the current inexpensive composition and separates required
+behavior from implementation choices. This page retains detailed experiments;
+earlier failed candidates and guards are not universal architecture requirements.
+
 This study continues the independent Helper-only simulations described in
 [frequency refinement](helper-frequency-refinement.md). It does not integrate
 or test ordinary Robust reception. The compared receivers use the actual Helper
@@ -60,9 +65,12 @@ The optional `HelperInversionTiming` adapter now publishes this receiver's
 actual marker observations, and the complete-stream study can select them
 with `auxiliary` boundary mode. It uses measured pilot frequencies to locate
 the auxiliary, requires no payload decode, and works without pilot ramps.
-The matched 40 W / 180 dB checks accepted no markers: boundary accuracy at that
-weak-signal operating point remains unestablished. Until marker evidence is
-available and consistent, retain schedule timing and its uncertainty.
+The strict adapter's matched 40 W / 180 dB checks accepted no individual markers.
+That is not the limit of available timing methods: the later
+[`HelperInversionProfile` pooled detector](#sensitive-pooled-inversion-timing-experimental)
+demonstrates useful calendar timing at that loss in the actual complete-stream
+chain. Until evidence for the selected method is available and consistent,
+retain schedule timing and its uncertainty.
 The v9 `tracked` mode remains a selectable ramp-based experiment for the
 recorded comparisons, not the recommended boundary-adjustment mechanism for
 integration. A transmitted marker also does not independently measure a
