@@ -89,6 +89,9 @@ struct SimulationHook {
     // Optional laboratory witness; callback consumes the span synchronously,
     // must not mutate or retain it, and may only inspect actual dated input.
     void (*raw_pcm_witness)(void*,std::uint64_t,std::span<const float>) noexcept=nullptr;
+    // Optional test synchronization after a prepared simulation TX is queued;
+    // invoked outside the Session mutex and without changing playback state.
+    void (*transmit_prepared)(void*) noexcept=nullptr;
 };
 inline std::atomic<SimulationHook*> simulation_hook{nullptr};
 inline bool mock_capture_pair_checkpoints()noexcept {

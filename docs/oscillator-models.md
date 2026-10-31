@@ -17,19 +17,21 @@ residual, while phase diffusion is spread out to examine coherence sensitivity.
 | CLI profile | Oscillator scenario | Relative clock offset | Phase diffusion |
 | --- | --- | ---: | ---: |
 | `crystal` | Existing consumer/free-running crystal case | 100 ppm | 0.5 degrees/sqrt(second) |
-| `cb-ssb` | Modern CB SSB crystal, ±20 ppm per radio assumed | 40 ppm | 0.5 degrees/sqrt(second), assumed |
-| `ats-mini-v4-ssb` | ATS Mini V4 SSB crystal, ±20 ppm per device assumed | 40 ppm | 0.5 degrees/sqrt(second), assumed |
+| `cb-ssb` | Modern CB SSB / ATS Mini V4 SSB RF crystal, ±20 ppm per device assumed (Shift Osc only) | 40 ppm | 0.5 degrees/sqrt(second), assumed |
 | `gpsdo-xo` | Hobbyist GPSDO, basic crystal, no oven | 0.0001 ppm | 0.5 degrees/sqrt(second) |
 | `gpsdo-tcxo` | GPSDO with temperature compensation, no oven | 0.0001 ppm | 0.05 degrees/sqrt(second) |
 | `gpsdo-ocxo` | GPSDO with an oven-controlled crystal | 0.0001 ppm | 0.005 degrees/sqrt(second) |
 | `ic-7100` | IC-7100 RF reference example (Shift Osc only) | 1 ppm | 0.05 degrees/sqrt(second), assumed |
 
 The default for each model remains `crystal`.
-The CB SSB and ATS Mini V4 SSB profiles use ±20 ppm per device as a
+The combined CB SSB / ATS Mini V4 SSB RF profile uses ±20 ppm per device as a
 typical worst-case simulation assumption. Opposite endpoint errors can produce
 40 ppm relative error, the quantity used by these link models. The phase
 diffusion is an illustrative free-running-crystal assumption, not a measured
 specification. These values are not verified specifications for particular radios.
+The former `ats-mini-v4-ssb` ID imports as `cb-ssb`. Neither this model nor the
+IC-7100 RF example describes an independent sound-card clock, so they are
+available only as Shift Osc choices, not Baseband Osc or a shared-clock model.
 
 For US CB transmitters, [47 CFR § 95.965](https://www.ecfr.gov/current/title-47/chapter-I/subchapter-D/part-95/subpart-D/section-95.965)
 requires the carrier, or the SSB reference frequency, to remain within ±50 ppm
@@ -66,6 +68,9 @@ The parts and circuit sections separately identify a PCM2901 USB codec
 as shared with the RF reference or permanently GPS disciplined.
 The manual specifies a five-minute warm-up for RF stability; it does not
 establish a permanently powered oven or an audio timing guarantee.
+These separate references provide no evidence that the sound card shares the
+RF reference's instantaneous phase, so the IC-7100 RF example cannot establish
+the shared Baseband clock topology.
 [Manufacturer service manual, public mirror](https://ok2haz.ok2kld.cz/ok2haz/wp-content/uploads/2017/01/IC-7100_service_manual.pdf)
 
 TI describes the PCM2901 as adaptive for USB playback and asynchronous for

@@ -22,6 +22,7 @@
 #include "datapump/resampler.hpp"
 #include "datapump/streaming_modem.hpp"
 #include "transmit_timing.hpp"
+#include "audio_trace.hpp"
 #include "helper_power_reference.hpp"
 #include <algorithm>
 #include <charconv>
@@ -155,7 +156,10 @@ Audio/simulation:
   --seed N --delay-samples N --frequency-offset HZ
   --oscillator MODEL    crystal (default), gpsdo-xo, gpsdo-tcxo, gpsdo-ocxo
                         LF/audio residual model; controls real RX search too
-  --rf-oscillator MODEL Independent RF reference model; same choices, default crystal
+  --rf-oscillator MODEL RF reference model; also cb-ssb or ic-7100, default crystal
+  --spread-preset ID    Propagation spread preset for simulate/listen simulation; default none
+  --selective-perturbation ID  off or slow-N, fast-N, each-N (N=1,5,10,25,65)
+  --simulation-trace PATH  New JSONL file recording actual spread/perturbation parameters
   --rf-shift HZ         Alias for --shift
   --rf-carrier HZ       Alias for absolute --carrier; matching aliases may be combined
   --reference MODE      independent (default) or shared-radio (ADC/DAC and LO clock)
@@ -205,7 +209,7 @@ public:
         const std::set<std::string> valued={"text","input","output","save","kind","filename","callsign","grid",
             "bw","sample-rate","carrier","doppler","spreading","dsss-factor","dsss-version","dsss-mode","search-arithmetic","receiver-strategy","receiver-cpu-budget","sched-hop","sched-hop-dilution","sched-frequency-search","symbol-burst","symbol-burst-random","clock-sync","audio-error","fec","memory-mb","keyfile","pad","time","search-seconds",
             "device","device-type","seconds","tx-delay","snr","seed","delay-samples","frequency-offset","bits","format",
-            "target-snr","receive-targets","pattern","simulation","oscillator","rf-oscillator","shift","rf-shift","rf-carrier","search-margin","reference","sideband","lf-reference","key-name","key-names","cache-mb","dsp-mb","clock-error-ppm","phase-noise","receiver-time",
+            "target-snr","receive-targets","pattern","simulation","oscillator","rf-oscillator","spread-preset","selective-perturbation","simulation-trace","shift","rf-shift","rf-carrier","search-margin","reference","sideband","lf-reference","key-name","key-names","cache-mb","dsp-mb","clock-error-ppm","phase-noise","receiver-time",
             "recovery-seconds","recovery-threads","recovery-bits","recovery-errors",
             "helper-power","helper-data-power","helper-ratio-limit","helper-frequency","helper-callsign",
             "tx-dbm","attenuation-db","noise-figure-db","symbol-seconds","coherent-seconds",
@@ -269,6 +273,10 @@ public:
         if(command!="keygen") reject({"key-names"},"is only valid for keygen");
         if(command!="simulate" && command!="listen" && command!="analyze-link") reject({"simulation"},"is only valid for simulate/listen/analyze-link");
         if(command!="simulate" && command!="listen" && command!="analyze-link") reject({"clock-error-ppm","phase-noise"},"is only valid for simulate/listen/analyze-link");
+        if(command!="simulate" && command!="listen") reject({"spread-preset","selective-perturbation","simulation-trace"},"is only valid for simulate or listen simulation");
+        if(command=="listen" && (has("spread-preset") || has("selective-perturbation") || has("simulation-trace")) &&
+           (!has("simulation") || !tuning::parse_simulation_preset(get("simulation")).enabled))
+            throw Error("spread and perturbation options require an enabled --simulation for listen");
         if(command=="qr"||command=="keygen"||command=="devices")
             reject({"oscillator","rf-oscillator","shift","rf-shift","rf-carrier","doppler","search-margin","reference","sideband","lf-reference"},"requires a Robust modem command");
         if(command!="analyze-link")
@@ -337,12 +345,13 @@ helper::Options helper_options(const Args& a,bool) {
 }
 tuning::OscillatorPreset oscillator_config(const Args& a) {
     auto result=tuning::parse_oscillator_preset(a.get("oscillator","crystal"));
+    if(!result.baseband_supported)throw Error("Selected oscillator is available for --rf-oscillator, not the unspecified audio clock");
     result.clock_error_ppm=a.number("clock-error-ppm",result.clock_error_ppm);
     result.phase_noise_degrees_per_sqrt_second=a.number("phase-noise",result.phase_noise_degrees_per_sqrt_second);
     return result;
 }
 modem::OscillatorSearchConfig oscillator_search_config(const Args& a) {
-    if(tuning::parse_oscillator_preset(a.get("oscillator","crystal")).id=="ic-7100")throw Error("IC-7100 model is available for --rf-oscillator, not the unspecified audio clock");
+    if(!tuning::parse_oscillator_preset(a.get("oscillator","crystal")).baseband_supported)throw Error("Selected oscillator is available for --rf-oscillator, not the unspecified audio clock");
     modem::OscillatorSearchConfig result;
     result.lf=tuning::oscillator_model(tuning::parse_oscillator_preset(a.get("oscillator","crystal")));
     result.rf=tuning::oscillator_model(tuning::parse_oscillator_preset(a.get("rf-oscillator","crystal")));
@@ -360,6 +369,9 @@ modem::OscillatorSearchConfig oscillator_search_config(const Args& a) {
     result.sideband=modem::OscillatorSideband::upper;
     if(a.has("shift")&&a.has("rf-shift"))throw Error("choose shift or its rf-shift alias, not both");
     result.rf_shift_hz=a.number("shift",a.number("rf-shift",0));
+    if(result.rf_shift_hz>0 && result.reference==modem::OscillatorReference::shared_radio &&
+       !tuning::parse_oscillator_preset(a.get("rf-oscillator","crystal")).baseband_supported)
+        throw Error("RF-only oscillator cannot describe a shared radio audio clock");
     modem::validate_oscillator_search(result);
     return result;
 }
@@ -376,6 +388,23 @@ void apply_oscillator_effects(const Args& args,const modem::Config& config,modem
         channel.clock_error_ppm=actual;
     }
     channel.phase_noise_degrees_per_sqrt_second=args.number("phase-noise",channel.phase_noise_degrees_per_sqrt_second);
+}
+void apply_spread_effects(const Args& args,const modem::Config& config,modem::ChannelConfig& channel) {
+    // Omitted CLI options preserve the original no-spread simulation. Explicit
+    // presets use the same family default and margin convention as the GUI.
+    const auto preset=tuning::parse_spread_preset(args.get("spread-preset","none"));
+    const auto margin=config.oscillator_search->margin;
+    channel.spread_delay_ms=preset.delay_ms*margin;
+    channel.spread_doppler_hz=preset.doppler_hz*margin;
+    const auto mode=args.get("selective-perturbation",preset.default_perturbation?"each-65":"off");
+    if(mode=="off")return;
+    for(const auto* kind:{"slow","fast","each"})for(const auto depth:{1,5,10,25,65}) {
+        if(mode!=std::string(kind)+"-"+std::to_string(depth))continue;
+        if(std::string_view(kind)!="fast")channel.perturbation_slow_depth=depth/100.;
+        if(std::string_view(kind)!="slow")channel.perturbation_fast_depth=depth/100.;
+        return;
+    }
+    throw Error("--selective-perturbation must be off, or slow/fast/each with depth 1, 5, 10, 25 or 65");
 }
 std::size_t budget(const Args& a) {
     auto mb=a.integer("memory-mb",256);
@@ -1451,9 +1480,14 @@ void listen(const Args& a,const transfer::Options& options,const helper::Options
     modem::ChannelConfig oscillator;
     oscillator.frequency_offset_hz=a.number("frequency-offset",0);
     apply_oscillator_effects(a,options.modem,oscillator);
+    apply_spread_effects(a,options.modem,oscillator);
     settings.simulation_clock_error_ppm=oscillator.clock_error_ppm;
     settings.simulation_frequency_offset_hz=oscillator.frequency_offset_hz;
     settings.simulation_phase_noise_degrees_per_sqrt_second=oscillator.phase_noise_degrees_per_sqrt_second;
+    settings.simulation_spread_delay_ms=oscillator.spread_delay_ms;
+    settings.simulation_spread_doppler_hz=oscillator.spread_doppler_hz;
+    settings.simulation_perturbation_slow_depth=oscillator.perturbation_slow_depth;
+    settings.simulation_perturbation_fast_depth=oscillator.perturbation_fast_depth;
     if(options.modem.spreading_mode!=modem::SpreadingMode::tone && a.has("keyfile") && !a.has("key-name")) {
         for(const auto& entry:load_keyring(a.get("keyfile"),a.has("pad")?
             std::optional<std::filesystem::path>(a.get("pad")):std::nullopt)) settings.receive_keys.push_back(entry.key);
@@ -1562,6 +1596,17 @@ int main(int argc,char** argv) {
         if((a.command=="estimate"||a.command=="analyze-link") && helper_power(a,"helper-power",0)>0)
             throw Error("enabled helper carrier is supported only by tx, status-tx, listen, rx, status-rx and simulate; use --helper-power 0 to disable it");
         a.validate_options();
+        std::unique_ptr<audio::trace::Scope> simulation_trace;
+        if(a.has("simulation-trace")) {
+            if(a.get("simulation-trace").empty())throw Error("--simulation-trace requires a new file path");
+            const auto filter=+[](const char* event) noexcept {
+                const std::string_view name(event);
+                return name=="trace_begin" || name=="simulation_two_ray_spread" ||
+                    name=="simulation_frequency_selective_perturbation";
+            };
+            simulation_trace=std::make_unique<audio::trace::Scope>(a.get("simulation-trace"),false,filter);
+            std::cerr<<"Simulation trace: "<<simulation_trace->path()<<'\n';
+        }
         if(a.command=="qr") {
             auto content=message(a).data;
             auto text=std::string(content.begin(),content.end());
@@ -1820,6 +1865,7 @@ int main(int argc,char** argv) {
         channel.delay_samples=a.integer("delay-samples",137);
         channel.frequency_offset_hz=a.number("frequency-offset",0);
         apply_oscillator_effects(a,c,channel);
+        apply_spread_effects(a,c,channel);
         if(a.has("receiver-time")) channel.receiver_timestamp=a.integer("receiver-time",timestamp);
         const auto outgoing=message(a);
         transfer::Received result;

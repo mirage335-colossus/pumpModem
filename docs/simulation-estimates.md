@@ -126,6 +126,11 @@ and a calibrated scattering spectrum, respectively. The delayed source is
 regenerated with bounded memory; this adds computation. The analytical Link
 planner and receive probability estimates do not model these spread or
 perturbation effects and do not predict performance in this channel.
+The sampled Live simulation, transfer simulation and bulk PCM simulation apply
+the selected effects. The accelerated symbol-observation channel cannot represent
+frequency-selective samples and explicitly rejects nonzero propagation spread;
+use a sampled path for these channel models. Ordinary physical audio is not
+modified by selecting simulation settings.
 
 **Additional frequency-selective perturbation** defaults to Off for None and
 Sub-9 kHz, and Each 65% for HF, Aurora and EME. Selecting a new spread preset
@@ -138,7 +143,10 @@ Each 65% can temporarily invert the gain. The seeded phases are distinct per
 range and component and continue across processing blocks. Off bypasses the
 filter bank, as does a zero Doppler reference. The GUI's `--verbose` or
 `--verbose-file` simulation trace records the seed, ranges, actual rates and
-phases for reproduction.
+phases for reproduction. The `pump simulate` and simulated `pump listen` CLI
+accept `--spread-preset` and `--selective-perturbation`; their omission keeps
+the earlier no-spread default. `--simulation-trace PATH` records the actual
+channel events in a new JSONL file without changing standard output.
 
 The local outer-DSSS candidate accounts for actual chip count, sampled bandwidth
 and symbol duration in compute estimates. Legacy outer DSSS can show a numerical

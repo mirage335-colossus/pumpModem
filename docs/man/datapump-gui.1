@@ -94,7 +94,9 @@ Baseband oscillator model for bounded receiver search and simulated impairments:
 .BR gpsdo-tcxo " or " gpsdo-ocxo .
 .TP
 .BI \-\-rf\-oscillator " ID"
-Shift oscillator model; the same choices plus ic-7100, default crystal. Inactive at Shift 0.
+Shift oscillator model; the same choices plus cb-ssb (combined CB/ATS example)
+and ic-7100, default crystal. Inactive at Shift 0. The RF-only examples do not
+specify an audio clock and cannot be used as a shared Baseband clock.
 The IC-7100 RF example does not specify the USB audio clock.
 For a legacy positive-Shift shared reference, this flag selects the shared model.
 .TP

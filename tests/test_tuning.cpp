@@ -548,7 +548,12 @@ void oscillator_simulation_presets() {
           tuning::parse_spread_preset("eme-focused").delay_ms==.5,
           "Propagation presets must retain requested values");
     const auto presets=tuning::oscillator_presets();
-    check(presets.size()==7,"oscillator simulation must include crystal, two SSB models, three GPSDO tiers and an IC-7100 RF example");
+    check(presets.size()==6,"oscillator simulation must include one combined SSB model, three GPSDO tiers and an IC-7100 RF example");
+    const auto radio=tuning::parse_oscillator_preset("cb-ssb");
+    check(radio.clock_error_ppm==40 && !radio.baseband_supported &&
+          tuning::parse_oscillator_preset("ats-mini-v4-ssb").id==radio.id &&
+          !tuning::parse_oscillator_preset("ic-7100").baseband_supported,
+          "Equivalent SSB RF examples must use one canonical model and remain separate from audio clocks");
     const modem::ChannelConfig defaults;
     check(presets.front().id=="crystal" &&
           presets.front().clock_error_ppm==defaults.clock_error_ppm &&

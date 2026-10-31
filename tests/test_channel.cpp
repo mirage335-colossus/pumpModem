@@ -332,6 +332,35 @@ void spread_helper_tail() {
     require(data_energy>1e-8,"physical helper capture omitted the delayed DATA slot");
     require(channel.working_bytes()<=m::SampledSimulationChannel::workspace_bound,"helper spread exceeded workspace");
 }
+void bulk_spread_and_perturbation() {
+    auto cfg=config();cfg.bandwidth_hz=1200;cfg.integration_seconds=.02;
+    std::vector<float> source(cfg.sample_rate);
+    for(std::size_t i=0;i<source.size();++i) {
+        const auto t=static_cast<double>(i)/cfg.sample_rate;
+        source[i]=static_cast<float>(.25*std::cos(tau*1100*t)+.25*std::cos(tau*1500*t)+.25*std::cos(tau*1900*t));
+    }
+    auto off=ideal(),zero=off;zero.perturbation_slow_depth=zero.perturbation_fast_depth=.65;
+    require(m::simulate(source,cfg,off)==m::simulate(source,cfg,zero),"zero-Doppler bulk perturbation changed PCM");
+    auto spread=off;spread.spread_delay_ms=200;spread.spread_doppler_hz=5;
+    auto both=spread;both.perturbation_slow_depth=.25;both.perturbation_fast_depth=.25;
+    const auto reference=m::simulate(source,cfg,off);
+    const auto spread_pcm=m::simulate(source,cfg,spread);
+    const auto modulated=m::simulate(source,cfg,both);
+    require(spread_pcm==m::simulate(source,cfg,spread) && modulated==m::simulate(source,cfg,both),
+            "bulk propagation or modulation was not reproducible");
+    require(spread_pcm.size()==reference.size()+cfg.sample_rate/5 && modulated.size()==spread_pcm.size(),
+            "bulk spread did not retain the delayed ray's complete tail");
+    double tail_energy=0,spread_difference=0,modulation_difference=0;
+    for(std::size_t i=0;i<reference.size();++i) {
+        const auto a=static_cast<double>(spread_pcm[i])-reference[i];
+        const auto b=static_cast<double>(modulated[i])-spread_pcm[i];
+        spread_difference+=a*a;modulation_difference+=b*b;
+    }
+    for(std::size_t i=reference.size()+32;i+32<spread_pcm.size();++i)
+        tail_energy+=static_cast<double>(spread_pcm[i])*spread_pcm[i];
+    require(spread_difference>1 && modulation_difference>1 && tail_energy>1,
+            "bulk spread, independent perturbation or delayed signal was absent");
+}
 void invalid(){
     const auto cfg=config();auto model=ideal();model.clock_error_ppm=std::numeric_limits<double>::quiet_NaN();
     rejects([&]{m::SimulationChannel channel(cfg,model);},"NaNclockaccepted");
@@ -341,9 +370,8 @@ void invalid(){
     rejects([&]{m::SimulationChannel channel(cfg,model);},"unboundedclockerroraccepted");
     model=ideal();model.spread_doppler_hz=1;
     rejects([&]{m::SimulationChannel unsupported(cfg,model);},"accelerated simulation silently ignored spread");
-    rejects([&]{m::simulate(std::span<const float>{},cfg,model);},"bulk simulation silently ignored spread");
     m::SimulationChannel channel(cfg,ideal());rejects([&]{channel.process({{1,0},0});},"zeroobservationaccepted");
     require(m::ChannelConfig{}.clock_error_ppm==100 && m::ChannelConfig{}.phase_noise_degrees_per_sqrt_second==.5,"simulationdefaultsarenotbadcrystalmodel");
 }
 }
-int main(){try{clock_and_carrier();long_coherence();phase_diffusion();pcm_clock();analytic_source_matches_hardware_pcm();sampled_startup_and_carrier();sampled_chunking_and_idle();stream_and_preview();preview_interpolation_edges();graceful_endpoint();selective_perturbation();spread_helper_tail();invalid();std::cout<<"channel tests passed\n";return 0;}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}
+int main(){try{clock_and_carrier();long_coherence();phase_diffusion();pcm_clock();analytic_source_matches_hardware_pcm();sampled_startup_and_carrier();sampled_chunking_and_idle();stream_and_preview();preview_interpolation_edges();graceful_endpoint();selective_perturbation();spread_helper_tail();bulk_spread_and_perturbation();invalid();std::cout<<"channel tests passed\n";return 0;}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

@@ -111,6 +111,8 @@ struct OscillatorPreset {
     std::string_view name;
     double clock_error_ppm = 100;
     double phase_noise_degrees_per_sqrt_second = .5;
+    // RF-only radio references cannot describe the independent audio clock.
+    bool baseband_supported = true;
 };
 std::span<const OscillatorPreset> oscillator_presets();
 OscillatorPreset parse_oscillator_preset(std::string_view name);

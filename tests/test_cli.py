@@ -788,6 +788,37 @@ class StreamCLI(unittest.TestCase):
             self.run_pump(command,'--text','a','--simulation','3dBm -120dB',
                           '--oscillator','missing',ok=False)
         self.run_pump('estimate','--text','a','--oscillator','gpsdo-xo')
+    def test_rf_oscillator_scope(self):
+        for name in ('cb-ssb','ats-mini-v4-ssb','ic-7100'):
+            self.run_pump('estimate','--text','a','--oscillator',name,ok=False)
+        self.run_pump('estimate','--text','a','--carrier','10.0015MHz','--shift','10MHz',
+                      '--rf-oscillator','ats-mini-v4-ssb')
+        self.run_pump('estimate','--text','a','--carrier','10.0015MHz','--shift','10MHz',
+                      '--rf-oscillator','cb-ssb','--reference','shared-radio',ok=False)
+    def test_sampled_spread_and_perturbation_cli(self):
+        self.run_pump('listen','--spread-preset','hf-best',ok=False)
+        self.run_pump('estimate','--text','e','--spread-preset','none',ok=False)
+        self.run_pump('simulate','--text','e','--selective-perturbation','each-2',*AUDIO,ok=False)
+        with tempfile.TemporaryDirectory() as directory:
+            default=pathlib.Path(directory)/'default.wav'
+            zero=pathlib.Path(directory)/'zero.wav'
+            stressed=pathlib.Path(directory)/'stressed.wav'
+            trace=pathlib.Path(directory)/'spread.jsonl'
+            common=('simulate','--text','e','--snr','40','--clock-error-ppm','0','--phase-noise','0',*AUDIO)
+            self.run_pump(*common,'--output',default)
+            self.run_pump(*common,'--output',zero,'--spread-preset','none','--selective-perturbation','each-65')
+            self.run_pump(*common,'--output',stressed,'--spread-preset','sub9-best',
+                          '--selective-perturbation','each-5','--simulation-trace',trace)
+            self.assertEqual(default.read_bytes(),zero.read_bytes(), 'zero Doppler must bypass perturbation')
+            self.assertNotEqual(default.read_bytes(),stressed.read_bytes(), 'enabled sampled channel must affect WAV')
+            events=[json.loads(line) for line in trace.read_text().splitlines()]
+            selective=next(event for event in events if event.get('event')=='simulation_frequency_selective_perturbation')
+            self.assertAlmostEqual(selective['doppler_reference_hz'],.003)
+            self.assertAlmostEqual(selective['slow_rate_hz'],.0003)
+            self.assertAlmostEqual(selective['fast_rate_hz'],.003)
+            for band in range(3):
+                self.assertIn(f'band{band}_slow_phase_rad',selective)
+                self.assertIn(f'band{band}_fast_phase_rad',selective)
     def test_real_radio_oscillator_search(self):
         args=('analyze-link','--bits','0','--bw','100','--tx-dbm','3','--attenuation-db','-200','--trials','10')
         radio=json.loads(self.run_pump(*args,'--carrier','10.0015MHz','--rf-shift','10MHz','--rf-oscillator','gpsdo-ocxo',

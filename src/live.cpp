@@ -15055,10 +15055,14 @@ struct Session::Impl {
                     prepared->receives=std::make_shared<detail::ReplayStaging>(reserved-frame_bytes,
                         prepared->replay_count,sizeof(RecoveryTask)+4096);
                 }
-                std::lock_guard lock(mutex);
-                if (!current.running || generation != version || tx_serial != serial || token.stop_requested()) continue;
-                staged_receives=prepared->receives;
-                ready = std::move(prepared); if (!value.simulation && !value.full_duplex) capture_stop.request_stop(); changed.notify_all();
+                {
+                    std::lock_guard lock(mutex);
+                    if (!current.running || generation != version || tx_serial != serial || token.stop_requested()) continue;
+                    staged_receives=prepared->receives;
+                    ready = std::move(prepared); if (!value.simulation && !value.full_duplex) capture_stop.request_stop(); changed.notify_all();
+                }
+                if(value.simulation)if(auto* hook=detail::simulation_hook.load(std::memory_order_acquire);
+                    hook && hook->transmit_prepared)hook->transmit_prepared(hook->context);
             } catch (const std::exception& exception) {
                 std::lock_guard lock(mutex);
                 if (generation != version || tx_serial != serial) continue;

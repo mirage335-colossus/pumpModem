@@ -243,7 +243,7 @@ Patch parse_arguments(std::span<const std::string> arguments) {
         }
         else if(flag=="--oscillator") {
             const auto preset=tuning::parse_oscillator_preset(value);
-            if(preset.id=="ic-7100")invalid("IC-7100 is an RF Shift oscillator example; its audio-clock accuracy is not specified.");
+            if(!preset.baseband_supported)invalid("This oscillator is an RF Shift example; its audio-clock accuracy is not specified.");
             result.oscillator=std::string(preset.id);
         }
         else if(flag=="--spread-preset")result.spread_preset=std::string(tuning::parse_spread_preset(value).id);
@@ -293,6 +293,9 @@ Patch parse_arguments(std::span<const std::string> arguments) {
             invalid("Doppler-adjusted Carrier minus Shift must be positive and at most 30 MHz for the real USB stream.");
     }
     if(lf_zero_reference&&explicit_reference=="independent")invalid("--lf-reference 0 conflicts with independent reference.");
+    if(result.reference=="shared-radio" && result.rf_shift_hz && *result.rf_shift_hz>0 && result.rf_oscillator &&
+       !tuning::parse_oscillator_preset(*result.rf_oscillator).baseband_supported)
+        invalid("An RF-only oscillator cannot describe the shared audio clock.");
     if(result.tx_key=="none"&&result.key_name)invalid("--key-name conflicts with --tx-key none.");
     if(result.helper_callsign)helper_callsign(*result.helper_callsign);
     if(result.dsss_mode=="interleave"&&(result.dsss_factor==1||result.dsss_version=="legacy"))

@@ -1190,6 +1190,93 @@ struct SimulationHookScope {
     }
     ~SimulationHookScope(){live::detail::simulation_hook.store(nullptr,std::memory_order_release);}
 };
+
+// Observe the actual sampled channel installed by a Live simulation, not a
+// separate reconstruction of its settings. The callback copies a bounded
+// capture while the session owns the channel.
+struct SpreadSimulationWitness {
+    std::mutex mutex;
+    std::vector<float> samples;
+    modem::SampledSimulationChannel::PerturbationMetadata metadata;
+    bool configured=false;
+    std::optional<std::uint64_t> burst_start;
+    double startup=0;
+    std::atomic<bool> release_channel{false},prepared{false};
+    live::detail::SimulationHook hook{this,[](void*,const auto&) {}};
+    SpreadSimulationWitness() {
+        hook.configure_channel=[](void* opaque,modem::SampledSimulationChannel& channel) {
+            auto& self=*static_cast<SpreadSimulationWitness*>(opaque);
+            {
+                std::lock_guard lock(self.mutex);
+                self.metadata=channel.perturbation_metadata();self.configured=true;
+            }
+            channel.set_physical_observer([&self,&channel](std::span<const float> block,std::uint32_t,std::uint64_t first) {
+                std::lock_guard lock(self.mutex);
+                const auto start=channel.payload_begin_sample();
+                if(!start)return; // Ignore asynchronous idle input before source binding.
+                if(!self.burst_start) {self.burst_start=*start;self.startup=channel.startup_offset_samples();}
+                if(first+block.size()<=*start)return;
+                const auto skip=first<*start?static_cast<std::size_t>(*start-first):0;
+                const auto count=std::min(block.size()-skip,std::size_t{40000}-self.samples.size());
+                self.samples.insert(self.samples.end(),block.begin()+skip,block.begin()+skip+count);
+            });
+            while(!self.release_channel.load(std::memory_order_acquire))std::this_thread::sleep_for(1ms);
+        };
+        hook.transmit_prepared=[](void* opaque) noexcept {
+            static_cast<SpreadSimulationWitness*>(opaque)->prepared.store(true,std::memory_order_release);
+        };
+        live::detail::SimulationHook* empty=nullptr;
+        check(live::detail::simulation_hook.compare_exchange_strong(empty,&hook),"simulation hook already installed");
+    }
+    ~SpreadSimulationWitness(){release_channel=true;live::detail::simulation_hook.store(nullptr,std::memory_order_release);}
+};
+
+void simulation_spread_path() {
+    struct Result {std::vector<float> samples;modem::SampledSimulationChannel::PerturbationMetadata metadata;
+        std::uint64_t burst_start;double startup;};
+    const auto run_case=[](double delay,double doppler,double depth) {
+        SpreadSimulationWitness witness;
+        auto value=settings();value.simulation_snr_db=90;value.simulation_seed=731;
+        value.simulation_spread_delay_ms=delay;value.simulation_spread_doppler_hz=doppler;
+        value.simulation_perturbation_slow_depth=depth;value.simulation_perturbation_fast_depth=depth;
+        live::Session session;
+        struct Release {SpreadSimulationWitness& witness;~Release(){witness.release_channel=true;}} release{witness};
+        session.start(value);
+        wait_for(session,"spread simulation channel construction",[&](const auto&) {
+            std::lock_guard lock(witness.mutex);return witness.configured;
+        });
+        session.transmit_bits(Bytes{0,0,1});
+        wait_for(session,"spread simulation transmit preparation",[&](const auto&) {return witness.prepared.load();});
+        witness.release_channel=true;
+        wait_for_sampled(session,"spread simulation PCM",[&](const auto&) {
+            std::lock_guard lock(witness.mutex);return witness.samples.size()>=16000;
+        });
+        session.stop();
+        std::lock_guard lock(witness.mutex);
+        check(witness.configured,"Live simulation did not construct its sampled channel");
+        check(witness.burst_start.has_value(),"Live simulation did not bind a source to the observed channel");
+        return Result{witness.samples,witness.metadata,*witness.burst_start,witness.startup};
+    };
+    const auto off=run_case(0,0,0),spread=run_case(.05,1,0),each=run_case(.05,1,.1);
+    if(off.burst_start!=spread.burst_start || off.burst_start!=each.burst_start ||
+       off.startup!=spread.startup || off.startup!=each.startup) {
+        std::ostringstream message;message<<"Live simulation cases were not aligned at the same seeded burst coordinate: "
+            <<off.burst_start<<'/'<<off.startup<<", "<<spread.burst_start<<'/'<<spread.startup<<", "
+            <<each.burst_start<<'/'<<each.startup;throw Error(message.str());
+    }
+    check(!off.metadata.enabled && !spread.metadata.enabled && each.metadata.enabled,
+          "Live simulation lost the selected perturbation mode");
+    check(each.metadata.seed==731 && each.metadata.rates_hz[0]==.1 && each.metadata.rates_hz[1]==1 &&
+          each.metadata.slow_depth==.1 && each.metadata.fast_depth==.1,
+          "Live simulation did not apply its selected seed, Doppler or depths");
+    const auto differs=[](const auto& a,const auto& b) {
+        const auto n=std::min(a.size(),b.size());double difference=0,energy=0;
+        for(std::size_t i=0;i<n;++i){const auto d=double(a[i])-b[i];difference+=d*d;energy+=double(a[i])*a[i];}
+        return energy>1e-5 && difference>energy*1e-4;
+    };
+    check(differs(off.samples,spread.samples),"Live spread did not change the receiver PCM");
+    check(differs(spread.samples,each.samples),"Live frequency-selective modulation did not change the receiver PCM");
+}
 struct ReleaseSimulationScript {
     SimulationScript& script;
     ~ReleaseSimulationScript(){script.released=true;}
@@ -1877,6 +1964,9 @@ int main(int argc,char** argv) {
     try {
         cpu_work_budget_boundaries();
         replay_staging_retention();
+        if(argc>1 && std::string_view(argv[1])=="--simulation-spread") {
+            simulation_spread_path();std::cout<<"Live spread simulation path passed\n";return 0;
+        }
         if(argc>1 && (std::string_view(argv[1])=="--replay-staging" || std::string_view(argv[1])=="--replay-staging-only")) {
             check(argc==2,"usage: test_live --replay-staging-only");
             std::cout<<"replay staging retention passed\n";return 0;

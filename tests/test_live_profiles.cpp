@@ -3,6 +3,7 @@
 #include "../src/audio_trace.hpp"
 #include "../src/scheduled_exact_source_samples.hpp"
 #include "../src/scheduled_acquisition_certificate.hpp"
+#include "../src/live_receiver_layout.hpp"
 #include "datapump/sched_hop.hpp"
 #include <fstream>
 #include <cstdlib>
@@ -65,6 +66,11 @@ struct CaptureScript {
     std::atomic<unsigned> capture_opened{0},capture_closed{0};
     std::size_t format_bytes=0;
     bool loopback=false;
+    // Optional test-only virtual channel: hold playback until complete, then
+    // apply the same selected simulation settings before releasing capture.
+    std::optional<modem::ChannelConfig> loopback_channel;
+    modem::Config loopback_modem;
+    std::vector<float> playback_input;
     std::atomic<bool> playback_started{false},playback_source_finished{false},finish_playback{false};
     std::atomic<std::size_t> played{0};
     std::atomic<unsigned> source_calls{0};
@@ -1181,6 +1187,64 @@ void duplex_loopback(bool keyed=false) {
     session.stop();
 }
 
+void duplex_spread_loopback() {
+    struct Result {std::vector<float> sent,received;bool decoded=false;};
+    const auto run_case=[](double delay,double doppler,double depth) {
+        Configuration geometry{1200.,1500.};
+        auto value=settings({55},geometry);value.transfer.automatic_receive_profiles=false;value.full_duplex=true;
+        value.transfer.search_seconds=1;
+        value.simulation_snr_db=90;value.simulation_clock_error_ppm=0;
+        value.simulation_phase_noise_degrees_per_sqrt_second=0;value.simulation_seed=731;
+        value.simulation_spread_delay_ms=delay;value.simulation_spread_doppler_hz=doppler;
+        value.simulation_perturbation_slow_depth=depth;value.simulation_perturbation_fast_depth=depth;
+        CaptureScript capture;capture.rate=value.transfer.modem.sample_rate;capture.loopback=true;
+        capture.loopback_channel=live::detail::channel_config(value);capture.loopback_modem=value.transfer.modem;
+        capture.format_bytes=16384;capture_script=&capture;
+        live::Session session([]{return static_cast<double>(epoch);});session.start(value);
+        const auto await=[&](auto predicate,const char* stage) {
+            testing::CpuWorkBudget budget(40s,stage);
+            while(budget.pending()) {const auto snapshot=session.snapshot();
+                check(snapshot.error.empty(),std::string(stage)+": "+snapshot.error);
+                if(predicate(snapshot))return snapshot;std::this_thread::sleep_for(1ms);
+            }
+            throw Error(std::string(stage)+" timed out");
+        };
+        await([&](const auto&){return capture.capture_opened.load()==1;},"virtual duplex capture");
+        session.transmit_bits(Bytes{0,0,1});
+        await([&](const auto&){return capture.playback_source_finished.load();},"virtual duplex playback");
+        const auto transmitted=capture.playback_input;
+        const auto impaired=capture.samples;
+        // Feed the modeled output and fully observed silence through the
+        // ordinary hardware capture/receiver path while playback stays open.
+        capture.samples.resize(capture.samples.size()+12*capture.rate);
+        const auto target=capture.samples.size();
+        bool decoded=false;testing::CpuWorkBudget budget(40s,"virtual duplex modeled reception");
+        while(budget.pending()) {
+            const auto snapshot=session.snapshot();
+            check(snapshot.error.empty(),"virtual duplex reception failed: "+snapshot.error);
+            for(const auto& signal:snapshot.signals)
+                if(signal.complete && (signal.binary?signal.text:signal.raw_bits)=="001")decoded=true;
+            const auto delivered=capture.delivered.load();
+            if(delivered<target && delivered>=capture.released.load() && snapshot.buffered_samples==0)
+                capture.released=delivered+std::min<std::size_t>(std::max<std::size_t>(8,capture.rate/10),target-delivered);
+            if(decoded && delivered>=target && snapshot.buffered_samples==0)break;
+            std::this_thread::sleep_for(1ms);
+        }
+        session.cancel_transmit();session.stop();capture_script=nullptr;
+        return Result{transmitted,impaired,decoded};
+    };
+    const auto off=run_case(0,0,0),spread=run_case(.05,.01,0),each=run_case(.05,.01,.01);
+    check(off.sent==spread.sent && off.sent==each.sent,"duplex test sources changed between channel cases");
+    const auto differs=[](const auto& a,const auto& b) {
+        const auto n=std::min(a.size(),b.size());double difference=0,energy=0;
+        for(std::size_t i=0;i<n;++i){const auto d=double(a[i])-b[i];difference+=d*d;energy+=double(a[i])*a[i];}
+        return energy>1e-5 && difference>energy*1e-7;
+    };
+    check(differs(off.received,spread.received),"virtual duplex spread did not change captured PCM");
+    check(differs(spread.received,each.received),"virtual duplex modulation did not change captured PCM");
+    check(off.decoded && spread.decoded && each.decoded,"virtual duplex did not receive all mild channel cases");
+}
+
 void duplex_transmit_failure(bool after_generation) {
     Configuration geometry{16.,8.};geometry.keyed=true;
     auto value=settings({55},geometry);value.transfer.automatic_receive_profiles=false;
@@ -1306,11 +1370,18 @@ void playback(std::uint32_t rate,const std::string& device,const PlaybackCallbac
         if(script.fail_playback_after_source)throw Error("injected audio output failure");
         if(!count)break;
         const auto offset=script.played.load();
+        if(script.loopback_channel) {
+            script.playback_input.insert(script.playback_input.end(),output.begin(),output.begin()+count);
+            script.played=offset+count;
+            continue;
+        }
         check(offset+count<=script.samples.size(),"duplex loopback output exceeded bounded fixture");
         std::copy_n(output.begin(),count,script.samples.begin()+offset);
         script.played=offset+count;script.released=offset+count;
         while(script.delivered<offset+count && !stop.stop_requested())std::this_thread::sleep_for(1ms);
     }
+    if(script.loopback_channel && !stop.stop_requested())
+        script.samples=modem::simulate(script.playback_input,script.loopback_modem,*script.loopback_channel);
     script.playback_source_finished=true;
     while(!stop.stop_requested() && !script.finish_playback)std::this_thread::sleep_for(1ms);
 }
@@ -1503,8 +1574,9 @@ int main(int argc, char** argv) {
         const std::string suite = argc > 1 ? argv[1] : "all";
         std::optional<audio::trace::Scope> calendar_trace;
         if((suite=="hop_calendar" || suite=="public_amplitude") && argc>2)calendar_trace.emplace(argv[2]);
-        check(suite == "public_amplitude" || suite == "retired" || suite == "all" || suite == "hop_calendar" || suite == "exact_source" || suite == "original" || suite == "matrix" || suite == "long" || suite == "long_fft" || suite == "long_seeds" || suite == "interval_queue" || suite == "monitor" || suite == "health" || suite == "frontier_failure" || suite == "capture_time" || suite == "arrival_time" || suite == "arrival_time_baseline" || suite == "backlog" || suite == "clear" || suite == "duplex" || suite == "arrival_fallback" || suite == "tx_failure",
+        check(suite == "public_amplitude" || suite == "retired" || suite == "all" || suite == "hop_calendar" || suite == "exact_source" || suite == "original" || suite == "matrix" || suite == "long" || suite == "long_fft" || suite == "long_seeds" || suite == "interval_queue" || suite == "monitor" || suite == "health" || suite == "frontier_failure" || suite == "capture_time" || suite == "arrival_time" || suite == "arrival_time_baseline" || suite == "backlog" || suite == "clear" || suite == "duplex" || suite == "duplex_spread" || suite == "arrival_fallback" || suite == "tx_failure",
               "unknown profile test suite");
+        if(suite=="duplex_spread") {context="modeled virtual duplex";duplex_spread_loopback();return 0;}
         if(suite=="all" || suite=="public_amplitude") {context="rolling public amplitude arrivals";public_amplitude_rolling_arrivals();if(suite=="public_amplitude")return 0;}
         if(suite=="all" || suite=="retired") {
             context="retired public reception identities";

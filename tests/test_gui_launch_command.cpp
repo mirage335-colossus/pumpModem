@@ -254,9 +254,15 @@ void parsing_and_formatting() {
     }
     for(const auto& oscillator:datapump::tuning::oscillator_presets()) {
         auto model=settings;
-        if(oscillator.id=="ic-7100")model.rf_oscillator=oscillator.id;else model.oscillator=oscillator.id;
+        if(!oscillator.baseband_supported)model.rf_oscillator=oscillator.id;else model.oscillator=oscillator.id;
         check(launch_command::parse(launch_command::format(model))==model,"every oscillator preset must round-trip");
     }
+    check(launch_command::parse("--rf-oscillator ats-mini-v4-ssb").rf_oscillator=="cb-ssb",
+          "Legacy ATS RF choice must import as the combined SSB model");
+    for(const auto* id:{"cb-ssb","ats-mini-v4-ssb","ic-7100"})
+        rejects([&]{launch_command::parse(std::string("--oscillator ")+id);},"RF-only model accepted as audio clock");
+    rejects([]{launch_command::parse("--shift 1MHz --reference shared-radio --rf-oscillator cb-ssb");},
+            "RF-only oscillator accepted as a shared radio audio clock");
     for(const auto& spread:datapump::tuning::spread_presets()) {
         auto model=settings;model.spread_preset=spread.id;model.selective_perturbation="fast-25";
         check(launch_command::parse(launch_command::format(model))==model,"spread and perturbation must round-trip");

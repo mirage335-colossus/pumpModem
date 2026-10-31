@@ -8,6 +8,10 @@
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/pattern_search.hpp"
 #include "datapump/crypto.hpp"
+#include "datapump/helper_carrier.hpp"
+#include "channel_perturbation.hpp"
+#include "channel_spread.hpp"
+#include "audio_trace.hpp"
 #include <algorithm>
 #include <bit>
 #include <cmath>
@@ -17,6 +21,7 @@
 #include <utility>
 #include <limits>
 #include <numbers>
+#include <optional>
 #include <ostream>
 #include <random>
 
@@ -576,14 +581,27 @@ DecodeResult demodulate(std::span<const float> samples, const Config& c,
 std::vector<float> simulate(std::span<const float> samples, const Config& c, const ChannelConfig& channel) {
     validate(c); finite_samples(samples, c.memory_limit);
     validate_channel(c,channel);
-    check(channel.spread_delay_ms==0 && channel.spread_doppler_hz==0,
-          "bulk PCM simulation does not support propagation spread; use the sampled simulation channel");
     const auto rate=1+static_cast<long double>(channel.clock_error_ppm)*1e-6L;
+    const bool spread_enabled=channel.spread_delay_ms!=0 || channel.spread_doppler_hz!=0;
+    const bool perturbation_enabled=channel.spread_doppler_hz!=0 &&
+        (channel.perturbation_slow_depth!=0 || channel.perturbation_fast_depth!=0);
+    const auto occupied=spread_enabled?helper::placement_band(c).waveform_bandwidth_hz:0.;
+    if(spread_enabled) {
+        const auto modulation=channel.perturbation_fast_depth>0?channel.spread_doppler_hz:
+            channel.perturbation_slow_depth>0?.1*channel.spread_doppler_hz:0;
+        const auto upper=(c.carrier_hz+occupied/2)*rate+channel.frequency_offset_hz+
+            channel.spread_doppler_hz+modulation;
+        const auto lower=(c.carrier_hz-occupied/2)*rate+channel.frequency_offset_hz-modulation;
+        check(channel.spread_doppler_hz<c.sample_rate/2. && upper<=c.sample_rate/2. && lower>=0,
+              "Doppler-spread payload leaves the sampled channel passband");
+    }
     std::mt19937_64 startup_random(channel.seed^0x8ebc6af09c88c6e3ULL);
     const auto uniform=[&]{return (static_cast<double>(startup_random()>>11)+.5)/9007199254740992.;};
     const auto initial_phase=static_cast<long double>(tau)*(uniform()-.5L);
     const auto startup=channel.delay_samples+std::floor((.05L+.25L*uniform())*c.sample_rate)+.05L+.9L*uniform();
-    const auto receiver_count=std::ceil(startup+static_cast<long double>(samples.size())/rate);
+    const auto delay=spread_enabled && !samples.empty()?
+        static_cast<long double>(channel.spread_delay_ms)*c.sample_rate/1000:0;
+    const auto receiver_count=std::ceil(startup+static_cast<long double>(samples.size())/rate+delay);
     check(receiver_count<=c.memory_limit/sizeof(float),"simulation duration exceeds memory limit");
     const auto count=static_cast<std::size_t>(receiver_count);
     budget(c.memory_limit, {{samples.size(),sizeof(float)}, {count,sizeof(float)}});
@@ -600,16 +618,36 @@ std::vector<float> simulate(std::span<const float> samples, const Config& c, con
         for (std::size_t k = 1; k < n/2; ++k) analytic[k] *= 2;
         for (std::size_t k = n/2+1; k < n; ++k) analytic[k] = 0;
         fft(analytic, true);
-        std::mt19937_64 phase_random(channel.seed^0xa0761d6478bd642fULL);
-        const auto diffusion=channel.phase_noise_degrees_per_sqrt_second*std::numbers::pi/180/std::sqrt(c.sample_rate);
-        std::normal_distribution<double> phase_step(0,1);double phase=0;
-        for (std::size_t i = 0; i < count; ++i) {
-            const auto position=(static_cast<long double>(i)-startup)*rate;
-            if(position<0) {if(diffusion)phase+=phase_step(phase_random)*diffusion;continue;}
+        std::optional<detail::SpreadRay> spread;
+        std::optional<detail::FrequencySelectivePerturbation> perturbation;
+        if(spread_enabled) {
+            spread.emplace(c.sample_rate,channel.spread_doppler_hz,channel.seed);
+            audio::trace::record("simulation_two_ray_spread",[&](auto& f) {
+                f.add("seed",channel.seed);f.add("delay_ms",channel.spread_delay_ms);
+                f.add("doppler_hz",spread->doppler_hz());f.add("phase_rad",spread->phase_radians());
+            });
+        }
+        if(perturbation_enabled) {
+            perturbation.emplace(c.sample_rate,c.carrier_hz*rate,occupied*rate,channel.spread_doppler_hz,
+                channel.perturbation_slow_depth,channel.perturbation_fast_depth,channel.seed);
+            audio::trace::record("simulation_frequency_selective_perturbation",[&](auto& f) {
+                f.add("seed",channel.seed);f.add("doppler_reference_hz",channel.spread_doppler_hz);
+                f.add("slow_depth",channel.perturbation_slow_depth);f.add("fast_depth",channel.perturbation_fast_depth);
+                f.add("slow_rate_hz",perturbation->rates_hz[0]);f.add("fast_rate_hz",perturbation->rates_hz[1]);
+                f.add("band_width_hz",perturbation->band_width_hz);
+                for(std::size_t band=0;band<3;++band) {
+                    f.add(("band"+std::to_string(band)+"_center_hz").c_str(),perturbation->band_centers_hz[band]);
+                    f.add(("band"+std::to_string(band)+"_slow_phase_rad").c_str(),perturbation->initial_phases[band][0]);
+                    f.add(("band"+std::to_string(band)+"_fast_phase_rad").c_str(),perturbation->initial_phases[band][1]);
+                }
+            });
+        }
+        const auto interpolate=[&](long double position) {
+            if(position<0 || position>=static_cast<long double>(samples.size()))return Complex{};
             const auto center=static_cast<std::int64_t>(std::floor(position));
             Complex value{};double weight=0;
-            if(std::abs(position-center)<1e-10)value=analytic[static_cast<std::size_t>(center)];
-            else for(auto tap=center-7;tap<=center+8;++tap) {
+            if(std::abs(position-center)<1e-10)return analytic[static_cast<std::size_t>(center)];
+            for(auto tap=center-7;tap<=center+8;++tap) {
                 const auto distance=static_cast<double>(position-tap);
                 const auto window=.42+.5*std::cos(std::numbers::pi*distance/8)+.08*std::cos(std::numbers::pi*distance/4);
                 const auto angle=std::numbers::pi*distance;
@@ -617,7 +655,17 @@ std::vector<float> simulate(std::span<const float> samples, const Config& c, con
                 weight+=coefficient;
                 if(tap>=0 && tap<static_cast<std::int64_t>(samples.size()))value+=analytic[static_cast<std::size_t>(tap)]*coefficient;
             }
-            if(weight)value/=weight;
+            return weight?value/weight:value;
+        };
+        std::mt19937_64 phase_random(channel.seed^0xa0761d6478bd642fULL);
+        const auto diffusion=channel.phase_noise_degrees_per_sqrt_second*std::numbers::pi/180/std::sqrt(c.sample_rate);
+        std::normal_distribution<double> phase_step(0,1);double phase=0;
+        for (std::size_t i = 0; i < count; ++i) {
+            const auto position=(static_cast<long double>(i)-startup)*rate;
+            if(position<0 && !spread && !perturbation) {if(diffusion)phase+=phase_step(phase_random)*diffusion;continue;}
+            auto value=interpolate(position);
+            if(spread) value=spread->process(value,delay==0?value:interpolate(position-delay*rate));
+            if(perturbation)value=perturbation->process(value);
             const auto angle=std::remainder(initial_phase+static_cast<long double>(tau)*
                 (channel.frequency_offset_hz*static_cast<long double>(i)+c.carrier_hz*rate*startup)/c.sample_rate+phase,static_cast<long double>(tau));
             out[i]=static_cast<float>((value*std::polar(1.,static_cast<double>(angle))).real());

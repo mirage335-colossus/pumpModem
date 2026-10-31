@@ -579,7 +579,7 @@ void oscillator_controls() {
     using F=ui::Field;
     Controller controller({true,true});
     check(controller.field(F::simulation_oscillator).selected=="crystal"&&
-          controller.field(F::simulation_oscillator).options.size()+1==tuning::oscillator_presets().size()&&
+          controller.field(F::simulation_oscillator).options.size()+2==tuning::oscillator_presets().size()&&
           controller.settings().simulation_clock_error_ppm==100&&
           controller.settings().simulation_phase_noise_degrees_per_sqrt_second==.5,
           "The default oscillator must preserve the existing independent-clock simulation");
@@ -588,7 +588,7 @@ void oscillator_controls() {
     const auto original_samples=controller.estimate()->waveform_samples;
     check(original_bits==3,"Oscillator fixture changed the exact a dictionary endpoint");
     for(const auto& preset:tuning::oscillator_presets()) {
-        if(preset.id=="ic-7100")continue;
+        if(!preset.baseband_supported)continue;
         const auto revision=controller.revision();
         const bool changed=controller.field(F::simulation_oscillator).selected!=preset.id;
         controller.select(F::simulation_oscillator,std::string(preset.id));
@@ -630,6 +630,20 @@ void oscillator_controls() {
     check(!controller.field(F::simulation_oscillator).enabled&&
           controller.field(F::simulation_oscillator).selected=="gpsdo-ocxo",
           "A stale oscillator callback reconfigured a closing application");
+}
+void oscillator_model_choices() {
+    using F=ui::Field;
+    Controller controller({true,true});
+    const auto contains=[](const auto& options,std::string_view id) {
+        return std::any_of(options.begin(),options.end(),[&](const auto& option){return option.id==id;});
+    };
+    const auto& baseband=controller.field(F::simulation_oscillator).options;
+    const auto& shift=controller.field(F::rf_oscillator).options;
+    check(!contains(baseband,"cb-ssb")&&!contains(baseband,"ats-mini-v4-ssb")&&!contains(baseband,"ic-7100"),
+          "RF-only crystal models must not appear in Baseband Osc");
+    check(contains(shift,"cb-ssb")&&!contains(shift,"ats-mini-v4-ssb")&&contains(shift,"ic-7100"),
+          "Shift Osc must contain one combined CB/ATS model and the IC-7100 RF model");
+    controller.close();
 }
 void shift_oscillator_controls() {
     using F=ui::Field;
@@ -782,7 +796,7 @@ void lpi_estimate_controls() {
         same_advisory(*reference);
     }
     for(const auto& preset:tuning::oscillator_presets()) {
-        if(preset.id=="ic-7100")continue;
+        if(!preset.baseband_supported)continue;
         advisory_context="oscillator: "+std::string(preset.id);
         controller.select(F::simulation_oscillator,std::string(preset.id));prepare(controller);
         same_advisory(*reference);
@@ -3771,6 +3785,7 @@ int main(int argc,char** argv) {
             std::cout<<"Delayed replay interruption checks passed\n";
             return 0;
         }
+        if(argc>1&&std::string_view(argv[1])=="--oscillator-model-choices") {oscillator_model_choices();std::cout<<"Oscillator model choices passed\n";return 0;}
         if(argc>1&&std::string_view(argv[1])=="--spread-controls") {spread_controls();std::cout<<"Spread controls passed\n";return 0;}
         if(argc>1&&std::string_view(argv[1])=="--carrier-controls") {rate_carrier_controls();std::cout<<"Carrier controls passed\n";return 0;}
         if(argc>1&&std::string_view(argv[1])=="--helper-controls") {helper_controls();std::cout<<"Helper controls passed\n";return 0;}
@@ -3779,7 +3794,7 @@ int main(int argc,char** argv) {
         datapump::gui::controller_self_check();
         simulation_estimate_controls();
         empty_composer_preview();
-        spread_controls();oscillator_controls();shift_oscillator_controls();
+        spread_controls();oscillator_controls();oscillator_model_choices();shift_oscillator_controls();
         lpi_estimate_controls();
         revised_reception_ingestion();
         pending_replay_batch();

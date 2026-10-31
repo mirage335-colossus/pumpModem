@@ -88,11 +88,10 @@ constexpr std::array presets{
 constexpr std::array oscillator_models{
     OscillatorPreset{"crystal","Free-running crystal",100,.5},
     // Relative worst-case sum of two independent +/-20 ppm crystal radios.
-    OscillatorPreset{"cb-ssb","Modern CB SSB crystal: +/-20 ppm/radio",40,.5},
-    OscillatorPreset{"ats-mini-v4-ssb","ATS Mini V4 SSB crystal: +/-20 ppm/radio",40,.5},
+    OscillatorPreset{"cb-ssb","CB SSB / ATS Mini V4 SSB: +/-20 ppm/radio",40,.5,false},
     // Icom specifies each radio at +/-0.5 ppm (430 MHz, 0..50 C).
     // Relative worst-case sum is 1 ppm; diffusion is an illustrative assumption.
-    OscillatorPreset{"ic-7100","IC-7100: +/-0.5 ppm/radio",1,.05},
+    OscillatorPreset{"ic-7100","IC-7100: +/-0.5 ppm/radio",1,.05,false},
     // Shared locked-link residual assumption; oscillator class changes the
     // phase-diffusion stress model, not an inferred unlocked frequency budget.
     OscillatorPreset{"gpsdo-xo","GPSDO: hobbyist XO (no oven)",.0001,.5},
@@ -454,6 +453,10 @@ SimulationPreset parse_simulation_preset(std::string_view name) {
 std::span<const OscillatorPreset> oscillator_presets(){return oscillator_models;}
 OscillatorPreset parse_oscillator_preset(std::string_view name) {
     const auto wanted=normalized(name);
+    // Preserve launch commands exported before the equivalent RF models were merged.
+    if(wanted==normalized("ats-mini-v4-ssb") ||
+       wanted==normalized("ATS Mini V4 SSB crystal: +/-20 ppm/radio") ||
+       wanted==normalized("Modern CB SSB crystal: +/-20 ppm/radio"))return oscillator_models[1];
     for(const auto& preset:oscillator_models)
         if(normalized(preset.id)==wanted || normalized(preset.name)==wanted)return preset;
     throw Error("unknown oscillator preset: "+std::string(name));

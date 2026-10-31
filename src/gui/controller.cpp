@@ -433,7 +433,7 @@ struct Controller::Impl {
         f(UiField::sched_frequency_search).selected="1";
         f(UiField::rf_oscillator).options.push_back({"baseband-clock","Baseband clock"});
         for(const auto& preset:tuning::oscillator_presets()) {
-            if(preset.id!="ic-7100")f(UiField::simulation_oscillator).options.push_back({std::string(preset.id),std::string(preset.name)});
+            if(preset.baseband_supported)f(UiField::simulation_oscillator).options.push_back({std::string(preset.id),std::string(preset.name)});
             f(UiField::rf_oscillator).options.push_back({std::string(preset.id),std::string(preset.name)});
         }
         f(UiField::simulation_oscillator).selected="crystal";
@@ -986,6 +986,7 @@ struct Controller::Impl {
             } else if(load&&load->reference=="independent"&&shift>0&&shift_oscillator_id=="baseband-clock")
                 shift_oscillator_id=oscillator_id;
             const auto oscillator=tuning::parse_oscillator_preset(oscillator_id);
+            if(!oscillator.baseband_supported)throw Error("Selected radio oscillator does not specify the Baseband clock");
             const bool shared=shift>0&&shift_oscillator_id=="baseband-clock";
             const auto rf_oscillator_id=shift_oscillator_id=="baseband-clock"?oscillator_id:shift_oscillator_id;
             const auto rf_oscillator=tuning::parse_oscillator_preset(rf_oscillator_id);

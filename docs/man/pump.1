@@ -457,7 +457,9 @@ or
 Does not control hardware.
 .TP
 .BI \-\-rf\-oscillator " model"
-Shift model; same choices, default crystal. At Shift 0 all of its frequency and
+Shift model; same choices plus cb-ssb (combined CB/ATS Mini V4 SSB example)
+and ic-7100, default crystal. These radio-specific examples do not specify
+the sound-card clock and cannot be used for a shared radio clock. At Shift 0 all of its frequency and
 phase contributions are excluded, regardless of the reference setting.
 For a legacy positive-Shift shared reference, this flag selects the shared model.
 .TP
@@ -470,7 +472,28 @@ is a legacy shared-reference shorthand, unrelated to setting Shift to 0 Hz.
 .TP
 .BI \-\-search\-margin " N"
 Multiply declared frequency and clock accuracy bounds; default 3, minimum 1.
-The margin does not multiply simulated impairments.
+It does not multiply simulated oscillator impairments. It does multiply both
+selected Doppler/delay spread values for simulation.
+.TP
+.BI \-\-spread\-preset " ID"
+Select a sampled simulation channel for
+.B simulate
+or simulated
+.BR listen :
+none, sub9-best, sub9-moderate, sub9-worst, hf-best, hf-moderate, hf-worst,
+aurora-best, aurora-worst, or eme-focused. The CLI defaults to none for
+compatibility. See simulation-estimates.md for values and model limits.
+.TP
+.BI \-\-selective\-perturbation " ID"
+Select off or slow-N, fast-N or each-N, where N is 1, 5, 10, 25 or 65 percent.
+An explicit spread preset defaults to off for none/Sub-9 kHz and each-65 for
+HF/Aurora/EME. Rates use the margin-adjusted Doppler spread. These options
+require an enabled simulation in listen and are not analytical link estimates.
+.TP
+.BI \-\-simulation\-trace " PATH"
+Create a new JSONL file with actual simulation spread and perturbation seed,
+rates, ranges and phases. Supported for simulate or simulated listen; the file
+must not already exist. This trace is opt-in and does not change standard output.
 .TP
 .BI \-\-clock\-error\-ppm " N"
 Override signed simulated relative clock error; crystal default 100 ppm.
