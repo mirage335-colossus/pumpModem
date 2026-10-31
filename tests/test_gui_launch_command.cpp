@@ -146,13 +146,13 @@ void parsing_and_formatting() {
         "explicit half duplex was confused with an omitted option");
     check(!launch_command::parse("--rate 1200").full_duplex.has_value(),"older commands must leave duplex unchanged");
     for(const auto* value:{"yes","no"}) {
-        const auto test=launch_command::parse(std::string("--hardware-channel-test ")+value);
-        check(test.hardware_channel_test==(std::string_view(value)=="yes")&&
-              launch_command::parse(launch_command::format(test))==test,
-              "Hardware channel test selection did not round trip");
+        const auto test=launch_command::parse(std::string("--hardware-channel-test ")+value+
+            " --spread-preset hf-moderate --selective-perturbation fast-25");
+        const auto selected=launch_command::parse("--spread-preset hf-moderate --selective-perturbation fast-25");
+        check(test==selected && launch_command::format(test).find("--hardware-channel-test")==std::string::npos &&
+              launch_command::parse(launch_command::format(test))==selected,
+              "Legacy physical gate must be ignored while preserving and exporting selected channel effects");
     }
-    check(!launch_command::parse("--rate 1200").hardware_channel_test.has_value(),
-          "Older commands must not opt into physical channel injection");
     check(launch_command::parse(launch_command::format(clock))==clock,"clock and spreading settings must round trip");
     for(const auto* version:{"legacy","interleave"}) {
         const auto patch=launch_command::parse(std::string("--dsss-factor 10 --dsss-version ")+version);

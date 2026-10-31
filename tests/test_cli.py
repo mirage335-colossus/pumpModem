@@ -796,7 +796,10 @@ class StreamCLI(unittest.TestCase):
         self.run_pump('estimate','--text','a','--carrier','10.0015MHz','--shift','10MHz',
                       '--rf-oscillator','cb-ssb','--reference','shared-radio',ok=False)
     def test_sampled_spread_and_perturbation_cli(self):
-        self.run_pump('listen','--spread-preset','hf-best',ok=False)
+        # Physical listen accepts selected effects without --simulation. Stop
+        # at the intentional duration validation before opening any device.
+        physical = self.run_pump('listen','--spread-preset','hf-best','--seconds','-1',ok=False)
+        self.assertIn(b'listen seconds must', physical.stderr)
         self.run_pump('estimate','--text','e','--spread-preset','none',ok=False)
         self.run_pump('simulate','--text','e','--selective-perturbation','each-2',*AUDIO,ok=False)
         with tempfile.TemporaryDirectory() as directory:

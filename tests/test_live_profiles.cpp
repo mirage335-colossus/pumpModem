@@ -1251,10 +1251,10 @@ void duplex_spread_loopback() {
 
 void hardware_channel_loopback(bool fhss=false) {
     struct Result {std::vector<float> pcm;bool decoded=false;std::uint32_t rate=0;};
-    const auto run_case=[fhss](bool enabled,double delay,double doppler,double depth,std::size_t chunk) {
+    const auto run_case=[fhss](double delay,double doppler,double depth,std::size_t chunk) {
         Configuration geometry{1200.,1500.};geometry.keyed=fhss;
         auto value=settings({55},geometry);value.transfer.automatic_receive_profiles=false;value.full_duplex=true;
-        value.transfer.search_seconds=1;value.hardware_channel_test=enabled;
+        value.transfer.search_seconds=1;
         std::shared_ptr<const modem::FhssPlan> hopping;
         if(fhss) {
             auto plan=std::make_shared<modem::FhssPlan>();plan->channels=2;
@@ -1269,7 +1269,7 @@ void hardware_channel_loopback(bool fhss=false) {
         value.simulation_spread_delay_ms=delay;value.simulation_spread_doppler_hz=doppler;
         value.simulation_perturbation_slow_depth=depth;value.simulation_perturbation_fast_depth=depth;
         // Simulation-only noise and oscillator settings must not affect
-        // physical output, including its explicit channel test.
+        // physical output, including selected propagation/modulation effects.
         value.simulation_snr_db=-80;value.simulation_clock_error_ppm=100;
         value.simulation_frequency_offset_hz=300;value.simulation_phase_noise_degrees_per_sqrt_second=10;
         CaptureScript capture;capture.rate=value.transfer.modem.sample_rate;capture.loopback=true;
@@ -1311,19 +1311,19 @@ void hardware_channel_loopback(bool fhss=false) {
         session.cancel_transmit();session.stop();capture_script=nullptr;
         return Result{emitted,decoded,capture.rate};
     };
-    const auto plain=run_case(false,0,0,0,113);
-    const auto disabled=run_case(false,6,10,.65,113);
-    const auto zero=run_case(true,0,0,.65,17);
-    check(plain.pcm==disabled.pcm,"disabled hardware test applied selected channel effects");
-    check(plain.pcm==zero.pcm,"zero-reference hardware test changed original playback PCM");
-    const auto spread=run_case(true,.05,.01,0,113);
-    const auto each=run_case(true,.05,.01,.01,113);
-    const auto partitioned=run_case(true,.05,.01,.01,17);
+    const auto plain=run_case(0,0,0,113);
+    const auto zero=run_case(0,0,.65,113);
+    check(plain.pcm==zero.pcm,"zero-reference modulation changed original playback PCM");
+    const auto delay_only=run_case(.05,0,0,113);
+    const auto spread=run_case(.05,.01,0,113);
+    const auto each=run_case(.05,.01,.01,113);
+    const auto partitioned=run_case(.05,.01,.01,17);
     const auto differs=[](const auto& a,const auto& b) {
         const auto n=std::min(a.size(),b.size());double difference=0,energy=0;
         for(std::size_t i=0;i<n;++i){const auto d=double(a[i])-b[i];difference+=d*d;energy+=double(a[i])*a[i];}
         return energy>1e-5 && difference>energy*1e-7;
     };
+    check(differs(plain.pcm,delay_only.pcm),"selected delay was bypassed at zero Doppler");
     check(differs(plain.pcm,spread.pcm),"production hardware spread did not change emitted PCM");
     check(differs(spread.pcm,each.pcm),"production hardware modulation did not change emitted PCM");
     // A depth-dependent fixed headroom gain alone is not evidence that
@@ -1343,7 +1343,7 @@ void hardware_channel_loopback(bool fhss=false) {
     check(each.pcm==partitioned.pcm,"hardware channel changed with playback block partition");
     check(spread.pcm.size()>=plain.pcm.size()+static_cast<std::size_t>(std::ceil(.00005*plain.rate)),
           "production playback omitted the delayed channel endpoint");
-    check(plain.decoded && disabled.decoded && zero.decoded && spread.decoded && each.decoded && partitioned.decoded,
+    check(plain.decoded && delay_only.decoded && zero.decoded && spread.decoded && each.decoded && partitioned.decoded,
           "production hardware loopback did not decode every mild channel case");
 }
 

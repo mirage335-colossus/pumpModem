@@ -798,19 +798,20 @@ TX cancellation does not stop duplex capture. Audio conversion buffers share the
 configured DSP reservation; the additional native capture thread has ordinary OS
 thread overhead outside that reservation.
 
-Select **Simulation → Audio test** to apply the selected Doppler/delay spread
-and additional frequency-selective amplitude modulation to outgoing Robust
-samples before the physical playback device. This is an explicit hardware test
-mode; **No** retains ordinary audio and **Yes** uses the simulated link. For
+Selected Doppler/delay spread and additional frequency-selective amplitude
+modulation apply to outgoing Robust samples in both modes: **Simulation → No**
+uses physical playback and **Yes** uses the simulated link. The defaults are
+**None** and **Off**, leaving ordinary physical audio unchanged by the models. For
 a same-instance cable or speaker/microphone loopback, also enable **Live/Duplex**.
-Audio test can also send to a separate receiver without local duplex capture.
+Physical output can also send to a separate receiver without local duplex capture.
 It does not add modeled noise, oscillator errors or link-budget attenuation,
 and does not reapply the effects to captured audio. The mode and selected values
-appear in the GUI status/diagnostics. It exports as
-`--hardware-channel-test yes`; an older imported command without that option
-returns to ordinary hardware mode, as with the established Simulation-off import.
+appear in the GUI status/diagnostics. There is no separate Audio test switch.
+Switching Simulation preserves the selected effects. The obsolete
+`--hardware-channel-test yes|no` launch flag is accepted but ignored; model
+selections alone control processing and remain in launch exports.
 
-Audio test supports smooth-ramp FHSS. Its DATA source already contains the
+The selected channel supports smooth-ramp FHSS. Its DATA source already contains the
 transmitter ramps and quiet intervals; propagation and additional amplitude
 modulation follow that source shaping. No later playback gate suppresses
 channel echoes in a transmitter quiet interval. Helper keeps its independent

@@ -52,14 +52,12 @@ struct Settings {
     // Hardware diagnostic only: exact raw capture rate, zero preserves provider
     // selection. The GUI exposes 48000 only with --debug; no modem clock changes.
     std::uint32_t diagnostic_capture_rate_hz = 0;
-    // Effective margin-adjusted propagation spread and additional amplitude stress.
+    // Effective margin-adjusted propagation spread and additional amplitude
+    // stress, applied in simulation and to outgoing physical Robust DATA.
     double simulation_spread_delay_ms = 0;
     double simulation_spread_doppler_hz = 0;
     double simulation_perturbation_slow_depth = 0;
     double simulation_perturbation_fast_depth = 0;
-    // Explicit physical-audio channel test: affect outgoing Robust DATA before
-    // playback. The actual audio route supplies noise and clock behavior.
-    bool hardware_channel_test = false;
     // Selecting a transmit key restricts reception to matching keyed streams.
     // Pattern-only raw results carry no separate authentication tag.
     bool permits_plaintext() const noexcept {

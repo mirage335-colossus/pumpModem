@@ -1509,7 +1509,8 @@ struct Session::Impl {
     }
     std::string idle_status() const {
         return settings.simulation ? "Simulated independent radios; sampled audio, clock error and phase noise" :
-            settings.hardware_channel_test?"Listening to audio input; selected channel effects apply to outgoing Live audio tests":"Listening to audio input";
+            (settings.simulation_spread_delay_ms!=0 || settings.simulation_spread_doppler_hz!=0)?
+                "Listening to audio input; selected channel effects apply to outgoing DATA":"Listening to audio input";
     }
     void update_simulation_elapsed() {
         if(simulation_compute_started)
@@ -13728,7 +13729,8 @@ struct Session::Impl {
                     current.status = wave->noise ? (value.simulation ? "Simulating continuous noise; stop when finished" :
                         "Transmitting continuous noise; stop when finished") :
                         value.simulation ? "Transmitting sampled audio to an independent receiver" :
-                        value.hardware_channel_test?"Transmitting Live audio channel test; fixed peak headroom applied":
+                        !wave->helper_only && (value.simulation_spread_delay_ms!=0 || value.simulation_spread_doppler_hz!=0)?
+                            "Transmitting with selected channel effects; fixed peak headroom applied":
                         value.full_duplex ? "Transmitting; duplex audio receiver active" : "Transmitting; audio input paused";
                 }
                 source_active=true;
@@ -14178,7 +14180,8 @@ struct Session::Impl {
                     std::optional<helper::Plan> helper_output_plan;
                     std::uint64_t helper_output_frames=0;
                     std::unique_ptr<modem::HardwareTestChannel> hardware_channel;
-                    if(value.hardware_channel_test && !wave->noise && !wave->helper_only) {
+                    if(!wave->noise && !wave->helper_only &&
+                       (value.simulation_spread_delay_ms!=0 || value.simulation_spread_doppler_hz!=0)) {
                         hardware_channel=std::make_unique<modem::HardwareTestChannel>(transmit_modem,channel_config(value));
                         audio::trace::record("hardware_channel_test_transmission",[&](auto& f) {
                             f.add("transmission_id",wave->serial);f.add("active",hardware_channel->active());
@@ -14326,7 +14329,7 @@ struct Session::Impl {
                         return playback_source_end();
                     };
                     // Ordinary playback keeps its final-rate transmitter mask
-                    // after resampling. An active Audio test instead carries
+                    // after resampling. Active outgoing channel effects carry
                     // channel output: StreamingTransmitter already shaped both
                     // the direct and regenerated delayed DATA at their emission
                     // coordinates. Applying the mask here would erase echoes

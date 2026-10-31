@@ -52,12 +52,13 @@ Open Robust Modem with a continuous simulated noisy channel instead of live
 audio. Transmissions run at computation speed, then replay in the plots.
 .TP
 .BI \-\-hardware-channel-test " yes|no"
-Select the GUI's Simulation: Audio test mode. Apply selected Doppler/delay
-spread and additional frequency-selective amplitude modulation once to
-outgoing Robust audio before hardware playback. Default no. Does not add
-synthetic noise, oscillator error or path loss. Enable Live/Duplex for a
-same-instance speaker/microphone or cable loopback; a physical path is required.
-Use \fB\-\-verbose\fP or \fB\-\-verbose-file\fP to record actual channel parameters.
+Deprecated compatibility spelling; accepted but ignored and no longer exported.
+Selected Doppler/delay spread and additional amplitude modulation apply in both
+simulation and physical output. Defaults are None and Off. Disable effects using
+those channel controls, not this old flag. Physical output adds no synthetic
+noise, oscillator error or path loss. Enable Live/Duplex for a same-instance
+speaker/microphone or cable loopback. Use \fB\-\-verbose\fP or
+\fB\-\-verbose-file\fP to record actual channel parameters.
 .TP
 .B \-\-debug, \-\-debug-live-duplex
 Run a bounded real-audio Robust GUI duplex diagnostic. Sends one raw 1 bit

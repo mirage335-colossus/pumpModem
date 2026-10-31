@@ -171,7 +171,7 @@ std::size_t HardwareTestChannel::read(StreamingTransmitter& source,std::span<flo
     if(!active())return source.read(output,stop);
     std::size_t count=0;
     while(count<output.size() && s.emitted<source_end_sample(source)) {
-        if(stop.stop_requested())throw Error("hardware channel test cancelled");
+        if(stop.stop_requested())throw Error("outgoing channel processing cancelled");
         auto size=static_cast<std::size_t>(std::min<std::uint64_t>(std::min(s.input.size(),output.size()-count),source_end_sample(source)-s.emitted));
         const auto direct=source.finished()?0:source.read_analytic(std::span(s.input).first(size),stop);
         // A source can discover its protected finite endpoint during this read.

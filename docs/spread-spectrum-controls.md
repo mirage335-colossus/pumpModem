@@ -243,7 +243,7 @@ difference. Their configured values, launch exports, audio frequency
 and radio tuning stay fixed; the configured displays return after completion
 or cancellation. No access protocol or actual RF hopping is implemented.
 
-For simulated propagation and **Simulation → Audio test**, the unchanged
+For selected channel effects in simulation or physical output, the unchanged
 smooth-ramp source is followed by Doppler/delay spread and the optional
 frequency-selective amplitude modulation. The channel output may contain
 delayed DATA during an original transmitter quiet interval; the transmitter

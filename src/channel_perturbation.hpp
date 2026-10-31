@@ -36,7 +36,7 @@ public:
     // A finite zero-input drain after the final delayed DATA sample. The
     // filter is IIR, so this bounds relative pole-state decay rather than
     // declaring an absolute acoustic silence threshold. Keep the same policy
-    // in sampled simulation, bulk PCM and physical Audio test playback.
+    // in sampled simulation, bulk PCM and physical playback.
     static std::uint64_t decay_samples(double sample_rate,double bandwidth_hz) {
         const auto cutoff=std::min(bandwidth_hz/6,sample_rate*.24);
         const auto k=std::tan(std::numbers::pi*cutoff/sample_rate);

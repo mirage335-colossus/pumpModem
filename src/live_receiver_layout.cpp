@@ -142,8 +142,6 @@ Settings normalized_layout(Settings value) {
     if (value.simulation_spectrum_gain_db && !std::isfinite(*value.simulation_spectrum_gain_db))
         throw Error("simulation spectrum display gain must be finite");
     modem::validate_channel(value.transfer.modem, channel_config(value));
-    if(value.simulation && value.hardware_channel_test)
-        throw Error("Live audio channel test and synthetic simulation are separate modes");
     if (value.receive_keys.size() > 128) throw Error("continuous receiver supports at most 128 loaded keys");
     // Explicit epochs retain their requested radius. Automatic admission and
     // pure estimates use the SAME normalized clock/propagation/audio bound.

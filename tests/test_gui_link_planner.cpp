@@ -1513,12 +1513,11 @@ void shared_link_controls_visibility() {
         check(found!=screen.end(),"Shared link control is missing from the native declaration");return *found;
     };
     const auto& simulation=app.field(F::simulation);
-    check(simulation.selected=="no"&&simulation.options.size()==3&&
+    check(simulation.selected=="no"&&simulation.options.size()==2&&
           std::any_of(simulation.options.begin(),simulation.options.end(),[](const auto& option){return option.id=="yes";})&&
-          std::any_of(simulation.options.begin(),simulation.options.end(),[](const auto& option){return option.id=="no";})&&
-          simulation.options[2].id=="hardware-test"&&simulation.options[2].label=="Audio test",
-          "Simulation must offer No, Yes and explicit physical Audio test choices");
-    for(const auto& page:ui::pages())for(const auto* mode:{"no","yes","hardware-test"}) {
+          std::any_of(simulation.options.begin(),simulation.options.end(),[](const auto& option){return option.id=="no";}),
+          "Simulation must offer only No and Yes; selected channel effects need no separate mode");
+    for(const auto& page:ui::pages())for(const auto* mode:{"no","yes"}) {
         app.select_page(page.id);app.select(F::simulation,mode);
         const bool simulated=std::string_view(mode)=="yes";
         for(const auto field:{F::link_power,F::link_loss,F::link_noise}) {

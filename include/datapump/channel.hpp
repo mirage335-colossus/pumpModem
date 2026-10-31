@@ -7,7 +7,7 @@
 #include <array>
 
 namespace datapump::modem {
-// Deliberate physical-audio test stage. Uses only propagation spread and the
+// Selected physical-audio channel stage. Uses only propagation spread and the
 // additional per-band amplitude modulation, at the original source clock.
 // No synthetic noise, startup, oscillator offset or receiver data is supplied.
 // StreamingTransmitter owns the emitted FHSS ramps/gaps. Both direct reads and

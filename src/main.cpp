@@ -157,7 +157,7 @@ Audio/simulation:
   --oscillator MODEL    crystal (default), gpsdo-xo, gpsdo-tcxo, gpsdo-ocxo
                         LF/audio residual model; controls real RX search too
   --rf-oscillator MODEL RF reference model; also cb-ssb or ic-7100, default crystal
-  --spread-preset ID    Propagation spread preset for simulate/listen simulation; default none
+  --spread-preset ID    Propagation spread for simulate or listen output; default none
   --selective-perturbation ID  off or slow-N, fast-N, each-N (N=1,5,10,25,65)
   --simulation-trace PATH  New JSONL file recording actual spread/perturbation parameters
   --rf-shift HZ         Alias for --shift
@@ -273,10 +273,7 @@ public:
         if(command!="keygen") reject({"key-names"},"is only valid for keygen");
         if(command!="simulate" && command!="listen" && command!="analyze-link") reject({"simulation"},"is only valid for simulate/listen/analyze-link");
         if(command!="simulate" && command!="listen" && command!="analyze-link") reject({"clock-error-ppm","phase-noise"},"is only valid for simulate/listen/analyze-link");
-        if(command!="simulate" && command!="listen") reject({"spread-preset","selective-perturbation","simulation-trace"},"is only valid for simulate or listen simulation");
-        if(command=="listen" && (has("spread-preset") || has("selective-perturbation") || has("simulation-trace")) &&
-           (!has("simulation") || !tuning::parse_simulation_preset(get("simulation")).enabled))
-            throw Error("spread and perturbation options require an enabled --simulation for listen");
+        if(command!="simulate" && command!="listen") reject({"spread-preset","selective-perturbation","simulation-trace"},"is only valid for simulate or listen");
         if(command=="qr"||command=="keygen"||command=="devices")
             reject({"oscillator","rf-oscillator","shift","rf-shift","rf-carrier","doppler","search-margin","reference","sideband","lf-reference"},"requires a Robust modem command");
         if(command!="analyze-link")
@@ -1602,10 +1599,11 @@ int main(int argc,char** argv) {
             const auto filter=+[](const char* event) noexcept {
                 const std::string_view name(event);
                 return name=="trace_begin" || name=="simulation_two_ray_spread" ||
-                    name=="simulation_frequency_selective_perturbation";
+                    name=="simulation_frequency_selective_perturbation" ||
+                    name=="hardware_channel_test" || name=="hardware_channel_test_transmission";
             };
             simulation_trace=std::make_unique<audio::trace::Scope>(a.get("simulation-trace"),false,filter);
-            std::cerr<<"Simulation trace: "<<simulation_trace->path()<<'\n';
+            std::cerr<<"Channel trace: "<<simulation_trace->path()<<'\n';
         }
         if(a.command=="qr") {
             auto content=message(a).data;

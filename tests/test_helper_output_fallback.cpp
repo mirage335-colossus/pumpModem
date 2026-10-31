@@ -287,7 +287,7 @@ void explicit_past_declines_at_calibrated_amplitude() {
 }
 void hardware_channel_helper_transform() {
     auto plain_settings=settings();plain_settings.transfer.timestamp=epoch+100;
-    auto stressed_settings=plain_settings;stressed_settings.hardware_channel_test=true;
+    auto stressed_settings=plain_settings;
     stressed_settings.simulation_spread_delay_ms=250;stressed_settings.simulation_spread_doppler_hz=.1;
     stressed_settings.simulation_perturbation_slow_depth=stressed_settings.simulation_perturbation_fast_depth=.65;
     modem::ChannelConfig effects;effects.spread_delay_ms=250;effects.spread_doppler_hz=.1;
@@ -341,7 +341,7 @@ void fhss_hardware_channel_transform() {
     plain_settings.transfer.modem.pulse_shaping=true;
     plain_settings.transfer.modem.spreading_factor=64;
     const auto hops=fhss_hops();
-    auto stressed_settings=plain_settings;stressed_settings.hardware_channel_test=true;
+    auto stressed_settings=plain_settings;
     stressed_settings.simulation_spread_delay_ms=80;stressed_settings.simulation_spread_doppler_hz=.1;
     stressed_settings.simulation_perturbation_slow_depth=stressed_settings.simulation_perturbation_fast_depth=.05;
     auto options=plain_settings.transfer;
@@ -361,7 +361,7 @@ void fhss_hardware_channel_transform() {
     check(plain.output_gain && !stressed.output_gain,
           "processed DATA retained a second hardware FHSS envelope");
     check(plain.accepted_utc && stressed.accepted_utc && plain.accepted_utc==stressed.accepted_utc,
-          "FHSS Audio test changed the original transmitter scheduling");
+          "FHSS channel effects changed the original transmitter scheduling");
     const auto lead=38ULL*rate;
     const auto prefix=modem::training_sample_count(options.modem)+modem::pattern_pulse_padding_samples(options.modem);
     const auto payload=*plain.accepted_utc+38+static_cast<long double>(prefix)/rate;
@@ -406,7 +406,7 @@ void fhss_hardware_channel_transform() {
           "production physical playback re-gated the delayed DATA echo in a transmitter quiet interval");
     check(stressed.logical_pcm.size()==std::max<std::uint64_t>(plain.logical_pcm.size(),
               lead+reference->total_samples()+stage.tail_samples()),
-          "FHSS Audio test omitted the complete delayed/filter tail or extended Helper timing");
+          "FHSS channel effects omitted the complete delayed/filter tail or extended Helper timing");
     check(stressed.snapshot.transmit_trace.wire_bits==plain.snapshot.transmit_trace.wire_bits &&
           stressed.snapshot.transmit_trace.generated_bits==plain.snapshot.transmit_trace.generated_bits &&
           stressed.snapshot.transmission_seconds==plain.snapshot.transmission_seconds,
