@@ -153,6 +153,16 @@ public:
     // lookahead. For transmitter progress only; never receiver acquisition.
     std::uint64_t transmitted_samples() const;
     std::size_t working_bytes() const;
+    // Reproducibility metadata for the optional frequency-selective stress.
+    struct PerturbationMetadata {
+        bool enabled=false;
+        std::uint64_t seed=0;
+        double doppler_reference_hz=0,slow_depth=0,fast_depth=0,band_width_hz=0;
+        std::array<double,2> rates_hz{};
+        std::array<double,3> band_centers_hz{};
+        std::array<std::array<double,2>,3> initial_phases_radians{};
+    };
+    PerturbationMetadata perturbation_metadata() const;
     // Channel diagnostics only. A receiver must acquire these from its PCM.
     double startup_offset_samples() const;
     double carrier_phase_radians() const;

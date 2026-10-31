@@ -202,6 +202,10 @@ void validate(const Config& c) {
     product(chip_samples(c), c.spreading_factor, std::numeric_limits<std::size_t>::max());
 }
 void validate_channel(const Config& c,const ChannelConfig& channel) {
+    check(std::isfinite(channel.spread_delay_ms) && channel.spread_delay_ms>=0 &&
+          std::isfinite(channel.spread_doppler_hz) && channel.spread_doppler_hz>=0, "spread must be finite and nonnegative");
+    check(std::isfinite(channel.perturbation_slow_depth) && channel.perturbation_slow_depth>=0 && channel.perturbation_slow_depth<=1 &&
+          std::isfinite(channel.perturbation_fast_depth) && channel.perturbation_fast_depth>=0 && channel.perturbation_fast_depth<=1, "perturbation depths must be between 0 and 1");
     check(std::isfinite(channel.snr_db) && channel.snr_db>=-300 && channel.snr_db<=300,"channel SNR must be -300..300 dB");
     check(std::isfinite(channel.frequency_offset_hz) && std::abs(channel.frequency_offset_hz)<c.sample_rate/2.,"channel frequency offset must fit internal Nyquist");
     check(std::isfinite(channel.clock_error_ppm) && std::abs(channel.clock_error_ppm)<=10000,"relative clock error must be -10000..10000 ppm");
@@ -572,6 +576,8 @@ DecodeResult demodulate(std::span<const float> samples, const Config& c,
 std::vector<float> simulate(std::span<const float> samples, const Config& c, const ChannelConfig& channel) {
     validate(c); finite_samples(samples, c.memory_limit);
     validate_channel(c,channel);
+    check(channel.spread_delay_ms==0 && channel.spread_doppler_hz==0,
+          "bulk PCM simulation does not support propagation spread; use the sampled simulation channel");
     const auto rate=1+static_cast<long double>(channel.clock_error_ppm)*1e-6L;
     std::mt19937_64 startup_random(channel.seed^0x8ebc6af09c88c6e3ULL);
     const auto uniform=[&]{return (static_cast<double>(startup_random()>>11)+.5)/9007199254740992.;};

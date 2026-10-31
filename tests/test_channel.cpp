@@ -1,4 +1,5 @@
 #include "datapump/channel.hpp"
+#include "../src/channel_perturbation.hpp"
 #include "datapump/stream_codec.hpp"
 #include "datapump/transfer.hpp"
 #include "resource_test_margin.hpp"
@@ -223,6 +224,114 @@ void graceful_endpoint() {
         require(channel.received_samples()==coordinate+chunk.size(),"observed absence did not advance independently");
     }
 }
+void selective_perturbation() {
+    auto cfg=config();cfg.bandwidth_hz=1200;cfg.integration_seconds=.02;cfg.stream_epoch=1800000001;
+    auto off=ideal(),zero=off;zero.perturbation_slow_depth=zero.perturbation_fast_depth=.65;
+    auto selected=zero;selected.spread_doppler_hz=5;
+    const auto bits=m::RawBits{{1,0,1,0}};
+    m::StreamingTransmitter a(bits,cfg),b(bits,cfg),c(bits,cfg),d(bits,cfg);
+    m::SampledSimulationChannel original(cfg,off),unity(cfg,zero),one(cfg,selected),chunks(cfg,selected);
+    require(capture(original,a,101)==capture(unity,b,31),"zero Doppler perturbation changed samples");
+    require(!unity.perturbation_metadata().enabled,"zero Doppler created a perturbation bank");
+    auto disabled=selected;disabled.perturbation_slow_depth=disabled.perturbation_fast_depth=0;
+    m::SampledSimulationChannel no_filter(cfg,disabled);
+    require(!no_filter.perturbation_metadata().enabled,"Off allocated a perturbation bank at nonzero Doppler");
+    const auto x=capture(one,c,4096),y=capture(chunks,d,13);
+    require(x==y,"perturbation changed with block partition");
+    std::array<float,32> idle_a{},idle_b{};
+    one.read_noise(idle_a);chunks.read_noise(std::span(idle_b).first(11));
+    chunks.read_noise(std::span(idle_b).subspan(11));
+    require(idle_a==idle_b,"perturbation tail changed with idle partition");
+    one.begin_burst();chunks.begin_burst();
+    m::StreamingTransmitter next_a(bits,cfg),next_b(bits,cfg);
+    require(capture(one,next_a,17)==capture(chunks,next_b,257),"perturbation startup or phases changed between bursts");
+    const auto metadata=one.perturbation_metadata();
+    require(metadata.enabled && metadata.rates_hz[0]==.5 && metadata.rates_hz[1]==5 && metadata.seed==selected.seed,
+            "perturbation metadata did not record the actual rates and seed");
+    require(metadata.initial_phases_radians[0][0]!=metadata.initial_phases_radians[1][0] &&
+            metadata.initial_phases_radians[0][0]!=metadata.initial_phases_radians[0][1],
+            "perturbation phases are not independent");
+    require(one.working_bytes()<=m::SampledSimulationChannel::workspace_bound,"perturbation exceeded channel reservation");
+    // Compare energy in three windowed frequency bins only over real DATA.
+    m::RawBits data_bits;data_bits.bits.resize(64);
+    for(std::size_t i=0;i<data_bits.bits.size();++i)data_bits.bits[i]=i%2;
+    m::StreamingTransmitter waveform(data_bits,cfg);
+    // The begin accessor is absolute UTC PCM; read offsets and valid end are
+    // relative to this burst's physical output origin.
+    const auto payload_begin=waveform.physical_payload_begin()-waveform.physical_output_origin();
+    const auto payload_end=waveform.physical_valid_payload_end();
+    std::array<std::complex<double>,256> block{};
+    std::array<double,3> energy{};double total_energy=0;
+    std::uint64_t sample=0;
+    while(const auto count=waveform.read_analytic(block)) {
+        if(sample>=payload_begin && sample+count<=payload_end && count==block.size()) {
+            for(std::size_t band=0;band<3;++band) {
+                std::complex<double> projection{};
+                for(std::size_t i=0;i<count;++i) {
+                    const auto window=.5-.5*std::cos(tau*static_cast<double>(i)/(count-1));
+                    projection+=window*block[i]*std::polar(1.,-tau*metadata.band_centers_hz[band]*
+                        static_cast<double>(sample+i)/cfg.sample_rate);
+                }
+                energy[band]+=std::norm(projection)/count;
+            }
+            for(const auto value:block)total_energy+=std::norm(value);
+        }
+        sample+=count;
+    }
+    require(total_energy>0 && std::all_of(energy.begin(),energy.end(),[&](double e){return e/total_energy>1e-6;}),
+            "Robust DATA waveform did not populate all three perturbation ranges");
+    for(const auto frequency:metadata.band_centers_hz) {
+        m::detail::FrequencySelectivePerturbation filter(cfg.sample_rate,cfg.carrier_hz,cfg.bandwidth_hz,5,0,.65,1);
+        double least=100,most=0;
+        for(unsigned i=0;i<cfg.sample_rate;++i) {
+            const auto output=filter.process(std::polar(1.,tau*frequency*i/cfg.sample_rate));
+            if(i>1000) {least=std::min(least,std::abs(output));most=std::max(most,std::abs(output));}
+        }
+        require(most-least>.2,"a populated frequency range was not modulated");
+    }
+}
+void spread_helper_tail() {
+    // Keep the 15 kW Helper's certified low-tone leakage guard clear of DATA.
+    m::Config cfg;cfg.sample_rate=8000;cfg.carrier_hz=2000;cfg.bandwidth_hz=200;
+    cfg.spreading_factor=4;cfg.integration_seconds=.02;cfg.stream_epoch=1800000001;
+    cfg.stream_phase_samples=137;
+    helper::Options helper;helper.power_w=15000;helper.data_power_w=4;helper.timecode=false;
+    // Six seconds puts the delayed DATA slot after the Helper's normal tail
+    // as well as exercising output beyond that tail.
+    auto model=ideal();model.spread_delay_ms=6000;
+    m::SampledSimulationChannel channel(cfg,model,helper),helper_only(cfg,model,helper);
+    // Align the seeded startup draws; the control carries the same Helper
+    // envelope and channel tail but suppresses both DATA rays.
+    channel.begin_burst();helper_only.begin_burst(true);
+    m::StreamingTransmitter source(m::RawBits{{0}},cfg),silent_data(m::RawBits{{0}},cfg);
+    const auto data_begin=source.physical_payload_begin()-source.physical_output_origin();
+    const auto output=capture(channel,source,2048);
+    const auto baseline=capture(helper_only,silent_data,2048);
+    require(output.size()==baseline.size(),"helper-only control changed the spread capture extent");
+    require(channel.payload_end_sample().has_value(),"helper spread did not expose source endpoint");
+    require(output.size()>=*channel.payload_end_sample()+cfg.sample_rate*6,
+            "physical helper capture truncated the delayed ray");
+    double energy=0,helper_energy=0;
+    for(std::size_t i=output.size()-2*cfg.sample_rate;i<output.size()-cfg.sample_rate;++i) {
+        energy+=static_cast<double>(output[i])*output[i];
+        helper_energy+=static_cast<double>(baseline[i])*baseline[i];
+    }
+    require(helper_energy<1e-12,"late delayed-ray window still contains the Helper signal");
+    require(energy>1e-8,"physical helper capture emitted no delayed-ray signal");
+    const auto delayed_begin=static_cast<std::size_t>(std::ceil(channel.startup_offset_samples()+
+        data_begin+cfg.sample_rate*6+8));
+    const auto delayed_end=static_cast<std::size_t>(std::floor(channel.startup_offset_samples()+
+        data_begin+m::symbol_sample_count(cfg)+cfg.sample_rate*6-8));
+    require(delayed_begin<delayed_end && delayed_end<=output.size(),"delayed DATA window is unavailable");
+    double data_energy=0,data_helper_energy=0;
+    for(auto i=delayed_begin;i<delayed_end;++i) {
+        data_energy+=static_cast<double>(output[i])*output[i];
+        data_helper_energy+=static_cast<double>(baseline[i])*baseline[i];
+    }
+    require(data_helper_energy<1e-12,"delayed DATA window still contains the Helper signal");
+    require(data_energy>1e-8,"physical helper capture omitted the delayed DATA slot");
+    require(channel.working_bytes()<=m::SampledSimulationChannel::workspace_bound,"helper spread exceeded workspace");
+}
 void invalid(){
     const auto cfg=config();auto model=ideal();model.clock_error_ppm=std::numeric_limits<double>::quiet_NaN();
     rejects([&]{m::SimulationChannel channel(cfg,model);},"NaNclockaccepted");
@@ -230,8 +339,11 @@ void invalid(){
     rejects([&]{m::SimulationChannel channel(cfg,model);},"negativephasediffusionaccepted");
     model=ideal();model.clock_error_ppm=10001;
     rejects([&]{m::SimulationChannel channel(cfg,model);},"unboundedclockerroraccepted");
+    model=ideal();model.spread_doppler_hz=1;
+    rejects([&]{m::SimulationChannel unsupported(cfg,model);},"accelerated simulation silently ignored spread");
+    rejects([&]{m::simulate(std::span<const float>{},cfg,model);},"bulk simulation silently ignored spread");
     m::SimulationChannel channel(cfg,ideal());rejects([&]{channel.process({{1,0},0});},"zeroobservationaccepted");
     require(m::ChannelConfig{}.clock_error_ppm==100 && m::ChannelConfig{}.phase_noise_degrees_per_sqrt_second==.5,"simulationdefaultsarenotbadcrystalmodel");
 }
 }
-int main(){try{clock_and_carrier();long_coherence();phase_diffusion();pcm_clock();analytic_source_matches_hardware_pcm();sampled_startup_and_carrier();sampled_chunking_and_idle();stream_and_preview();preview_interpolation_edges();graceful_endpoint();invalid();std::cout<<"channel tests passed\n";return 0;}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}
+int main(){try{clock_and_carrier();long_coherence();phase_diffusion();pcm_clock();analytic_source_matches_hardware_pcm();sampled_startup_and_carrier();sampled_chunking_and_idle();stream_and_preview();preview_interpolation_edges();graceful_endpoint();selective_perturbation();spread_helper_tail();invalid();std::cout<<"channel tests passed\n";return 0;}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

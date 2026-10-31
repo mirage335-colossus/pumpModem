@@ -1811,11 +1811,11 @@ void oscillator_declaration() {
         for(const auto size:{ui::Rect{0,0,ui::min_width,ui::min_height},ui::Rect{0,0,ui::default_width,ui::default_height}}) {
             auto previous=app.control_layout(oscillator,size.w,size.h);
             check(previous.has_label&&previous.widget.w>=300,"LF model choice clips at the minimum desktop width");
-            for(const auto field:{F::rf_oscillator,F::search_margin}) {
+            for(const auto field:{F::rf_oscillator,F::spread_preset,F::selective_perturbation,F::search_margin}) {
                 const auto current=app.control_layout(control(field),size.w,size.h);
                 check(current.has_label&&current.frame.y==previous.frame.y&&
                       current.frame.x==previous.frame.x+previous.frame.w+10,
-                      "The three oscillator controls must share a compact row without overlapping labels");
+                      "Oscillators, spread, perturbation and margin must share a row without overlapping labels");
                 previous=current;
             }
             const auto carrier=app.control_layout(control(F::carrier),size.w,size.h);
@@ -2286,6 +2286,10 @@ int main(int argc,char** argv) {
     }
     if(argc==2&&std::string(argv[1])=="--helper-only") {
         try {helper_assistance_debug_fields();std::cout<<"Helper assistance diagnostics passed\n";return 0;}
+        catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}
+    }
+    if(argc==2&&std::string(argv[1])=="--oscillator-only") {
+        try {oscillator_declaration();std::cout<<"Oscillator declaration passed\n";return 0;}
         catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}
     }
     if(argc==2&&std::string(argv[1])=="--expanded-spectrum") {

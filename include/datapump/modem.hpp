@@ -171,6 +171,11 @@ struct ChannelConfig {
     // Wiener phase diffusion: RMS phase change over one second, scaling as
     // sqrt(elapsed seconds). This is separate from deterministic clock error.
     double phase_noise_degrees_per_sqrt_second = .5;
+    // Effective propagation spread and additional per-band amplitude stress.
+    double spread_delay_ms = 0;
+    double spread_doppler_hz = 0;
+    double perturbation_slow_depth = 0;
+    double perturbation_fast_depth = 0;
     // Optional independent receiver wall-clock center for transfer::simulate.
     // Omission uses the explicitly configured transfer timestamp; the receiver
     // still searches its configured finite epoch window from this center.

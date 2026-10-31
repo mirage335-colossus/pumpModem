@@ -1252,11 +1252,13 @@ and transmitted constellation display the generated signal from those stages.
 
 ## Layout and documents
 
-`desktop_layout.hpp` defines the desktop arrangement at 1180 by 1120 logical
-pixels, with a 1130 by 1040 minimum. A persistent simulation row holds the
+`desktop_layout.hpp` defines the desktop arrangement at 1180 by 1168 logical
+pixels, with a 1130 by 1088 minimum. A 1080-pixel-high display cannot fit the
+entire native minimum-height window. A persistent simulation row holds the
 dropdown, modeled receive probability and reference CPU/GPU compute estimates.
 The following compact persistent row holds editable Clock accuracy, Clock region
-and Clock offset, followed by Audio error, to the left of Baseband Osc, Shift Osc and Margin;
+and Clock offset, followed by Audio error. The next row holds Baseband Osc,
+Shift Osc, Doppler/delay spread, Additional frequency-selective perturbation and Margin;
 Carrier and Shift share the existing modem row. Detailed oscillator/search
 values appear under the Link planner's hideable Model limits and references,
 and LPI assumptions remain in inspection.

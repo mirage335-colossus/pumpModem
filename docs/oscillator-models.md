@@ -17,12 +17,26 @@ residual, while phase diffusion is spread out to examine coherence sensitivity.
 | CLI profile | Oscillator scenario | Relative clock offset | Phase diffusion |
 | --- | --- | ---: | ---: |
 | `crystal` | Existing consumer/free-running crystal case | 100 ppm | 0.5 degrees/sqrt(second) |
+| `cb-ssb` | Modern CB SSB crystal, ±20 ppm per radio assumed | 40 ppm | 0.5 degrees/sqrt(second), assumed |
+| `ats-mini-v4-ssb` | ATS Mini V4 SSB crystal, ±20 ppm per device assumed | 40 ppm | 0.5 degrees/sqrt(second), assumed |
 | `gpsdo-xo` | Hobbyist GPSDO, basic crystal, no oven | 0.0001 ppm | 0.5 degrees/sqrt(second) |
 | `gpsdo-tcxo` | GPSDO with temperature compensation, no oven | 0.0001 ppm | 0.05 degrees/sqrt(second) |
 | `gpsdo-ocxo` | GPSDO with an oven-controlled crystal | 0.0001 ppm | 0.005 degrees/sqrt(second) |
 | `ic-7100` | IC-7100 RF reference example (Shift Osc only) | 1 ppm | 0.05 degrees/sqrt(second), assumed |
 
 The default for each model remains `crystal`.
+The CB SSB and ATS Mini V4 SSB profiles use ±20 ppm per device as a
+typical worst-case simulation assumption. Opposite endpoint errors can produce
+40 ppm relative error, the quantity used by these link models. The phase
+diffusion is an illustrative free-running-crystal assumption, not a measured
+specification. These values are not verified specifications for particular radios.
+
+For US CB transmitters, [47 CFR § 95.965](https://www.ecfr.gov/current/title-47/chapter-I/subchapter-D/part-95/subpart-D/section-95.965)
+requires the carrier, or the SSB reference frequency, to remain within ±50 ppm
+of the specified channel center under normal operating conditions. That is a
+transmitter frequency-accuracy requirement, not a crystal-component rating or
+a specification for the ATS Mini V4 receiver.
+
 The common GPS residual, 0.0001 ppm (a fractional offset of 10^-10), is an
 explicit link-planning assumption, not a measured or universal locked-device
 specification. It is not derived from an Allan-deviation point or an unlocked

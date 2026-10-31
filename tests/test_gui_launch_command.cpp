@@ -257,6 +257,11 @@ void parsing_and_formatting() {
         if(oscillator.id=="ic-7100")model.rf_oscillator=oscillator.id;else model.oscillator=oscillator.id;
         check(launch_command::parse(launch_command::format(model))==model,"every oscillator preset must round-trip");
     }
+    for(const auto& spread:datapump::tuning::spread_presets()) {
+        auto model=settings;model.spread_preset=spread.id;model.selective_perturbation="fast-25";
+        check(launch_command::parse(launch_command::format(model))==model,"spread and perturbation must round-trip");
+    }
+    rejects([]{launch_command::parse("--selective-perturbation each-2");},"invalid perturbation selection accepted");
     const auto windows=launch_command::parse(R"("C:\Program Files\Data Pump\datapump-gui.exe" --rate "3.6 kHz"
         --carrier=1.5kHz --oscillator "GPSDO: OCXO" --target-snr=+23)");
     check(windows.rate_hz==3600&&windows.carrier_hz==1500&&windows.target_db_hz==23,

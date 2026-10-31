@@ -102,8 +102,43 @@ select an oscillator reference. Selected numeric assumptions and
 requested/covered bounds appear under the Link planner's hideable **Model limits
 and references**. These are
 illustrative sensitivity models, not measured GPSDO specifications; see
-[oscillator models](oscillator-models.md). The margin affects acquisition
-coverage, without multiplying the simulated impairment.
+[oscillator models](oscillator-models.md). For oscillators, the margin affects
+acquisition coverage without multiplying the simulated impairment.
+
+## Propagation spread and additional perturbation
+
+The **Doppler/delay spread** selector is separate from the static radial
+Doppler calculator. The supplied presets are illustrative simulation inputs:
+
+| Preset | Delay | Doppler |
+| --- | ---: | ---: |
+| None | 0 ms | 0 Hz |
+| Sub-9 kHz worldwide — Best / Moderate / Worst | 0.005 / 0.05 / 5 ms | 0.001 / 0.005 / 0.05 Hz |
+| HF worldwide — Best / Moderate / Worst | 0.5 / 6 / 7 ms | 0.1 / 10 / 30 Hz |
+| Aurora worldwide — Best / Worst | 3 / 11 ms | 10 / 55 Hz |
+| EME worldwide — Focused, 1296 MHz reference | 0.5 ms | 6 Hz |
+
+HF Moderate is the default. Margin multiplies both selected spread values
+once for simulation. The simulated propagation is an illustrative equal-power
+two-ray channel: the selected delay is the excess delay between the rays and
+the selected Doppler is their frequency separation. These are not RMS delay
+and a calibrated scattering spectrum, respectively. The delayed source is
+regenerated with bounded memory; this adds computation. The analytical Link
+planner and receive probability estimates do not model these spread or
+perturbation effects and do not predict performance in this channel.
+
+**Additional frequency-selective perturbation** defaults to Off for None and
+Sub-9 kHz, and Each 65% for HF, Aurora and EME. Selecting a new spread preset
+sets its family default; the perturbation can then be changed independently.
+Slow, Fast and Each offer 1, 5, 10, 25 and 65 percent. The rates are 0.1 and
+1 times the margin-adjusted Doppler spread, respectively. For each of three
+payload frequency ranges the gain is `1 + slow*sin(slow phase) +
+fast*sin(fast phase)`, with each depth relative to nominal amplitude. Thus
+Each 65% can temporarily invert the gain. The seeded phases are distinct per
+range and component and continue across processing blocks. Off bypasses the
+filter bank, as does a zero Doppler reference. The GUI's `--verbose` or
+`--verbose-file` simulation trace records the seed, ranges, actual rates and
+phases for reproduction.
 
 The local outer-DSSS candidate accounts for actual chip count, sampled bandwidth
 and symbol duration in compute estimates. Legacy outer DSSS can show a numerical

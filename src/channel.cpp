@@ -1,4 +1,6 @@
 #include "datapump/channel.hpp"
+#include "channel_perturbation.hpp"
+#include "channel_spread.hpp"
 #include "live_simulation_clock.hpp"
 #include "audio_trace.hpp"
 #include "helper_power_reference.hpp"
@@ -26,10 +28,53 @@ double preview_normal(std::uint64_t seed,std::uint64_t sample) {
            std::cos(static_cast<double>(tau)*uniform(mix(seed^sample^0xd1b54a32d192ed03ULL)));
 }
 }
+namespace {
+using Perturbation=detail::FrequencySelectivePerturbation;
+using SpreadRay=detail::SpreadRay;
+std::unique_ptr<SpreadRay> make_spread(const Config& config,const ChannelConfig& channel,double sample_rate) {
+    if(channel.spread_doppler_hz==0 && channel.spread_delay_ms==0)return {};
+    const auto clock=1+channel.clock_error_ppm*1e-6;
+    const auto half_band=helper::placement_band(config).waveform_bandwidth_hz/2;
+    const auto modulation=channel.perturbation_fast_depth>0?channel.spread_doppler_hz:
+        channel.perturbation_slow_depth>0?.1*channel.spread_doppler_hz:0;
+    const auto upper=(config.carrier_hz+half_band)*clock+
+        channel.frequency_offset_hz+channel.spread_doppler_hz+modulation;
+    const auto lower=(config.carrier_hz-half_band)*clock+channel.frequency_offset_hz-modulation;
+    if(channel.spread_doppler_hz>=sample_rate/2 || upper>config.sample_rate/2. || lower<0)
+        throw Error("Doppler-spread payload leaves the sampled channel passband");
+    auto result=std::make_unique<SpreadRay>(sample_rate,channel.spread_doppler_hz,channel.seed);
+    audio::trace::record("simulation_two_ray_spread",[&](auto& f) {
+        f.add("seed",channel.seed);f.add("delay_ms",channel.spread_delay_ms);
+        f.add("doppler_hz",result->doppler_hz());f.add("phase_rad",result->phase_radians());
+    });
+    return result;
+}
+std::unique_ptr<Perturbation> make_perturbation(const Config& config,const ChannelConfig& channel,double sample_rate) {
+    if(channel.spread_doppler_hz==0 || (channel.perturbation_slow_depth==0 && channel.perturbation_fast_depth==0))return {};
+    const auto rate=1+channel.clock_error_ppm*1e-6;
+    auto result=std::make_unique<Perturbation>(sample_rate,config.carrier_hz*rate,
+        helper::placement_band(config).waveform_bandwidth_hz*rate,channel.spread_doppler_hz,
+        channel.perturbation_slow_depth,channel.perturbation_fast_depth,channel.seed);
+    audio::trace::record("simulation_frequency_selective_perturbation",[&](auto& f) {
+        f.add("seed",channel.seed);f.add("doppler_reference_hz",channel.spread_doppler_hz);
+        f.add("slow_depth",channel.perturbation_slow_depth);f.add("fast_depth",channel.perturbation_fast_depth);
+        f.add("slow_rate_hz",result->rates_hz[0]);f.add("fast_rate_hz",result->rates_hz[1]);
+        f.add("band_width_hz",result->band_width_hz);
+        for(std::size_t i=0;i<3;++i) {
+            f.add(("band"+std::to_string(i)+"_center_hz").c_str(),result->band_centers_hz[i]);
+            f.add(("band"+std::to_string(i)+"_slow_phase_rad").c_str(),result->initial_phases[i][0]);
+            f.add(("band"+std::to_string(i)+"_fast_phase_rad").c_str(),result->initial_phases[i][1]);
+        }
+    });
+    return result;
+}
+}
 struct SampledLegacy {
-    static constexpr std::size_t taps=16,phases=256;
+    static constexpr std::size_t taps=16,phases=256,stored_phases=249;
     Config config;
     ChannelConfig channel;
+    std::unique_ptr<Perturbation> perturbation;
+    std::unique_ptr<SpreadRay> spread;
     long double rate=1,startup=0;
     std::uint64_t received=0,origin=0,total=0,buffer_start=0;
     std::size_t buffer_count=0;
@@ -40,7 +85,7 @@ struct SampledLegacy {
     std::mt19937_64 startup_random,phase_random,noise_random;
     std::normal_distribution<double> phase_normal{0,1},noise_normal{0,1};
     std::array<Complex,1024> buffer{};
-    std::array<std::array<double,taps>,phases+1> coefficients{};
+    std::array<std::array<double,taps>,stored_phases> coefficients{};
     std::optional<helper::Generator> helper_generator;
     helper::Options helper_options;
     std::optional<helper::Plan> helper_plan;
@@ -50,8 +95,10 @@ struct SampledLegacy {
         phase_random(impairment.seed^0xa0761d6478bd642fULL),noise_random(impairment.seed),helper_options(std::move(helper_value)) {
         static_assert(sizeof(SampledLegacy)+sizeof(SampledSimulationChannel)+
             SampledSimulationChannel::auxiliary_workspace_bound+
-            SampledSimulationChannel::helper_cohort_workspace_bound<=SampledSimulationChannel::workspace_bound);
+            SampledSimulationChannel::helper_cohort_workspace_bound+sizeof(Perturbation)+sizeof(SpreadRay)<=SampledSimulationChannel::workspace_bound);
         validate(config);validate_channel(config,channel);
+        perturbation=make_perturbation(config,channel,config.sample_rate);
+        spread=make_spread(config,channel,config.sample_rate);
         rate=1+static_cast<long double>(channel.clock_error_ppm)*1e-6L;
         diffusion=channel.phase_noise_degrees_per_sqrt_second*std::numbers::pi/180/std::sqrt(config.sample_rate);
         sigma=std::sqrt(nominal_signal_power*std::pow(10.,-channel.snr_db/10));
@@ -65,17 +112,19 @@ struct SampledLegacy {
         step=phase_rotation(tau*channel.frequency_offset_hz/config.sample_rate);
         // Interpolated polyphase Blackman-windowed sinc coefficients avoid
         // per-tap trigonometry while retaining fractional sample boundaries.
-        for(std::size_t phase=0;phase<=phases;++phase) {
-            double sum=0;
-            for(std::size_t tap=0;tap<taps;++tap) {
-                const auto distance=static_cast<double>(phase)/phases-static_cast<double>(tap)+7;
-                const auto window=.42+.5*std::cos(std::numbers::pi*distance/8)+.08*std::cos(std::numbers::pi*distance/4);
-                const auto coefficient=sinc(std::numbers::pi*distance)*window;
-                coefficients[phase][tap]=coefficient;sum+=coefficient;
-            }
-            for(auto& coefficient:coefficients[phase])coefficient/=sum;
-        }
+        for(std::size_t phase=0;phase<stored_phases;++phase)coefficients[phase]=make_coefficients(phase);
         begin();
+    }
+    static std::array<double,taps> make_coefficients(std::size_t phase) {
+        std::array<double,taps> result{};double sum=0;
+        for(std::size_t tap=0;tap<taps;++tap) {
+            const auto distance=static_cast<double>(phase)/phases-static_cast<double>(tap)+7;
+            const auto window=.42+.5*std::cos(std::numbers::pi*distance/8)+.08*std::cos(std::numbers::pi*distance/4);
+            const auto coefficient=sinc(std::numbers::pi*distance)*window;
+            result[tap]=coefficient;sum+=coefficient;
+        }
+        for(auto& coefficient:result)coefficient/=sum;
+        return result;
     }
     double uniform() {return (static_cast<double>(startup_random()>>11)+.5)/9007199254740992.;}
     void begin() {
@@ -106,11 +155,16 @@ struct SampledLegacy {
         const auto fractional=static_cast<double>(position-center)*phases;
         const auto phase=std::min(phases-1,static_cast<std::size_t>(fractional));
         const auto blend=fractional-static_cast<double>(phase);
+        // Rare final phases are reconstructed identically to free bounded space
+        // for the optional channel stages without changing the interpolation.
+        std::array<double,taps> first{},second{};
+        const auto* first_row=phase<stored_phases?&coefficients[phase]:(first=make_coefficients(phase),&first);
+        const auto* second_row=phase+1<stored_phases?&coefficients[phase+1]:(second=make_coefficients(phase+1),&second);
         Complex value{};
         for(std::size_t tap=0;tap<taps;++tap) {
             if((tap<7 && center<7-tap) || (tap>=7 && total-center<=tap-7))continue;
             const auto index=tap<7?center-(7-tap):center+(tap-7);
-            const auto coefficient=coefficients[phase][tap]+blend*(coefficients[phase+1][tap]-coefficients[phase][tap]);
+            const auto coefficient=(*first_row)[tap]+blend*((*second_row)[tap]-(*first_row)[tap]);
             value+=buffer[static_cast<std::size_t>(index-buffer_start)]*coefficient;
         }
         return value;
@@ -177,6 +231,8 @@ struct SampledPhysical {
     };
     Config config;
     ChannelConfig channel;
+    std::unique_ptr<Perturbation> perturbation;
+    std::unique_ptr<SpreadRay> spread;
     helper::Options options;
     helper::Plan plan;
     std::optional<Crypto> time_key;
@@ -236,6 +292,8 @@ struct SampledPhysical {
         // routes can place it beyond logical Nyquist and may need more stages.
         const auto selected=select_sampled_physical_clock(config,options,bandwidth,capture_domain);
         stage_count=selected.stages;factor=selected.factor;physical_rate=selected.rate;plan=selected.plan;
+        perturbation=make_perturbation(config,channel,physical_rate);
+        spread=make_spread(config,channel,physical_rate);
         const auto occupied=selected.occupied;
         occupied_bandwidth_hz=occupied;
         // Shared 257-tap Kaiser halfband, beta=14. Exact zeros are retained.
@@ -420,7 +478,9 @@ struct SampledPhysical {
         auto next_end=dwell_boundary(phase+next_origin+
             static_cast<long double>(next_total)/config.sample_rate+tail_seconds,true)-phase;
         next_end=helper::protected_endpoint(next_epoch,next_start,next_end);
-        const auto duration=next_startup+(next_end-next_origin)*config.sample_rate/rate;
+        const auto duration=std::max(next_startup+(next_end-next_origin)*config.sample_rate/rate,
+            next_startup+static_cast<long double>(next_total)/rate+
+                (spread?static_cast<long double>(channel.spread_delay_ms)*config.sample_rate/1000:0));
         if(!std::isfinite(next_startup)||next_startup<0||origin>=limit||
            !std::isfinite(duration)||duration<0||
            std::ceil(duration)+group_delay()+1>=static_cast<long double>(limit-origin))
@@ -555,6 +615,14 @@ struct SampledPhysical {
         }
         return value;
     }
+    Complex delayed(long double position,std::stop_token stop) {
+        const auto delayed_position=position-channel.spread_delay_ms*config.sample_rate*rate/1000;
+        if(!source || helper_only || delayed_position<0 || delayed_position>=total)return {};
+        return detail::preview_spread_ray(*source,delayed_position,total,[&](std::size_t phase) {
+            std::array<double,taps> row{};
+            std::copy(coefficients[phase].begin(),coefficients[phase].end(),row.begin());return row;
+        },stop);
+    }
     float next(StreamingTransmitter* transmitter,std::stop_token stop) {
         float output=0;
         for(;;) {
@@ -562,11 +630,17 @@ struct SampledPhysical {
             const auto time=static_cast<long double>(physical_received)/factor;
             const auto position=(time-origin-startup)*rate;
             Complex value{};
+            if(transmitter && position>=0&&position<total) {
+                const auto payload=interpolate(*transmitter,position,stop);
+                if(!helper_only)value=payload;
+            }
+            if(spread) {
+                const auto ray=channel.spread_delay_ms==0?value:(transmitter?delayed(position,stop):Complex{});
+                value=spread->process(value,ray);
+            }
+            value*=burst_rotation;
+            if(perturbation)value=perturbation->process(value);
             if(transmitter) {
-                if(position>=0&&position<total) {
-                    const auto payload=interpolate(*transmitter,position,stop);
-                    value=helper_only?Complex{}:payload*burst_rotation;
-                }
                 auto rendered_helper_end=helper_end;
                 if(lab_helper_end_sample) {
                     const auto cutoff=helper_origin+
@@ -583,6 +657,7 @@ struct SampledPhysical {
                     if(physical_received<rf_segment.settled_first_sample)value={};
                 }
             }
+            else if(perturbation || spread)value*=oscillator;
             const auto pcm=static_cast<float>(value.real()+noise());
             if(observer)observer_buffer[observer_count++]=pcm;
             advance();
@@ -621,8 +696,10 @@ struct SampledPhysical {
         total=endpoint;
         update_helper_end();
         prime(&transmitter,stop);
-        const auto end=startup+(helper_end-helper_origin)*config.sample_rate/rate;
         const auto payload_end=startup+static_cast<long double>(total)/rate;
+        const auto helper_end_sample=startup+(helper_end-helper_origin)*config.sample_rate/rate;
+        const auto end=std::max(helper_end_sample,payload_end+
+            (spread?channel.spread_delay_ms*config.sample_rate/1000:0));
         const bool reach_payload_end=static_cast<long double>(received-origin)<payload_end;
         std::size_t written=0;
         while(written<output.size()) {
@@ -657,10 +734,10 @@ struct SampledSimulationChannel::Impl {
          std::optional<PreconversionCapture> capture) {
         static_assert(sizeof(Impl)+sizeof(SampledLegacy)+sizeof(SampledSimulationChannel)+
             SampledSimulationChannel::auxiliary_workspace_bound+
-            SampledSimulationChannel::helper_cohort_workspace_bound<=SampledSimulationChannel::workspace_bound);
+            SampledSimulationChannel::helper_cohort_workspace_bound+sizeof(Perturbation)+sizeof(SpreadRay)<=SampledSimulationChannel::workspace_bound);
         static_assert(sizeof(Impl)+sizeof(SampledPhysical)+sizeof(SampledSimulationChannel)+
             SampledSimulationChannel::auxiliary_workspace_bound+
-            SampledSimulationChannel::physical_helper_cohort_workspace_bound<=SampledSimulationChannel::workspace_bound);
+            SampledSimulationChannel::physical_helper_cohort_workspace_bound+sizeof(Perturbation)+sizeof(SpreadRay)<=SampledSimulationChannel::workspace_bound);
         if(helper::effective_helper_power(options)>0)physical=std::make_unique<SampledPhysical>(config,channel,std::move(options),bandwidth,envelope,capture);
         else {
             if(capture)throw Error("preconversion capture requires an enabled Helper Carrier");
@@ -789,7 +866,18 @@ std::uint64_t SampledSimulationChannel::transmitted_samples()const {
     const auto position=(static_cast<long double>(s.received-s.origin)-s.startup)*s.rate;
     return position<=0?0:position>=s.total?s.total:static_cast<std::uint64_t>(position);
 }
-std::size_t SampledSimulationChannel::working_bytes()const{return sizeof(Impl)+sizeof(*this)+(impl_->physical?sizeof(SampledPhysical):sizeof(SampledLegacy));}
+std::size_t SampledSimulationChannel::working_bytes()const{return sizeof(Impl)+sizeof(*this)+(impl_->physical?
+    sizeof(SampledPhysical)+(impl_->physical->perturbation?sizeof(Perturbation):0)+(impl_->physical->spread?sizeof(SpreadRay):0):
+    sizeof(SampledLegacy)+(impl_->legacy->perturbation?sizeof(Perturbation):0)+(impl_->legacy->spread?sizeof(SpreadRay):0));}
+SampledSimulationChannel::PerturbationMetadata SampledSimulationChannel::perturbation_metadata()const {
+    const auto& channel=impl_->physical?impl_->physical->channel:impl_->legacy->channel;
+    const auto* p=impl_->physical?impl_->physical->perturbation.get():impl_->legacy->perturbation.get();
+    PerturbationMetadata result;result.seed=channel.seed;result.doppler_reference_hz=channel.spread_doppler_hz;
+    result.slow_depth=channel.perturbation_slow_depth;result.fast_depth=channel.perturbation_fast_depth;
+    if(p) {result.enabled=true;result.rates_hz=p->rates_hz;result.band_centers_hz=p->band_centers_hz;
+        result.band_width_hz=p->band_width_hz;result.initial_phases_radians=p->initial_phases;}
+    return result;
+}
 double SampledSimulationChannel::startup_offset_samples()const{return impl_->physical?static_cast<double>(impl_->physical->startup):static_cast<double>(impl_->legacy->startup);}
 double SampledSimulationChannel::carrier_phase_radians()const {
     if(impl_->physical) {
@@ -819,7 +907,8 @@ std::size_t SampledSimulationChannel::read(StreamingTransmitter& source,std::spa
             s.sigma=std::sqrt(nominal_signal_power*std::pow(10.,-s.channel.snr_db/10))*s.helper_plan->data_gain;
             s.helper_generator.emplace(s.helper_options,*s.helper_plan,origin/s.config.sample_rate,false,impl_->time_key);
         }
-        const auto duration=std::ceil(s.startup+static_cast<long double>(s.total)/s.rate);
+        const auto duration=std::ceil(s.startup+static_cast<long double>(s.total)/s.rate+
+            (s.spread?static_cast<long double>(s.channel.spread_delay_ms)*s.config.sample_rate/1000:0));
         if(duration>=static_cast<long double>(std::numeric_limits<std::uint64_t>::max()-s.origin))
             throw Error("sampled simulation duration exceeds the receiver counter");
     } else if(s.source!=&source || source.samples_emitted()!=s.buffer_start+s.buffer_count)
@@ -835,13 +924,22 @@ std::size_t SampledSimulationChannel::read(StreamingTransmitter& source,std::spa
     while(written<output.size()) {
         if((written&4095U)==0 && stop.stop_requested())throw Error("modem operation cancelled");
         const auto position=(static_cast<long double>(s.received-s.origin)-s.startup)*s.rate;
-        if(position>=s.total){s.complete=true;break;}
-        auto value=position<0?Complex{}:s.interpolate(source,position,stop);
+        const auto delay=s.spread?s.channel.spread_delay_ms*s.config.sample_rate*s.rate/1000:0;
+        if(position>=s.total+delay){s.complete=true;break;}
+        auto value=position<0 || position>=s.total?Complex{}:s.interpolate(source,position,stop);
+        if(s.spread) {
+            const auto delayed=delay==0?value:detail::preview_spread_ray(source,position-delay,s.total,[&](std::size_t phase) {
+                return phase<s.stored_phases?s.coefficients[phase]:s.make_coefficients(phase);
+            },stop);
+            value=s.spread->process(value,delayed);
+        }
+        if(s.perturbation)value=s.perturbation->process(value*s.burst_rotation);
         if(position>=0 && s.helper_generator) {
             value=s.helper_generator->mix_analytic(s.helper_only?Complex{}:value,s.helper_origin+position/s.config.sample_rate,s.config.sample_rate,
                 s.helper_origin+static_cast<long double>(s.total)/s.config.sample_rate,s.helper_origin);
         }
-        if(position>=0)value=value*s.oscillator*s.burst_rotation;
+        if(position>=0 || s.perturbation || s.spread)
+            value=s.perturbation?value*s.oscillator:value*s.oscillator*s.burst_rotation;
         output[written++]=static_cast<float>(value.real()+s.noise());s.advance();
         if(written==1)live::detail::simulation_checkpoint(live::detail::SimulationPhase::read_progress,s.received);
     }
@@ -854,7 +952,14 @@ void SampledSimulationChannel::read_noise(std::span<float> output,std::stop_toke
     if(stop.stop_requested())throw Error("modem operation cancelled");
     for(std::size_t i=0;i<output.size();++i) {
         if((i&4095U)==0 && stop.stop_requested())throw Error("modem operation cancelled");
-        output[i]=static_cast<float>(s.noise());s.advance();
+        Complex tail{};
+        // Source lifetime belongs to the caller; read_noise never dereferences
+        // a transmitter retained from an earlier read. read() drains the ray.
+        if(s.spread)tail=s.spread->process({},{});
+        if(s.perturbation)tail=s.perturbation->process(tail*s.burst_rotation);
+        if(s.perturbation)tail*=s.oscillator;
+        else if(s.spread)tail*=s.oscillator*s.burst_rotation;
+        output[i]=static_cast<float>(tail.real()+s.noise());s.advance();
     }
     if(impl_->observer&&!output.empty())impl_->observer(output,s.config.sample_rate,s.received-output.size());
 }
@@ -873,6 +978,8 @@ struct SimulationChannel::Impl {
     Impl(Config value,ChannelConfig impairment):config(value),channel(impairment),
         phase_random(impairment.seed^0xa0761d6478bd642fULL),noise_random(impairment.seed) {
         validate(config);validate_channel(config,channel);
+        if(channel.spread_delay_ms!=0 || channel.spread_doppler_hz!=0)
+            throw Error("accelerated simulation does not support propagation spread; use the sampled simulation channel");
         rate=1+static_cast<long double>(channel.clock_error_ppm)*1e-6L;
         frequency=channel.frequency_offset_hz+static_cast<long double>(config.carrier_hz)*(rate-1);
         diffusion=channel.phase_noise_degrees_per_sqrt_second*std::numbers::pi/180;

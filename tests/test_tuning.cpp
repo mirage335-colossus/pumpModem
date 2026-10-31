@@ -4,6 +4,7 @@
 #include "datapump/pattern_search.hpp"
 #include "resource_test_margin.hpp"
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cmath>
 #include <iostream>
@@ -534,8 +535,20 @@ void physical_simulation_presets() {
     rejects([]{tuning::parse_simulation_preset("3dBm -7dB");},"reject unlisted preset");
 }
 void oscillator_simulation_presets() {
+    const auto spread=tuning::spread_presets();
+    constexpr std::array expected_delay{0.,.005,.05,5.,.5,6.,7.,3.,11.,.5};
+    constexpr std::array expected_doppler{0.,.001,.005,.05,.1,10.,30.,10.,55.,6.};
+    check(spread.size()==expected_delay.size(),"Propagation preset count changed");
+    for(std::size_t i=0;i<spread.size();++i)
+        check(spread[i].delay_ms==expected_delay[i] && spread[i].doppler_hz==expected_doppler[i] &&
+              spread[i].default_perturbation==(i>=4),"Propagation preset values/default changed");
+    check(spread.size()==10 && tuning::parse_spread_preset("hf-moderate").doppler_hz==10 &&
+          tuning::parse_spread_preset("hf-moderate").delay_ms==6 &&
+          tuning::parse_spread_preset("eme-focused").doppler_hz==6 &&
+          tuning::parse_spread_preset("eme-focused").delay_ms==.5,
+          "Propagation presets must retain requested values");
     const auto presets=tuning::oscillator_presets();
-    check(presets.size()==5,"oscillator simulation must include crystal, three GPSDO tiers and an IC-7100 RF example");
+    check(presets.size()==7,"oscillator simulation must include crystal, two SSB models, three GPSDO tiers and an IC-7100 RF example");
     const modem::ChannelConfig defaults;
     check(presets.front().id=="crystal" &&
           presets.front().clock_error_ppm==defaults.clock_error_ppm &&

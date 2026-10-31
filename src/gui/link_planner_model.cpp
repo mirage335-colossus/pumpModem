@@ -594,6 +594,7 @@ auto curve_base_key(const transfer::Options& options,const modem::ChannelConfig&
         options.clock_sync.value_or(clock_sync::Policy{}).region_seconds,
         options.clock_sync.value_or(clock_sync::Policy{}).offset_seconds,channel.snr_db,channel.frequency_offset_hz,
         channel.delay_samples,channel.clock_error_ppm,channel.phase_noise_degrees_per_sqrt_second,
+        channel.spread_delay_ms,channel.spread_doppler_hz,channel.perturbation_slow_depth,channel.perturbation_fast_depth,
         c.fake_hopping?c.fake_hopping->power_ramps:false,modem::deferred_symbols(c),
         c.fake_hopping?c.fake_hopping->matched_gaps:false,c.fake_hopping?c.fake_hopping->mandatory_ramps:false,
         c.fake_hopping?c.fake_hopping->smooth_ramps:false,c.fake_hopping?c.fake_hopping->remote_guard_covered:false,

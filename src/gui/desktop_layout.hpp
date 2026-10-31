@@ -4,11 +4,11 @@
 #include <cstddef>
 
 namespace datapump::gui::ui {
-inline constexpr int default_width = 1180, default_height = 1120;
-inline constexpr int min_width = 1130, min_height = 1040;
+inline constexpr int default_width = 1180, default_height = 1168;
+inline constexpr int min_width = 1130, min_height = 1088;
 // Preserve established body sizing when the header requires a wider minimum.
 inline constexpr int body_growth_width = 1030;
-inline constexpr int oscillator_row_height = 48;
+inline constexpr int oscillator_row_height = 96;
 inline constexpr int helper_row_height = 48;
 inline constexpr int key_path_row_height = 24;
 inline constexpr int simulation_estimate_row_height = 48;
@@ -19,7 +19,7 @@ enum class Slot {
     none, header, fast_mode, mode, developer_mode, shellcode_mode, clear, callsign, grid, repeatable, simulation,
     link_power, link_loss, link_noise,
     simulation_confidence, simulation_cpu_time, simulation_gpu_time,
-    simulation_oscillator, rf_oscillator, search_margin, helper_power, helper_ratio_limit, helper_frequency, helper_callsign, transmit_helper, key_actions,
+    simulation_oscillator, rf_oscillator, spread_preset, selective_perturbation, search_margin, helper_power, helper_ratio_limit, helper_frequency, helper_callsign, transmit_helper, key_actions,
     key_path, key, clock_accuracy, clock_region, clock_offset, audio_error, dsss_factor, dsss_version, fhss, tabs, page, message_label, paste_previous, force_transmit, binary_label, message,
     binary, qr_brightness, qr, attach_file, use_text, send_key, transmit, transmit_noise,
     cancel, airtime, transmit_scope_caption, transmit_scope_format, transmit_scope, profile_reference, signal_label, signals, copy_signal, paste_signal, recovery_actions, file_label, files,
@@ -45,7 +45,7 @@ inline constexpr bool persistent_slot(Slot slot) {
     case Slot::callsign: case Slot::grid: case Slot::repeatable: case Slot::simulation:
     case Slot::link_power: case Slot::link_loss: case Slot::link_noise:
     case Slot::simulation_confidence: case Slot::simulation_cpu_time: case Slot::simulation_gpu_time:
-    case Slot::simulation_oscillator: case Slot::rf_oscillator:
+    case Slot::simulation_oscillator: case Slot::rf_oscillator: case Slot::spread_preset: case Slot::selective_perturbation:
     case Slot::helper_power: case Slot::helper_ratio_limit: case Slot::helper_frequency: case Slot::helper_callsign: case Slot::transmit_helper:
     case Slot::search_margin: case Slot::clock_accuracy: case Slot::clock_region: case Slot::clock_offset: case Slot::audio_error:
     case Slot::dsss_factor: case Slot::dsss_version: case Slot::fhss:
@@ -180,31 +180,35 @@ struct DesktopLayout {
         out[Slot::link_loss] = {loss_x, 105, loss_width, field_height};
         out[Slot::link_noise] = {noise_x, 105, confidence_x - group_gap - noise_x, field_height};
         out[Slot::simulation_confidence] = {confidence_x, 89, confidence_width, 43};
-        // Keep clock assumptions together without consuming another row.
+        // Clock assumptions occupy their own row; full-width model controls follow.
         out[Slot::clock_accuracy] = {margin, 153, 90, field_height};
         out[Slot::clock_region] = {116, 153, 80, field_height};
         out[Slot::clock_offset] = {206, 153, 80, field_height};
         out[Slot::audio_error] = {296, 153, 90, field_height};
-        const int oscillator_width = width - 396 - margin - 90 - 2 * group_gap;
-        const int baseband_width = oscillator_width / 2;
-        const int shift_x = 396 + baseband_width + group_gap;
-        const int shift_oscillator_width = oscillator_width - baseband_width;
-        out[Slot::simulation_oscillator] = {396, 153, baseband_width, field_height};
-        out[Slot::rf_oscillator] = {shift_x, 153, shift_oscillator_width, field_height};
-        out[Slot::search_margin] = {shift_x + shift_oscillator_width + group_gap, 153, 90, field_height};
+        const int spread_width=200, perturbation_width=140, margin_width=90;
+        const int oscillator_width=(width-2*margin-4*group_gap-spread_width-perturbation_width-margin_width)/2;
+        const int baseband_x=margin;
+        const int shift_x=baseband_x+oscillator_width+group_gap;
+        const int spread_x=shift_x+oscillator_width+group_gap;
+        const int perturbation_x=spread_x+spread_width+group_gap;
+        out[Slot::simulation_oscillator]={baseband_x,201,oscillator_width,field_height};
+        out[Slot::rf_oscillator]={shift_x,201,oscillator_width,field_height};
+        out[Slot::spread_preset]={spread_x,201,spread_width,field_height};
+        out[Slot::selective_perturbation]={perturbation_x,201,perturbation_width,field_height};
+        out[Slot::search_margin]={perturbation_x+perturbation_width+group_gap,201,width-margin-(perturbation_x+perturbation_width+group_gap),field_height};
         const int helper_column=(width-2*margin-3*group_gap)/4;
-        out[Slot::helper_power]={margin,201,helper_column,field_height};
-        out[Slot::helper_ratio_limit]={margin+helper_column+group_gap,201,helper_column,field_height};
-        out[Slot::helper_frequency]={margin+2*(helper_column+group_gap),201,helper_column,field_height};
-        out[Slot::helper_callsign]={margin+3*(helper_column+group_gap),201,width-margin-(margin+3*(helper_column+group_gap))-69,field_height};
-        out[Slot::transmit_helper]={width-margin-61,201,61,field_height};
+        out[Slot::helper_power]={margin,249,helper_column,field_height};
+        out[Slot::helper_ratio_limit]={margin+helper_column+group_gap,249,helper_column,field_height};
+        out[Slot::helper_frequency]={margin+2*(helper_column+group_gap),249,helper_column,field_height};
+        out[Slot::helper_callsign]={margin+3*(helper_column+group_gap),249,width-margin-(margin+3*(helper_column+group_gap))-69,field_height};
+        out[Slot::transmit_helper]={width-margin-61,249,61,field_height};
         const int cpu_width = (width - 2 * margin - group_gap) * 42 / 100;
-        out[Slot::simulation_cpu_time] = {margin, 185+helper_row_height, cpu_width, simulation_estimates_visible ? 43 : 0};
+        out[Slot::simulation_cpu_time] = {margin, 233+helper_row_height, cpu_width, simulation_estimates_visible ? 43 : 0};
         const int gpu_x = margin + cpu_width + group_gap;
-        out[Slot::simulation_gpu_time] = {gpu_x, 185+helper_row_height, width - margin - gpu_x, simulation_estimates_visible ? 43 : 0};
+        out[Slot::simulation_gpu_time] = {gpu_x, 233+helper_row_height, width - margin - gpu_x, simulation_estimates_visible ? 43 : 0};
         for(const auto slot:{Slot::simulation,Slot::link_power,Slot::link_loss,Slot::link_noise,
             Slot::simulation_confidence,Slot::clock_accuracy,Slot::clock_region,Slot::clock_offset,Slot::audio_error,
-            Slot::simulation_oscillator,Slot::rf_oscillator,Slot::search_margin,
+            Slot::simulation_oscillator,Slot::rf_oscillator,Slot::spread_preset,Slot::selective_perturbation,Slot::search_margin,
             Slot::helper_power,Slot::helper_ratio_limit,Slot::helper_frequency,Slot::helper_callsign,Slot::transmit_helper,
             Slot::simulation_cpu_time,Slot::simulation_gpu_time})out[slot].y+=key_path_row_height;
         out[Slot::tabs] = {margin, 137, width - 2 * margin, content_height - 296};

@@ -543,6 +543,38 @@ void empty_composer_preview() {
           "An empty attachment must retain its fixed-interval format and normal send eligibility");
     controller.close();
 }
+void spread_controls() {
+    using F=ui::Field;
+    Controller controller({true,true});
+    check(controller.field(F::spread_preset).options.size()==10 &&
+          controller.field(F::selective_perturbation).options.size()==16 &&
+          controller.field(F::spread_preset).selected=="hf-moderate" &&
+          controller.field(F::selective_perturbation).selected=="each-65",
+          "Spread and perturbation defaults/options changed");
+    check(controller.settings().simulation_spread_delay_ms==18 &&
+          controller.settings().simulation_spread_doppler_hz==30 &&
+          controller.settings().simulation_perturbation_slow_depth==.65 &&
+          controller.settings().simulation_perturbation_fast_depth==.65,
+          "Default spread must apply the 3x margin to both dimensions");
+    controller.select(F::spread_preset,"sub9-best");
+    check(controller.field(F::selective_perturbation).selected=="off" &&
+          controller.settings().simulation_spread_delay_ms==.015 &&
+          controller.settings().simulation_spread_doppler_hz==.003,
+          "Sub-9 preset/default did not reach simulation with margin");
+    controller.select(F::selective_perturbation,"fast-25");
+    controller.edit(F::search_margin,"2x");
+    check(controller.field(F::selective_perturbation).selected=="fast-25" &&
+          controller.settings().simulation_perturbation_slow_depth==0 &&
+          controller.settings().simulation_perturbation_fast_depth==.25 &&
+          controller.settings().simulation_spread_doppler_hz==.002,
+          "Explicit perturbation must survive unrelated configuration edits");
+    controller.select(F::spread_preset,"eme-focused");
+    check(controller.field(F::selective_perturbation).selected=="each-65" &&
+          controller.settings().simulation_spread_delay_ms==1 &&
+          controller.settings().simulation_spread_doppler_hz==12,
+          "EME preset must choose Each 65 and apply margin");
+    controller.close();
+}
 void oscillator_controls() {
     using F=ui::Field;
     Controller controller({true,true});
@@ -3739,6 +3771,7 @@ int main(int argc,char** argv) {
             std::cout<<"Delayed replay interruption checks passed\n";
             return 0;
         }
+        if(argc>1&&std::string_view(argv[1])=="--spread-controls") {spread_controls();std::cout<<"Spread controls passed\n";return 0;}
         if(argc>1&&std::string_view(argv[1])=="--carrier-controls") {rate_carrier_controls();std::cout<<"Carrier controls passed\n";return 0;}
         if(argc>1&&std::string_view(argv[1])=="--helper-controls") {helper_controls();std::cout<<"Helper controls passed\n";return 0;}
         if(argc>1&&std::string_view(argv[1])=="--fhss-list-controls") {fake_hop_display(true);std::cout<<"FHSS list controls passed\n";return 0;}
@@ -3746,7 +3779,7 @@ int main(int argc,char** argv) {
         datapump::gui::controller_self_check();
         simulation_estimate_controls();
         empty_composer_preview();
-        oscillator_controls();shift_oscillator_controls();
+        spread_controls();oscillator_controls();shift_oscillator_controls();
         lpi_estimate_controls();
         revised_reception_ingestion();
         pending_replay_batch();

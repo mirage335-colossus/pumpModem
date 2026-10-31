@@ -115,6 +115,14 @@ struct OscillatorPreset {
 std::span<const OscillatorPreset> oscillator_presets();
 OscillatorPreset parse_oscillator_preset(std::string_view name);
 modem::OscillatorModel oscillator_model(const OscillatorPreset&);
+// Delay and Doppler spread are channel dispersion, separate from radial motion.
+struct SpreadPreset {
+    std::string_view id, name;
+    double delay_ms, doppler_hz;
+    bool default_perturbation;
+};
+std::span<const SpreadPreset> spread_presets();
+SpreadPreset parse_spread_preset(std::string_view name);
 struct LinkBudget {
     double received_power_dbm = 0;
     double noise_power_dbm = 0; // In the configured channel bandwidth.

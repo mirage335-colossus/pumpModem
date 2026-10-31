@@ -438,6 +438,16 @@ struct Controller::Impl {
         }
         f(UiField::simulation_oscillator).selected="crystal";
         f(UiField::rf_oscillator).selected="crystal";
+        for(const auto& preset:tuning::spread_presets())
+            f(UiField::spread_preset).options.push_back({std::string(preset.id),std::string(preset.name)});
+        f(UiField::spread_preset).selected="hf-moderate";
+        f(UiField::selective_perturbation).options.push_back({"off","Off"});
+        for(const auto* kind:{"slow","fast","each"}) for(const auto depth:{1,5,10,25,65}) {
+            const std::string name=kind;
+            const auto label=(name=="slow"?"Slow":name=="fast"?"Fast":"Each")+std::string(" — ")+std::to_string(depth)+"%";
+            f(UiField::selective_perturbation).options.push_back({name+"-"+std::to_string(depth),label});
+        }
+        f(UiField::selective_perturbation).selected="each-65";
         for(const auto* value:{"0.000000c","100 knots","-100 knots","100 mph","-100 mph","100 kph","-100 kph"})
             f(UiField::doppler).options.push_back({value,value});
         f(UiField::rf_shift).text="0 Hz";
@@ -988,6 +998,25 @@ struct Controller::Impl {
             oscillator_policy.reference=shared?modem::OscillatorReference::shared_radio:modem::OscillatorReference::independent_audio;
             oscillator_policy.sideband=modem::OscillatorSideband::upper;
             modem::validate_oscillator_search(oscillator_policy);
+            const auto spread_id=load&&load->spread_preset?*load->spread_preset:f(UiField::spread_preset).selected;
+            const auto spread=tuning::parse_spread_preset(spread_id);
+            next.simulation_spread_delay_ms=spread.delay_ms*oscillator_policy.margin;
+            next.simulation_spread_doppler_hz=spread.doppler_hz*oscillator_policy.margin;
+            const auto perturbation=load&&load->selective_perturbation?*load->selective_perturbation:
+                load&&load->spread_preset?(spread.default_perturbation?"each-65":"off"):f(UiField::selective_perturbation).selected;
+            next.simulation_perturbation_slow_depth=0;
+            next.simulation_perturbation_fast_depth=0;
+            if(perturbation!="off") {
+                const auto separator=perturbation.find('-');
+                if(separator==std::string::npos)throw Error("Invalid selective perturbation");
+                const auto depth=number(perturbation.substr(separator+1),"Perturbation depth")/100.;
+                next.simulation_perturbation_slow_depth=perturbation.starts_with("slow-")||perturbation.starts_with("each-")?depth:0;
+                next.simulation_perturbation_fast_depth=perturbation.starts_with("fast-")||perturbation.starts_with("each-")?depth:0;
+            }
+            next_planner.channel.spread_delay_ms=next.simulation_spread_delay_ms;
+            next_planner.channel.spread_doppler_hz=next.simulation_spread_doppler_hz;
+            next_planner.channel.perturbation_slow_depth=next.simulation_perturbation_slow_depth;
+            next_planner.channel.perturbation_fast_depth=next.simulation_perturbation_fast_depth;
             std::ostringstream oscillator_detail;
             oscillator_detail<<std::setprecision(6)<<"Clock mismatch "<<oscillator.clock_error_ppm<<" ppm | Phase diffusion "
                 <<oscillator.phase_noise_degrees_per_sqrt_second<<" deg / sqrt(s)";
@@ -1321,6 +1350,8 @@ struct Controller::Impl {
                 target_edits={};receive_target_edit.reset();
                 f(UiField::simulation_oscillator).selected=oscillator_id;
                 f(UiField::rf_oscillator).selected=shift_oscillator_id;
+                f(UiField::spread_preset).selected=spread_id;
+                f(UiField::selective_perturbation).selected=perturbation;
                 f(UiField::rf_shift).text=exact_frequency_text(oscillator_policy.rf_shift_hz);
                 f(UiField::search_margin).text=planner_number(oscillator_policy.margin)+"x";
                 f(UiField::oscillator_reference).selected=reference;
@@ -1370,6 +1401,10 @@ struct Controller::Impl {
             update_link_channel(next);
             if(match_receive_target||align_receive)receive_target_edit=std::move(receive_adjustment);
             if(!receive_target_edit)f(UiField::receive_snr).text=targets.canonical;
+            planner_inputs.channel.spread_delay_ms=next.simulation_spread_delay_ms;
+            planner_inputs.channel.spread_doppler_hz=next.simulation_spread_doppler_hz;
+            planner_inputs.channel.perturbation_slow_depth=next.simulation_perturbation_slow_depth;
+            planner_inputs.channel.perturbation_fast_depth=next.simulation_perturbation_fast_depth;
             settings=std::move(next);searched_spectrum=next_spectrum;timing_advice.reset(); settings_valid=true;settings_error.clear();
             carrier_options(carrier_tones,shift,doppler);
             if(!carrier_edit_pending||load)f(UiField::carrier).text=exact_frequency_text(physical_carrier);
@@ -1509,6 +1544,8 @@ struct Controller::Impl {
         if(policy.rf_shift_hz>0)values.rf_oscillator=f(UiField::rf_oscillator).selected=="baseband-clock"?
             f(UiField::simulation_oscillator).selected:f(UiField::rf_oscillator).selected;
         values.search_margin=policy.margin;
+        values.spread_preset=f(UiField::spread_preset).selected;
+        values.selective_perturbation=f(UiField::selective_perturbation).selected;
         values.reference=policy.reference==modem::OscillatorReference::shared_radio?"shared-radio":"independent";
         values.target_db_hz=planner_inputs.target_db_hz;
         // Export actual independent TX targets without inventing redundant
@@ -1855,7 +1892,7 @@ struct Controller::Impl {
         f(UiField::planner_target).enabled=!closing;
         f(UiField::planner_command).enabled=!closing;
         sync_launch_command();
-        for(auto id:{UiField::clock_accuracy,UiField::clock_region,UiField::clock_offset,UiField::audio_error,UiField::dsss_factor,UiField::dsss_version,UiField::search_arithmetic,UiField::receiver_strategy,UiField::receiver_cpu_budget,UiField::fhss,UiField::sched_hop,UiField::sched_frequency_search,UiField::sched_hop_dilution,UiField::fhss_list,UiField::simulation,UiField::simulation_oscillator,UiField::rf_oscillator,UiField::rf_shift,UiField::doppler,UiField::search_margin,
+        for(auto id:{UiField::clock_accuracy,UiField::clock_region,UiField::clock_offset,UiField::audio_error,UiField::dsss_factor,UiField::dsss_version,UiField::search_arithmetic,UiField::receiver_strategy,UiField::receiver_cpu_budget,UiField::fhss,UiField::sched_hop,UiField::sched_frequency_search,UiField::sched_hop_dilution,UiField::fhss_list,UiField::simulation,UiField::simulation_oscillator,UiField::rf_oscillator,UiField::spread_preset,UiField::selective_perturbation,UiField::rf_shift,UiField::doppler,UiField::search_margin,
             UiField::link_power,UiField::link_loss,UiField::link_noise,UiField::key,UiField::device,UiField::mono,UiField::live_duplex,UiField::volume,UiField::exclusive,UiField::bandwidth,UiField::carrier,UiField::snr,UiField::long_snr,UiField::receive_snr,UiField::pattern,UiField::fec,UiField::dsp_workspace}) f(id).enabled=!busy;
         f(UiField::helper_power).enabled=!busy;
         const bool helper_enabled=f(UiField::helper_power).selected!="0";
@@ -2043,6 +2080,10 @@ struct Controller::Impl {
                     channel.clock_error_ppm=simulation_settings.simulation_clock_error_ppm;
                     channel.frequency_offset_hz=simulation_settings.simulation_frequency_offset_hz;
                     channel.phase_noise_degrees_per_sqrt_second=simulation_settings.simulation_phase_noise_degrees_per_sqrt_second;
+                    channel.spread_delay_ms=simulation_settings.simulation_spread_delay_ms;
+                    channel.spread_doppler_hz=simulation_settings.simulation_spread_doppler_hz;
+                    channel.perturbation_slow_depth=simulation_settings.simulation_perturbation_slow_depth;
+                    channel.perturbation_fast_depth=simulation_settings.simulation_perturbation_fast_depth;
                     channel.seed=simulation_settings.simulation_seed;
                     const auto& base=simulation_settings.transfer;
                     // Match the live bank's deduplication of identical key material.
@@ -2822,6 +2863,11 @@ void Controller::select(UiField field,std::string id) {
             p.f(UiField::bandwidth).text=exact_frequency_text(3600./factor);
             p.configure();
         }
+        else if(field==UiField::spread_preset) {
+            p.f(UiField::selective_perturbation).selected=tuning::parse_spread_preset(state.selected).default_perturbation?"each-65":"off";
+            p.configure();
+        }
+        else if(field==UiField::selective_perturbation) p.configure();
         else if(field==UiField::helper_power||field==UiField::helper_ratio_limit||field==UiField::helper_frequency||field==UiField::simulation||field==UiField::simulation_oscillator||field==UiField::rf_oscillator||
             field==UiField::fec||field==UiField::dsp_workspace||field==UiField::fhss||field==UiField::sched_hop||
             field==UiField::symbol_burst||field==UiField::symbol_burst_random||

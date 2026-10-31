@@ -165,7 +165,7 @@ Patch parse_arguments(std::span<const std::string> arguments) {
         const bool known=flag=="--tx-dbm"||flag=="--path-loss-db"||flag=="--noise-dbm-hz"||
             flag=="--oscillator"||flag=="--target-snr"||flag=="--short-target-snr"||flag=="--long-target-snr"||
             flag=="--rate"||flag=="--bw"||flag=="--carrier"||flag=="--dsp-workspace"||flag=="--pattern"||
-            flag=="--rf-oscillator"||flag=="--shift"||flag=="--rf-shift"||flag=="--rf-carrier"||flag=="--search-margin"||
+            flag=="--spread-preset"||flag=="--selective-perturbation"||flag=="--rf-oscillator"||flag=="--shift"||flag=="--rf-shift"||flag=="--rf-carrier"||flag=="--search-margin"||
             flag=="--reference"||flag=="--sideband"||flag=="--lf-reference"||
             flag=="--clock-sync"||flag=="--audio-error"||flag=="--dsss-factor"||flag=="--dsss-version"||flag=="--dsss-mode"||flag=="--search-arithmetic"||flag=="--receiver-strategy"||flag=="--receiver-cpu-budget"||flag=="--doppler"||flag=="--fhss"||flag=="--sched-hop"||flag=="--sched-hop-dilution"||flag=="--sched-frequency-search"||flag=="--fhss-list"||flag=="--fhss-list-file"||flag=="--live-duplex"||
             flag=="--keyfile"||flag=="--key-name"||flag=="--tx-key"||
@@ -246,6 +246,14 @@ Patch parse_arguments(std::span<const std::string> arguments) {
             if(preset.id=="ic-7100")invalid("IC-7100 is an RF Shift oscillator example; its audio-clock accuracy is not specified.");
             result.oscillator=std::string(preset.id);
         }
+        else if(flag=="--spread-preset")result.spread_preset=std::string(tuning::parse_spread_preset(value).id);
+        else if(flag=="--selective-perturbation") {
+            bool valid=value=="off";
+            for(const auto* kind:{"slow","fast","each"})for(const auto* depth:{"1","5","10","25","65"})
+                if(value==std::string(kind)+"-"+depth)valid=true;
+            if(!valid)invalid("--selective-perturbation must be off, or slow/fast/each with depth 1, 5, 10, 25 or 65.");
+            result.selective_perturbation=value;
+        }
         else if(flag=="--rf-oscillator")result.rf_oscillator=std::string(tuning::parse_oscillator_preset(value).id);
         else if(flag=="--shift"||flag=="--rf-shift")result.rf_shift_hz=frequency(value,flag,0,true,std::numeric_limits<double>::max());
         else if(flag=="--rf-carrier")carrier_alias=frequency(value,flag,0,false,std::numeric_limits<double>::max());
@@ -317,6 +325,8 @@ std::string format(const Patch& settings) {
     if(settings.noise_dbm_hz)add("--noise-dbm-hz",numeric(*settings.noise_dbm_hz));
     if(settings.oscillator)add("--oscillator",std::string(tuning::parse_oscillator_preset(*settings.oscillator).id));
     if(settings.rf_oscillator)add("--rf-oscillator",std::string(tuning::parse_oscillator_preset(*settings.rf_oscillator).id));
+    if(settings.spread_preset)add("--spread-preset",std::string(tuning::parse_spread_preset(*settings.spread_preset).id));
+    if(settings.selective_perturbation)add("--selective-perturbation",*settings.selective_perturbation);
     if(settings.rf_shift_hz)add("--shift",numeric(*settings.rf_shift_hz));
     if(settings.search_margin)add("--search-margin",numeric(*settings.search_margin));
     if(settings.reference)add("--reference",*settings.reference);

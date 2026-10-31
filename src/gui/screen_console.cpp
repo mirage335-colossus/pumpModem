@@ -12,7 +12,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     case Slot::clear:case Slot::transmit:case Slot::transmit_noise:case Slot::transmit_helper:case Slot::cancel:
         control.purpose=ControlPurpose::operation;break;
     case Slot::simulation:case Slot::link_power:case Slot::link_loss:case Slot::link_noise:
-    case Slot::simulation_oscillator:case Slot::rf_oscillator:
+    case Slot::simulation_oscillator:case Slot::rf_oscillator:case Slot::spread_preset:case Slot::selective_perturbation:
     case Slot::search_margin: case Slot::clock_accuracy: case Slot::clock_region: case Slot::clock_offset: case Slot::audio_error:
         control.purpose=ControlPurpose::planning;break;
     case Slot::device:case Slot::mono:case Slot::live_duplex:case Slot::exclusive:case Slot::key:case Slot::key_actions:
@@ -78,7 +78,9 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
         control.help="Illustrative effective TX/RX residual sample-clock mismatch and random-walk phase diffusion used by sampled simulation, model estimates and bounded real receiver search. This Baseband model always describes the ADC/DAC clock. Select Baseband clock under Shift Osc when the mixer shares that reference. At Shift 0 only this model contributes. Model limits and references contains numerical assumptions and search bounds. All GPSDO choices share a 0.0001 ppm locked-link residual assumption; their phase-diffusion scenarios differ. GPS lock does not imply phase coherence. Hobbyist XO and TCXO choices have no oven. These are scenario assumptions, not measured product specifications or a full GPS control-loop model. This choice does not discipline audio hardware or control a physical oscillator.";
     if(control.field==Field::rf_oscillator)control.help="Effective relative TX/RX frequency-shift oscillator accuracy and phase diffusion. Select Baseband clock when the mixer and ADC/DAC share a reference; its errors are counted once with linked drift. At Shift 0 this choice is disabled as N/A and contributes no frequency or phase drift; the selection is remembered. Illustrative models are not measured hardware guarantees and selecting one does not control hardware.";
     if(control.field==Field::rf_shift)control.help="Absolute frequency translation or radio LO in Hz, kHz, MHz, GHz or THz; default 0 Hz. Fixed USB delivers a real ADC/DAC stream at Carrier minus Shift, which must stay positive. Set Carrier above Shift to keep the desired stream tone. This setting does not retune physical hardware.";
-    if(control.field==Field::search_margin)control.help="Conservative multiplier on justified relative frequency and sample-clock accuracy; default 3x. At least 1x. Model limits and references shows requested and actually covered bounds. A margin cannot guarantee an unjustified oscillator specification.";
+    if(control.field==Field::spread_preset)control.help="Channel Doppler and delay spread (not radial vehicle Doppler). Values are nominal; Margin multiplies both. EME is referenced to 1296 MHz. Planner analytical estimates do not include spread or selective perturbation.";
+    if(control.field==Field::selective_perturbation)control.help="Additional frequency-selective amplitude modulation; slow and fast rates are 0.1 and 1 times the margin-adjusted Doppler spread. Off bypasses the stage. Each applies both selected depths. Use --verbose or --verbose-file to record the actual seed, rates and phases.";
+    if(control.field==Field::search_margin)control.help="Conservative multiplier on Doppler/delay spread and justified relative frequency and sample-clock accuracy; default 3x. At least 1x. Model limits and references shows requested and actually covered bounds. A margin cannot guarantee an unjustified oscillator specification.";
 
     if(slot==Slot::clock_accuracy)control.help="GPS PC-clock error bound at each station, independent of oscillator accuracy or GPSDO. The arrival search adds both station bounds. Editable ns/us/ms/s; Default restores all four timing controls and the existing six-second epoch search.";
     if(slot==Slot::clock_region)control.help="Total remaining propagation-delay search width centered on Offset. For example 400 ms means +/-200 ms. Both GPS error bounds are added outside this region. Editable ns/us/ms/s; Default resets all four timing controls.";
@@ -241,6 +243,8 @@ const std::vector<Control>& console_screen() {
         placed({Kind::text,Field::audio_error,Command::none,Bitmap::none,Page::console,3,"Audio error",1,false,128}, Slot::audio_error),
         placed({Kind::choice,Field::simulation_oscillator,Command::none,Bitmap::none,Page::console,3,"Baseband Osc"}, Slot::simulation_oscillator),
         placed({Kind::choice,Field::rf_oscillator,Command::none,Bitmap::none,Page::console,3,"Shift Osc"}, Slot::rf_oscillator),
+        placed({Kind::choice,Field::spread_preset,Command::none,Bitmap::none,Page::console,3,"Doppler/delay spread"}, Slot::spread_preset),
+        placed({Kind::choice,Field::selective_perturbation,Command::none,Bitmap::none,Page::console,3,"Add. freq-selective"}, Slot::selective_perturbation),
         placed({Kind::text,Field::search_margin,Command::none,Bitmap::none,Page::console,3,"Margin",1,false,64}, Slot::search_margin),
         placed({Kind::text,Field::helper_power,Command::none,Bitmap::none,Page::console,4,"Helper Carrier Power",1,false,64}, Slot::helper_power),
         placed({Kind::choice,Field::helper_ratio_limit,Command::none,Bitmap::none,Page::console,4,"Helper Carrier Ratio Limit"}, Slot::helper_ratio_limit),

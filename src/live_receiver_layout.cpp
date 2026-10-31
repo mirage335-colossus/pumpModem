@@ -72,6 +72,10 @@ modem::ChannelConfig channel_config(const Settings& settings) {
     channel.clock_error_ppm = settings.simulation_clock_error_ppm;
     channel.frequency_offset_hz = settings.simulation_frequency_offset_hz;
     channel.phase_noise_degrees_per_sqrt_second = settings.simulation_phase_noise_degrees_per_sqrt_second;
+    channel.spread_delay_ms = settings.simulation_spread_delay_ms;
+    channel.spread_doppler_hz = settings.simulation_spread_doppler_hz;
+    channel.perturbation_slow_depth = settings.simulation_perturbation_slow_depth;
+    channel.perturbation_fast_depth = settings.simulation_perturbation_fast_depth;
     channel.seed = settings.simulation_seed;
     return channel;
 }

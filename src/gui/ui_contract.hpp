@@ -12,7 +12,7 @@ enum class Page { console, compression, flow, transmission, planner, fast_modem,
 enum class Field {
     callsign, grid, repeatable, helper_power, helper_ratio_limit, helper_frequency, helper_callsign, simulation, link_power, link_loss, link_noise,
     simulation_confidence, simulation_cpu_time, simulation_gpu_time,
-    simulation_oscillator, simulation_oscillator_detail, rf_oscillator, rf_shift, search_margin, oscillator_reference, oscillator_sideband,
+    simulation_oscillator, simulation_oscillator_detail, rf_oscillator, rf_shift, spread_preset, selective_perturbation, search_margin, oscillator_reference, oscillator_sideband,
     clock_accuracy, clock_region, clock_offset, audio_error, dsss_factor, dsss_version, fhss,
     oscillator_search_detail, lpi_estimate, planner_target, planner_command,
     key, message, binary,
