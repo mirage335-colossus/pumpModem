@@ -5,6 +5,15 @@ and release status. [Latest resource measurements](../ci-resource-results.json)
 are one bounded snapshot; Git keeps prior versions. Historical results are not
 qualification of new source or binaries.
 
+## Separate three-carrier experiment
+
+The [v3 state-likelihood study](../validation-data/triad-v3/2026-11-01-state/README.md)
+records independent long-span paths, conditional calibration, GPU acceleration,
+weak-signal failures and reproduction artifacts. Its
+[initial v3 study](../validation-data/triad-v3/2026-10-31/README.md) compares earlier
+receiver and acquisition approaches. Neither study qualifies ordinary Robust
+integration or a physical radio link.
+
 ## Helper Carrier
 
 The [integration guide](../helper-integration.md) maps implemented inexpensive

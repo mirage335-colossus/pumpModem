@@ -1,6 +1,6 @@
 # Validation status
 
-Updated 31 October 2026. This page records current qualification, release status,
+Updated 1 November 2026. This page records current qualification, release status,
 coverage limits and useful historical anchors. It is not a session log. Replace
 superseded status here; keep one latest [resource snapshot](ci-resource-results.json)
 and use Git history for comparisons. Detailed studies remain in the
@@ -8,7 +8,20 @@ and use Git history for comparisons. Detailed studies remain in the
 
 ## Separate experimental three-carrier modem
 
-The [v2 triad simulation](triad-v2.md) implements the GUI's inner Rate × Added
+The [v3 state-likelihood study](validation-data/triad-v3/2026-11-01-state/README.md)
+adds reusable full-covariance block exports, Gaussian and finite phase/frequency
+likelihoods, conditional duration bounds and actual GPU execution. At fixed
+known-alignment HF-model points, phase/frequency reception accepted 300/300
+hour-long paths at −16 dB-Hz; Gaussian reception accepted 300/300 two-day paths
+at −24 dB-Hz, including 300 independent sampled-noise counterparts. These are
+pointwise balanced-bit model results, not a general radio qualification.
+The default false-admission allocation assumes known white-noise variance;
+a measured variance-mismatch failure prevents transferring that allocation to
+an unknown-noise operational receiver. Focused Release and ASan/UBSan triad
+checks passed 10/10 each, with leak detection disabled. Ordinary receiver
+integration and its regression campaign remain outside this study.
+
+The earlier [v2 triad simulation](triad-v2.md) implements the GUI's inner Rate × Added
 Symbols semantics, including the requested Rate 360/36 and Added ×10 examples.
 Its [31 October measurement package](validation-data/triad-v2/2026-10-31/README.md)
 retains **291 captured trials / 849 receiver evaluations** with source/binary

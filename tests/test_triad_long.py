@@ -40,6 +40,20 @@ def export(directory, *extra):
     return json.loads((directory / "manifest.json").read_text())
 
 
+def export_stats(directory, *extra):
+    invoke("--mode", "export-stats", *COMMON, "--channel", "none", "--threads", "2",
+           "--chunk", "512", "--block-seconds", "4", "--output", str(directory),
+           *extra, timeout=45)
+    return json.loads((directory / "manifest.json").read_text())
+
+
+def complex128_values(path):
+    data = path.read_bytes()
+    if len(data) % 16:
+        raise AssertionError(f"complex128 export has a partial value: {path}")
+    return [complex(real, imag) for real, imag in struct.iter_unpack("<dd", data)]
+
+
 def file_digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -150,6 +164,104 @@ def main():
             b = basis[indexed[(bit, 3600)] * row_bytes:(indexed[(bit, 3600)] + 1) * row_bytes]
             if a == b:
                 raise AssertionError(f"encrypted basis did not change for bit {bit} at a different epoch")
+
+        # Block statistics must match direct full-basis projection on identical
+        # public rows. The raw basis is FP32, so compare with a small tolerance.
+        direct = root / "fresh-direct"
+        direct_manifest = export(direct, "--block-seconds", "4")
+        stats = root / "fresh-stats"
+        stats_manifest = export_stats(stats)
+        if stats_manifest["format"] != "triad-block-stats-v1" or stats_manifest["dimension"] != 2:
+            raise AssertionError(f"unexpected block-statistics format/dimension: {stats_manifest}")
+        if stats_manifest["epoch"] != int(COMMON[COMMON.index("--epoch") + 1]) or "relative_white_fm_hz_sqrt_s" not in stats_manifest["oscillator_model"]:
+            raise AssertionError("statistics manifest omits explicit epoch or oscillator settings")
+        if "not included" not in stats_manifest["source_hash_binding"] or not stats_manifest["oscillator_model"]["truth_fields_simulation_only"]:
+            raise AssertionError("statistics manifest misstates hash binding or simulation-only truth")
+        if stats_manifest["column_mapping"] != [[0], [1]]:
+            raise AssertionError(f"flat candidate column mapping is wrong: {stats_manifest['column_mapping']}")
+        gram = complex128_values(stats / "gram.c128")
+        means = complex128_values(stats / "mean.c128")
+        direct_shape = direct_manifest["basis_shape"]
+        direct_basis = [complex(real, imag) for real, imag in struct.iter_unpack(
+            "=ff", (direct / "basis.c64").read_bytes())]
+        direct_signal = [complex(real, imag) for real, imag in struct.iter_unpack(
+            "=ff", (direct / "signal.c64").read_bytes())]
+        block_rows = stats_manifest["block_samples"]
+        expected = []
+        intervals = list(struct.iter_unpack("<QQ", (stats / "intervals.u64").read_bytes()))
+        if len(intervals) != stats_manifest["block_count"]:
+            raise AssertionError("block interval count differs from manifest")
+        for block_index, (first_sample, stop_sample) in enumerate(intervals):
+            expected_gram = []
+            for i in range(2):
+                ai = direct_basis[i * direct_shape[1]:(i + 1) * direct_shape[1]]
+                for j in range(2):
+                    aj = direct_basis[j * direct_shape[1]:(j + 1) * direct_shape[1]]
+                    expected_gram.append(sum(a.conjugate() * b for a, b in
+                                             zip(ai[first_sample:stop_sample], aj[first_sample:stop_sample])))
+            for element, want in enumerate(expected_gram):
+                got = gram[block_index * 4 + element]
+                if not math.isclose(got.real, want.real, rel_tol=2e-5, abs_tol=2e-5) or not math.isclose(got.imag, want.imag, rel_tol=2e-5, abs_tol=2e-5):
+                    raise AssertionError(f"block {block_index} Gram differs from direct basis: got={got}, expected={want}")
+            for i in range(2):
+                ai = direct_basis[i * direct_shape[1]:(i + 1) * direct_shape[1]]
+                want = sum(a.conjugate() * y for a, y in zip(ai[first_sample:stop_sample], direct_signal[first_sample:stop_sample]))
+                got = means[block_index * 2 + i]
+                if not math.isclose(got.real, want.real, rel_tol=2e-5, abs_tol=2e-5) or not math.isclose(got.imag, want.imag, rel_tol=2e-5, abs_tol=2e-5):
+                    raise AssertionError(f"block {block_index} projection differs from direct basis: got={got}, expected={want}")
+
+        chunked = root / "fresh-stats-chunked"
+        chunked_manifest = export_stats(chunked, "--chunk", "777")
+        for file_name in ("intervals.u64", "valid_rows.u64"):
+            if (stats / file_name).read_bytes() != (chunked / file_name).read_bytes():
+                raise AssertionError(f"changing chunk size changed {file_name}")
+        for file_name in ("gram.c128", "mean.c128"):
+            left, right = complex128_values(stats / file_name), complex128_values(chunked / file_name)
+            if len(left) != len(right) or any(abs(a - b) > 1e-11 * max(1.0, abs(a), abs(b)) for a, b in zip(left, right)):
+                raise AssertionError(f"changing chunk size materially changed {file_name}")
+
+        rays = root / "fresh-stats-rays"
+        ray_manifest = export_stats(rays, "--basis", "two-ray")
+        if ray_manifest["dimension"] != 4 or ray_manifest["column_mapping"] != [[0], [1], [0, 2], [1, 3]]:
+            raise AssertionError(f"two-ray columns were not uniquely deduplicated: {ray_manifest['column_mapping']}")
+
+        erased = root / "fresh-stats-erased"
+        erased_manifest = export_stats(erased, "--dropout-ms", "40", "--dropout-start-ms", "100")
+        erased_valid = struct.unpack("<" + "Q" * erased_manifest["block_count"], (erased / "valid_rows.u64").read_bytes())
+        if not any(value < stop - start for value, (start, stop) in zip(erased_valid, struct.iter_unpack("<QQ", (erased / "intervals.u64").read_bytes()))):
+            raise AssertionError("configured dropout did not remove rows from statistics")
+
+        noisy = root / "fresh-stats-noisy"
+        noisy_manifest = export_stats(noisy, "--stats-noisy", "--channel", "hf",
+                                       "--phase-diffusion", ".02", "--white-fm", ".1",
+                                       "--random-walk-fm", ".01", "--flicker-fm", ".02",
+                                       "--flicker-tau", ".1", "10", "--flicker-bands", "3",
+                                       "--white-pm", ".01")
+        observations = complex128_values(noisy / "observation.c128")
+        if len(observations) != noisy_manifest["block_count"] * noisy_manifest["dimension"] or not all(math.isfinite(x.real) and math.isfinite(x.imag) for x in observations):
+            raise AssertionError("actual noisy projection output has invalid dimensions or values")
+        if observations == complex128_values(noisy / "mean.c128"):
+            raise AssertionError("noisy projection unexpectedly equals noiseless mean")
+
+        # Channel seed changes actual samples while leaving the public design
+        # matrix fixed; key seed changes the encrypted public basis.
+        seed_a, seed_b, seed_key = (root / "seed-a", root / "seed-b", root / "seed-key")
+        seed_extra = ("--start", "0", ".01", ".01", "--frequency", "0", ".1", ".1", "--clock-ppm", "0,100")
+        export_stats(seed_a, *seed_extra, "--channel-seed", "811")
+        export_stats(seed_b, *seed_extra, "--channel-seed", "812")
+        export_stats(seed_key, *seed_extra, "--channel-seed", "811", "--key-seed", "999")
+        if (seed_a / "gram.c128").read_bytes() != (seed_b / "gram.c128").read_bytes():
+            raise AssertionError("channel seed changed the public Gram matrix")
+        if (seed_a / "mean.c128").read_bytes() == (seed_b / "mean.c128").read_bytes():
+            raise AssertionError("channel seed did not change the actual-signal mean")
+        if (seed_a / "gram.c128").read_bytes() == (seed_key / "gram.c128").read_bytes():
+            raise AssertionError("key seed did not change the encrypted public Gram matrix")
+
+        collision = invoke("--mode", "export-stats", *COMMON, "--channel", "none",
+                           "--threads", "2", "--chunk", "512", "--block-seconds", "4",
+                           "--output", str(stats), ok=False, timeout=20)
+        if "fresh output directory" not in collision.stderr:
+            raise AssertionError(f"stats export collision had unexpected failure: {collision.stderr}")
 
     for option in (("--signal-bit", "256"), ("--threads", "4294967296"),
                    ("--chunk", "-1")):

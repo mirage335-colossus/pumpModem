@@ -8,7 +8,8 @@ the earlier v1/v2 experimental formats. The implementation is in
 `src/` implementations. This page describes the current software and the
 assumptions needed to interpret its theoretical bounds; it is not a claim of
 validated radio performance. Recorded experiments and evidence limits are in
-the [v3 validation record](validation-data/triad-v3/2026-10-31/README.md).
+the [initial v3 validation record](validation-data/triad-v3/2026-10-31/README.md)
+and the [state-likelihood study](validation-data/triad-v3/2026-11-01-state/README.md).
 
 ## Format and streaming state
 
@@ -294,6 +295,142 @@ sweeps before extrapolating. Product-first energy-combination receivers can
 scale worse when each segment has weak product evidence; derive that specific
 statistic's mean and variance rather than assign one universal exponent.
 
+## Exported-window likelihood experiments
+
+The C++ `export-stats` mode creates a separate sampled-waveform fixture for
+Python receiver experiments. It uses the same shaped triad, public candidate
+basis, sampled channel and validity calendar as the C++ study, then writes the
+full Hermitian block Gram matrix `G_raw = Aᴴ W A`, the simulator's signal
+projection `m = Aᴴ W s`, and block intervals/valid-row counts. `W` selects valid sample
+rows. `--stats-noisy` additionally writes `Aᴴ W y` from an independently
+replayed noisy channel pass. These are sufficient-statistic experiments over
+the exported linear model; they are neither modes of the C++
+`StreamingReceiver` nor integrated with the ordinary Robust receiver.
+
+The Python workspace uses `σ² = Fs / 10^(C/N₀/10)` and presents detectors with
+`r = Aᴴ W y / σ²` and `G = G_raw / σ²`; under the declared white-noise model,
+`r | H0 ~ CN(0,G)`. It samples noise using the **full** Gram matrix, retaining
+cross-candidate and cross-tap covariance. It does not treat candidate scores as
+independent. The public iterator exposes raw Grams and the observation calendar;
+the detector-facing iterators supply normalized `r`, `G`, valid-row counts,
+and physical elapsed time. Exported means, signal energies and selected truth
+fields are simulation-only and must not be supplied as receiver metadata.
+The optional actual noisy projection becomes ordinary normalized observation
+input through its separate iterator. The finite Gaussian
+likelihood assumes known white-noise variance; uncertainty or estimation of
+`σ²`, colored noise and non-Gaussian interference are outside that likelihood.
+
+The `gaussian` method integrates unknown proper complex channel coefficients
+under a specified static or OU prior, using a bounded-memory forward Gaussian
+state update. The OU correlation time, stationary tap powers and rotation are
+fixed before looking at observations; taps already represented in `A` must
+not be counted again in the prior. Singular public Grams are supported without
+forming an inverse. The likelihood is exact for this declared Gaussian model,
+not for arbitrary constant-modulus oscillator or propagation processes. It
+does not implement optional stopping or an automatic anytime decision rule.
+The `phase-frequency` method instead integrates a finite oscillator-state
+prior, initial phase, positive global-amplitude quadrature and static relative
+ray-phase quadrature. It is exact only for that finite discretized model.
+`block-energy` is a separate fixed-rank Gaussian projection detector; its
+nearly singular whitening and sensitive reductions use FP64. The Gaussian and
+phase/frequency bulk may use FP32 or FP64, but their accumulated log evidence is
+FP64; the FP32 CUDA path disables TF32 and lower-precision matrix multiply.
+FP64 reference comparisons remain important near an admission threshold.
+
+Likelihood mixtures and bank maxima have different null calibration. A
+normalized prior mixture retains its declared probability weights; under its
+specified known-variance null it is a nonnegative likelihood ratio with unit
+mean, which supports a Markov threshold for a fixed test. The current scripts
+allocate the family budget across scheduled attempts, duration alternatives
+and receiver-selection methods, and apply the corresponding log threshold to
+each bit-mixture score. `block-energy` instead takes a maximum over candidate
+scores and accounts for the candidate count in its family threshold. These
+analytic allocations require the deployed family and schedule to be declared;
+the union bound remains valid for overlapping, dependent windows. These tests
+do not empirically reproduce a whole operational schedule or validate a
+mismatched noise null. Calibrate the complete operational schedule and any adaptive
+method/duration choice on held-out null data. Do not tune and report a threshold
+on the same holdout. Any separately selected acquisition bank or
+receiver must be included in the family count.
+
+The workspace iterators carry absolute sample intervals, block centers and
+physical `dt` across tiles. Detector state is updated through missing or
+zero-energy blocks so oscillator/channel evolution is not restarted at a file
+or shard boundary. Independent path batches derive stable thermal-noise seeds
+from the root seed, split, channel/key seeds and epoch, rather than shard
+position; null and signal projections on each path are paired with that same
+noise seed. Keep development, calibration and holdout seed domains separate.
+Each exported path keeps several memory maps open. The path runner checks a
+soft file-descriptor limit of at least `6N + 128` for `N` paths: for 300 paths,
+raise it within the host hard limit before launch, for example with
+`ulimit -n 4096`, or use smaller batches. This is a process-resource
+requirement, not a C++ runtime setting.
+
+Finite oscillator grids need convergence checks against the continuous
+physical model. In the current phase-prior diagnostic, the default OU settings
+(`σ_f = 0.003 Hz`, `τ = 1000 s`) have continuous phase correlation about
+`6.57e-18` at 512 s, while a 256-state phase model with its coarse aligned
+frequency grid has a spurious correlation revival of `0.10424`; 512 phase
+states remove it at that evaluated lag. The slower `σ_f = 0.002 Hz`,
+`τ = 4096 s` case needs 1024 states to meet the same declared lag checks.
+These finite lag diagnostics do not demonstrate continuous-model convergence
+or reception. Keep phase-state and frequency-grid refinement separate, and
+compare detector rankings and outcomes as well as prior correlations before
+using sensitivity results. A finite-grid likelihood can be computationally
+exact while representing the wrong long-term oscillator behavior.
+
+`tools/triad_gaussian_bounds.py` evaluates a complete exported design using
+public Grams only. For a single specified Gaussian tap prior, it computes
+the exact model log-LR mean and variance, a positive-scale Chernoff miss bound,
+and Bhattacharyya bounds against wrong bit/epoch candidates. Its fixed bank
+maximizes individual Gaussian likelihoods with a union-calibrated gate. It
+does not certify the multi-coherence mixture or a physical channel merely
+because the waveform design is shared. It reports whether that complete
+duration meets the requested conditional reception bound; it does not
+extrapolate duration or declare a truncated interleave tile complete. Numerical
+FP64 evaluation is not interval-certified rounding. Failed conservative bounds
+are not proofs that reception is impossible.
+
+Optional `--null-calibration gaussian-chernoff` uses fixed-design fractional
+Gaussian likelihood moments to tighten that individual-bank null gate. The
+default remains `markov`. The tighter gate is not valid for the separate
+multi-coherence mixture without a corresponding mixture calibration.
+
+One local development check at `−24 dB-Hz` used a single two-day sampled
+physical path: the Gaussian method accepted 32/32 conditionally generated
+thermal-noise trials and the separately retained actual noisy projection
+accepted 1/1; block-energy accepted 0/32. This is evidence for that one path
+and declared Gaussian prior only, not a path-diversity estimate or a 99%
+reliability result. The detailed export provenance, conditions, and limits are
+recorded in the [state-study report](validation-data/triad-v3/2026-11-01-state/README.md).
+
+These scripts have optional Python dependencies (`numpy`, `scipy`, and
+`torch`); they are not dependencies of the ordinary CMake build or receiver.
+The C++ exporter remains available from the isolated study build. For example,
+after building that target, a short fixture and conditional receiver study can
+be run locally as follows:
+
+```sh
+build/dev/triad_long --mode export-stats --seconds 16 --channel hf \
+  --basis two-ray --block-seconds 4 --signal-bit 0 --seed 7101 \
+  --key-seed 7101 --channel-seed 9101 --output /tmp/triad-stats-0
+
+python3 tools/triad-state-study.py /tmp/triad-stats-0 \
+  --output /tmp/triad-state-development.json --cn0 -24 \
+  --trials 32 --split development --methods gaussian block-energy
+```
+
+For path-diversity work, create independent exports with unique channel and key
+seeds, balance the transmitted bit, and pass the complete batch to
+`tools/triad-path-study.py`. Its outcomes and confidence intervals use paths,
+not conditional noise replications, as independent trials. Keep `--actual-observation`
+for a separately sampled noisy projection only when each export was created
+with `--stats-noisy`; it must match that export's physical C/N₀. The
+`tools/triad-state-campaign.py` helper can generate provenance-tagged C++
+exports and shard independent path ranges. All report claims should state
+whether they use conditional noise replicas, actual noisy projections, or
+independent sampled paths.
+
 ## Running the isolated study
 
 Build and run only the isolated triad group; it does not invoke the ordinary
@@ -304,7 +441,7 @@ CCACHE_DISABLE=1 ./build.sh test triad --jobs 2
 build/dev/triad_long --help
 ```
 
-The executable provides `--mode plan|run|export`:
+The executable provides `--mode plan|run|export|export-stats`:
 
 ```sh
 # Baseline duration calculation; absent certificates, status stays unsupported.
@@ -355,8 +492,12 @@ status with any GPU results. Do not treat a GPU kernel timing as end-to-end
 streaming throughput, or synthetic sampled channels as physical link
 measurements. The large daily false-admission campaign qualifies only its fixed
 Gaussian bank and schedule; it does not establish a general operational rate.
-The current study does not establish 99% multi-day reception, real RF retuning,
-device oscillator behavior, or public LPI characteristics.
+The state study has pointwise 300/300 two-day successes for a selected,
+known-alignment HF model and known white-noise variance. It does not establish
+a general 99% multi-day operating envelope, real RF retuning, device oscillator
+behavior, or public LPI characteristics. A measured noise-variance mismatch
+test demonstrates that the known-noise assumption is operationally material;
+variance-robust calibration remains required.
 
 Additional experimental tools deliberately preserve their narrower scopes:
 

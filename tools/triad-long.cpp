@@ -14,6 +14,10 @@
 #include <limits>
 #include <numbers>
 #include <random>
+#include <optional>
+#include <complex>
+#include <map>
+#include <bit>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -51,6 +55,7 @@ struct Options {
     double retained_energy = 1;
     double wrong_projection = .08;
     std::uint64_t minimum_dwells = 20, seed = 1, epoch = 1793404800;
+    std::optional<std::uint64_t> key_seed, channel_seed;
     std::uint64_t duration_alternatives = 1;
     unsigned added = 10, threads = 2;
     std::size_t chunk = 4096, block = 1536;
@@ -62,6 +67,7 @@ struct Options {
     std::uint8_t signal_bit = 0;
     bool encrypt = true, now = false, fhss = false;
     bool assume_model_bounds = false;
+    bool stats_noisy = false;
     std::string basis = "flat";
     double tap_delay_ms = 1.5, tap_doppler_hz = .3;
     std::vector<double> clocks_ppm{0}, frequency_drifts{0};
@@ -118,7 +124,7 @@ Options parse(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         const std::string_view key(argv[i]);
         if (key == "--help" || key == "-h") {
-            std::cout << R"HELP(triad_long --mode plan|run|export [options]
+            std::cout << R"HELP(triad_long --mode plan|run|export|export-stats [options]
   --seconds S                 Requested active one-bit span (8..604800 s); rounded to complete private tiles.
   --rate HZ --added N --sample-rate HZ --rf-hz HZ
   --cn0 DB-HZ                 Total nominal three-carrier C/N0; N0 normalization uses power1, not faded output.
@@ -137,6 +143,7 @@ Options parse(int argc, char** argv) {
   --fhss                      Source envelope only; no physical RF-retuning claim.
   --burst-wait-tiles N         Silent tile waits within this one-bit v3 observation.
   --seed N --epoch UTC | --now --trials N --signal-bit 0|1 --no-encrypt
+  --key-seed N --channel-seed N   Independent deterministic seeds (default to --seed).
   --control signal|null|wrong-key
   --correct P --false P --horizon S --attempt-spacing S --duration-alternatives N
                               Count every separately attempted duration in the operational false-admission budget.
@@ -144,6 +151,7 @@ Options parse(int argc, char** argv) {
   --minimum-dwells N --assume-model-bounds
                               Planner bounds are conditional on caller certificates, not empirical recommendations.
   --output DIRECTORY          Fresh export directory; signal uses the selected sampled channel without AWGN.
+  --stats-noisy               export-stats also writes matched actual noisy projections.
   --export-max-samples N       At most128000000 raw samples; default128000000.
   --export-max-mib N           Explicit disk budget, default8192MiB; chunk RAM follows --memory-mib.
 Examples:
@@ -194,6 +202,8 @@ Examples:
         else if (key == "--output") o.output = need();
         else if (key == "--epoch") o.epoch = integer(need(), "epoch");
         else if (key == "--seed") o.seed = integer(need(), "seed");
+        else if (key == "--key-seed") o.key_seed = integer(need(), "key seed");
+        else if (key == "--channel-seed") o.channel_seed = integer(need(), "channel seed");
         else if (key == "--trials") o.trials = bounded_integer<unsigned>(need(),"trials");
         else if (key == "--threads") o.threads = bounded_integer<unsigned>(need(),"threads");
         else if (key == "--chunk") o.chunk = bounded_integer<std::size_t>(need(),"chunk");
@@ -208,12 +218,13 @@ Examples:
         else if (key == "--signal-bit") o.signal_bit = bounded_integer<std::uint8_t>(need(), "signal bit");
         else if (key == "--no-encrypt") o.encrypt = false;
         else if (key == "--fhss") o.fhss = true;
+        else if (key == "--stats-noisy") o.stats_noisy = true;
         else if (key == "--assume-model-bounds") o.assume_model_bounds = true;
         else if (key == "--now") o.now = true;
         else throw std::invalid_argument(std::string("unknown option: ") + std::string(key));
     }
     if (o.now) o.epoch = static_cast<std::uint64_t>(std::time(nullptr));
-    if (o.mode != "plan" && o.mode != "run" && o.mode != "export") throw std::invalid_argument("mode must be plan, run, or export");
+    if (o.mode != "plan" && o.mode != "run" && o.mode != "export" && o.mode != "export-stats") throw std::invalid_argument("mode must be plan, run, export, or export-stats");
     if (o.channel != "none" && o.channel != "hf") throw std::invalid_argument("channel must be none or hf");
     if (o.basis!="flat" && o.basis!="two-ray" && o.basis!="per-carrier")
         throw std::invalid_argument("basis must be flat, two-ray, or per-carrier");
@@ -242,6 +253,8 @@ Examples:
     if(o.tap_delay_ms<0||!std::isfinite(o.tap_doppler_hz))throw std::invalid_argument("invalid public tap model");
     for(const auto ppm:o.clocks_ppm)if(std::abs(ppm)>10000)throw std::invalid_argument("clock hypotheses exceed +/-10000ppm");
     if(o.seed>UINT64_MAX-(o.trials-1))throw std::invalid_argument("trial seed overflow");
+    if(o.key_seed && *o.key_seed>UINT64_MAX-(o.trials-1))throw std::invalid_argument("key trial seed overflow");
+    if(o.channel_seed && *o.channel_seed>UINT64_MAX-(o.trials-1))throw std::invalid_argument("channel trial seed overflow");
     return o;
 }
 
@@ -535,10 +548,10 @@ void run(const Options& o) {
     std::size_t total_correct=0,total_wrong=0,total_missed=0,total_false=0;
     for (unsigned trial=0;trial<o.trials;++trial) {
         const auto trial_started=Clock::now();const auto trial_cpu=std::clock();
-        const auto seed=o.seed+trial; auto txkey=key_for(seed,0); auto rxkey=o.control=="wrong-key"?key_for(seed^0x6a09e667f3bcc909ULL,0):key_for(seed,0);
+        const auto seed=o.seed+trial,key_seed=o.key_seed.value_or(o.seed)+trial,channel_seed=o.channel_seed.value_or(o.seed)+trial; auto txkey=key_for(key_seed,0); auto rxkey=o.control=="wrong-key"?key_for(key_seed^0x6a09e667f3bcc909ULL,0):key_for(key_seed,0);
         auto txf=base; txf.symbol_ordinal=0;
         PatternSource source(txf,txkey,o.signal_bit);
-        auto channel_cfg=channel_config(o,base,nominal,seed,noise,pad,trail);
+        auto channel_cfg=channel_config(o,base,nominal,channel_seed,noise,pad,trail);
         const auto true_clock=truth_clock(channel_cfg),true_drift=truth_drift(channel_cfg);
         StreamingChannel channel(source,channel_cfg);
         auto candidate_bank=candidates_for(o,base,rxkey);
@@ -584,7 +597,7 @@ void run(const Options& o) {
         const auto pipeline_wall=std::chrono::duration<double>(Clock::now()-trial_started).count();
         const auto pipeline_cpu=static_cast<double>(std::clock()-trial_cpu)/CLOCKS_PER_SEC;
         std::cout<<std::setprecision(12)<<"{\"mode\":\"run\",\"version\":3,\"trial\":"<<trial
-            <<",\"seed\":"<<seed<<",\"epoch\":"<<base.epoch<<",\"control\":\""<<o.control
+            <<",\"seed\":"<<seed<<",\"key_seed\":"<<key_seed<<",\"channel_seed\":"<<channel_seed<<",\"epoch\":"<<base.epoch<<",\"control\":\""<<o.control
             <<"\",\"channel\":\""<<o.channel<<"\",\"cn0_db_hz\":"<<o.cn0
             <<",\"complex_noise_variance\":"<<noise<<",\"noise_reference_power\":1,\"sample_rate\":"<<base.sample_rate
             <<",\"occupied_bandwidth_hz\":"<<nominal.occupied_bandwidth_hz
@@ -641,14 +654,15 @@ void export_basis(const Options& o) {
     if(o.output.empty())throw std::invalid_argument("--output directory is required for --mode export");
     if(o.dropout_ms>0)throw std::invalid_argument("GPU export with erased observations is unsupported; use --mode run for selected erasures");
     const auto f=format_for(o);const auto g=geometry(f);
-    const auto txkey=key_for(o.seed,0);
-    const auto rxkey=o.control=="wrong-key"?key_for(o.seed^0x6a09e667f3bcc909ULL,0):key_for(o.seed,0);
+    const auto key_seed=o.key_seed.value_or(o.seed),channel_seed=o.channel_seed.value_or(o.seed);
+    const auto txkey=key_for(key_seed,0);
+    const auto rxkey=o.control=="wrong-key"?key_for(key_seed^0x6a09e667f3bcc909ULL,0):key_for(key_seed,0);
     auto candidates=candidates_for(o,f,rxkey);
     const auto calendar=observation_calendar(o,f,g);
     const auto pad=calendar.pad,trail=calendar.trail;
     const auto noise=static_cast<double>(f.sample_rate)/std::pow(10.,o.cn0/10.);
     if(!std::isfinite(noise)||noise<=0)throw std::invalid_argument("C/N0 is outside numeric range");
-    auto config=channel_config(o,f,g,o.seed,noise,pad,trail);config.effects.noise_enabled=false;
+    auto config=channel_config(o,f,g,channel_seed,noise,pad,trail);config.effects.noise_enabled=false;
     PatternSource truth(f,txkey,o.signal_bit);StreamingChannel channel(truth,config);
     for(auto& c:candidates)c.arrival_seconds+=pad;
     const auto rows=calendar.samples;
@@ -702,7 +716,7 @@ void export_basis(const Options& o) {
         <<",\"added_symbols\":"<<f.added_symbols<<",\"encrypted\":"<<(f.encrypt?"true":"false")
         <<",\"cn0_db_hz\":"<<o.cn0<<",\"noise_reference_power\":1,\"noise_variance\":"<<noise
         <<",\"signal_start_samples\":0,\"signal_bit\":"<<static_cast<unsigned>(o.signal_bit)
-        <<",\"seed\":"<<o.seed<<",\"epoch\":"<<f.epoch<<",\"source_samples\":"<<g.source_samples
+        <<",\"seed\":"<<o.seed<<",\"key_seed\":"<<key_seed<<",\"channel_seed\":"<<channel_seed<<",\"epoch\":"<<f.epoch<<",\"source_samples\":"<<g.source_samples
         <<",\"requested_active_seconds\":"<<f.bit_seconds<<",\"actual_elapsed_seconds\":"<<g.bit_seconds
         <<",\"nominal_payload_energy_seconds_lower\":"<<g.nominal_payload_energy_seconds
         <<",\"channel_signal_energy_pre_erasure_samples\":"<<channel.report().signal_energy
@@ -737,6 +751,194 @@ void export_basis(const Options& o) {
     std::filesystem::rename(directory/"manifest.json.partial",directory/"manifest.json");
 }
 
+struct ColumnRef { std::size_t candidate=0, local=0; };
+using ColumnKey=std::string;
+void key_part(ColumnKey& k,const auto& value) {
+    k.append(reinterpret_cast<const char*>(&value),sizeof(value));
+}
+ColumnKey column_key(const Candidate& c,std::size_t local) {
+    const auto taps=c.channel.taps.size();
+    const auto tap_index=local/(c.channel.linear_gain?2:1);
+    const auto gain_index=c.channel.linear_gain?local%2:0;
+    const auto& tap=c.channel.taps[tap_index];
+    ColumnKey k;
+    key_part(k,c.source_bit); key_part(k,c.epoch_offset_seconds);
+    key_part(k,c.arrival_seconds); key_part(k,c.frequency_hz); key_part(k,c.clock_ppm);
+    key_part(k,c.frequency_drift_hz_per_second); key_part(k,tap.delay_seconds); key_part(k,tap.doppler_hz);
+    key_part(k,c.channel.linear_gain); key_part(k,gain_index);
+    if(c.channel.linear_gain){key_part(k,c.channel.gain_reference_seconds);key_part(k,c.channel.gain_scale_seconds);}
+    (void)taps;
+    return k;
+}
+void write_le_u64(std::ostream& out,std::uint64_t v) {
+    std::array<unsigned char,8> b{}; for(unsigned i=0;i<8;++i)b[i]=static_cast<unsigned char>(v>>(8*i));
+    out.write(reinterpret_cast<const char*>(b.data()),b.size());
+}
+void write_le_f64(std::ostream& out,double v) { write_le_u64(out,std::bit_cast<std::uint64_t>(v)); }
+void write_le_complex(std::ostream& out,Complex v) { write_le_f64(out,v.real());write_le_f64(out,v.imag()); }
+
+void export_stats(const Options& o) {
+    if(o.output.empty())throw std::invalid_argument("--output directory is required for --mode export-stats");
+    const auto f=format_for(o);const auto g=geometry(f);
+    const auto key_seed=o.key_seed.value_or(o.seed),channel_seed=o.channel_seed.value_or(o.seed);
+    const auto txkey=key_for(key_seed,0);
+    const auto rxkey=o.control=="wrong-key"?key_for(key_seed^0x6a09e667f3bcc909ULL,0):key_for(key_seed,0);
+    auto candidates=candidates_for(o,f,rxkey);
+    const auto calendar=observation_calendar(o,f,g);const auto pad=calendar.pad,trail=calendar.trail;
+    const auto noise=static_cast<double>(f.sample_rate)/std::pow(10.,o.cn0/10.);
+    if(!std::isfinite(noise)||noise<=0)throw std::invalid_argument("C/N0 is outside numeric range");
+    for(auto& c:candidates)c.arrival_seconds+=pad;
+    const auto rows=calendar.samples;
+    const auto block=block_samples(o,f);
+    const auto blocks=rows/block+(rows%block!=0);
+    std::map<ColumnKey,std::size_t> indices;
+    std::vector<ColumnRef> columns;
+    std::vector<std::vector<std::size_t>> mapping(candidates.size());
+    for(std::size_t ci=0;ci<candidates.size();++ci){
+        const auto local_count=candidates[ci].channel.taps.size()*(candidates[ci].channel.linear_gain?2:1);
+        mapping[ci].reserve(local_count);
+        for(std::size_t j=0;j<local_count;++j){auto key=column_key(candidates[ci],j);auto [it,inserted]=indices.emplace(std::move(key),columns.size());
+            if(inserted)columns.push_back({ci,j});mapping[ci].push_back(it->second);}
+    }
+    const auto d=columns.size();
+    if(d==0||d>64)throw std::invalid_argument("export-stats unique design dimension exceeds explicit cap D=64");
+    const long double gram_bytes=static_cast<long double>(blocks)*d*d*16;
+    const long double vector_bytes=static_cast<long double>(blocks)*d*16;
+    const long double fixed_bytes=static_cast<long double>(blocks)*16+static_cast<long double>(blocks)*8+static_cast<long double>(blocks)*8;
+    const long double total_bytes=gram_bytes+vector_bytes+fixed_bytes+(o.stats_noisy?vector_bytes:0)+(o.stats_noisy?rows:0);
+    if(rows>o.export_max_samples)throw std::invalid_argument("export-stats exceeds --export-max-samples (at most128000000)");
+    if(total_bytes>o.export_max_bytes)throw std::invalid_argument("export-stats exceeds explicit --export-max-mib disk budget");
+    std::size_t max_local=0;for(const auto& c:candidates)max_local=std::max(max_local,c.channel.taps.size()*(c.channel.linear_gain?2:1));
+    const long double scratch=static_cast<long double>(o.chunk)*(d+max_local+1)*sizeof(Complex)+
+        static_cast<long double>(d)*d*sizeof(Complex)+static_cast<long double>(d)*sizeof(Complex)+65536;
+    long double sources_bytes=0;
+    for(const auto& c:candidates){(void)c;sources_bytes+=g.source_workspace_bytes;}
+    const long double channel_bytes=static_cast<long double>(g.source_workspace_bytes)+
+        static_cast<long double>(rows?std::min<std::uint64_t>(rows,o.chunk):0)*sizeof(Complex)*3+65536;
+    if(scratch+sources_bytes+channel_bytes>o.memory_bytes)throw std::invalid_argument("export-stats bounded scratch/source estimate exceeds --memory-mib");
+    std::filesystem::create_directories(o.output);const auto directory=std::filesystem::path(o.output);
+    std::vector<std::string> names{"gram.c128","mean.c128","intervals.u64","valid_rows.u64","signal_energy.f64","manifest.json"};
+    if(o.stats_noisy)names.push_back("observation.c128");
+    for(const auto& name:names)if(std::filesystem::exists(directory/name)||std::filesystem::exists(directory/(name+".partial")))
+        throw std::invalid_argument("export files already exist; choose a fresh output directory");
+    if(std::filesystem::exists(directory/"validity-mask.tmp"))throw std::invalid_argument("export files already exist; choose a fresh output directory");
+    std::ofstream gram(directory/"gram.c128.partial",std::ios::binary),mean(directory/"mean.c128.partial",std::ios::binary),
+        intervals(directory/"intervals.u64.partial",std::ios::binary),valid_rows(directory/"valid_rows.u64.partial",std::ios::binary),
+        energy(directory/"signal_energy.f64.partial",std::ios::binary);
+    std::ofstream observation;
+    if(o.stats_noisy)observation.open(directory/"observation.c128.partial",std::ios::binary);
+    if(!gram||!mean||!intervals||!valid_rows||!energy||(o.stats_noisy&&!observation))throw std::runtime_error("cannot create export-stats files");
+    std::vector<std::unique_ptr<PatternSource>> sources; sources.reserve(candidates.size());
+    for(const auto& c:candidates){auto addressed=f;addressed.epoch=offset_epoch(f.epoch,c.epoch_offset_seconds);sources.push_back(std::make_unique<PatternSource>(addressed,rxkey,c.source_bit));}
+    std::vector<Complex> basis_values(o.chunk*d),local_values(o.chunk*max_local),samples(o.chunk);
+    std::vector<std::uint8_t> validity(o.chunk);
+    double actual_signal_energy=0,actual_observed_energy=0,selected_truth_arrival=0,selected_truth_frequency=0;
+    double selected_truth_clock=0,selected_truth_drift=0;
+    std::uint64_t actual_channel_samples=0,actual_channel_tail=0;
+    auto pass=[&](bool noisy_pass){
+        PatternSource truth(f,txkey,o.signal_bit);
+        auto config=channel_config(o,f,g,channel_seed,noise,pad,trail);
+        config.effects.noise_enabled=noisy_pass;
+        StreamingChannel channel(truth,config);
+        if(channel.total_samples()<rows)throw std::runtime_error("channel does not cover public export-stats calendar");
+        if(!noisy_pass){
+            std::ofstream mask;
+            if(o.stats_noisy){mask.open(directory/"validity-mask.tmp",std::ios::binary);if(!mask)throw std::runtime_error("cannot create temporary validity mask");}
+            std::uint64_t block_first=0;std::size_t block_rows=0;std::uint64_t block_valid=0;double block_energy=0;
+            std::vector<Complex> G(d*d),m(d);
+            std::uint64_t at=0;
+            while(at<rows){const auto want=static_cast<std::size_t>(std::min<std::uint64_t>(o.chunk,rows-at));
+                const auto n=channel.read(std::span(samples).first(want),std::span(validity).first(want));
+                if(!n)throw std::runtime_error("channel ended before export-stats calendar");
+                if(channel.position()-n!=at)throw std::runtime_error("noncontiguous channel samples");
+                if(o.stats_noisy)mask.write(reinterpret_cast<const char*>(validity.data()),static_cast<std::streamsize>(n));
+                std::fill(basis_values.begin(),basis_values.begin()+n*d,Complex{});
+                for(std::size_t ci=0;ci<candidates.size();++ci){const auto cols=mapping[ci].size();
+                    shaped_basis(*sources[ci],candidates[ci],f.sample_rate,at,n,std::span(local_values).first(n*cols));
+                    for(std::size_t j=0;j<cols;++j){const auto target=mapping[ci][j];
+                        for(std::size_t r=0;r<n;++r)basis_values[target*n+r]=local_values[j*n+r];}}
+                for(std::size_t r=0;r<n;++r){const bool valid=validity[r]!=0;
+                    if(valid){++block_valid;block_energy+=std::norm(samples[r]);
+                        for(std::size_t i=0;i<d;++i){const auto ai=std::conj(basis_values[i*n+r]);m[i]+=ai*samples[r];
+                            for(std::size_t j=0;j<d;++j)G[i*d+j]+=ai*basis_values[j*n+r];}}
+                    ++block_rows;
+                    if(block_rows==block||at+r+1==rows){
+                        const auto stop=block_first+block_rows;
+                        write_le_u64(intervals,block_first);write_le_u64(intervals,stop);write_le_u64(valid_rows,block_valid);write_le_f64(energy,block_energy);
+                        for(auto v:G)write_le_complex(gram,v);for(auto v:m)write_le_complex(mean,v);
+                        block_first=stop;block_rows=0;block_valid=0;block_energy=0;std::fill(G.begin(),G.end(),Complex{});std::fill(m.begin(),m.end(),Complex{});
+                    }
+                }
+                at+=n;
+            }
+            actual_signal_energy=channel.report().signal_energy;actual_observed_energy=channel.report().observed_energy;
+            actual_channel_samples=channel.report().samples;actual_channel_tail=channel.report().tail_samples;
+            selected_truth_arrival=pad+config.effects.timing_offset_seconds;selected_truth_frequency=truth_frequency(config);
+            selected_truth_clock=truth_clock(config);selected_truth_drift=truth_drift(config);
+            if(o.stats_noisy){mask.close();if(!mask)throw std::runtime_error("failed writing temporary validity mask");}
+        } else {
+            std::ifstream mask(directory/"validity-mask.tmp",std::ios::binary);
+            if(!mask)throw std::runtime_error("cannot read temporary validity mask");
+            std::uint64_t at=0,block_count=0;std::vector<Complex> projection(d);std::vector<std::uint8_t> expected_mask(o.chunk);
+            while(at<rows){const auto want=static_cast<std::size_t>(std::min<std::uint64_t>(o.chunk,rows-at));
+                const auto n=channel.read(std::span(samples).first(want),std::span(validity).first(want));
+                if(!n)throw std::runtime_error("noisy channel ended before export-stats calendar");
+                mask.read(reinterpret_cast<char*>(expected_mask.data()),static_cast<std::streamsize>(n));
+                if(mask.gcount()!=static_cast<std::streamsize>(n)||!std::equal(expected_mask.begin(),expected_mask.begin()+n,validity.begin()))
+                    throw std::runtime_error("noisy and noiseless channel erasure masks differ");
+                std::fill(basis_values.begin(),basis_values.begin()+n*d,Complex{});
+                for(std::size_t ci=0;ci<candidates.size();++ci){const auto cols=mapping[ci].size();shaped_basis(*sources[ci],candidates[ci],f.sample_rate,at,n,std::span(local_values).first(n*cols));
+                    for(std::size_t j=0;j<cols;++j)for(std::size_t r=0;r<n;++r)basis_values[mapping[ci][j]*n+r]=local_values[j*n+r];}
+                for(std::size_t r=0;r<n;++r){if(validity[r]){for(std::size_t j=0;j<d;++j)projection[j]+=std::conj(basis_values[j*n+r])*samples[r];}
+                    ++block_count;if(block_count==block||at+r+1==rows){
+                        for(auto v:projection)write_le_complex(observation,v);std::fill(projection.begin(),projection.end(),Complex{});block_count=0;
+                    }}
+                at+=n;
+            }
+            mask.close();
+        }
+    };
+    pass(false);
+    if(o.stats_noisy){
+        // Retain the first pass's mask counts before opening the second channel pass.
+        pass(true);
+        std::filesystem::remove(directory/"validity-mask.tmp");
+    }
+    gram.close();mean.close();intervals.close();valid_rows.close();energy.close();if(o.stats_noisy)observation.close();
+    if(!gram||!mean||!intervals||!valid_rows||!energy||(o.stats_noisy&&!observation))throw std::runtime_error("failed writing export-stats files");
+    auto size_of=[&](const std::string& n){return std::filesystem::file_size(directory/(n+".partial"));};
+    std::ofstream manifest(directory/"manifest.json.partial");
+    manifest<<std::setprecision(17)<<"{\"format\":\"triad-block-stats-v1\",\"byte_order\":\"little\",\"complex_type\":\"complex128\",\"real_type\":\"float64\",\"integer_type\":\"uint64\",\"layout\":\"block,row,column\",\"block_count\":"<<blocks
+       <<",\"dimension\":"<<d<<",\"sample_rate\":"<<f.sample_rate<<",\"noise_variance\":"<<noise
+       <<",\"gram_file\":\"gram.c128\",\"gram_shape\":["<<blocks<<','<<d<<','<<d<<"],\"mean_file\":\"mean.c128\",\"mean_shape\":["<<blocks<<','<<d<<']'
+       <<",\"intervals_file\":\"intervals.u64\",\"intervals_shape\":["<<blocks<<",2],\"valid_rows_file\":\"valid_rows.u64\",\"valid_rows_shape\":["<<blocks<<']'
+       <<",\"signal_energy_file\":\"signal_energy.f64\",\"signal_energy_shape\":["<<blocks<<']'
+       <<",\"sample_count\":"<<rows<<",\"block_samples\":"<<block<<",\"signal_bit\":"<<static_cast<unsigned>(o.signal_bit)
+       <<",\"key_seed\":"<<key_seed<<",\"channel_seed\":"<<channel_seed<<",\"legacy_seed\":"<<o.seed
+       <<",\"epoch\":"<<f.epoch<<",\"source_samples\":"<<g.source_samples<<",\"requested_active_seconds\":"<<f.bit_seconds<<",\"actual_elapsed_seconds\":"<<g.bit_seconds
+       <<",\"nominal_payload_energy_seconds_lower\":"<<g.nominal_payload_energy_seconds<<",\"channel_signal_energy_samples\":"<<actual_signal_energy
+       <<",\"channel_observed_energy_samples\":"<<actual_observed_energy<<",\"channel_samples\":"<<actual_channel_samples<<",\"channel_tail_samples\":"<<actual_channel_tail
+       <<",\"source_hash_binding\":\"not included; bind externally to the exact source and binary\""
+       <<",\"selected_truth_arrival_seconds_simulation_only\":"<<selected_truth_arrival<<",\"selected_truth_frequency_hz_simulation_only\":"<<selected_truth_frequency
+       <<",\"selected_truth_clock_ppm_simulation_only\":"<<selected_truth_clock<<",\"selected_truth_frequency_drift_hz_per_second_simulation_only\":"<<selected_truth_drift
+       <<",\"cn0_db_hz\":"<<o.cn0<<",\"channel\":\""<<o.channel<<"\",\"control\":\""<<o.control<<"\",\"signal_enabled\":"<<(o.control!="null"?"true":"false")
+       <<",\"oscillator_model\":{\"relative_phase_diffusion_rad_sqrt_s\":"<<o.phase_diffusion<<",\"relative_white_fm_hz_sqrt_s\":"<<o.white_fm
+       <<",\"relative_random_walk_fm_hz_sqrt_s\":"<<o.random_walk_fm<<",\"relative_flicker_fm_rms_hz\":"<<o.flicker_fm<<",\"flicker_tau_seconds\":["<<o.flicker_min_tau<<','<<o.flicker_max_tau
+       <<"],\"flicker_bands\":"<<o.flicker_bands<<",\"relative_white_pm_rms_rad\":"<<o.white_pm<<",\"truth_fields_simulation_only\":true}"
+       <<",\"column_mapping\":[";
+    for(std::size_t i=0;i<mapping.size();++i){if(i)manifest<<',';manifest<<'[';for(std::size_t j=0;j<mapping[i].size();++j){if(j)manifest<<',';manifest<<mapping[i][j];}manifest<<']';}
+    manifest<<"],\"column_descriptors\":[";
+    for(std::size_t i=0;i<columns.size();++i){if(i)manifest<<',';const auto& ref=columns[i];const auto& c=candidates[ref.candidate];const auto local=ref.local;const auto tap_i=local/(c.channel.linear_gain?2:1);const auto gain_i=c.channel.linear_gain?local%2:0;const auto& tap=c.channel.taps[tap_i];
+        manifest<<"{\"source_bit\":"<<static_cast<unsigned>(c.source_bit)<<",\"epoch_offset_seconds\":"<<c.epoch_offset_seconds<<",\"arrival_seconds\":"<<c.arrival_seconds<<",\"frequency_hz\":"<<c.frequency_hz<<",\"clock_ppm\":"<<c.clock_ppm<<",\"frequency_drift_hz_per_second\":"<<c.frequency_drift_hz_per_second<<",\"tap_delay_seconds\":"<<tap.delay_seconds<<",\"tap_doppler_hz\":"<<tap.doppler_hz<<",\"linear_gain\":"<<(c.channel.linear_gain?"true":"false")<<",\"gain_column\":"<<gain_i<<",\"candidate_index\":"<<ref.candidate<<'}';}
+    manifest<<"],\"candidates\":[";for(std::size_t i=0;i<candidates.size();++i){if(i)manifest<<',';json_candidate(manifest,candidates[i]);}manifest<<']';
+    manifest<<",\"candidate_count\":"<<candidates.size()<<",\"signal_energy_semantics\":\"post-erasure actual signal energy; simulation evaluation only\",\"mean_semantics\":\"A^H W s_actual; simulation evaluation only\",\"receiver_metadata_warning\":\"Do not read hidden means or energies as receiver metadata\",\"stats_noisy\":"<<(o.stats_noisy?"true":"false");
+    if(o.stats_noisy)manifest<<",\"observation_file\":\"observation.c128\",\"observation_shape\":["<<blocks<<','<<d<<"],\"observation_semantics\":\"A^H W y from a second actual channel pass; simulation evaluation only\"";
+    manifest<<",\"file_sizes\":{\"gram.c128\":"<<size_of("gram.c128")<<",\"mean.c128\":"<<size_of("mean.c128")<<",\"intervals.u64\":"<<size_of("intervals.u64")<<",\"valid_rows.u64\":"<<size_of("valid_rows.u64")<<",\"signal_energy.f64\":"<<size_of("signal_energy.f64");if(o.stats_noisy)manifest<<",\"observation.c128\":"<<size_of("observation.c128");manifest<<'}';
+    json_provenance(manifest,o,f,g);manifest<<"}\n";manifest.close();if(!manifest)throw std::runtime_error("failed writing export-stats manifest");
+    for(const auto& n:names)if(n!="manifest.json")std::filesystem::rename(directory/(n+".partial"),directory/n);
+    std::filesystem::rename(directory/"manifest.json.partial",directory/"manifest.json");
+}
+
 } // namespace
 
 int main(int argc,char** argv) {
@@ -744,7 +946,8 @@ int main(int argc,char** argv) {
         const auto options=parse(argc,argv);
         if(options.mode=="plan") print_plan(options);
         else if(options.mode=="run") run(options);
-        else export_basis(options);
+        else if(options.mode=="export") export_basis(options);
+        else export_stats(options);
         return 0;
     } catch(const std::exception& e) {
         std::cerr<<"triad_long: "<<e.what()<<"\n";
