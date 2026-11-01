@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -125,6 +126,11 @@ struct StreamChannelConfig {
     // is unused: a stream is never normalized using its future whole power.
     double complex_noise_variance = 1;
     std::size_t maximum_chunk_samples = 4096;
+    // Independent roots for reproducible physical-path, thermal-noise, and
+    // receiver/transmitter frontend streams. Unset roots inherit effects.seed.
+    std::optional<std::uint64_t> oscillator_seed;
+    std::optional<std::uint64_t> noise_seed;
+    std::optional<std::uint64_t> frontend_seed;
 };
 struct StreamChannelReport {
     std::uint64_t samples = 0, source_samples = 0, tail_samples = 0;

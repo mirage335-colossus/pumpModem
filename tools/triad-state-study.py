@@ -94,8 +94,11 @@ def parse():
     p.add_argument('--coherences', type=float, nargs='+', default=[16., 64., 256., 1024.])
     p.add_argument('--taps', type=int, choices=[1, 2], default=2)
     p.add_argument('--phase-states', type=int, default=128)
-    p.add_argument('--phase-implementation', choices=['reference', 'optimized', 'graph'], default='reference',
+    p.add_argument('--phase-implementation', choices=['reference', 'optimized', 'graph', 'graph-fp64', 'tensor'], default='reference',
                    help='Explicit numerical implementation; finite prior and search bank are unchanged.')
+    p.add_argument('--tensor-fuse-advection', action='store_true')
+    p.add_argument('--tensor-mode', choices=['strict-padded', 'tf32', 'tf32x3', 'bf16', 'fp16-scaled', 'bf16-split2'], default='strict-padded')
+    p.add_argument('--tensor-block-columns', type=int, choices=[64, 128, 256], default=128)
     p.add_argument('--relative-phase-states', type=int, default=8)
     p.add_argument('--frequency-bound', type=float, default=.02)
     p.add_argument('--frequency-step', type=float, default=None,
@@ -112,6 +115,10 @@ def parse():
     p.add_argument('--actual-observation', action='store_true',
                    help='Also score the exported independently sampled raw noisy projection.')
     a = p.parse_args()
+    if a.phase_implementation != 'tensor' and (a.tensor_mode != 'strict-padded' or a.tensor_fuse_advection or a.tensor_block_columns != 128):
+        p.error('tensor options require --phase-implementation tensor')
+    if a.phase_implementation == 'tensor' and a.precision != 'fp32':
+        p.error('experimental tensor backend requires explicit FP32 bulk state')
     if a.trials < 1 or a.trials > 100000 or a.threads < 1 or a.duration_alternatives < 1:
         p.error('invalid trial, thread or duration count')
     if not 0 < a.false_probability < 1 or not math.isfinite(a.horizon_seconds) or a.horizon_seconds <= 0 or not math.isfinite(a.attempt_spacing) or a.attempt_spacing <= 0:
@@ -160,11 +167,20 @@ def evaluate(workspace, blocks, args, selected, labels, batch):
         implementation = getattr(args, 'phase_implementation', 'reference')
         if implementation != 'reference':
             from triad_phase_optimized import OptimizedPhaseFrequencyLikelihood, GraphPhaseFrequencyLikelihood
-            phase_type = GraphPhaseFrequencyLikelihood if implementation == 'graph' else OptimizedPhaseFrequencyLikelihood
+            if implementation == 'tensor':
+                from triad_phase_tensor import TensorPhaseFrequencyLikelihood
+                phase_type = TensorPhaseFrequencyLikelihood
+            elif implementation == 'graph-fp64':
+                from triad_phase_reduction import Fp64ReductionGraphLikelihood
+                phase_type = Fp64ReductionGraphLikelihood
+            else:
+                phase_type = GraphPhaseFrequencyLikelihood if implementation == 'graph' else OptimizedPhaseFrequencyLikelihood
+        tensor_options = ({'tensor_mode': args.tensor_mode, 'tensor_block_columns': args.tensor_block_columns, 'tensor_fuse_advection': args.tensor_fuse_advection}
+                          if implementation == 'tensor' else {})
         phase = phase_type(batch, len(selected), args.taps, model,
                                          device=device, dtype=torch.float64 if args.precision == 'fp64' else torch.float32,
                                          memory_limit_bytes=getattr(args, 'memory_limit_bytes', 4*1024**3),
-                                         validate_inputs=False)
+                                         validate_inputs=False, **tensor_options)
     energies = torch.zeros((batch, len(selected)), dtype=torch.float64, device=device)
     ranks = np.zeros((batch, len(selected)), dtype=np.int64)
     started = time.perf_counter()
@@ -264,7 +280,7 @@ def main():
                 row['wall_seconds_scope'] = 'joint time for all requested methods, including input iteration; run a single method for individual latency'
                 admitted = int(np.sum(results['null'][method].max(axis=1) >= threshold))
                 row['null'] = dict(admitted=admitted, trials=a.trials, one_sided_95=interval(admitted,a.trials),
-                                   scope='one capture; analytic family union bound covers declared repeated attempts, not empirically simulated days')
+                                   scope=('reference threshold for paired tensor decision diagnostics; analytical LR tail calibration unsupported' if a.phase_implementation == 'tensor' else 'one capture; analytic family union bound covers declared repeated attempts, not empirically simulated days'))
                 if actual is not None:
                     row['actual_sampled_noise'] = describe(actual[method], truth, threshold)
                     row['actual_sampled_noise_wall_seconds'] = actual_seconds

@@ -1,0 +1,21 @@
+{
+  "schema": "triad-fp4-artifact-verification-v1",
+  "archive_sha256": "517dca859b71480cd6084aa30a7e50797bd2756b57532a9394f64e41f398ccf0",
+  "archive_bytes": 61295584,
+  "internal_files_hash_verified": 8670,
+  "internal_missing_or_mismatched_files": 0,
+  "current_source_files_identical_to_frozen_archive": 44,
+  "extracted_archive_analysis_reproduced": true,
+  "identical_analysis_sections": [
+    "holdout_summary_separate",
+    "holdout_paired_policy_comparison",
+    "holdout_seed_domain_audit",
+    "holdout_campaign_audit",
+    "sensitivity_by_independent_group",
+    "diagnostic_paired_scores_vs_strict_staging_fp32"
+  ],
+  "holdout_marginal_groups": 40,
+  "holdout_paired_groups": 20,
+  "workspace_records_numerically_identical": 6,
+  "note": "Archive was extracted and analysis regenerated without GPU reruns. Only source path strings differ. Initial symlink-directory recipe discovered zero records; documented recipe corrected to copy real directories and successful rerun verified."
+}

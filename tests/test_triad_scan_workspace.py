@@ -1,0 +1,104 @@
+#!/usr/bin/env python3
+"""Fresh-input validation and optional actual whole-scan graph tests."""
+from pathlib import Path
+from types import SimpleNamespace
+import sys
+import unittest
+import numpy as np
+import torch
+
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tools'))
+from triad_scan_workspace import WholeScanWorkspace,validate_observation,preparation_estimate
+
+CUDA='--cuda' in sys.argv
+
+
+class Checks(unittest.TestCase):
+    def test_fresh_validation(self):
+        a=np.ones((2,19),dtype=np.complex128)
+        validate_observation(a,a.shape,torch.complex128,fp32_input=True)
+        for value in (a[:1],a.astype(np.complex64),a*np.nan,a*1e40):
+            with self.assertRaises(ValueError):
+                validate_observation(value,a.shape,torch.complex128,fp32_input=True)
+        validate_observation(a*1e40,a.shape,torch.complex128,fp32_input=False)
+        validate_observation(torch.from_numpy(a),a.shape,torch.complex128,fp32_input=True)
+
+    def test_estimate_and_cpu_rejection(self):
+        bank=SimpleNamespace(device=torch.device('cpu'),lags=[0,2],frequencies=[-.1,0.,.1],
+            samples=169,block_samples=2,_half_alignment=1,candidates=2,taps=1,backend=None,
+            frequency_tile=3,candidate_tile=2,
+            precision='fp32',_basis=np.ones((2,169,1),dtype=np.complex128),block_count=85)
+        grouped=SimpleNamespace(groups=[(None,1,SimpleNamespace(working_bytes_bound=4096,
+                                                               frequency_states=1,phase_states=16),None)])
+        estimate=preparation_estimate(bank,grouped,(1,171),torch.complex128)
+        self.assertGreater(estimate['device_total_bound_bytes'],85*8192)
+        with self.assertRaisesRegex(RuntimeError,'requires CUDA'):
+            WholeScanWorkspace(bank,grouped,(1,171),noise_variance=1.)
+
+    def test_actual_cuda_aba(self):
+        if not CUDA:self.skipTest('explicit --cuda qualification not requested')
+        if not torch.cuda.is_available():self.fail('--cuda requested but CUDA unavailable')
+        from triad_exhaustive_correlation import ExhaustiveCorrelationBank
+        from triad_phase_reduction import Fp64ReductionGraphLikelihood
+        from triad_phase_frequency import PhaseFrequencyModel
+        torch.backends.cuda.matmul.allow_tf32=False
+        torch.set_float32_matmul_precision('highest')
+        rng=np.random.default_rng(154)
+        basis=(rng.normal(size=(2,169,1))+1j*rng.normal(size=(2,169,1)))*.03
+        a=rng.normal(size=(1,171))+1j*rng.normal(size=(1,171))
+        b=rng.normal(size=(1,171))+1j*rng.normal(size=(1,171))
+        model=PhaseFrequencyModel(phase_states=16,frequency_grid_hz=(0.,),relative_phase_states=1,
+                                  amplitude_nodes=(1.,),amplitude_weights=(1.,),nominal_dt_seconds=2/11.)
+        def pair():
+            bank=ExhaustiveCorrelationBank(basis,11.,[-.1,0.,.1],[0,2],2,device='cuda',precision='fp32',
+                                           fused_reconstruction=True)
+            receiver=Fp64ReductionGraphLikelihood(6,2,1,model,device='cuda',dtype=torch.float32,validate_inputs=False)
+            indices=torch.arange(2,device='cuda')
+            grouped=SimpleNamespace(batch=6,count=2,groups=[(indices,1,receiver,receiver.weights.clone())])
+            return bank,grouped
+        bank,grouped=pair()
+        workspace=WholeScanWorkspace(bank,grouped,a.shape,noise_variance=2.3,memory_limit_bytes=2*1024**3)
+        expected=[]
+        refbank,refgroup=pair();receiver=refgroup.groups[0][2]
+        for observation in (a,b,a):
+            receiver.reset()
+            for block in refbank.iter_blocks(observation,2.3):
+                receiver.update(block.r.permute(0,1,3,2,4).reshape(6,2,1).to(torch.complex64),
+                                block.gram.to(torch.complex64),block.dt)
+            expected.append(receiver.scores().cpu().numpy())
+        actual=[]
+        for value,reference in zip((a,b,a),expected):
+            score,timing=workspace.replay(value);actual.append(score)
+            np.testing.assert_allclose(score,reference,rtol=0,atol=2e-5)
+            self.assertGreater(timing['complete_replay_seconds'],0.)
+        np.testing.assert_array_equal(actual[0],actual[2])
+        self.assertGreater(float(abs(actual[0]-actual[1]).max()),1e-5)
+        with self.assertRaises(ValueError):workspace.replay(a*np.nan)
+        workspace.close()
+        with self.assertRaises(RuntimeError):workspace.replay(a)
+        # Owned capture must not contaminate a later normal-mode capture, even
+        # if the workspace constructor's caller has inference_mode enabled.
+        ambient_bank,ambient_group=pair()
+        with torch.inference_mode():
+            ambient=WholeScanWorkspace(ambient_bank,ambient_group,a.shape,noise_variance=2.3,
+                                       memory_limit_bytes=2*1024**3)
+        self.assertFalse(torch.is_inference(ambient.observation))
+        normal_bank,normal_group=pair();normal=normal_group.groups[0][2]
+        for value,reference in zip((a,b,a),expected):
+            normal.reset()
+            for block in normal_bank.iter_blocks(value,2.3):
+                normal.update(block.r.permute(0,1,3,2,4).reshape(6,2,1).to(torch.complex64),
+                              block.gram.to(torch.complex64),block.dt)
+            score,_=ambient.replay(value)
+            np.testing.assert_allclose(score,normal.scores().cpu().numpy(),rtol=0,atol=2e-5)
+            np.testing.assert_allclose(score,reference,rtol=0,atol=2e-5)
+        ambient.close()
+        with torch.inference_mode():
+            bad_bank,bad_group=pair()
+        with self.assertRaisesRegex(ValueError,'created in inference_mode'):
+            WholeScanWorkspace(bad_bank,bad_group,a.shape,noise_variance=2.3,memory_limit_bytes=2*1024**3)
+
+
+if __name__=='__main__':
+    if CUDA:sys.argv.remove('--cuda')
+    unittest.main()

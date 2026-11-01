@@ -129,6 +129,9 @@ void chunk_and_impairment_checks() {
     cfg.tx_spectrum.flicker_fm_rms_hz = .003;
     cfg.tx_spectrum.white_pm_rms_radians = .002;
     cfg.rx_spectrum = cfg.tx_spectrum;
+    cfg.oscillator_seed = 101;
+    cfg.noise_seed = 202;
+    cfg.frontend_seed = 303;
     const auto left = capture(73, cfg, f);
     const auto right = capture(4096, cfg, f);
     check(left.size() == right.size(), "chunk size changed the channel extent");
@@ -136,6 +139,13 @@ void chunk_and_impairment_checks() {
         check(left[i] == right[i], "noise or oscillator state changed across chunk boundaries");
     check(std::any_of(left.begin(), left.end(), [](Complex z) { return std::norm(z) > 0; }),
           "impaired channel produced no sampled signal");
+
+    auto legacy_roots=cfg;
+    legacy_roots.oscillator_seed.reset();legacy_roots.noise_seed.reset();legacy_roots.frontend_seed.reset();
+    auto explicit_roots=legacy_roots;
+    explicit_roots.oscillator_seed=explicit_roots.noise_seed=explicit_roots.frontend_seed=0x13579bdf;
+    check(capture(73,legacy_roots,f)==capture(4096,explicit_roots,f),
+          "explicit roots equal to effects.seed changed established FHSS/channel draws");
 }
 
 void historical_phase_and_energy_checks() {
@@ -330,6 +340,54 @@ void sampled_frontend_checks() {
     cfg.effects.rx.audio_ppm = 0; cfg.frontend.tone_amplitude = 0; cfg.frontend.tone_frequency_hz = 0;
     cfg.frontend.lowpass_hz = 1e-20;
     rejects([&]{(void)capture(127,cfg,f);}, "unbounded analog-filter tail accepted");
+}
+
+void independent_seed_root_checks() {
+    const auto f=fixture_format();
+    constexpr std::uint64_t legacy_seed=0x13579bdf;
+    StreamChannelConfig legacy;
+    legacy.effects.noise_enabled=false;
+    legacy.complex_noise_variance=0;
+    const auto default_roots=capture(127,legacy,f);
+    auto explicit_equal=legacy;
+    explicit_equal.oscillator_seed=legacy_seed;
+    explicit_equal.noise_seed=legacy_seed;
+    explicit_equal.frontend_seed=legacy_seed;
+    const auto equal_roots=capture(511,explicit_equal,f);
+    check(default_roots==equal_roots,
+          "explicit component roots equal to the legacy seed changed historical samples");
+
+    auto noiseless_a=legacy,noiseless_b=legacy;
+    noiseless_a.noise_seed=11;noiseless_b.noise_seed=12;
+    check(capture(137,noiseless_a,f)==capture(4096,noiseless_b,f),
+          "thermal-noise root changed the noiseless physical path");
+
+    auto null_a=StreamChannelConfig{},null_b=StreamChannelConfig{};
+    null_a.effects.signal_enabled=false;null_b.effects.signal_enabled=false;
+    null_a.effects.noise_enabled=true;null_b.effects.noise_enabled=true;
+    null_a.complex_noise_variance=null_b.complex_noise_variance=.2;
+    null_a.noise_seed=null_b.noise_seed=901;
+    null_a.oscillator_seed=1001;null_b.oscillator_seed=1002;
+    check(capture(113,null_a,f)==capture(307,null_b,f),
+          "oscillator root changed thermal-only null noise");
+    null_b.noise_seed=902;
+    check(capture(113,null_a,f)!=capture(113,null_b,f),
+          "independent thermal-noise root did not change a noise-only capture");
+
+    auto frontend_a=StreamChannelConfig{},frontend_b=StreamChannelConfig{};
+    frontend_a.effects.noise_enabled=true;frontend_b.effects.noise_enabled=true;
+    frontend_a.complex_noise_variance=frontend_b.complex_noise_variance=.2;
+    frontend_a.noise_seed=frontend_b.noise_seed=1901;
+    frontend_a.oscillator_seed=frontend_b.oscillator_seed=1902;
+    for(auto* cfg:{&frontend_a,&frontend_b}){
+        cfg->frontend.adc.nominal_bits=16;
+        cfg->frontend.adc.effective_bits=12;
+        cfg->frontend.adc.full_scale=2;
+        cfg->frontend.adc.dither_rms_lsb=.5;
+    }
+    frontend_a.frontend_seed=2901;frontend_b.frontend_seed=2902;
+    check(capture(127,frontend_a,f)!=capture(127,frontend_b,f),
+          "independent frontend root did not change ADC dither realization");
 }
 
 void physical_hop_origin_checks() {
@@ -541,6 +599,7 @@ int main() {
         historical_phase_and_energy_checks();
         bounded_configuration_checks();
         sampled_frontend_checks();
+        independent_seed_root_checks();
         physical_hop_origin_checks();
         erasure_and_noise_checks();
         long_extent_prefix_and_tail_checks();

@@ -32,7 +32,10 @@ def main():
     p.add_argument("input", type=Path)
     p.add_argument("--output", type=Path, required=True)
     p.add_argument("--device", default="cuda:0")
-    p.add_argument("--backend", choices=("reference", "optimized", "graph"), default="reference")
+    p.add_argument("--backend", choices=("reference", "optimized", "graph", "graph-fp64", "tensor"), default="reference")
+    p.add_argument("--tensor-fuse-advection", action="store_true", help="Experimental fusion of the first phase advection into frequency contraction")
+    p.add_argument("--tensor-mode", choices=("strict-padded", "tf32", "tf32x3", "bf16", "fp16-scaled", "bf16-split2"), default="strict-padded")
+    p.add_argument("--tensor-block-columns", type=int, choices=(64,128,256), default=128)
     p.add_argument("--batch", type=int, default=8)
     p.add_argument("--blocks", type=int, default=16)
     p.add_argument("--phase-states", type=int, default=512)
@@ -41,6 +44,10 @@ def main():
     p.add_argument("--seed", type=int, default=170041)
     p.add_argument("--no-torch-profile", action="store_true", help="for an external Nsight capture")
     a = p.parse_args()
+    if a.backend != "tensor" and (a.tensor_mode != "strict-padded" or a.tensor_fuse_advection or a.tensor_block_columns != 128):
+        p.error("tensor options require --backend tensor")
+    if a.backend == "tensor" and a.precision != "fp32":
+        p.error("experimental tensor backend requires explicit FP32 bulk state")
     if a.output.exists() or min(a.batch, a.blocks) < 1:
         p.error("fresh output and positive batch/blocks required")
     a.output.mkdir(parents=True)
@@ -69,12 +76,20 @@ def main():
         import triad_phase_optimized as optimized
         cls = (optimized.OptimizedPhaseFrequencyLikelihood if a.backend == "optimized"
                else optimized.GraphPhaseFrequencyLikelihood)
+    if a.backend == "graph-fp64":
+        from triad_phase_reduction import Fp64ReductionGraphLikelihood
+        cls = Fp64ReductionGraphLikelihood
+    elif a.backend == "tensor":
+        from triad_phase_tensor import TensorPhaseFrequencyLikelihood
+        cls = TensorPhaseFrequencyLikelihood
+    tensor_options = ({"tensor_mode":a.tensor_mode, "tensor_block_columns":a.tensor_block_columns, "tensor_fuse_advection":a.tensor_fuse_advection}
+                      if a.backend == "tensor" else {})
     model = PhaseFrequencyModel(phase_states=a.phase_states,
                                nominal_dt_seconds=w.block_samples/w.sample_rate)
 
     def state():
         return cls(a.batch, len(selected), 2, model, device=device, dtype=dtype,
-                   memory_limit_bytes=24*1024**3, validate_inputs=False)
+                   memory_limit_bytes=24*1024**3, validate_inputs=False, **tensor_options)
 
     def sync():
         if device.type == "cuda":
@@ -89,7 +104,7 @@ def main():
     for dt in set(b[2] for b in blocks):
         if dt:
             receiver._transition(dt)
-    if a.backend == "graph":
+    if a.backend in ("graph", "graph-fp64", "tensor"):
         # Graph pools/captures belong to an instance; warming `warm` above
         # cannot prepare the receiver whose replay is being attributed.
         with torch.inference_mode():
@@ -150,7 +165,9 @@ def main():
                               for name in sorted(w.manifest["file_sizes"])},
               "source_sha256": {f.name: sha256_file(f) for f in
                   (Path(__file__), Path(__file__).with_name("triad_phase_frequency.py"),
-                   Path(__file__).with_name("triad_phase_optimized.py"))},
+                   Path(__file__).with_name("triad_phase_optimized.py"),
+                   Path(__file__).with_name("triad_phase_reduction.py"),
+                   Path(__file__).with_name("triad_phase_tensor.py"))},
               "diagnostics": receiver.diagnostics(),
               "counter_scope": "torch/CPU trace; SM/tensor/DRAM/cache/occupancy hardware counters require separate Nsight capture",
               "scores": receiver.scores().cpu().tolist()}

@@ -48,6 +48,10 @@ struct Rng {
 
 bool finite_nonnegative(double x) { return std::isfinite(x) && x >= 0; }
 
+std::uint64_t root_seed(const std::optional<std::uint64_t>& selected, std::uint64_t legacy) {
+    return selected.value_or(legacy);
+}
+
 void validate_converter(const ConverterConfig& c) {
     require(c.nominal_bits == 0 || (c.nominal_bits >= 2 && c.nominal_bits <= 24),
             "converter nominal bit depth must be 0 or 2..24");
@@ -309,14 +313,14 @@ struct StreamingChannel::Impl {
 
     Impl(PatternSource& src, const StreamChannelConfig& cfg)
         : source(src), format(src.format()), geometry(src.geometry()), config(checked_config(cfg, src.format())),
-          effects(config.effects), tx_rng(cfg.effects.seed ^ 0x3254494154545801ULL),
-          rx_rng(cfg.effects.seed ^ 0x3254494154525802ULL),
-          thermal_rng(cfg.effects.seed ^ 0x3254494154415747ULL),
-          tx_spectrum_rng(cfg.effects.seed ^ 0x9e37a201ULL),
-          rx_spectrum_rng(cfg.effects.seed ^ 0x9e37a202ULL),
-          dac_rng(cfg.effects.seed ^ 0x444143434f4e5631ULL),
-          adc_rng(cfg.effects.seed ^ 0x414443434f4e5631ULL),
-          interference_rng(cfg.effects.seed ^ 0x494e544552464531ULL) {
+          effects(config.effects), tx_rng(root_seed(cfg.oscillator_seed,cfg.effects.seed) ^ 0x3254494154545801ULL),
+          rx_rng(root_seed(cfg.oscillator_seed,cfg.effects.seed) ^ 0x3254494154525802ULL),
+          thermal_rng(root_seed(cfg.noise_seed,cfg.effects.seed) ^ 0x3254494154415747ULL),
+          tx_spectrum_rng(root_seed(cfg.oscillator_seed,cfg.effects.seed) ^ 0x9e37a201ULL),
+          rx_spectrum_rng(root_seed(cfg.oscillator_seed,cfg.effects.seed) ^ 0x9e37a202ULL),
+          dac_rng(root_seed(cfg.frontend_seed,cfg.effects.seed) ^ 0x444143434f4e5631ULL),
+          adc_rng(root_seed(cfg.frontend_seed,cfg.effects.seed) ^ 0x414443434f4e5631ULL),
+          interference_rng(root_seed(cfg.frontend_seed,cfg.effects.seed) ^ 0x494e544552464531ULL) {
         validate_effects(effects, format);
         validate_spectrum(config.tx_spectrum);
         validate_spectrum(config.rx_spectrum);
@@ -434,7 +438,7 @@ struct StreamingChannel::Impl {
         agc_alpha = std::exp(-dt_rx / .75);
         if (config.frontend.overload_recovery_seconds > 0)
             recovery_alpha = std::exp(-dt_rx/config.frontend.overload_recovery_seconds);
-        tone_initial_phase = keyed_phase(effects.seed, 0, 0x544f4e4546524f4eULL);
+        tone_initial_phase = keyed_phase(root_seed(config.frontend_seed,effects.seed), 0, 0x544f4e4546524f4eULL);
         stats.complex_noise_variance = effects.noise_enabled ? config.complex_noise_variance : 0;
         stats.gaussian_projection_supported = !config.frontend.active() && !effects.slow_agc;
         stats.source_samples = geometry.source_samples;
@@ -452,7 +456,7 @@ struct StreamingChannel::Impl {
             const double hop = hop_at(effects, calendar_time);
             const auto current_dwell = dwell_index(calendar_time, effects.dwell_seconds);
             if (effects.fhss && current_dwell != previous_tx_dwell) {
-                tx_osc.phase += keyed_phase(effects.seed, current_dwell,
+                tx_osc.phase += keyed_phase(root_seed(config.oscillator_seed,effects.seed), current_dwell,
                                             0x5458484f50504841ULL);
                 previous_tx_dwell = current_dwell;
             }
@@ -525,7 +529,7 @@ struct StreamingChannel::Impl {
 
         const auto rx_dwell = dwell_index(receive_calendar, effects.dwell_seconds);
         if (effects.fhss && rx_dwell != previous_rx_dwell) {
-            rx_osc.phase += keyed_phase(effects.seed ^ 0x5258484f50504841ULL,
+            rx_osc.phase += keyed_phase(root_seed(config.oscillator_seed,effects.seed) ^ 0x5258484f50504841ULL,
                                         rx_dwell, 0x5258504841534531ULL);
             previous_rx_dwell = rx_dwell;
         }

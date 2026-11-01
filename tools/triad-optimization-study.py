@@ -146,7 +146,7 @@ def _memory_preflight(args, device, workspace, candidate_count, block_count, cap
     receiver_bytes = elements*dtype_bytes*16 + cache_entries*(frequency_states**2*16+
         frequency_states*phase_states*24+phase_states*32)+65536
     graph_bytes = None
-    if args.backend == "graph":
+    if args.backend in ("graph", "graph-fp64", "tensor"):
         graph_inputs = args.batch*candidate_count*(args.taps+args.taps*args.taps)*tensor_item
         graph_bytes = (cache_entries+1)*receiver_bytes+elements*dtype_bytes+graph_inputs
     planned_receiver_bytes = graph_bytes if graph_bytes is not None else receiver_bytes
@@ -190,6 +190,14 @@ def _make_receiver(args, batch, bits, taps, device):
                              else module.OptimizedPhaseFrequencyLikelihood)
         except (ImportError, AttributeError) as exc:
             raise RuntimeError("optimized backend is not installed in this source revision") from exc
+    if args.backend == "graph-fp64":
+        from triad_phase_reduction import Fp64ReductionGraphLikelihood
+        receiver_type = Fp64ReductionGraphLikelihood
+    elif args.backend == "tensor":
+        from triad_phase_tensor import TensorPhaseFrequencyLikelihood
+        receiver_type = TensorPhaseFrequencyLikelihood
+    tensor_options = ({"tensor_mode":args.tensor_mode,"tensor_block_columns":args.tensor_block_columns,
+                       "tensor_fuse_advection":args.tensor_fuse_advection} if args.backend == "tensor" else {})
     model = PhaseFrequencyModel(
         phase_states=args.phase_states,
         frequency_bound_hz=args.frequency_bound_hz,
@@ -203,12 +211,14 @@ def _make_receiver(args, batch, bits, taps, device):
     dtype = torch.float32 if args.precision == "fp32" else torch.float64
     return receiver_type(batch, bits, taps, model, device=device, dtype=dtype,
                          memory_limit_bytes=args.memory_gib * 1024**3,
-                         validate_inputs=False)
+                         validate_inputs=False, **tensor_options)
 
 
-def _verified_method(receiver):
+def _verified_method(receiver, *, experimental_tensor=False):
     diagnostic = receiver.diagnostics()
-    if diagnostic.get("tf32_allowed") is True:
+    if experimental_tensor and diagnostic.get("implementation") != "experimental_graph_tensor_frequency_v1":
+        raise RuntimeError("explicit tensor mode did not execute the tensor receiver")
+    if diagnostic.get("tf32_allowed") is True and not experimental_tensor:
         raise RuntimeError("FP32 minimum violated: receiver reports TF32 allowed")
     return diagnostic
 
@@ -357,7 +367,7 @@ def _verify(scores, candidate_labels, truth, family_multiplier, *, calibration_s
             "null_admitted": null_admitted if calibration_supported else None,
             "null_admission_one_sided_95": interval(null_admitted, len(scores)) if calibration_supported and null_admitted is not None else None,
             "hypothetical_score_gate_crossings": int(np.sum(admitted)),
-            "scope": "conditional trials on one exported fixed basis; pointwise interval only; not a calibrated operational tail or independent path estimate" if calibration_supported else "uncalibrated likelihood score diagnostics only; active sampled frontend violates the Gaussian projection/null model, so threshold crossings are hypothetical and are not admissions",
+            "scope": "conditional trials on one exported fixed basis; pointwise interval only; not a calibrated operational tail or independent path estimate" if calibration_supported else "uncalibrated likelihood score diagnostics only; experimental tensor arithmetic or active sampled frontend lacks a supported likelihood/null calibration, so threshold crossings are hypothetical and are not admissions",
         }
     return bit_scores, reports
 
@@ -458,6 +468,10 @@ def run(args):
             importlib.import_module("triad_phase_optimized")
         except ImportError as exc:
             raise RuntimeError("optimized backend requested but triad_phase_optimized is unavailable") from exc
+    if args.backend == "tensor" and args.precision != "fp32":
+        raise ValueError("experimental tensor backend requires explicit FP32 bulk state")
+    if args.backend != "tensor" and (args.tensor_mode != "strict-padded" or args.tensor_fuse_advection or args.tensor_block_columns != 128):
+        raise ValueError("tensor options require --backend tensor")
     torch.set_num_threads(args.cpu_threads)
     torch.set_float32_matmul_precision("highest")
     torch.backends.cuda.matmul.allow_tf32 = False
@@ -588,7 +602,7 @@ def run(args):
         with torch.inference_mode():
             for dt in sorted({block[2] for block in blocks if block[2] > 0}):
                 receiver._transition(dt)
-            if args.backend == "graph":
+            if args.backend in ("graph", "graph-fp64", "tensor"):
                 seen = set()
                 for r, gram, dt, _ in blocks:
                     if dt not in seen:
@@ -601,7 +615,7 @@ def run(args):
         # starts with a prepared transition cache but cold posterior weights.
         resident_timing[label] = _run_updates(receiver, blocks, device, measure_events=True)
         if model_diagnostics is None:
-            model_diagnostics = _verified_method(receiver)
+            model_diagnostics = _verified_method(receiver, experimental_tensor=args.backend == "tensor")
             state_working_bytes = receiver.working_bytes_bound
         d2h_start = time.perf_counter()
         resident_scores[label] = receiver.scores().detach().cpu().numpy()
@@ -618,7 +632,7 @@ def run(args):
         st = time.perf_counter()
         for dt in sorted({block[2] for block in blocks if block[2] > 0}):
             receiver._transition(dt)
-        if args.backend == "graph":
+        if args.backend in ("graph", "graph-fp64", "tensor"):
             seen = set()
             for r, gram, dt, _ in blocks:
                 if dt not in seen:
@@ -645,14 +659,14 @@ def run(args):
               "selection_methods": args.selection_methods}
     signal_verify_start = time.perf_counter()
     _, signal_protocol = _verify(s_scores, labels, truth, family,
-                                 calibration_supported=gaussian_projection_supported)
+                                 calibration_supported=gaussian_projection_supported and args.backend != "tensor")
     signal_decision_verification_seconds = time.perf_counter()-signal_verify_start
     if n_scores is None:
         null_protocol = {"status": "unavailable", "reason": "no sampled noise-only observation was provided; do not infer null calibration from the signal observation"}
     else:
         null_verify_start = time.perf_counter()
         _, null_protocol = _verify(n_scores, labels, None, family,
-                                   calibration_supported=gaussian_projection_supported)
+                                   calibration_supported=gaussian_projection_supported and args.backend != "tensor")
         null_decision_verification_seconds = time.perf_counter()-null_verify_start
     if n_scores is None:
         null_decision_verification_seconds = 0.
@@ -664,7 +678,7 @@ def run(args):
                        for sh, nh in zip(signal_host, null_host or [])) if not args.actual_observation and null_host is not None else None
     if cold_capture is not None:
         cold_verify_start = time.perf_counter()
-        _verify(cold_scores, labels, truth, family, calibration_supported=gaussian_projection_supported)
+        _verify(cold_scores, labels, truth, family, calibration_supported=gaussian_projection_supported and args.backend != "tensor")
         cold_verify_seconds = time.perf_counter()-cold_verify_start
         cold_capture["decision_verification_seconds"] = cold_verify_seconds
         cold_capture["end_to_end_full_first_capture_seconds"] = (
@@ -692,6 +706,10 @@ def run(args):
                     Path(__file__).with_name("triad-long.cpp")]
     if args.backend != "reference":
         source_paths.append(Path(__file__).with_name("triad_phase_optimized.py"))
+    if args.backend in ("graph-fp64", "tensor"):
+        source_paths.append(Path(__file__).with_name("triad_phase_reduction.py"))
+    if args.backend == "tensor":
+        source_paths.append(Path(__file__).with_name("triad_phase_tensor.py"))
     if args.observation_preparation == "cached":
         source_paths.append(Path(__file__).with_name("triad_prepared_observation.py"))
     input_files = [input_dir / "manifest.json"] + [input_dir / name for name in sorted(workspace.manifest["file_sizes"])]
@@ -762,7 +780,8 @@ def run(args):
         resident_timing.get("null", {}).get("synchronized_wall_seconds", 0.)
     report = {
         "schema": "triad-gpu-optimization-report-v1",
-        "status": ("uncalibrated_frontend_score_diagnostic" if not gaussian_projection_supported else
+        "status": ("uncalibrated_tensor_score_diagnostic" if args.backend == "tensor" else
+                   "uncalibrated_frontend_score_diagnostic" if not gaussian_projection_supported else
                    "screening_only" if args.split != "holdout" or truncated else "frozen_reference_holdout_screening"),
         "configuration": {k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()
                            if k not in ("effective_seed", "stop_block")},
@@ -790,14 +809,14 @@ def run(args):
                             "total_memory_bytes": torch.cuda.get_device_properties(device).total_memory}
                             if device.type == "cuda" else None)},
         "workload": {"family": "finite phase/frequency fixed candidate bank; all exported candidates of selected tap count exhaustively scored",
-                     "receiver_backend": args.backend, "precision": args.precision, "precision_contract": "strict FP32 or FP64 inputs/accumulation; TF32 disabled; log evidence FP64",
+                     "receiver_backend": args.backend, "precision": args.precision, "precision_contract": ("explicit experimental tensor products; FP32 state/accumulation; FP64 posterior normalization and log evidence; see tensor_mode" if args.backend == "tensor" else "strict FP32 or FP64 inputs/accumulation; TF32 disabled; log evidence FP64"),
                      "candidate_count_scored": bits, "candidate_count_exported": len(workspace.candidates),
                      "candidate_labels": labels.tolist(), "candidate_mappings": [list(x) for x in mappings],
                      "batch_independent_trials": batch, "taps": taps,
                      "phase_states": args.phase_states, "frequency_states": model_diagnostics["frequency_states"],
                      "gain_quadrature_states": model_diagnostics["quadrature_states"],
                      "public_distinct_dt_values": args.public_dt_values,
-                     "graph_cache_covers_public_dt_values": args.backend != "graph" or len(args.public_dt_values) <= 32,
+                     "graph_cache_covers_public_dt_values": args.backend not in ("graph", "graph-fp64", "tensor") or len(args.public_dt_values) <= 32,
                      "full_blocks": total_blocks, "scored_blocks": run_blocks,
                      "block_updates_per_capture": run_blocks,
                      "source_sample_count": workspace.sample_count, "sample_rate_hz": workspace.sample_rate,
@@ -808,7 +827,7 @@ def run(args):
         "threshold_family": {"attempt_spacing_seconds": 60., "duration_alternatives": args.duration_alternatives,
                              "receiver_selection_methods": args.selection_methods,
                              "bit_hypotheses": 2,
-                             "calibration_status": "conditional model supported" if gaussian_projection_supported else "unsupported for active sampled frontend; gate crossings below are hypothetical diagnostics",
+                             "calibration_status": ("unsupported for experimental tensor arithmetic; reference thresholds for paired diagnostics" if args.backend == "tensor" else "conditional model supported" if gaussian_projection_supported else "unsupported for active sampled frontend; gate crossings below are hypothetical diagnostics"),
                              "note": "per-test union allocation for the declared default/relaxed horizons; threshold audit only, not empirical 24h/12h calibration"},
         "timing_seconds": {"timing_protocol_version": 2,
                            "workspace_setup_schema_and_file_validation": workspace_setup_seconds,
@@ -907,7 +926,10 @@ def parse_args(argv=None):
     parser.add_argument("--compare-report", type=Path,
                         help="paired prior run report; requires its .scores.npz and exactly matched model/input settings")
     parser.add_argument("--observation-preparation", choices=("reference", "cached"), default="reference")
-    parser.add_argument("--backend", choices=("reference", "optimized", "graph"), default="reference")
+    parser.add_argument("--backend", choices=("reference", "optimized", "graph", "graph-fp64", "tensor"), default="reference")
+    parser.add_argument("--tensor-mode", choices=("strict-padded", "tf32", "tf32x3", "bf16", "fp16-scaled", "bf16-split2"), default="strict-padded")
+    parser.add_argument("--tensor-block-columns", type=int, choices=(64,128,256), default=128)
+    parser.add_argument("--tensor-fuse-advection", action="store_true")
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--precision", choices=("fp32", "fp64"), default="fp64")
     parser.add_argument("--batch", type=int, default=1, help="independent paired conditional noise trials")

@@ -13,6 +13,15 @@ and the [state-likelihood study](validation-data/triad-v3/2026-11-01-state/READM
 The [GPU optimization protocol](triad-gpu-optimization.md) defines the comparison
 gates; the [optimization campaign](validation-data/triad-v3/2026-11-01-optimization/README.md)
 records its timings, numerical checks and remaining qualification gaps.
+The [tensor follow-up](validation-data/triad-v3/2026-11-01-tensor/README.md)
+adds optional mixed-product frequency contraction and fused phase advection.
+It retains strict reference modes and reports modest gains, accumulated
+two-day errors and unqualified operational tails; receiver defaults are unchanged.
+The [exhaustive native FP4 campaign](validation-data/triad-v3/2026-11-01-fp4/README.md)
+adds tiled candidate/timing/CFO/epoch correlations, sampled quantization diagnostics,
+independent seed controls and RTX5090/PRO/MIG measurements. It preserves complete
+search accounting and strict references; quantized operational admission remains
+unqualified.
 
 ## Format and streaming state
 

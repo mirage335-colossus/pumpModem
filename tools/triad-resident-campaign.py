@@ -29,7 +29,8 @@ from triad_state_workspace import BlockWorkspace
 
 SPLITS = {"development": 0x444556, "calibration": 0x43414C, "holdout": 0x484F4C44}
 TARGETS = {"default": (.99, 1e-4, 86400.), "relaxed": (.90, .01, 43200.)}
-GRAPH_BACKENDS = ("graph", "graph-fp64")
+GRAPH_BACKENDS = ("graph", "graph-fp64", "tensor")
+TENSOR_MODES = ("strict-padded", "tf32", "tf32x3", "bf16", "fp16-scaled", "bf16-split2")
 MAX_NOISE_BATCHES = 32
 
 
@@ -103,7 +104,7 @@ def decisions(scores, labels, truth, args):
             "missed": total-correct-wrong, "null_admitted": null,
             "correct_one_sided_95": interval(correct, total),
             "null_one_sided_95": interval(null, total),
-            "scope": "conditional fixed physical path, known Gaussian variance; analytic family gate only; no empirical operational horizon or synchronization qualification"}
+            "scope": ("conditional fixed physical path; reference threshold for paired tensor decision diagnostics only; analytical LR tail calibration unsupported" if args.backend == "tensor" else "conditional fixed physical path, known Gaussian variance; analytic family gate only; no empirical operational horizon or synchronization qualification")}
     return result
 
 
@@ -237,7 +238,10 @@ def make_receiver(args, bits, device, dts):
     cls = PhaseFrequencyLikelihood
     if args.backend != "reference":
         from triad_phase_optimized import GraphPhaseFrequencyLikelihood, OptimizedPhaseFrequencyLikelihood
-        if args.backend == "graph-fp64":
+        if args.backend == "tensor":
+            from triad_phase_tensor import TensorPhaseFrequencyLikelihood
+            cls = TensorPhaseFrequencyLikelihood
+        elif args.backend == "graph-fp64":
             from triad_phase_reduction import Fp64ReductionGraphLikelihood
             cls = Fp64ReductionGraphLikelihood
         else:
@@ -247,9 +251,11 @@ def make_receiver(args, bits, device, dts):
         frequency_std_hz=args.frequency_std, frequency_correlation_seconds=args.frequency_correlation,
         phase_diffusion_rad_per_sqrt_second=args.phase_diffusion,
         transition_cache_entries=max(1, min(32, len(set(dts)))))
+    tensor_options = ({"tensor_mode": args.tensor_mode, "tensor_block_columns": args.tensor_block_columns, "tensor_fuse_advection": args.tensor_fuse_advection}
+                      if args.backend == "tensor" else {})
     return cls(args.batch, bits, args.taps, model, device=device,
         dtype=torch.float32 if args.precision == "fp32" else torch.float64,
-        memory_limit_bytes=int(args.memory_gib*1024**3), validate_inputs=False)
+        memory_limit_bytes=int(args.memory_gib*1024**3), validate_inputs=False, **tensor_options)
 
 
 def reset_receiver(receiver, initial):
@@ -282,8 +288,8 @@ def run_inference(receiver, observations, grams, dts):
 
 def compare_report(path, identity, args, scores, hashes, labels):
     prior = json.loads(path.read_text())
-    if prior["configuration"]["backend"] != "reference":
-        raise ValueError("numerical comparison requires an original reference backend campaign")
+    if prior["configuration"]["backend"] not in ("reference", "graph-fp64"):
+        raise ValueError("numerical comparison requires the original reference or strict graph-fp64 campaign")
     keys = ("batch", "batches", "precision", "cn0", "seed", "split", "phase_states", "relative_phase_states",
             "taps", "frequency_bound", "frequency_std", "frequency_correlation", "phase_diffusion", "nominal_dt",
             "max_blocks", "attempt_spacing", "duration_alternatives", "selection_methods")
@@ -301,10 +307,15 @@ def compare_report(path, identity, args, scores, hashes, labels):
     if not np.isfinite(left).all() or not np.isfinite(right).all():
         raise ValueError("nonfinite comparison score")
     lbits, rbits = bit_scores(left, labels), bit_scores(right, labels)
-    result = {"reference_report": str(path), "reference_report_sha256": sha_file(path),
+    result = {"reference_backend": prior["configuration"]["backend"],
+        "reference_report": str(path), "reference_report_sha256": sha_file(path),
         "reference_archive_sha256": sha_file(archive_path), "checked_batch_indices": indices,
         "boundary_batch_indices": sorted({0, args.batches-1}),
         "maximum_absolute_log_lr_error": float(np.abs(left-right).max()),
+        "mean_signed_log_lr_error": float((right-left).mean()),
+        "minimum_signed_log_lr_error": float((right-left).min()),
+        "maximum_signed_log_lr_error": float((right-left).max()),
+        "maximum_bit_likelihood_margin_error": float(np.abs((rbits[..., 1]-rbits[..., 0])-(lbits[..., 1]-lbits[..., 0])).max()),
         "candidate_ranking_differences": int((left.argmax(-1) != right.argmax(-1)).sum()),
         "bit_ranking_differences": int((lbits.argmax(-1) != rbits.argmax(-1)).sum()),
         "reference_complete_campaign_wall_seconds": prior["timing"]["complete_campaign_wall_before_json_seconds"],
@@ -322,6 +333,12 @@ def run(args):
         raise ValueError("fresh report and score paths required")
     if not 1 <= args.batches <= MAX_NOISE_BATCHES or args.batch < 1 or args.max_blocks < 0:
         raise ValueError(f"one through {MAX_NOISE_BATCHES} independent noise batches and positive batch required")
+    if args.backend != "tensor" and (args.tensor_mode != "strict-padded" or args.tensor_fuse_advection or args.tensor_block_columns != 128):
+        raise ValueError("tensor options require --backend tensor")
+    if args.backend == "tensor" and args.precision != "fp32":
+        raise ValueError("experimental tensor backend requires explicit FP32 bulk state; FP64 reference remains separate")
+    if args.tensor_block_columns not in (64, 128, 256):
+        raise ValueError("tensor block columns must be 64, 128 or 256")
     for value in (args.cn0, args.memory_gib, args.frequency_bound, args.frequency_std,
                   args.frequency_correlation, args.phase_diffusion, args.attempt_spacing):
         if not math.isfinite(value):
@@ -432,8 +449,10 @@ def run(args):
                Path(__file__).with_name("triad_state_workspace.py")]
     if args.backend != "reference":
         sources.append(Path(__file__).with_name("triad_phase_optimized.py"))
-    if args.backend == "graph-fp64":
+    if args.backend in ("graph-fp64", "tensor"):
         sources.append(Path(__file__).with_name("triad_phase_reduction.py"))
+    if args.backend == "tensor":
+        sources.append(Path(__file__).with_name("triad_phase_tensor.py"))
     if prepared is not None:
         sources.append(Path(__file__).with_name("triad_prepared_observation.py"))
     source_hashes = {p.name: sha_file(p) for p in sources}
@@ -485,8 +504,11 @@ def run(args):
                 "projected_paired_observations_per_second": 2*args.batch*n/(fixed+n*per_batch_variable)} for n in (1, 2, 4, 8, 16, 32)],
             "resident_pipeline_speedup_ceiling_if_inference_zero": pipeline/(pipeline-inference_total) if pipeline > inference_total else None,
             "scope": "complete processing includes all first-use context/design/receiver capture/reset/generation/transfer/inference/D2H and verification; external reference campaign cost reported separately, not charged again; provenance observation hashes and archive/JSON I/O are outside processing total and inside complete driver wall"},
-        "batches": batches, "decisions": metrics, "comparison_to_original_reference": comparison,
+        "batches": batches, "decisions": metrics,
+        "comparison_to_reference": comparison,
+        "comparison_to_original_reference": comparison if comparison and comparison["reference_backend"] == "reference" else None,
         "limits": ["One sampled physical design; independent noise batches are not independent channels.",
+            "Tensor arithmetic modes are explicit experimental approximations; no operational calibration guarantee transfers automatically.",
             "Receiver nuisance parameters are explicit in configuration: this benchmark's default phase diffusion 0.00872665 differs from the existing path-holdout profile default 0.0153; sensitivity claims do not transfer between these workloads.",
             "No sampled ADC/DAC/interference processing, blind acquisition, hour/day operational null schedule or sensitivity-loss certification.",
             "Same preparation and receiver lifetime are the primary matched arithmetic comparison; compare best absolute baseline and optimized configurations across batch sizes.",
@@ -501,7 +523,10 @@ def parser():
     p.add_argument("input", type=Path)
     p.add_argument("--output", type=Path, required=True)
     p.add_argument("--compare-report", type=Path)
-    p.add_argument("--backend", choices=("reference", "optimized", "graph", "graph-fp64"), default="reference")
+    p.add_argument("--backend", choices=("reference", "optimized", "graph", "graph-fp64", "tensor"), default="reference")
+    p.add_argument("--tensor-fuse-advection", action="store_true", help="Experimental fusion of the first phase advection into frequency contraction")
+    p.add_argument("--tensor-mode", choices=TENSOR_MODES, default="strict-padded")
+    p.add_argument("--tensor-block-columns", type=int, choices=(64, 128, 256), default=128)
     p.add_argument("--observation-preparation", choices=("cached", "reference"), default="cached")
     p.add_argument("--receiver-lifetime", choices=("campaign", "capture"), default="campaign")
     p.add_argument("--device", default="cpu")

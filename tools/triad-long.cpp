@@ -56,6 +56,7 @@ struct Options {
     double wrong_projection = .08;
     std::uint64_t minimum_dwells = 20, seed = 1, epoch = 1793404800;
     std::optional<std::uint64_t> key_seed, channel_seed;
+    std::optional<std::uint64_t> oscillator_seed, noise_seed, frontend_seed;
     std::uint64_t duration_alternatives = 1;
     unsigned added = 10, threads = 2;
     std::size_t chunk = 4096, block = 1536;
@@ -125,7 +126,7 @@ Options parse(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         const std::string_view key(argv[i]);
         if (key == "--help" || key == "-h") {
-            std::cout << R"HELP(triad_long --mode plan|run|export|export-stats [options]
+            std::cout << R"HELP(triad_long --mode plan|run|export|export-sampled|export-stats [options]
   --seconds S                 Requested active one-bit span (8..604800 s); rounded to complete private tiles.
   --rate HZ --added N --sample-rate HZ --rf-hz HZ
   --cn0 DB-HZ                 Total nominal three-carrier C/N0; N0 normalization uses power1, not faded output.
@@ -144,14 +145,17 @@ Options parse(int argc, char** argv) {
   --fhss                      Source envelope only; no physical RF-retuning claim.
   --burst-wait-tiles N         Silent tile waits within this one-bit v3 observation.
   --seed N --epoch UTC | --now --trials N --signal-bit 0|1 --no-encrypt
-  --key-seed N --channel-seed N   Independent deterministic seeds (default to --seed).
+  --key-seed N --channel-seed N   Key/channel seeds (default to --seed).
+  --oscillator-seed N --noise-seed N --frontend-seed N
+                              Independent sample-stream roots; default to the resolved channel seed.
   --control signal|null|wrong-key
   --correct P --false P --horizon S --attempt-spacing S --duration-alternatives N
                               Count every separately attempted duration in the operational false-admission budget.
   --outage FRACTION --retained-energy FRACTION --wrong-projection FRACTION
   --minimum-dwells N --assume-model-bounds
                               Planner bounds are conditional on caller certificates, not empirical recommendations.
-  --output DIRECTORY          Fresh export directory; signal uses the selected sampled channel without AWGN.
+  --output DIRECTORY          Fresh export directory for exported arrays.
+  --mode export-sampled       Export full complex128 public bases and actual noisy/frontend samples.
   --stats-noisy               export-stats also writes matched actual noisy projections.
   --dac-bits N --adc-bits N    0=exact bypass, or 2..24 signed component quantization bits.
   --dac-enob B --adc-enob B    Synthetic Gaussian converter-error effective resolution (0=nominal).
@@ -214,6 +218,9 @@ Examples:
         else if (key == "--seed") o.seed = integer(need(), "seed");
         else if (key == "--key-seed") o.key_seed = integer(need(), "key seed");
         else if (key == "--channel-seed") o.channel_seed = integer(need(), "channel seed");
+        else if (key == "--oscillator-seed") o.oscillator_seed = integer(need(), "oscillator seed");
+        else if (key == "--noise-seed") o.noise_seed = integer(need(), "noise seed");
+        else if (key == "--frontend-seed") o.frontend_seed = integer(need(), "frontend seed");
         else if (key == "--trials") o.trials = bounded_integer<unsigned>(need(),"trials");
         else if (key == "--threads") o.threads = bounded_integer<unsigned>(need(),"threads");
         else if (key == "--chunk") o.chunk = bounded_integer<std::size_t>(need(),"chunk");
@@ -250,7 +257,7 @@ Examples:
         else throw std::invalid_argument(std::string("unknown option: ") + std::string(key));
     }
     if (o.now) o.epoch = static_cast<std::uint64_t>(std::time(nullptr));
-    if (o.mode != "plan" && o.mode != "run" && o.mode != "export" && o.mode != "export-stats") throw std::invalid_argument("mode must be plan, run, export, or export-stats");
+    if (o.mode != "plan" && o.mode != "run" && o.mode != "export" && o.mode != "export-sampled" && o.mode != "export-stats") throw std::invalid_argument("mode must be plan, run, export, export-sampled, or export-stats");
     if (o.channel != "none" && o.channel != "hf") throw std::invalid_argument("channel must be none or hf");
     if (o.basis!="flat" && o.basis!="two-ray" && o.basis!="per-carrier")
         throw std::invalid_argument("basis must be flat, two-ray, or per-carrier");
@@ -281,6 +288,9 @@ Examples:
     if(o.seed>UINT64_MAX-(o.trials-1))throw std::invalid_argument("trial seed overflow");
     if(o.key_seed && *o.key_seed>UINT64_MAX-(o.trials-1))throw std::invalid_argument("key trial seed overflow");
     if(o.channel_seed && *o.channel_seed>UINT64_MAX-(o.trials-1))throw std::invalid_argument("channel trial seed overflow");
+    if(o.oscillator_seed && *o.oscillator_seed>UINT64_MAX-(o.trials-1))throw std::invalid_argument("oscillator trial seed overflow");
+    if(o.noise_seed && *o.noise_seed>UINT64_MAX-(o.trials-1))throw std::invalid_argument("noise trial seed overflow");
+    if(o.frontend_seed && *o.frontend_seed>UINT64_MAX-(o.trials-1))throw std::invalid_argument("frontend trial seed overflow");
     for(const auto* c:{&o.frontend.dac,&o.frontend.adc})
         if(!(c->nominal_bits==0||(c->nominal_bits>=2&&c->nominal_bits<=24))||
            !(c->full_scale>0)||c->gain<0||c->dither_rms_lsb<0||c->effective_bits<0||
@@ -346,10 +356,20 @@ void json_string(std::ostream& out,std::string_view value) {
     }
     out<<'"';
 }
-void json_provenance(std::ostream& out,const Options& o,const Format& f,const Geometry& g) {
+void json_provenance(std::ostream& out,const Options& o,const Format& f,const Geometry& g,std::uint64_t trial=0) {
+    const auto channel_seed=o.channel_seed.value_or(o.seed)+trial;
+    const auto oscillator_seed=o.oscillator_seed.value_or(o.channel_seed.value_or(o.seed))+trial;
+    const auto noise_seed=o.noise_seed.value_or(o.channel_seed.value_or(o.seed))+trial;
+    const auto frontend_seed=o.frontend_seed.value_or(o.channel_seed.value_or(o.seed))+trial;
     out<<",\"duration_alternatives\":"<<o.duration_alternatives
        <<",\"false_admission_probability_per_horizon\":"<<o.false_probability
        <<",\"monitoring_horizon_seconds\":"<<o.horizon<<",\"attempt_spacing_seconds\":"<<o.attempt_spacing
+       <<",\"random_seed_roots\":{\"channel\":"<<channel_seed<<",\"oscillator\":"<<oscillator_seed
+       <<",\"noise\":"<<noise_seed<<",\"frontend\":"<<frontend_seed
+       <<",\"oscillator_explicit\":"<<(o.oscillator_seed?"true":"false")
+       <<",\"noise_explicit\":"<<(o.noise_seed?"true":"false")
+       <<",\"frontend_explicit\":"<<(o.frontend_seed?"true":"false")
+       <<",\"fallback\":\"unset oscillator/noise/frontend roots inherit the resolved channel seed\",\"channel_root_scope\":\"static timing/CFO/clock/drift truth, spread ray, and frequency-selective perturbation\",\"oscillator_root_scope\":\"TX/RX oscillator spectra and FHSS phase resets\",\"noise_root_scope\":\"thermal noise only\",\"frontend_root_scope\":\"DAC/ADC conversion, impulse process, and tone phase\"}"
        <<",\"command_argv\":[";
     for(std::size_t i=0;i<o.command_argv.size();++i){if(i)out<<',';json_string(out,o.command_argv[i]);}
     out<<"],\"source_format\":{\"version\":3,\"inner_rate_hz\":"<<f.inner_rate_hz
@@ -547,6 +567,12 @@ StreamChannelConfig channel_config(const Options& o,const Format& base,const Geo
     channel_cfg.effects.occupied_bandwidth_hz=nominal.occupied_bandwidth_hz;
     channel_cfg.effects.rf_hz=o.rf_hz; channel_cfg.effects.nominal_conversion_if_hz=1500;
     channel_cfg.effects.seed=seed; channel_cfg.effects.signal_enabled=o.control!="null";
+    const auto channel_seed_base=o.channel_seed.value_or(o.seed);
+    if(seed<channel_seed_base)throw std::invalid_argument("channel trial seed precedes its configured root");
+    const auto trial=seed-channel_seed_base;
+    channel_cfg.oscillator_seed=o.oscillator_seed.value_or(channel_seed_base)+trial;
+    channel_cfg.noise_seed=o.noise_seed.value_or(channel_seed_base)+trial;
+    channel_cfg.frontend_seed=o.frontend_seed.value_or(channel_seed_base)+trial;
     channel_cfg.effects.capture_lead_seconds=pad;
     channel_cfg.effects.capture_trail_seconds=trail;
     channel_cfg.signal_gain=1; // PatternSource already divides total triplet power by three.
@@ -710,7 +736,7 @@ void run(const Options& o) {
             <<",\"channel_samples\":"<<channel.report().samples<<",\"channel_tail_samples\":"<<channel.report().tail_samples
             <<",\"threads_used\":"<<report.threads_used<<",\"wall_seconds\":"<<report.wall_seconds
             <<",\"cpu_seconds\":"<<report.cpu_seconds;
-        json_provenance(std::cout,o,base,nominal);
+        json_provenance(std::cout,o,base,nominal,trial);
         json_frontend_report(std::cout,channel.report());
         std::cout<<",\"candidates\":[";
         for(std::size_t j=0;j<rc.candidates.size();++j){if(j)std::cout<<',';json_candidate(std::cout,rc.candidates[j]);}
@@ -855,6 +881,110 @@ void write_le_u64(std::ostream& out,std::uint64_t v) {
 }
 void write_le_f64(std::ostream& out,double v) { write_le_u64(out,std::bit_cast<std::uint64_t>(v)); }
 void write_le_complex(std::ostream& out,Complex v) { write_le_f64(out,v.real());write_le_f64(out,v.imag()); }
+
+void export_sampled(const Options& o) {
+    if(o.output.empty())throw std::invalid_argument("--output directory is required for --mode export-sampled");
+    const auto f=format_for(o);const auto g=geometry(f);
+    const auto key_seed=o.key_seed.value_or(o.seed),channel_seed=o.channel_seed.value_or(o.seed);
+    const auto txkey=key_for(key_seed,0);
+    const auto rxkey=o.control=="wrong-key"?key_for(key_seed^0x6a09e667f3bcc909ULL,0):key_for(key_seed,0);
+    auto candidates=candidates_for(o,f,rxkey);
+    const auto calendar=observation_calendar(o,f,g);const auto pad=calendar.pad,trail=calendar.trail;
+    const auto noise=static_cast<double>(f.sample_rate)/std::pow(10.,o.cn0/10.);
+    if(!std::isfinite(noise)||noise<=0)throw std::invalid_argument("C/N0 is outside numeric range");
+    auto config=channel_config(o,f,g,channel_seed,noise,pad,trail);
+    config.effects.noise_enabled=true;
+    PatternSource truth(f,txkey,o.signal_bit);StreamingChannel channel(truth,config);
+    for(auto& c:candidates)c.arrival_seconds+=pad;
+    const auto rows=calendar.samples;
+    if(channel.total_samples()<rows)throw std::runtime_error("channel does not cover public sampled-export calendar");
+    if(rows>o.export_max_samples)throw std::invalid_argument("export-sampled exceeds --export-max-samples (at most128000000)");
+    std::size_t columns=0,max_local=0;
+    for(const auto& c:candidates){
+        const auto n=c.channel.taps.size()*(c.channel.linear_gain?2:1);
+        columns=std::max(columns,n);max_local=std::max(max_local,n);
+    }
+    const long double complex_values=(static_cast<long double>(candidates.size())*columns+1)*rows;
+    const long double total_bytes=complex_values*16+rows;
+    if(total_bytes>o.export_max_bytes)throw std::invalid_argument("export-sampled exceeds explicit --export-max-mib disk budget");
+    const long double scratch_bytes=static_cast<long double>(o.chunk)*(max_local+columns+1)*sizeof(Complex)+o.chunk+65536;
+    if(scratch_bytes+2*g.source_workspace_bytes+channel.report().working_bytes>o.memory_bytes)
+        throw std::invalid_argument("export-sampled scratch/source estimate exceeds --memory-mib");
+
+    std::filesystem::create_directories(o.output);const auto directory=std::filesystem::path(o.output);
+    const std::array<const char*,4> names{"basis.c128","observation.c128","validity.u8","manifest.json"};
+    for(const auto* name:names)if(std::filesystem::exists(directory/name)||std::filesystem::exists(directory/(std::string(name)+".partial")))
+        throw std::invalid_argument("export files already exist; choose a fresh output directory");
+    std::ofstream basis(directory/"basis.c128.partial",std::ios::binary),
+        observation(directory/"observation.c128.partial",std::ios::binary),
+        validity_file(directory/"validity.u8.partial",std::ios::binary);
+    if(!basis||!observation||!validity_file)throw std::runtime_error("cannot create sampled export files");
+
+    const auto sampled_started=Clock::now();
+    std::vector<Complex> sample_chunk(o.chunk);std::vector<std::uint8_t> valid(o.chunk);
+    while(channel.position()<rows){
+        const auto wanted=static_cast<std::size_t>(std::min<std::uint64_t>(o.chunk,rows-channel.position()));
+        const auto n=channel.read(std::span(sample_chunk).first(wanted),std::span(valid).first(wanted));
+        if(!n)throw std::runtime_error("channel ended before sampled-export calendar");
+        for(std::size_t i=0;i<n;++i){write_le_complex(observation,sample_chunk[i]);validity_file.put(static_cast<char>(valid[i]));}
+    }
+    const double sampled_seconds=std::chrono::duration<double>(Clock::now()-sampled_started).count();
+
+    const auto basis_started=Clock::now();
+    std::vector<Complex> row_values(columns);
+    auto write_row=[&](std::span<const Complex> row){
+        for(std::size_t k=0;k<columns;++k){const Complex value=k<row.size()?row[k]:Complex{};
+            if(!std::isfinite(value.real())||!std::isfinite(value.imag()))throw std::runtime_error("sampled basis value is not finite");
+            write_le_complex(basis,value);
+        }
+    };
+    for(std::size_t ci=0;ci<candidates.size();++ci){
+        const auto& c=candidates[ci];auto addressed=f;addressed.epoch=offset_epoch(f.epoch,c.epoch_offset_seconds);
+        PatternSource candidate(addressed,rxkey,c.source_bit);
+        const auto actual_columns=c.channel.taps.size()*(c.channel.linear_gain?2:1);
+        std::vector<Complex> values(o.chunk*actual_columns);
+        for(std::uint64_t at=0;at<rows;){
+            const auto n=static_cast<std::size_t>(std::min<std::uint64_t>(o.chunk,rows-at));
+            shaped_basis(candidate,c,f.sample_rate,at,n,std::span(values).first(n*actual_columns));
+            for(std::size_t r=0;r<n;++r){
+                for(std::size_t k=0;k<actual_columns;++k)row_values[k]=values[k*n+r];
+                write_row(std::span(row_values).first(actual_columns));
+            }
+            at+=n;
+        }
+        std::cerr<<"sampled export candidate="<<ci+1<<'/'<<candidates.size()<<" samples="<<rows<<'\n';
+    }
+    const double basis_seconds=std::chrono::duration<double>(Clock::now()-basis_started).count();
+    basis.close();observation.close();validity_file.close();
+    if(!basis||!observation||!validity_file)throw std::runtime_error("failed writing sampled waveform exports");
+
+    const auto& report=channel.report();
+    std::ofstream manifest(directory/"manifest.json.partial");
+    manifest<<std::setprecision(17)<<"{\"format\":\"triad-sampled-waveforms-v1\",\"byte_order\":\"little\",\"complex_type\":\"complex128\",\"integer_type\":\"uint8\",\"layout\":\"candidate,sample,column\",\"basis_file\":\"basis.c128\",\"basis_shape\":["<<candidates.size()<<','<<rows<<','<<columns
+        <<"],\"observation_file\":\"observation.c128\",\"observation_shape\":["<<rows<<"],\"validity_file\":\"validity.u8\",\"validity_shape\":["<<rows<<']'
+        <<",\"sample_rate\":"<<f.sample_rate<<",\"sample_count\":"<<rows<<",\"template_sample_count\":"<<rows<<",\"observation_sample_count\":"<<rows<<",\"block_samples\":"<<block_samples(o,f)<<",\"chunk_samples\":"<<o.chunk
+        <<",\"noise_variance_pre_frontend\":"<<noise<<",\"cn0_db_hz\":"<<o.cn0<<",\"noise_reference_power\":1"
+        <<",\"signal_bit_simulation_truth\":"<<static_cast<unsigned>(o.signal_bit)<<",\"signal_enabled\":"<<(o.control!="null"?"true":"false")
+        <<",\"seed\":"<<o.seed<<",\"key_seed\":"<<key_seed<<",\"channel_seed\":"<<channel_seed<<",\"epoch\":"<<f.epoch
+        <<",\"source_samples\":"<<g.source_samples<<",\"requested_active_seconds\":"<<f.bit_seconds<<",\"actual_elapsed_seconds\":"<<g.bit_seconds
+        <<",\"channel_samples\":"<<report.samples<<",\"channel_tail_samples\":"<<report.tail_samples
+        <<",\"channel_signal_energy_samples\":"<<report.signal_energy<<",\"channel_observed_energy_samples\":"<<report.observed_energy
+        <<",\"sampled_observation_wall_seconds\":"<<sampled_seconds<<",\"basis_generation_and_write_wall_seconds\":"<<basis_seconds
+        <<",\"export_bytes\":"<<static_cast<std::uint64_t>(total_bytes)<<",\"channel\":";
+    json_string(manifest,o.channel);manifest<<",\"control\":";json_string(manifest,o.control);
+    manifest<<",\"fhss_envelope_only\":"<<(o.fhss?"true":"false")<<",\"oscillator_model\":{\"relative_phase_diffusion_rad_sqrt_s\":"<<o.phase_diffusion
+        <<",\"relative_white_fm_hz_sqrt_s\":"<<o.white_fm<<",\"relative_random_walk_fm_hz_sqrt_s\":"<<o.random_walk_fm
+        <<",\"relative_flicker_fm_rms_hz\":"<<o.flicker_fm<<",\"flicker_tau_seconds\":["<<o.flicker_min_tau<<','<<o.flicker_max_tau
+        <<"],\"flicker_bands\":"<<o.flicker_bands<<",\"relative_white_pm_rms_rad\":"<<o.white_pm<<'}'
+        <<",\"candidate_count\":"<<candidates.size()<<",\"candidates\":[";
+    for(std::size_t i=0;i<candidates.size();++i){if(i)manifest<<',';json_candidate(manifest,candidates[i]);}
+    manifest<<"],\"candidate_bits\":[";for(std::size_t i=0;i<candidates.size();++i){if(i)manifest<<',';manifest<<static_cast<unsigned>(candidates[i].source_bit);}manifest<<']';
+    manifest<<",\"file_sizes\":{\"basis.c128\":"<<std::filesystem::file_size(directory/"basis.c128.partial")<<",\"observation.c128\":"<<std::filesystem::file_size(directory/"observation.c128.partial")<<",\"validity.u8\":"<<std::filesystem::file_size(directory/"validity.u8.partial")<<'}';
+    json_provenance(manifest,o,f,g);json_frontend_report(manifest,report);manifest<<"}\n";manifest.close();
+    if(!manifest)throw std::runtime_error("failed writing sampled-export manifest");
+    for(const auto* name:{"basis.c128","observation.c128","validity.u8"})std::filesystem::rename(directory/(std::string(name)+".partial"),directory/name);
+    std::filesystem::rename(directory/"manifest.json.partial",directory/"manifest.json");
+}
 
 void export_stats(const Options& o) {
     if(o.output.empty())throw std::invalid_argument("--output directory is required for --mode export-stats");
@@ -1032,6 +1162,7 @@ int main(int argc,char** argv) {
         if(options.mode=="plan") print_plan(options);
         else if(options.mode=="run") run(options);
         else if(options.mode=="export") export_basis(options);
+        else if(options.mode=="export-sampled") export_sampled(options);
         else export_stats(options);
         return 0;
     } catch(const std::exception& e) {

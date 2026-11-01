@@ -67,6 +67,21 @@ class ResidentTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "unsupported on CPU"):
             campaign.make_receiver(args, 2, campaign.torch.device("cpu"), dts)
 
+    def test_tensor_is_explicit_and_rejects_fp64(self):
+        args = campaign.parser().parse_args(["input", "--output", "out.json",
+            "--backend", "tensor", "--tensor-mode", "bf16", "--precision", "fp64"])
+        with self.assertRaisesRegex(ValueError, "explicit FP32 bulk"):
+            campaign.run(args)
+        args.backend, args.precision = "reference", "fp32"
+        with self.assertRaisesRegex(ValueError, "tensor options require"):
+            campaign.run(args)
+        for script in ("triad-state-study.py", "triad-path-study.py"):
+            result = subprocess.run([sys.executable, str(ROOT/"tools"/script), "input",
+                "--output", "out.json", "--phase-implementation", "tensor"],
+                capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("explicit FP32 bulk", result.stderr)
+
     def test_preallocation_rejects_large_batch(self):
         workspace = SimpleNamespace(dimension=4, max_tile_blocks=64)
         args = SimpleNamespace(stop=929, batch=10**9, batches=8, taps=2,
@@ -107,6 +122,15 @@ class ResidentTests(unittest.TestCase):
                     self.assertEqual(comparison["candidate_ranking_differences"], 0)
             with np.load(root/"baseline.scores.npz") as a, np.load(root/"capture.scores.npz") as b:
                 np.testing.assert_array_equal(a["scores"], b["scores"])
+                synthetic = reports[0].copy()
+                synthetic["configuration"] = dict(synthetic["configuration"], backend="graph-fp64")
+                (root/"synthetic.json").write_text(json.dumps(synthetic))
+                np.savez(root/"synthetic.scores.npz", scores=a["scores"])
+                comparison = campaign.compare_report(root/"synthetic.json", synthetic["input_identity"],
+                    SimpleNamespace(**synthetic["configuration"]), a["scores"],
+                    synthetic["represented_observation_sha256_by_batch"], np.asarray([0, 1]))
+                self.assertEqual(comparison["reference_backend"], "graph-fp64")
+                self.assertEqual(comparison["maximum_bit_likelihood_margin_error"], 0.)
 
 
 if __name__ == "__main__":

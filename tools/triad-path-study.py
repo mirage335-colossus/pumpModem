@@ -45,7 +45,10 @@ def _parse():
     p.add_argument('--coherences', type=float, nargs='+', default=[16., 64., 256., 1024.])
     p.add_argument('--taps', type=int, choices=[1, 2], default=2)
     p.add_argument('--phase-states', type=int, default=512)
-    p.add_argument('--phase-implementation', choices=['reference', 'optimized', 'graph'], default='reference')
+    p.add_argument('--phase-implementation', choices=['reference', 'optimized', 'graph', 'graph-fp64', 'tensor'], default='reference')
+    p.add_argument('--tensor-fuse-advection', action='store_true')
+    p.add_argument('--tensor-mode', choices=['strict-padded', 'tf32', 'tf32x3', 'bf16', 'fp16-scaled', 'bf16-split2'], default='strict-padded')
+    p.add_argument('--tensor-block-columns', type=int, choices=[64, 128, 256], default=128)
     p.add_argument('--relative-phase-states', type=int, default=8)
     p.add_argument('--frequency-bound', type=float, default=.02)
     p.add_argument('--frequency-step', type=float, default=None)
@@ -62,6 +65,10 @@ def _parse():
     p.add_argument('--actual-observation', action='store_true',
                    help='score the independent sampled noisy projection in every export')
     a = p.parse_args()
+    if a.phase_implementation != 'tensor' and (a.tensor_mode != 'strict-padded' or a.tensor_fuse_advection or a.tensor_block_columns != 128):
+        p.error('tensor options require --phase-implementation tensor')
+    if a.phase_implementation == 'tensor' and a.precision != 'fp32':
+        p.error('experimental tensor backend requires explicit FP32 bulk state')
     if a.output.exists():
         p.error('output must be fresh')
     if not 1 <= len(a.inputs) <= 2000 or a.threads < 1 or a.duration_alternatives < 1 or a.memory_limit_mib < 1:
@@ -340,6 +347,8 @@ def main():
             successes = int(sum(row['signal']['correct_accepted'] for row in rows_for_method))
             false_count = int(sum(row['null_admitted'] for row in rows_for_method))
             summary = dict(schema='triad-path-method-summary-v1', method=method,
+                           admission_calibration_supported=args.phase_implementation != 'tensor',
+                           threshold_scope=('reference score gate only' if args.phase_implementation == 'tensor' else 'conditional Gaussian model'),
                            cn0_db_hz=cn0, independent_physical_paths=len(workspaces),
                            balanced_signal_bits={"0": int(np.sum(bits == 0)), "1": int(np.sum(bits == 1))},
                            correct_accepted=successes, wrong_accepted=int(sum(
@@ -378,7 +387,7 @@ def main():
                   limitations=[
                       'The independent trial is one independently generated keyed/channel path and one thermal-noise realization.',
                       'Null and signal are paired using identical deterministic noise seeds on each path.',
-                      'Thresholds use a union bound across declared repeated attempts, duration choices, receiver methods, and candidate or bit hypotheses.',
+                      ('Tensor thresholds are reference thresholds for paired decision diagnostics only; analytical LR tail calibration unsupported.' if args.phase_implementation == 'tensor' else 'Thresholds use a union bound across declared repeated attempts, duration choices, receiver methods, and candidate or bit hypotheses.'),
                       'Empirical confidence intervals apply only to the finite sampled path distribution and listed C/N0 values.',
                       'No field, all-oscillator, timing/acquisition, or universal optimality claim follows from these sampled paths.'])
     args.output.parent.mkdir(parents=True, exist_ok=True)

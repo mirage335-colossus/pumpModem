@@ -248,7 +248,7 @@ campaign, the sensitivity/throughput curves, a calibrated acquisition result
 across the stated default and relaxed gates, a complete profiler breakdown, or
 the requested 5090/PRO 6000/MIG and cost comparison. Mark each of those
 acceptance targets **unmeasured** until new evidence fills it. The 1 November
-state-study source snapshot matches the current `tools/triad-long.cpp`, while
+state-study source snapshot matched `tools/triad-long.cpp` at that earlier audit, while
 its `final-source.sha256` records a different hash for that file; preserve this
 as a provenance limitation. The 31 October hash set is historical and differs
 from the current checkout in three files. Do not reuse either record as proof
@@ -266,3 +266,19 @@ records corrected timings, sampled holdouts, hardware comparisons, failures and
 remaining qualification gaps. Its primary conditional performance workload is
 the full 929-block hour-path P512/F43/Q24 receiver. Complete operational
 acquisition throughput remains unqualified.
+
+The [tensor-processing follow-up](validation-data/triad-v3/2026-11-01-tensor/README.md)
+compares six explicit arithmetic modes against the current graph/FP64-reduction
+implementation, with native instruction verification, fresh noise and sampled
+paths, and continuous two-day diagnostics. Fused split BF16 gives a modest
+amortized gain on RTX 5090; plain BF16/TF32/scaled-FP16 fail the numerical screen.
+No precision policy is promoted to a default or an operationally calibrated result.
+
+The [exhaustive native FP4 follow-up](validation-data/triad-v3/2026-11-01-fp4/README.md)
+adds dense FP4/FP32-accumulation GEMMs, complete finite candidate/timing/CFO/epoch
+banks, independent sampled holdouts and packing-inclusive comparisons on RTX5090,
+full PRO 6000 and MIG 1g.24gb. The new sampled exporter and independent RNG-root
+controls intentionally change the earlier source hashes while preserving default
+streams. Its flat P512/F43/Q3 and two-ray P512/F43/Q24 groups retain distinct gain
+priors; broad correlation-only timings do not include the full likelihood. The
+report separates arithmetic gains from receiver gains and unqualified admission.

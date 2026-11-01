@@ -47,6 +47,12 @@ def export_stats(directory, *extra):
     return json.loads((directory / "manifest.json").read_text())
 
 
+def export_sampled(directory, *extra):
+    invoke("--mode", "export-sampled", *COMMON, "--channel", "none", "--threads", "2",
+           "--chunk", "512", "--output", str(directory), *extra, timeout=60)
+    return json.loads((directory / "manifest.json").read_text())
+
+
 def complex128_values(path):
     data = path.read_bytes()
     if len(data) % 16:
@@ -115,6 +121,19 @@ def main():
         raise AssertionError(f"run sample energy has incorrect gain ({run_ratio:.3f})")
     if not run["complete_observation"] or not run["accepted"] or not run["correct"]:
         raise AssertionError(f"clean high-SNR end-to-end run did not decode correctly: {run}")
+    multi_trial = invoke("--mode", "run", *COMMON, "--channel", "none", "--cn0", "80",
+                         "--threads", "2", "--chunk", "512", "--block-seconds", "1",
+                         "--trials", "2", "--oscillator-seed", "501", "--noise-seed", "601",
+                         "--frontend-seed", "701", timeout=60)
+    trial_rows = [json.loads(line) for line in multi_trial.stdout.splitlines() if line.startswith("{")]
+    if len(trial_rows) != 2:
+        raise AssertionError(f"two-trial seed-root run emitted {len(trial_rows)} results")
+    for index, trial_row in enumerate(trial_rows):
+        roots = trial_row["random_seed_roots"]
+        expected = (int(COMMON[COMMON.index("--seed") + 1]) + index, 501 + index, 601 + index, 701 + index)
+        actual = (roots["channel"], roots["oscillator"], roots["noise"], roots["frontend"])
+        if actual != expected:
+            raise AssertionError(f"trial seed roots did not increment exactly once: {actual} != {expected}")
 
     with tempfile.TemporaryDirectory(prefix="triad-long-test-") as scratch:
         root = pathlib.Path(scratch)
@@ -178,6 +197,98 @@ def main():
             b = basis[indexed[(bit, 3600)] * row_bytes:(indexed[(bit, 3600)] + 1) * row_bytes]
             if a == b:
                 raise AssertionError(f"encrypted basis did not change for bit {bit} at a different epoch")
+
+        sampled = root / "fresh-sampled"
+        sampled_manifest = export_sampled(sampled)
+        sampled_shape = sampled_manifest["basis_shape"]
+        if sampled_manifest["format"] != "triad-sampled-waveforms-v1" or sampled_shape != [2, base_manifest["basis_shape"][1], 1]:
+            raise AssertionError(f"sampled export has an unexpected schema or basis shape: {sampled_manifest}")
+        if sampled_manifest["observation_shape"] != [sampled_manifest["sample_count"]] or sampled_manifest["sampled_frontend"]["active"]:
+            raise AssertionError("sampled waveform dimensions/frontend state are missing")
+        if sampled_manifest["template_sample_count"] != sampled_manifest["observation_sample_count"] or sampled_manifest["template_sample_count"] != sampled_manifest["sample_count"]:
+            raise AssertionError("sampled exporter did not state the shared template/observation calendar")
+        default_roots = sampled_manifest["random_seed_roots"]
+        if any(default_roots[name] != sampled_manifest["channel_seed"]
+               for name in ("channel", "oscillator", "noise", "frontend")):
+            raise AssertionError(f"default RNG roots did not fall back to channel seed: {default_roots}")
+        if (sampled / "basis.c128").stat().st_size != 2 * sampled_shape[1] * 16:
+            raise AssertionError("complex128 basis file size does not match its declared shape")
+        if (sampled / "observation.c128").stat().st_size != sampled_manifest["sample_count"] * 16:
+            raise AssertionError("complex128 observation file size does not match its declared shape")
+        observed = complex128_values(sampled / "observation.c128")
+        if not any(abs(value) > 0 for value in observed):
+            raise AssertionError("actual sampled observation is unexpectedly all zero")
+        if any(value != 1 for value in (sampled / "validity.u8").read_bytes()):
+            raise AssertionError("un-erased sampled waveform has invalid sample flags")
+        high_precision_basis = complex128_values(sampled / "basis.c128")
+        old_basis = [complex(real, imag) for real, imag in struct.iter_unpack(
+            "=ff", (first / "basis.c64").read_bytes())]
+        if len(high_precision_basis) != len(old_basis) or any(
+                abs(a - b) > 2e-7 * max(1.0, abs(a), abs(b))
+                for a, b in zip(high_precision_basis, old_basis)):
+            raise AssertionError("complex128 public basis differs from the established sampled basis")
+
+        sampled_chunked = root / "fresh-sampled-chunked"
+        export_sampled(sampled_chunked, "--chunk", "777")
+        for file_name in ("basis.c128", "observation.c128", "validity.u8"):
+            if (sampled / file_name).read_bytes() != (sampled_chunked / file_name).read_bytes():
+                raise AssertionError(f"changing sampled-export chunk size changed {file_name}")
+
+        sampled_erased = root / "fresh-sampled-erased"
+        erased_manifest = export_sampled(sampled_erased, "--dropout-ms", "40", "--dropout-start-ms", "100")
+        erased_flags = (sampled_erased / "validity.u8").read_bytes()
+        if len(erased_flags) != erased_manifest["sample_count"] or not any(value == 0 for value in erased_flags):
+            raise AssertionError("sampled exporter dropped or omitted the selected dwell erasure mask")
+
+        sampled_null = root / "fresh-sampled-null"
+        null_manifest = export_sampled(sampled_null, "--control", "null")
+        null_observation = complex128_values(sampled_null / "observation.c128")
+        if null_manifest["signal_enabled"] or not any(abs(value) > 0 for value in null_observation):
+            raise AssertionError("noise-only sampled control did not retain its noise waveform")
+
+        sampled_epochs = root / "fresh-sampled-epochs"
+        sampled_epoch_manifest = export_sampled(sampled_epochs, "--epoch-offsets", "0,3600")
+        sampled_epoch_shape = sampled_epoch_manifest["basis_shape"]
+        if sampled_epoch_shape[0] != 4:
+            raise AssertionError(f"sampled epoch bank has incorrect dimensions: {sampled_epoch_shape}")
+        sampled_epoch_params = sampled_epoch_manifest["candidates"]
+        sampled_epoch_index = {(row["bit"], row["epoch_offset_seconds"]): index
+                               for index, row in enumerate(sampled_epoch_params)}
+        sampled_epoch_basis = complex128_values(sampled_epochs / "basis.c128")
+        sampled_row_values = sampled_epoch_shape[1] * sampled_epoch_shape[2]
+        for bit in (0, 1):
+            left = sampled_epoch_index[(bit, 0)] * sampled_row_values
+            right = sampled_epoch_index[(bit, 3600)] * sampled_row_values
+            if sampled_epoch_basis[left:left + sampled_row_values] == sampled_epoch_basis[right:right + sampled_row_values]:
+                raise AssertionError(f"sampled encrypted basis did not change with epoch for bit {bit}")
+
+        sampled_two_ray = root / "fresh-sampled-two-ray-chunk1"
+        sampled_two_ray_manifest = export_sampled(sampled_two_ray, "--basis", "two-ray", "--chunk", "1")
+        if sampled_two_ray_manifest["basis_shape"][2] != 2:
+            raise AssertionError("sampled two-ray basis did not retain both coupled tap columns")
+        two_ray_values = complex128_values(sampled_two_ray / "basis.c128")
+        if not any(abs(two_ray_values[index]) > 0
+                   for index in range(1, len(two_ray_values), 2)):
+            raise AssertionError("sampled two-ray export lost the delayed tap")
+
+        sampled_frontend = root / "fresh-sampled-frontend"
+        frontend_manifest = export_sampled(sampled_frontend, "--dac-bits", "16", "--dac-enob", "14",
+                                            "--adc-bits", "16", "--adc-enob", "12",
+                                            "--adc-full-scale", "1", "--adc-gain", ".2",
+                                            "--adc-dither-lsb", ".5", "--rx-lowpass-hz", "100")
+        if not frontend_manifest["sampled_frontend"]["active"] or not (sampled_frontend / "observation.c128").exists():
+            raise AssertionError("sampled exporter rejected or omitted active ADC/DAC/frontend samples")
+
+        rooted = root / "fresh-sampled-independent-roots"
+        rooted_manifest = export_sampled(rooted, "--channel-seed", "81", "--oscillator-seed", "82",
+                                         "--noise-seed", "83", "--frontend-seed", "84")
+        roots = rooted_manifest["random_seed_roots"]
+        if (roots["channel"], roots["oscillator"], roots["noise"], roots["frontend"]) != (81, 82, 83, 84):
+            raise AssertionError(f"explicit independent RNG roots were not applied/reported: {roots}")
+        if not all(roots[f"{name}_explicit"] for name in ("oscillator", "noise", "frontend")):
+            raise AssertionError("manifest omitted explicit independent-root flags")
+        if (rooted / "basis.c128").read_bytes() != (sampled / "basis.c128").read_bytes():
+            raise AssertionError("physical-channel seed overrides changed the separately keyed public basis")
 
         # Block statistics must match direct full-basis projection on identical
         # public rows. The raw basis is FP32, so compare with a small tolerance.
@@ -298,6 +409,7 @@ def main():
                    ("--chunk", "-1"), ("--adc-bits", "1"),
                    ("--adc-full-scale", "0"), ("--dac-enob", "14")):
         invoke("--mode", "plan", *option, ok=False, timeout=10)
+    invoke("--mode", "plan", "--trials", "2", "--oscillator-seed", str((1 << 64) - 1), ok=False, timeout=10)
     invoke("--mode", "plan", "--adc-bits", "16", ok=False, timeout=10)
 
     # A two-day coherent block is a planner input only; this short source case

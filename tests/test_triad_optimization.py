@@ -13,6 +13,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -81,6 +82,28 @@ class OptimizationStudyTests(unittest.TestCase):
         self.assertAlmostEqual(results["relaxed"]["threshold_nats"], expected_relaxed)
         self.assertEqual(study.interval(0, 10)[0], 0.)
         self.assertEqual(study.interval(10, 10)[1], 1.)
+
+    def test_explicit_tensor_contract_and_uncalibrated_labels(self):
+        receiver = SimpleNamespace(diagnostics=lambda: dict(tf32_allowed=True,
+            implementation="experimental_graph_tensor_frequency_v1"))
+        with self.assertRaisesRegex(RuntimeError, "FP32 minimum"):
+            study._verified_method(receiver)
+        self.assertTrue(study._verified_method(receiver, experimental_tensor=True)["tf32_allowed"])
+        wrong = SimpleNamespace(diagnostics=lambda: dict(tf32_allowed=False, implementation="reference"))
+        with self.assertRaisesRegex(RuntimeError, "did not execute"):
+            study._verified_method(wrong, experimental_tensor=True)
+        _, rows = study._verify(np.array([[30., 0.]]), np.array([0, 1]), 0,
+            {"duration_alternatives":1, "selection_methods":1}, calibration_supported=False)
+        for row in rows.values():
+            self.assertFalse(row["admission_calibration_supported"])
+            self.assertIsNone(row["conditional_correct_accepted"])
+            self.assertEqual(row["hypothetical_score_gate_crossings"], 1)
+            self.assertIn("tensor arithmetic", row["scope"])
+        with tempfile.TemporaryDirectory() as temporary:
+            args = study.parse_args(["input", "--output", str(Path(temporary)/"out.json"),
+                                     "--backend", "tensor", "--precision", "fp64"])
+            with self.assertRaisesRegex(ValueError, "explicit FP32 bulk"):
+                study.run(args)
 
     def test_paired_full_runner_records_stages_provenance_and_decisions(self):
         with tempfile.TemporaryDirectory() as temporary:
