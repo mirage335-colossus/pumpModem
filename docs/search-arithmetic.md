@@ -4,10 +4,16 @@ The maintained implementation/evidence is in
 [search compute](search-compute.md#experimental-cpu-search-arithmetic-local-manual-candidate).
 Algorithm, arithmetic and template reuse are independent choices.
 
+For GPU optimization or changes to the scope of this dropdown, read the
+[precision-control experiment guide](gpu-precision-controls.md). It documents
+which costly stages should be separately forceable in experiments, where
+inexpensive higher precision may be valuable, and how to measure exceptions.
+These existing CPU choices do not control the isolated GPU study.
+
 | Control | Current CPU execution |
 | --- | --- |
 | Default — automatic | Demonstrated native FP32 paths and eligible reuse; wider fallbacks where required |
-| FP32 minimum | Prohibits lower-precision operands; currently essentially the same supported paths as Default |
+| FP32 minimum | Prohibits lower-precision operands; supported FP32 paths retain wider fallbacks. Some experimental paths are Default-only, so dispatch is not universally identical. |
 | FP64 force | Original unquantized templates and FP64 search; bypasses approximate template interpolation; exact reuse allowed |
 
 Precise timestamps, epochs and phase origins are retained. Scheduled FFT tiles

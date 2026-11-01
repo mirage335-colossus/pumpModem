@@ -34,6 +34,8 @@ retain their individual scope and qualification limits.
 | Document | Context and contents |
 | --- | --- |
 | [Batched iterative search](../search-compute.md) | Implementation reference: FFT acquisition, long-symbol CPU batching, workers, memory boundaries and reproducible workloads. |
+| [GPU precision and dropdown experiments](../gpu-precision-controls.md) | Start here for stage-specific precision decisions: current control semantics, measured bulk costs, high-value precision exceptions, forcing/fallback contracts and paired validation. |
+| [GPU precision evidence map](../validation-data/triad-v3/precision-controls/README.md) | Exact archived results, source/input hashes, directly browsable passing and failing test logs, and portable analysis checks. |
 | [Experimental three-carrier modem v2](../triad-v2.md) | Separate sampled complex-I/Q study with GUI inner Rate × Added Symbols semantics, twenty-dwell diversity, continuous low-rate patterns, bounded parallel acquisition and the two requested HF link examples. [V1 evidence](../triad-modem.md) remains version-specific. |
 | [Symbol_Burst](../symbol-burst.md) | Local implementation: whole-symbol UTC scheduling, guarded listening, backlog processing and planner limits; see validation for qualification. |
 | [Symbol_Burst implementation handoff](../symbol-burst-implementation-plan.md) | Historical implementation plan: accepted timing decisions, integration stages and validation obligations. |

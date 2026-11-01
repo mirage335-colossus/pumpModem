@@ -23,6 +23,11 @@ independent seed controls and RTX5090/PRO/MIG measurements. It preserves complet
 search accounting and strict references; quantized operational admission remains
 unqualified.
 
+Before changing arithmetic or relating these experiments to a precision
+dropdown, read the [precision-control experiment guide](gpu-precision-controls.md).
+It separates bulk computation, sensitive higher-precision operations, caching
+and placement, with measured tradeoffs and unresolved policy decisions.
+
 ## Format and streaming state
 
 The configured GUI-style inner Rate maps to `inner_rate = Rate / 6` inner chips

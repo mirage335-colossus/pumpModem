@@ -5,6 +5,18 @@ Current compatibility requirements are in [the development contract](docs/develo
 build and test stages are in [the build guide](docs/building.md#testing-stages).
 Search `src/`, `include/`, `tests/` and `cmake/` first when locating implementation.
 
+## GPU optimization and precision controls
+
+Before changing GPU arithmetic, precision selection or related performance
+estimates, read the [precision-control experiment guide](docs/gpu-precision-controls.md).
+Distinguish expensive bulk work that should support explicit lower/tensor
+arithmetic experiments from sensitive preparation/reductions whose higher
+precision may cost little. Measure both; do not hide substantial FP64 work
+behind a lower-precision selection or downcast every stage indiscriminately.
+Preserve the current dropdown's floor/force semantics, strict references and
+explicit fallback reporting. The guide separates implemented CPU controls from
+isolated GPU experiments and gives the evidence needed to change that scope.
+
 ## Simulation channel models
 
 Before adding or changing Robust simulation software, read the

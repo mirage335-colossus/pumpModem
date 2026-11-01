@@ -71,6 +71,26 @@ class CampaignTests(unittest.TestCase):
       with self.assertRaisesRegex(ValueError, "successful generation"):
         campaign.generation_provenance(directory, hashes)
 
+  def test_consumer_generation_schema_retains_exact_payload_binding(self):
+    with tempfile.TemporaryDirectory() as temporary:
+      directory = Path(temporary) / "capture"
+      directory.mkdir()
+      path = directory.parent / "capture.run.json"
+      hashes = {"manifest.json": "a", "basis.c128": "b", "observation.c128": "c", "validity.u8": "d"}
+      record = dict(format="consumer-gpu-input-v1", status="complete", returncode=0,
+                    input_file_hashes=hashes.copy())
+      path.write_text(json.dumps(record))
+      self.assertEqual(campaign.generation_provenance(directory, hashes)["status"], "verified payload binding")
+      record["input_file_hashes"]["observation.c128"] = "wrong"
+      path.write_text(json.dumps(record))
+      with self.assertRaisesRegex(ValueError, "payload hashes"):
+        campaign.generation_provenance(directory, hashes)
+      record["input_file_hashes"] = hashes.copy()
+      del record["input_file_hashes"]["manifest.json"]
+      path.write_text(json.dumps(record))
+      with self.assertRaisesRegex(ValueError, "payload hashes"):
+        campaign.generation_provenance(directory, hashes)
+
   def test_campaign_keeps_every_cfo_candidate_lag_and_runs_full_fp64_refinement(self):
     with tempfile.TemporaryDirectory() as temporary:
       tmp_path = Path(temporary)
@@ -210,6 +230,30 @@ class CampaignTests(unittest.TestCase):
   def test_graph_fp64_requires_cuda_and_fp32_state(self):
     with self.assertRaisesRegex(ValueError, "requires CUDA"):
       campaign._new_receiver(1, 2, 1, torch.device("cpu"), "fp32", "graph-fp64", _args())
+
+  def test_consumer_arithmetic_selection_is_explicit(self):
+    from triad_tensor_native import TensorBackend
+    for precision in ("fp32", "fp64"):
+      self.assertIsNone(campaign.make_backend(SimpleNamespace(precision=precision)))
+    backend = campaign.make_backend(SimpleNamespace(precision="tensor", tensor_format="fp16",
+                                                    tensor_engine="torch"))
+    self.assertIsInstance(backend, TensorBackend)
+    self.assertEqual(backend.contract_metadata()["multiplication"], "fp16")
+    self.assertEqual(backend.contract_metadata()["accumulation"], "fp32")
+    with self.assertRaisesRegex(ValueError, "explicit tensor_format"):
+      campaign.make_backend(SimpleNamespace(precision="tensor", tensor_format=None))
+    diagnostic = campaign.make_backend(SimpleNamespace(precision="diagnostic-fp64",
+        tensor_format="bf16", tensor_engine="triton", representation_mode="observation-only"))
+    self.assertEqual(diagnostic.native_backend.format, "bf16")
+    self.assertEqual(diagnostic.mode, "observation-only")
+
+  def test_turing_default_keeps_complete_eager_receiver(self):
+    with mock.patch.object(torch.cuda, "get_device_capability", return_value=(7, 5)):
+      self.assertEqual(campaign.default_inference_implementation("cuda:0"), "reference")
+    with mock.patch.object(torch.cuda, "get_device_capability", return_value=(8, 9)):
+      self.assertEqual(campaign.default_inference_implementation("cuda:0"), "graph-fp64")
+    with mock.patch.object(torch.cuda, "get_device_capability", side_effect=AssertionError("CPU queried CUDA")):
+      self.assertEqual(campaign.default_inference_implementation("cpu"), "reference")
 
   def test_remote_source_revision_can_be_supplied_without_git(self):
     with tempfile.TemporaryDirectory() as temporary:

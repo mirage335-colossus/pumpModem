@@ -1,0 +1,1240 @@
+{
+  "schema": "triad-precision-evidence-catalog-v1",
+  "scope": "Selected entry points into immutable complete archives; not an exhaustive listing of every case. Paths are exact, without shell glob syntax. No new physical measurements.",
+  "archives": [
+    {
+      "id": "optimization",
+      "path": "docs/validation-data/triad-v3/2026-11-01-optimization/evidence.tar.gz",
+      "sha256": "d9fe8583300de89189d8dc100310facb885f617d40cf2666b5cf60fe39851327",
+      "bytes": 2943751
+    },
+    {
+      "id": "optimization-inputs",
+      "path": "docs/validation-data/triad-v3/2026-11-01-optimization/fixed-inputs.tar.gz",
+      "sha256": "d63eb20b1fe7af6197682a7df2f19d966a5efbff4ed7db3146dd9069b7db7c67",
+      "bytes": 750757
+    },
+    {
+      "id": "optimization-source",
+      "path": "docs/validation-data/triad-v3/2026-11-01-optimization/source-overlay.tar.gz",
+      "sha256": "350034fe3d458b856820f74c663cfa9f5cd3337aae98ff03377aa36684049f72",
+      "bytes": 333713
+    },
+    {
+      "id": "tensor",
+      "path": "docs/validation-data/triad-v3/2026-11-01-tensor/evidence.tar.gz",
+      "sha256": "8ca619fcc334509c5282bdc5162d9d9f2a818902ceec3864eaff161842c88bdd",
+      "bytes": 10044837
+    },
+    {
+      "id": "fp4",
+      "path": "docs/validation-data/triad-v3/2026-11-01-fp4/technical-evidence.tar.gz",
+      "sha256": "517dca859b71480cd6084aa30a7e50797bd2756b57532a9394f64e41f398ccf0",
+      "bytes": 61295584
+    },
+    {
+      "id": "consumer",
+      "path": "docs/validation-data/triad-v3/2026-11-01-consumer-gpu/technical-evidence.tar.gz",
+      "sha256": "181b4b69dc831d8b1ea982be9a3529128836b7c90fb5f8c6f6ea8efc1aaba055",
+      "bytes": 28545099
+    }
+  ],
+  "groups": [
+    {
+      "id": "O1",
+      "title": "FP32 versus FP64 bulk inference",
+      "archive_id": "optimization",
+      "scope": "RTX 5090; same fixed hour input and nuisance model. Inference timing, not complete acquisition or calibrated admission.",
+      "members": [
+        {
+          "path": "gpu/results/5090-numeric-hour-graph-fp32-b1.json",
+          "role": "result-or-provenance",
+          "sha256": "24765f3f193cd69e233510c0123e9382dd23c9da9477ce25d820cf5d3fc511ca",
+          "bytes": 22902
+        },
+        {
+          "path": "gpu/results/5090-numeric-hour-graph-fp32-b1.scores.npz",
+          "role": "result-or-provenance",
+          "sha256": "1d076364712d091e6090a65a31e536e60c715e6dc17db6ce1a67744fcfd49d5a",
+          "bytes": 424
+        },
+        {
+          "path": "gpu/results/5090-numeric-hour-graph-fp32-b1.stderr",
+          "role": "test-log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "path": "gpu/results/5090-numeric-hour-graph-fp32-b1.stdout",
+          "role": "test-log",
+          "sha256": "96e53a6ae5c251495a4427bfd182a160a1cb8d7b641222455ad213e952a84ed4",
+          "bytes": 209
+        },
+        {
+          "path": "gpu/results/5090-numeric-hour-graph-fp64-b1.json",
+          "role": "result-or-provenance",
+          "sha256": "fd9c88121992dd151321325d9b3d4366d73534ad6e9889475e766c88bfc24122",
+          "bytes": 22900
+        },
+        {
+          "path": "gpu/results/5090-numeric-hour-graph-fp64-b1.scores.npz",
+          "role": "result-or-provenance",
+          "sha256": "8d3519ab3466017788e998253271a2da662c095d930992ea7378c003e2c18b56",
+          "bytes": 424
+        },
+        {
+          "path": "gpu/results/5090-numeric-hour-graph-fp64-b1.stderr",
+          "role": "test-log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "path": "gpu/results/5090-numeric-hour-graph-fp64-b1.stdout",
+          "role": "test-log",
+          "sha256": "6ca7dd5925a33076c08b9345b38884aab2dc343a77ee4add3e5f9a2fd7e93051",
+          "bytes": 212
+        }
+      ]
+    },
+    {
+      "id": "O2",
+      "title": "FP64 reduction organizations and cached covariance preparation",
+      "archive_id": "optimization",
+      "scope": "Both reduction organizations retain FP64; not a precision-necessity comparison. Gaussian design prep cost and reuse are separate from inference.",
+      "members": [
+        {
+          "path": "checks/python-tests.json",
+          "role": "result-or-provenance",
+          "sha256": "16c42e9209898c4611ef011ff573a71903fc0a5bc59e7a214d188913d66044a6",
+          "bytes": 1017
+        },
+        {
+          "path": "checks/test_triad_gaussian_prepared.py.log",
+          "role": "test-log",
+          "sha256": "1e3b0822e48fd2a94a13e71f1d9a61659c7a3e9ea1071a00a1a43a91741ffaf9",
+          "bytes": 103
+        },
+        {
+          "path": "checks/test_triad_phase_reduction_final.log",
+          "role": "test-log",
+          "sha256": "c3d382efa9651b151ae3dea69209408b8e5f07d7480e82d6b6f63875d0e6fb1d",
+          "bytes": 1195
+        },
+        {
+          "path": "gpu/results/5090-fp64-reduction-reversed.json",
+          "role": "result-or-provenance",
+          "sha256": "e4d955872841ca93117e75dcc835ac47e78f9b19c3359d1f7d09d0a1fe19c4dc",
+          "bytes": 25551
+        },
+        {
+          "path": "gpu/results/5090-fp64-reduction.json",
+          "role": "result-or-provenance",
+          "sha256": "4baff38e13ff15db22e02f74d803f02110346186242fca1b7431d869c98fbed0",
+          "bytes": 25498
+        },
+        {
+          "path": "gpu/results/5090-reduction-check.json",
+          "role": "result-or-provenance",
+          "sha256": "cab3a60c649ac2952047c4e15e699ff487a7c42b1b79389c1eca12809554fe85",
+          "bytes": 10117
+        },
+        {
+          "path": "source-snapshots/hardware-bundle/tools/triad_phase_reduction.py",
+          "role": "source",
+          "sha256": "42e64a97d8e99073ff3fe04adb28213f3ac707dc321c5cb0828f7bbbe196f60f",
+          "bytes": 7312
+        }
+      ]
+    },
+    {
+      "id": "O3",
+      "title": "Exact fixed hour input payloads",
+      "archive_id": "optimization-inputs",
+      "scope": "Existing exported input bytes; does not cover every later raw physical holdout or day input.",
+      "members": [
+        {
+          "path": "inputs/flat/manifest.json",
+          "role": "result-or-provenance",
+          "sha256": "2d6c159101c0d4fca5e3ab5b50f5f0d7a360851950e1afe81b564888fd226ae7",
+          "bytes": 1585
+        },
+        {
+          "path": "inputs/hour/gram.c128",
+          "role": "result-or-provenance",
+          "sha256": "b00f36cf800999e334c18b49f8328a1e648c1bb76808b591582b8f486de8aae8",
+          "bytes": 237824
+        },
+        {
+          "path": "inputs/hour/intervals.u64",
+          "role": "result-or-provenance",
+          "sha256": "bfd67b06f0097dfe3df9de3326b02a751044b36a9faa2ae0364cd7c7378c39e0",
+          "bytes": 14864
+        },
+        {
+          "path": "inputs/hour/manifest.json",
+          "role": "result-or-provenance",
+          "sha256": "a4187a2d8825a26c2fd6b038042fec57261bde01a5e6d3a21813a88f49cea047",
+          "bytes": 5827
+        },
+        {
+          "path": "inputs/hour/mean.c128",
+          "role": "result-or-provenance",
+          "sha256": "047f38957bce0f130865498fb737909c4dd732a817ae5826cd255dab19769e1f",
+          "bytes": 59456
+        },
+        {
+          "path": "inputs/hour/observation.c128",
+          "role": "result-or-provenance",
+          "sha256": "e11341c414d8bf4278cc0d4f4a915d5ae929e32f64c19593d93de1a608db8a1c",
+          "bytes": 59456
+        },
+        {
+          "path": "inputs/hour/signal_energy.f64",
+          "role": "result-or-provenance",
+          "sha256": "4fe69dac32a3dff96d290673a4a3b48dbc19572eb6a801eafc371d40bc809b03",
+          "bytes": 7432
+        },
+        {
+          "path": "inputs/hour/valid_rows.u64",
+          "role": "result-or-provenance",
+          "sha256": "5212e571ed68b86dbfc584b7a68b618948cd69f55788f3cee268bcce7039f707",
+          "bytes": 7432
+        }
+      ]
+    },
+    {
+      "id": "O4",
+      "title": "Original optimization source and tests",
+      "archive_id": "optimization-source",
+      "scope": "Historical source snapshot, not current-code test execution.",
+      "members": [
+        {
+          "path": "tests/test_triad_gaussian_prepared.py",
+          "role": "source",
+          "sha256": "d59e54477f9a31d4038761d2d0c7a8fe020398d4e9e0d6386c1a1593a2e749c4",
+          "bytes": 6323
+        },
+        {
+          "path": "tests/test_triad_phase_reduction.py",
+          "role": "source",
+          "sha256": "2d1bf61ebe53494568777439ca9c5b0b4d9badc7597440a82c9bb4175da62ff7",
+          "bytes": 5309
+        },
+        {
+          "path": "tools/triad_gaussian_prepared.py",
+          "role": "source",
+          "sha256": "c88afdf459521393958c49d801517d79cd158cbe2291e4a48c3eff6931e42875",
+          "bytes": 22456
+        },
+        {
+          "path": "tools/triad_phase_reduction.py",
+          "role": "source",
+          "sha256": "b2f762320fbff5a66fa88123711483f9c42721e1765e406b7699c434048ded98",
+          "bytes": 21111
+        }
+      ]
+    },
+    {
+      "id": "T1",
+      "title": "Lower-precision recurrence screening and failures",
+      "archive_id": "tensor",
+      "scope": "Plain BF16/TF32/scaled FP16 failed development likelihood gates; more accurate multi-component modes are still experimental.",
+      "members": [
+        {
+          "path": "evidence/micro.json",
+          "role": "result-or-provenance",
+          "sha256": "cad0859f289972962df6509e537cff19b4b376bb12948c78644c3725b1b0897f",
+          "bytes": 1064920
+        },
+        {
+          "path": "evidence/screen/results/b1-bf16-bc128.json",
+          "role": "result-or-provenance",
+          "sha256": "3b26310ee5899b61c98c00bebacbbbaec0c68db5c9f1d7458797982e7476f040",
+          "bytes": 24699
+        },
+        {
+          "path": "evidence/screen/results/b1-bf16-bc128.scores.npz",
+          "role": "result-or-provenance",
+          "sha256": "9d3aa3ee21acb32179368783710ace6561f20b742881a10101688b1d33a4e34b",
+          "bytes": 347
+        },
+        {
+          "path": "evidence/screen/results/b1-bf16-bc128.stderr",
+          "role": "test-log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "path": "evidence/screen/results/b1-bf16-bc128.stdout",
+          "role": "test-log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "path": "evidence/screen/results/b1-bf16-split2-bc128.json",
+          "role": "result-or-provenance",
+          "sha256": "1cf76012ab4b4c5fa97e31095ad599135ccde8acdc3967606c6358250ba1641b",
+          "bytes": 24739
+        },
+        {
+          "path": "evidence/screen/results/b1-bf16-split2-bc128.scores.npz",
+          "role": "result-or-provenance",
+          "sha256": "679fadb8574e4632243b188b6da02fc282cead6cbd48c50ae06d84004383d0fe",
+          "bytes": 347
+        },
+        {
+          "path": "evidence/screen/results/b1-bf16-split2-bc128.stderr",
+          "role": "test-log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "path": "evidence/screen/results/b1-bf16-split2-bc128.stdout",
+          "role": "test-log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      ]
+    },
+    {
+      "id": "T2",
+      "title": "Native dense tensor instructions, profile and counter denial",
+      "archive_id": "tensor",
+      "scope": "PTX/SASS and event traces; hardware utilization counters unavailable. FP64 partial-reduction share is kernel-time only.",
+      "members": [
+        {
+          "path": "evidence/final/results/isa-fused/bf16-split2.cubin",
+          "role": "result-or-provenance",
+          "sha256": "173cdb2c94891d9b5c376b1784d792f1b4a80028c269bb34389022b06be4e50d",
+          "bytes": 122072
+        },
+        {
+          "path": "evidence/final/results/isa-fused/bf16-split2.ptx",
+          "role": "result-or-provenance",
+          "sha256": "077bc6509363d39aa7dde593e6a44d05f1ea549bb8befb08f8e02e03383c2a07",
+          "bytes": 105566
+        },
+        {
+          "path": "evidence/final/results/isa-fused/bf16-split2.sass",
+          "role": "result-or-provenance",
+          "sha256": "d1c54ba3faa13b60f4e85596b59bdffc1c6bfd87839675a56a8821b2a4432437",
+          "bytes": 758395
+        },
+        {
+          "path": "evidence/final/results/isa-fused/bf16-split2.stderr",
+          "role": "test-log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "path": "evidence/final/results/isa-fused/summary.json",
+          "role": "result-or-provenance",
+          "sha256": "7faac60c60b53bdf71e1da7b40c32fce97d05f73f62103f97ef6d6be39cb4499",
+          "bytes": 3331
+        },
+        {
+          "path": "evidence/final/results/isa-fused/tf32x3.cubin",
+          "role": "result-or-provenance",
+          "sha256": "9d80e437e8f2cd3a8e7bfa9e7af3954e1834e05386e42788c62aeafa38b0d810",
+          "bytes": 146304
+        },
+        {
+          "path": "evidence/final/results/isa-fused/tf32x3.ptx",
+          "role": "result-or-provenance",
+          "sha256": "8cdd36a558194465f9ea1a1a0d3d2fb8fe22f6233a3863be4c2334a067449588",
+          "bytes": 104308
+        },
+        {
+          "path": "evidence/final/results/isa-fused/tf32x3.sass",
+          "role": "result-or-provenance",
+          "sha256": "7d9abd26701e4f380bcc1c282e25df77722322a99e6c17a789d025d98aeb63e3",
+          "bytes": 907778
+        },
+        {
+          "path": "evidence/final/results/isa-fused/tf32x3.stderr",
+          "role": "test-log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "path": "evidence/final/results/validation-profile-v2/profile-baseline/summary.json",
+          "role": "result-or-provenance",
+          "sha256": "121078a02d2e92024ee551990582b6d7f12ab995b1ced653cdb405116f189550",
+          "bytes": 10884
+        },
+        {
+          "path": "evidence/final/results/validation-profile-v2/profile-baseline/trace.json.gz",
+          "role": "result-or-provenance",
+          "sha256": "7d658de49bf82adc4ca9f3156a66c0ec5884e73d9999529f04061ac224b199ca",
+          "bytes": 182281
+        },
+        {
+          "path": "evidence/screen/results/ncu-counter-probe.stdout",
+          "role": "test-log",
+          "sha256": "99b4ff0ab1fb3bab697173ff8b24a79d2e92576efaa1a797bfe4621c29eff9ef",
+          "bytes": 345
+        }
+      ]
+    },
+    {
+      "id": "T3",
+      "title": "Long accumulation and signal-absent interference",
+      "archive_id": "tensor",
+      "scope": "Actual sampled two-day and interference diagnostics; null interference crosses reference gates. Raw physical IQ must be regenerated.",
+      "members": [
+        {
+          "path": "evidence/final/results/validation-physical-v2/actual-hour-null-interference-baseline.json",
+          "role": "result-or-provenance",
+          "sha256": "2a99e33f3f96d8f38bbc8b0cb33a6792ef11262b8e24dc075c395c2e377c7125",
+          "bytes": 19677
+        },
+        {
+          "path": "evidence/final/results/validation-physical-v2/actual-hour-null-interference-baseline.scores.npz",
+          "role": "result-or-provenance",
+          "sha256": "0a73e077486952dc6e3d473d8ca224de915d1d04e70a6ebfba471a9dbc06e0b2",
+          "bytes": 225
+        },
+        {
+          "path": "evidence/final/results/validation-physical-v2/actual-hour-null-interference-bf16-split2.json",
+          "role": "result-or-provenance",
+          "sha256": "786b997c761b5776432fb1d5cc5997e1248c2f97f6cbc15dd8f2958b262a5325",
+          "bytes": 22582
+        },
+        {
+          "path": "evidence/final/results/validation-physical-v2/actual-hour-null-interference-bf16-split2.scores.npz",
+          "role": "result-or-provenance",
+          "sha256": "3b34233155eb4a9c4a77d8485de06d73962afb896cfac5cc80c031dc54998b66",
+          "bytes": 225
+        },
+        {
+          "path": "evidence/final/results/validation-physical-v2/actual-hour-null-interference-tf32x3.json",
+          "role": "result-or-provenance",
+          "sha256": "fdf5c3bccbbd1c257fdd87da57f04fe3212fec5471ff46898ce7b1465084e000",
+          "bytes": 22553
+        },
+        {
+          "path": "evidence/final/results/validation-physical-v2/actual-hour-null-interference-tf32x3.scores.npz",
+          "role": "result-or-provenance",
+          "sha256": "171d8a18d96604ac784b9b34b644421b5826d10d5fceb04d39cb85182437368a",
+          "bytes": 225
+        },
+        {
+          "path": "evidence/final/results/validation-physical-v2/actual-two-day-baseline-baseline.json",
+          "role": "result-or-provenance",
+          "sha256": "9d16941882e2d5390019abfd02547ffc0cd6b978c7c71821a070f3762a1ef96b",
+          "bytes": 22348
+        },
+        {
+          "path": "evidence/final/results/validation-physical-v2/actual-two-day-baseline-baseline.scores.npz",
+          "role": "result-or-provenance",
+          "sha256": "6a783a483305016d770098afed0fc31fb21c3da9bea663351b675040b12d26a0",
+          "bytes": 424
+        },
+        {
+          "path": "evidence/final/results/validation-physical-v2/actual-two-day-baseline-bf16-split2.json",
+          "role": "result-or-provenance",
+          "sha256": "807e8459b4cb74814a295d61709a7450a06854246afc6013e60a7169eadef67a",
+          "bytes": 26224
+        },
+        {
+          "path": "evidence/final/results/validation-physical-v2/actual-two-day-baseline-bf16-split2.scores.npz",
+          "role": "result-or-provenance",
+          "sha256": "847e365f58e124847cbe17b3b62d4879fe76169d87e4a44a6db36a1f3e3c4da3",
+          "bytes": 424
+        },
+        {
+          "path": "evidence/final/results/validation-physical-v2/actual-two-day-baseline-tf32x3.json",
+          "role": "result-or-provenance",
+          "sha256": "9f7e9956b42184ba2176ed4e7953fc59ac67f3ade767a671da48138edb49b5b9",
+          "bytes": 26211
+        },
+        {
+          "path": "evidence/final/results/validation-physical-v2/actual-two-day-baseline-tf32x3.scores.npz",
+          "role": "result-or-provenance",
+          "sha256": "afe2f551acffea6524802513a0386c8ab5f9a01c0fd4136177fa70926797e110",
+          "bytes": 424
+        },
+        {
+          "path": "evidence/prepared/inputs/physical/hour-null-interference/manifest.json",
+          "role": "result-or-provenance",
+          "sha256": "a694fab9b8f3d2591e74ba054d4204d0ffa56356c1a53cc321e9c42edfe31218",
+          "bytes": 8282
+        },
+        {
+          "path": "evidence/prepared/physical-input-hashes.json",
+          "role": "result-or-provenance",
+          "sha256": "8cb3d0da9d5e1550a6546fb94d71a04c165ab0be1edbfdb06bb3aed83b751697",
+          "bytes": 8725
+        }
+      ]
+    },
+    {
+      "id": "T4",
+      "title": "Tensor source and recorded CPU checks",
+      "archive_id": "tensor",
+      "scope": "Logs establish the stated historical runs; test source is not a new run.",
+      "members": [
+        {
+          "path": "evidence/checks/optimization-final-check.log",
+          "role": "test-log",
+          "sha256": "82d935d6351482e3ef196f4ea66767db7aaa299faf448fb6155aa401da392dc8",
+          "bytes": 727
+        },
+        {
+          "path": "evidence/checks/resident-final-check.log",
+          "role": "test-log",
+          "sha256": "94c7d3d5af0cf212000cc5fd18f7c538958f7cbacc284f525c06fbc97cd87c1e",
+          "bytes": 827
+        },
+        {
+          "path": "evidence/checks/tensor-final-cpu-check.log",
+          "role": "test-log",
+          "sha256": "bb35a6122f9751fcac05bbae2062195c247eee175d8f6bfa7ef9f11bd2a50fa8",
+          "bytes": 1533
+        },
+        {
+          "path": "evidence/source-final/tests/test_triad_phase_tensor.py",
+          "role": "source",
+          "sha256": "9403029b2ab959689b475dd92c10e8da84d633501dd0c1414a0a99d55a4639ae",
+          "bytes": 11522
+        },
+        {
+          "path": "evidence/source-final/tools/triad_phase_tensor.py",
+          "role": "source",
+          "sha256": "3b1a674ac7ace90ddce72c2773c2d1543bcfe8307d7b65ea965ad03a6525ffda",
+          "bytes": 23317
+        }
+      ]
+    },
+    {
+      "id": "F1",
+      "title": "Native floating FP4 and counter limits",
+      "archive_id": "fp4",
+      "scope": "Blackwell native dense product evidence. Synthetic GEMM speedup does not establish receiver efficiency.",
+      "members": [
+        {
+          "path": "technical-evidence/gpu-5090/results/ncu-good.log",
+          "role": "test-log",
+          "sha256": "df8165192c9a880d20923fb46e4072411c297f21f48ea2a599da32c263b5ea93",
+          "bytes": 422
+        },
+        {
+          "path": "technical-evidence/gpu-5090/results/probe-mxfp4-v2-isa/product.cubin",
+          "role": "result-or-provenance",
+          "sha256": "c368a250be300d74c2c0b1d431c4761cc133ddb7d73a3f7d6bd6157257937bdc",
+          "bytes": 446384
+        },
+        {
+          "path": "technical-evidence/gpu-5090/results/probe-mxfp4-v2-isa/product.llir",
+          "role": "result-or-provenance",
+          "sha256": "6af7d73831bc34283f9e73a963e7f5a739bb45007f365d643f18cc178adb3358",
+          "bytes": 577196
+        },
+        {
+          "path": "technical-evidence/gpu-5090/results/probe-mxfp4-v2-isa/product.ptx",
+          "role": "result-or-provenance",
+          "sha256": "cfbefed0e727d7fd5e2acd3885e6e8e6c8118500a1dcd6c04f66f6a971e66f6e",
+          "bytes": 331280
+        },
+        {
+          "path": "technical-evidence/gpu-5090/results/probe-mxfp4-v2-isa/product.sass",
+          "role": "result-or-provenance",
+          "sha256": "eaf299ba9482ddc1d5df3b5ebb7348b77c95e48417eac5d87fe150f45f5ec22f",
+          "bytes": 2405528
+        },
+        {
+          "path": "technical-evidence/gpu-5090/results/probe-mxfp4-v2-isa/product.ttgir",
+          "role": "result-or-provenance",
+          "sha256": "be13623a1baa85c5f05e99341898bc08f035bfd5fd4173f82618129123e46ac2",
+          "bytes": 23016
+        },
+        {
+          "path": "technical-evidence/gpu-5090/results/probe-mxfp4-v2-isa/product.ttir",
+          "role": "result-or-provenance",
+          "sha256": "12298541bcab5ea481806088e892fc68efb14b76576617889db502a8244983d2",
+          "bytes": 14575
+        },
+        {
+          "path": "technical-evidence/gpu-5090/results/probe-nvfp4-v2-isa/product.cubin",
+          "role": "result-or-provenance",
+          "sha256": "dcbc407bc0420dd63e8ffec45a0be12ba62a7233760f19df49792548d2b5a50e",
+          "bytes": 446288
+        },
+        {
+          "path": "technical-evidence/gpu-5090/results/probe-nvfp4-v2-isa/product.llir",
+          "role": "result-or-provenance",
+          "sha256": "5c19729036bb08936e2bc7bc0a6f5772be639bba95ffeab8b5470829b1a77187",
+          "bytes": 575117
+        },
+        {
+          "path": "technical-evidence/gpu-5090/results/probe-nvfp4-v2-isa/product.ptx",
+          "role": "result-or-provenance",
+          "sha256": "31a890c6c0b9f3a787b626857cfa2222ba0c089691d7275769aa6b2880be0b0d",
+          "bytes": 331180
+        },
+        {
+          "path": "technical-evidence/gpu-5090/results/probe-nvfp4-v2-isa/product.ttgir",
+          "role": "result-or-provenance",
+          "sha256": "a2af06a4e94919a5963ccdeb23d59f581bcbbb6e0c99429255d73aa739fd2d70",
+          "bytes": 23181
+        },
+        {
+          "path": "technical-evidence/gpu-5090/results/probe-nvfp4-v2-isa/product.ttir",
+          "role": "result-or-provenance",
+          "sha256": "6f2fe7229f21b76ad241b6d986dc7609a3ab6f8c6735a8c35a1b2042a174d49b",
+          "bytes": 14700
+        },
+        {
+          "path": "technical-evidence/static-kernel-analysis/summary.json",
+          "role": "result-or-provenance",
+          "sha256": "472b3515dfff8f5d28fa4503d085c66396dac56a8b4f4461ea683997b17252ba",
+          "bytes": 161670
+        }
+      ]
+    },
+    {
+      "id": "F2",
+      "title": "Separate sampled template and observation quantization",
+      "archive_id": "fp4",
+      "scope": "Actual sampled converter/interference diagnostics; nonlinear quantization is not replaced by Gaussian projected noise.",
+      "members": [
+        {
+          "path": "technical-evidence/development-inputs/inputs/frontend-adc-dac16-nominal/manifest.json",
+          "role": "result-or-provenance",
+          "sha256": "5f2d33cc48dee36e45172e7a766fe4c886deeb2a202c05f100581af080ebdf84",
+          "bytes": 5973
+        },
+        {
+          "path": "technical-evidence/gpu-5090/results/diagnostic-v2/frontend-adc-dac16-nominal-both-b1.json",
+          "role": "result-or-provenance",
+          "sha256": "e1090863d32fa0c898da78097010c830467fc1149c4a8c0d3eaa9100edcc60fd",
+          "bytes": 30992
+        },
+        {
+          "path": "technical-evidence/gpu-5090/results/diagnostic-v2/frontend-adc-dac16-nominal-both-b1.npz",
+          "role": "result-or-provenance",
+          "sha256": "a3a8468cbc158400a164f42aef1d43e6f949f982fb722f91c5c4cb8a75bb1a1a",
+          "bytes": 519
+        },
+        {
+          "path": "technical-evidence/gpu-5090/results/diagnostic-v2/frontend-adc-dac16-nominal-observation-only-b1.json",
+          "role": "result-or-provenance",
+          "sha256": "fce884e346c874bd87c24e7d75cf771eae21c23356ce037c69d693aa80bcf7e2",
+          "bytes": 31058
+        },
+        {
+          "path": "technical-evidence/gpu-5090/results/diagnostic-v2/frontend-adc-dac16-nominal-observation-only-b1.npz",
+          "role": "result-or-provenance",
+          "sha256": "9d4c7ac79aede522239340d134a2bd0438ece2057c87ae3a639c0dacf73cf990",
+          "bytes": 518
+        },
+        {
+          "path": "technical-evidence/gpu-5090/results/diagnostic-v2/frontend-adc-dac16-nominal-strict-b1.json",
+          "role": "result-or-provenance",
+          "sha256": "9d8b7e0f2efae6add389388457e8401809e93575b820bf51d958bb9a3471bd29",
+          "bytes": 31002
+        },
+        {
+          "path": "technical-evidence/gpu-5090/results/diagnostic-v2/frontend-adc-dac16-nominal-strict-b1.npz",
+          "role": "result-or-provenance",
+          "sha256": "8d191bf61679beb17212648f3c9b98c6f0f56ba9bdf010379f1c0f4acf18bcd8",
+          "bytes": 518
+        },
+        {
+          "path": "technical-evidence/gpu-5090/results/diagnostic-v2/frontend-adc-dac16-nominal-template-only-b1.json",
+          "role": "result-or-provenance",
+          "sha256": "73001224f4db9d2b1026c6c5036e3b4e95838b10bd99cd0fe0b5386f0ef37bc6",
+          "bytes": 31034
+        },
+        {
+          "path": "technical-evidence/gpu-5090/results/diagnostic-v2/frontend-adc-dac16-nominal-template-only-b1.npz",
+          "role": "result-or-provenance",
+          "sha256": "cf68a89969980e2ce6288e127b2e52bd9ccde789bb9625283a259bff8acedac1",
+          "bytes": 519
+        },
+        {
+          "path": "technical-evidence/gpu-5090/results/diagnostic-v2/index.json",
+          "role": "result-or-provenance",
+          "sha256": "33613a1db13bf2c8925fa5abb7a7f8eed0bc666d5679068aec47f6c416e3ebe8",
+          "bytes": 74662
+        }
+      ]
+    },
+    {
+      "id": "F3",
+      "title": "FP4 independent holdout, complete workspace and hardware comparisons",
+      "archive_id": "fp4",
+      "scope": "753 physical cases and paired policies; zero-event samples do not qualify operational tails. Fixed workspace and broad correlation-only workload are distinct.",
+      "members": [
+        {
+          "path": "technical-evidence/gpu-5090/results/holdout-v1/index.json",
+          "role": "result-or-provenance",
+          "sha256": "37172d584edba9acba832dcc0356f02e6be917c95ed077358b76f3592dd736c5",
+          "bytes": 4527310
+        },
+        {
+          "path": "technical-evidence/gpu-5090/results/whole-scan-fp32.json",
+          "role": "result-or-provenance",
+          "sha256": "c1199479fc923242ed7dbfc2676aee057be754ae4ff64c3ca65540fe79ca5323",
+          "bytes": 30039
+        },
+        {
+          "path": "technical-evidence/gpu-5090/results/whole-scan-native.json",
+          "role": "result-or-provenance",
+          "sha256": "f12d80425bdeefffc108f1fb5d583165f49ca2519cdd7815ec4117347e49b15b",
+          "bytes": 30191
+        },
+        {
+          "path": "technical-evidence/gpu-mig/results/hardware-receiver/index.json",
+          "role": "result-or-provenance",
+          "sha256": "82e192202c956535d0e7041fc992118cfb9f45dfce187e4b606a16a268b7c085",
+          "bytes": 59948
+        },
+        {
+          "path": "technical-evidence/gpu-pro/results/whole-scan-fp32.json",
+          "role": "result-or-provenance",
+          "sha256": "efa324086c89ca493be7bb650b87668806e7d8729618c91baab722a29993fd5e",
+          "bytes": 30058
+        },
+        {
+          "path": "technical-evidence/gpu-pro/results/whole-scan-native.json",
+          "role": "result-or-provenance",
+          "sha256": "beafea5fd33ee10801428c53682a7b4eb6d8c8141ca95276c07eeed6e4320b28",
+          "bytes": 30205
+        },
+        {
+          "path": "technical-evidence/holdout-evidence/holdout-inputs/holdout-summary.json",
+          "role": "result-or-provenance",
+          "sha256": "cb3327d50d14417b74808e0d898233065c89f6736762be3ab4808701e1e4b0bf",
+          "bytes": 3016183
+        },
+        {
+          "path": "technical-evidence/profile-analysis/full-receiver-summary.json",
+          "role": "result-or-provenance",
+          "sha256": "23f1fc0cdf8a30ef74463ec3f9360f077d52ffe4763b7565581f5570c2b5b65e",
+          "bytes": 129998
+        }
+      ]
+    },
+    {
+      "id": "F4",
+      "title": "FP4 source, exporter and holdout regeneration",
+      "archive_id": "fp4",
+      "scope": "Raw holdout arrays omitted; frozen generator, exporter, seeds and hashes support regeneration. Follow recorded binary/library prerequisites.",
+      "members": [
+        {
+          "path": "technical-evidence/exporter-current/build/dev/triad_long",
+          "role": "result-or-provenance",
+          "sha256": "89b4af004e4f5fc564acdcbd6b7c3849afc5803b503ca45c43ed343b7af6c591",
+          "bytes": 397816
+        },
+        {
+          "path": "technical-evidence/exporter-current/include/datapump/triad_modem_v3.hpp",
+          "role": "source",
+          "sha256": "e625915b0c0d1f29925d6a95e3b49d89efe44c8482eb13a9de6836de4d6e9c92",
+          "bytes": 11871
+        },
+        {
+          "path": "technical-evidence/exporter-current/src/triad_simulation_stream.cpp",
+          "role": "source",
+          "sha256": "b270448dc776ee6594c121e2b10a2f4f6eba5fa966897fc1f3a7fc06af501450",
+          "bytes": 35634
+        },
+        {
+          "path": "technical-evidence/exporter-current/tools/triad-long.cpp",
+          "role": "source",
+          "sha256": "c07003b3234543508a3ec1730ea6246902828bd6a1e3b6d7a4f2b37356a10566",
+          "bytes": 90862
+        },
+        {
+          "path": "technical-evidence/holdout-evidence/generate-holdout.py",
+          "role": "source",
+          "sha256": "7f0dd888a848782f814accf89ea1502ff9edaa4672dd89990d4e19bcc01f8a4f",
+          "bytes": 17564
+        },
+        {
+          "path": "technical-evidence/holdout-evidence/run-campaign.py",
+          "role": "source",
+          "sha256": "54fc76c16f912afcebc73fbb5a450252c88fcca83cbf74bad445b9c2af964945",
+          "bytes": 5898
+        },
+        {
+          "path": "technical-evidence/source-final/tools/triad_fp4_native.py",
+          "role": "source",
+          "sha256": "e9a6811182c57b14d70604fc69894aa58e0c6227c10a6de2db5e5d127a567b3c",
+          "bytes": 30154
+        }
+      ]
+    },
+    {
+      "id": "C1",
+      "title": "Consumer GPU final tests and original failures",
+      "archive_id": "consumer",
+      "scope": "RTX 4090 final suites: tensor14, correlation15, workspace8. CPU provenance14. Earlier failures remain, not silently counted as passes.",
+      "members": [
+        {
+          "path": "triad-consumer-gpu-evidence/local-test-logs/local-env-test_triad_fp4_campaign.py.log",
+          "role": "test-log",
+          "sha256": "396b0965509c5597a794d08fb48cddc2204d58184450c560a1fd1787d7609b84",
+          "bytes": 113
+        },
+        {
+          "path": "triad-consumer-gpu-evidence/local-test-logs/local-test_triad_fp4_campaign.py.log",
+          "role": "test-log",
+          "sha256": "304b05c0b0f4e781b438ba008c2ee9b2baf92e33fbe6d722eb94e555596a2be9",
+          "bytes": 213
+        },
+        {
+          "path": "triad-consumer-gpu-evidence/stage5/consumer-results/correlation-tests.log",
+          "role": "test-log",
+          "sha256": "2fe399fe2b5cc39725f7360dda2e4133f998127860beb2f36d88d70771088253",
+          "bytes": 114
+        },
+        {
+          "path": "triad-consumer-gpu-evidence/stage5/consumer-results/tensor-tests-final-signedzero.log",
+          "role": "test-log",
+          "sha256": "928ffdd0c9494cde467774c2f0ea505b349f7d8c85e9a108be8a468d6028aae8",
+          "bytes": 113
+        },
+        {
+          "path": "triad-consumer-gpu-evidence/stage5/consumer-results/tensor-tests-fp8-details.log",
+          "role": "test-log",
+          "sha256": "93e9ecc1f72edf4a3b992ca4545274b1aafc246d97036d20fbfe9232f10715dc",
+          "bytes": 3378
+        },
+        {
+          "path": "triad-consumer-gpu-evidence/stage5/consumer-results/tensor-tests-fused1.log",
+          "role": "test-log",
+          "sha256": "03a3539c0b085464a31d79f4644a8169606bf2b0c0c1be0d2eb1bfa1313fc1fc",
+          "bytes": 3737
+        },
+        {
+          "path": "triad-consumer-gpu-evidence/stage5/consumer-results/tensor-tests-scalingfix.log",
+          "role": "test-log",
+          "sha256": "91a55f25c44e2b259f3a26bcafcb8b104768c55beb832273312c645552f962e0",
+          "bytes": 1335
+        },
+        {
+          "path": "triad-consumer-gpu-evidence/stage5/consumer-results/workspace-tests.log",
+          "role": "test-log",
+          "sha256": "a792d99dd5dc02f26b0f16ec362c3d228bd77a2be58240bb6ff6aabf6551407a",
+          "bytes": 106
+        }
+      ]
+    },
+    {
+      "id": "C2",
+      "title": "Subnormal scaling and FP8 conversion",
+      "archive_id": "consumer",
+      "scope": "Observed arithmetic/conversion defects and repairs; not a receiver sensitivity certificate.",
+      "members": [
+        {
+          "path": "triad-consumer-gpu-evidence/stage5/consumer-results/scaling-diagnostic-extended.json",
+          "role": "result-or-provenance",
+          "sha256": "de6763952fb6c923a1f75d3633dcca5bf361bb87ff590f08b30ae24db49b2cb0",
+          "bytes": 80711
+        },
+        {
+          "path": "triad-consumer-gpu-evidence/stage5/consumer-results/scaling-diagnostic.json",
+          "role": "result-or-provenance",
+          "sha256": "574ddc5b364cd2f96a01c0788afc20a79a165eb899908299377c980859525ed6",
+          "bytes": 68026
+        },
+        {
+          "path": "triad-consumer-gpu-evidence/stage5/consumer-results/tensor-tests-final-signedzero.log",
+          "role": "test-log",
+          "sha256": "928ffdd0c9494cde467774c2f0ea505b349f7d8c85e9a108be8a468d6028aae8",
+          "bytes": 113
+        }
+      ]
+    },
+    {
+      "id": "C3",
+      "title": "Short tensor partials and higher-precision outer sums",
+      "archive_id": "consumer",
+      "scope": "Represented-input synthetic arithmetic tests distinguish FP8 input loss from accumulation loss.",
+      "members": [
+        {
+          "path": "triad-consumer-gpu-evidence/partial-accumulation-probe.py",
+          "role": "source",
+          "sha256": "47f599b6dbe77b0056bd1e891aa21f55aa8515cbab0ec559d09df48f995aae77",
+          "bytes": 12588
+        },
+        {
+          "path": "triad-consumer-gpu-evidence/stage5/consumer-results/partial-accumulation-artifacts/fp8-e4m3-constructed-large-plus-small-partial-32-outer-fp32.ptx",
+          "role": "result-or-provenance",
+          "sha256": "aa2af3d8ba6c60f07ac751176534914f39f7f03048023cce92587f93b1e594a2",
+          "bytes": 15149
+        },
+        {
+          "path": "triad-consumer-gpu-evidence/stage5/consumer-results/partial-accumulation.json",
+          "role": "result-or-provenance",
+          "sha256": "118018cffa94975800180f78f3d05254591b1bef30505aa43cb8f5ecfac88546",
+          "bytes": 361930
+        }
+      ]
+    },
+    {
+      "id": "C4",
+      "title": "Independent consumer holdout and initial setup failures",
+      "archive_id": "consumer",
+      "scope": "128 physical sampled inputs, 1024 paired policy evaluations; zero of 32 null admissions is inadequate for operational tail claims.",
+      "members": [
+        {
+          "path": "triad-consumer-gpu-evidence/holdout-inputs/index.json",
+          "role": "result-or-provenance",
+          "sha256": "05d414a5ba6793d823a953115d9bf1bf155479a5b024774f274fabd53b0326a0",
+          "bytes": 1763471
+        },
+        {
+          "path": "triad-consumer-gpu-evidence/holdout-policy-freeze.json",
+          "role": "result-or-provenance",
+          "sha256": "aa1d89460acc9e3ad7cdb099aea0c144db9bbaa97900e879c2d6cd1cd483d000",
+          "bytes": 902
+        },
+        {
+          "path": "triad-consumer-gpu-evidence/input-binding-check.json",
+          "role": "result-or-provenance",
+          "sha256": "c6ce44ecd96f9e425ba071bae75b46ed1ded966118ff21865645de694ede16b6",
+          "bytes": 237
+        },
+        {
+          "path": "triad-consumer-gpu-evidence/stage5/consumer-results/holdout-final/index.json",
+          "role": "result-or-provenance",
+          "sha256": "797d003da2f186b846bfdb621b67aa9f0bad10cb6b498196c598072261c3b6f2",
+          "bytes": 4082458
+        },
+        {
+          "path": "triad-consumer-gpu-evidence/stage5/consumer-results/holdout-verified/boundary-cn-11-r000-fp32.json",
+          "role": "result-or-provenance",
+          "sha256": "c869fdd0f1e642c87ed83a15658cd680a34599816ae3699c24e460ffb8c79c73",
+          "bytes": 42702
+        },
+        {
+          "path": "triad-consumer-gpu-evidence/stage5/consumer-results/holdout-verified/boundary-cn-11-r000-fp32.npz",
+          "role": "result-or-provenance",
+          "sha256": "0e446537789dc07d316464526bed81ebbe3fedba15163c55faa8ceb311a74d6d",
+          "bytes": 518
+        },
+        {
+          "path": "triad-consumer-gpu-evidence/stage5/consumer-results/holdout-verified/index.json",
+          "role": "result-or-provenance",
+          "sha256": "b82ddabf178a328f9bef07cccb2a85fc5ccf7e8cb6dcf60d7a3864c03b3604c2",
+          "bytes": 7138061
+        }
+      ]
+    },
+    {
+      "id": "C5",
+      "title": "Consumer profiling and measurement limits",
+      "archive_id": "consumer",
+      "scope": "Kernel event shares and CPU traces, not hardware SM/tensor/DRAM counters.",
+      "members": [
+        {
+          "path": "triad-consumer-gpu-evidence/stage5/consumer-results/hardware.json",
+          "role": "result-or-provenance",
+          "sha256": "bc5d361e252f4afc84ca30d499773166c6a784ef3b24362e8c028ee1440c754f",
+          "bytes": 17989
+        },
+        {
+          "path": "triad-consumer-gpu-evidence/stage5/consumer-results/ncu.log",
+          "role": "test-log",
+          "sha256": "92437653e4e527e85c455a00c314e082c53c1c753a1affed15e75c4b16e95595",
+          "bytes": 345
+        },
+        {
+          "path": "triad-consumer-gpu-evidence/stage5/consumer-results/nsight-systems-availability.log",
+          "role": "test-log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "path": "triad-consumer-gpu-evidence/stage5/consumer-results/profile-fp16/profile.json",
+          "role": "result-or-provenance",
+          "sha256": "9e6b8505325d6713cc7655c51203d6691737e1b682863d9088808a93fd1bee68",
+          "bytes": 9559
+        },
+        {
+          "path": "triad-consumer-gpu-evidence/stage5/consumer-results/profile-fp16/torch-trace.json.gz",
+          "role": "result-or-provenance",
+          "sha256": "e7650249d4fc86e53e41b9249ff82cec4bc91c619a19b415f24c3fd130a511db",
+          "bytes": 1933553
+        },
+        {
+          "path": "triad-consumer-gpu-evidence/stage5/consumer-results/profile-fp32/profile.json",
+          "role": "result-or-provenance",
+          "sha256": "ca6aaedd56d2f3f2a675fdd62cd24b6a5761e8ca34ae0a6ee3212db89723c30c",
+          "bytes": 8183
+        },
+        {
+          "path": "triad-consumer-gpu-evidence/stage5/consumer-results/profile-fp32/torch-trace.json.gz",
+          "role": "result-or-provenance",
+          "sha256": "7b8e305dce91a2a0339e549c33da4fc625ed990c1a08bb25225e2e7176047e1f",
+          "bytes": 1949260
+        }
+      ]
+    },
+    {
+      "id": "C6",
+      "title": "Sustained complete receiver replay and failed batching benefit",
+      "archive_id": "consumer",
+      "scope": "One fixed capture repeated; cloned B8 columns are not independent trials. Full-call latency and amortized service time differ.",
+      "members": [
+        {
+          "path": "triad-consumer-gpu-evidence/stage5/consumer-results/sustain-fp16-b1/sustain.json",
+          "role": "result-or-provenance",
+          "sha256": "d1c5801748b3056ebb8f40ef052ea7478be0ee8c9f7fcbecc37c32133ef23fed",
+          "bytes": 12264
+        },
+        {
+          "path": "triad-consumer-gpu-evidence/stage5/consumer-results/sustain-fp16-b1/sustained-receiver.json",
+          "role": "result-or-provenance",
+          "sha256": "60bd09e4e40c661c09318a778592de7364e391d9bda5ff51cd016b3b8c2bdb1a",
+          "bytes": 4702118
+        },
+        {
+          "path": "triad-consumer-gpu-evidence/stage5/consumer-results/sustain-fp16-b8/sustain.json",
+          "role": "result-or-provenance",
+          "sha256": "2ec413ef0164ea02ab7295a779153abc72da1b91a6b789aea80811a1eb002887",
+          "bytes": 12263
+        },
+        {
+          "path": "triad-consumer-gpu-evidence/stage5/consumer-results/sustain-fp16-b8/sustained-receiver.json",
+          "role": "result-or-provenance",
+          "sha256": "aec14f120d36cbb80d35a43e1e6aa774342462e948af792a42a8ee597f0f2b9b",
+          "bytes": 1209221
+        },
+        {
+          "path": "triad-consumer-gpu-evidence/stage5/consumer-results/sustain-fp32-b1/sustain.json",
+          "role": "result-or-provenance",
+          "sha256": "58780f3da6a76e30d8f74422c35c9a90ae503d74d2cee85cdfdb8895897df83c",
+          "bytes": 11944
+        },
+        {
+          "path": "triad-consumer-gpu-evidence/stage5/consumer-results/sustain-fp32-b1/sustained-receiver.json",
+          "role": "result-or-provenance",
+          "sha256": "3ea69742e7b4b176e0abead427401c6345f594cb2549234faae2cccd7cc53a2f",
+          "bytes": 4702173
+        }
+      ]
+    },
+    {
+      "id": "C7",
+      "title": "Packing-inclusive products, tile sweep and setup failure",
+      "archive_id": "consumer",
+      "scope": "Synthetic shape-specific timings with sampled-output gate, not full receiver admission.",
+      "members": [
+        {
+          "path": "triad-consumer-gpu-evidence/stage5/consumer-results/probe-fp16-final.json",
+          "role": "result-or-provenance",
+          "sha256": "1880f5b2281eaf967806d0ed6055929194934f21a03982d49e983630cfe5eaec",
+          "bytes": 259034
+        },
+        {
+          "path": "triad-consumer-gpu-evidence/stage5/consumer-results/probe-fp16.json",
+          "role": "result-or-provenance",
+          "sha256": "c8d0dcd99fb05f3928c1e02c7e84e348dd36d9684e23b1aa85bc4596f8e0a3c3",
+          "bytes": 253502
+        },
+        {
+          "path": "triad-consumer-gpu-evidence/stage5/consumer-results/tile-sweep-fixed/index.json",
+          "role": "result-or-provenance",
+          "sha256": "25c2430f48e7d9681b24e9f2de23723be0e81af11e301cec69a02129f62b93c7",
+          "bytes": 293688
+        },
+        {
+          "path": "triad-consumer-gpu-evidence/stage5/consumer-results/tile-sweep.log",
+          "role": "test-log",
+          "sha256": "4e8003800e496132daa46c8e7f9e019b62c216962bc2218679b4991837f66442",
+          "bytes": 761
+        },
+        {
+          "path": "triad-consumer-gpu-evidence/stage5/consumer-results/tile-sweep/index.json",
+          "role": "result-or-provenance",
+          "sha256": "db858902eb7cc00b5c009216ca3fccce045363e2011ea287e5168ae454757bf1",
+          "bytes": 2135
+        }
+      ]
+    },
+    {
+      "id": "C8",
+      "title": "Template-only versus observation-only numerical diagnostics",
+      "archive_id": "consumer",
+      "scope": "Development sampled waveform; CPU FP64 products separate input representation from arithmetic. No independent reception qualification.",
+      "members": [
+        {
+          "path": "triad-consumer-gpu-evidence/cpu-representation/representation-screen-final.json",
+          "role": "result-or-provenance",
+          "sha256": "67b307a187ab79935c5ee66a9967db36f2e7a79e186bf22617593824f947f7a9",
+          "bytes": 14226
+        },
+        {
+          "path": "triad-consumer-gpu-evidence/cpu-representation/representation-screen-final.py",
+          "role": "source",
+          "sha256": "238c07ee094965fe17d5124cf8aa8d1267dfb6ed060d1b17f7eb6bd1bb2b455e",
+          "bytes": 3873
+        },
+        {
+          "path": "triad-consumer-gpu-evidence/stage5/consumer-results/representation/index.json",
+          "role": "result-or-provenance",
+          "sha256": "3f1fcd0e926c29227adf31f4cfbd377467757d240738f01cc2904fd95e890f04",
+          "bytes": 146212
+        }
+      ]
+    },
+    {
+      "id": "C9",
+      "title": "Consumer exact source and input regeneration",
+      "archive_id": "consumer",
+      "scope": "Archived exporter and source snapshot; development raw IQ present; 128 holdout raw IQ omitted. Manifest binds every payload.",
+      "members": [
+        {
+          "path": "triad-consumer-gpu-evidence/MANIFEST.json",
+          "role": "result-or-provenance",
+          "sha256": "a919fd6873409fa0e8a5a208c42e1bcd36de58868f60662eb4a89fbbfd5b9c3f",
+          "bytes": 2373407
+        },
+        {
+          "path": "triad-consumer-gpu-evidence/SHA256SUMS",
+          "role": "result-or-provenance",
+          "sha256": "cfbd4ec3f8d7bf9f44c11b9e134898fc09e4285d0a4ebd835056d9c2107aa92b",
+          "bytes": 763041
+        },
+        {
+          "path": "triad-consumer-gpu-evidence/exporter/build/dev/triad_long",
+          "role": "result-or-provenance",
+          "sha256": "89b4af004e4f5fc564acdcbd6b7c3849afc5803b503ca45c43ed343b7af6c591",
+          "bytes": 397816
+        },
+        {
+          "path": "triad-consumer-gpu-evidence/exporter/include/datapump/triad_modem_v3.hpp",
+          "role": "source",
+          "sha256": "e625915b0c0d1f29925d6a95e3b49d89efe44c8482eb13a9de6836de4d6e9c92",
+          "bytes": 11871
+        },
+        {
+          "path": "triad-consumer-gpu-evidence/exporter/src/triad_simulation_stream.cpp",
+          "role": "source",
+          "sha256": "b270448dc776ee6594c121e2b10a2f4f6eba5fa966897fc1f3a7fc06af501450",
+          "bytes": 35634
+        },
+        {
+          "path": "triad-consumer-gpu-evidence/exporter/tools/triad-long.cpp",
+          "role": "source",
+          "sha256": "c07003b3234543508a3ec1730ea6246902828bd6a1e3b6d7a4f2b37356a10566",
+          "bytes": 90862
+        },
+        {
+          "path": "triad-consumer-gpu-evidence/source-final/tests/test_triad_fp4_campaign.py",
+          "role": "source",
+          "sha256": "d87970a47df6fbf829ec6b0052f6710061f13c3ddf9adcbffaf693b1f6cd0087",
+          "bytes": 14954
+        },
+        {
+          "path": "triad-consumer-gpu-evidence/source-final/tests/test_triad_tensor_native.py",
+          "role": "source",
+          "sha256": "24c903b1d3a1b32d4b8809bb92726ce53f539cbd75700c52473889deb0cc57be",
+          "bytes": 15850
+        },
+        {
+          "path": "triad-consumer-gpu-evidence/source-final/tools/triad_scan_workspace.py",
+          "role": "source",
+          "sha256": "bf0ecb596961951992d13f361150119e04cfb885b703497baa188f942f147dd7",
+          "bytes": 25067
+        },
+        {
+          "path": "triad-consumer-gpu-evidence/source-final/tools/triad_tensor_native.py",
+          "role": "source",
+          "sha256": "0ed9242733ae564aaadf7548a4391ac833aaffd27097e2a966c9931aab990c5e",
+          "bytes": 45550
+        },
+        {
+          "path": "triad-consumer-gpu-evidence/study/analyze.py",
+          "role": "source",
+          "sha256": "da3116901e86a67256ddd3fde5c5854dfcf4e115f4f5820442595c24b6b0e0a1",
+          "bytes": 91489
+        },
+        {
+          "path": "triad-consumer-gpu-evidence/study/generate-inputs.py",
+          "role": "source",
+          "sha256": "b491797aea1778d133effb72f58fc13370bbb5b748d464edd15c7706fa4cf18d",
+          "bytes": 12734
+        },
+        {
+          "path": "triad-consumer-gpu-evidence/study/run-campaign.py",
+          "role": "source",
+          "sha256": "681f518ed6cea7abd8e2d4ba2e7ab17bc67379dd1d9f88ca3a265cb76cb1563a",
+          "bytes": 22344
+        }
+      ]
+    }
+  ],
+  "copies": [
+    {
+      "path": "docs/validation-data/triad-v3/precision-controls/test-results/consumer-tensor-final.log",
+      "archive_id": "consumer",
+      "member": "triad-consumer-gpu-evidence/stage5/consumer-results/tensor-tests-final-signedzero.log",
+      "sha256": "928ffdd0c9494cde467774c2f0ea505b349f7d8c85e9a108be8a468d6028aae8"
+    },
+    {
+      "path": "docs/validation-data/triad-v3/precision-controls/test-results/consumer-correlation.log",
+      "archive_id": "consumer",
+      "member": "triad-consumer-gpu-evidence/stage5/consumer-results/correlation-tests.log",
+      "sha256": "2fe399fe2b5cc39725f7360dda2e4133f998127860beb2f36d88d70771088253"
+    },
+    {
+      "path": "docs/validation-data/triad-v3/precision-controls/test-results/consumer-workspace.log",
+      "archive_id": "consumer",
+      "member": "triad-consumer-gpu-evidence/stage5/consumer-results/workspace-tests.log",
+      "sha256": "a792d99dd5dc02f26b0f16ec362c3d228bd77a2be58240bb6ff6aabf6551407a"
+    },
+    {
+      "path": "docs/validation-data/triad-v3/precision-controls/test-results/consumer-provenance-local.log",
+      "archive_id": "consumer",
+      "member": "triad-consumer-gpu-evidence/local-test-logs/local-env-test_triad_fp4_campaign.py.log",
+      "sha256": "396b0965509c5597a794d08fb48cddc2204d58184450c560a1fd1787d7609b84"
+    },
+    {
+      "path": "docs/validation-data/triad-v3/precision-controls/test-results/consumer-fused-packing-failure.log",
+      "archive_id": "consumer",
+      "member": "triad-consumer-gpu-evidence/stage5/consumer-results/tensor-tests-fused1.log",
+      "sha256": "03a3539c0b085464a31d79f4644a8169606bf2b0c0c1be0d2eb1bfa1313fc1fc"
+    },
+    {
+      "path": "docs/validation-data/triad-v3/precision-controls/test-results/consumer-scalingfix-intermediate.log",
+      "archive_id": "consumer",
+      "member": "triad-consumer-gpu-evidence/stage5/consumer-results/tensor-tests-scalingfix.log",
+      "sha256": "91a55f25c44e2b259f3a26bcafcb8b104768c55beb832273312c645552f962e0"
+    },
+    {
+      "path": "docs/validation-data/triad-v3/precision-controls/test-results/consumer-counter-denial.log",
+      "archive_id": "consumer",
+      "member": "triad-consumer-gpu-evidence/stage5/consumer-results/ncu.log",
+      "sha256": "92437653e4e527e85c455a00c314e082c53c1c753a1affed15e75c4b16e95595"
+    },
+    {
+      "path": "docs/validation-data/triad-v3/precision-controls/test-results/consumer-tile-setup-failure.log",
+      "archive_id": "consumer",
+      "member": "triad-consumer-gpu-evidence/stage5/consumer-results/tile-sweep.log",
+      "sha256": "4e8003800e496132daa46c8e7f9e019b62c216962bc2218679b4991837f66442"
+    },
+    {
+      "path": "docs/validation-data/triad-v3/precision-controls/test-results/optimization-reduction.log",
+      "archive_id": "optimization",
+      "member": "checks/test_triad_phase_reduction_final.log",
+      "sha256": "c3d382efa9651b151ae3dea69209408b8e5f07d7480e82d6b6f63875d0e6fb1d"
+    },
+    {
+      "path": "docs/validation-data/triad-v3/precision-controls/test-results/optimization-gaussian-preparation.log",
+      "archive_id": "optimization",
+      "member": "checks/test_triad_gaussian_prepared.py.log",
+      "sha256": "1e3b0822e48fd2a94a13e71f1d9a61659c7a3e9ea1071a00a1a43a91741ffaf9"
+    },
+    {
+      "path": "docs/validation-data/triad-v3/precision-controls/test-results/tensor-cpu-final.log",
+      "archive_id": "tensor",
+      "member": "evidence/checks/tensor-final-cpu-check.log",
+      "sha256": "bb35a6122f9751fcac05bbae2062195c247eee175d8f6bfa7ef9f11bd2a50fa8"
+    }
+  ]
+}

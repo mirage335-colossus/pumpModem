@@ -9,6 +9,14 @@ assumptions and limits before applying their findings.
 It documents the shared APIs, model presets, processing order, bypass rules,
 reproducibility and focused integration checks for new simulation paths.
 
+**GPU optimization or numerical precision controls:** start with the
+[precision-control experiment guide](gpu-precision-controls.md). It separates
+costly bulk arithmetic from sensitive preparation/reductions, records measured
+precision tradeoffs, and explains what a dropdown can force versus permit.
+Current CPU control behavior and experimental GPU policies are kept distinct.
+The [GPU evidence map](validation-data/triad-v3/precision-controls/README.md)
+provides archived measurements, direct test logs and reproduction checks.
+
 ## Topic map
 
 | Topic | Explore |
@@ -17,8 +25,9 @@ reproducibility and focused integration checks for new simulation paths.
 | Helper Carrier integration | [Current integration guide](helper-integration.md): transmission facts, inexpensive search-space narrowing and complete-stream correction, [retained experimental results](validation-data/helper/README.md) and remaining Robust integration work. |
 | Simulation channel models | [Doppler/delay spread and additional frequency-selective amplitude modulation](channel-models.md): current sampled/PCM/Live integration, FHSS echoes, Helper composition, defaults and model limits. |
 | Build, test, install and release | [Development and delivery](indexes/development.md): native/SDK/browser builds, test groups, packaging, offline use and dependency provenance; [shell script inventory and compatibility](shell-scripts.md) |
+| GPU arithmetic and precision controls | [Stage allocation and dropdown experiments](gpu-precision-controls.md): measured cost versus numerical benefit, explicit bulk overrides, higher-precision exceptions, fallbacks and acceptance procedure; [current Search arithmetic](search-arithmetic.md). |
 | Robust Modem | [Waveform, receiver and weak-signal topics](indexes/robust.md): protocol, iterative search, CPU efficiency at low expected SNR, link planning, measurements and alternate-receiver research |
-| Experimental three-carrier Robust | [V3 streaming study](triad-v3.md): long observations, joint channel likelihoods, finite-horizon detection and conditional duration planning; [GPU optimization protocol](triad-gpu-optimization.md), [measured campaign](validation-data/triad-v3/2026-11-01-optimization/README.md), [tensor follow-up](validation-data/triad-v3/2026-11-01-tensor/README.md) and [exhaustive native FP4 campaign](validation-data/triad-v3/2026-11-01-fp4/README.md); [V2 configuration examples](triad-v2.md) and [v1 prototype and evidence](triad-modem.md). |
+| Experimental three-carrier Robust | [V3 streaming study](triad-v3.md): long observations, joint channel likelihoods, finite-horizon detection and conditional duration planning; [GPU optimization protocol](triad-gpu-optimization.md), [measured campaign](validation-data/triad-v3/2026-11-01-optimization/README.md), [tensor follow-up](validation-data/triad-v3/2026-11-01-tensor/README.md), [exhaustive native FP4 campaign](validation-data/triad-v3/2026-11-01-fp4/README.md) and [consumer GPU / RTX 4090 extension](validation-data/triad-v3/2026-11-01-consumer-gpu/README.md); [V2 configuration examples](triad-v2.md) and [v1 prototype and evidence](triad-modem.md). |
 | Scheduled Robust bursts | [Symbol_Burst](symbol-burst.md): complete symbols with guarded backlog time; [Sched_Hop](scheduled-hops.md): keyed active/null scheduling, split long symbols, dilution, frequency-search widening, workspace and qualification limits; fullscreen configured search-band waterfall |
 | Fast Modem | [Formats, profiles and investigations](indexes/fast.md): QAM/LDPC, APSK, acoustic OFDM, cable/radio paths, expected SNR, recovery and physical measurements |
 | Legacy Modem | [BPSK31, BPSK125 and Olivia reference](legacy-modem.md), [Olivia interoperability fixtures](../tests/fixtures/legacy/README.md), [BPSK fixture provenance](../tests/fixtures/legacy/PSK-fixtures.md) |

@@ -1,6 +1,6 @@
-"""Diagnostic adapter separating FP4 operand representation from arithmetic.
+"""Diagnostic adapter separating operand representation from arithmetic.
 
-Every operand still passes through the actual selected FP4 packer. Products
+Every operand still passes through the actual selected arithmetic packer. Products
 are calculated explicitly in CPU FP64. By default they are rounded to the
 correlation backend's usual FP32 output; optional FP64 output retains small
 diagnostic margins. These runs diagnose quantization only; they are not
@@ -102,7 +102,7 @@ class Fp4RepresentationDiagnostic:
                     both=qa @ qb.T,
                     native=native_result,
                     native_minus_represented=(native_result - qa @ qb.T),
-                    semantics="four CPU FP64 products preserve representation effects; native result and native-minus-both use actual FP4 MMA output")
+                    semantics="four CPU FP64 products preserve representation effects; native result and native-minus-both use the selected arithmetic backend output")
 
     def matmul(self, a, b):
         if not isinstance(a, RepresentedRows) or not isinstance(b, RepresentedRows):
@@ -133,4 +133,12 @@ class Fp4RepresentationDiagnostic:
                     output_dtype=self.output_dtype,
                     last_product=self.last_product_diagnostics,
                     native_mma_executed=False,
+                    representation_backend=(self.native_backend.describe()
+                        if hasattr(self.native_backend, "describe") else
+                        dict(format=getattr(self.native_backend, "format", "unspecified"))),
                     purpose="representation-only diagnostic; exclude from throughput")
+
+
+# Backward-compatible name for the original FP4 study. The adapter operates on
+# actual packed/dequantized operands and is equally applicable to other formats.
+RepresentationDiagnostic = Fp4RepresentationDiagnostic

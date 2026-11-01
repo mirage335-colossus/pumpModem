@@ -1,5 +1,11 @@
 # Three-carrier GPU optimization protocol
 
+For stage allocation and precision-dropdown decisions, first read the
+[precision-control experiment guide](gpu-precision-controls.md). It distinguishes
+cheap, valuable higher-precision work from costly bulk work needing explicit
+lower/tensor arithmetic experiments, and separates current controls from
+proposed GPU policies. The comparison gates below still apply.
+
 This is the frozen comparison protocol for optimizing the isolated three-carrier
 v3 study. It defines measurements and acceptance gates before selecting a faster
 implementation. It does not change the default receiver, the waveform or wire
@@ -282,3 +288,13 @@ controls intentionally change the earlier source hashes while preserving default
 streams. Its flat P512/F43/Q3 and two-ray P512/F43/Q24 groups retain distinct gain
 priors; broad correlation-only timings do not include the full likelihood. The
 report separates arithmetic gains from receiver gains and unqualified admission.
+
+The [consumer GPU extension](validation-data/triad-v3/2026-11-01-consumer-gpu/README.md)
+adds explicit FP16/BF16/TF32/FP8/INT8 correlation, capability guards for
+Turing/Ampere/Ada, fused packing and FP32 accumulation of short tensor partials.
+Actual RTX 4090 measurements include 128 independent sampled captures evaluated
+under eight paired arithmetic policies, sustained workspace replay, tile sweeps
+and CPU/CUDA traces. Native instructions and numerical failures are recorded.
+The full receiver does not gain 5× from replacing its correlation arithmetic;
+neither operational admission target nor fine sensitivity-loss budgets are
+qualified. Laptop and eGPU performance remains unmeasured.

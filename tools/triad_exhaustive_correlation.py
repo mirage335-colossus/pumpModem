@@ -176,12 +176,12 @@ class ExhaustiveCorrelationBank:
         if fused_reconstruction and self.device.type != "cuda":
             raise ValueError("fused reconstruction requires CUDA; no CPU fallback")
         self.fused_reconstruction = fused_reconstruction
-        if precision not in ("fp64", "fp32", "native-fp4", "diagnostic-fp64"):
-            raise ValueError("precision must be fp64, fp32, native-fp4 or diagnostic-fp64")
-        if precision in ("native-fp4", "diagnostic-fp64") and backend is None:
+        if precision not in ("fp64", "fp32", "native-fp4", "tensor", "diagnostic-fp64"):
+            raise ValueError("precision must be fp64, fp32, native-fp4, tensor or diagnostic-fp64")
+        if precision in ("native-fp4", "tensor", "diagnostic-fp64") and backend is None:
             raise ValueError(f"{precision} requires an explicit backend; no CPU fallback")
-        if precision not in ("native-fp4", "diagnostic-fp64") and backend is not None:
-            raise ValueError("backend is only valid for native-fp4 or diagnostic-fp64")
+        if precision not in ("native-fp4", "tensor", "diagnostic-fp64") and backend is not None:
+            raise ValueError("backend is only valid for native-fp4, tensor or diagnostic-fp64")
         if precision == "fp32":
             _require_ieee(self.device)
         self.precision, self.backend = precision, backend

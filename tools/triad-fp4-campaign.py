@@ -45,7 +45,10 @@ def generation_provenance(directory: Path, input_hashes: dict):
     if not path.exists():
         return dict(status="unavailable; current source hashes do not identify the input producer")
     record = json.loads(path.read_text())
-    expected = dict(record.get("exported_file_hashes", {}))
+    if record.get("format") == "consumer-gpu-input-v1":
+        expected = dict(record.get("input_file_hashes", {}))
+    else:
+        expected = dict(record.get("exported_file_hashes", {}))
     if record.get("manifest_sha256"):
         expected["manifest.json"] = record["manifest_sha256"]
     if record.get("returncode") != 0 or record.get("status", "complete") != "complete":
@@ -497,7 +500,15 @@ def parse_args(argv=None):
     parser.add_argument("capture", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--device", default="cpu")
-    parser.add_argument("--precision", choices=["fp64", "fp32", "native-fp4", "diagnostic-fp64"], default="fp64")
+    parser.add_argument("--precision", choices=["fp64", "fp32", "native-fp4", "tensor", "diagnostic-fp64"], default="fp64")
+    parser.add_argument("--tensor-format", choices=["fp16", "bf16", "tf32", "fp8-e4m3", "fp8-e5m2", "int8"],
+                        help="explicit experimental product format; also selects the diagnostic quantizer")
+    parser.add_argument("--tensor-engine", choices=["auto", "triton", "torch"], default="auto",
+                        help="auto selects an implementation of the requested format, never another precision")
+    parser.add_argument("--tensor-packing", choices=["torch", "triton"], default="torch",
+                        help="explicit experimental fused packer; leaves arithmetic format unchanged")
+    parser.add_argument("--tensor-accumulation", choices=["native", "partial-fp32"], default="native",
+                        help="explicit tensor accumulation organization; partial mode uses 32-term dots")
     parser.add_argument("--representation-mode", choices=["strict", "template-only", "observation-only", "both"], default="both")
     parser.add_argument("--fused-reconstruction", action="store_true",
                         help="experimental one-kernel FP64 correlation reconstruction; CUDA only")
@@ -548,8 +559,14 @@ def parse_args(argv=None):
         parser.error("output must not exist")
     if args.save_scores and args.output.with_suffix(".npz").exists():
         parser.error("score archive output must not exist")
-    if args.precision == "native-fp4" and args.device == "cpu":
-        parser.error("native-fp4 requires an explicitly selected GPU")
+    if args.precision in ("native-fp4", "tensor") and args.device == "cpu":
+        parser.error(f"{args.precision} requires an explicitly selected GPU")
+    if args.precision == "tensor" and args.tensor_format is None:
+        parser.error("tensor requires --tensor-format; no automatic precision reduction")
+    if args.tensor_format is not None and args.precision not in ("tensor", "diagnostic-fp64"):
+        parser.error("--tensor-format requires tensor or diagnostic-fp64 precision")
+    if args.representation_mode != "both" and args.precision != "diagnostic-fp64":
+        parser.error("separate operand quantization requires diagnostic-fp64")
     if args.lag_start < 0 or args.lag_stop < args.lag_start or args.lag_step < 1:
         parser.error("invalid lag range")
     if args.lag_stop % args.lag_step != args.lag_start % args.lag_step:
@@ -565,28 +582,62 @@ def parse_args(argv=None):
     return args
 
 
+def configure_cuda_arithmetic():
+    """Explicit settings owned by these standalone experiment processes only."""
+    torch.backends.cuda.matmul.allow_tf32 = False
+    torch.backends.cudnn.allow_tf32 = False
+    torch.set_float32_matmul_precision("highest")
+    for name in ("allow_fp16_reduced_precision_reduction",
+                 "allow_bf16_reduced_precision_reduction", "allow_fp16_accumulation"):
+        if hasattr(torch.backends.cuda.matmul, name):
+            setattr(torch.backends.cuda.matmul, name, False)
+
+
+def make_backend(args):
+    if args.precision not in ("native-fp4", "tensor", "diagnostic-fp64"):
+        return None
+    tensor_format = getattr(args, "tensor_format", None)
+    if tensor_format is not None:
+        from triad_tensor_native import TensorBackend
+        backend = TensorBackend(format=tensor_format,
+                                implementation=getattr(args, "tensor_engine", "auto"),
+                                pack_implementation=getattr(args, "tensor_packing", "torch"),
+                                accumulation=getattr(args, "tensor_accumulation", "native"))
+    else:
+        if args.precision == "tensor":
+            raise ValueError("tensor requires an explicit tensor_format")
+        from triad_fp4_native import NativeFp4Backend
+        backend = NativeFp4Backend(format=args.native_format)
+    if args.precision == "diagnostic-fp64":
+        from triad_fp4_representation import RepresentationDiagnostic
+        backend = RepresentationDiagnostic(backend, mode=args.representation_mode, output_dtype="fp64")
+    return backend
+
+
+def default_inference_implementation(device):
+    # Current graph inference requires the maintained SM80+ Triton route.
+    # Turing keeps the complete eager Torch model; no states are discarded.
+    if str(device).startswith("cuda") and torch.cuda.get_device_capability(device) >= (8, 0):
+        return "graph-fp64"
+    return "reference"
+
+
 def run(args, native_backend=None):
     wall_start = time.perf_counter()
     if str(args.device).startswith("cuda"):
-        # This standalone runner owns its CUDA process. Explicitly select strict
-        # IEEE FP32 for any downstream FP32 work; the library module itself
-        # continues to reject callers that leave reduced products enabled.
-        torch.backends.cuda.matmul.allow_tf32 = False
-        torch.backends.cudnn.allow_tf32 = False
-        torch.set_float32_matmul_precision("highest")
+        configure_cuda_arithmetic()
     capture = load_capture(args.capture, trim_zero_suffix=args.trim_zero_suffix)
-    if args.precision in ("native-fp4", "diagnostic-fp64") and native_backend is None:
-        from triad_fp4_native import NativeFp4Backend
-        native_backend = NativeFp4Backend(format=args.native_format)
-        if args.precision == "diagnostic-fp64":
-            from triad_fp4_representation import Fp4RepresentationDiagnostic
-            native_backend = Fp4RepresentationDiagnostic(native_backend, mode=args.representation_mode, output_dtype="fp64")
+    if native_backend is None:
+        native_backend = make_backend(args)
     if args.inference_implementation is None:
-        args.inference_implementation = "graph-fp64" if str(args.device).startswith("cuda") else "reference"
+        args.inference_implementation = default_inference_implementation(args.device)
     if args.inference_precision is None:
         args.inference_precision = "fp32" if args.inference_implementation == "graph-fp64" else "fp64"
     if args.inference_implementation == "graph-fp64" and not str(args.device).startswith("cuda"):
         raise ValueError("graph-fp64 inference requires CUDA; CPU reference fallback is prohibited")
+    if (args.inference_implementation == "graph-fp64" and
+            torch.cuda.get_device_capability(args.device) < (8, 0)):
+        raise ValueError("graph-fp64 is supported on SM80+; select reference inference for Turing")
     if args.inference_implementation == "graph-fp64" and args.inference_precision != "fp32":
         raise ValueError("graph-fp64 inference requires FP32 bulk state with FP64 reductions")
     if args.correlation_only:
@@ -663,6 +714,8 @@ def run(args, native_backend=None):
         source_names.append("triad_fp4_native.py")
     if Path(__file__).with_name("triad_fp4_representation.py").exists():
         source_names.append("triad_fp4_representation.py")
+    if Path(__file__).with_name("triad_tensor_native.py").exists():
+        source_names.append("triad_tensor_native.py")
     output = dict(format="triad-fp4-campaign-v1", source_revision=revision,
                   configuration={key: str(value) if isinstance(value, Path) else value for key, value in vars(args).items()},
                   source_hashes={name: sha256(Path(__file__).with_name(name))
@@ -694,10 +747,13 @@ def run(args, native_backend=None):
                                                      inference=inference_implementation,
                                                      inference_precision=inference_precision),
                                  admission_calibration=("not established for quantized sampled observations"
-                                     if args.precision == "native-fp4" else "not established by this campaign")),
+                                     if args.precision in ("native-fp4", "tensor", "diagnostic-fp64")
+                                     else "not established by this campaign")),
                   decisions=dict(final=final_decisions, approximate_diagnostics=approximate_diagnostics),
                   scans=runs,
                   strict_reference_verification=verification)
+    if native_backend is not None and hasattr(native_backend, "describe"):
+        output["arithmetic_backend"] = native_backend.describe()
     if args.precision == "diagnostic-fp64":
         output["representation_diagnostics"] = native_backend.diagnostics()
     args.output.parent.mkdir(parents=True, exist_ok=True)

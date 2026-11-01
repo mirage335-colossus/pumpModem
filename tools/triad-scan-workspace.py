@@ -25,16 +25,17 @@ def main():
     spec=importlib.util.spec_from_file_location('triad_scan_campaign',path)
     runner=importlib.util.module_from_spec(spec);spec.loader.exec_module(runner)
     args=runner.parse_args(rest)
-    if not str(args.device).startswith('cuda') or args.correlation_only or args.precision not in ('fp32','fp64','native-fp4'):
-        raise ValueError('whole-scan experiment requires CUDA, full inference and fp32/fp64/native-fp4 correlation')
+    if not str(args.device).startswith('cuda') or args.correlation_only or args.precision not in ('fp32','fp64','native-fp4','tensor'):
+        raise ValueError('whole-scan experiment requires CUDA, full inference and fp32/fp64/native-fp4/tensor correlation')
     if args.strict_all:
         raise ValueError('run separate strict reference CLI; this wrapper compares the same declared inference implementation')
     if args.inference_precision not in (None,'fp32') or args.inference_implementation not in (None,'graph-fp64'):
         raise ValueError('workspace CLI requires explicit graph-fp64 inference with FP32 bulk; run strict FP64 inference separately')
-    torch.backends.cuda.matmul.allow_tf32=False
-    torch.set_float32_matmul_precision('highest')
+    runner.configure_cuda_arithmetic()
     torch.set_num_threads(2)
     torch.cuda.set_device(torch.device(args.device))
+    if torch.cuda.get_device_capability(args.device)<(8,0):
+        raise ValueError('whole-scan graph requires SM80+; use the campaign reference inference path for Turing')
     args.inference_implementation='graph-fp64'
     args.inference_precision='fp32'
     input_started=time.perf_counter()
@@ -80,10 +81,7 @@ def main():
                    for name,gate in gates.items()}
         return dict(bit_scores=values.tolist(),decisions=decisions,placement='CPU Torch FP64'),time.perf_counter()-started
     def new_pair():
-        backend=None
-        if args.precision=='native-fp4':
-            from triad_fp4_native import NativeFp4Backend
-            backend=NativeFp4Backend(format=args.native_format)
+        backend=runner.make_backend(args)
         bank=ExhaustiveCorrelationBank(capture['basis'],args.sample_rate,frequencies,lags,args.block_samples,
             device=device,precision=args.precision,backend=backend,candidate_tile=args.candidate_tile,
             frequency_tile=args.frequency_tile,column_tile=args.column_tile,
@@ -139,7 +137,7 @@ def main():
         timing.append(row)
     sources={name:hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest() for name in
         ('triad-scan-workspace.py','triad_scan_workspace.py','triad_exhaustive_correlation.py',
-         'triad_correlation_fusion.py','triad_fp4_native.py','triad_phase_frequency.py',
+         'triad_correlation_fusion.py','triad_fp4_native.py','triad_tensor_native.py','triad_phase_frequency.py',
          'triad_phase_reduction.py','triad_phase_optimized.py','triad-fp4-campaign.py')}
     report=dict(schema='triad-whole-scan-workspace-v1',configuration={k:str(v) if isinstance(v,Path) else v for k,v in vars(args).items()},
         workspace_configuration={k:str(v) if isinstance(v,Path) else v for k,v in vars(own).items()},
@@ -149,7 +147,8 @@ def main():
         second_input_hashes=second_hashes,second_input_generation=second_generation,
         source_hashes=sources,signature=workspace.signature,signature_sha256=workspace.signature_sha256,
         second_observation_kind=b_kind,baseline_aba_timings=baseline_times,aba=results,timing_replays=timing,
-        thresholds=gates,admission_status='uncalibrated experimental FP4' if args.precision=='native-fp4' else
+        arithmetic_backend=bank.backend.describe() if bank.backend is not None and hasattr(bank.backend,'describe') else None,
+        thresholds=gates,admission_status='uncalibrated experimental quantized arithmetic' if args.precision in ('native-fp4','tensor') else
             'strict arithmetic comparison; operational qualification remains separate',
         preparation_seconds=workspace.preparation_seconds,memory_estimate=workspace.estimate,
         input_load_hash_seconds=input_load_hash_seconds,

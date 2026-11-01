@@ -39,51 +39,137 @@ def validate_observation(observation, shape, dtype, *, fp32_input):
         raise ValueError("fresh observation must be finite and representable at product input")
 
 
-def preparation_estimate(bank, grouped, shape, dtype):
-    """Conservative bounds before allocating schedule or capture buffers.
+def _byte_count(value, name):
+    if isinstance(value, bool) or not isinstance(value, (int,np.integer)) or value < 0:
+        raise ValueError(f'{name} must return nonnegative integer bytes')
+    return int(value)
 
-    The capture estimate charges two complete receiver workspace bounds for
-    EVERY block, without assuming graph allocator reuse. Actual pool peaks are
-    also checked. Driver/library allocations are separately visible in free
-    device memory, outside Torch allocator accounting.
+
+def backend_contract_metadata(backend):
+    """Snapshot arithmetic identity, excluding evolving execution evidence."""
+    if backend is None:
+        return None
+    if hasattr(backend,'contract_metadata'):
+        metadata=backend.contract_metadata()
+        if not isinstance(metadata,dict):
+            raise TypeError('backend contract_metadata must return a JSON object')
+    else:
+        metadata={name:getattr(backend,name,None) for name in
+                  ('format','implementation','block_m','block_n','block_k','num_warps','num_stages','group_size')}
+    # Copy nested lists/dicts too: later runtime mutations must not rewrite the
+    # frozen workspace identity. Non-JSON arithmetic policy is rejected.
+    return dict(type=type(backend).__module__+'.'+type(backend).__name__,
+                contract=json.loads(json.dumps(metadata,sort_keys=True,allow_nan=False)))
+
+
+def _packed_bytes(bank, rows, k):
+    if bank.backend is None:
+        return rows*k*(8 if bank.precision=='fp64' else 4)
+    if hasattr(bank.backend,'estimated_packed_nbytes'):
+        return _byte_count(bank.backend.estimated_packed_nbytes(rows,k),'estimated_packed_nbytes')
+    if getattr(bank.backend,'format',None) not in ('nvfp4','mxfp4'):
+        raise TypeError('packed backend must expose estimated_packed_nbytes')
+    kp=math.ceil(k/bank.backend.block_k)*bank.backend.block_k
+    return rows*(kp//2+kp//bank._half_alignment+20)
+
+
+def _scratch_bytes(bank, operation, *shape):
+    if bank.backend is None:
+        return 0
+    function=getattr(bank.backend,'estimated_'+operation+'_scratch_nbytes',None)
+    if function is not None:
+        return _byte_count(function(*shape),'estimated_'+operation+'_scratch_nbytes')
+    if getattr(bank.backend,'format',None) in ('nvfp4','mxfp4'):
+        # Existing fused native FP4 kernels allocate only their returned packs
+        # and product. Register/shared-memory storage is not CUDA heap storage.
+        return 0
+    raise TypeError('packed backend must declare '+operation+' scratch bytes')
+
+
+def _block_calendar(bank):
+    for block in range(bank.block_count):
+        first=block*bank.block_samples
+        stop=min(first+bank.block_samples,bank.samples)
+        center=(first+stop)/(2*bank.sample_rate)
+        previous=(max(0,first-bank.block_samples)+first)/(2*bank.sample_rate)
+        yield first,stop,0. if block==0 else center-previous
+
+
+def preparation_estimate(bank, grouped, shape, dtype):
+    """Retained schedule plus peak live blocks, not summed block temporaries.
+
+    All block/tile temporary references have explicit helper lifetimes, and all
+    work runs on one capture stream. The allocator may reuse dead temporaries
+    in that graph's private pool. Reserve separate full envelopes for eager
+    warmup and captured storage, plus immutable schedule/state and preparation
+    staging. These are logical planning bounds, not an allocator-fragmentation
+    guarantee: allocated/reserved peaks and setup guards remain authoritative.
     """
     batch, extent = shape
     columns = batch*len(bank.lags)
     scalar_bytes = 16 if dtype == torch.complex128 else 8
-    schedule = 0  # observation windows are never retained
-    for first in range(0, bank.samples, bank.block_samples):
-        length = min(bank.block_samples, bank.samples-first)
+    schedule=0
+    packed_a=sample_indices=grams=0
+    a_staging=0
+    b_live=0
+    product_live=0
+    calendar=list(_block_calendar(bank))
+    for first,stop,dt in calendar:
+        length=stop-first
         half = math.ceil(length/bank._half_alignment)*bank._half_alignment
         k = 2*half
-        rows = 2*len(bank.frequencies)*bank.candidates*bank.taps
-        if bank.backend is None:
-            a_bytes = rows*k*(8 if bank.precision == 'fp64' else 4)
-        else:
-            bk = bank.backend.block_k
-            kp = math.ceil(k/bk)*bk
-            a_bytes = rows*(kp//2+kp//bank._half_alignment+20)
-        schedule += a_bytes+columns*length*8+bank.candidates*bank.taps**2*16
+        for f0 in range(0,len(bank.frequencies),bank.frequency_tile):
+            ft=min(bank.frequency_tile,len(bank.frequencies)-f0)
+            for c0 in range(0,bank.candidates,bank.candidate_tile):
+                ct=min(bank.candidate_tile,bank.candidates-c0)
+                rows=2*ft*ct*bank.taps
+                size=_packed_bytes(bank,rows,k)
+                packed_a+=size
+                schedule+=size
+                a_staging=max(a_staging,64*ft*ct*bank.taps*half+16*ct*bank.taps*length+
+                              16*ft*length+8*length+8*ft+_scratch_bytes(bank,'pack',rows,k))
+                n=min(columns,bank.column_tile)
+                product_live=max(product_live,rows*n*8+_scratch_bytes(bank,'matmul',rows,n,k))
+        n=min(columns,bank.column_tile)
+        b_live=max(b_live,n*half*64+_packed_bytes(bank,n,k)+_scratch_bytes(bank,'pack',n,k))
+        index_bytes=columns*length*8
+        gram_bytes=bank.candidates*bank.taps**2*16
+        sample_indices+=index_bytes
+        grams+=gram_bytes
+        schedule+=index_bytes+gram_bytes
     geometry = columns*(40+16*len(bank.frequencies))
     length=min(bank.block_samples,bank.samples)
-    half=math.ceil(length/bank._half_alignment)*bank._half_alignment
-    ft=min(bank.frequency_tile,len(bank.frequencies));ct=min(bank.candidate_tile,bank.candidates)
-    a_staging=(64*ft*ct*bank.taps*half+16*ct*bank.taps*length+
-               16*ft*length+8*length+8*ft)
     state_bound = sum(receiver.working_bytes_bound for _,_,receiver,_ in grouped.groups)
-    transition_bound = bank.block_count*sum(receiver.frequency_states**2*16+
+    exact_dts={dt for _,_,dt in calendar if dt}
+    transition_bound = len(exact_dts)*sum(receiver.frequency_states**2*16+
         receiver.frequency_states*receiver.phase_states*24+receiver.phase_states*32
         for _,_,receiver,_ in grouped.groups)
     output = columns*len(bank.frequencies)*bank.candidates*bank.taps*16
-    per_block = 2*state_bound+6*output+columns*half*64
+    live_block=2*state_bound+6*output+b_live+product_live
+    bank_cache=sum(getattr(bank,name,0) for name in ('_cache_bytes','_gram_cache_bytes','_geometry_cache_bytes'))
+    raw_gram_cache=min(grams,getattr(bank,'gram_cache_bytes',0))
+    grid=8*(2*len(bank.lags)+len(bank.frequencies))
+    retained=schedule+geometry+transition_bound+batch*extent*scalar_bytes+2*state_bound+bank_cache+raw_gram_cache+grid
     return dict(host_bytes=bank._basis.nbytes+transition_bound+bank.block_count*2048+
                     64*bank.candidates*length*bank.taps,
                 schedule_bytes=schedule+geometry+transition_bound,
+                schedule_packed_a_bytes=packed_a,
+                schedule_sample_index_bytes=sample_indices,
+                schedule_normalized_gram_bytes=grams,
+                public_geometry_bytes=geometry,
+                preexisting_bank_cache_bytes=bank_cache,
+                raw_gram_cache_bound_bytes=raw_gram_cache,
+                public_grid_bytes=grid,
+                exact_transition_count=len(exact_dts),
                 exact_transition_residency_bound_bytes=transition_bound,
                 template_preparation_transient_bound_bytes=a_staging,
-                capture_transient_bound_bytes=bank.block_count*per_block,
-                device_total_bound_bytes=schedule+geometry+transition_bound+a_staging+bank.block_count*per_block+
-                    batch*extent*scalar_bytes+2*state_bound,
-                estimate_scope='Conservative owned schedule plus two receiver bounds and six correlation outputs per block; excludes pre-existing unrelated CUDA allocations.')
+                capture_transient_bound_bytes=live_block,
+                eager_warm_pool_bound_bytes=live_block,
+                graph_private_pool_bound_bytes=live_block,
+                retained_device_bound_bytes=retained,
+                device_total_bound_bytes=retained+a_staging+2*live_block,
+                transient_lifetime='One block helper and one column-tile helper on one capture stream; no returned temporary survives to the next block.',
+                estimate_scope='Logical retained tensors plus separate maximum-live eager/capture envelopes; excludes allocator fragmentation, driver/library allocations beyond declared backend scratch, and unrelated allocations. Actual allocated/reserved setup caps remain enforced.')
 
 
 class WholeScanWorkspace:
@@ -156,6 +242,7 @@ class WholeScanWorkspace:
             variance=variance,time_origin_seconds=origin,precision=bank.precision,
             fused_reconstruction=bank.fused_reconstruction,
             backend=self._backend_identity,device=str(self.device),
+            device_compute_capability=list(torch.cuda.get_device_capability(self.device)),
             caller_identity=identity or {},groups=[dict(taps=taps,candidate_indices=indices.cpu().tolist(),
                 bulk_dtype=str(r.dtype),receiver_type=type(r).__module__+'.'+type(r).__name__,
                 reduction_block_size=getattr(r,'reduction_block_size',None),
@@ -169,6 +256,7 @@ class WholeScanWorkspace:
         self.graph = None
         self.replays = 0
         self.prepared = False
+        self.memory_observations=[]
         started = time.perf_counter()
         torch.cuda.reset_peak_memory_stats(self.device)
         self.observation = torch.empty(self.shape,dtype=self.dtype,device=self.device)
@@ -181,12 +269,14 @@ class WholeScanWorkspace:
         self._state_pointers=tuple(tensor.data_ptr() for tensor in self._state_references)
         try:
             self._prepare_schedule()
+            self._memory_guard('schedule prepared')
             self._capture_stream.wait_stream(self._construction_stream)
             self.graph = torch.cuda.CUDAGraph()
             with torch.cuda.stream(self._capture_stream):
                 # Compile every shape and initialize BLAS handles outside capture.
-                self._body()
+                self._body(check_memory=True)
             self._capture_stream.synchronize()
+            self._memory_guard('before capture',additional_reserved=self.estimate['graph_private_pool_bound_bytes'])
             with torch.cuda.graph(self.graph,stream=self._capture_stream):
                 self._body()
             self._capture_stream.synchronize()
@@ -204,9 +294,16 @@ class WholeScanWorkspace:
         self.preparation_seconds = time.perf_counter()-started
 
     def _backend_signature(self):
-        backend = self.bank.backend
-        return None if backend is None else dict(type=type(backend).__module__+'.'+type(backend).__name__,
-            **{name:getattr(backend,name,None) for name in ('format','block_m','block_n','block_k','num_warps','num_stages')})
+        return backend_contract_metadata(self.bank.backend)
+
+    def _memory_guard(self,phase,additional_reserved=0):
+        """Allocator metadata only, invoked during uncaptured setup, never replay."""
+        allocated=torch.cuda.memory_allocated(self.device)
+        reserved=torch.cuda.memory_reserved(self.device)
+        self.memory_observations.append(dict(phase=phase,allocated_bytes=allocated,
+                                             reserved_bytes=reserved,additional_reserved_bytes=additional_reserved))
+        if max(allocated,reserved)+additional_reserved>self.memory_limit_bytes:
+            raise MemoryError('whole-scan setup memory cap at '+phase)
 
     def _prepare_schedule(self):
         bank = self.bank
@@ -214,11 +311,8 @@ class WholeScanWorkspace:
         # Own these references once, independently of the bank's bounded LRU.
         geometries=[bank._column_geometry(columns,n0,min(columns,n0+bank.column_tile),self.origin)
                     for n0 in range(0,columns,bank.column_tile)]
-        for block in range(bank.block_count):
-            first,stop = block*bank.block_samples,min((block+1)*bank.block_samples,bank.samples)
-            center=(first+stop)/(2*bank.sample_rate)
-            previous=(max(0,first-bank.block_samples)+first)/(2*bank.sample_rate)
-            dt=0. if block==0 else center-previous
+        for block,(first,stop,dt) in enumerate(_block_calendar(bank)):
+            self._memory_guard('before schedule block',additional_reserved=self.estimate['template_preparation_transient_bound_bytes'])
             for _,_,receiver,_ in self.grouped.groups:
                 if dt and dt not in self._transitions[id(receiver)]:
                     self._transitions[id(receiver)][dt]=receiver._transition(dt)
@@ -244,40 +338,54 @@ class WholeScanWorkspace:
             receiver.weights.copy_(initial)
             receiver._scores.zero_()
 
-    def _body(self):
-        bank=self.bank
+    def _body(self,check_memory=False):
         self._reset_state()
         for dt,gram,tiles in self.schedule:
-            dense=torch.empty((self.shape[0],len(bank.frequencies),bank.candidates,len(bank.lags),bank.taps),
-                              dtype=torch.complex128,device=self.device)
-            destination=dense.permute(0,3,1,2,4)
-            for trials,lag_indices,residual,sample_indices,apacks in tiles:
-                windows=self.observation[trials[:,None],sample_indices]
-                rows=observation_rows(windows,half_alignment=bank._half_alignment).to(bank._dtype).contiguous()
-                bpack=bank._pack(rows)  # ALWAYS recomputed from current captured input.
-                for f0,f1,c0,c1,apack in apacks:
-                    product=apack@bpack.T if bank.backend is None else bank.backend.matmul(apack,bpack)
-                    if bank.fused_reconstruction:
-                        value=reconstruct_correlations(product,residual[f0:f1],self.reciprocal_variance,
-                                                       candidates=c1-c0,taps=bank.taps)
-                    else:
-                        value=reconstruction_reference(product,residual[f0:f1],self.reciprocal_variance,
-                                                       candidates=c1-c0,taps=bank.taps)
-                    destination[trials,lag_indices,f0:f1,c0:c1]=value
-            r=dense.permute(0,1,3,2,4).reshape(self.grouped.batch,bank.candidates,bank.taps)
-            for indices,taps,receiver,_ in self.grouped.groups:
-                if dt:
-                    # Exact keys may exceed the ordinary per-block LRU (e.g.
-                    # nonbinary Fs). Install the already-owned transition for
-                    # this block. Never round dt or allocate on a cache miss
-                    # during capture. Python bookkeeping runs only at prepare.
-                    receiver._transition_cache.clear()
-                    receiver._transition_cache[dt]=self._transitions[id(receiver)][dt]
-                receiver._graph_r.copy_(r[:,indices,:taps].to(receiver.complex_dtype))
-                receiver._graph_g.copy_(gram[indices,:taps,:taps].to(receiver.complex_dtype))
-                receiver._graph_body(dt)  # Exact existing implementation; no nested graph preparation/replay.
+            if check_memory:
+                self._memory_guard('before warm block',additional_reserved=self.estimate['capture_transient_bound_bytes'])
+            self._run_block(dt,gram,tiles)
+            # _run_block returns None. Its dense/r arrays and all tile locals
+            # are now dead, rather than carrying into the next loop iteration.
+            if check_memory:
+                self._memory_guard('after warm block')
         for indices,_,receiver,_ in self.grouped.groups:
             self.output[:,indices]=receiver._scores
+
+    def _run_block(self,dt,gram,tiles):
+        bank=self.bank
+        dense=torch.empty((self.shape[0],len(bank.frequencies),bank.candidates,len(bank.lags),bank.taps),
+                          dtype=torch.complex128,device=self.device)
+        for tile in tiles:
+            self._write_column_tile(dense,tile)
+        r=dense.permute(0,1,3,2,4).reshape(self.grouped.batch,bank.candidates,bank.taps)
+        for indices,taps,receiver,_ in self.grouped.groups:
+            if dt:
+                receiver._transition_cache.clear()
+                receiver._transition_cache[dt]=self._transitions[id(receiver)][dt]
+            receiver._graph_r.copy_(r[:,indices,:taps].to(receiver.complex_dtype))
+            receiver._graph_g.copy_(gram[indices,:taps,:taps].to(receiver.complex_dtype))
+            receiver._graph_body(dt)  # Same finite-model body and operation order.
+
+    def _write_column_tile(self,dense,tile):
+        bank=self.bank
+        trials,lag_indices,residual,sample_indices,apacks=tile
+        windows=self.observation[trials[:,None],sample_indices]
+        rows=observation_rows(windows,half_alignment=bank._half_alignment).to(bank._dtype).contiguous()
+        bpack=bank._pack(rows)  # ALWAYS recomputed from current captured input.
+        destination=dense.permute(0,3,1,2,4)
+        for f0,f1,c0,c1,apack in apacks:
+            self._write_product(destination,trials,lag_indices,residual,apack,bpack,f0,f1,c0,c1)
+
+    def _write_product(self,destination,trials,lag_indices,residual,apack,bpack,f0,f1,c0,c1):
+        bank=self.bank
+        product=apack@bpack.T if bank.backend is None else bank.backend.matmul(apack,bpack)
+        if bank.fused_reconstruction:
+            value=reconstruct_correlations(product,residual[f0:f1],self.reciprocal_variance,
+                                           candidates=c1-c0,taps=bank.taps)
+        else:
+            value=reconstruction_reference(product,residual[f0:f1],self.reciprocal_variance,
+                                           candidates=c1-c0,taps=bank.taps)
+        destination[trials,lag_indices,f0:f1,c0:c1]=value
 
     @torch.inference_mode(False)
     @torch.no_grad()

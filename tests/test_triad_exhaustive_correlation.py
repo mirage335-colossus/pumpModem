@@ -148,7 +148,8 @@ class ExhaustiveChecks(unittest.TestCase):
         basis, observations = fixture()
         reference = list(ExhaustiveCorrelationBank(basis, 17., [-.3, .2], [0, 5], 7).iter_blocks(observations))
         backend = RecordingBackend()
-        for precision, extra in (("fp32", {}), ("native-fp4", {"backend": backend})):
+        for precision, extra in (("fp32", {}), ("native-fp4", {"backend": backend}),
+                                 ("tensor", {"backend": backend})):
             bank = ExhaustiveCorrelationBank(basis, 17., [-.3, .2], [0, 5], 7,
                                              precision=precision, column_tile=2, **extra)
             for actual, expected in zip(bank.iter_blocks(observations), reference):

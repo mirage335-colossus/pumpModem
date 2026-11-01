@@ -1,0 +1,21 @@
+.FF........
+======================================================================
+FAIL: test_optin_fused_pack_is_bit_identical_to_torch_policy (__main__.TensorCudaTests.test_optin_fused_pack_is_bit_identical_to_torch_policy) (format='fp8-e4m3')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/triad-consumer/tests/test_triad_tensor_native.py", line 154, in test_optin_fused_pack_is_bit_identical_to_torch_policy
+    self.assertTrue(torch.equal(fused.data.view(torch.uint8), reference.data.view(torch.uint8)))
+AssertionError: False is not true
+
+======================================================================
+FAIL: test_optin_fused_pack_is_bit_identical_to_torch_policy (__main__.TensorCudaTests.test_optin_fused_pack_is_bit_identical_to_torch_policy) (format='fp8-e5m2')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/triad-consumer/tests/test_triad_tensor_native.py", line 154, in test_optin_fused_pack_is_bit_identical_to_torch_policy
+    self.assertTrue(torch.equal(fused.data.view(torch.uint8), reference.data.view(torch.uint8)))
+AssertionError: False is not true
+
+----------------------------------------------------------------------
+Ran 10 tests in 2.818s
+
+FAILED (failures=2)

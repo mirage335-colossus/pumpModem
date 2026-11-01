@@ -522,6 +522,12 @@ not a full Live acquisition or broader sensitivity qualification.
 
 ## Experimental CPU search arithmetic (local manual candidate)
 
+Before extending precision controls or applying GPU/tensor results here, use the
+[stage-allocation and forcing guide](gpu-precision-controls.md). It distinguishes
+current CPU behavior from proposed GPU choices and requires measured cost and
+numerical benefit for each retained higher-precision stage. A precision floor
+does not force a costly stage to narrow its arithmetic.
+
 `--search-arithmetic default|fp32-min|fp64-force` is a receiver-only policy.
 The developer-only **Search arithmetic** control, immediately before the persistent
 planner's **Model limits and references**, offers exactly:
@@ -531,9 +537,11 @@ planner's **Model limits and references**, offers exactly:
   previously measured FP32 implementation instead of retaining INT8 solely for
   its narrower operands. No current geometry has sufficient complete-execution
   evidence to enable INT8 automatically.
-* **FP32 minimum:** prohibit lower-precision search operands; currently use the
-  same supported native FP32 paths and original-FP64 numerical/resource fallbacks.
-  This is a minimum operand width, not a demand to narrow every calculation.
+* **FP32 minimum:** prohibit lower-precision search operands; use supported
+  native FP32 paths and original-FP64 numerical/resource fallbacks. Some
+  experimental paths are Default-only, so dispatch is not universally identical
+  to Default. This is a minimum operand width, not a demand to narrow every
+  calculation.
 * **FP64 force:** original templates and FP64 search, with existing wider timing,
   phase, energy and cancellation-sensitive calculations preserved. Exact caching
   remains allowed; approximate interpolation is prohibited.
@@ -541,7 +549,7 @@ planner's **Model limits and references**, offers exactly:
 | Option | Actual execution | Expected CPU ceiling |
 | --- | --- | --- |
 | Default — automatic | Native FP32 and eligible template reuse where supported; higher-precision fallbacks elsewhere | Best demonstrated path in the measured geometries |
-| FP32 minimum | Currently the same paths as Default; prohibits lower-precision operands | Essentially the same as Default today |
+| FP32 minimum | Supported FP32 paths and wider fallbacks; prohibits lower-precision operands; some Default-only experiments are excluded | Depends on the resolved path; do not assume identical dispatch or timing to Default |
 | FP64 force | FP64 operands and original templates; bypasses approximate template interpolation | Independent diagnostic reference; usually slower in the demanding tested cases |
 
 The FP64 interpolation bypass is deliberate: it protects the independent original
