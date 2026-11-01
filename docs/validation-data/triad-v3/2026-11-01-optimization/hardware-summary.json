@@ -1,0 +1,774 @@
+{
+  "scope": "conditional screening only; no qualified operational throughput/cost",
+  "source_sha256": {
+    "gpu/results/5090-cached-hour-graph-b1-r0.json": "a7c231fc27448c0984628ae8e1a949024c68f802401f6e3cb2305171385f3b86",
+    "gpu/results/5090-cached-hour-graph-b1-r1.json": "62b46d72c37d1cc24fe931bd5b77f9e14c6f5e045d58f26c3903e4c57f6f8692",
+    "gpu/results/5090-cached-hour-graph-b1-r2.json": "91af92fd8f066ae4658caad21cf35e7375a21eff5f749c433bb142e7fdc91669",
+    "gpu/results/5090-cached-hour-graph-b8-r0.json": "8ba5b174768f57e1006a1ee3f318131fad87df33e8042243db7a4a3ea37cdc1e",
+    "gpu/results/5090-cached-hour-graph-b8-r1.json": "1050371426a3b3eabe5dadb5ebcf6f3b8e37af5972ea7c25c11fa5f5f43d85a5",
+    "gpu/results/5090-cached-hour-graph-b8-r2.json": "432027b273790fcd1ef53f567decff456f5b81ca796287d16f8335efa6fe8727",
+    "gpu/results/5090-cached-hour-graph-b32-r0.json": "77e44109d3a64254ddae507619fda123028a2b86431c01702d9a1f5917024618",
+    "gpu/results/5090-cached-hour-graph-b32-r1.json": "ea9b206fdf56b71acc14ddff5d753065b5b2bfc72f1afe844c464c01abd1ce11",
+    "gpu/results/5090-cached-hour-graph-b32-r2.json": "c89e8772c3b16ef45558b2ae3dcd68c8c31ad6dd71995daa4c58b6ab282f3766",
+    "pro6000/results/pro6000-cached-hour-graph-b1-r0.json": "e160bdd924a25210ac7620c60763294b1bfb8b787b8f2e5d43682604106bc718",
+    "pro6000/results/pro6000-cached-hour-graph-b1-r1.json": "d537cf395ec652fd7c9fdb79b5c5bb77ce89021276129b0e9c84870c6dbb3c31",
+    "pro6000/results/pro6000-cached-hour-graph-b1-r2.json": "99072060e8c3528142a20193acc77ca2924f6978fc8d8d6d1db74e7a651daaa0",
+    "pro6000/results/pro6000-cached-hour-graph-b8-r0.json": "d7a53ce4f174b1a8df52c9d47dbc441b182529d7650d23cb0add589792dde399",
+    "pro6000/results/pro6000-cached-hour-graph-b8-r1.json": "3997a178258f318913389ff00d197f4d16be0dcc31078934bd59a634425afb4c",
+    "pro6000/results/pro6000-cached-hour-graph-b8-r2.json": "22653da55376cb039be27e718781992bb9746b95be47913ae843c602159169b8",
+    "pro6000/results/pro6000-cached-hour-graph-b32-r0.json": "596f19c48215247196e3a1c913de696e56145808b3b36f9035e909d8c1798562",
+    "pro6000/results/pro6000-cached-hour-graph-b32-r1.json": "2807ad9703aa43a5cd5fce461bea2f27b42bead5e9cc63527cf17d805ecc46f0",
+    "pro6000/results/pro6000-cached-hour-graph-b32-r2.json": "234b9b7eeba34b9935477d61d8b84a2567362a3218efd2025dc36a1da7ccfc2d",
+    "mig24/results/mig24-cached-hour-graph-b1-r0.json": "a0c8b9a7681271564e1429025334cdf713308fcf065a80b120592f51f4b94975",
+    "mig24/results/mig24-cached-hour-graph-b1-r1.json": "2a9c35ce8af0a6761c0826713e6623e2bde0c1bb074eef5aa51b767a1c0e54c4",
+    "mig24/results/mig24-cached-hour-graph-b1-r2.json": "6da9d86a4f446d33598e1b060697727cb979b6ecd9a8528143b6bf2ad0f7001e",
+    "mig24/results/mig24-cached-hour-graph-b8-r0.json": "b1753283b7a3942ff559f984d58cbfcf91ae99d47e565e656a74e2ac8663489b",
+    "mig24/results/mig24-cached-hour-graph-b8-r1.json": "a0fc8540847dc3778fde81e8c05d420f8c12333bc376cbcd4ec0f69defe00322",
+    "mig24/results/mig24-cached-hour-graph-b8-r2.json": "638a921c7e89f9c2d1283f30829f52c6a55a102ad513906ff218cd059c390b44",
+    "mig24/results/mig24-cached-hour-graph-b32-r0.json": "b4503f396b44d818aeea066795bd0aa122bf95bc4bf8a08e267a40eb386eee54",
+    "mig24/results/mig24-cached-hour-graph-b32-r1.json": "b8f4edab479d0ba8210d5b1ed2dc6688b5ce98590b805912d8eec122637b47a6",
+    "mig24/results/mig24-cached-hour-graph-b32-r2.json": "c8ef65ec7c9cacee8859bb7d9c9635146685bf9f29759961b0590568c7c64a86",
+    "gpu/results/equal-work-analysis.json": "3f8d886926e1e11d7bfd773fa77f554018da2656739881311cf7d237ff5c395d",
+    "pro6000/results/scaling-analysis.json": "59071cce19bf77b07c2c27d1be88fce2631d914a6f5d3c76080b2cd00d31b2c2",
+    "pro6000/results/pro6000-screen-graph-fp64-b4.json": "b64262330a6995c3472444de0951e52806d8220a295b4314d960255f2ba350f2",
+    "pro6000/results/pro6000-screen-graph-fp64-b8.json": "4bd3faa55dae7eefa1233e876c955608b2c631c9e0c08da1c29e196ef5b6af2f",
+    "pro6000/results/pro6000-screen-graph-fp64-b12.json": "b0e7e19e5eb77867257b0ba0ef954bac1626e5bcc26436edbdf70b3de64482a5",
+    "pro6000/results/pro6000-screen-graph-fp64-b16.json": "8165a94dd0de5296d7feee4c405b56d111d1ca105b4f6adfc76c5ab2376b525e",
+    "mig24/results/mig24-screen-graph-fp64-b1.json": "2c78f8453d5b87d0157154853df7837196986a31ee56c5542065e517694b2d1b",
+    "mig24/results/mig24-screen-graph-fp64-b2.json": "6523f74ca5b570a2fbc0f087fd2b82e5c5adea4b719b576b85619d94c6c12b88",
+    "mig24/results/mig24-screen-graph-fp64-b4.json": "d3cbfa7c255c82aa4106a5aa33bb59f7941c9add7d18a61100ae7b1f04ff19ef",
+    "mig24/results/mig24-screen-graph-fp64-b8.json": "5619423aa99d081b3a5369af497d2df1314e75796a8136feb82c3faa5b3ef9a2"
+  },
+  "latency_streaming": [
+    {
+      "device": "5090",
+      "batch": 1,
+      "median_single_capture_warm_resident_seconds": 0.618185220984742,
+      "median_single_capture_warm_streamed_seconds": 0.6617801639949903,
+      "median_single_capture_cold_seconds": 1.6478370659751818,
+      "paired_streaming_pipeline_seconds": 0.9943647750187665,
+      "represented_samples_per_second_streaming_pipeline": 478088.13419705856,
+      "represented_real_time_factor": 7470.12709682904,
+      "scope": "already-exported sufficient statistics; includes simulated observation preparation and streaming host transfers; excludes physical waveform generation, raw sampled-IQ acquisition, calibration and subprocess launch"
+    },
+    {
+      "device": "5090",
+      "batch": 8,
+      "median_single_capture_warm_resident_seconds": null,
+      "median_single_capture_warm_streamed_seconds": null,
+      "median_single_capture_cold_seconds": null,
+      "paired_streaming_pipeline_seconds": 1.5227281851693988,
+      "represented_samples_per_second_streaming_pipeline": 2497590.8616132373,
+      "represented_real_time_factor": 39024.85721270683,
+      "scope": "already-exported sufficient statistics; includes simulated observation preparation and streaming host transfers; excludes physical waveform generation, raw sampled-IQ acquisition, calibration and subprocess launch"
+    },
+    {
+      "device": "5090",
+      "batch": 32,
+      "median_single_capture_warm_resident_seconds": null,
+      "median_single_capture_warm_streamed_seconds": null,
+      "median_single_capture_cold_seconds": null,
+      "paired_streaming_pipeline_seconds": 5.741502586985007,
+      "represented_samples_per_second_streaming_pipeline": 2649586.544554443,
+      "represented_real_time_factor": 41399.78975866317,
+      "scope": "already-exported sufficient statistics; includes simulated observation preparation and streaming host transfers; excludes physical waveform generation, raw sampled-IQ acquisition, calibration and subprocess launch"
+    },
+    {
+      "device": "pro6000",
+      "batch": 1,
+      "median_single_capture_warm_resident_seconds": 0.40209244086872786,
+      "median_single_capture_warm_streamed_seconds": 0.4548529130406678,
+      "median_single_capture_cold_seconds": 0.8243917260551825,
+      "paired_streaming_pipeline_seconds": 0.7446836988674477,
+      "represented_samples_per_second_streaming_pipeline": 638383.7872683436,
+      "represented_real_time_factor": 9974.746676067869,
+      "scope": "already-exported sufficient statistics; includes simulated observation preparation and streaming host transfers; excludes physical waveform generation, raw sampled-IQ acquisition, calibration and subprocess launch"
+    },
+    {
+      "device": "pro6000",
+      "batch": 8,
+      "median_single_capture_warm_resident_seconds": null,
+      "median_single_capture_warm_streamed_seconds": null,
+      "median_single_capture_cold_seconds": null,
+      "paired_streaming_pipeline_seconds": 1.4360987361287698,
+      "represented_samples_per_second_streaming_pipeline": 2648252.45251033,
+      "represented_real_time_factor": 41378.944570473905,
+      "scope": "already-exported sufficient statistics; includes simulated observation preparation and streaming host transfers; excludes physical waveform generation, raw sampled-IQ acquisition, calibration and subprocess launch"
+    },
+    {
+      "device": "pro6000",
+      "batch": 32,
+      "median_single_capture_warm_resident_seconds": null,
+      "median_single_capture_warm_streamed_seconds": null,
+      "median_single_capture_cold_seconds": null,
+      "paired_streaming_pipeline_seconds": 5.653608505032025,
+      "represented_samples_per_second_streaming_pipeline": 2690778.4623678727,
+      "represented_real_time_factor": 42043.41347449801,
+      "scope": "already-exported sufficient statistics; includes simulated observation preparation and streaming host transfers; excludes physical waveform generation, raw sampled-IQ acquisition, calibration and subprocess launch"
+    },
+    {
+      "device": "mig24",
+      "batch": 1,
+      "median_single_capture_warm_resident_seconds": 0.5985268271761015,
+      "median_single_capture_warm_streamed_seconds": 0.643422166001983,
+      "median_single_capture_cold_seconds": 1.2815543761244044,
+      "paired_streaming_pipeline_seconds": 1.080522170290351,
+      "represented_samples_per_second_streaming_pipeline": 439966.9095843311,
+      "represented_real_time_factor": 6874.482962255173,
+      "scope": "already-exported sufficient statistics; includes simulated observation preparation and streaming host transfers; excludes physical waveform generation, raw sampled-IQ acquisition, calibration and subprocess launch"
+    },
+    {
+      "device": "mig24",
+      "batch": 8,
+      "median_single_capture_warm_resident_seconds": null,
+      "median_single_capture_warm_streamed_seconds": null,
+      "median_single_capture_cold_seconds": null,
+      "paired_streaming_pipeline_seconds": 5.7399283580016345,
+      "represented_samples_per_second_streaming_pipeline": 662578.3046051944,
+      "represented_real_time_factor": 10352.786009456162,
+      "scope": "already-exported sufficient statistics; includes simulated observation preparation and streaming host transfers; excludes physical waveform generation, raw sampled-IQ acquisition, calibration and subprocess launch"
+    },
+    {
+      "device": "mig24",
+      "batch": 32,
+      "median_single_capture_warm_resident_seconds": null,
+      "median_single_capture_warm_streamed_seconds": null,
+      "median_single_capture_cold_seconds": null,
+      "paired_streaming_pipeline_seconds": 22.023480309639126,
+      "represented_samples_per_second_streaming_pipeline": 690744.9588402166,
+      "represented_real_time_factor": 10792.889981878385,
+      "scope": "already-exported sufficient statistics; includes simulated observation preparation and streaming host transfers; excludes physical waveform generation, raw sampled-IQ acquisition, calibration and subprocess launch"
+    }
+  ],
+  "equal_work": {
+    "scope": "conditional fixed physical design; each mode scores192H0/H1observations; numericalpairs matchB4referenceandcandidate; B12 uses same root/split butdifferentbatch-shape noise draw ordering so is equal-counttiming,notpairednumericalcomparison; source exportnotcharged; parentincludeslaunch/importandoutput",
+    "rows": [
+      {
+        "mode": "reference-b4",
+        "observations": 192,
+        "processing_seconds": 47.48758627532516,
+        "parent_job_seconds": 50.404238739050925,
+        "parent_range": [
+          49.79512696899474,
+          54.85564530501142
+        ],
+        "inference_seconds": 45.89378477621358,
+        "processing_observations_per_second": 4.043161909447573,
+        "complete_job_observations_per_second": 3.809203448027618,
+        "context_seconds": 0.27157198602799326,
+        "design_seconds": 0.0277896219631657,
+        "receiver_setup_seconds": 0.32205051404889673,
+        "simulation_rng_seconds": 0.8731562201865017,
+        "h2d_seconds": 0.0032377036986872554,
+        "reset_seconds": 0.0028227079892531037,
+        "d2h_seconds": 0.005770667572505772,
+        "verification_seconds": 0.0031441819155588746,
+        "cost_per_1000_observations_complete_job_usd": 0.08728859052465851
+      },
+      {
+        "mode": "graph-fp64-b4",
+        "observations": 192,
+        "processing_seconds": 11.762490465654992,
+        "parent_job_seconds": 14.901069629006088,
+        "parent_range": [
+          14.455729995970614,
+          14.982392631005496
+        ],
+        "inference_seconds": 9.290942584280856,
+        "processing_observations_per_second": 16.32307380487288,
+        "complete_job_observations_per_second": 12.884981063792702,
+        "context_seconds": 0.2654435009462759,
+        "design_seconds": 0.038871156983077526,
+        "receiver_setup_seconds": 1.1533458488993347,
+        "simulation_rng_seconds": 0.9966212541330606,
+        "h2d_seconds": 0.003583266749046743,
+        "reset_seconds": 0.004159067175351083,
+        "d2h_seconds": 0.00612728379201144,
+        "verification_seconds": 0.006360232946462929,
+        "cost_per_1000_observations_complete_job_usd": 0.0258052377689819
+      },
+      {
+        "mode": "graph-fp64-b12",
+        "observations": 192,
+        "processing_seconds": 10.276133146137,
+        "parent_job_seconds": 13.196145422989503,
+        "parent_range": [
+          12.841720563010313,
+          13.236982884001918
+        ],
+        "inference_seconds": 8.42577640817035,
+        "processing_observations_per_second": 18.68407087272673,
+        "complete_job_observations_per_second": 14.549703253914553,
+        "context_seconds": 0.2662612539716065,
+        "design_seconds": 0.032542931963689625,
+        "receiver_setup_seconds": 1.1542163339909166,
+        "simulation_rng_seconds": 0.36736421508248895,
+        "h2d_seconds": 0.0016845478676259518,
+        "reset_seconds": 0.0017514810897409916,
+        "d2h_seconds": 0.0027952229138463736,
+        "verification_seconds": 0.0031079730251803994,
+        "cost_per_1000_observations_complete_job_usd": 0.022852699755958387
+      }
+    ],
+    "processing_best_configuration_speedup": 4.621153268452606,
+    "complete_job_best_configuration_speedup": 3.819618314545079
+  },
+  "multi_gpu": {
+    "rate_whole_2gpu_pod_usd_hour": 4.987,
+    "scope": "conditional paired observations; same source/input/seeds per shard; includes subprocess launch/import/context/preparation/transfers/scoring/verification/output; excludes rental idle/download and physical source regeneration; no operationally qualified results",
+    "rows": [
+      {
+        "rep": 0,
+        "observations": 512,
+        "sequential_parent_wall": 30.228442418039776,
+        "parallel_parent_wall": 15.259845718974248,
+        "speedup": 1.98091402591662,
+        "observations_per_second": 33.55210854873677,
+        "max_log_lr_delta": 0,
+        "conditional_cost_per_1000_observations_usd": 0.04128735384143044
+      },
+      {
+        "rep": 1,
+        "observations": 512,
+        "sequential_parent_wall": 29.574355273041874,
+        "parallel_parent_wall": 15.0900260648923,
+        "speedup": 1.9598611126224685,
+        "observations_per_second": 33.92969619788753,
+        "max_log_lr_delta": 0,
+        "conditional_cost_per_1000_observations_usd": 0.040827886276919426
+      },
+      {
+        "rep": 2,
+        "observations": 512,
+        "sequential_parent_wall": 29.22452356806025,
+        "parallel_parent_wall": 14.899619358940981,
+        "speedup": 1.961427528047766,
+        "observations_per_second": 34.36329396514136,
+        "max_log_lr_delta": 0,
+        "conditional_cost_per_1000_observations_usd": 0.0403127179595479
+      }
+    ]
+  },
+  "batch_screen": [
+    {
+      "device": "pro6000",
+      "batch": 4,
+      "observations": 64,
+      "pipeline_observations_per_second": 13.069640921284304,
+      "inference_observations_per_second": 18.72370594944443,
+      "stages": {
+        "cuda_context_initialization_seconds": 0.4559425109764561,
+        "workspace_validation_and_design_preparation_seconds": 0.014525256003253162,
+        "persistent_allocation_and_gram_h2d": {
+          "wall_seconds": 0.004939230973832309,
+          "cuda_event_seconds": 0.0048717761039733885
+        },
+        "receiver_setup_warmup_capture_seconds": 0.8685979549773037,
+        "paired_observation_generation_seconds": 0.13082933309487998,
+        "observation_h2d_seconds": 0.0005457521183416247,
+        "inference_seconds": 3.4181267411913723,
+        "explicit_reset_seconds": 0.0006661968072876334,
+        "score_d2h_seconds": 0.0013080392964184284,
+        "verification_and_input_hashing_seconds": 0.0013635409995913506,
+        "artifact_serialization_and_source_hashing_seconds": 0.0007249499903991818,
+        "complete_processing_pipeline_seconds": 4.896844556438737,
+        "processing_wall_before_verification_seconds": 4.898089251946658,
+        "complete_campaign_wall_before_json_seconds": 4.90102313098032,
+        "paired_observations_per_second_complete_processing": 13.069640921284304,
+        "paired_observations_per_second_inference": 18.72370594944443,
+        "steady_variable_pipeline_paired_observations_per_second": 18.02067615649329,
+        "fixed_setup_seconds": 1.3440049529308453,
+        "variable_pipeline_seconds_per_noise_batch": 0.4439345078135375,
+        "amortization": [
+          {
+            "independent_noise_batches": 1,
+            "projected_processing_seconds_excluding_verification": 1.7879394607443828,
+            "projected_paired_observations_per_second": 4.4744244285929655
+          },
+          {
+            "independent_noise_batches": 2,
+            "projected_processing_seconds_excluding_verification": 2.2318739685579203,
+            "projected_paired_observations_per_second": 7.168863576261017
+          },
+          {
+            "independent_noise_batches": 4,
+            "projected_processing_seconds_excluding_verification": 3.1197429841849953,
+            "projected_paired_observations_per_second": 10.257255216926055
+          },
+          {
+            "independent_noise_batches": 8,
+            "projected_processing_seconds_excluding_verification": 4.895481015439145,
+            "projected_paired_observations_per_second": 13.073281215504608
+          },
+          {
+            "independent_noise_batches": 16,
+            "projected_processing_seconds_excluding_verification": 8.446957077947445,
+            "projected_paired_observations_per_second": 15.153385866511725
+          },
+          {
+            "independent_noise_batches": 32,
+            "projected_processing_seconds_excluding_verification": 15.549909202964045,
+            "projected_paired_observations_per_second": 16.46311863680867
+          }
+        ],
+        "resident_pipeline_speedup_ceiling_if_inference_zero": 3.311547684045166,
+        "scope": "complete processing includes all first-use context/design/receiver capture/reset/generation/transfer/inference/D2H and verification; external reference campaign cost reported separately, not charged again; provenance observation hashes and archive/JSON I/O are outside processing total and inside complete driver wall"
+      }
+    },
+    {
+      "device": "pro6000",
+      "batch": 8,
+      "observations": 128,
+      "pipeline_observations_per_second": 17.67031634474011,
+      "inference_observations_per_second": 20.66522475385149,
+      "stages": {
+        "cuda_context_initialization_seconds": 0.30696434096898884,
+        "workspace_validation_and_design_preparation_seconds": 0.014229391003027558,
+        "persistent_allocation_and_gram_h2d": {
+          "wall_seconds": 0.00457616604398936,
+          "cuda_event_seconds": 0.004516511917114258
+        },
+        "receiver_setup_warmup_capture_seconds": 0.5775148220127448,
+        "paired_observation_generation_seconds": 0.1415470641804859,
+        "observation_h2d_seconds": 0.0006883019814267755,
+        "inference_seconds": 6.193980540963821,
+        "explicit_reset_seconds": 0.0008995860116556287,
+        "score_d2h_seconds": 0.0017204671166837215,
+        "verification_and_input_hashing_seconds": 0.0016658769454807043,
+        "artifact_serialization_and_source_hashing_seconds": 0.0009694660548120737,
+        "complete_processing_pipeline_seconds": 7.2437865572283044,
+        "processing_wall_before_verification_seconds": 7.24589792592451,
+        "complete_campaign_wall_before_json_seconds": 7.249501815997064,
+        "paired_observations_per_second_complete_processing": 17.67031634474011,
+        "paired_observations_per_second_inference": 20.66522475385149,
+        "steady_variable_pipeline_paired_observations_per_second": 20.19298192958278,
+        "fixed_setup_seconds": 0.9032847200287506,
+        "variable_pipeline_seconds_per_noise_batch": 0.7923544950317591,
+        "amortization": [
+          {
+            "independent_noise_batches": 1,
+            "projected_processing_seconds_excluding_verification": 1.6956392150605097,
+            "projected_paired_observations_per_second": 9.435969549353123
+          },
+          {
+            "independent_noise_batches": 2,
+            "projected_processing_seconds_excluding_verification": 2.487993710092269,
+            "projected_paired_observations_per_second": 12.861768850216771
+          },
+          {
+            "independent_noise_batches": 4,
+            "projected_processing_seconds_excluding_verification": 4.072702700155787,
+            "projected_paired_observations_per_second": 15.714380526118909
+          },
+          {
+            "independent_noise_batches": 8,
+            "projected_processing_seconds_excluding_verification": 7.242120680282824,
+            "projected_paired_observations_per_second": 17.67438097910863
+          },
+          {
+            "independent_noise_batches": 16,
+            "projected_processing_seconds_excluding_verification": 13.580956640536897,
+            "projected_paired_observations_per_second": 18.84992396160684
+          },
+          {
+            "independent_noise_batches": 32,
+            "projected_processing_seconds_excluding_verification": 26.258628561045043,
+            "projected_paired_observations_per_second": 19.49835265804999
+          }
+        ],
+        "resident_pipeline_speedup_ceiling_if_inference_zero": 6.900119112485004,
+        "scope": "complete processing includes all first-use context/design/receiver capture/reset/generation/transfer/inference/D2H and verification; external reference campaign cost reported separately, not charged again; provenance observation hashes and archive/JSON I/O are outside processing total and inside complete driver wall"
+      }
+    },
+    {
+      "device": "pro6000",
+      "batch": 12,
+      "observations": 192,
+      "pipeline_observations_per_second": 19.658517244683885,
+      "inference_observations_per_second": 22.010766541082035,
+      "stages": {
+        "cuda_context_initialization_seconds": 0.309046417940408,
+        "workspace_validation_and_design_preparation_seconds": 0.014300348935648799,
+        "persistent_allocation_and_gram_h2d": {
+          "wall_seconds": 0.0046697750221937895,
+          "cuda_event_seconds": 0.004605152130126953
+        },
+        "receiver_setup_warmup_capture_seconds": 0.5713142330059782,
+        "paired_observation_generation_seconds": 0.13939242193009704,
+        "observation_h2d_seconds": 0.0008414579788222909,
+        "inference_seconds": 8.723003791878,
+        "explicit_reset_seconds": 0.0012283128453418612,
+        "score_d2h_seconds": 0.0016562879318371415,
+        "verification_and_input_hashing_seconds": 0.0013059410266578197,
+        "artifact_serialization_and_source_hashing_seconds": 0.000792698934674263,
+        "complete_processing_pipeline_seconds": 9.766758988494985,
+        "processing_wall_before_verification_seconds": 9.770109841017984,
+        "complete_campaign_wall_before_json_seconds": 9.772955400985666,
+        "paired_observations_per_second_complete_processing": 19.658517244683885,
+        "paired_observations_per_second_inference": 22.010766541082035,
+        "steady_variable_pipeline_paired_observations_per_second": 21.655464936924815,
+        "fixed_setup_seconds": 0.8993307749042287,
+        "variable_pipeline_seconds_per_noise_batch": 1.1082652840705123,
+        "amortization": [
+          {
+            "independent_noise_batches": 1,
+            "projected_processing_seconds_excluding_verification": 2.007596058974741,
+            "projected_paired_observations_per_second": 11.954596091534746
+          },
+          {
+            "independent_noise_batches": 2,
+            "projected_processing_seconds_excluding_verification": 3.1158613430452533,
+            "projected_paired_observations_per_second": 15.405050069746595
+          },
+          {
+            "independent_noise_batches": 4,
+            "projected_processing_seconds_excluding_verification": 5.332391911186278,
+            "projected_paired_observations_per_second": 18.003177860691643
+          },
+          {
+            "independent_noise_batches": 8,
+            "projected_processing_seconds_excluding_verification": 9.765453047468327,
+            "projected_paired_observations_per_second": 19.66114619226761
+          },
+          {
+            "independent_noise_batches": 16,
+            "projected_processing_seconds_excluding_verification": 18.631575320032425,
+            "projected_paired_observations_per_second": 20.610173504069095
+          },
+          {
+            "independent_noise_batches": 32,
+            "projected_processing_seconds_excluding_verification": 36.36381986516062,
+            "projected_paired_observations_per_second": 21.11989342285253
+          }
+        ],
+        "resident_pipeline_speedup_ceiling_if_inference_zero": 9.357327292981116,
+        "scope": "complete processing includes all first-use context/design/receiver capture/reset/generation/transfer/inference/D2H and verification; external reference campaign cost reported separately, not charged again; provenance observation hashes and archive/JSON I/O are outside processing total and inside complete driver wall"
+      }
+    },
+    {
+      "device": "pro6000",
+      "batch": 16,
+      "observations": 256,
+      "pipeline_observations_per_second": 18.624012507502346,
+      "inference_observations_per_second": 20.250463636828922,
+      "stages": {
+        "cuda_context_initialization_seconds": 0.31466214801184833,
+        "workspace_validation_and_design_preparation_seconds": 0.01506559900008142,
+        "persistent_allocation_and_gram_h2d": {
+          "wall_seconds": 0.004856332088820636,
+          "cuda_event_seconds": 0.004781951904296875
+        },
+        "receiver_setup_warmup_capture_seconds": 0.6228509279899299,
+        "paired_observation_generation_seconds": 0.1409842090215534,
+        "observation_h2d_seconds": 0.0007876278832554817,
+        "inference_seconds": 12.641685869079083,
+        "explicit_reset_seconds": 0.0016585291596129537,
+        "score_d2h_seconds": 0.001352009829133749,
+        "verification_and_input_hashing_seconds": 0.0017919839592650533,
+        "artifact_serialization_and_source_hashing_seconds": 0.0009435770334675908,
+        "complete_processing_pipeline_seconds": 13.745695236022584,
+        "processing_wall_before_verification_seconds": 13.749096343060955,
+        "complete_campaign_wall_before_json_seconds": 13.752787571051158,
+        "paired_observations_per_second_complete_processing": 18.624012507502346,
+        "paired_observations_per_second_inference": 20.250463636828922,
+        "steady_variable_pipeline_paired_observations_per_second": 20.02116574298408,
+        "fixed_setup_seconds": 0.9574350070906803,
+        "variable_pipeline_seconds_per_noise_batch": 1.5983085306215798,
+        "amortization": [
+          {
+            "independent_noise_batches": 1,
+            "projected_processing_seconds_excluding_verification": 2.55574353771226,
+            "projected_paired_observations_per_second": 12.520818121150127
+          },
+          {
+            "independent_noise_batches": 2,
+            "projected_processing_seconds_excluding_verification": 4.15405206833384,
+            "projected_paired_observations_per_second": 15.406643669170457
+          },
+          {
+            "independent_noise_batches": 4,
+            "projected_processing_seconds_excluding_verification": 7.350669129577,
+            "projected_paired_observations_per_second": 17.413380706385553
+          },
+          {
+            "independent_noise_batches": 8,
+            "projected_processing_seconds_excluding_verification": 13.743903252063319,
+            "projected_paired_observations_per_second": 18.626440779228254
+          },
+          {
+            "independent_noise_batches": 16,
+            "projected_processing_seconds_excluding_verification": 26.530371497035958,
+            "projected_paired_observations_per_second": 19.298636660900204
+          },
+          {
+            "independent_noise_batches": 32,
+            "projected_processing_seconds_excluding_verification": 52.103307986981235,
+            "projected_paired_observations_per_second": 19.65326271137835
+          }
+        ],
+        "resident_pipeline_speedup_ceiling_if_inference_zero": 12.450705263559632,
+        "scope": "complete processing includes all first-use context/design/receiver capture/reset/generation/transfer/inference/D2H and verification; external reference campaign cost reported separately, not charged again; provenance observation hashes and archive/JSON I/O are outside processing total and inside complete driver wall"
+      }
+    },
+    {
+      "device": "mig24",
+      "batch": 1,
+      "observations": 16,
+      "pipeline_observations_per_second": 3.6928756831354197,
+      "inference_observations_per_second": 5.3825131498082674,
+      "stages": {
+        "cuda_context_initialization_seconds": 0.18275365803856403,
+        "workspace_validation_and_design_preparation_seconds": 0.017876188037917018,
+        "persistent_allocation_and_gram_h2d": {
+          "wall_seconds": 0.004759502946399152,
+          "cuda_event_seconds": 0.004680704116821289
+        },
+        "receiver_setup_warmup_capture_seconds": 0.9954205210087821,
+        "paired_observation_generation_seconds": 0.15588060696609318,
+        "observation_h2d_seconds": 0.00046310480684041977,
+        "inference_seconds": 2.972589114913717,
+        "explicit_reset_seconds": 0.0006922080647200346,
+        "score_d2h_seconds": 0.0009349837200716138,
+        "verification_and_input_hashing_seconds": 0.0012969470117241144,
+        "artifact_serialization_and_source_hashing_seconds": 0.0008066709851846099,
+        "complete_processing_pipeline_seconds": 4.332666835514829,
+        "processing_wall_before_verification_seconds": 4.333063422003761,
+        "complete_campaign_wall_before_json_seconds": 4.335831096046604,
+        "paired_observations_per_second_complete_processing": 3.6928756831354197,
+        "paired_observations_per_second_inference": 5.3825131498082674,
+        "steady_variable_pipeline_paired_observations_per_second": 5.11090664468791,
+        "fixed_setup_seconds": 1.2008098700316623,
+        "variable_pipeline_seconds_per_noise_batch": 0.39132000230893027,
+        "amortization": [
+          {
+            "independent_noise_batches": 1,
+            "projected_processing_seconds_excluding_verification": 1.5921298723405926,
+            "projected_paired_observations_per_second": 1.2561789303405235
+          },
+          {
+            "independent_noise_batches": 2,
+            "projected_processing_seconds_excluding_verification": 1.9834498746495228,
+            "projected_paired_observations_per_second": 2.0166882214287383
+          },
+          {
+            "independent_noise_batches": 4,
+            "projected_processing_seconds_excluding_verification": 2.7660898792673834,
+            "projected_paired_observations_per_second": 2.8921692169015314
+          },
+          {
+            "independent_noise_batches": 8,
+            "projected_processing_seconds_excluding_verification": 4.3313698885031044,
+            "projected_paired_observations_per_second": 3.6939814451010795
+          },
+          {
+            "independent_noise_batches": 16,
+            "projected_processing_seconds_excluding_verification": 7.461929906974547,
+            "projected_paired_observations_per_second": 4.288434814978644
+          },
+          {
+            "independent_noise_batches": 32,
+            "projected_processing_seconds_excluding_verification": 13.723049943917431,
+            "projected_paired_observations_per_second": 4.66368629871286
+          }
+        ],
+        "resident_pipeline_speedup_ceiling_if_inference_zero": 3.1856023886634404,
+        "scope": "complete processing includes all first-use context/design/receiver capture/reset/generation/transfer/inference/D2H and verification; external reference campaign cost reported separately, not charged again; provenance observation hashes and archive/JSON I/O are outside processing total and inside complete driver wall"
+      }
+    },
+    {
+      "device": "mig24",
+      "batch": 2,
+      "observations": 32,
+      "pipeline_observations_per_second": 4.687064481123795,
+      "inference_observations_per_second": 5.690146408838192,
+      "stages": {
+        "cuda_context_initialization_seconds": 0.18835342209786177,
+        "workspace_validation_and_design_preparation_seconds": 0.024222812964580953,
+        "persistent_allocation_and_gram_h2d": {
+          "wall_seconds": 0.007077201036736369,
+          "cuda_event_seconds": 0.006982336044311524
+        },
+        "receiver_setup_warmup_capture_seconds": 0.8016849120613188,
+        "paired_observation_generation_seconds": 0.17660410096868873,
+        "observation_h2d_seconds": 0.0007863600039854646,
+        "inference_seconds": 5.623756877379492,
+        "explicit_reset_seconds": 0.0011129293125122786,
+        "score_d2h_seconds": 0.002005683141760528,
+        "verification_and_input_hashing_seconds": 0.0016966969706118107,
+        "artifact_serialization_and_source_hashing_seconds": 0.0010424850042909384,
+        "complete_processing_pipeline_seconds": 6.827300995937549,
+        "processing_wall_before_verification_seconds": 6.829053950030357,
+        "complete_campaign_wall_before_json_seconds": 6.832778070005588,
+        "paired_observations_per_second_complete_processing": 4.687064481123795,
+        "paired_observations_per_second_inference": 5.690146408838192,
+        "steady_variable_pipeline_paired_observations_per_second": 5.513186382432037,
+        "fixed_setup_seconds": 1.0213383481604978,
+        "variable_pipeline_seconds_per_noise_batch": 0.7255332438508049,
+        "amortization": [
+          {
+            "independent_noise_batches": 1,
+            "projected_processing_seconds_excluding_verification": 1.7468715920113027,
+            "projected_paired_observations_per_second": 2.2898076872350437
+          },
+          {
+            "independent_noise_batches": 2,
+            "projected_processing_seconds_excluding_verification": 2.4724048358621076,
+            "projected_paired_observations_per_second": 3.2357160461589474
+          },
+          {
+            "independent_noise_batches": 4,
+            "projected_processing_seconds_excluding_verification": 3.9234713235637173,
+            "projected_paired_observations_per_second": 4.07802139495876
+          },
+          {
+            "independent_noise_batches": 8,
+            "projected_processing_seconds_excluding_verification": 6.825604298966937,
+            "projected_paired_observations_per_second": 4.688229583546652
+          },
+          {
+            "independent_noise_batches": 16,
+            "projected_processing_seconds_excluding_verification": 12.629870249773376,
+            "projected_paired_observations_per_second": 5.067352136982436
+          },
+          {
+            "independent_noise_batches": 32,
+            "projected_processing_seconds_excluding_verification": 24.238402151386254,
+            "projected_paired_observations_per_second": 5.280876156792347
+          }
+        ],
+        "resident_pipeline_speedup_ceiling_if_inference_zero": 5.672663669460833,
+        "scope": "complete processing includes all first-use context/design/receiver capture/reset/generation/transfer/inference/D2H and verification; external reference campaign cost reported separately, not charged again; provenance observation hashes and archive/JSON I/O are outside processing total and inside complete driver wall"
+      }
+    },
+    {
+      "device": "mig24",
+      "batch": 4,
+      "observations": 64,
+      "pipeline_observations_per_second": 4.822137228091994,
+      "inference_observations_per_second": 5.235002720499633,
+      "stages": {
+        "cuda_context_initialization_seconds": 0.18213079299312085,
+        "workspace_validation_and_design_preparation_seconds": 0.0177126529160887,
+        "persistent_allocation_and_gram_h2d": {
+          "wall_seconds": 0.004617268918082118,
+          "cuda_event_seconds": 0.004546048164367676
+        },
+        "receiver_setup_warmup_capture_seconds": 0.6666102689923719,
+        "paired_observation_generation_seconds": 0.17038419470191002,
+        "observation_h2d_seconds": 0.0006609949050471187,
+        "inference_seconds": 12.225399568444118,
+        "explicit_reset_seconds": 0.0016603441908955574,
+        "score_d2h_seconds": 0.0012138208840042353,
+        "verification_and_input_hashing_seconds": 0.0017334219301119447,
+        "artifact_serialization_and_source_hashing_seconds": 0.0010637069353833795,
+        "complete_processing_pipeline_seconds": 13.27212332887575,
+        "processing_wall_before_verification_seconds": 13.273207810008898,
+        "complete_campaign_wall_before_json_seconds": 13.276936896960251,
+        "paired_observations_per_second_complete_processing": 4.822137228091994,
+        "paired_observations_per_second_inference": 5.235002720499633,
+        "steady_variable_pipeline_paired_observations_per_second": 5.161573824884331,
+        "fixed_setup_seconds": 0.8710709838196635,
+        "variable_pipeline_seconds_per_noise_batch": 1.5499148653907469,
+        "amortization": [
+          {
+            "independent_noise_batches": 1,
+            "projected_processing_seconds_excluding_verification": 2.4209858492104104,
+            "projected_paired_observations_per_second": 3.304438975803659
+          },
+          {
+            "independent_noise_batches": 2,
+            "projected_processing_seconds_excluding_verification": 3.9709007146011572,
+            "projected_paired_observations_per_second": 4.029312528809238
+          },
+          {
+            "independent_noise_batches": 4,
+            "projected_processing_seconds_excluding_verification": 7.070730445382651,
+            "projected_paired_observations_per_second": 4.525699324444864
+          },
+          {
+            "independent_noise_batches": 8,
+            "projected_processing_seconds_excluding_verification": 13.270389906945638,
+            "projected_paired_observations_per_second": 4.822767111500077
+          },
+          {
+            "independent_noise_batches": 16,
+            "projected_processing_seconds_excluding_verification": 25.669708830071613,
+            "projected_paired_observations_per_second": 4.986421967126104
+          },
+          {
+            "independent_noise_batches": 32,
+            "projected_processing_seconds_excluding_verification": 50.46834667632356,
+            "projected_paired_observations_per_second": 5.072486357475594
+          }
+        ],
+        "resident_pipeline_speedup_ceiling_if_inference_zero": 12.67968095364797,
+        "scope": "complete processing includes all first-use context/design/receiver capture/reset/generation/transfer/inference/D2H and verification; external reference campaign cost reported separately, not charged again; provenance observation hashes and archive/JSON I/O are outside processing total and inside complete driver wall"
+      }
+    },
+    {
+      "device": "mig24",
+      "batch": 8,
+      "observations": 128,
+      "pipeline_observations_per_second": 3.5464994936620244,
+      "inference_observations_per_second": 3.6808871463751203,
+      "stages": {
+        "cuda_context_initialization_seconds": 0.18847571592777967,
+        "workspace_validation_and_design_preparation_seconds": 0.018488837056793272,
+        "persistent_allocation_and_gram_h2d": {
+          "wall_seconds": 0.005905773025006056,
+          "cuda_event_seconds": 0.005809728145599365
+        },
+        "receiver_setup_warmup_capture_seconds": 0.9127321870764717,
+        "paired_observation_generation_seconds": 0.18218293006066233,
+        "observation_h2d_seconds": 0.0010105770779773593,
+        "inference_seconds": 34.7742255901685,
+        "explicit_reset_seconds": 0.0035002342192456126,
+        "score_d2h_seconds": 0.002574714133515954,
+        "verification_and_input_hashing_seconds": 0.0028302069986239076,
+        "artifact_serialization_and_source_hashing_seconds": 0.0014912879560142756,
+        "complete_processing_pipeline_seconds": 36.091926765744574,
+        "processing_wall_before_verification_seconds": 36.094650782993995,
+        "complete_campaign_wall_before_json_seconds": 36.10036303498782,
+        "paired_observations_per_second_complete_processing": 3.5464994936620244,
+        "paired_observations_per_second_inference": 3.6808871463751203,
+        "steady_variable_pipeline_paired_observations_per_second": 3.660961339643025,
+        "fixed_setup_seconds": 1.1256025130860507,
+        "variable_pipeline_seconds_per_noise_batch": 4.3704367557074875,
+        "amortization": [
+          {
+            "independent_noise_batches": 1,
+            "projected_processing_seconds_excluding_verification": 5.496039268793538,
+            "projected_paired_observations_per_second": 2.9111873510161868
+          },
+          {
+            "independent_noise_batches": 2,
+            "projected_processing_seconds_excluding_verification": 9.866476024501026,
+            "projected_paired_observations_per_second": 3.2433059098847123
+          },
+          {
+            "independent_noise_batches": 4,
+            "projected_processing_seconds_excluding_verification": 18.607349535916,
+            "projected_paired_observations_per_second": 3.439501143162108
+          },
+          {
+            "independent_noise_batches": 8,
+            "projected_processing_seconds_excluding_verification": 36.08909655874595,
+            "projected_paired_observations_per_second": 3.5467776199839522
+          },
+          {
+            "independent_noise_batches": 16,
+            "projected_processing_seconds_excluding_verification": 71.05259060440585,
+            "projected_paired_observations_per_second": 3.602965040716276
+          },
+          {
+            "independent_noise_batches": 32,
+            "projected_processing_seconds_excluding_verification": 140.97957869572565,
+            "projected_paired_observations_per_second": 3.631731664520312
+          }
+        ],
+        "resident_pipeline_speedup_ceiling_if_inference_zero": 27.39006948974286,
+        "scope": "complete processing includes all first-use context/design/receiver capture/reset/generation/transfer/inference/D2H and verification; external reference campaign cost reported separately, not charged again; provenance observation hashes and archive/JSON I/O are outside processing total and inside complete driver wall"
+      }
+    }
+  ]
+}

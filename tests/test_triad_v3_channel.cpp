@@ -39,7 +39,7 @@ Format fixture_format() {
 }
 
 std::vector<Complex> capture(std::size_t chunk_size, StreamChannelConfig cfg,
-                             const Format& f) {
+                             const Format& f, StreamChannelReport* report = nullptr) {
     const auto key = fixture_key();
     PatternSource source(f, key, 1);
     cfg.effects.sample_rate = f.sample_rate;
@@ -64,6 +64,7 @@ std::vector<Complex> capture(std::size_t chunk_size, StreamChannelConfig cfg,
           "stream channel sample cursor did not reach its endpoint");
     check(channel.report().samples == channel.total_samples(),
           "stream channel report lost samples");
+    if (report) *report = channel.report();
     return output;
 }
 
@@ -215,6 +216,120 @@ void bounded_configuration_checks() {
     cfg.effects.tx.audio_ppm = 10'000'000;
     rejects([&] { StreamingChannel channel(source, cfg); },
             "source clock expansion silently aliased the received bandwidth");
+}
+
+void sampled_frontend_checks() {
+    auto f = fixture_format();
+    f.sample_rate = 1024;
+    StreamChannelConfig cfg;
+    cfg.effects.noise_enabled = false;
+    cfg.complex_noise_variance = 0;
+    const auto baseline = capture(127, cfg, f);
+
+    // Independent signed quantizer reference applied to the shaped source,
+    // before any propagation, rather than rounding a received noisy capture.
+    cfg.frontend.dac.nominal_bits = 4;
+    cfg.frontend.dac.full_scale = .25;
+    cfg.frontend.dac.gain = 2;
+    StreamChannelReport quantized_report;
+    const auto quantized = capture(73, cfg, f, &quantized_report);
+    const double step = .5/16;
+    auto q = [&](double x) { return std::clamp(std::round(std::clamp(x*2, -.25, .25-step)/step)*step, -.25, .25-step); };
+    for (std::size_t i=0;i<baseline.size();++i)
+        check(quantized[i] == Complex(q(baseline[i].real()), q(baseline[i].imag())),
+              "DAC was not applied to shaped emitted samples before channel processing");
+    check(quantized_report.dac_clipped_components > 0 && !quantized_report.gaussian_projection_supported,
+          "DAC clipping or nonlinear projection metadata was lost");
+
+    // Reuse the identical quantized/dithered realization for both rays.
+    cfg.frontend.dac.nominal_bits = 16;
+    cfg.frontend.dac.effective_bits = 12;
+    cfg.frontend.dac.dither_rms_lsb = .5;
+    const auto direct = capture(79, cfg, f);
+    cfg.effects.spread_delay_ms = 31.25;
+    cfg.effects.spread_doppler_hz = .3;
+    const auto echoed = capture(509, cfg, f);
+    modem::detail::SpreadRay ray(f.sample_rate, .3, 0x13579bdf ^ 0x325449415443484eULL);
+    for (std::size_t n=0;n<echoed.size();++n) {
+        const auto now = n<direct.size()?direct[n]:Complex{};
+        const auto old = n>=32 && n-32<direct.size()?direct[n-32]:Complex{};
+        check(std::abs(echoed[n]-ray.process(now,old)) < 1e-10,
+              "DAC realization was regenerated at the delayed-ray arrival");
+    }
+
+    // Continuous analog filtering includes its complete relative decay tail.
+    cfg = StreamChannelConfig{};
+    cfg.effects.noise_enabled = false;
+    cfg.complex_noise_variance = 0;
+    cfg.frontend.lowpass_hz = 10;
+    const auto filtered = capture(103, cfg, f);
+    check(filtered.size()>baseline.size(), "analog filter did not append its decay tail");
+    const double alpha = std::exp(-2*std::acos(-1.)*10/f.sample_rate);
+    Complex state{};
+    for (std::size_t n=0;n<filtered.size();++n) {
+        state = alpha*state+(1-alpha)*(n<baseline.size()?baseline[n]:Complex{});
+        check(std::abs(filtered[n]-state)<1e-14, "analog filter reset or dropped channel-tail samples");
+    }
+
+    cfg.effects.noise_enabled = true;
+    cfg.complex_noise_variance = .1;
+    cfg.frontend.dac.nominal_bits = 16;
+    cfg.frontend.dac.effective_bits = 14;
+    cfg.frontend.dac.dither_rms_lsb = .4;
+    cfg.frontend.adc.nominal_bits = 16;
+    cfg.frontend.adc.effective_bits = 12;
+    cfg.frontend.adc.full_scale = .1;
+    cfg.frontend.adc.gain = 4;
+    cfg.frontend.adc.dither_rms_lsb = .5;
+    cfg.frontend.tone_amplitude = 2;
+    cfg.frontend.tone_frequency_hz = 210;
+    cfg.frontend.tone_every_n_dwells = 3;
+    cfg.frontend.impulse_amplitude = 3;
+    cfg.frontend.impulse_rate_hz = 40;
+    cfg.frontend.gain_step_seconds = .8;
+    cfg.frontend.gain_step_factor = .7;
+    cfg.frontend.overload_recovery_seconds = .03;
+    StreamChannelReport left_report, right_report;
+    const auto left = capture(71, cfg, f, &left_report);
+    const auto right = capture(4096, cfg, f, &right_report);
+    check(left==right, "converter/interference/filter/overload state changed with chunk size");
+    check(left_report.adc_clipped_components>0 && left_report.overload_samples>0 &&
+          left_report.impulse_events>0 && left_report.impulse_events==right_report.impulse_events,
+          "sampled frontend counters omitted actual clipping, impulses or overload");
+    check(std::all_of(left.begin(),left.end(),[](Complex z){return
+        z.real()>=-.1 && z.real()<=.1 && z.imag()>=-.1 && z.imag()<=.1;}),
+        "ADC output escaped its declared signed full-scale range");
+
+    // Receiver conversion/interference operates on null captures too. An
+    // absent transmitter must not inject the DAC's selected converter noise.
+    cfg = StreamChannelConfig{};
+    cfg.effects.signal_enabled = false;
+    cfg.effects.noise_enabled = false;
+    cfg.frontend.dac.nominal_bits = 16;
+    cfg.frontend.dac.effective_bits = 4;
+    const auto absent = capture(127,cfg,f);
+    check(std::all_of(absent.begin(),absent.end(),[](Complex z){return z==Complex{};}),
+          "absent transmitter generated DAC noise");
+    cfg.frontend.adc.nominal_bits = 16;
+    cfg.frontend.adc.effective_bits = 8;
+    const auto receiver_noise = capture(127,cfg,f);
+    check(std::any_of(receiver_noise.begin(),receiver_noise.end(),[](Complex z){return z!=Complex{};}),
+          "null capture bypassed receiver converter noise");
+
+    cfg = StreamChannelConfig{};
+    cfg.frontend.adc.nominal_bits = 1;
+    rejects([&]{(void)capture(127,cfg,f);}, "invalid ADC bits accepted");
+    cfg.frontend.adc.nominal_bits = 16; cfg.frontend.adc.effective_bits = 17;
+    rejects([&]{(void)capture(127,cfg,f);}, "effective resolution exceeded nominal bits");
+    cfg.frontend.adc.effective_bits = 0; cfg.frontend.lowpass_hz = f.sample_rate;
+    rejects([&]{(void)capture(127,cfg,f);}, "aliased analog-filter parameter accepted");
+    cfg.effects.rx.audio_ppm = -500'000; cfg.frontend.lowpass_hz = 300;
+    rejects([&]{(void)capture(127,cfg,f);}, "analog filter used nominal rather than actual RX Nyquist");
+    cfg.frontend.lowpass_hz = 0; cfg.frontend.tone_amplitude = 1; cfg.frontend.tone_frequency_hz = 300;
+    rejects([&]{(void)capture(127,cfg,f);}, "interferer used nominal rather than actual RX Nyquist");
+    cfg.effects.rx.audio_ppm = 0; cfg.frontend.tone_amplitude = 0; cfg.frontend.tone_frequency_hz = 0;
+    cfg.frontend.lowpass_hz = 1e-20;
+    rejects([&]{(void)capture(127,cfg,f);}, "unbounded analog-filter tail accepted");
 }
 
 void physical_hop_origin_checks() {
@@ -425,6 +540,7 @@ int main() {
         chunk_and_impairment_checks();
         historical_phase_and_energy_checks();
         bounded_configuration_checks();
+        sampled_frontend_checks();
         physical_hop_origin_checks();
         erasure_and_noise_checks();
         long_extent_prefix_and_tail_checks();

@@ -45,6 +45,7 @@ def _parse():
     p.add_argument('--coherences', type=float, nargs='+', default=[16., 64., 256., 1024.])
     p.add_argument('--taps', type=int, choices=[1, 2], default=2)
     p.add_argument('--phase-states', type=int, default=512)
+    p.add_argument('--phase-implementation', choices=['reference', 'optimized', 'graph'], default='reference')
     p.add_argument('--relative-phase-states', type=int, default=8)
     p.add_argument('--frequency-bound', type=float, default=.02)
     p.add_argument('--frequency-step', type=float, default=None)

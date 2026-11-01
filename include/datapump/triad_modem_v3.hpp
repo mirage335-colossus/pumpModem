@@ -78,12 +78,48 @@ struct OscillatorSpectrum {
     unsigned flicker_bands = 12;
     double white_pm_rms_radians = 0;
 };
+// Optional sampled converter model. A zero nominal_bits bypasses quantization,
+// converter noise and dither exactly. The signed component range is
+// [-full_scale, full_scale-step], step=2*full_scale/2^nominal_bits.
+// effective_bits adds independent Gaussian input-referred converter error so
+// its noise variance plus ideal quantization variance is step_ENOB^2/12.
+// This is a synthetic effective-resolution model, not measured hardware ENOB.
+struct ConverterConfig {
+    unsigned nominal_bits = 0;
+    double effective_bits = 0; // 0 selects nominal_bits.
+    double full_scale = 1;
+    double gain = 1;
+    double dither_rms_lsb = 0; // TPDF, per real component, before quantization.
+};
+struct SampledFrontendConfig {
+    ConverterConfig dac{}, adc{};
+    // Receiver-coordinate tone, not a simulation of a fixed external RF
+    // source through a retuning front end. Frequency must be below Nyquist.
+    double tone_amplitude = 0, tone_frequency_hz = 0;
+    std::size_t tone_every_n_dwells = 1;
+    // One-sample impulse occupancy with probability 1-exp(-rate/Fs); at most
+    // one impulse per sample. This is not a multiple-event Poisson renderer.
+    double impulse_amplitude = 0, impulse_rate_hz = 0;
+    // One-pole analog approximation after channel noise and interference.
+    // Its state and relative 1e-6 tail persist through chunks and hop guards.
+    double lowpass_hz = 0;
+    double gain_step_seconds = -1, gain_step_factor = 1;
+    // Instant gain attack following an ADC overload, exponential release.
+    // Zero disables recovery; clipping still occurs at the selected ADC.
+    double overload_recovery_seconds = 0;
+    bool active() const {
+        return dac.nominal_bits || adc.nominal_bits || dac.gain != 1 || adc.gain != 1 ||
+            tone_amplitude != 0 || impulse_amplitude != 0 || lowpass_hz != 0 ||
+            gain_step_seconds >= 0 || overload_recovery_seconds != 0;
+    }
+};
 struct StreamChannelConfig {
     SimulationConfig effects{};
     // With physical effects.fhss, RF hops and dropout windows use the public
     // source calendar origin. Envelope-only paths retain capture-relative
     // dropout windows. RF dwell clocks remain independent of audio-clock ppm.
     OscillatorSpectrum tx_spectrum{}, rx_spectrum{};
+    SampledFrontendConfig frontend{};
     double signal_gain = 1;
     // Absolute variance E|n|² of final complex sample noise. effects.snr_db
     // is unused: a stream is never normalized using its future whole power.
@@ -95,6 +131,10 @@ struct StreamChannelReport {
     std::uint64_t erased_samples = 0, out_of_passband_samples = 0;
     double signal_energy = 0, observed_energy = 0;
     double complex_noise_variance = 0;
+    std::uint64_t dac_clipped_components = 0, adc_clipped_components = 0;
+    std::uint64_t impulse_events = 0, overload_samples = 0;
+    double maximum_adc_input_component = 0;
+    bool gaussian_projection_supported = true;
     std::size_t working_bytes = 0;
 };
 class StreamingChannel {

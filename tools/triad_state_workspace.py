@@ -62,6 +62,10 @@ class BlockWorkspace:
         except (OSError, json.JSONDecodeError) as exc:
             raise WorkspaceError(f"cannot read manifest: {exc}") from exc
         m = self.manifest
+        supported = m.get("gaussian_projection_supported", True)
+        if not isinstance(supported, bool):
+            raise WorkspaceError("gaussian_projection_supported must be boolean")
+        self.gaussian_projection_supported = supported
         if m.get("format") != self.FORMAT:
             raise WorkspaceError("unsupported block statistics format")
         if m.get("byte_order") != "little" or m.get("complex_type") != "complex128" or m.get("real_type") != "float64" or m.get("integer_type") != "uint64":
@@ -280,6 +284,8 @@ class BlockWorkspace:
         each disjoint block. The physical complex noise variance is Fs/10^(C/N0/10).
         The yielded likelihood inputs satisfy ``r=AᴴWy/σ²`` and ``G=AᴴWA/σ²``.
         """
+        if not self.gaussian_projection_supported:
+            raise WorkspaceError("Gaussian projection simulation is unsupported for this sampled frontend; use independently sampled observation exports")
         if isinstance(seed, bool) or not isinstance(seed, int) or seed < 0:
             raise ValueError("seed must be a nonnegative integer")
         if isinstance(batch, bool) or not isinstance(batch, int) or batch < 1:

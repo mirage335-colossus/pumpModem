@@ -94,6 +94,8 @@ def parse():
     p.add_argument('--coherences', type=float, nargs='+', default=[16., 64., 256., 1024.])
     p.add_argument('--taps', type=int, choices=[1, 2], default=2)
     p.add_argument('--phase-states', type=int, default=128)
+    p.add_argument('--phase-implementation', choices=['reference', 'optimized', 'graph'], default='reference',
+                   help='Explicit numerical implementation; finite prior and search bank are unchanged.')
     p.add_argument('--relative-phase-states', type=int, default=8)
     p.add_argument('--frequency-bound', type=float, default=.02)
     p.add_argument('--frequency-step', type=float, default=None,
@@ -154,7 +156,12 @@ def evaluate(workspace, blocks, args, selected, labels, batch):
                                     frequency_std_hz=args.frequency_std,
                                     frequency_correlation_seconds=args.frequency_coherence,
                                     phase_diffusion_rad_per_sqrt_second=args.phase_diffusion)
-        phase = PhaseFrequencyLikelihood(batch, len(selected), args.taps, model,
+        phase_type = PhaseFrequencyLikelihood
+        implementation = getattr(args, 'phase_implementation', 'reference')
+        if implementation != 'reference':
+            from triad_phase_optimized import OptimizedPhaseFrequencyLikelihood, GraphPhaseFrequencyLikelihood
+            phase_type = GraphPhaseFrequencyLikelihood if implementation == 'graph' else OptimizedPhaseFrequencyLikelihood
+        phase = phase_type(batch, len(selected), args.taps, model,
                                          device=device, dtype=torch.float64 if args.precision == 'fp64' else torch.float32,
                                          memory_limit_bytes=getattr(args, 'memory_limit_bytes', 4*1024**3),
                                          validate_inputs=False)

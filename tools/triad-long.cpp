@@ -73,6 +73,7 @@ struct Options {
     std::vector<double> clocks_ppm{0}, frequency_drifts{0};
     std::vector<std::int64_t> epoch_offsets{0};
     std::vector<std::string> command_argv;
+    SampledFrontendConfig frontend{};
 };
 
 double number(std::string_view s, const char* name) {
@@ -152,6 +153,15 @@ Options parse(int argc, char** argv) {
                               Planner bounds are conditional on caller certificates, not empirical recommendations.
   --output DIRECTORY          Fresh export directory; signal uses the selected sampled channel without AWGN.
   --stats-noisy               export-stats also writes matched actual noisy projections.
+  --dac-bits N --adc-bits N    0=exact bypass, or 2..24 signed component quantization bits.
+  --dac-enob B --adc-enob B    Synthetic Gaussian converter-error effective resolution (0=nominal).
+  --dac-full-scale V --adc-full-scale V --dac-gain G --adc-gain G
+  --dac-dither-lsb RMS --adc-dither-lsb RMS   Added TPDF dither before quantization.
+  --rx-lowpass-hz HZ          Continuous one-pole analog approximation after noise/interference.
+  --interference-tone AMP HZ  Receiver-coordinate tone; no fixed-RF retuning claim.
+  --tone-every-dwells N --interference-impulse AMP RATE-HZ
+  --rx-gain-step TIME FACTOR --overload-recovery-seconds S
+                              Experimental actual-sample path; Gaussian projection/analytic null disabled.
   --export-max-samples N       At most128000000 raw samples; default128000000.
   --export-max-mib N           Explicit disk budget, default8192MiB; chunk RAM follows --memory-mib.
 Examples:
@@ -219,6 +229,22 @@ Examples:
         else if (key == "--no-encrypt") o.encrypt = false;
         else if (key == "--fhss") o.fhss = true;
         else if (key == "--stats-noisy") o.stats_noisy = true;
+        else if (key == "--dac-bits") o.frontend.dac.nominal_bits=bounded_integer<unsigned>(need(),"DAC bits");
+        else if (key == "--adc-bits") o.frontend.adc.nominal_bits=bounded_integer<unsigned>(need(),"ADC bits");
+        else if (key == "--dac-enob") o.frontend.dac.effective_bits=number(need(),"DAC effective bits");
+        else if (key == "--adc-enob") o.frontend.adc.effective_bits=number(need(),"ADC effective bits");
+        else if (key == "--dac-full-scale") o.frontend.dac.full_scale=number(need(),"DAC full scale");
+        else if (key == "--adc-full-scale") o.frontend.adc.full_scale=number(need(),"ADC full scale");
+        else if (key == "--dac-gain") o.frontend.dac.gain=number(need(),"DAC gain");
+        else if (key == "--adc-gain") o.frontend.adc.gain=number(need(),"ADC gain");
+        else if (key == "--dac-dither-lsb") o.frontend.dac.dither_rms_lsb=number(need(),"DAC dither");
+        else if (key == "--adc-dither-lsb") o.frontend.adc.dither_rms_lsb=number(need(),"ADC dither");
+        else if (key == "--rx-lowpass-hz") o.frontend.lowpass_hz=number(need(),"frontend lowpass");
+        else if (key == "--interference-tone") {o.frontend.tone_amplitude=number(need(),"tone amplitude");o.frontend.tone_frequency_hz=number(need(),"tone frequency");}
+        else if (key == "--tone-every-dwells") o.frontend.tone_every_n_dwells=bounded_integer<std::size_t>(need(),"tone dwell period");
+        else if (key == "--interference-impulse") {o.frontend.impulse_amplitude=number(need(),"impulse amplitude");o.frontend.impulse_rate_hz=number(need(),"impulse event rate");}
+        else if (key == "--rx-gain-step") {o.frontend.gain_step_seconds=number(need(),"gain-step time");o.frontend.gain_step_factor=number(need(),"gain-step factor");}
+        else if (key == "--overload-recovery-seconds") o.frontend.overload_recovery_seconds=number(need(),"overload recovery");
         else if (key == "--assume-model-bounds") o.assume_model_bounds = true;
         else if (key == "--now") o.now = true;
         else throw std::invalid_argument(std::string("unknown option: ") + std::string(key));
@@ -255,6 +281,24 @@ Examples:
     if(o.seed>UINT64_MAX-(o.trials-1))throw std::invalid_argument("trial seed overflow");
     if(o.key_seed && *o.key_seed>UINT64_MAX-(o.trials-1))throw std::invalid_argument("key trial seed overflow");
     if(o.channel_seed && *o.channel_seed>UINT64_MAX-(o.trials-1))throw std::invalid_argument("channel trial seed overflow");
+    for(const auto* c:{&o.frontend.dac,&o.frontend.adc})
+        if(!(c->nominal_bits==0||(c->nominal_bits>=2&&c->nominal_bits<=24))||
+           !(c->full_scale>0)||c->gain<0||c->dither_rms_lsb<0||c->effective_bits<0||
+           (c->effective_bits!=0&&(!c->nominal_bits||c->effective_bits<1||c->effective_bits>c->nominal_bits))||
+           (!c->nominal_bits&&c->dither_rms_lsb!=0))
+            throw std::invalid_argument("invalid converter range, nominal/effective bits, gain or dither");
+    if(o.frontend.lowpass_hz<0||o.frontend.tone_amplitude<0||o.frontend.impulse_amplitude<0||
+       o.frontend.impulse_rate_hz<0||o.frontend.tone_every_n_dwells==0||
+       !(o.frontend.gain_step_seconds==-1||o.frontend.gain_step_seconds>=0)||
+       o.frontend.gain_step_factor<0||o.frontend.overload_recovery_seconds<0||
+       (o.frontend.overload_recovery_seconds>0&&!o.frontend.adc.nominal_bits))
+        throw std::invalid_argument("invalid sampled frontend configuration");
+    if(o.mode=="plan" && o.frontend.active())
+        throw std::invalid_argument("planner cannot represent the sampled frontend; use run or actual-sample export-stats");
+    if(o.mode=="export-stats" && o.frontend.active() && !o.stats_noisy)
+        throw std::invalid_argument("sampled frontend export-stats requires --stats-noisy; Gaussian projection simulation is unsupported");
+    if(o.mode=="export" && o.frontend.active())
+        throw std::invalid_argument("raw export cannot represent noise through the sampled frontend; use export-stats --stats-noisy");
     return o;
 }
 
@@ -328,6 +372,36 @@ void json_provenance(std::ostream& out,const Options& o,const Format& f,const Ge
        <<",\"flicker_bands\":"<<o.flicker_bands
        <<",\"sample_clock_reference\":\"RX0ppm; TX carries declared relative error\",\"physical_rf_retuning\":false}"
        <<",\"source_hash_note\":\"source and binary hashes must be bound externally to this uncommitted study build\"";
+    const auto& front=o.frontend;
+    auto converter=[&](const ConverterConfig& c){
+        out<<"{\"nominal_bits\":"<<c.nominal_bits<<",\"effective_bits\":"<<(c.effective_bits>0?c.effective_bits:c.nominal_bits)
+           <<",\"full_scale_component\":"<<c.full_scale<<",\"gain\":"<<c.gain
+           <<",\"quantization_step\":"<<(c.nominal_bits?std::ldexp(c.full_scale,1-static_cast<int>(c.nominal_bits)):0)
+           <<",\"added_tpdf_dither_rms_lsb_per_component\":"<<c.dither_rms_lsb<<'}';
+    };
+    out<<",\"gaussian_projection_supported\":"<<(!front.active()?"true":"false")
+       <<",\"sampled_frontend\":{\"active\":"<<(front.active()?"true":"false")<<",\"dac\":";
+    converter(front.dac);out<<",\"adc\":";converter(front.adc);
+    out<<",\"tone_amplitude\":"<<front.tone_amplitude<<",\"tone_frequency_hz\":"<<front.tone_frequency_hz
+       <<",\"tone_every_n_dwells\":"<<front.tone_every_n_dwells
+       <<",\"impulse_amplitude\":"<<front.impulse_amplitude<<",\"impulse_rate_hz\":"<<front.impulse_rate_hz
+       <<",\"impulse_process\":\"one-sample occupancy probability 1-exp(-rate/Fs_RX); at most one event per sample; independent uniform phase\""
+       <<",\"lowpass_hz\":"<<front.lowpass_hz<<",\"gain_step_seconds\":"<<front.gain_step_seconds
+       <<",\"gain_step_factor\":"<<front.gain_step_factor<<",\"overload_recovery_seconds\":"<<front.overload_recovery_seconds
+       <<",\"ordering\":\"shaped source; DAC gain, ENOB error, TPDF and quantization; TX oscillator and gain; shared propagation; RX oscillator; thermal noise; receiver-coordinate interference; one-pole analog filter; legacy slow AGC; gain step and overload recovery; ADC gain, ENOB error, TPDF and quantization; observed erasure mask\""
+       <<",\"converter_error_model\":\"synthetic independent Gaussian input error, variance=(step_ENOB^2-step_nominal^2)/12; not calibrated hardware ENOB or distortion\""
+       <<",\"tone_coordinate\":\"receiver tuned baseband; not fixed RF; occupancy uses receiver nominal t=0 400-ms dwells\""
+       <<",\"dac_dither_guards\":\"converter noise can occupy shaped guards while finite transmitter source exists; absent transmitter disables DAC\""
+       <<",\"noise_normalization\":\"reported variance is pre-frontend thermal input variance; transformed samples may be colored and non-Gaussian\""
+       <<",\"signal_energy_report_stage\":\"after shared propagation and RX oscillator; before thermal noise and sampled frontend\""
+       <<",\"analytic_admission_supported\":"<<(!front.active()?"true":"false")<<'}';
+}
+
+void json_frontend_report(std::ostream& out,const StreamChannelReport& r) {
+    out<<",\"frontend_report\":{\"dac_clipped_components\":"<<r.dac_clipped_components
+       <<",\"adc_clipped_components\":"<<r.adc_clipped_components<<",\"impulse_events\":"<<r.impulse_events
+       <<",\"overload_samples\":"<<r.overload_samples<<",\"maximum_adc_input_component\":"<<r.maximum_adc_input_component
+       <<",\"gaussian_projection_supported\":"<<(r.gaussian_projection_supported?"true":"false")<<'}';
 }
 
 std::size_t block_samples(const Options&,const Format&);
@@ -469,7 +543,7 @@ std::size_t block_samples(const Options& o,const Format& f) {
 
 StreamChannelConfig channel_config(const Options& o,const Format& base,const Geometry& nominal,
                                    std::uint64_t seed,double noise,double pad,double trail) {
-    StreamChannelConfig channel_cfg; channel_cfg.effects.sample_rate=base.sample_rate;
+    StreamChannelConfig channel_cfg; channel_cfg.frontend=o.frontend; channel_cfg.effects.sample_rate=base.sample_rate;
     channel_cfg.effects.occupied_bandwidth_hz=nominal.occupied_bandwidth_hz;
     channel_cfg.effects.rf_hz=o.rf_hz; channel_cfg.effects.nominal_conversion_if_hz=1500;
     channel_cfg.effects.seed=seed; channel_cfg.effects.signal_enabled=o.control!="null";
@@ -533,8 +607,9 @@ ObservationCalendar observation_calendar(const Options& o,const Format& f,const 
     const long double source_seconds=static_cast<long double>(g.source_samples)/f.sample_rate;
     const auto delay=std::max(o.channel=="hf"?.0015:0.,o.basis=="two-ray"?o.tap_delay_ms*.001:0.);
     ObservationCalendar c;c.pad=std::max(0.,-o.start_low)+.05;
-    c.trail=std::max(0.,o.start_high)-o.start_low+static_cast<double>(source_seconds*(1/slow-1/fast))+delay+2;
-    const long double end=c.pad+std::max(0.,o.start_high)+source_seconds/slow+delay+2;
+    const double frontend_tail=o.frontend.lowpass_hz>0?std::log(1e6)/(2*std::numbers::pi*o.frontend.lowpass_hz):0;
+    c.trail=std::max(0.,o.start_high)-o.start_low+static_cast<double>(source_seconds*(1/slow-1/fast))+delay+2+frontend_tail;
+    const long double end=c.pad+std::max(0.,o.start_high)+source_seconds/slow+delay+2+frontend_tail;
     if(!std::isfinite(end)||end>7*86400.L||end*f.sample_rate>UINT64_MAX)throw std::invalid_argument("public capture exceeds seven-day/coordinate study guard");
     c.samples=static_cast<std::uint64_t>(std::ceil(end*f.sample_rate));return c;
 }
@@ -564,7 +639,7 @@ void run(const Options& o) {
             o.chunk*(sizeof(Complex)+sizeof(std::uint8_t))+65536;
         if(caller_bytes>=o.memory_bytes)throw std::invalid_argument("source/channel exceed pipeline --memory-mib");
         rc.memory_limit_bytes=o.memory_bytes-static_cast<std::size_t>(caller_bytes); rc.complex_noise_variance=noise;
-        rc.known_white_noise=true;
+        rc.known_white_noise=channel.report().gaussian_projection_supported;
         rc.log_family_hypotheses=std::log(static_cast<double>(rc.candidates.size()))+
             std::log(std::ceil(o.horizon/o.attempt_spacing))+std::log(static_cast<double>(o.duration_alternatives));
         rc.family_false_admission_probability=o.false_probability;
@@ -623,6 +698,7 @@ void run(const Options& o) {
             <<",\"correct\":"<<(correct?"true":"false")<<",\"wrong_accepted\":"<<(wrong?"true":"false")<<",\"missed\":"<<(missed?"true":"false")<<",\"false_admission\":"<<(false_admission?"true":"false")<<",\"decoded_bit\":"<<static_cast<unsigned>(got)
             <<",\"score\":"<<report.score<<",\"threshold\":"<<report.threshold<<",\"margin\":"<<report.margin
             <<",\"analytical_null_supported\":"<<(report.analytic_null_supported?"true":"false")
+            <<",\"uncalibrated_candidate_pass\":"<<(!report.analytic_null_supported&&report.presence&&report.margin>0?"true":"false")
             <<",\"all_samples_observed\":"<<(report.all_samples_observed?"true":"false")
             <<",\"missing_samples\":"<<report.missing_samples<<",\"blocks\":"<<report.blocks
             <<",\"basis_values\":"<<report.basis_values<<",\"working_bytes\":"<<report.working_bytes
@@ -635,6 +711,7 @@ void run(const Options& o) {
             <<",\"threads_used\":"<<report.threads_used<<",\"wall_seconds\":"<<report.wall_seconds
             <<",\"cpu_seconds\":"<<report.cpu_seconds;
         json_provenance(std::cout,o,base,nominal);
+        json_frontend_report(std::cout,channel.report());
         std::cout<<",\"candidates\":[";
         for(std::size_t j=0;j<rc.candidates.size();++j){if(j)std::cout<<',';json_candidate(std::cout,rc.candidates[j]);}
         std::cout<<"]}\n";
@@ -735,12 +812,14 @@ void export_basis(const Options& o) {
     for(std::size_t i=0;i<candidates.size();++i){if(i)manifest<<',';manifest<<static_cast<unsigned>(candidates[i].source_bit);}
     manifest<<"],\"candidateparams\":[";
     for(std::size_t i=0;i<candidates.size();++i){if(i)manifest<<',';json_candidate(manifest,candidates[i]);}
-    manifest<<"],\"message\":\"noiseless sampled channel realization; templates use only declared public channel bases\"";
+    manifest<<"],\"message\":";
+    json_string(manifest,o.frontend.active()?"sampled no-thermal channel pass including selected converter noise and interference; templates use only declared public channel bases":"noiseless sampled channel realization; templates use only declared public channel bases");
     json_provenance(manifest,o,f,g);
+    json_frontend_report(manifest,channel.report());
     // This optional diagnostic label must not tell the detector hidden channel
     // truth. Only flat deterministic truth lying on the public grid gets one.
     // Independent interpolation and direct template evaluation may still differ.
-    if(o.control=="signal"&&o.channel=="none"&&o.phase_diffusion==0&&o.white_fm==0&&o.random_walk_fm==0&&o.flicker_fm==0&&o.white_pm==0&&truth_clock(config)==0&&truth_drift(config)==0){
+    if(!o.frontend.active()&&o.control=="signal"&&o.channel=="none"&&o.phase_diffusion==0&&o.white_fm==0&&o.random_walk_fm==0&&o.flicker_fm==0&&o.white_pm==0&&truth_clock(config)==0&&truth_drift(config)==0){
         for(std::size_t i=0;i<candidates.size();++i){const auto& c=candidates[i];
             if(c.source_bit==o.signal_bit&&c.epoch_offset_seconds==0&&c.clock_ppm==0&&c.frequency_drift_hz_per_second==0&&
                c.arrival_seconds==pad+config.effects.timing_offset_seconds&&c.frequency_hz==truth_frequency(config)&&c.channel.taps.size()==1){manifest<<",\"true_candidate_index\":"<<i<<",\"true_candidate_note\":\"nominal parameter match; sampled channel interpolation is independently evaluated\"";break;}}
@@ -835,6 +914,7 @@ void export_stats(const Options& o) {
     double actual_signal_energy=0,actual_observed_energy=0,selected_truth_arrival=0,selected_truth_frequency=0;
     double selected_truth_clock=0,selected_truth_drift=0;
     std::uint64_t actual_channel_samples=0,actual_channel_tail=0;
+    StreamChannelReport frontend_report{};
     auto pass=[&](bool noisy_pass){
         PatternSource truth(f,txkey,o.signal_bit);
         auto config=channel_config(o,f,g,channel_seed,noise,pad,trail);
@@ -897,6 +977,7 @@ void export_stats(const Options& o) {
             }
             mask.close();
         }
+        frontend_report=channel.report();
     };
     pass(false);
     if(o.stats_noisy){
@@ -931,10 +1012,14 @@ void export_stats(const Options& o) {
     for(std::size_t i=0;i<columns.size();++i){if(i)manifest<<',';const auto& ref=columns[i];const auto& c=candidates[ref.candidate];const auto local=ref.local;const auto tap_i=local/(c.channel.linear_gain?2:1);const auto gain_i=c.channel.linear_gain?local%2:0;const auto& tap=c.channel.taps[tap_i];
         manifest<<"{\"source_bit\":"<<static_cast<unsigned>(c.source_bit)<<",\"epoch_offset_seconds\":"<<c.epoch_offset_seconds<<",\"arrival_seconds\":"<<c.arrival_seconds<<",\"frequency_hz\":"<<c.frequency_hz<<",\"clock_ppm\":"<<c.clock_ppm<<",\"frequency_drift_hz_per_second\":"<<c.frequency_drift_hz_per_second<<",\"tap_delay_seconds\":"<<tap.delay_seconds<<",\"tap_doppler_hz\":"<<tap.doppler_hz<<",\"linear_gain\":"<<(c.channel.linear_gain?"true":"false")<<",\"gain_column\":"<<gain_i<<",\"candidate_index\":"<<ref.candidate<<'}';}
     manifest<<"],\"candidates\":[";for(std::size_t i=0;i<candidates.size();++i){if(i)manifest<<',';json_candidate(manifest,candidates[i]);}manifest<<']';
-    manifest<<",\"candidate_count\":"<<candidates.size()<<",\"signal_energy_semantics\":\"post-erasure actual signal energy; simulation evaluation only\",\"mean_semantics\":\"A^H W s_actual; simulation evaluation only\",\"receiver_metadata_warning\":\"Do not read hidden means or energies as receiver metadata\",\"stats_noisy\":"<<(o.stats_noisy?"true":"false");
+    manifest<<",\"candidate_count\":"<<candidates.size()<<",\"signal_energy_semantics\":";
+    json_string(manifest,o.frontend.active()?"post-erasure transformed no-thermal pass energy, including converter noise/interference; not pure signal energy":"post-erasure actual signal energy; simulation evaluation only");
+    manifest<<",\"mean_semantics\":";
+    json_string(manifest,o.frontend.active()?"A^H W applied to transformed no-thermal pass; not a Gaussian signal mean; simulation evaluation only":"A^H W s_actual; simulation evaluation only");
+    manifest<<",\"receiver_metadata_warning\":\"Do not read hidden means or energies as receiver metadata\",\"stats_noisy\":"<<(o.stats_noisy?"true":"false");
     if(o.stats_noisy)manifest<<",\"observation_file\":\"observation.c128\",\"observation_shape\":["<<blocks<<','<<d<<"],\"observation_semantics\":\"A^H W y from a second actual channel pass; simulation evaluation only\"";
     manifest<<",\"file_sizes\":{\"gram.c128\":"<<size_of("gram.c128")<<",\"mean.c128\":"<<size_of("mean.c128")<<",\"intervals.u64\":"<<size_of("intervals.u64")<<",\"valid_rows.u64\":"<<size_of("valid_rows.u64")<<",\"signal_energy.f64\":"<<size_of("signal_energy.f64");if(o.stats_noisy)manifest<<",\"observation.c128\":"<<size_of("observation.c128");manifest<<'}';
-    json_provenance(manifest,o,f,g);manifest<<"}\n";manifest.close();if(!manifest)throw std::runtime_error("failed writing export-stats manifest");
+    json_provenance(manifest,o,f,g);json_frontend_report(manifest,frontend_report);manifest<<"}\n";manifest.close();if(!manifest)throw std::runtime_error("failed writing export-stats manifest");
     for(const auto& n:names)if(n!="manifest.json")std::filesystem::rename(directory/(n+".partial"),directory/n);
     std::filesystem::rename(directory/"manifest.json.partial",directory/"manifest.json");
 }

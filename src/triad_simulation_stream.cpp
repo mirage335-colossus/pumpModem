@@ -43,9 +43,60 @@ struct Rng {
     std::normal_distribution<double> normal{0, 1};
     explicit Rng(std::uint64_t seed) : engine(seed) {}
     double gaussian() { return normal(engine); }
+    double uniform() { return (static_cast<double>(engine() >> 11) + .5) / 9007199254740992.0; }
 };
 
 bool finite_nonnegative(double x) { return std::isfinite(x) && x >= 0; }
+
+void validate_converter(const ConverterConfig& c) {
+    require(c.nominal_bits == 0 || (c.nominal_bits >= 2 && c.nominal_bits <= 24),
+            "converter nominal bit depth must be 0 or 2..24");
+    require(std::isfinite(c.full_scale) && c.full_scale > 0 &&
+            finite_nonnegative(c.gain) && finite_nonnegative(c.dither_rms_lsb) &&
+            finite_nonnegative(c.effective_bits), "invalid converter range, gain or noise");
+    require(c.effective_bits == 0 || (c.nominal_bits && c.effective_bits >= 1 &&
+            c.effective_bits <= c.nominal_bits), "effective bits must not exceed nominal converter bits");
+    require(c.nominal_bits || (c.effective_bits == 0 && c.dither_rms_lsb == 0),
+            "converter dither or effective resolution needs enabled quantization");
+}
+
+void validate_frontend(const SampledFrontendConfig& f, double sample_rate) {
+    validate_converter(f.dac); validate_converter(f.adc);
+    require(finite_nonnegative(f.tone_amplitude) && std::isfinite(f.tone_frequency_hz) &&
+            std::abs(f.tone_frequency_hz) < sample_rate*.5 && f.tone_every_n_dwells > 0 &&
+            finite_nonnegative(f.impulse_amplitude) && finite_nonnegative(f.impulse_rate_hz) &&
+            finite_nonnegative(f.lowpass_hz) && f.lowpass_hz < sample_rate*.5 &&
+            std::isfinite(f.gain_step_seconds) && (f.gain_step_seconds == -1 || f.gain_step_seconds >= 0) &&
+            finite_nonnegative(f.gain_step_factor) && finite_nonnegative(f.overload_recovery_seconds),
+            "invalid sampled frontend configuration");
+    require(!f.overload_recovery_seconds || f.adc.nominal_bits,
+            "overload recovery needs an enabled ADC range");
+}
+
+Complex convert(Complex value, const ConverterConfig& c, Rng& rng,
+                std::uint64_t& clipped) {
+    value *= c.gain;
+    require(std::isfinite(value.real()) && std::isfinite(value.imag()),
+            "converter input overflow");
+    if (!c.nominal_bits) return value;
+    const double step = std::ldexp(c.full_scale, 1-static_cast<int>(c.nominal_bits));
+    const double effective = c.effective_bits > 0 ? c.effective_bits : c.nominal_bits;
+    const double noise = step*std::sqrt(std::expm1(2*std::log(2.)*(c.nominal_bits-effective))/12);
+    require(std::isfinite(step) && step > 0 && std::isfinite(noise),
+            "converter resolution outside numeric range");
+    auto component = [&](double x) {
+        if (noise > 0) x += noise*rng.gaussian();
+        if (c.dither_rms_lsb > 0)
+            x += (rng.uniform()-rng.uniform())*std::sqrt(6.)*c.dither_rms_lsb*step;
+        if (x < -c.full_scale || x > c.full_scale-step) ++clipped;
+        x = std::clamp(x, -c.full_scale, c.full_scale-step);
+        return std::clamp(std::round(x/step)*step, -c.full_scale, c.full_scale-step);
+    };
+    // Explicit order avoids evaluation-order-dependent seeded realizations.
+    const double real = component(value.real());
+    const double imag = component(value.imag());
+    return {real, imag};
+}
 
 std::int64_t dwell_index(double t, double dwell) {
     const long double q = std::floor(static_cast<long double>(t) / dwell);
@@ -225,6 +276,7 @@ StreamChannelConfig checked_config(const StreamChannelConfig& cfg, const Format&
     validate_effects(cfg.effects, format);
     validate_spectrum(cfg.tx_spectrum);
     validate_spectrum(cfg.rx_spectrum);
+    validate_frontend(cfg.frontend, cfg.effects.sample_rate*(1+cfg.effects.rx.audio_ppm*1e-6));
     return cfg;
 }
 
@@ -244,11 +296,15 @@ struct StreamingChannel::Impl {
     OscillatorState tx_osc, rx_osc;
     Rng tx_rng, rx_rng, thermal_rng;
     Rng tx_spectrum_rng, rx_spectrum_rng;
+    Rng dac_rng, adc_rng, interference_rng;
     std::unique_ptr<SpreadRay> spread;
     std::unique_ptr<FrequencySelectivePerturbation> perturbation;
     std::vector<long double> hop_prefix;
     std::int64_t previous_tx_dwell = INT64_MIN, previous_rx_dwell = INT64_MIN;
     double agc_power = 1, agc_alpha = 0;
+    Complex frontend_filter_state{};
+    double frontend_filter_alpha = 0, recovery_scale = 1, recovery_alpha = 0;
+    double tone_initial_phase = 0;
     StreamChannelReport stats;
 
     Impl(PatternSource& src, const StreamChannelConfig& cfg)
@@ -257,7 +313,10 @@ struct StreamingChannel::Impl {
           rx_rng(cfg.effects.seed ^ 0x3254494154525802ULL),
           thermal_rng(cfg.effects.seed ^ 0x3254494154415747ULL),
           tx_spectrum_rng(cfg.effects.seed ^ 0x9e37a201ULL),
-          rx_spectrum_rng(cfg.effects.seed ^ 0x9e37a202ULL) {
+          rx_spectrum_rng(cfg.effects.seed ^ 0x9e37a202ULL),
+          dac_rng(cfg.effects.seed ^ 0x444143434f4e5631ULL),
+          adc_rng(cfg.effects.seed ^ 0x414443434f4e5631ULL),
+          interference_rng(cfg.effects.seed ^ 0x494e544552464531ULL) {
         validate_effects(effects, format);
         validate_spectrum(config.tx_spectrum);
         validate_spectrum(config.rx_spectrum);
@@ -300,8 +359,20 @@ struct StreamingChannel::Impl {
                 std::isfinite(delay_tail_real) && delay_tail_real <
                     static_cast<long double>(UINT64_MAX - perturb_tail - tx_interpolation_tail),
                 "stream channel tail overflows sample coordinates");
+        std::uint64_t frontend_tail = 0;
+        if (config.frontend.lowpass_hz > 0) {
+            frontend_filter_alpha = std::exp(-tau*config.frontend.lowpass_hz*dt_rx);
+            const long double filter_tail = std::ceil(std::log(1e6L) /
+                (tau*config.frontend.lowpass_hz*dt_rx));
+            require(std::isfinite(filter_tail) && filter_tail <= 128'000'000,
+                    "frontend filter tail exceeds its explicit sample bound");
+            frontend_tail = static_cast<std::uint64_t>(filter_tail);
+        }
+        require(frontend_tail <= UINT64_MAX - perturb_tail - tx_interpolation_tail -
+                static_cast<std::uint64_t>(std::ceil(delay_tail_real)),
+                "frontend tail overflows sample coordinates");
         tail_samples = static_cast<std::uint64_t>(std::ceil(delay_tail_real)) +
-            perturb_tail + tx_interpolation_tail;
+            perturb_tail + tx_interpolation_tail + frontend_tail;
         const long double lead_samples = effects.capture_lead_seconds *
             effects.sample_rate * rx_scale;
         const long double end_seconds = std::max(0.0L,
@@ -361,7 +432,11 @@ struct StreamingChannel::Impl {
             hop_prefix[i + 1] = hop_prefix[i] + effects.hop_offsets_hz[i];
         agc_power = config.complex_noise_variance > 0 ? config.complex_noise_variance : 1;
         agc_alpha = std::exp(-dt_rx / .75);
+        if (config.frontend.overload_recovery_seconds > 0)
+            recovery_alpha = std::exp(-dt_rx/config.frontend.overload_recovery_seconds);
+        tone_initial_phase = keyed_phase(effects.seed, 0, 0x544f4e4546524f4eULL);
         stats.complex_noise_variance = effects.noise_enabled ? config.complex_noise_variance : 0;
+        stats.gaussian_projection_supported = !config.frontend.active() && !effects.slow_agc;
         stats.source_samples = geometry.source_samples;
         stats.tail_samples = tail_samples;
     }
@@ -386,6 +461,8 @@ struct StreamingChannel::Impl {
                 tx_spectrum_rng, rf, effects.nominal_conversion_if_hz, tx_scale, t, dt_tx);
             tx_osc.phase = std::remainder(tx_osc.phase, tau);
             auto value = effects.signal_enabled ? source.sample_at(static_cast<long double>(tx_next)) : Complex{};
+            if (effects.signal_enabled && (config.frontend.dac.nominal_bits || config.frontend.dac.gain != 1))
+                value = convert(value, config.frontend.dac, dac_rng, stats.dac_clipped_components);
             const double white_pm = config.tx_spectrum.white_pm_rms_radians * tx_spectrum_rng.gaussian();
             value *= config.signal_gain * std::polar(1.0, tx_osc.phase + white_pm);
             tx_history[static_cast<std::size_t>(tx_next % tx_history.size())] = value;
@@ -465,9 +542,45 @@ struct StreamingChannel::Impl {
         const double sigma = std::sqrt(config.complex_noise_variance * .5);
         if (effects.noise_enabled)
             propagated += Complex{sigma * thermal_rng.gaussian(), sigma * thermal_rng.gaussian()};
+        const auto& front = config.frontend;
+        if (front.tone_amplitude > 0) {
+            const auto d = dwell_index(t, effects.dwell_seconds);
+            if (d >= 0 && static_cast<std::uint64_t>(d) % front.tone_every_n_dwells == 0) {
+                const auto cycles = std::remainder(physical_time*front.tone_frequency_hz, 1.L);
+                propagated += std::polar(front.tone_amplitude,
+                    tone_initial_phase + tau*static_cast<double>(cycles));
+            }
+        }
+        if (front.impulse_amplitude > 0 && front.impulse_rate_hz > 0 &&
+                interference_rng.uniform() < -std::expm1(-front.impulse_rate_hz*dt_rx)) {
+            propagated += std::polar(front.impulse_amplitude, tau*interference_rng.uniform());
+            ++stats.impulse_events;
+        }
+        if (front.lowpass_hz > 0) {
+            frontend_filter_state = frontend_filter_alpha*frontend_filter_state +
+                (1-frontend_filter_alpha)*propagated;
+            propagated = frontend_filter_state;
+        }
         if (effects.slow_agc) {
             agc_power = agc_alpha * agc_power + (1 - agc_alpha) * std::norm(propagated);
             propagated *= std::clamp(1 / std::sqrt(std::max(agc_power, 1e-12)), .02, 50.0);
+        }
+        if (front.active()) {
+            if (front.gain_step_seconds >= 0 && t >= front.gain_step_seconds)
+                propagated *= front.gain_step_factor;
+            if (front.overload_recovery_seconds > 0) {
+                recovery_scale = 1-(1-recovery_scale)*recovery_alpha;
+                propagated *= recovery_scale;
+            }
+            const double peak = front.adc.gain*std::max(std::abs(propagated.real()), std::abs(propagated.imag()));
+            stats.maximum_adc_input_component = std::max(stats.maximum_adc_input_component, peak);
+            if (front.adc.nominal_bits && peak >= front.adc.full_scale) {
+                ++stats.overload_samples;
+                if (front.overload_recovery_seconds > 0)
+                    recovery_scale *= front.adc.full_scale/peak;
+            }
+            if (front.adc.nominal_bits || front.adc.gain != 1)
+                propagated = convert(propagated, front.adc, adc_rng, stats.adc_clipped_components);
         }
         // Preserve the established envelope-only experiment coordinates;
         // actual retuning uses windows measured from the RF dwell calendar.

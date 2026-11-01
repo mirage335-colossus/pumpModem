@@ -95,6 +95,20 @@ def main():
                           "--block-seconds", "1", timeout=45))
     if run["channel_model"]["signal_gain"] != 1:
         raise AssertionError("run path does not apply unit total-power signal gain")
+    if not run["gaussian_projection_supported"] or run["sampled_frontend"]["active"]:
+        raise AssertionError("default sampled frontend did not preserve the linear reference")
+    frontend = one_json(invoke("--mode", "run", *COMMON, "--channel", "none",
+                               "--cn0", "80", "--threads", "2", "--chunk", "512",
+                               "--block-seconds", "1", "--dac-bits", "16", "--dac-enob", "14",
+                               "--adc-bits", "16", "--adc-full-scale", ".25", "--adc-gain", "10",
+                               "--interference-tone", "2", "210", "--rx-lowpass-hz", "100",
+                               "--overload-recovery-seconds", ".02", timeout=45))
+    if frontend["analytical_null_supported"] or frontend["accepted"] or frontend["gaussian_projection_supported"]:
+        raise AssertionError("nonlinear sampled frontend inherited Gaussian analytic admission")
+    if not frontend["frontend_report"]["adc_clipped_components"]:
+        raise AssertionError("actual sampled ADC clipping was not reported")
+    if frontend["sampled_frontend"]["adc"]["nominal_bits"] != 16:
+        raise AssertionError("effective frontend configuration was omitted")
     run_ratio = (run["signal_energy"] / run["sample_rate"] /
                  run["nominal_payload_energy_seconds_lower"])
     if not 0.5 <= run_ratio <= 1.5:
@@ -263,9 +277,28 @@ def main():
         if "fresh output directory" not in collision.stderr:
             raise AssertionError(f"stats export collision had unexpected failure: {collision.stderr}")
 
+        transformed = pathlib.Path(scratch) / "frontend-stats"
+        transformed_manifest = export_stats(transformed, "--stats-noisy", "--cn0", "-4",
+                                             "--dac-bits", "16", "--dac-enob", "14",
+                                             "--adc-bits", "16", "--adc-enob", "12",
+                                             "--adc-full-scale", "1", "--adc-gain", ".2",
+                                             "--adc-dither-lsb", ".5", "--rx-lowpass-hz", "100")
+        if transformed_manifest["gaussian_projection_supported"] or not transformed_manifest["stats_noisy"]:
+            raise AssertionError("nonlinear actual observation export lost its projection restriction")
+        if not transformed_manifest["frontend_report"]["adc_clipped_components"]:
+            raise AssertionError("noisy transformed export did not report sampled clipping")
+        if not (transformed / "observation.c128").exists():
+            raise AssertionError("nonlinear export omitted actual sampled observation")
+        rejected_export = invoke("--mode", "export", *COMMON, "--adc-bits", "16",
+                                 "--output", str(pathlib.Path(scratch)/"invalid-frontend-raw"), ok=False)
+        if "export-stats --stats-noisy" not in rejected_export.stderr:
+            raise AssertionError("raw export allowed post-ADC Gaussian noise generation")
+
     for option in (("--signal-bit", "256"), ("--threads", "4294967296"),
-                   ("--chunk", "-1")):
+                   ("--chunk", "-1"), ("--adc-bits", "1"),
+                   ("--adc-full-scale", "0"), ("--dac-enob", "14")):
         invoke("--mode", "plan", *option, ok=False, timeout=10)
+    invoke("--mode", "plan", "--adc-bits", "16", ok=False, timeout=10)
 
     # A two-day coherent block is a planner input only; this short source case
     # proves it does not allocate a two-day waveform. Burst waits create a

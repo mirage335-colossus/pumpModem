@@ -64,6 +64,22 @@ def write_export(directory, grams, means=None, *, sample_rate=64.0, block_sample
 
 
 class WorkspaceTests(unittest.TestCase):
+    def test_nonlinear_frontend_rejects_gaussian_projection_shortcut(self):
+        with tempfile.TemporaryDirectory() as temp:
+            manifest = write_export(temp, np.eye(2)[None], observation=np.array([[.1+.2j, -.3j]]))
+            manifest["gaussian_projection_supported"] = False
+            (Path(temp)/"manifest.json").write_text(json.dumps(manifest))
+            ws = BlockWorkspace(temp)
+            self.assertFalse(ws.gaussian_projection_supported)
+            with self.assertRaisesRegex(WorkspaceError, "sampled frontend"):
+                next(ws.iter_simulator(seed=1, batch=2, cn0_db_hz=0))
+            actual = next(ws.iter_observation())
+            np.testing.assert_array_equal(actual.r, np.array([[.1+.2j, -.3j]]))
+            manifest["gaussian_projection_supported"] = "false"
+            (Path(temp)/"manifest.json").write_text(json.dumps(manifest))
+            with self.assertRaisesRegex(WorkspaceError,"must be boolean"):
+                BlockWorkspace(temp)
+
     def test_full_covariance_and_paired_h0_h1(self):
         # A^H A for two nonorthogonal columns; preserve the cross-correlation.
         G0 = np.array([[2.0, .7+.2j], [.7-.2j, 1.5]], dtype=np.complex128)

@@ -10,6 +10,9 @@ assumptions needed to interpret its theoretical bounds; it is not a claim of
 validated radio performance. Recorded experiments and evidence limits are in
 the [initial v3 validation record](validation-data/triad-v3/2026-10-31/README.md)
 and the [state-likelihood study](validation-data/triad-v3/2026-11-01-state/README.md).
+The [GPU optimization protocol](triad-gpu-optimization.md) defines the comparison
+gates; the [optimization campaign](validation-data/triad-v3/2026-11-01-optimization/README.md)
+records its timings, numerical checks and remaining qualification gaps.
 
 ## Format and streaming state
 
@@ -119,6 +122,64 @@ shapes the source envelope only; it does not retune the simulated RF channel or
 validate real FHSS hardware. Oscillator white FM, random-walk FM, finite-band
 flicker FM, white PM and Wiener phase diffusion are synthetic spectra, not
 measurements or a device-specific Allan-deviation model.
+
+### Optional sampled converters and interference
+
+`StreamChannelConfig.frontend` adds explicit sampled ADC/DAC and receiver
+front-end experiments. Defaults disable these stages and preserve the existing
+sample output exactly. The processing order is shaped source → DAC gain,
+converter error, dither and quantization → TX oscillator/gain → shared
+propagation → RX oscillator → thermal noise and receiver-coordinate
+interference → optional analog-filter approximation → existing slow AGC when
+selected → gain step/overload recovery → ADC gain, converter error, dither and
+quantization → observed erasure mask. Channel, oscillator, converter RNG,
+filter and recovery state continue across chunks. Echoes are not gated away at
+hop guards; the analog filter adds its relative `1e-6` decay tail.
+
+The isolated CLI exposes these controls:
+
+| Controls | Sampled model |
+| --- | --- |
+| `--dac-bits N`, `--adc-bits N` | `0` bypasses quantization/error/dither; `2..24` selects signed component quantization, including nominal 16-bit paths. |
+| `--dac-full-scale V`, `--adc-full-scale V`, `--dac-gain G`, `--adc-gain G` | Per-real-component full scale and physical input gain; the range is `[-V, V-step]`, with `step = 2V / 2^N`. |
+| `--dac-enob B`, `--adc-enob B` | Add synthetic independent Gaussian converter error before quantization. `0` selects nominal resolution; otherwise `1 <= B <= N`. |
+| `--dac-dither-lsb RMS`, `--adc-dither-lsb RMS` | Added TPDF dither, with the stated RMS in nominal LSBs per real component, immediately before conversion. |
+| `--rx-lowpass-hz HZ` | Continuous one-pole approximation after thermal noise and interference; it also colors that noise. |
+| `--interference-tone AMP HZ`, `--tone-every-dwells N` | Receiver-coordinate tone during every Nth receiver-time 400-ms dwell. |
+| `--interference-impulse AMP RATE-HZ` | Random-phase, one-sample impulses with occupancy `1-exp(-RATE-HZ/Fs_RX)`, at most one event per sample. |
+| `--rx-gain-step TIME FACTOR`, `--overload-recovery-seconds S` | A physical gain change and optional immediate overload attack with exponential gain recovery. |
+
+The ENOB setting models additional component-noise variance
+`(step_ENOB² - step_nominal²)/12`; it is not a measured converter ENOB or a
+distortion model. Thermal noise can itself provide quantization dither; added
+dither contributes further noise. DAC converter noise can occupy shaped quiet
+guards while the finite transmitter source exists; an absent-transmitter null
+does not inject DAC noise. Full scale and gain determine headroom and clipping.
+Gains are not automatically removed at the receiver, and reported thermal
+variance remains the pre-frontend input reference. Nominal converter bit depth
+does not prescribe DSP arithmetic precision.
+
+These are synthetic component models. A receiver-coordinate tone does not
+represent a fixed external RF interferer moving through a retuning front end,
+and CLI FHSS remains envelope-only. No physical RF selectivity, retuning or
+overload immunity is established. Reports include actual DAC/ADC clipping,
+overload and impulse counters and effective frontend parameters.
+
+The current implementation conservatively disables the inherited Gaussian
+projection shortcut and analytic admission claim for any active frontend.
+Transmit quantization alone differs from quantizing noisy receiver input;
+restoring an eligible shortcut requires accounting for the selected processing.
+`--mode export` and the duration planner reject active frontend settings;
+`--mode export-stats` requires `--stats-noisy` and records actual sampled
+observations after the selected processing. `BlockWorkspace.iter_simulator()`
+rejects these exports; use `iter_observation()` for the actual noisy projection.
+Replacing receiver quantization or analog filtering with unprocessed projected
+white Gaussian noise would represent a different physical experiment. The exported no-thermal pass can include
+converter noise/interference and is not a Gaussian signal mean. `run` retains
+uncalibrated score diagnostics through `uncalibrated_candidate_pass`, with
+acceptance disabled until an appropriate admission policy is established.
+Neither small numerical differences nor these software paths establish 99%
+reception or an operational rare-tail rate.
 
 ## Bounds, planner and measurable targets
 
