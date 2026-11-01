@@ -674,7 +674,9 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
   # Isolated 3-carrier Robust waveform/receiver research. This target owns its
   # complex-baseband channel path and does not link the ordinary modem receiver.
   add_library(triad_experiment STATIC EXCLUDE_FROM_ALL
-    src/crypto.cpp src/triad_modem.cpp src/triad_simulation.cpp src/triad_modem_v2.cpp src/search_fft.cpp)
+    src/crypto.cpp src/triad_modem.cpp src/triad_simulation.cpp src/triad_modem_v2.cpp
+    src/triad_statistics.cpp src/triad_modem_v3.cpp src/triad_simulation_stream.cpp
+    src/triad_receiver_v3.cpp src/search_fft.cpp)
   target_include_directories(triad_experiment PUBLIC include PRIVATE src)
   target_link_libraries(triad_experiment PUBLIC OpenSSL::Crypto Threads::Threads)
   if(MSVC)
@@ -694,18 +696,48 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
   add_executable(test_triad_v2 EXCLUDE_FROM_ALL tests/test_triad_v2.cpp)
   target_include_directories(test_triad_v2 PRIVATE src)
   target_link_libraries(test_triad_v2 PRIVATE triad_experiment)
+  add_executable(test_triad_statistics EXCLUDE_FROM_ALL tests/test_triad_statistics.cpp)
+  target_include_directories(test_triad_statistics PRIVATE src)
+  target_link_libraries(test_triad_statistics PRIVATE triad_experiment)
+  add_executable(test_triad_v3_source EXCLUDE_FROM_ALL tests/test_triad_v3_source.cpp)
+  target_include_directories(test_triad_v3_source PRIVATE src)
+  target_link_libraries(test_triad_v3_source PRIVATE triad_experiment)
+  add_executable(test_triad_v3_channel EXCLUDE_FROM_ALL tests/test_triad_v3_channel.cpp)
+  target_include_directories(test_triad_v3_channel PRIVATE src)
+  target_link_libraries(test_triad_v3_channel PRIVATE triad_experiment)
+  add_executable(test_triad_v3_receiver EXCLUDE_FROM_ALL tests/test_triad_v3_receiver.cpp)
+  target_include_directories(test_triad_v3_receiver PRIVATE src)
+  target_link_libraries(test_triad_v3_receiver PRIVATE triad_experiment)
   add_executable(triad_study EXCLUDE_FROM_ALL tools/triad-study.cpp)
   target_include_directories(triad_study PRIVATE src)
   target_link_libraries(triad_study PRIVATE triad_experiment)
   add_executable(triad_examples EXCLUDE_FROM_ALL tools/triad-examples.cpp)
   target_include_directories(triad_examples PRIVATE src)
   target_link_libraries(triad_examples PRIVATE triad_experiment)
+  add_executable(triad_long EXCLUDE_FROM_ALL tools/triad-long.cpp)
+  target_include_directories(triad_long PRIVATE src)
+  target_link_libraries(triad_long PRIVATE triad_experiment)
+  add_executable(triad_oscillator_study EXCLUDE_FROM_ALL tools/triad-oscillator-study.cpp)
+  target_include_directories(triad_oscillator_study PRIVATE src)
+  target_link_libraries(triad_oscillator_study PRIVATE triad_experiment)
+  # TestGroups maps conventional triad_<case> tests through a test_<case>
+  # build target. Keep this executable's public target name while satisfying
+  # that prerequisite convention with a lightweight alias target.
+  add_custom_target(test_triad_oscillator_study DEPENDS triad_oscillator_study)
   add_test(NAME triad_modem COMMAND test_triad_modem)
   add_test(NAME triad_smoke COMMAND triad_study --suite smoke --trials 1 --threads 2)
   add_test(NAME triad_v2 COMMAND test_triad_v2)
   add_test(NAME triad_examples_smoke COMMAND triad_examples --case 2 --trials 1 --threads 2 --diagnostic-clean)
+  add_test(NAME triad_statistics COMMAND test_triad_statistics)
+  add_test(NAME triad_v3_source COMMAND test_triad_v3_source)
+  add_test(NAME triad_v3_channel COMMAND test_triad_v3_channel)
+  add_test(NAME triad_v3_receiver COMMAND test_triad_v3_receiver)
+  add_test(NAME triad_oscillator_study COMMAND triad_oscillator_study --seconds 7200 --model all)
   set_tests_properties(triad_modem triad_smoke triad_v2 triad_examples_smoke PROPERTIES LABELS "triad" TIMEOUT 180)
   set_tests_properties(triad_v2 triad_examples_smoke PROPERTIES TIMEOUT 300)
+  set_tests_properties(triad_statistics triad_v3_source triad_v3_channel triad_v3_receiver
+    PROPERTIES LABELS "triad" TIMEOUT 300)
+  set_tests_properties(triad_oscillator_study PROPERTIES LABELS "triad" TIMEOUT 300)
   add_test(NAME helper_continuation_recovery COMMAND test_helper_continuation_study --recovery-robustness)
   add_test(NAME helper_continuation_gap COMMAND test_helper_continuation_study --gap-robustness)
   add_test(NAME helper_continuation_extended_recovery COMMAND test_helper_continuation_study --extended-recovery-robustness)
@@ -1043,6 +1075,10 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
   endif()
   find_package(Python3 QUIET COMPONENTS Interpreter)
   if(Python3_FOUND)
+    add_test(NAME triad_long_smoke COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_triad_long.py $<TARGET_FILE:triad_long>)
+    set_tests_properties(triad_long_smoke PROPERTIES LABELS "triad" TIMEOUT 300)
+    add_custom_target(test_triad_long_smoke DEPENDS triad_long)
     add_test(NAME helper_complete_clock_regression COMMAND ${Python3_EXECUTABLE}
       ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_helper_complete_clock_regression.py $<TARGET_FILE:test_helper_complete_study>)
     add_test(NAME helper_complete_inversion_regression COMMAND ${Python3_EXECUTABLE}
@@ -1136,7 +1172,10 @@ if(NOT DATAPUMP_BUILD_WASM)
     get_target_property(_type ${_target} TYPE)
     if(_type STREQUAL "EXECUTABLE")
       if(_target STREQUAL "test_triad_modem" OR _target STREQUAL "test_triad_v2" OR
-          _target STREQUAL "triad_study" OR _target STREQUAL "triad_examples")
+          _target STREQUAL "test_triad_statistics" OR _target STREQUAL "test_triad_v3_source" OR
+          _target STREQUAL "test_triad_v3_channel" OR _target STREQUAL "test_triad_v3_receiver" OR
+          _target STREQUAL "triad_study" OR _target STREQUAL "triad_examples" OR
+          _target STREQUAL "triad_long" OR _target STREQUAL "triad_oscillator_study")
         # These experiments are self-contained complex-I/Q simulations. Do
         # not pull the native audio provider or ordinary receiver into them.
         continue()
