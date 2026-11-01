@@ -64,7 +64,8 @@ Geometry geometry(const Format& f){
     require(std::isfinite(f.inner_rate_hz)&&f.inner_rate_hz>0&&f.inner_rate_hz<=30e6,"triad v3 invalid Rate");
     require(f.added_symbols>=1&&f.added_symbols<=1000&&f.minimum_inner_coefficients>=64,
             "triad v3 invalid Added Symbols or minimum complexity");
-    require(f.sample_rate>=64&&std::isfinite(f.bit_seconds)&&f.bit_seconds>0,"triad v3 invalid duration/sample rate");
+    require(f.sample_rate>=1&&std::isfinite(f.bit_seconds)&&f.bit_seconds>0,"triad v3 invalid duration/sample rate");
+    require(f.sample_rate>=64||!f.fhss,"triad v3 sub-64-Hz source requires FHSS off");
     require(std::isfinite(f.dwell_seconds)&&std::abs(f.dwell_seconds-.4)<1e-12,"triad v3 dwell must be400ms");
     require(std::isfinite(f.quiet_seconds)&&f.quiet_seconds>=0&&std::isfinite(f.ramp_seconds)&&f.ramp_seconds>0&&
         std::isfinite(f.margin_seconds)&&f.margin_seconds>=.001&&f.burst_wait_tiles<=1000,"triad v3 invalid margins/burst");

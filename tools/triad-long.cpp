@@ -60,7 +60,7 @@ struct Options {
     double wrong_projection = .08;
     std::uint64_t minimum_dwells = 20, seed = 1, epoch = 1793404800;
     std::optional<std::uint64_t> key_seed, channel_seed;
-    std::optional<std::uint64_t> oscillator_seed, noise_seed, frontend_seed;
+    std::optional<std::uint64_t> oscillator_seed, noise_seed, frontend_seed, path_seed;
     std::uint64_t duration_alternatives = 1;
     unsigned added = 10, threads = 2;
     std::size_t chunk = 4096, block = 1536;
@@ -79,6 +79,7 @@ struct Options {
     std::vector<std::int64_t> epoch_offsets{0};
     std::vector<std::string> command_argv;
     SampledFrontendConfig frontend{};
+    PathEvolutionConfig path_evolution{};
     std::optional<std::string> base_oscillator,shift_oscillator,clock_sync_text,spread_preset,selective_perturbation;
     double audio_error_seconds=clock_sync::default_audio_error_seconds,margin=1,nominal_if_hz=1500;
     bool audio_error_explicit=false,margin_explicit=false,phase_diffusion_explicit=false;
@@ -86,6 +87,11 @@ struct Options {
     std::int64_t truth_epoch_offset=0;
     double truth_frequency_hz=0,truth_frequency_drift=0;
 };
+
+bool path_evolution_active(const Options& o) {
+    const auto& p=o.path_evolution;
+    return p.ray_coherence_seconds>0||p.diurnal_phase_amplitude_radians>0||p.outage_start_seconds>=0;
+}
 
 bool configured_physics(const Options& o) {
     return o.base_oscillator||o.shift_oscillator||o.clock_sync_text||o.spread_preset||
@@ -196,8 +202,10 @@ Options parse(int argc, char** argv) {
         const std::string_view key(argv[i]);
         if (key == "--help" || key == "-h") {
             std::cout << R"HELP(triad_long --mode configure|plan|run|export|export-sampled|export-stats [options]
-  --seconds S                 Requested active one-bit span (8..604800 s); rounded to complete private tiles.
+  --seconds S                 Requested active one-bit span (8..3283200 s, 38 days); rounded to complete private tiles.
   --rate HZ --added N --sample-rate HZ --rf-hz HZ
+                              Integer sample rates1..63 require FHSS/dropout/frontend/FM/white-PM off.
+                              Constant offsets, Wiener phase, two-ray spread and perturbation remain modeled.
   --base-oscillator ID --shift-oscillator ID   Existing tuning presets; unspecified partner=gpsdo-xo.
   --clock-sync GPS_10ms-1ms_region-0ms_offset | default
   --audio-error-ms MS --margin X --nominal-if-hz HZ
@@ -220,12 +228,17 @@ Options parse(int argc, char** argv) {
   --phase-diffusion RAD/SQRT(S)   Relative Wiener coefficient; default0.5 degrees/sqrt(s) expressed in radians.
   --white-fm HZ*SQRT(S) --random-walk-fm HZ/SQRT(S)
   --flicker-fm RMS-HZ --flicker-tau MIN MAX --flicker-bands N --white-pm RMS-RAD
+  --ray-coherence-seconds S    Independent stationary complex OU ray gains; 0 disables.
+  --diurnal-phase-radians A --diurnal-period-seconds S   Sinusoidal common path phase; A=0 disables.
+  --outage-seconds START END --outage-gain G --outage-ramp-seconds S
+                              Physical-path attenuation, separate from planner --outage; -1 -1 disables.
+                              Physical time excludes capture lead; OU spectrum requires sampling refinement.
   --dropout-ms MS --dropout-start-ms MS --dropout-every-dwells N
   --fhss                      Source envelope only; no physical RF-retuning claim.
   --burst-wait-tiles N         Silent tile waits within this one-bit v3 observation.
   --seed N --epoch UTC | --now --trials N --signal-bit 0|1 --no-encrypt
   --key-seed N --channel-seed N   Key/channel seeds (default to --seed).
-  --oscillator-seed N --noise-seed N --frontend-seed N
+  --oscillator-seed N --noise-seed N --frontend-seed N --path-seed N
                               Independent sample-stream roots; default to the resolved channel seed.
   --control signal|null|wrong-key
   --correct P --false P --horizon S --attempt-spacing S --duration-alternatives N
@@ -300,6 +313,12 @@ Examples:
         else if (key == "--flicker-tau") {o.flicker_min_tau=number(need(),"minimum flicker tau");o.flicker_max_tau=number(need(),"maximum flicker tau");}
         else if (key == "--flicker-bands") o.flicker_bands=bounded_integer<unsigned>(need(),"flicker bands");
         else if (key == "--white-pm") o.white_pm=number(need(),"white PM");
+        else if (key == "--ray-coherence-seconds") o.path_evolution.ray_coherence_seconds=number(need(),"ray coherence");
+        else if (key == "--diurnal-phase-radians") o.path_evolution.diurnal_phase_amplitude_radians=number(need(),"diurnal phase amplitude");
+        else if (key == "--diurnal-period-seconds") o.path_evolution.diurnal_period_seconds=number(need(),"diurnal period");
+        else if (key == "--outage-seconds") {o.path_evolution.outage_start_seconds=number(need(),"path outage start");o.path_evolution.outage_end_seconds=number(need(),"path outage end");}
+        else if (key == "--outage-gain") o.path_evolution.outage_gain=number(need(),"path outage gain");
+        else if (key == "--outage-ramp-seconds") o.path_evolution.outage_ramp_seconds=number(need(),"path outage ramp");
         else if (key == "--dropout-ms") o.dropout_ms=number(need(),"dropout milliseconds");
         else if (key == "--dropout-start-ms") o.dropout_start_ms=number(need(),"dropout start milliseconds");
         else if (key == "--dropout-every-dwells") o.dropout_every_dwells=bounded_integer<std::size_t>(need(),"dropout period");
@@ -313,6 +332,7 @@ Examples:
         else if (key == "--oscillator-seed") o.oscillator_seed = integer(need(), "oscillator seed");
         else if (key == "--noise-seed") o.noise_seed = integer(need(), "noise seed");
         else if (key == "--frontend-seed") o.frontend_seed = integer(need(), "frontend seed");
+        else if (key == "--path-seed") o.path_seed = integer(need(), "path seed");
         else if (key == "--trials") o.trials = bounded_integer<unsigned>(need(),"trials");
         else if (key == "--threads") o.threads = bounded_integer<unsigned>(need(),"threads");
         else if (key == "--chunk") o.chunk = bounded_integer<std::size_t>(need(),"chunk");
@@ -357,9 +377,9 @@ Examples:
     if (o.basis=="per-carrier")
         throw std::invalid_argument("per-carrier tap fits are not implemented; use the coupled shared-tap basis");
     if (o.control != "signal" && o.control != "null" && o.control != "wrong-key") throw std::invalid_argument("control must be signal, null, or wrong-key");
-    if (!(o.seconds >= 8 && o.seconds <= 7*86400.) ||
+    if (!(o.seconds >= 8 && o.seconds <= 38*86400.) ||
         !(o.rate > 0 && o.rate <= 30000000) || !(o.rf_hz > 0 && o.rf_hz <= 10e9) ||
-        !(o.sample_rate == 0 || (o.sample_rate >= 64 && o.sample_rate <= 10000000)) ||
+        !(o.sample_rate == 0 || (o.sample_rate >= 1 && o.sample_rate <= 10000000)) ||
         o.trials == 0 || o.trials > 100000 || o.threads == 0 || o.threads > 256 ||
         o.chunk == 0 || o.chunk > 1000000 || o.block == 0 || o.burst_wait_tiles>1000 ||
         o.signal_bit > 1 || o.added == 0 || o.added > 1000 || o.minimum_dwells < 20 || o.duration_alternatives==0)
@@ -376,6 +396,20 @@ Examples:
     if(!(o.flicker_min_tau>0&&o.flicker_max_tau>=o.flicker_min_tau&&o.flicker_bands>=1&&o.flicker_bands<=64&&
          o.dropout_every_dwells>0&&o.dropout_start_ms+o.dropout_ms<=400))
         throw std::invalid_argument("invalid flicker band or dwell-erasure parameters");
+    const auto& path=o.path_evolution;
+    for(const auto x:{path.ray_coherence_seconds,path.diurnal_phase_amplitude_radians,
+                      path.diurnal_period_seconds,path.outage_start_seconds,path.outage_end_seconds,
+                      path.outage_gain,path.outage_ramp_seconds})
+        if(!std::isfinite(x))throw std::invalid_argument("physical-path evolution parameters must be finite");
+    if(!(path.ray_coherence_seconds>=0&&path.diurnal_phase_amplitude_radians>=0&&path.diurnal_period_seconds>0&&
+         path.outage_gain>=0&&path.outage_gain<=1&&path.outage_ramp_seconds>=0))
+        throw std::invalid_argument("invalid physical-path evolution");
+    if(!((path.outage_start_seconds==-1&&path.outage_end_seconds==-1)||
+         (path.outage_start_seconds>=0&&path.outage_end_seconds>path.outage_start_seconds&&
+          path.outage_ramp_seconds<=(path.outage_end_seconds-path.outage_start_seconds)*.5)))
+        throw std::invalid_argument("physical-path outage needs ordered endpoints and ramps within its interval");
+    if(!std::isfinite(path.diurnal_phase_amplitude_radians/path.diurnal_period_seconds))
+        throw std::invalid_argument("physical-path diurnal frequency excursion exceeds numeric range");
     if((o.block_seconds!= -1 && o.block_seconds<=0) || o.export_max_samples==0 || o.export_max_samples>128000000)
         throw std::invalid_argument("invalid block duration or export sample ceiling");
     if(o.tap_delay_ms<0||!std::isfinite(o.tap_doppler_hz))throw std::invalid_argument("invalid public tap model");
@@ -386,6 +420,7 @@ Examples:
     if(o.oscillator_seed && *o.oscillator_seed>UINT64_MAX-(o.trials-1))throw std::invalid_argument("oscillator trial seed overflow");
     if(o.noise_seed && *o.noise_seed>UINT64_MAX-(o.trials-1))throw std::invalid_argument("noise trial seed overflow");
     if(o.frontend_seed && *o.frontend_seed>UINT64_MAX-(o.trials-1))throw std::invalid_argument("frontend trial seed overflow");
+    if(o.path_seed && *o.path_seed>UINT64_MAX-(o.trials-1))throw std::invalid_argument("path trial seed overflow");
     for(const auto* c:{&o.frontend.dac,&o.frontend.adc})
         if(!(c->nominal_bits==0||(c->nominal_bits>=2&&c->nominal_bits<=24))||
            !(c->full_scale>0)||c->gain<0||c->dither_rms_lsb<0||c->effective_bits<0||
@@ -404,6 +439,13 @@ Examples:
         throw std::invalid_argument("sampled frontend export-stats requires --stats-noisy; Gaussian projection simulation is unsupported");
     if(o.mode=="export" && o.frontend.active())
         throw std::invalid_argument("raw export cannot represent noise through the sampled frontend; use export-stats --stats-noisy");
+    // These point-sampled low-rate models preserve their physical-second
+    // parameters. Fast events and sample-rate-sensitive oscillator spectra
+    // need a separately validated high-rate integration/decimation path.
+    if(o.sample_rate>0 && o.sample_rate<64 &&
+       (o.fhss || o.dropout_ms>0 || o.frontend.active() || o.white_fm>0 ||
+        o.random_walk_fm>0 || o.flicker_fm>0 || o.white_pm>0))
+        throw std::invalid_argument("sub-64-Hz simulation requires FHSS, dropout, sampled frontend, white/flicker/random-walk FM and white-PM off; use at least 64 samples/s for those effects");
     clock_sync::validate_audio_error(o.audio_error_seconds);
     if(o.margin<1||o.margin>1000||o.nominal_if_hz<0||o.nominal_if_hz>1e9)
         throw std::invalid_argument("margin must be 1..1000 and nominal IF 0..1e9 Hz");
@@ -411,6 +453,8 @@ Examples:
     (void)resolve_configuration(o);
     if(o.mode=="plan"&&configured_physics(o))
         throw std::invalid_argument("duration planning for resolved GUI presets is unsupported; inspect --mode configure and supply independently justified manual planner bounds");
+    if(o.mode=="plan"&&path_evolution_active(o))
+        throw std::invalid_argument("duration planning for physical-path evolution is unsupported; supply independently justified planner bounds separately");
     return o;
 }
 
@@ -492,7 +536,8 @@ double configuration_capture_margin(const Options& o,const Format& f,const Geome
     const double oscillator=std::max(r.frequency_bound_hz+std::abs(o.truth_frequency_hz),public_frequency);
     const double spread=r.spread_doppler_hz*((r.slow_depth>0||r.fast_depth>0)?2:1);
     const double drift=std::abs(o.truth_frequency_drift)*(g.bit_seconds+2*r.arrival_half+2);
-    return f.sample_rate*rx_min-g.occupied_bandwidth_hz*tx_max-2*(oscillator+spread+drift);
+    const double diurnal=std::abs(o.path_evolution.diurnal_phase_amplitude_radians)/o.path_evolution.diurnal_period_seconds;
+    return f.sample_rate*rx_min-g.occupied_bandwidth_hz*tx_max-2*(oscillator+spread+drift+diurnal);
 }
 
 void json_string(std::ostream& out,std::string_view value) {
@@ -504,6 +549,20 @@ void json_string(std::ostream& out,std::string_view value) {
         else out<<static_cast<char>(ch);
     }
     out<<'"';
+}
+void json_path_evolution(std::ostream& out,const Options& o) {
+    const auto& p=o.path_evolution;
+    out<<"{\"active\":"<<(path_evolution_active(o)?"true":"false")
+       <<",\"ray_coherence_seconds\":"<<p.ray_coherence_seconds
+       <<",\"diurnal_phase_amplitude_radians\":"<<p.diurnal_phase_amplitude_radians
+       <<",\"diurnal_period_seconds\":"<<p.diurnal_period_seconds
+       <<",\"maximum_diurnal_instantaneous_frequency_hz\":"<<std::abs(p.diurnal_phase_amplitude_radians)/p.diurnal_period_seconds
+       <<",\"outage_start_seconds\":"<<p.outage_start_seconds<<",\"outage_end_seconds\":"<<p.outage_end_seconds
+       <<",\"outage_gain\":"<<p.outage_gain<<",\"outage_ramp_seconds\":"<<p.outage_ramp_seconds
+       <<",\"time_coordinate\":\"physical RX time n/(Fs*rx_clock_scale)-capture_lead_seconds\""
+       <<",\"ray_model\":\"independent stationary proper-complex OU gains: zero mean, unit mean power, correlation exp(-abs(dt)/coherence); existing equal-power two-ray delay and Doppler retained\""
+       <<",\"outage_model\":\"signal-only attenuation on [start,end), with cosine descent/ascent inside the interval; thermal noise and path/filter state continue\""
+       <<",\"scope\":\"declared physical-path stress, not field calibration; OU is point sampled and has an unbounded analog spectrum, so finite deterministic capture bounds are not a bandwidth guarantee and sampling-rate refinement is required\"}";
 }
 // Expected normalized autocorrelation for independent zero-mean random chips,
 // equal mean carrier powers and one shared complex gain. The infinite RRC
@@ -576,6 +635,8 @@ void json_configuration(std::ostream& out,const Options& o,const Format& f,const
        <<",\"spread_preset\":";json_string(out,r.spread_id);out<<",\"selective_perturbation\":";json_string(out,r.perturbation_id);
     out<<",\"spread_delay_ms\":"<<r.spread_delay_ms<<",\"spread_doppler_hz\":"<<r.spread_doppler_hz
        <<",\"perturbation_slow_depth\":"<<r.slow_depth<<",\"perturbation_fast_depth\":"<<r.fast_depth
+       <<",\"path_evolution\":";json_path_evolution(out,o);
+    out
        <<",\"audio_error_seconds_per_station\":"<<o.audio_error_seconds
        <<",\"audio_lag_interval_per_station\":[0,"<<o.audio_error_seconds<<"],\"clock_sync\":";
     json_string(out,clock_sync::format(r.clock));
@@ -624,7 +685,13 @@ void json_configuration(std::ostream& out,const Options& o,const Format& f,const
        <<",\"capture\":{\"sample_rate_hz\":"<<f.sample_rate<<",\"fine_rate_per_carrier_hz\":"<<g.fine_chip_rate_hz
        <<",\"nominal_triplet_bandwidth_hz\":"<<g.occupied_bandwidth_hz<<",\"deterministic_nyquist_margin_hz\":"<<configuration_capture_margin(o,f,g)
        <<",\"feasible_for_deterministic_prior\":"<<(configuration_capture_margin(o,f,g)>0?"true":"false")
-       <<",\"scope\":\"whole deterministic RF/audio-error bound and public CFO grid; stochastic phase/frequency tails are not a bounded capture guarantee\"}"
+       <<",\"scope\":\"whole deterministic RF/audio-error bound, public CFO grid and maximum diurnal instantaneous frequency; stochastic oscillator and OU-path spectral tails are not a bounded capture guarantee\""
+       <<",\"sub_64_hz_model\":"<<(f.sample_rate<64?"true":"false")
+       <<",\"sampling_model_limits\":\"below 64 samples/s: FHSS, dropout, active sampled frontend, slow AGC, white/flicker/random-walk FM and white PM are rejected; constant offsets, Wiener phase, fractional two-ray propagation and selected selective perturbations remain modeled in physical seconds; no high-rate integration/decimation equivalence is claimed\"}"
+       <<",\"duration\":{\"maximum_requested_active_seconds\":3283200,\"requested_active_seconds\":"<<f.bit_seconds
+       <<",\"rounded_active_seconds\":"<<g.tile_count*g.tile_seconds<<",\"elapsed_source_calendar_seconds\":"<<g.bit_seconds
+       <<",\"source_support_seconds\":"<<static_cast<long double>(g.source_samples)/f.sample_rate
+       <<",\"scope\":\"38-day requested-active limit; complete private tiles, internal burst waits, pulse padding and channel/capture tails may extend actual elapsed duration\"}"
        <<",\"whole_bit_symbol_burst\":{\"enabled\":"<<(o.symbol_burst_wait?"true":"false")<<",\"wait_useful_symbols\":"<<o.symbol_burst_wait
        <<",\"changes_inside_one_bit\":false,\"internal_wait_tiles\":"<<o.burst_wait_tiles
        <<",\"requested_earliest_support_epoch\":"<<o.epoch<<",\"useful_samples\":"<<calendar.useful_samples
@@ -645,15 +712,17 @@ void json_provenance(std::ostream& out,const Options& o,const Format& f,const Ge
     const auto oscillator_seed=o.oscillator_seed.value_or(o.channel_seed.value_or(o.seed))+trial;
     const auto noise_seed=o.noise_seed.value_or(o.channel_seed.value_or(o.seed))+trial;
     const auto frontend_seed=o.frontend_seed.value_or(o.channel_seed.value_or(o.seed))+trial;
+    const auto path_seed=o.path_seed.value_or(o.channel_seed.value_or(o.seed))+trial;
     out<<",\"duration_alternatives\":"<<o.duration_alternatives
        <<",\"false_admission_probability_per_horizon\":"<<o.false_probability
        <<",\"monitoring_horizon_seconds\":"<<o.horizon<<",\"attempt_spacing_seconds\":"<<o.attempt_spacing
        <<",\"random_seed_roots\":{\"channel\":"<<channel_seed<<",\"oscillator\":"<<oscillator_seed
-       <<",\"noise\":"<<noise_seed<<",\"frontend\":"<<frontend_seed
+       <<",\"noise\":"<<noise_seed<<",\"frontend\":"<<frontend_seed<<",\"path\":"<<path_seed
        <<",\"oscillator_explicit\":"<<(o.oscillator_seed?"true":"false")
        <<",\"noise_explicit\":"<<(o.noise_seed?"true":"false")
        <<",\"frontend_explicit\":"<<(o.frontend_seed?"true":"false")
-       <<",\"fallback\":\"unset oscillator/noise/frontend roots inherit the resolved channel seed\",\"channel_root_scope\":\"static timing/CFO/clock/drift truth, spread ray, and frequency-selective perturbation\",\"oscillator_root_scope\":\"TX/RX oscillator spectra and FHSS phase resets\",\"noise_root_scope\":\"thermal noise only\",\"frontend_root_scope\":\"DAC/ADC conversion, impulse process, and tone phase\"}"
+       <<",\"path_explicit\":"<<(o.path_seed?"true":"false")
+       <<",\"fallback\":\"unset oscillator/noise/frontend/path roots inherit the resolved channel seed\",\"channel_root_scope\":\"static timing/CFO/clock/drift truth, spread ray, and frequency-selective perturbation\",\"oscillator_root_scope\":\"TX/RX oscillator spectra and FHSS phase resets\",\"noise_root_scope\":\"thermal noise only\",\"frontend_root_scope\":\"DAC/ADC conversion, impulse process, and tone phase\",\"path_root_scope\":\"independent stationary ray OU gains and initial diurnal path phase\"}"
        <<",\"command_argv\":[";
     for(std::size_t i=0;i<o.command_argv.size();++i){if(i)out<<',';json_string(out,o.command_argv[i]);}
     out<<"],\"source_format\":{\"version\":3,\"inner_rate_hz\":"<<f.inner_rate_hz
@@ -676,9 +745,9 @@ void json_provenance(std::ostream& out,const Options& o,const Format& f,const Ge
        <<",\"flicker_bands\":"<<o.flicker_bands
        <<",\"sample_clock_reference\":";
     json_string(out,resolve_configuration(o).oscillators?"independent TX/RX endpoint errors; truth_clock_ppm reports their exact ratio":"RX0ppm; TX carries declared relative error");
-    out<<",\"physical_rf_retuning\":false}"
+    out<<",\"physical_rf_retuning\":false,\"path_evolution\":";json_path_evolution(out,o);out<<'}'
        <<",\"source_hash_note\":\"source and binary hashes must be bound externally to this uncommitted study build\"";
-    if(configured_physics(o)||o.truth_epoch_offset||o.nominal_if_hz!=1500){out<<",\"resolved_configuration\":";json_configuration(out,o,f,g);}
+    if(configured_physics(o)||path_evolution_active(o)||o.truth_epoch_offset||o.nominal_if_hz!=1500||f.sample_rate<64||o.seconds>7*86400.){out<<",\"resolved_configuration\":";json_configuration(out,o,f,g);}
     const auto& front=o.frontend;
     auto converter=[&](const ConverterConfig& c){
         out<<"{\"nominal_bits\":"<<c.nominal_bits<<",\"effective_bits\":"<<(c.effective_bits>0?c.effective_bits:c.nominal_bits)
@@ -705,6 +774,8 @@ void json_provenance(std::ostream& out,const Options& o,const Format& f,const Ge
 }
 
 void json_frontend_report(std::ostream& out,const StreamChannelReport& r) {
+    out<<",\"path_truth_simulation_only\":{\"diurnal_initial_phase_radians\":"<<r.path_diurnal_initial_phase_radians
+       <<",\"scope\":\"seeded physical truth; never a receiver search input\"}";
     out<<",\"frontend_report\":{\"dac_clipped_components\":"<<r.dac_clipped_components
        <<",\"adc_clipped_components\":"<<r.adc_clipped_components<<",\"impulse_events\":"<<r.impulse_events
        <<",\"overload_samples\":"<<r.overload_samples<<",\"maximum_adc_input_component\":"<<r.maximum_adc_input_component
@@ -857,7 +928,8 @@ std::size_t block_samples(const Options& o,const Format& f) {
 
 StreamChannelConfig channel_config(const Options& o,const Format& base,const Geometry& nominal,
                                    std::uint64_t seed,double noise,double pad,double trail) {
-    StreamChannelConfig channel_cfg; channel_cfg.frontend=o.frontend; channel_cfg.effects.sample_rate=base.sample_rate;
+    StreamChannelConfig channel_cfg; channel_cfg.frontend=o.frontend; channel_cfg.path_evolution=o.path_evolution;
+    channel_cfg.effects.sample_rate=base.sample_rate;
     channel_cfg.effects.occupied_bandwidth_hz=nominal.occupied_bandwidth_hz;
     channel_cfg.effects.rf_hz=o.rf_hz; channel_cfg.effects.nominal_conversion_if_hz=o.nominal_if_hz;
     channel_cfg.effects.seed=seed; channel_cfg.effects.signal_enabled=o.control!="null";
@@ -867,6 +939,7 @@ StreamChannelConfig channel_config(const Options& o,const Format& base,const Geo
     channel_cfg.oscillator_seed=o.oscillator_seed.value_or(channel_seed_base)+trial;
     channel_cfg.noise_seed=o.noise_seed.value_or(channel_seed_base)+trial;
     channel_cfg.frontend_seed=o.frontend_seed.value_or(channel_seed_base)+trial;
+    channel_cfg.path_seed=o.path_seed.value_or(channel_seed_base)+trial;
     channel_cfg.effects.capture_lead_seconds=pad;
     channel_cfg.effects.capture_trail_seconds=trail;
     channel_cfg.signal_gain=1; // PatternSource already divides total triplet power by three.
@@ -982,7 +1055,9 @@ ObservationCalendar observation_calendar(const Options& o,const Format& f,const 
     const long double end=resolved.active?
         (c.pad+std::max(0.,start_high)+delay+2+frontend_tail)*rx_max+source_seconds/slow:
         c.pad+std::max(0.,o.start_high)+source_seconds/slow+delay+2+frontend_tail;
-    if(!std::isfinite(end)||end>7*86400.L||end*f.sample_rate>UINT64_MAX)throw std::invalid_argument("public capture exceeds seven-day/coordinate study guard");
+    // The requested active span is capped separately. Complete private tiles,
+    // source pulse support and channel/capture tails can extend that span.
+    if(!std::isfinite(end)||end*f.sample_rate>UINT64_MAX)throw std::invalid_argument("public capture exceeds the coordinate study guard");
     c.samples=static_cast<std::uint64_t>(std::ceil(end*f.sample_rate));return c;
 }
 
@@ -1195,7 +1270,7 @@ void export_basis(const Options& o) {
     // This optional diagnostic label must not tell the detector hidden channel
     // truth. Only flat deterministic truth lying on the public grid gets one.
     // Independent interpolation and direct template evaluation may still differ.
-    if(!o.frontend.active()&&o.control=="signal"&&o.channel=="none"&&o.phase_diffusion==0&&o.white_fm==0&&o.random_walk_fm==0&&o.flicker_fm==0&&o.white_pm==0&&truth_clock(config)==0&&truth_drift(config)==0){
+    if(!o.frontend.active()&&!path_evolution_active(o)&&o.control=="signal"&&o.channel=="none"&&o.phase_diffusion==0&&o.white_fm==0&&o.random_walk_fm==0&&o.flicker_fm==0&&o.white_pm==0&&truth_clock(config)==0&&truth_drift(config)==0){
         for(std::size_t i=0;i<candidates.size();++i){const auto& c=candidates[i];
             if(c.source_bit==o.signal_bit&&c.epoch_offset_seconds==o.truth_epoch_offset&&c.clock_ppm==0&&c.frequency_drift_hz_per_second==0&&
                c.arrival_seconds==truth_arrival(config)&&c.frequency_hz==truth_frequency(config)&&c.channel.taps.size()==1){manifest<<",\"true_candidate_index\":"<<i<<",\"true_candidate_note\":\"nominal parameter match; sampled channel interpolation is independently evaluated\"";break;}}
@@ -1530,7 +1605,7 @@ int main(int argc,char** argv) {
         if(options.mode=="configure")print_configuration(options);
         else if(options.mode=="plan") print_plan(options);
         else {
-        if(configured_physics(options)){
+        if(configured_physics(options)||path_evolution_active(options)){
             const auto f=format_for(options);const auto g=geometry(f);
             if(configuration_capture_margin(options,f,g)<=0)
                 throw std::invalid_argument("configured RF/audio oscillator prior cannot fit the sampled baseband; inspect --mode configure or widen/coarsely acquire the RF capture before simulation");

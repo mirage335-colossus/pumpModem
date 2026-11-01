@@ -1,0 +1,110 @@
+test_default_power_and_noise_sweep_unit_conversions (tests.test_triad_link_budget.TriadLinkBudgetTests.test_default_power_and_noise_sweep_unit_conversions) ... ok
+test_finite_inputs_that_overflow_or_underflow_derived_values_fail_closed (tests.test_triad_link_budget.TriadLinkBudgetTests.test_finite_inputs_that_overflow_or_underflow_derived_values_fail_closed) ... ok
+test_fraction_scales_useful_duration_and_elapsed_time (tests.test_triad_link_budget.TriadLinkBudgetTests.test_fraction_scales_useful_duration_and_elapsed_time) ... ok
+test_invalid_inputs_rejected (tests.test_triad_link_budget.TriadLinkBudgetTests.test_invalid_inputs_rejected) ... ok
+test_known_waveform_probability_tail_and_family_count (tests.test_triad_link_budget.TriadLinkBudgetTests.test_known_waveform_probability_tail_and_family_count) ... ok
+test_tenfold_useful_duration_changes_energy_by_ten_db (tests.test_triad_link_budget.TriadLinkBudgetTests.test_tenfold_useful_duration_changes_energy_by_ten_db) ... ok
+test_actual_driver_smoke_and_no_overwrite (tests.test_triad_lowrate_campaign.LowRateCampaignTests.test_actual_driver_smoke_and_no_overwrite) ... ok
+test_campaign_term_forwards_to_runner_and_reaps_children (tests.test_triad_lowrate_campaign.LowRateCampaignTests.test_campaign_term_forwards_to_runner_and_reaps_children) ... ok
+test_cancel_before_worker_launch_is_not_an_attempt (tests.test_triad_lowrate_campaign.LowRateCampaignTests.test_cancel_before_worker_launch_is_not_an_attempt) ... ok
+test_configuration_bounds_fail_before_output_creation (tests.test_triad_lowrate_campaign.LowRateCampaignTests.test_configuration_bounds_fail_before_output_creation) ... ok
+test_declared_options_and_seeds_are_explicit (tests.test_triad_lowrate_campaign.LowRateCampaignTests.test_declared_options_and_seeds_are_explicit) ... ok
+test_failed_export_records_failure_and_stops_new_dispatch (tests.test_triad_lowrate_campaign.LowRateCampaignTests.test_failed_export_records_failure_and_stops_new_dispatch) ... ok
+test_receiver_basis_override_does_not_change_physical_preset (tests.test_triad_lowrate_campaign.LowRateCampaignTests.test_receiver_basis_override_does_not_change_physical_preset) ... ok
+test_sampled_controls_forward_without_changing_seed_identity (tests.test_triad_lowrate_campaign.LowRateCampaignTests.test_sampled_controls_forward_without_changing_seed_identity) ... ok
+test_seed_partition_pairing_and_independence (tests.test_triad_lowrate_campaign.LowRateCampaignTests.test_seed_partition_pairing_and_independence) ... ok
+test_timeout_reaps_fake_exporter_children (tests.test_triad_lowrate_campaign.LowRateCampaignTests.test_timeout_reaps_fake_exporter_children) ... ok
+test_all_finite_phase_paths_match_dense_gaussian_mixture (tests.test_triad_rbpf.RBPhaseTests.test_all_finite_phase_paths_match_dense_gaussian_mixture) ... ok
+test_covariance_is_observation_and_particle_independent (tests.test_triad_rbpf.RBPhaseTests.test_covariance_is_observation_and_particle_independent) ... ok
+test_erasure_advances_time_without_evidence_or_history_growth (tests.test_triad_rbpf.RBPhaseTests.test_erasure_advances_time_without_evidence_or_history_growth) ... ok
+test_fp32_bulk_retains_ranking_near_gate_and_long_recurrence (tests.test_triad_rbpf.RBPhaseTests.test_fp32_bulk_retains_ranking_near_gate_and_long_recurrence) ... ok
+test_frequency_initialization_zero_bound_single_particle_and_default (tests.test_triad_rbpf.RBPhaseTests.test_frequency_initialization_zero_bound_single_particle_and_default) ... ok
+test_integrated_random_walk_frequency_has_correct_covariance (tests.test_triad_rbpf.RBPhaseTests.test_integrated_random_walk_frequency_has_correct_covariance) ... ok
+test_likelihood_not_log_estimate_converges_with_resampling (tests.test_triad_rbpf.RBPhaseTests.test_likelihood_not_log_estimate_converges_with_resampling) ... ok
+test_memory_guard_covers_live_bulk_products_and_resampling_gather (tests.test_triad_rbpf.RBPhaseTests.test_memory_guard_covers_live_bulk_products_and_resampling_gather) ... ok
+test_resampling_reproducibility_and_normalized_empty_observations (tests.test_triad_rbpf.RBPhaseTests.test_resampling_reproducibility_and_normalized_empty_observations) ... ok
+test_singular_gram_invalid_inputs_and_allocation_guard (tests.test_triad_rbpf.RBPhaseTests.test_singular_gram_invalid_inputs_and_allocation_guard) ... ok
+test_stratified_cfo_likelihood_mean_matches_dense_continuous_prior (tests.test_triad_rbpf.RBPhaseTests.test_stratified_cfo_likelihood_mean_matches_dense_continuous_prior) ... ok
+test_stratified_frequency_strata_seed_weights_and_paired_rng (tests.test_triad_rbpf.RBPhaseTests.test_stratified_frequency_strata_seed_weights_and_paired_rng) ... ok
+test_zero_phase_matches_existing_gaussian_with_broadcast_and_independent_grams (tests.test_triad_rbpf.RBPhaseTests.test_zero_phase_matches_existing_gaussian_with_broadcast_and_independent_grams) ... ok
+test_memory_preflight_and_fresh_output (tests.test_triad_rbpf_benchmark.RBPFBenchmarkTests.test_memory_preflight_and_fresh_output) ... ok
+test_prepared_bank_is_identical_and_has_valid_joint_statistics (tests.test_triad_rbpf_benchmark.RBPFBenchmarkTests.test_prepared_bank_is_identical_and_has_valid_joint_statistics) ... ok
+test_tiny_cpu_run_records_stages_pairing_and_precision (tests.test_triad_rbpf_benchmark.RBPFBenchmarkTests.test_tiny_cpu_run_records_stages_pairing_and_precision) ... ok
+test_cli_validation_and_memory_failure_are_explicit (tests.test_triad_rbpf_study.RBStudyTests.test_cli_validation_and_memory_failure_are_explicit) ... ok
+test_cuda_initialization_precedes_allocator_peak_reset (tests.test_triad_rbpf_study.RBStudyTests.test_cuda_initialization_precedes_allocator_peak_reset) ... ok
+test_fp32_bulk_parity_diagnostics_and_bounded_retention (tests.test_triad_rbpf_study.RBStudyTests.test_fp32_bulk_parity_diagnostics_and_bounded_retention) ... ok
+test_no_truth_leakage_and_actual_only_file_reads (tests.test_triad_rbpf_study.RBStudyTests.test_no_truth_leakage_and_actual_only_file_reads) ... ok
+test_noise_failure_and_reception_categories_are_distinct (tests.test_triad_rbpf_study.RBStudyTests.test_noise_failure_and_reception_categories_are_distinct) ... ok
+test_normalized_acquisition_mixture_is_not_a_maximum (tests.test_triad_rbpf_study.RBStudyTests.test_normalized_acquisition_mixture_is_not_a_maximum) ... ok
+test_partial_last_block_and_zero_evidence_erasure_keep_physical_time (tests.test_triad_rbpf_study.RBStudyTests.test_partial_last_block_and_zero_evidence_erasure_keep_physical_time) ... ok
+test_ucb_reference_scaling_and_expanded_budget (tests.test_triad_rbpf_study.RBStudyTests.test_ucb_reference_scaling_and_expanded_budget) ... ok
+test_zero_phase_actual_adapter_matches_existing_gaussian_filter (tests.test_triad_rbpf_study.RBStudyTests.test_zero_phase_actual_adapter_matches_existing_gaussian_filter) ... ok
+test_calibration_once_and_truth_does_not_enter_decisions (tests.test_triad_rbpf_convergence.ConvergenceTests.test_calibration_once_and_truth_does_not_enter_decisions) ... ok
+test_identical_zero_phase_replicas_are_not_independent_physical_trials (tests.test_triad_rbpf_convergence.ConvergenceTests.test_identical_zero_phase_replicas_are_not_independent_physical_trials) ... ok
+test_likelihood_mean_and_variation_are_not_log_mean_or_maximum (tests.test_triad_rbpf_convergence.ConvergenceTests.test_likelihood_mean_and_variation_are_not_log_mean_or_maximum) ... ok
+test_memory_preflight_precedes_duration_sized_preparation (tests.test_triad_rbpf_convergence.ConvergenceTests.test_memory_preflight_precedes_duration_sized_preparation) ... ok
+test_paired_initializations_keep_iid_compatibility_and_frozen_replica_rows (tests.test_triad_rbpf_convergence.ConvergenceTests.test_paired_initializations_keep_iid_compatibility_and_frozen_replica_rows) ... ok
+test_preflight_covers_current_core_for_both_precisions_and_replica_counts (tests.test_triad_rbpf_convergence.ConvergenceTests.test_preflight_covers_current_core_for_both_precisions_and_replica_counts) ... ok
+test_rejected_resampling_replica_counts_and_duplicate_particle_counts (tests.test_triad_rbpf_convergence.ConvergenceTests.test_rejected_resampling_replica_counts_and_duplicate_particle_counts) ... ok
+test_single_replica_matches_actual_adapter_with_same_predeclared_seed (tests.test_triad_rbpf_convergence.ConvergenceTests.test_single_replica_matches_actual_adapter_with_same_predeclared_seed) ... ok
+test_zero_frequency_pair_and_likelihood_scale_overflow_representation (tests.test_triad_rbpf_convergence.ConvergenceTests.test_zero_frequency_pair_and_likelihood_scale_overflow_representation) ... ok
+test_driver_int_and_term_forward_and_stop_new_exports (tests.test_triad_sampling_refinement.RefinementLifecycleTests.test_driver_int_and_term_forward_and_stop_new_exports) ... ok
+test_success_requires_runner_cleanup_receipt (tests.test_triad_sampling_refinement.RefinementLifecycleTests.test_success_requires_runner_cleanup_receipt) ... ok
+test_timeout_reaps_term_ignoring_exporter_and_descendant (tests.test_triad_sampling_refinement.RefinementLifecycleTests.test_timeout_reaps_term_ignoring_exporter_and_descendant) ... ok
+test_actual_uses_explicit_reference_and_one_observation (tests.test_triad_noise_study.NoiseStudyTests.test_actual_uses_explicit_reference_and_one_observation) ... ok
+test_cli_reports_capture_errors_and_exits_nonzero (tests.test_triad_noise_study.NoiseStudyTests.test_cli_reports_capture_errors_and_exits_nonzero) ... ok
+test_configuration_infinity_encoding_is_recursive_and_keeps_invalid_values_rejected (tests.test_triad_noise_study.NoiseStudyTests.test_configuration_infinity_encoding_is_recursive_and_keeps_invalid_values_rejected) ... ok
+test_independent_path_masks_and_known_only_reserved_budget (tests.test_triad_noise_study.NoiseStudyTests.test_independent_path_masks_and_known_only_reserved_budget) ... ok
+test_joint_sampler_dense_raw_validation (tests.test_triad_noise_study.NoiseStudyTests.test_joint_sampler_dense_raw_validation) ... ok
+test_many_actual_paths_do_not_accumulate_mmap_descriptors (tests.test_triad_noise_study.NoiseStudyTests.test_many_actual_paths_do_not_accumulate_mmap_descriptors) ... ok
+test_mixed_tap_bank_selects_model_but_keeps_full_residual_bank (tests.test_triad_noise_study.NoiseStudyTests.test_mixed_tap_bank_selects_model_but_keeps_full_residual_bank) ... ok
+test_phase_frequency_model_is_explicit_and_static_gps_prior_is_available (tests.test_triad_noise_study.NoiseStudyTests.test_phase_frequency_model_is_explicit_and_static_gps_prior_is_available) ... ok
+test_piecewise_scale_skips_angular_instead_of_claiming_validity (tests.test_triad_noise_study.NoiseStudyTests.test_piecewise_scale_skips_angular_instead_of_claiming_validity) ... ok
+test_projected_paired_controls_and_path_independence_report (tests.test_triad_noise_study.NoiseStudyTests.test_projected_paired_controls_and_path_independence_report) ... ok
+test_rank_truncation_and_mixed_family_budget (tests.test_triad_noise_study.NoiseStudyTests.test_rank_truncation_and_mixed_family_budget) ... ok
+test_static_coherence_actual_report_is_strict_json_without_changing_prior (tests.test_triad_noise_study.NoiseStudyTests.test_static_coherence_actual_report_is_strict_json_without_changing_prior) ... ok
+test_stationary_pool_dense_gamma_and_deterministic_replay (tests.test_triad_noise_study.NoiseStudyTests.test_stationary_pool_dense_gamma_and_deterministic_replay) ... ok
+test_stationary_sensitivity_budget_and_variable_power_rejection (tests.test_triad_noise_study.NoiseStudyTests.test_stationary_sensitivity_budget_and_variable_power_rejection) ... usage: python -m unittest [-h] --output OUTPUT [--mode {actual,projected}]
+                          --cn0 CN0 [--reference-variance REFERENCE_VARIANCE]
+                          [--noise-scale NOISE_SCALE]
+                          [--noise-step-factor NOISE_STEP_FACTOR]
+                          [--noise-step-fraction NOISE_STEP_FRACTION]
+                          [--controls {signal,null} [{signal,null} ...]]
+                          [--trials TRIALS] [--seed SEED]
+                          [--split {development,calibration,holdout}]
+                          [--device DEVICE] [--precision {fp32,fp64}]
+                          [--threads THREADS] [--memory-gib MEMORY_GIB]
+                          [--tile-blocks TILE_BLOCKS]
+                          [--methods {gaussian-ou,angular-gaussian,residual-ucb,phase-frequency,phase-frequency-ucb} [{gaussian-ou,angular-gaussian,residual-ucb,phase-frequency,phase-frequency-ucb} ...]]
+                          [--coherences COHERENCES [COHERENCES ...]]
+                          [--taps {1,2}] [--phase-states PHASE_STATES]
+                          [--relative-phase-states RELATIVE_PHASE_STATES]
+                          [--frequency-bound FREQUENCY_BOUND]
+                          [--frequency-step FREQUENCY_STEP]
+                          [--frequency-model {ou,static,random_walk}]
+                          [--frequency-std FREQUENCY_STD]
+                          [--frequency-coherence FREQUENCY_COHERENCE]
+                          [--frequency-random-walk FREQUENCY_RANDOM_WALK]
+                          [--phase-diffusion PHASE_DIFFUSION]
+                          [--phase-implementation {reference,optimized,graph,graph-fp64}]
+                          [--false-probability FALSE_PROBABILITY]
+                          [--horizon-seconds HORIZON_SECONDS]
+                          [--attempt-spacing ATTEMPT_SPACING]
+                          [--duration-alternatives DURATION_ALTERNATIVES]
+                          [--selection-methods SELECTION_METHODS]
+                          [--calibration-scope {per-block,stationary}]
+                          [--calibration-alternatives CALIBRATION_ALTERNATIVES]
+                          [--projection-validation-trials PROJECTION_VALIDATION_TRIALS]
+                          inputs [inputs ...]
+python -m unittest: error: stationary UCB calibration cannot pool a nonconstant projected noise-step schedule
+ok
+
+----------------------------------------------------------------------
+Ran 67 tests in 5.201s
+
+OK
+/tmp/triad-lowrate-campaign-v5rlg9ha/result/campaign.json
+/tmp/triad-lowrate-campaign-nnp5bkcq/result/campaign.json
+/tmp/triad-lowrate-campaign-8vx6q6ei/result/campaign.json
+/tmp/triad-lowrate-campaign-ke4x8ocl/result/campaign.json
+{"attempted_capture_records": 2, "completed_capture_records": 1, "failed_capture_records": 1, "failed_records_are_excluded_from_reception_denominators": true, "output": "/tmp/tmpj8grabt6/with-error.json", "scores": "with-error.scores.npz", "wall_seconds_joint": 0.0019064890075242147}

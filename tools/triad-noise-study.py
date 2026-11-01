@@ -31,6 +31,21 @@ METHODS = ("gaussian-ou", "angular-gaussian", "residual-ucb",
 SPLIT_SALT = {"development": 0x444556, "calibration": 0x43414C, "holdout": 0x484F4C44}
 
 
+def _json_model_parameters(value):
+    """Encode positive infinite model durations as the JSON string 'infinity'.
+
+    Apply only to declared configuration, leaving numeric DSP state untouched.
+    NaN/negative infinity and invalid score values still fail strict JSON output.
+    """
+    if isinstance(value, dict):
+        return {key: _json_model_parameters(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_model_parameters(item) for item in value]
+    if isinstance(value, float) and value == math.inf:
+        return "infinity"
+    return value
+
+
 def _sha256(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as stream:
@@ -947,9 +962,9 @@ def run(args) -> dict:
         "schema": "triad-noise-study-v1",
         "created_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "scope": "independent block-workspace likelihood comparison; projected statistics validated against dense raw Gaussian samples; not field qualification",
-        "configuration": {key: ("infinity" if isinstance(value, float) and math.isinf(value) else value)
-                           for key, value in vars(args).items()
-                           if key not in ("inputs", "output", "memory_limit_bytes")},
+        "configuration": _json_model_parameters({
+            key: value for key, value in vars(args).items()
+            if key not in ("inputs", "output", "memory_limit_bytes")}),
         "inputs": [{"path": str(w.directory), "manifest_sha256": _sha256(w.manifest_path),
                     "hashes": _file_hashes(w)} for w in workspaces],
         "path_independence": {"rule": "unique workspaces; duplicate exported channel_seed/key_seed/epoch identities rejected when available",

@@ -1,0 +1,236 @@
+{
+  "scope": "SIMULATION ORACLE: hidden means/energies evaluate retained information only",
+  "probability_scope": "Presence admission for the specified true-signal model only; no competing bit, timing, epoch, or model likelihood is simulated. These probabilities do not establish correct-bit reception or wrong-bit admission rates.",
+  "noise_variance_source": "manifest simulation oracle, not receiver noise estimation",
+  "source_sha256": {
+    "benchmark_math.py": "bacf1b9cd6577c7fb5136f31e1acc7e4ec70de5f6a532c044ca9f1cab8080ba3",
+    "day_frequency_diagnostic.py": "ceab65e0c6ee71e8161672347c5b45712b62c4d03d1200af6a7b589069126a42",
+    "day_oracle_diagnostic.py": "e0121aac948b4975038c231108fd515f145103b64f186e2d60fc2ecca9425eb5",
+    "ou_bound_diagnostic.py": "99fc05a66b23a6b10677b9e0a6445f7e181df4faa6a068d14a5334cbdbf089e3",
+    "ou_bound_validation.py": "b27b938fc7e7761305f7e6c839c60b6153465e01483a4c695048bb7b41bde6d6"
+  },
+  "input_sha256": {
+    "manifest.json": "4f2709ea545b319df1c046d5a46332fa5a0f1353e4d75cddc1563452360f3700",
+    "gram.c128": "0a4f7e246dc88a409c84a4206e0d600319c97dedd13e20d48e0211c66995c922",
+    "mean.c128": "d6ef0451611660ecce7bbeff23faa0c67ff8efd518aff8c80b20c83f6f1ba232",
+    "observation.c128": "3260464732c244966d622dfe02b341ec7b5d0250bd5263c9e29b1a9b415eb446",
+    "signal_energy.f64": "7503610bccaea9b958dc64ed672c4f0213462082e3694da09576ed3f06a0e0e0"
+  },
+  "actual_energy_snr": 23.835874305848105,
+  "actual_energy_snr_db": 13.772310865857536,
+  "sampled_seconds": 98678.0,
+  "requested_seconds": 86400,
+  "actual_elapsed_seconds": 96002.40000000001,
+  "nominal_payload_energy_seconds_lower": 64000.00000000001,
+  "physical_spread": {
+    "spread_delay_ms": 0.005,
+    "spread_doppler_hz": 0.001,
+    "perturbation_slow_depth": 0,
+    "perturbation_fast_depth": 0,
+    "nominal_conversion_if_hz": 1500,
+    "signal_gain": 1,
+    "rf_hz": 8270,
+    "flicker_tau_seconds": [
+      0.1,
+      86400
+    ],
+    "flicker_bands": 12,
+    "sample_clock_reference": "independent TX/RX endpoint errors; truth_clock_ppm reports their exact ratio",
+    "physical_rf_retuning": false,
+    "path_evolution": {
+      "active": false,
+      "ray_coherence_seconds": 0,
+      "diurnal_phase_amplitude_radians": 0,
+      "diurnal_period_seconds": 86400,
+      "maximum_diurnal_instantaneous_frequency_hz": 0,
+      "outage_start_seconds": -1,
+      "outage_end_seconds": -1,
+      "outage_gain": 0,
+      "outage_ramp_seconds": 60,
+      "time_coordinate": "physical RX time n/(Fs*rx_clock_scale)-capture_lead_seconds",
+      "ray_model": "independent stationary proper-complex OU gains: zero mean, unit mean power, correlation exp(-abs(dt)/coherence); existing equal-power two-ray delay and Doppler retained",
+      "outage_model": "signal-only attenuation on [start,end), with cosine descent/ascent inside the interval; thermal noise and path/filter state continue",
+      "scope": "declared physical-path stress, not field calibration; OU is point sampled and has an unbounded analog spectrum, so finite deterministic capture bounds are not a bandwidth guarantee and sampling-rate refinement is required"
+    }
+  },
+  "candidate_taps": [
+    {
+      "delay_seconds": 0,
+      "doppler_hz": 0
+    },
+    {
+      "delay_seconds": 0.0015,
+      "doppler_hz": 0.3
+    }
+  ],
+  "mismatch_note": "correct_bit names the bit only; exported 1.5ms/.3Hz ray mismatches physical 5us/.001Hz ray",
+  "projections": {
+    "full_bank": {
+      "blockwise_oracle_energy_snr": 12.528301852333305,
+      "blockwise_energy_fraction": 0.5256069775992862,
+      "blockwise_oracle_loglr_actual": 16.893700632676367,
+      "static_oracle_energy_snr": 11.964684278523457,
+      "static_energy_fraction": 0.5019612087645526,
+      "static_oracle_loglr_actual": 18.89823437303731,
+      "gram_eigenvalues": [
+        22.773134204959728,
+        22.77315198435697,
+        24.64326718480708,
+        24.64331021110598
+      ],
+      "fitted_static_tap_magnitude": [
+        0.7105795575459147,
+        0.010397516564469534,
+        6.698899939148316e-07,
+        9.892747965685288e-07
+      ],
+      "gaussian_logdet": 7.739459407642262,
+      "gaussian_actual_quadratic": 21.736586585833113,
+      "gaussian_actual_zero_cfo_loglr": 13.997127178190851,
+      "gaussian_signal_quadratic": 10.236701235844315,
+      "gaussian_expected_loglr_given_oracle_mean": 5.919137386617982
+    },
+    "correct_bit_mismatched_two_ray": {
+      "blockwise_oracle_energy_snr": 12.049653830051877,
+      "blockwise_energy_fraction": 0.5055259847168899,
+      "blockwise_oracle_loglr_actual": 18.226435641584683,
+      "static_oracle_energy_snr": 11.962125303079835,
+      "static_energy_fraction": 0.5018538506114265,
+      "static_oracle_loglr_actual": 18.741635076736003,
+      "gram_eigenvalues": [
+        23.70907734211221,
+        23.70908977245707
+      ],
+      "fitted_static_tap_magnitude": [
+        0.7103081373907795,
+        6.61686639565861e-07
+      ],
+      "gaussian_logdet": 5.107394389405369,
+      "gaussian_actual_quadratic": 19.567407112647988,
+      "gaussian_actual_zero_cfo_loglr": 14.46001272324262,
+      "gaussian_signal_quadratic": 11.031549518372023,
+      "gaussian_expected_loglr_given_oracle_mean": 7.768568097204613
+    },
+    "correct_bit_flat": {
+      "blockwise_oracle_energy_snr": 12.049639524643906,
+      "blockwise_energy_fraction": 0.5055253845539679,
+      "blockwise_oracle_loglr_actual": 18.232658845496307,
+      "static_oracle_energy_snr": 11.962125303069454,
+      "static_energy_fraction": 0.5018538506109911,
+      "static_oracle_loglr_actual": 18.74163316039308,
+      "gram_eigenvalues": [
+        23.709083558054786
+      ],
+      "fitted_static_tap_magnitude": [
+        0.7103081373908425
+      ],
+      "gaussian_logdet": 3.2071709314153267,
+      "gaussian_actual_quadratic": 19.508692094823406,
+      "gaussian_actual_zero_cfo_loglr": 16.30152116340808,
+      "gaussian_signal_quadratic": 11.478006769293646,
+      "gaussian_expected_loglr_given_oracle_mean": 9.23036489132741
+    },
+    "wrong_bit_mismatched_two_ray": {
+      "blockwise_oracle_energy_snr": 1.3576856478791974,
+      "blockwise_energy_fraction": 0.056959758658657246,
+      "blockwise_oracle_loglr_actual": 1.877611221589899,
+      "static_oracle_energy_snr": 0.012037670494090763,
+      "static_energy_fraction": 0.0005050232410034707,
+      "static_oracle_loglr_actual": 0.0957499442454274,
+      "gram_eigenvalues": [
+        23.70733300199777,
+        23.70736346866271
+      ],
+      "fitted_static_tap_magnitude": [
+        0.022533556156200882,
+        9.734102139303454e-07
+      ],
+      "gaussian_logdet": 5.107259388052819,
+      "gaussian_actual_quadratic": 3.919879420168636,
+      "gaussian_actual_zero_cfo_loglr": -1.187379967884183,
+      "gaussian_signal_quadratic": 0.011101154569728515,
+      "gaussian_expected_loglr_given_oracle_mean": -3.2517557678294806
+    }
+  },
+  "threshold": 21.653222759584384,
+  "alpha_per_score": 3.9457070707070573e-10,
+  "fixed_energy_presence_benchmarks": [
+    {
+      "target_presence_probability": 0.9,
+      "rank": 1,
+      "h1_model": "fixed total signal energy; orthogonal equal-energy basis columns",
+      "receiver_model": "proper Gaussian coefficient prior; H1 performance is conditional on fixed energy, not averaged over Gaussian fading",
+      "known_channel_NP_energy": 27.59240576374265,
+      "known_channel_fixed_evalue_energy": 31.88761625358295,
+      "unknown_gain_rank_gamma_NP_energy": 30.36029108815768,
+      "Gaussian_prior_receiver_fixed_energy_H1_fixed_evalue_energy": 35.47373727327621,
+      "ideal_seconds_at_minus36": 141223.49174822128,
+      "ideal_days_at_minus36": 1.6345311544933019,
+      "hypothetical_matched_day_energy_presence_probability": 0.41184491561279607,
+      "hypothetical_matched_half_energy_presence_probability": 0.01134336698553372,
+      "hypothetical_probability_note": "ideal matched models at these energies, not predictions for the mismatched actual Gram matrices"
+    },
+    {
+      "target_presence_probability": 0.9,
+      "rank": 2,
+      "h1_model": "fixed total signal energy; orthogonal equal-energy basis columns",
+      "receiver_model": "proper Gaussian coefficient prior; H1 performance is conditional on fixed energy, not averaged over Gaussian fading",
+      "known_channel_NP_energy": 27.59240576374265,
+      "known_channel_fixed_evalue_energy": 31.88761625358295,
+      "unknown_gain_rank_gamma_NP_energy": 33.139940663696464,
+      "Gaussian_prior_receiver_fixed_energy_H1_fixed_evalue_energy": 38.07464359265603,
+      "ideal_seconds_at_minus36": 151577.8863050514,
+      "ideal_days_at_minus36": 1.754373684086243,
+      "hypothetical_matched_day_energy_presence_probability": 0.3063872817313184,
+      "hypothetical_matched_half_energy_presence_probability": 0.004699205058241868,
+      "hypothetical_probability_note": "ideal matched models at these energies, not predictions for the mismatched actual Gram matrices"
+    },
+    {
+      "target_presence_probability": 0.99,
+      "rank": 1,
+      "h1_model": "fixed total signal energy; orthogonal equal-energy basis columns",
+      "receiver_model": "proper Gaussian coefficient prior; H1 performance is conditional on fixed energy, not averaged over Gaussian fading",
+      "known_channel_NP_energy": 35.89962946389015,
+      "known_channel_fixed_evalue_energy": 43.30268205322894,
+      "unknown_gain_rank_gamma_NP_energy": 39.08698475083478,
+      "Gaussian_prior_receiver_fixed_energy_H1_fixed_evalue_energy": 44.97011563673098,
+      "ideal_seconds_at_minus36": 179029.25495602557,
+      "ideal_days_at_minus36": 2.072097858287333,
+      "hypothetical_matched_day_energy_presence_probability": 0.41184491561279607,
+      "hypothetical_matched_half_energy_presence_probability": 0.01134336698553372,
+      "hypothetical_probability_note": "ideal matched models at these energies, not predictions for the mismatched actual Gram matrices"
+    },
+    {
+      "target_presence_probability": 0.99,
+      "rank": 2,
+      "h1_model": "fixed total signal energy; orthogonal equal-energy basis columns",
+      "receiver_model": "proper Gaussian coefficient prior; H1 performance is conditional on fixed energy, not averaged over Gaussian fading",
+      "known_channel_NP_energy": 35.89962946389015,
+      "known_channel_fixed_evalue_energy": 43.30268205322894,
+      "unknown_gain_rank_gamma_NP_energy": 42.30357230921056,
+      "Gaussian_prior_receiver_fixed_energy_H1_fixed_evalue_energy": 48.05239322154466,
+      "ideal_seconds_at_minus36": 191300.023037532,
+      "ideal_days_at_minus36": 2.214120637008472,
+      "hypothetical_matched_day_energy_presence_probability": 0.3063872817313184,
+      "hypothetical_matched_half_energy_presence_probability": 0.004699205058241868,
+      "hypothetical_probability_note": "ideal matched models at these energies, not predictions for the mismatched actual Gram matrices"
+    }
+  ],
+  "gaussian_static_fading_presence_benchmarks": [
+    {
+      "target_presence_probability": 0.9,
+      "h1_model": "two independent static proper Gaussian ray gains; averaged over fading and noise",
+      "rank": 2,
+      "mean_energy_snr": 111.8303806541138,
+      "ideal_days_at_minus36": 5.152832919459469
+    },
+    {
+      "target_presence_probability": 0.99,
+      "h1_model": "two independent static proper Gaussian ray gains; averaged over fading and noise",
+      "rank": 2,
+      "mean_energy_snr": 436.6660416199932,
+      "ideal_days_at_minus36": 20.120356748394816
+    }
+  ],
+  "known_retained_oracle_presence_probability_fixed_gate": 0.034157627982834386
+}

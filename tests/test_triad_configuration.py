@@ -41,7 +41,73 @@ def check(condition, message):
 
 
 def main():
+    low_rate = ("--rate", ".036", "--sample-rate", "1", "--rf-hz", "8270",
+                "--spread-preset", "sub9-best")
+    month = configure(*low_rate, "--seconds", "3283200")
+    check(month["capture"]["sub_64_hz_model"], "low-rate model scope omitted")
+    check("no high-rate integration/decimation equivalence" in month["capture"]["sampling_model_limits"],
+          "low-rate model claims unvalidated sample-rate equivalence")
+    near(month["duration"]["maximum_requested_active_seconds"], 3283200, "38-day request ceiling")
+    near(month["duration"]["requested_active_seconds"], 3283200, "38-day request lost")
+    check(month["duration"]["source_support_seconds"] > 3283200, "pulse/tile overhead was clipped to request ceiling")
+    near(month["spread_doppler_hz"], .001, "low-rate Doppler preset lost")
+    near(month["spread_delay_ms"], .005, "low-rate fractional delay lost")
+    near(month["perturbation_slow_depth"], .01, "low-rate selected perturbation lost")
+    invoke("--mode", "configure", *COMMON, *low_rate, "--seconds", "3283201", ok=False)
+    invoke("--mode", "configure", *COMMON, *low_rate, "--sample-rate", "1.5", ok=False)
+    invoke("--mode", "configure", *COMMON, *low_rate, "--rate", "3.6", ok=False)
+    for impairment in (("--fhss",), ("--dropout-ms", "10"), ("--white-fm", ".001"),
+                       ("--flicker-fm", ".001"), ("--random-walk-fm", ".001"),
+                       ("--white-pm", ".001"), ("--adc-bits", "16"),
+                       ("--rx-lowpass-hz", ".1")):
+        rejected = invoke("--mode", "configure", *COMMON, *low_rate, *impairment, ok=False)
+        check("sub-64-Hz" in rejected.stderr, f"low-rate impairment was not explicitly rejected: {impairment}")
+        if impairment != ("--fhss",):
+            check(not configure(*impairment)["capture"]["sub_64_hz_model"],
+                  "legacy 64-Hz impairment support changed")
+    check(configure("--sample-rate", "0")["capture"]["sample_rate_hz"] == 960,
+          "automatic legacy sample-rate selection changed")
     c = configure("--symbol-burst", "3", "--start", "-.09375", ".09375", ".03125")
+    path_off = c["path_evolution"]
+    check(not path_off["active"], "physical path stress is not off by default")
+    near(path_off["ray_coherence_seconds"], 0, "default ray coherence")
+    near(path_off["diurnal_phase_amplitude_radians"], 0, "default diurnal phase")
+    near(path_off["diurnal_period_seconds"], 86400, "default diurnal period")
+    check(path_off["outage_start_seconds"] == path_off["outage_end_seconds"] == -1,
+          "physical outage is not disabled by both default endpoints")
+    path_args = ("--ray-coherence-seconds", "1000", "--diurnal-phase-radians", "864",
+                 "--diurnal-period-seconds", "86400", "--outage-seconds", "100", "1000",
+                 "--outage-gain", ".1", "--outage-ramp-seconds", "60", "--path-seed", "99")
+    path_config = configure(*path_args)
+    path = path_config["path_evolution"]
+    check(path["active"], "explicit physical path controls were ignored")
+    near(path["ray_coherence_seconds"], 1000, "OU coherence")
+    near(path["maximum_diurnal_instantaneous_frequency_hz"], .01, "diurnal frequency derivative")
+    near(path_config["capture"]["deterministic_nyquist_margin_hz"],
+         c["capture"]["deterministic_nyquist_margin_hz"]-.02, "diurnal excursion missing from both capture edges")
+    check("unbounded analog spectrum" in path["scope"] and "refinement" in path["scope"],
+          "OU path spectrum qualification omitted")
+    near(path["outage_start_seconds"], 100, "physical outage start")
+    near(path["outage_end_seconds"], 1000, "physical outage end")
+    near(path["outage_gain"], .1, "physical outage attenuation")
+    near(path["outage_ramp_seconds"], 60, "physical outage ramps")
+    for invalid in (("--ray-coherence-seconds", "-1"), ("--diurnal-phase-radians", "-1"),
+                    ("--diurnal-period-seconds", "0"), ("--diurnal-period-seconds", "nan"),
+                    ("--diurnal-phase-radians", "1e308", "--diurnal-period-seconds", "1e-100"),
+                    ("--outage-seconds", "-1", "100"), ("--outage-seconds", "10", "10"),
+                    ("--outage-seconds", "10", "100"), ("--outage-gain", "1.1"),
+                    ("--outage-ramp-seconds", "-1"),
+                    ("--trials", "2", "--path-seed", str((1 << 64)-1))):
+        invoke("--mode", "configure", *COMMON, *invalid, ok=False)
+    for nonfinite in ("inf", "-inf", "nan"):
+        for option in ("--ray-coherence-seconds", "--diurnal-phase-radians",
+                       "--diurnal-period-seconds", "--outage-gain", "--outage-ramp-seconds"):
+            result = invoke("--mode", "configure", *COMMON, option, nonfinite, ok=False)
+            check(not rows(result), "nonfinite path scalar emitted configuration JSON")
+        for endpoints in ((nonfinite, "1000"), ("0", nonfinite)):
+            result = invoke("--mode", "configure", *COMMON, "--outage-seconds", *endpoints, ok=False)
+            check(not rows(result), "nonfinite outage endpoint emitted configuration JSON")
+    invoke("--mode", "plan", "--ray-coherence-seconds", "1000", ok=False)
     near(c["base_nominal_relative_bound_ppm"], .0001, "base relative accuracy")
     near(c["shift_nominal_relative_bound_ppm"], .0001, "RF relative accuracy")
     near(c["relative_phase_diffusion_rad_sqrt_s"], math.sqrt(2)*.5*math.pi/180, "combined relative phase")
@@ -101,6 +167,36 @@ def main():
         root = pathlib.Path(directory); impossible = root/"impossible"
         bad = invoke("--mode", "export-stats", *COMMON, "--shift-oscillator", "crystal", "--rf-hz", "5800000000", "--output", str(impossible), ok=False)
         check("cannot fit the sampled baseband" in bad.stderr and not impossible.exists(), "capture rejection came after sample generation")
+        diurnal_impossible = root/"diurnal-impossible"
+        bad = invoke("--mode", "export-stats", *COMMON, *low_rate,
+                     "--diurnal-phase-radians", "1", "--diurnal-period-seconds", "1",
+                     "--output", str(diurnal_impossible), ok=False)
+        check("cannot fit the sampled baseband" in bad.stderr and not diurnal_impossible.exists(),
+              "diurnal instantaneous frequency escaped capture preflight")
+        # CLI path seeds change the actual propagated samples while public
+        # templates and independent endpoint draws stay fixed.
+        path_outputs = []
+        for name, seed in (("path-a", "101"), ("path-b", "102")):
+            destination = root/name
+            invoke("--mode", "export-stats", *COMMON, "--phase-diffusion", "0",
+                   "--spread-preset", "none", "--selective-perturbation", "off",
+                   "--ray-coherence-seconds", "3", "--diurnal-phase-radians", ".1",
+                   "--diurnal-period-seconds", "100", "--path-seed", seed,
+                   "--block-seconds", "4", "--output", str(destination))
+            manifest = json.loads((destination/"manifest.json").read_text())
+            check(manifest["random_seed_roots"]["path"] == int(seed) and
+                  manifest["random_seed_roots"]["path_explicit"], "export path seed provenance lost")
+            near(manifest["channel_model"]["path_evolution"]["ray_coherence_seconds"], 3,
+                 "export path configuration differs from actual input")
+            phase = manifest["path_truth_simulation_only"]["diurnal_initial_phase_radians"]
+            check(0 <= phase <= 2*math.pi, "seeded diurnal truth missing or invalid")
+            path_outputs.append((destination, manifest))
+        check(path_outputs[0][1]["endpoint_truth"] == path_outputs[1][1]["endpoint_truth"],
+              "path seed changed independent endpoint truth")
+        check((path_outputs[0][0]/"gram.c128").read_bytes() == (path_outputs[1][0]/"gram.c128").read_bytes(),
+              "hidden path seed changed public templates")
+        check((path_outputs[0][0]/"mean.c128").read_bytes() != (path_outputs[1][0]/"mean.c128").read_bytes(),
+              "CLI path seed did not reach actual propagated samples")
         manifests = []
         for name, frequency in (("a", ("0", "0", "1")), ("b", ("-.01", ".01", ".01"))):
             destination = root/name

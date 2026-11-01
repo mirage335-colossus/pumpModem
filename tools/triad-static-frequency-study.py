@@ -27,6 +27,7 @@ from triad_noise_likelihood import FalseAdmissionBudget, variance_upper_confiden
 from triad_state_workspace import BlockWorkspace, WorkspaceError
 
 METHODS = ("static-frequency", "static-frequency-ucb")
+CONTROLS = ("signal", "null", "wrong-key")
 
 
 def sha256(path):
@@ -288,7 +289,7 @@ def run(args):
             if all(x is not None for x in identity):
                 if identity in seen:raise WorkspaceError("duplicate channel/key/epoch identity")
                 seen.add(identity)
-            if control not in ("signal","null"):raise WorkspaceError("only actual signal/null controls are supported")
+            if control not in CONTROLS:raise WorkspaceError("only actual signal/null/wrong-key controls are supported")
             if not ws.has_observation or not ws.has_received_energy:raise WorkspaceError("actual projections and actual received energy are required")
             if not ws.gaussian_projection_supported:raise WorkspaceError("sampled frontend does not support this Gaussian null")
             indices=[i for i,v in enumerate(ws.column_mapping) if len(v)==args.taps]
@@ -305,8 +306,10 @@ def run(args):
             if not math.isfinite(reference) or reference<=0:raise ValueError("reference variance is unresolved")
             t0=time.perf_counter();raw,projected,G,centers,upper,calibration=prepare(ws,mapping,reference,args.budget.delta_per_segment)
             preparation=time.perf_counter()-t0
-            truth=int(ws.manifest.get("signal_bit_simulation_truth",ws.manifest.get("signal_bit",0)))
-            if truth not in (0,1):raise WorkspaceError("evaluation truth bit must be binary")
+            truth=None
+            if control=="signal":
+                truth=int(ws.manifest.get("signal_bit_simulation_truth",ws.manifest.get("signal_bit",0)))
+                if truth not in (0,1):raise WorkspaceError("evaluation truth bit must be binary")
             for method in args.methods:
                 t0=time.perf_counter()
                 r,g=(projected/upper,G[1]/upper) if method.endswith("-ucb") else (raw,G[0])
@@ -336,11 +339,11 @@ def run(args):
     scores_path=args.output.with_suffix(".scores.npz");np.savez_compressed(scores_path,**arrays)
     configuration={k:v for k,v in vars(args).items() if k not in ("inputs","output","budget")}
     result={"schema":"triad-static-frequency-study-v1","source_sha256":sha256(__file__),"workspace_source_sha256":sha256(Path(__file__).with_name("triad_state_workspace.py")),"noise_likelihood_source_sha256":sha256(Path(__file__).with_name("triad_noise_likelihood.py")),"configuration":configuration,"family":args.budget.diagnostics(),"captures":captures,
-        "summary_by_control":{control:{method:summary(captures,method,control) for method in args.methods} for control in ("signal","null") if any(c["control"]==control for c in captures)},
+        "summary_by_control":{control:{method:summary(captures,method,control) for method in args.methods} for control in CONTROLS if any(c["control"]==control for c in captures)},
         "failed_physical_capture_records":sum(c["status"]!="completed" for c in captures),"scores_file":scores_path.name,"scores_sha256":sha256(scores_path),"wall_seconds_joint":time.perf_counter()-started,
         "host":{"python":platform.python_version(),"numpy":np.__version__,"torch":torch.__version__,"device":args.device,"threads":torch.get_num_threads()},
         "arithmetic":{"rank_residual_energy_gram_cholesky_whitening":"CPU FP64; whitening includes all retained block correlations","fft_gemm_bulk":args.precision,"phase_arguments":"FP64 then cast to bulk width","quadratic_and_evidence_reductions":"FP64","tf32_allowed":False},
-        "limitations":["static Gaussian tap coefficients and constant CFO, approximated as one common phase per exported block","actual observations only; one constant unknown white proper-complex noise variance for pooled UCB","frequency, timing, epoch and bit alternatives are normalized finite mixtures; no continuous-grid or arbitrary channel guarantee","K9 score family is separate from earlier K7 results unless their score gates are corrected; the shared calibration allocation does not depend on K","CPU preparation streams full-bank statistics; retained selected correlations and FFT workspace grow with observation length within the declared memory cap"]}
+        "limitations":["static Gaussian tap coefficients and constant CFO, approximated as one common phase per exported block","actual observations only; one constant unknown white proper-complex noise variance for pooled UCB","frequency, timing, epoch and bit alternatives are normalized finite mixtures; no continuous-grid or arbitrary channel guarantee","wrong-key signal admissions are empirical controls, not Gaussian noise-only null qualification; the Gaussian null bound does not cover wrong-key signals","K9 score family is separate from earlier K7 results unless their score gates are corrected; the shared calibration allocation does not depend on K","CPU preparation streams full-bank statistics; retained selected correlations and FFT workspace grow with observation length within the declared memory cap"]}
     if args.device.startswith("cuda"):result["cuda_memory"]={"maximum_allocated_bytes":torch.cuda.max_memory_allocated(args.device),"maximum_reserved_bytes":torch.cuda.max_memory_reserved(args.device)}
     args.output.write_text(json.dumps(result,indent=2,allow_nan=False)+"\n")
     return result

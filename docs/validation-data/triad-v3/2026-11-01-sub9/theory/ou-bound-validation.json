@@ -1,0 +1,209 @@
+{
+  "scope": "Independent ideal covariance-oracle H1 presence validation; not physical waveform or receiver validation",
+  "probability_scope": "Presence admission for the specified true-signal model only; no competing bit, timing, epoch, or model likelihood is simulated. These probabilities do not establish correct-bit reception or wrong-bit admission rates.",
+  "frequency_scenario_scope": "Hypothetical 0.22-dB scalar energy derating plus log(M) threshold cost. The derating is NOT a proved CFO-mismatch bound for stochastic OU covariance. The finite-mixture inequality L_mix >= L_matched/M holds only when an exactly matched component is present. This scenario is not a demonstrated or conservative continuous-CFO acquisition bound.",
+  "source_sha256": {
+    "benchmark_math.py": "bacf1b9cd6577c7fb5136f31e1acc7e4ec70de5f6a532c044ca9f1cab8080ba3",
+    "day_frequency_diagnostic.py": "ceab65e0c6ee71e8161672347c5b45712b62c4d03d1200af6a7b589069126a42",
+    "day_oracle_diagnostic.py": "e0121aac948b4975038c231108fd515f145103b64f186e2d60fc2ecca9425eb5",
+    "ou_bound_diagnostic.py": "99fc05a66b23a6b10677b9e0a6445f7e181df4faa6a068d14a5334cbdbf089e3",
+    "ou_bound_validation.py": "b27b938fc7e7761305f7e6c839c60b6153465e01483a4c695048bb7b41bde6d6"
+  },
+  "targets_sha256": "a181d9651f6b77545165849be105eb1edf76741fbe07948f8e82df417eaccaef",
+  "seed": 7719284,
+  "modes": 1536,
+  "results": [
+    {
+      "tc_seconds": 10000.0,
+      "target_presence_probability": 0.9,
+      "days": 5.63679365756277,
+      "frequency_bins": 1,
+      "hypothetical_energy_derating_db": 0,
+      "independent_validation_trials": 100000,
+      "presence_admissions": 90072,
+      "presence_probability_estimate": 0.90072,
+      "pointwise_95_interval": [
+        0.8988499414736368,
+        0.9025667798030979
+      ],
+      "discrete_minus_exact_logdet": -0.013906000173733446,
+      "q01": 11.208045334761302
+    },
+    {
+      "tc_seconds": 10000.0,
+      "target_presence_probability": 0.9,
+      "days": 6.550759040478027,
+      "frequency_bins": 11,
+      "hypothetical_energy_derating_db": 0.22,
+      "independent_validation_trials": 100000,
+      "presence_admissions": 90036,
+      "presence_probability_estimate": 0.90036,
+      "pointwise_95_interval": [
+        0.898486965892086,
+        0.9022097764309357
+      ],
+      "discrete_minus_exact_logdet": -0.020044418392373586,
+      "q01": 13.148860147875698
+    },
+    {
+      "tc_seconds": 10000.0,
+      "target_presence_probability": 0.99,
+      "days": 8.15472422664985,
+      "frequency_bins": 1,
+      "hypothetical_energy_derating_db": 0,
+      "independent_validation_trials": 100000,
+      "presence_admissions": 99069,
+      "presence_probability_estimate": 0.99069,
+      "pointwise_95_interval": [
+        0.9900753074562749,
+        0.9912759736473996
+      ],
+      "discrete_minus_exact_logdet": -0.04192577267976105,
+      "q01": 22.005917540942022
+    },
+    {
+      "tc_seconds": 10000.0,
+      "target_presence_probability": 0.99,
+      "days": 9.33566538638711,
+      "frequency_bins": 11,
+      "hypothetical_energy_derating_db": 0.22,
+      "independent_validation_trials": 100000,
+      "presence_admissions": 99071,
+      "presence_probability_estimate": 0.99071,
+      "pointwise_95_interval": [
+        0.9900959402775511,
+        0.99129533932134
+      ],
+      "discrete_minus_exact_logdet": -0.05780185917083713,
+      "q01": 24.403150575508906
+    },
+    {
+      "tc_seconds": 100000.0,
+      "target_presence_probability": 0.9,
+      "days": 3.8647645711050354,
+      "frequency_bins": 1,
+      "hypothetical_energy_derating_db": 0,
+      "independent_validation_trials": 100000,
+      "presence_admissions": 90073,
+      "presence_probability_estimate": 0.90073,
+      "pointwise_95_interval": [
+        0.8988600242356956,
+        0.9025766964564058
+      ],
+      "discrete_minus_exact_logdet": -0.0001820628549502601,
+      "q01": 6.792777550534314
+    },
+    {
+      "tc_seconds": 100000.0,
+      "target_presence_probability": 0.9,
+      "days": 4.287694413491639,
+      "frequency_bins": 7,
+      "hypothetical_energy_derating_db": 0.22,
+      "independent_validation_trials": 100000,
+      "presence_admissions": 90092,
+      "presence_probability_estimate": 0.90092,
+      "pointwise_95_interval": [
+        0.89905159781665,
+        0.9027651117672691
+      ],
+      "discrete_minus_exact_logdet": -0.00022808833382370608,
+      "q01": 8.089205112879322
+    },
+    {
+      "tc_seconds": 100000.0,
+      "target_presence_probability": 0.99,
+      "days": 6.189516238660484,
+      "frequency_bins": 1,
+      "hypothetical_energy_derating_db": 0,
+      "independent_validation_trials": 100000,
+      "presence_admissions": 98982,
+      "presence_probability_estimate": 0.98982,
+      "pointwise_95_interval": [
+        0.989178427181071,
+        0.9904329183885354
+      ],
+      "discrete_minus_exact_logdet": -0.0007174422735687358,
+      "q01": 21.527784552967695
+    },
+    {
+      "tc_seconds": 100000.0,
+      "target_presence_probability": 0.99,
+      "days": 6.815681877407464,
+      "frequency_bins": 11,
+      "hypothetical_energy_derating_db": 0.22,
+      "independent_validation_trials": 100000,
+      "presence_admissions": 98970,
+      "presence_probability_estimate": 0.9897,
+      "pointwise_95_interval": [
+        0.9890548139446789,
+        0.9903165403770507
+      ],
+      "discrete_minus_exact_logdet": -0.0008821269521916975,
+      "q01": 23.83016201851207
+    },
+    {
+      "tc_seconds": 1000000.0,
+      "target_presence_probability": 0.9,
+      "days": 4.834739177223708,
+      "frequency_bins": 1,
+      "hypothetical_energy_derating_db": 0,
+      "independent_validation_trials": 100000,
+      "presence_admissions": 89935,
+      "presence_probability_estimate": 0.89935,
+      "pointwise_95_interval": [
+        0.8974686575084609,
+        0.9012081438557942
+      ],
+      "discrete_minus_exact_logdet": -1.432236550691357e-05,
+      "q01": 2.472531318176815
+    },
+    {
+      "tc_seconds": 1000000.0,
+      "target_presence_probability": 0.9,
+      "days": 5.355325103979687,
+      "frequency_bins": 7,
+      "hypothetical_energy_derating_db": 0.22,
+      "independent_validation_trials": 100000,
+      "presence_admissions": 89938,
+      "presence_probability_estimate": 0.89938,
+      "pointwise_95_interval": [
+        0.8974989034520204,
+        0.901237896158646
+      ],
+      "discrete_minus_exact_logdet": -1.7636227511275138e-05,
+      "q01": 3.3549786415532385
+    },
+    {
+      "tc_seconds": 1000000.0,
+      "target_presence_probability": 0.99,
+      "days": 9.831062167598743,
+      "frequency_bins": 1,
+      "hypothetical_energy_derating_db": 0,
+      "independent_validation_trials": 100000,
+      "presence_admissions": 99019,
+      "presence_probability_estimate": 0.99019,
+      "pointwise_95_interval": [
+        0.9895597084221267,
+        0.9907916099575288
+      ],
+      "discrete_minus_exact_logdet": -0.00010291334042022982,
+      "q01": 21.84730942179619
+    },
+    {
+      "tc_seconds": 1000000.0,
+      "target_presence_probability": 0.99,
+      "days": 10.70296143155286,
+      "frequency_bins": 11,
+      "hypothetical_energy_derating_db": 0.22,
+      "independent_validation_trials": 100000,
+      "presence_admissions": 99019,
+      "presence_probability_estimate": 0.99019,
+      "pointwise_95_interval": [
+        0.9895597084221267,
+        0.9907916099575288
+      ],
+      "discrete_minus_exact_logdet": -0.00012182623790479852,
+      "q01": 24.24973471793875
+    }
+  ]
+}

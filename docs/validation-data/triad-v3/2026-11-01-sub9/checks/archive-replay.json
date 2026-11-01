@@ -1,0 +1,18 @@
+{
+  "scope": "Full archive extraction and independent recount/integrity replay; does not regenerate omitted waveform arrays",
+  "archive_sha256": "453072fb232c38855e06344d8fc48acdecce18a052427ac1f5c0974fc36822a9",
+  "checks": [
+    {
+      "check": "analysis",
+      "exit_code": 0,
+      "byte_identical": true,
+      "sha256": "22bbbaceb75d9d9b8e88ab584bfefe426cfb87c366ddbf435949d8e3b64c9a31"
+    },
+    {
+      "check": "retained-array-hashes",
+      "exit_code": 0,
+      "byte_identical": true,
+      "sha256": "bdf8ea30152e52842b8d29611487ee29c993d86112a215461267ecc630385926"
+    }
+  ]
+}

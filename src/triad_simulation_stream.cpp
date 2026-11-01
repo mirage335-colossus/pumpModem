@@ -77,6 +77,28 @@ void validate_frontend(const SampledFrontendConfig& f, double sample_rate) {
             "overload recovery needs an enabled ADC range");
 }
 
+void validate_path_evolution(const PathEvolutionConfig& p) {
+    require(finite_nonnegative(p.ray_coherence_seconds) &&
+            finite_nonnegative(p.diurnal_phase_amplitude_radians) &&
+            std::isfinite(p.diurnal_period_seconds) && p.diurnal_period_seconds > 0 &&
+            std::isfinite(p.outage_start_seconds) && std::isfinite(p.outage_end_seconds) &&
+            std::isfinite(p.outage_gain) && p.outage_gain >= 0 && p.outage_gain <= 1 &&
+            finite_nonnegative(p.outage_ramp_seconds), "invalid physical-path evolution");
+    const bool outage_off = p.outage_start_seconds == -1 && p.outage_end_seconds == -1;
+    require(outage_off || (p.outage_start_seconds >= 0 && p.outage_end_seconds > p.outage_start_seconds &&
+            p.outage_ramp_seconds <= (p.outage_end_seconds-p.outage_start_seconds)*.5),
+            "physical-path outage needs ordered endpoints and ramps within its interval");
+}
+
+double outage_gain(const PathEvolutionConfig& p, long double seconds) {
+    if (p.outage_start_seconds < 0 || seconds < p.outage_start_seconds || seconds >= p.outage_end_seconds)
+        return 1;
+    if (p.outage_ramp_seconds == 0) return p.outage_gain;
+    const auto edge = std::min(seconds-p.outage_start_seconds, p.outage_end_seconds-seconds);
+    const double fraction = std::min(1., static_cast<double>(edge/p.outage_ramp_seconds));
+    return 1-(1-p.outage_gain)*.5*(1-std::cos(std::numbers::pi*fraction));
+}
+
 Complex convert(Complex value, const ConverterConfig& c, Rng& rng,
                 std::uint64_t& clipped) {
     value *= c.gain;
@@ -281,6 +303,16 @@ StreamChannelConfig checked_config(const StreamChannelConfig& cfg, const Format&
     validate_spectrum(cfg.tx_spectrum);
     validate_spectrum(cfg.rx_spectrum);
     validate_frontend(cfg.frontend, cfg.effects.sample_rate*(1+cfg.effects.rx.audio_ppm*1e-6));
+    validate_path_evolution(cfg.path_evolution);
+    if (format.sample_rate < 64) {
+        const auto fast_spectrum = [](const OscillatorSpectrum& s) {
+            return s.white_fm_hz_sqrt_seconds != 0 || s.random_walk_fm_hz_per_sqrt_second != 0 ||
+                s.flicker_fm_rms_hz != 0 || s.white_pm_rms_radians != 0;
+        };
+        require(!format.fhss && !cfg.effects.fhss && cfg.effects.dropout_ms == 0 && !cfg.effects.slow_agc &&
+                !cfg.frontend.active() && !fast_spectrum(cfg.tx_spectrum) && !fast_spectrum(cfg.rx_spectrum),
+                "sample rates below 64 Hz require FHSS/dropout/AGC/frontend/FM spectra/white PM off; refinement remains required");
+    }
     return cfg;
 }
 
@@ -301,6 +333,9 @@ struct StreamingChannel::Impl {
     Rng tx_rng, rx_rng, thermal_rng;
     Rng tx_spectrum_rng, rx_spectrum_rng;
     Rng dac_rng, adc_rng, interference_rng;
+    Rng path_rng;
+    Complex direct_gain{1,0}, delayed_gain{1,0};
+    double path_gain_decay = 1, path_gain_innovation = 0;
     std::unique_ptr<SpreadRay> spread;
     std::unique_ptr<FrequencySelectivePerturbation> perturbation;
     std::vector<long double> hop_prefix;
@@ -320,7 +355,8 @@ struct StreamingChannel::Impl {
           rx_spectrum_rng(root_seed(cfg.oscillator_seed,cfg.effects.seed) ^ 0x9e37a202ULL),
           dac_rng(root_seed(cfg.frontend_seed,cfg.effects.seed) ^ 0x444143434f4e5631ULL),
           adc_rng(root_seed(cfg.frontend_seed,cfg.effects.seed) ^ 0x414443434f4e5631ULL),
-          interference_rng(root_seed(cfg.frontend_seed,cfg.effects.seed) ^ 0x494e544552464531ULL) {
+          interference_rng(root_seed(cfg.frontend_seed,cfg.effects.seed) ^ 0x494e544552464531ULL),
+          path_rng(root_seed(cfg.path_seed,cfg.effects.seed) ^ 0x504154484741494eULL) {
         validate_effects(effects, format);
         validate_spectrum(config.tx_spectrum);
         validate_spectrum(config.rx_spectrum);
@@ -401,7 +437,8 @@ struct StreamingChannel::Impl {
                 (std::abs(effects.tx.audio_ppm) + std::abs(effects.rx.audio_ppm)) * 1e-6 +
             std::abs(effects.static_doppler_hz) +
             (spread_enabled ? effects.spread_doppler_hz : 0) +
-            (perturb_enabled ? effects.spread_doppler_hz : 0);
+            (perturb_enabled ? effects.spread_doppler_hz : 0) +
+            config.path_evolution.diurnal_phase_amplitude_radians/config.path_evolution.diurnal_period_seconds;
         require(std::isfinite(cfo_bound) &&
                 effects.sample_rate * rx_scale > effects.occupied_bandwidth_hz * tx_scale + 2 * cfo_bound,
                 "stream channel sample clock aliases the deterministic oscillator and baseband offset");
@@ -431,6 +468,18 @@ struct StreamingChannel::Impl {
             effects.perturbation_fast_depth, effects.seed ^ 0x3254494154504552ULL);
         initialize_spectrum(tx_osc, config.tx_spectrum, tx_spectrum_rng);
         initialize_spectrum(rx_osc, config.rx_spectrum, rx_spectrum_rng);
+        if (config.path_evolution.ray_coherence_seconds > 0) {
+            path_gain_decay = std::exp(-dt_rx/config.path_evolution.ray_coherence_seconds);
+            path_gain_innovation = std::sqrt(-std::expm1(-2*dt_rx/config.path_evolution.ray_coherence_seconds)*.5);
+            constexpr double scale = .7071067811865475244;
+            const double direct_real = path_rng.gaussian(), direct_imag = path_rng.gaussian();
+            const double delayed_real = path_rng.gaussian(), delayed_imag = path_rng.gaussian();
+            direct_gain = scale*Complex{direct_real,direct_imag};
+            delayed_gain = scale*Complex{delayed_real,delayed_imag};
+        }
+        if (config.path_evolution.diurnal_phase_amplitude_radians > 0)
+            stats.path_diurnal_initial_phase_radians = keyed_phase(root_seed(config.path_seed,effects.seed), 0,
+                                                                  0x5041544844495552ULL);
         hop_prefix.assign(prefix_count, 0);
         for (std::size_t i = 0; effects.fhss && i < effects.hop_offsets_hz.size(); ++i)
             hop_prefix[i + 1] = hop_prefix[i] + effects.hop_offsets_hz[i];
@@ -524,7 +573,26 @@ struct StreamingChannel::Impl {
         delayed *= std::polar(1.0, delayed_phase);
         delayed *= std::polar(1.0, -tau * std::remainder(effects.rf_hz *
             effects.spread_delay_ms * .001, 1.0));
+        if (config.path_evolution.ray_coherence_seconds > 0) {
+            direct *= direct_gain;
+            delayed *= delayed_gain;
+            // Use stationary initial gains on the first row, then advance by
+            // the exact OU endpoint transition for the physical RX sample dt.
+            // Independent draws and updates persist even through source silence.
+            const double direct_real = path_rng.gaussian(), direct_imag = path_rng.gaussian();
+            const double delayed_real = path_rng.gaussian(), delayed_imag = path_rng.gaussian();
+            direct_gain = path_gain_decay*direct_gain + path_gain_innovation*Complex{direct_real,direct_imag};
+            delayed_gain = path_gain_decay*delayed_gain + path_gain_innovation*Complex{delayed_real,delayed_imag};
+        }
         Complex propagated = spread ? spread->process(direct, delayed) : direct;
+        const auto& path = config.path_evolution;
+        if (path.diurnal_phase_amplitude_radians > 0) {
+            const auto cycles = std::remainder(physical_time/path.diurnal_period_seconds, 1.L);
+            const double angle = path.diurnal_phase_amplitude_radians*std::sin(
+                tau*static_cast<double>(cycles)+stats.path_diurnal_initial_phase_radians);
+            propagated *= std::polar(1., angle);
+        }
+        if (path.outage_start_seconds >= 0) propagated *= outage_gain(path, physical_time);
         if (perturbation) propagated = perturbation->process(propagated);
 
         const auto rx_dwell = dwell_index(receive_calendar, effects.dwell_seconds);

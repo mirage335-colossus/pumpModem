@@ -1,0 +1,427 @@
+{
+  "scope": "Ideal mathematical presence benchmark; no sampled-waveform or receiver-performance claim",
+  "probability_scope": "Presence admission for the specified true-signal model only; no competing bit, timing, epoch, or model likelihood is simulated. These probabilities do not establish correct-bit reception or wrong-bit admission rates.",
+  "source_sha256": {
+    "benchmark_math.py": "bacf1b9cd6577c7fb5136f31e1acc7e4ec70de5f6a532c044ca9f1cab8080ba3",
+    "day_frequency_diagnostic.py": "ceab65e0c6ee71e8161672347c5b45712b62c4d03d1200af6a7b589069126a42",
+    "day_oracle_diagnostic.py": "e0121aac948b4975038c231108fd515f145103b64f186e2d60fc2ecca9425eb5",
+    "ou_bound_diagnostic.py": "99fc05a66b23a6b10677b9e0a6445f7e181df4faa6a068d14a5334cbdbf089e3",
+    "ou_bound_validation.py": "b27b938fc7e7761305f7e6c839c60b6153465e01483a4c695048bb7b41bde6d6"
+  },
+  "cn0_db_hz": -36.0,
+  "gate": 21.653222759584384,
+  "seed": 926183,
+  "eigenmode_count": 768,
+  "sample_count": 50000,
+  "targets": [
+    {
+      "tc_seconds": 10000.0,
+      "target_presence_probability": 0.9,
+      "ideal_seconds": 487018.9720134234,
+      "ideal_days": 5.63679365756277,
+      "threshold": 21.653222759584384,
+      "frequency_grid_bins": 1,
+      "frequency_penalty_model": "known common CFO and phase",
+      "hypothetical_energy_derating_db": 0,
+      "sample_count": 50000,
+      "presence_admissions": 45000,
+      "descriptive_pointwise_95_interval": [
+        0.897337165526753,
+        0.9026162936635779
+      ],
+      "exact_logdet_two_rays": 85.32526836801635,
+      "discrete_minus_exact_logdet": -0.05556243458350707,
+      "KL_expected": 37.008366400809834,
+      "variance_H1_exact": 152.066705285331,
+      "relative_discrete_variance_error": 0.001367876901704479,
+      "scope": "Fitted H1 presence quantile of an ideal covariance oracle; reused draws make these intervals descriptive, not independent validation",
+      "probability_scope": "Presence admission for the specified true-signal model only; no competing bit, timing, epoch, or model likelihood is simulated. These probabilities do not establish correct-bit reception or wrong-bit admission rates."
+    },
+    {
+      "tc_seconds": 10000.0,
+      "target_presence_probability": 0.9,
+      "ideal_seconds": 565985.5810973016,
+      "ideal_days": 6.550759040478027,
+      "threshold": 24.051118032382753,
+      "frequency_grid_bins": 11,
+      "frequency_penalty_model": "Hypothetical 0.22-dB scalar energy derating plus log(M) threshold cost. The derating is NOT a proved CFO-mismatch bound for stochastic OU covariance. The finite-mixture inequality L_mix >= L_matched/M holds only when an exactly matched component is present. This scenario is not a demonstrated or conservative continuous-CFO acquisition bound.",
+      "hypothetical_energy_derating_db": 0.22,
+      "sample_count": 50000,
+      "presence_admissions": 45000,
+      "descriptive_pointwise_95_interval": [
+        0.897337165526753,
+        0.9026162936635779
+      ],
+      "exact_logdet_two_rays": 95.33687528590035,
+      "discrete_minus_exact_logdet": -0.08006268263631,
+      "KL_expected": 39.809800365130414,
+      "variance_H1_exact": 159.92696780316754,
+      "relative_discrete_variance_error": 0.0018419614490707836,
+      "scope": "Fitted H1 presence quantile of an ideal covariance oracle; reused draws make these intervals descriptive, not independent validation",
+      "probability_scope": "Presence admission for the specified true-signal model only; no competing bit, timing, epoch, or model likelihood is simulated. These probabilities do not establish correct-bit reception or wrong-bit admission rates."
+    },
+    {
+      "tc_seconds": 10000.0,
+      "target_presence_probability": 0.99,
+      "ideal_seconds": 704568.1731825471,
+      "ideal_days": 8.15472422664985,
+      "threshold": 21.653222759584384,
+      "frequency_grid_bins": 1,
+      "frequency_penalty_model": "known common CFO and phase",
+      "hypothetical_energy_derating_db": 0,
+      "sample_count": 50000,
+      "presence_admissions": 49500,
+      "descriptive_pointwise_95_interval": [
+        0.9890888261006515,
+        0.9908535895109171
+      ],
+      "exact_logdet_two_rays": 123.35298982975863,
+      "discrete_minus_exact_logdet": -0.1673165361881246,
+      "KL_expected": 53.62653359931454,
+      "variance_H1_exact": 220.69883841705982,
+      "relative_discrete_variance_error": 0.002843933587361791,
+      "scope": "Fitted H1 presence quantile of an ideal covariance oracle; reused draws make these intervals descriptive, not independent validation",
+      "probability_scope": "Presence admission for the specified true-signal model only; no competing bit, timing, epoch, or model likelihood is simulated. These probabilities do not establish correct-bit reception or wrong-bit admission rates."
+    },
+    {
+      "tc_seconds": 10000.0,
+      "target_presence_probability": 0.99,
+      "ideal_seconds": 806601.4893838463,
+      "ideal_days": 9.33566538638711,
+      "threshold": 24.051118032382753,
+      "frequency_grid_bins": 11,
+      "frequency_penalty_model": "Hypothetical 0.22-dB scalar energy derating plus log(M) threshold cost. The derating is NOT a proved CFO-mismatch bound for stochastic OU covariance. The finite-mixture inequality L_mix >= L_matched/M holds only when an exactly matched component is present. This scenario is not a demonstrated or conservative continuous-CFO acquisition bound.",
+      "hypothetical_energy_derating_db": 0.22,
+      "sample_count": 50000,
+      "presence_admissions": 49500,
+      "descriptive_pointwise_95_interval": [
+        0.9890888261006515,
+        0.9908535895109171
+      ],
+      "exact_logdet_two_rays": 135.78925999736012,
+      "discrete_minus_exact_logdet": -0.23053732011149464,
+      "KL_expected": 56.81195371917201,
+      "variance_H1_exact": 228.52226492685193,
+      "relative_discrete_variance_error": 0.0037199370147511512,
+      "scope": "Fitted H1 presence quantile of an ideal covariance oracle; reused draws make these intervals descriptive, not independent validation",
+      "probability_scope": "Presence admission for the specified true-signal model only; no competing bit, timing, epoch, or model likelihood is simulated. These probabilities do not establish correct-bit reception or wrong-bit admission rates."
+    },
+    {
+      "tc_seconds": 100000.0,
+      "target_presence_probability": 0.9,
+      "ideal_seconds": 333915.65894347505,
+      "ideal_days": 3.8647645711050354,
+      "threshold": 21.653222759584384,
+      "frequency_grid_bins": 1,
+      "frequency_penalty_model": "known common CFO and phase",
+      "hypothetical_energy_derating_db": 0,
+      "sample_count": 50000,
+      "presence_admissions": 45000,
+      "descriptive_pointwise_95_interval": [
+        0.897337165526753,
+        0.9026162936635779
+      ],
+      "exact_logdet_two_rays": 28.657180854530754,
+      "discrete_minus_exact_logdet": -0.000728222508428189,
+      "KL_expected": 55.21864044233878,
+      "variance_H1_exact": 895.8917711172217,
+      "relative_discrete_variance_error": 8.517357028114958e-06,
+      "scope": "Fitted H1 presence quantile of an ideal covariance oracle; reused draws make these intervals descriptive, not independent validation",
+      "probability_scope": "Presence admission for the specified true-signal model only; no competing bit, timing, epoch, or model likelihood is simulated. These probabilities do not establish correct-bit reception or wrong-bit admission rates."
+    },
+    {
+      "tc_seconds": 100000.0,
+      "target_presence_probability": 0.9,
+      "ideal_seconds": 370456.79732567765,
+      "ideal_days": 4.287694413491639,
+      "threshold": 23.599132908639696,
+      "frequency_grid_bins": 7,
+      "frequency_penalty_model": "Hypothetical 0.22-dB scalar energy derating plus log(M) threshold cost. The derating is NOT a proved CFO-mismatch bound for stochastic OU covariance. The finite-mixture inequality L_mix >= L_matched/M holds only when an exactly matched component is present. This scenario is not a demonstrated or conservative continuous-CFO acquisition bound.",
+      "hypothetical_energy_derating_db": 0.22,
+      "sample_count": 50000,
+      "presence_admissions": 45000,
+      "descriptive_pointwise_95_interval": [
+        0.897337165526753,
+        0.9026162936635779
+      ],
+      "exact_logdet_two_rays": 30.718442296942023,
+      "discrete_minus_exact_logdet": -0.0009123115492393197,
+      "KL_expected": 57.73964975167129,
+      "variance_H1_exact": 913.6514194671464,
+      "relative_discrete_variance_error": 1.017433636341103e-05,
+      "scope": "Fitted H1 presence quantile of an ideal covariance oracle; reused draws make these intervals descriptive, not independent validation",
+      "probability_scope": "Presence admission for the specified true-signal model only; no competing bit, timing, epoch, or model likelihood is simulated. These probabilities do not establish correct-bit reception or wrong-bit admission rates."
+    },
+    {
+      "tc_seconds": 100000.0,
+      "target_presence_probability": 0.99,
+      "ideal_seconds": 534774.2030202658,
+      "ideal_days": 6.189516238660484,
+      "threshold": 21.653222759584384,
+      "frequency_grid_bins": 1,
+      "frequency_penalty_model": "known common CFO and phase",
+      "hypothetical_energy_derating_db": 0,
+      "sample_count": 50000,
+      "presence_admissions": 49500,
+      "descriptive_pointwise_95_interval": [
+        0.9890888261006515,
+        0.9908535895109171
+      ],
+      "exact_logdet_two_rays": 45.17041185181641,
+      "discrete_minus_exact_logdet": -0.0028694559192459224,
+      "KL_expected": 89.15879459697906,
+      "variance_H1_exact": 1529.362791370391,
+      "relative_discrete_variance_error": 1.9495870296148965e-05,
+      "scope": "Fitted H1 presence quantile of an ideal covariance oracle; reused draws make these intervals descriptive, not independent validation",
+      "probability_scope": "Presence admission for the specified true-signal model only; no competing bit, timing, epoch, or model likelihood is simulated. These probabilities do not establish correct-bit reception or wrong-bit admission rates."
+    },
+    {
+      "tc_seconds": 100000.0,
+      "target_presence_probability": 0.99,
+      "ideal_seconds": 588874.9142080048,
+      "ideal_days": 6.815681877407464,
+      "threshold": 24.051118032382753,
+      "frequency_grid_bins": 11,
+      "frequency_penalty_model": "Hypothetical 0.22-dB scalar energy derating plus log(M) threshold cost. The derating is NOT a proved CFO-mismatch bound for stochastic OU covariance. The finite-mixture inequality L_mix >= L_matched/M holds only when an exactly matched component is present. This scenario is not a demonstrated or conservative continuous-CFO acquisition bound.",
+      "hypothetical_energy_derating_db": 0.22,
+      "sample_count": 50000,
+      "presence_admissions": 49500,
+      "descriptive_pointwise_95_interval": [
+        0.9890888261006515,
+        0.9908535895109171
+      ],
+      "exact_logdet_two_rays": 48.138581857673984,
+      "discrete_minus_exact_logdet": -0.0035280646926594272,
+      "KL_expected": 92.47363457936632,
+      "variance_H1_exact": 1536.237210599599,
+      "relative_discrete_variance_error": 2.323421225680633e-05,
+      "scope": "Fitted H1 presence quantile of an ideal covariance oracle; reused draws make these intervals descriptive, not independent validation",
+      "probability_scope": "Presence admission for the specified true-signal model only; no competing bit, timing, epoch, or model likelihood is simulated. These probabilities do not establish correct-bit reception or wrong-bit admission rates."
+    },
+    {
+      "tc_seconds": 1000000.0,
+      "target_presence_probability": 0.9,
+      "ideal_seconds": 417721.46491212834,
+      "ideal_days": 4.834739177223708,
+      "threshold": 21.653222759584384,
+      "frequency_grid_bins": 1,
+      "frequency_penalty_model": "known common CFO and phase",
+      "hypothetical_energy_derating_db": 0,
+      "sample_count": 50000,
+      "presence_admissions": 45000,
+      "descriptive_pointwise_95_interval": [
+        0.897337165526753,
+        0.9026162936635779
+      ],
+      "exact_logdet_two_rays": 15.43362087639528,
+      "discrete_minus_exact_logdet": -5.72705174608501e-05,
+      "KL_expected": 89.49326710991274,
+      "variance_H1_exact": 4245.16426632936,
+      "relative_discrete_variance_error": 5.136828400420512e-07,
+      "scope": "Fitted H1 presence quantile of an ideal covariance oracle; reused draws make these intervals descriptive, not independent validation",
+      "probability_scope": "Presence admission for the specified true-signal model only; no competing bit, timing, epoch, or model likelihood is simulated. These probabilities do not establish correct-bit reception or wrong-bit admission rates."
+    },
+    {
+      "tc_seconds": 1000000.0,
+      "target_presence_probability": 0.9,
+      "ideal_seconds": 462700.08898384497,
+      "ideal_days": 5.355325103979687,
+      "threshold": 23.599132908639696,
+      "frequency_grid_bins": 7,
+      "frequency_penalty_model": "Hypothetical 0.22-dB scalar energy derating plus log(M) threshold cost. The derating is NOT a proved CFO-mismatch bound for stochastic OU covariance. The finite-mixture inequality L_mix >= L_matched/M holds only when an exactly matched component is present. This scenario is not a demonstrated or conservative continuous-CFO acquisition bound.",
+      "hypothetical_energy_derating_db": 0.22,
+      "sample_count": 50000,
+      "presence_admissions": 45000,
+      "descriptive_pointwise_95_interval": [
+        0.897337165526753,
+        0.9026162936635779
+      ],
+      "exact_logdet_two_rays": 16.36175438687254,
+      "discrete_minus_exact_logdet": -7.054323863187051e-05,
+      "KL_expected": 94.12229492118306,
+      "variance_H1_exact": 4586.58593492956,
+      "relative_discrete_variance_error": 5.767581183757642e-07,
+      "scope": "Fitted H1 presence quantile of an ideal covariance oracle; reused draws make these intervals descriptive, not independent validation",
+      "probability_scope": "Presence admission for the specified true-signal model only; no competing bit, timing, epoch, or model likelihood is simulated. These probabilities do not establish correct-bit reception or wrong-bit admission rates."
+    },
+    {
+      "tc_seconds": 1000000.0,
+      "target_presence_probability": 0.99,
+      "ideal_seconds": 849403.7712805314,
+      "ideal_days": 9.831062167598743,
+      "threshold": 21.653222759584384,
+      "frequency_grid_bins": 1,
+      "frequency_penalty_model": "known common CFO and phase",
+      "hypothetical_energy_derating_db": 0,
+      "sample_count": 50000,
+      "presence_admissions": 49500,
+      "descriptive_pointwise_95_interval": [
+        0.9890888261006515,
+        0.9908535895109171
+      ],
+      "exact_logdet_two_rays": 28.28087618378555,
+      "discrete_minus_exact_logdet": -0.00041162345730683114,
+      "KL_expected": 185.07970461147775,
+      "variance_H1_exact": 13908.019844342798,
+      "relative_discrete_variance_error": 1.1637020589372327e-06,
+      "scope": "Fitted H1 presence quantile of an ideal covariance oracle; reused draws make these intervals descriptive, not independent validation",
+      "probability_scope": "Presence admission for the specified true-signal model only; no competing bit, timing, epoch, or model likelihood is simulated. These probabilities do not establish correct-bit reception or wrong-bit admission rates."
+    },
+    {
+      "tc_seconds": 1000000.0,
+      "target_presence_probability": 0.99,
+      "ideal_seconds": 924735.8676861671,
+      "ideal_days": 10.70296143155286,
+      "threshold": 24.051118032382753,
+      "frequency_grid_bins": 11,
+      "frequency_penalty_model": "Hypothetical 0.22-dB scalar energy derating plus log(M) threshold cost. The derating is NOT a proved CFO-mismatch bound for stochastic OU covariance. The finite-mixture inequality L_mix >= L_matched/M holds only when an exactly matched component is present. This scenario is not a demonstrated or conservative continuous-CFO acquisition bound.",
+      "hypothetical_energy_derating_db": 0.22,
+      "sample_count": 50000,
+      "presence_admissions": 49500,
+      "descriptive_pointwise_95_interval": [
+        0.9890888261006515,
+        0.9908535895109171
+      ],
+      "exact_logdet_two_rays": 29.74680958263422,
+      "discrete_minus_exact_logdet": -0.0004873004972516526,
+      "KL_expected": 191.06266427491943,
+      "variance_H1_exact": 14350.920507487293,
+      "relative_discrete_variance_error": 1.2922777998802815e-06,
+      "scope": "Fitted H1 presence quantile of an ideal covariance oracle; reused draws make these intervals descriptive, not independent validation",
+      "probability_scope": "Presence admission for the specified true-signal model only; no competing bit, timing, epoch, or model likelihood is simulated. These probabilities do not establish correct-bit reception or wrong-bit admission rates."
+    }
+  ],
+  "original_coarse_38day_predictions": [
+    {
+      "tc_seconds": 10000.0,
+      "eigenmode_count": 768,
+      "sample_count": 50000,
+      "seed": 926183,
+      "days": 38,
+      "presence_admission_fraction": 1.0,
+      "loglr_percentiles": [
+        154.76537764299846,
+        175.5529351947928,
+        208.43168590811203,
+        250.4261397771748
+      ],
+      "relative_discrete_variance_error": 0.06037063502087525,
+      "status": "superseded by refined numerical summary; retained to expose the original discretization error"
+    },
+    {
+      "tc_seconds": 100000.0,
+      "eigenmode_count": 768,
+      "sample_count": 50000,
+      "seed": 926183,
+      "days": 38,
+      "presence_admission_fraction": 1.0,
+      "loglr_percentiles": [
+        291.3661688450186,
+        345.7214776139185,
+        428.82443083842657,
+        547.1824842054132
+      ],
+      "relative_discrete_variance_error": 0.0006279503282851095,
+      "status": "superseded by refined numerical summary; retained to expose the original discretization error"
+    },
+    {
+      "tc_seconds": 1000000.0,
+      "eigenmode_count": 768,
+      "sample_count": 50000,
+      "seed": 926183,
+      "days": 38,
+      "presence_admission_fraction": 1.0,
+      "loglr_percentiles": [
+        173.9201808413812,
+        243.49809570388186,
+        392.1262997270971,
+        674.3728334937748
+      ],
+      "relative_discrete_variance_error": 8.276946042773403e-06,
+      "status": "superseded by refined numerical summary; retained to expose the original discretization error"
+    }
+  ],
+  "refined_38day_predictions": [
+    {
+      "tc_seconds": 10000.0,
+      "days": 38,
+      "eigenmode_count": 3072,
+      "sample_count": 50000,
+      "seed": 926184,
+      "mean_loglr_exact": 250.60328465676685,
+      "presence_admissions_above_fixed_gate": 50000,
+      "presence_admission_fraction": 1.0,
+      "presence_one_sided_95_lower": 0.9999400871493754,
+      "presence_fraction_above_gate_plus_log_grid_count": 1.0,
+      "log_grid_count_scope": "exact mixture inequality only if a matched component is included; no continuous-CFO mismatch guarantee",
+      "loglr_percentiles": [
+        156.42392551991747,
+        177.99203906973707,
+        209.96124212233767,
+        250.1235059248662
+      ],
+      "discrete_minus_exact_logdet": -1.0498048986941058,
+      "relative_discrete_variance_error": 0.0038161224407737837,
+      "KL_rate_per_second_asymptotic": 7.63880865073169e-05,
+      "low_snr_scaling": "KL rate approaches C^2*tc/4 when C*tc << 1; present C*tc values are 2.51,25.12,251.19, outside that limit",
+      "probability_scope": "Presence admission for the specified true-signal model only; no competing bit, timing, epoch, or model likelihood is simulated. These probabilities do not establish correct-bit reception or wrong-bit admission rates."
+    },
+    {
+      "tc_seconds": 100000.0,
+      "days": 38,
+      "eigenmode_count": 3072,
+      "sample_count": 50000,
+      "seed": 926184,
+      "mean_loglr_exact": 553.5751611540295,
+      "presence_admissions_above_fixed_gate": 50000,
+      "presence_admission_fraction": 1.0,
+      "presence_one_sided_95_lower": 0.9999400871493754,
+      "presence_fraction_above_gate_plus_log_grid_count": 1.0,
+      "log_grid_count_scope": "exact mixture inequality only if a matched component is included; no continuous-CFO mismatch guarantee",
+      "loglr_percentiles": [
+        286.8571626350629,
+        344.33145757088835,
+        428.90609660114444,
+        547.1648763245134
+      ],
+      "discrete_minus_exact_logdet": -0.03904589427213523,
+      "relative_discrete_variance_error": 3.925155750117426e-05,
+      "KL_rate_per_second_asymptotic": 0.00016897540660089895,
+      "low_snr_scaling": "KL rate approaches C^2*tc/4 when C*tc << 1; present C*tc values are 2.51,25.12,251.19, outside that limit",
+      "probability_scope": "Presence admission for the specified true-signal model only; no competing bit, timing, epoch, or model likelihood is simulated. These probabilities do not establish correct-bit reception or wrong-bit admission rates."
+    },
+    {
+      "tc_seconds": 1000000.0,
+      "days": 38,
+      "eigenmode_count": 3072,
+      "sample_count": 50000,
+      "seed": 926184,
+      "mean_loglr_exact": 723.9897183436508,
+      "presence_admissions_above_fixed_gate": 50000,
+      "presence_admission_fraction": 1.0,
+      "presence_one_sided_95_lower": 0.9999400871493754,
+      "presence_fraction_above_gate_plus_log_grid_count": 1.0,
+      "log_grid_count_scope": "exact mixture inequality only if a matched component is included; no continuous-CFO mismatch guarantee",
+      "loglr_percentiles": [
+        167.54642723452997,
+        243.1300555154877,
+        394.0477310091497,
+        673.4623308772562
+      ],
+      "discrete_minus_exact_logdet": -0.0013047729702577726,
+      "relative_discrete_variance_error": 5.170869978865511e-07,
+      "KL_rate_per_second_asymptotic": 0.0002214277462397586,
+      "low_snr_scaling": "KL rate approaches C^2*tc/4 when C*tc << 1; present C*tc values are 2.51,25.12,251.19, outside that limit",
+      "probability_scope": "Presence admission for the specified true-signal model only; no competing bit, timing, epoch, or model likelihood is simulated. These probabilities do not establish correct-bit reception or wrong-bit admission rates."
+    }
+  ],
+  "assumptions": [
+    "two exactly orthogonal equal-power ray observation channels",
+    "known timing, epoch, delay/Doppler model and common phase",
+    "proper Gaussian stationary OU coefficients; known stationary white noise",
+    "continuous OU Fredholm determinant with point-sampled covariance eigenvalues",
+    "Hypothetical 0.22-dB scalar energy derating plus log(M) threshold cost. The derating is NOT a proved CFO-mismatch bound for stochastic OU covariance. The finite-mixture inequality L_mix >= L_matched/M holds only when an exactly matched component is present. This scenario is not a demonstrated or conservative continuous-CFO acquisition bound."
+  ],
+  "exact_formula": "E logLR = C*T - 2*logdet; logdet=-T/tc+log(cosh(z*T/tc)+(1+C*tc/2)/z*sinh(z*T/tc)), z=sqrt(1+C*tc)",
+  "variance_formula": "Var_H1 logLR=C^2/2*(T*tc-tc^2/2*(1-exp(-2*T/tc)))"
+}

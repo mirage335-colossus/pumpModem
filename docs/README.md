@@ -17,6 +17,11 @@ Current CPU control behavior and experimental GPU policies are kept distinct.
 The [GPU evidence map](validation-data/triad-v3/precision-controls/README.md)
 provides archived measurements, direct test logs and reproduction checks.
 
+For isolated extremely weak, long-duration three-carrier work, the
+[sub-9-kHz study](validation-data/triad-v3/2026-11-01-sub9/README.md) records
+sampled observations lasting up to 38 days, receiver comparisons and the
+limits of their model-conditional reception and false-admission claims.
+
 ## Topic map
 
 | Topic | Explore |

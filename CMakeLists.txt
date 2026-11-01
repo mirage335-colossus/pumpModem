@@ -1085,7 +1085,7 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
     set_tests_properties(triad_configuration PROPERTIES LABELS "triad" TIMEOUT 90)
     add_custom_target(test_triad_configuration DEPENDS triad_long)
     if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
-      foreach(_triad_python_test bounded_run diversity_export)
+      foreach(_triad_python_test bounded_run diversity_export lowrate_campaign)
         add_test(NAME triad_${_triad_python_test} COMMAND ${Python3_EXECUTABLE}
           ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_triad_${_triad_python_test}.py)
         set_tests_properties(triad_${_triad_python_test} PROPERTIES LABELS "triad" TIMEOUT 60)

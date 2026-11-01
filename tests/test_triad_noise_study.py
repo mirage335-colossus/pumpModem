@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import math
 import resource
 import sys
 import tempfile
@@ -88,6 +89,37 @@ def write_workspace(directory: Path, *, seed: int, observation: bool = False,
 
 
 class NoiseStudyTests(unittest.TestCase):
+    def test_static_coherence_actual_report_is_strict_json_without_changing_prior(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp)/"actual"; path.mkdir()
+            write_workspace(path, seed=30, observation=True)
+            output = Path(temp)/"static.json"
+            args = study._parse_args([
+                str(path), "--output", str(output), "--mode", "actual", "--cn0", "0",
+                "--reference-variance", "2", "--methods", "gaussian-ou", "residual-ucb",
+                "angular-gaussian", "--coherences", "10000", "100000", "1000000", "inf",
+                "--taps", "1", "--calibration-scope", "stationary",
+            ])
+            report = study.run(args)
+            self.assertEqual(args.coherences, [10000., 100000., 1000000., math.inf])
+            self.assertEqual(report["configuration"]["coherences"],
+                             [10000., 100000., 1000000., "infinity"])
+            self.assertEqual(json.loads(output.read_text()), report)
+            self.assertEqual(report["capture_outcomes"]["completed_capture_records"], 1)
+            self.assertEqual(report["capture_outcomes"]["failed_capture_records"], 0)
+            self.assertTrue(all(row["status"] == "scored"
+                                for row in report["captures"][0]["methods"].values()))
+            with np.load(output.with_suffix(".scores.npz")) as scores:
+                self.assertTrue(all(np.isfinite(scores[name]).all() for name in scores.files))
+
+    def test_configuration_infinity_encoding_is_recursive_and_keeps_invalid_values_rejected(self):
+        encoded = study._json_model_parameters({"prior": [1., {"coherence": (math.inf,)}]})
+        self.assertEqual(encoded, {"prior": [1., {"coherence": ["infinity"]}]})
+        json.dumps(encoded, allow_nan=False)
+        for invalid in (math.nan, -math.inf):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                json.dumps(study._json_model_parameters({"prior": [invalid]}), allow_nan=False)
+
     def test_phase_frequency_model_is_explicit_and_static_gps_prior_is_available(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp)/"path"; path.mkdir()

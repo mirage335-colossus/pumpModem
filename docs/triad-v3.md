@@ -27,6 +27,12 @@ independent seed controls and RTX5090/PRO/MIG measurements. It preserves complet
 search accounting and strict references; quantized operational admission remains
 unqualified.
 
+The [sub-9-kHz long-duration study](validation-data/triad-v3/2026-11-01-sub9/README.md)
+adds low-rate representation, sampled month-long observations, evolving-ray
+stress cases and conditional-channel phase-particle likelihoods. Its measured
+reception probabilities apply to the declared sampled models and acquisition
+conditions; the record separates these from ideal presence-detection bounds.
+
 Before changing arithmetic or relating these experiments to a precision
 dropdown, read the [precision-control experiment guide](gpu-precision-controls.md).
 It separates bulk computation, sensitive higher-precision operations, caching
@@ -92,8 +98,8 @@ masks for erasures. A short input remains incomplete; EOF does not turn an
 unscored interval into absence. The implementation is a synchronous study
 pipeline and does not yet provide a resumable transmission session, persisted
 receiver checkpoint, or operator-facing progress service for a multi-day bit.
-The maintained study has processed actual sequential sampled observations up
-to 172,871.2 seconds (two days) with duration-bounded workspace. One separate
+The initial validation record processed actual sequential sampled observations
+up to 172,871.2 seconds (two days) with duration-bounded workspace. One separate
 two-day flat-spread, colored-oscillator case processed 11,064,065 samples in
 55.308 seconds wall time on the recorded host. These are specific synthetic
 model results; four trials per long-duration operating point do not qualify
@@ -101,6 +107,59 @@ model results; four trials per long-duration operating point do not qualify
 guarantee. Multi-day checkpoint/restart and operational recovery remain
 unimplemented. See the [validation record](validation-data/triad-v3/2026-10-31/README.md)
 for conditions, counts, confidence limits and exclusions.
+
+### Low-rate and 38-day representation
+
+The CLI accepts a requested active duration through 38 days (`3,283,200 s`),
+and the generic planner's default maximum has the same value. Complete-tile
+rounding, pulse padding, burst waits and channel tails can make the actual
+elapsed capture longer. Reports distinguish these quantities. Source/sample
+addresses and tile crypto addresses use checked 64-bit coordinates; extending
+the requested duration does not allocate a full-duration waveform or reseed
+its epoch/key-addressed pattern. Range support alone does not establish a
+reception probability. The linked sub-9-kHz study records the measured cases;
+checkpoint/restart is not implemented.
+
+Explicit integer sample rates can be as low as 1 sample/s. Geometry still
+requires `Fs >= 4 × fine_rate` and `Fs > 1.1 × nominal_triplet_bandwidth`, plus
+the sampled channel's oscillator/capture checks. The CLI's automatic sample-rate
+choice is unchanged. Useful initial geometries with Added Symbols off are:
+
+| GUI-style Rate | Fine rate per carrier | Nominal triplet bandwidth | Explicit sample rate |
+| ---: | ---: | ---: | ---: |
+| 3.6 Hz | 0.6 Hz | 2.25 Hz | 4 Hz |
+| 0.36 Hz | 0.06 Hz | 0.225 Hz | 1 Hz |
+| 0.036 Hz | 0.006 Hz | 0.0225 Hz | 1 Hz |
+| 0.0036 Hz | 0.0006 Hz | 0.00225 Hz | 1 Hz |
+
+Below 64 samples/s, FHSS, millisecond dwell dropout, active sampled frontend,
+slow AGC, white/flicker/random-walk FM and white PM are rejected. Constant
+offsets, Wiener phase, fractional two-ray propagation, selected selective
+perturbation and the optional path evolution described below remain modeled.
+This is a point-sampled physical model, not an established high-rate
+integration/decimation equivalent. Compare physical-time-aligned waveforms,
+Grams and retained information at finer sampling rates before using it for a
+sensitivity claim. Equal RNG seeds at different sample rates do not create
+identical stochastic trajectories. The 400-ms source calendar and whole-cell
+interleave remain in force; unsupported 10-ms erasures are not silently dropped.
+
+The export limits remain explicit: at most 128 million samples and the selected
+disk budget (8 GiB by default). They can reject an export even when the bounded
+streaming geometry is representable. No public pilot or new repeating pattern
+structure is added by this range extension. At very low rates, Doppler sidebands
+can overlap adjacent carriers; retain the summed waveform and full Gram matrix
+rather than assume independent carrier observations.
+
+Physical channel presets and receiver tap hypotheses are separate controls.
+For a matched `sub9-best`, margin-1 experiment, explicitly supply
+`--basis two-ray --tap-delay-ms .005 --tap-doppler-hz .001`. Selecting
+`--spread-preset sub9-best` alone does **not** replace the receiver's older
+HF tap defaults. Deliberate tap mismatch is a separate experiment.
+
+[`tools/triad-lowrate-campaign.py`](../tools/triad-lowrate-campaign.py) generates
+independently seeded sampled exports with bounded jobs and cancellation. Its
+nominal-only timing bank is a diagnostic, not known alignment or complete
+acquisition. Declare the timing/epoch bank and all receiver alternatives used.
 
 ## Current receiver and search
 
@@ -140,6 +199,26 @@ shapes the source envelope only; it does not retune the simulated RF channel or
 validate real FHSS hardware. Oscillator white FM, random-walk FM, finite-band
 flicker FM, white PM and Wiener phase diffusion are synthetic spectra, not
 measurements or a device-specific Allan-deviation model.
+
+### Optional long-span path evolution
+
+`StreamChannelConfig.path_evolution` adds independent stationary proper-complex
+OU ray gains, common sinusoidal path phase and one finite signal outage to the
+isolated streaming channel. Defaults are off and preserve the earlier sample
+and RNG sequence. The [channel-model contract](channel-models.md#isolated-triad-long-span-path-evolution)
+defines their units, order, seed and time coordinate. CLI controls are
+`--ray-coherence-seconds`, `--diurnal-phase-radians`,
+`--diurnal-period-seconds`, `--outage-seconds START END`, `--outage-gain`,
+`--outage-ramp-seconds` and `--path-seed`.
+
+These are independently selected stress models. A 0.001-Hz separation of two
+fixed rays describes beating; it does not by itself set an OU coherence time.
+OU paths have unbounded spectral tails, so the deterministic capture check is
+not an analog bandwidth guarantee. GPSDO presets likewise remain declared
+simulation inputs over a long observation, not measured device behavior.
+NIST describes methods for evaluating actual GPSDO frequency/time uncertainty
+([Lombardi, 2016](https://www.nist.gov/publications/evaluating-frequency-and-time-uncertainty-gps-disciplined-oscillators-and-clocks));
+a preset name alone does not supply that evaluation for a month-long link.
 
 ### Optional sampled converters and interference
 
@@ -205,6 +284,36 @@ The default operational target is 99% correct reception and at most `1e-4`
 probability of any noise-only admission in 24 hours. The explicitly relaxed
 comparison is 90% correct reception and 1% per 12 hours. Both are configurable;
 the relaxed target is not substituted silently when the default fails.
+
+[`tools/triad-link-budget.py`](../tools/triad-link-budget.py) supplies a separate
+radiated-power budget and known-waveform detection reference. For 1 mW radiated
+power and 200 dB complete path loss, received power is `−200 dBm`; no antenna
+input-power or efficiency correction is applied. At 38 days and a useful
+full-power energy fraction of one, the explicit noise-density comparison is:
+
+| Receiver noise density | Total-triplet C/N₀ | Nominal available E/N₀ |
+| ---: | ---: | ---: |
+| −164 dBm/Hz | −36 dB-Hz | 29.163 dB |
+| −154 dBm/Hz | −46 dB-Hz | 19.163 dB |
+| −144 dBm/Hz | −56 dB-Hz | 9.163 dB |
+
+These energies use `E/N₀ = (C/N₀) × useful_seconds`; they do not predict
+unknown-channel reception. The script exposes the useful-energy fraction,
+noise density and family counts. Its default expanded study family is
+`K=11` methods, `D=4` durations and two bit hypotheses, with one scheduled
+attempt per minute and half the false-admission budget allocated to scores.
+This differs from the earlier measured `K=9/D=3` family. Its inverse duration
+assumes a completely known waveform, phase, alignment and channel; it is not
+the practical decoder's duration planner. Raising the generic planner's range
+does not establish retained-energy or channel-uncertainty bounds for the new
+path models.
+
+No noise density in this table is asserted to be typical below 9 kHz.
+[ITU-R P.372-18](https://www.itu.int/dms_pubrec/itu-r/rec/p/R-REC-P.372-18-202609-I!!SUM-HTM-E.htm)
+includes atmospheric and man-made radio noise as well as other sources.
+Site, time and receive-system noise measurements remain necessary for a
+physical link prediction; the current Gaussian null does not cover impulsive
+or colored environmental interference merely by changing `C/N₀`.
 
 These comparisons follow standard matched-subspace and separable least-squares
 results. Scharf and Friedlander derive finite-sample GLRT distributions and
@@ -415,6 +524,73 @@ nearly singular whitening and sensitive reductions use FP64. The Gaussian and
 phase/frequency bulk may use FP32 or FP64, but their accumulated log evidence is
 FP64; the FP32 CUDA path disables TF32 and lower-precision matrix multiply.
 FP64 reference comparisons remain important near an admission threshold.
+
+### Conditional Gaussian channel with phase particles
+
+[`triad_rbpf.py`](../tools/triad_rbpf.py) adds a bounded Rao–Blackwellized
+phase/frequency filter. Each particle represents a common oscillator trajectory
+and a conditional complex channel mean. Given its phase `φ`, the Gaussian
+update uses `exp(−jφ) r` with unchanged `G`; covariance, factorization and gain
+preparation are shared across particles. The channel coefficients apply to
+the complete summed three-carrier basis. This retains complex accumulation
+before likelihood multiplication and does not treat carrier pairs as
+independent evidence.
+
+The declared oscillator prior has a uniform initial CFO interval, optional
+Wiener phase and optional Brownian frequency. Frequency/phase increments use
+the jointly integrated Brownian transition. The initial CFO interval is not a
+hard bound on later random-walk trajectories. A circular Gaussian tap prior
+already marginalizes the constant common phase, so the particle phase starts
+at zero. Tap OU coherence and powers are independent prior parameters; do not
+duplicate a Doppler already represented in the public waveform basis.
+
+With resampling off, the score is a normalized mixture over a predeclared
+independent prior-path bank. With multinomial or systematic resampling, the
+likelihood estimate is nonnegative and unbiased over independent algorithm
+randomness under its declared model; its logarithm is not an unbiased log
+likelihood. A Markov null bound for adaptive resampling is joint over noise
+and algorithm randomness, not conditional on every fixed adaptive seed.
+Never select the best particle or seed while keeping the mixture's admission
+claim. Particle-count, block-length and sampling refinement, including
+effective-sample-size depletion, remain necessary sensitivity checks.
+
+The core also supports optional `frequency_initialization="stratified"`:
+one independent uniform jitter in each equal-width CFO stratum, with equal
+weights. It preserves the continuous prior in expectation and can reduce
+initial-frequency integration variance. IID initialization remains the default.
+[`triad-rbpf-convergence.py`](../tools/triad-rbpf-convergence.py) compares both
+choices on identical observations and paired algorithm randomness. Its
+replicas are numerical diagnostics, not additional independent transmissions;
+it reports likelihood averages and variability without selecting a best seed
+or qualifying an additional receiver family.
+
+[`triad-rbpf-study.py`](../tools/triad-rbpf-study.py) consumes actual noisy
+exported correlations, public full-bank Grams, received energy and physical
+intervals. `rbpf` requires a correct caller-declared white Gaussian noise
+variance; `rbpf-ucb` uses a pooled upper confidence bound from residuals
+orthogonal to the entire scored bank and assumes one constant unknown white
+proper-complex noise variance. Hidden signal means/energies and selected
+simulation truth do not enter scoring. Finite acquisition alternatives are
+normalized mixtures within each bit. The default `K=11/D=4` family includes
+these two methods; any further selected model, duration or receiver must be
+accounted for. Neither mode is an anytime stopping rule or a duration inverse.
+
+The adapter approximates common phase as constant inside each exported block,
+then advances state by physical block-center separation through erasures and
+the partial final block. It processes independent workspaces serially and
+batches candidates and particles within each filter. FP32 uses complex64 bulk
+particle means/products, with FP64 covariance solves, oscillator state and
+evidence reductions; FP64 widens the bulk too. TF32 is disabled. Report the
+memory estimate separately from framework/cache overhead and measured device
+usage. [`triad-rbpf-benchmark.py`](../tools/triad-rbpf-benchmark.py) compares
+identical predeclared phase banks across CPU/GPU and precisions; a kernel
+timing does not establish end-to-end sampled-receiver acceleration.
+
+The conditional-channel strategy has prior communication-system research,
+including [Kim, Pun and Iltis, MERL TR2010-095](https://www.merl.com/publications/docs/TR2010-095.pdf).
+That work studies CFO-conditioned channel estimation in MIMO-OFDMA; its
+pilot-assisted/semi-blind results are motivation, not performance evidence for
+this keyed one-way triad waveform.
 
 Likelihood mixtures and bank maxima have different null calibration. A
 normalized prior mixture retains its declared probability weights; under its

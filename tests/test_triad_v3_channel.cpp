@@ -526,6 +526,202 @@ void erasure_and_noise_checks() {
           "absolute complex noise variance does not match E|n|^2");
 }
 
+void path_evolution_deterministic_checks() {
+    auto f = fixture_format();
+    f.sample_rate = 1024;
+    StreamChannelConfig cfg;
+    cfg.effects.spread_delay_ms = 5;
+    cfg.effects.spread_doppler_hz = .1;
+    cfg.effects.perturbation_slow_depth = .01;
+    cfg.effects.perturbation_fast_depth = .01;
+    cfg.complex_noise_variance = .2;
+    const auto established = capture(73, cfg, f);
+    auto disabled = cfg;
+    disabled.path_seed = 719;
+    disabled.path_evolution.diurnal_period_seconds = 37;
+    disabled.path_evolution.outage_gain = .7;
+    disabled.path_evolution.outage_ramp_seconds = 9;
+    check(established == capture(257, disabled, f),
+          "disabled physical path changed established samples or RNG streams");
+
+    cfg.path_evolution.ray_coherence_seconds = .7;
+    cfg.path_evolution.diurnal_phase_amplitude_radians = .8;
+    cfg.path_evolution.diurnal_period_seconds = 1000;
+    cfg.path_evolution.outage_start_seconds = 2;
+    cfg.path_evolution.outage_end_seconds = 6;
+    cfg.path_evolution.outage_ramp_seconds = .5;
+    const auto evolving = capture(73, cfg, f);
+    cfg.path_seed = 0x13579bdf;
+    check(evolving == capture(4096, cfg, f),
+          "physical path seed inheritance or chunk continuity changed");
+    cfg.path_seed = 720;
+    check(evolving != capture(4096, cfg, f), "physical path seed did not change the channel");
+    cfg.effects.signal_enabled = false;
+    const auto noise = capture(73, cfg, f);
+    cfg.path_seed = 721;
+    check(noise == capture(4096, cfg, f),
+          "changing independent physical path seed altered thermal noise");
+
+    StreamChannelConfig flat;
+    flat.effects.noise_enabled = false;
+    flat.effects.capture_lead_seconds = .125;
+    const auto baseline = capture(127, flat, f);
+    auto phase = flat;
+    phase.path_seed = 602;
+    phase.path_evolution.diurnal_phase_amplitude_radians = .7;
+    phase.path_evolution.diurnal_period_seconds = 17;
+    StreamChannelReport report;
+    const auto rotated = capture(283, phase, f, &report);
+    constexpr double tau = 6.2831853071795864769;
+    for (std::size_t n = 0; n < baseline.size(); ++n) {
+        const double t = static_cast<double>(n)/f.sample_rate-flat.effects.capture_lead_seconds;
+        const double angle = .7*std::sin(tau*t/17+report.path_diurnal_initial_phase_radians);
+        check(std::abs(rotated[n]-baseline[n]*std::polar(1., angle)) < 2e-12 &&
+              std::abs(std::norm(rotated[n])-std::norm(baseline[n])) < 2e-12,
+              "diurnal phase changed amplitude or disagreed with physical time law");
+    }
+
+    auto outage = flat;
+    outage.path_evolution.outage_start_seconds = 4;
+    outage.path_evolution.outage_end_seconds = 8;
+    outage.path_evolution.outage_ramp_seconds = .5;
+    outage.path_evolution.outage_gain = .2;
+    const auto faded = capture(151, outage, f);
+    for (std::size_t n = 0; n < baseline.size(); ++n) {
+        const double t = static_cast<double>(n)/f.sample_rate-flat.effects.capture_lead_seconds;
+        double gain = 1;
+        if (t >= 4 && t < 8) {
+            const double edge = std::min(t-4, 8-t);
+            gain = edge >= .5 ? .2 : 1-.4*(1-std::cos(tau*edge));
+        }
+        check(std::abs(faded[n]-gain*baseline[n]) < 2e-12,
+              "signal outage did not obey the declared cosine ramp");
+    }
+    outage.effects.noise_enabled = true;
+    outage.complex_noise_variance = .1;
+    outage.noise_seed = 811;
+    outage.path_evolution.outage_gain = 0;
+    const auto lost_signal = capture(151, outage, f);
+    outage.effects.signal_enabled = false;
+    const auto noise_only = capture(293, outage, f);
+    std::size_t checked = 0;
+    for (std::size_t n = 0; n < lost_signal.size(); ++n) {
+        const double t = static_cast<double>(n)/f.sample_rate-flat.effects.capture_lead_seconds;
+        if (t >= 4.5 && t <= 7.5) {
+            check(lost_signal[n] == noise_only[n], "signal outage removed or altered thermal noise");
+            ++checked;
+        }
+    }
+    check(checked > 2000, "signal outage plateau diagnostic did not inspect enough samples");
+    check(std::any_of(noise_only.begin(), noise_only.end(), [](Complex z) { return std::norm(z) > 0; }),
+          "signal outage noise reference unexpectedly vanished");
+
+    auto uninterrupted = flat;
+    uninterrupted.path_evolution.ray_coherence_seconds = .8;
+    const auto continuous = capture(173, uninterrupted, f);
+    uninterrupted.path_evolution.outage_start_seconds = 4;
+    uninterrupted.path_evolution.outage_end_seconds = 8;
+    uninterrupted.path_evolution.outage_ramp_seconds = .5;
+    const auto interrupted = capture(307, uninterrupted, f);
+    for (std::size_t n = 0; n < continuous.size(); ++n) {
+        const double t = static_cast<double>(n)/f.sample_rate-flat.effects.capture_lead_seconds;
+        if (t >= 8) check(interrupted[n] == continuous[n],
+                          "physical path state stopped advancing inside signal outage");
+    }
+}
+
+void path_ou_statistics_checks() {
+    auto f = fixture_format();
+    f.inner_rate_hz = .6;
+    f.added_symbols = 1;
+    f.sample_rate = 4;
+    f.bit_seconds = 16'384;
+    StreamChannelConfig cfg;
+    cfg.effects.noise_enabled = false;
+    const auto baseline = capture(251, cfg, f);
+    cfg.path_seed = 20261101;
+    cfg.path_evolution.ray_coherence_seconds = 1.25;
+    const auto direct = capture(257, cfg, f);
+    cfg.effects.spread_doppler_hz = .01; // Zero delay permits observing both ray gains independently.
+    const auto pair = capture(263, cfg, f);
+    check(baseline.size() == direct.size() && direct.size() == pair.size(),
+          "zero-delay OU diagnostic changed capture extent");
+    modem::detail::SpreadRay ray(f.sample_rate, .01, 0x13579bdf ^ 0x325449415443484eULL);
+    Complex mean0{}, mean1{}, proper0{}, cross{}, lag0{}, previous{};
+    long double power0 = 0, power1 = 0;
+    std::size_t count = 0, lag_count = 0;
+    bool previous_valid = false;
+    for (std::size_t n = 0; n < direct.size(); ++n) {
+        const auto delayed_weight = ray.process({}, {1,0});
+        if (std::norm(baseline[n]) < 1e-6) { previous_valid = false; continue; }
+        const auto g0 = direct[n]/baseline[n];
+        const auto g1 = (pair[n]/baseline[n]-.7071067811865475244*g0)/delayed_weight;
+        mean0 += g0; mean1 += g1; proper0 += g0*g0; cross += g0*std::conj(g1);
+        power0 += std::norm(g0); power1 += std::norm(g1);
+        if (previous_valid) { lag0 += g0*std::conj(previous); ++lag_count; }
+        previous = g0; previous_valid = true; ++count;
+    }
+    check(count > 50'000 && lag_count > 50'000, "OU diagnostic retained too few physical observations");
+    mean0 /= count; mean1 /= count; proper0 /= count; cross /= count; lag0 /= lag_count;
+    const double p0 = static_cast<double>(power0/count), p1 = static_cast<double>(power1/count);
+    const double rho = std::exp(-1./(f.sample_rate*cfg.path_evolution.ray_coherence_seconds));
+    // Fixed-seed numerical diagnostic, not a claim of field calibration. These
+    // tolerances exceed several stationary-AR sampling standard errors.
+    check(std::abs(p0-1) < .08 && std::abs(p1-1) < .08 &&
+          std::abs(mean0) < .05 && std::abs(mean1) < .05 && std::abs(proper0) < .08,
+          "OU gains failed stationary zero-mean unit-power proper-complex diagnostic");
+    check(std::abs(lag0-Complex{rho,0}) < .06,
+          "OU lag covariance disagrees with physical sample interval");
+    check(std::abs(cross) < .06, "direct/delayed OU gains are not independent");
+    std::cout << "path OU diagnostic rows=" << count << " powers=" << p0 << ',' << p1
+              << " lag=" << lag0 << " expected=" << rho << " cross=" << cross << '\n';
+}
+
+void low_rate_path_configuration_checks() {
+    auto f = fixture_format();
+    f.inner_rate_hz = .36;
+    f.added_symbols = 1;
+    f.sample_rate = 1;
+    const auto key = fixture_key();
+    PatternSource source(f, key, 1);
+    StreamChannelConfig cfg;
+    cfg.effects.sample_rate = f.sample_rate;
+    cfg.effects.occupied_bandwidth_hz = geometry(f).occupied_bandwidth_hz;
+    cfg.effects.rf_hz = 8000;
+    cfg.effects.spread_delay_ms = .005;
+    cfg.effects.spread_doppler_hz = .001;
+    cfg.effects.perturbation_slow_depth = .01;
+    cfg.effects.perturbation_fast_depth = .01;
+    cfg.effects.tx.phase_noise_rad_per_sqrt_second = .001;
+    cfg.effects.rx.phase_noise_rad_per_sqrt_second = .001;
+    cfg.effects.tx.rf_ppm = .0001;
+    cfg.path_evolution.ray_coherence_seconds = 600;
+    cfg.path_evolution.diurnal_phase_amplitude_radians = 2;
+    StreamingChannel point_sampled(source, cfg);
+    std::vector<Complex> prefix(32);
+    check(point_sampled.read(prefix) == prefix.size(), "valid low-rate point-sampled path was rejected");
+    auto reject_change = [&](auto change) {
+        auto invalid = cfg; change(invalid);
+        rejects([&] { StreamingChannel channel(source, invalid); },
+                "low-rate channel silently retained an unsupported fast effect");
+    };
+    reject_change([](auto& c) { c.effects.fhss = true; c.effects.hop_offsets_hz = {0}; });
+    reject_change([](auto& c) { c.effects.dropout_ms = 10; });
+    reject_change([](auto& c) { c.effects.slow_agc = true; });
+    reject_change([](auto& c) { c.frontend.dac.gain = .9; });
+    reject_change([](auto& c) { c.tx_spectrum.white_fm_hz_sqrt_seconds = .001; });
+    reject_change([](auto& c) { c.rx_spectrum.random_walk_fm_hz_per_sqrt_second = .001; });
+    reject_change([](auto& c) { c.tx_spectrum.flicker_fm_rms_hz = .001; });
+    reject_change([](auto& c) { c.rx_spectrum.white_pm_rms_radians = .001; });
+    reject_change([](auto& c) { c.path_evolution.ray_coherence_seconds = -1; });
+    reject_change([](auto& c) { c.path_evolution.diurnal_period_seconds = 0; });
+    reject_change([](auto& c) { c.path_evolution.outage_start_seconds = 4;
+                              c.path_evolution.outage_end_seconds = 2; });
+    reject_change([](auto& c) { c.path_evolution.outage_start_seconds = 2;
+                              c.path_evolution.outage_end_seconds = 4;
+                              c.path_evolution.outage_ramp_seconds = 2; });
+}
+
 // This is an extent/prefix resource check, not a two-day sampled propagation
 // run. Full-duration evidence must separately drain and score the entire stream.
 void long_extent_prefix_and_tail_checks() {
@@ -602,6 +798,9 @@ int main() {
         independent_seed_root_checks();
         physical_hop_origin_checks();
         erasure_and_noise_checks();
+        path_evolution_deterministic_checks();
+        path_ou_statistics_checks();
+        low_rate_path_configuration_checks();
         long_extent_prefix_and_tail_checks();
         std::cout << "triad v3 streaming channel checks passed\n";
         return 0;

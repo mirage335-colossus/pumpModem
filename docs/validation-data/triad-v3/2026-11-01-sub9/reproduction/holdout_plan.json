@@ -1,0 +1,14 @@
+{
+ "scope": "Independent, fixed-size validation after the development screen; no sequential early success stopping",
+ "common": {"rate":0.036,"sample_rate":1,"added":1,"rf_hz":8270,"base_oscillator":"gpsdo-ocxo","shift_oscillator":"gpsdo-ocxo","spread":"sub9-best","receiver_delay_ms":0.005,"receiver_doppler_hz":0.001,"margin":1,"block_seconds":1024,"nominal_timing_branch_only":true,"epoch_known":true},
+ "strict": {"correct_reception_target":0.99,"false_probability":0.0001,"horizon_seconds":86400,"attempt_spacing_seconds":60,"methods":11,"duration_alternatives":4},
+ "relaxed": {"correct_reception_target":0.9,"false_probability":0.01,"horizon_seconds":43200,"attempt_spacing_seconds":60,"methods":11,"duration_alternatives":4},
+ "cohorts": [
+  {"name":"static30-cn46","paths":600,"seconds":2592000,"cn0":-46,"ray_coherence_seconds":0,"primary":"static-frequency-ucb","paired_rbpf_paths":64},
+  {"name":"static38-cn48","paths":300,"seconds":3283200,"cn0":-48,"ray_coherence_seconds":0,"primary":"static-frequency-ucb","paired_rbpf_paths":64},
+  {"name":"ou8-cn36","paths":300,"seconds":691200,"cn0":-36,"ray_coherence_seconds":100000,"primary":"rbpf-ucb","particles":256,"resampling":"none","paired_gaussian":true},
+  {"name":"null38","paths":32,"seconds":3283200,"cn0":-46,"control":"null"},
+  {"name":"wrong-key38","paths":32,"seconds":3283200,"cn0":-46,"control":"wrong-key"}
+ ],
+ "qualification": "Pointwise one-sided exact 95% confidence bounds; conditional on the declared sampled model and configured prior. Multiple cohort claims are not simultaneous. Noise-only daily bound is mathematical under stated white proper Gaussian and independent residual assumptions, not empirically established by32 null paths. Presence benchmarks do not establish correct-bit performance."
+}

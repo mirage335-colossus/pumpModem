@@ -1,0 +1,402 @@
+{
+  "scope": "Reproduction and label-correction checks for mathematical evidence only; no ordinary receiver regression or physical qualification",
+  "host": {
+    "python": "3.13.5",
+    "numpy": "2.5.4",
+    "scipy": "1.18.1"
+  },
+  "original_scratch_sha256": {
+    "triad-day-oracle-diagnostic.py": "78af1bba44a4e38c95c9659ee9f3d8797c83c54c6c22f4feba61c5e7f779ed40",
+    "triad-day-oracle-diagnostic.json": "e2e5cbbbea9fc327b4ad8537d3c6f71439ebad23da681ce9a58733edd2754ec3",
+    "triad-day-frequency-diagnostic.py": "6c56a4facce560735e5b5eef876c68311bb1f469532736e4b91de3867d282409",
+    "triad-day-frequency-diagnostic.json": "f811aa88c0e2ec8ff5f7e9e19bc5e75284f3becafedd75d634fe34f7a4d0b1c2",
+    "triad-ou-bound-diagnostic.py": "fe402177247f3e2722031f6bdd0c4dfce88fbd74e911bef41bd122e6a55837b6",
+    "triad-ou-bound-diagnostic.json": "0e21a4e7ab824c6e4cfcd09a91544a828b77785e55b6b9e37af7c4020d1ad361",
+    "triad-ou-bound-validation.py": "caf9c97f404616106f3133fa35e5f6fcf9dd0b749b55030cc311dccf6a6d1d7c",
+    "triad-ou-bound-validation.json": "de8db800f444a0fda5b662fd3808e57324491cd883a24b26c11c9eff527908d9"
+  },
+  "source_sha256": {
+    "benchmark_math.py": "bacf1b9cd6577c7fb5136f31e1acc7e4ec70de5f6a532c044ca9f1cab8080ba3",
+    "day_frequency_diagnostic.py": "ceab65e0c6ee71e8161672347c5b45712b62c4d03d1200af6a7b589069126a42",
+    "day_oracle_diagnostic.py": "e0121aac948b4975038c231108fd515f145103b64f186e2d60fc2ecca9425eb5",
+    "ou_bound_diagnostic.py": "99fc05a66b23a6b10677b9e0a6445f7e181df4faa6a068d14a5334cbdbf089e3",
+    "ou_bound_validation.py": "b27b938fc7e7761305f7e6c839c60b6153465e01483a4c695048bb7b41bde6d6"
+  },
+  "result_sha256": {
+    "day-frequency-diagnostic.json": "ec5cb53a569016189458eb141c98e16c882b121fb5b5cf7cdee90702e9bb761d",
+    "day-oracle-diagnostic.json": "d08b8eb2a8ff9a1abcd070c1d88f3accfd3b44aa1d6270f4cad1db341099a6b3",
+    "ou-bound-diagnostic.json": "a181d9651f6b77545165849be105eb1edf76741fbe07948f8e82df417eaccaef",
+    "ou-bound-validation.json": "0e4300bc4a3891bf5e1200b22cfc454f2082bbfbe9c7fb69f8a16d985b7a4497"
+  },
+  "executed_commands": [
+    "PYTHONDONTWRITEBYTECODE=1 OPENBLAS_NUM_THREADS=2 OMP_NUM_THREADS=2 /tmp/triad-weak-env/bin/python docs/validation-data/triad-v3/2026-11-01-sub9/theory/day_oracle_diagnostic.py local-evidence/triad-sub9-diagnostics/day-static --output docs/validation-data/triad-v3/2026-11-01-sub9/theory/day-oracle-diagnostic.json",
+    "PYTHONDONTWRITEBYTECODE=1 OPENBLAS_NUM_THREADS=2 OMP_NUM_THREADS=2 /tmp/triad-weak-env/bin/python docs/validation-data/triad-v3/2026-11-01-sub9/theory/day_frequency_diagnostic.py local-evidence/triad-sub9-diagnostics/day-static --output docs/validation-data/triad-v3/2026-11-01-sub9/theory/day-frequency-diagnostic.json",
+    "PYTHONDONTWRITEBYTECODE=1 OPENBLAS_NUM_THREADS=2 OMP_NUM_THREADS=2 /tmp/triad-weak-env/bin/python docs/validation-data/triad-v3/2026-11-01-sub9/theory/ou_bound_diagnostic.py --output docs/validation-data/triad-v3/2026-11-01-sub9/theory/ou-bound-diagnostic.json",
+    "PYTHONDONTWRITEBYTECODE=1 OPENBLAS_NUM_THREADS=2 OMP_NUM_THREADS=2 /tmp/triad-weak-env/bin/python docs/validation-data/triad-v3/2026-11-01-sub9/theory/ou_bound_validation.py docs/validation-data/triad-v3/2026-11-01-sub9/theory/ou-bound-diagnostic.json --output docs/validation-data/triad-v3/2026-11-01-sub9/theory/ou-bound-validation.json"
+  ],
+  "relocation": "Both day diagnostics accept WORKSPACE as a positional CLI argument; copied evidence can be substituted without editing scripts. Day workspace contents are bound by hashes in result JSON. No transmitter source or binary provenance is inferred.",
+  "checks": [
+    {
+      "name": "actual day energy preserved",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity full_bank blockwise_oracle_energy_snr",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity full_bank blockwise_energy_fraction",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity full_bank blockwise_oracle_loglr_actual",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity full_bank static_oracle_energy_snr",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity full_bank static_energy_fraction",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity full_bank static_oracle_loglr_actual",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity full_bank gram_eigenvalues",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity full_bank fitted_static_tap_magnitude",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity full_bank gaussian_logdet",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity full_bank gaussian_actual_quadratic",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity full_bank gaussian_actual_zero_cfo_loglr",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity full_bank gaussian_signal_quadratic",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity full_bank gaussian_expected_loglr_given_oracle_mean",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity correct_bit_mismatched_two_ray blockwise_oracle_energy_snr",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity correct_bit_mismatched_two_ray blockwise_energy_fraction",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity correct_bit_mismatched_two_ray blockwise_oracle_loglr_actual",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity correct_bit_mismatched_two_ray static_oracle_energy_snr",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity correct_bit_mismatched_two_ray static_energy_fraction",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity correct_bit_mismatched_two_ray static_oracle_loglr_actual",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity correct_bit_mismatched_two_ray gram_eigenvalues",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity correct_bit_mismatched_two_ray fitted_static_tap_magnitude",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity correct_bit_mismatched_two_ray gaussian_logdet",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity correct_bit_mismatched_two_ray gaussian_actual_quadratic",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity correct_bit_mismatched_two_ray gaussian_actual_zero_cfo_loglr",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity correct_bit_mismatched_two_ray gaussian_signal_quadratic",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity correct_bit_mismatched_two_ray gaussian_expected_loglr_given_oracle_mean",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity correct_bit_flat blockwise_oracle_energy_snr",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity correct_bit_flat blockwise_energy_fraction",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity correct_bit_flat blockwise_oracle_loglr_actual",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity correct_bit_flat static_oracle_energy_snr",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity correct_bit_flat static_energy_fraction",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity correct_bit_flat static_oracle_loglr_actual",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity correct_bit_flat gram_eigenvalues",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity correct_bit_flat fitted_static_tap_magnitude",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity correct_bit_flat gaussian_logdet",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity correct_bit_flat gaussian_actual_quadratic",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity correct_bit_flat gaussian_actual_zero_cfo_loglr",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity correct_bit_flat gaussian_signal_quadratic",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity correct_bit_flat gaussian_expected_loglr_given_oracle_mean",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity wrong_bit_mismatched_two_ray blockwise_oracle_energy_snr",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity wrong_bit_mismatched_two_ray blockwise_energy_fraction",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity wrong_bit_mismatched_two_ray blockwise_oracle_loglr_actual",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity wrong_bit_mismatched_two_ray static_oracle_energy_snr",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity wrong_bit_mismatched_two_ray static_energy_fraction",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity wrong_bit_mismatched_two_ray static_oracle_loglr_actual",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity wrong_bit_mismatched_two_ray gram_eigenvalues",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity wrong_bit_mismatched_two_ray fitted_static_tap_magnitude",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity wrong_bit_mismatched_two_ray gaussian_logdet",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity wrong_bit_mismatched_two_ray gaussian_actual_quadratic",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity wrong_bit_mismatched_two_ray gaussian_actual_zero_cfo_loglr",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity wrong_bit_mismatched_two_ray gaussian_signal_quadratic",
+      "passed": true
+    },
+    {
+      "name": "day projection numerical parity wrong_bit_mismatched_two_ray gaussian_expected_loglr_given_oracle_mean",
+      "passed": true
+    },
+    {
+      "name": "original OU target seed/model preserved",
+      "passed": true
+    },
+    {
+      "name": "OU target duration parity (10000.0, 0.9, 1)",
+      "passed": true
+    },
+    {
+      "name": "OU target duration parity (10000.0, 0.9, 11)",
+      "passed": true
+    },
+    {
+      "name": "OU target duration parity (10000.0, 0.99, 1)",
+      "passed": true
+    },
+    {
+      "name": "OU target duration parity (10000.0, 0.99, 11)",
+      "passed": true
+    },
+    {
+      "name": "OU target duration parity (100000.0, 0.9, 1)",
+      "passed": true
+    },
+    {
+      "name": "OU target duration parity (100000.0, 0.9, 7)",
+      "passed": true
+    },
+    {
+      "name": "OU target duration parity (100000.0, 0.99, 1)",
+      "passed": true
+    },
+    {
+      "name": "OU target duration parity (100000.0, 0.99, 11)",
+      "passed": true
+    },
+    {
+      "name": "OU target duration parity (1000000.0, 0.9, 1)",
+      "passed": true
+    },
+    {
+      "name": "OU target duration parity (1000000.0, 0.9, 7)",
+      "passed": true
+    },
+    {
+      "name": "OU target duration parity (1000000.0, 0.99, 1)",
+      "passed": true
+    },
+    {
+      "name": "OU target duration parity (1000000.0, 0.99, 11)",
+      "passed": true
+    },
+    {
+      "name": "independent validation seed/model preserved",
+      "passed": true
+    },
+    {
+      "name": "independent validation count parity (10000.0, 0.9, 1)",
+      "passed": true
+    },
+    {
+      "name": "independent validation count parity (10000.0, 0.9, 11)",
+      "passed": true
+    },
+    {
+      "name": "independent validation count parity (10000.0, 0.99, 1)",
+      "passed": true
+    },
+    {
+      "name": "independent validation count parity (10000.0, 0.99, 11)",
+      "passed": true
+    },
+    {
+      "name": "independent validation count parity (100000.0, 0.9, 1)",
+      "passed": true
+    },
+    {
+      "name": "independent validation count parity (100000.0, 0.9, 7)",
+      "passed": true
+    },
+    {
+      "name": "independent validation count parity (100000.0, 0.99, 1)",
+      "passed": true
+    },
+    {
+      "name": "independent validation count parity (100000.0, 0.99, 11)",
+      "passed": true
+    },
+    {
+      "name": "independent validation count parity (1000000.0, 0.9, 1)",
+      "passed": true
+    },
+    {
+      "name": "independent validation count parity (1000000.0, 0.9, 7)",
+      "passed": true
+    },
+    {
+      "name": "independent validation count parity (1000000.0, 0.99, 1)",
+      "passed": true
+    },
+    {
+      "name": "independent validation count parity (1000000.0, 0.99, 11)",
+      "passed": true
+    },
+    {
+      "name": "refined 38day covariance variance relative error below .004",
+      "passed": true
+    },
+    {
+      "name": "source hash binding day-oracle-diagnostic.json",
+      "passed": true
+    },
+    {
+      "name": "presence scope day-oracle-diagnostic.json",
+      "passed": true
+    },
+    {
+      "name": "source hash binding day-frequency-diagnostic.json",
+      "passed": true
+    },
+    {
+      "name": "presence scope day-frequency-diagnostic.json",
+      "passed": true
+    },
+    {
+      "name": "source hash binding ou-bound-diagnostic.json",
+      "passed": true
+    },
+    {
+      "name": "presence scope ou-bound-diagnostic.json",
+      "passed": true
+    },
+    {
+      "name": "source hash binding ou-bound-validation.json",
+      "passed": true
+    },
+    {
+      "name": "presence scope ou-bound-validation.json",
+      "passed": true
+    },
+    {
+      "name": "artifact size below 5MB",
+      "passed": true
+    }
+  ],
+  "limits": [
+    "All probabilities concern presence admission only, not correct-bit reception.",
+    "Independent H1 Monte Carlo validates numerical ideal-model predictions, not sampled physical waveforms.",
+    "The .22dB energy derating is hypothetical; no stochastic OU CFO-mismatch bound is claimed.",
+    "Target-fit confidence intervals are descriptive; separate validation uses an independent seed."
+  ]
+}

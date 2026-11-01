@@ -436,6 +436,18 @@ def main():
     invoke("--mode", "plan", "--trials", "2", "--oscillator-seed", str((1 << 64) - 1), ok=False, timeout=10)
     invoke("--mode", "plan", "--adc-bits", "16", ok=False, timeout=10)
 
+    # Exercise the full 38-day public capture calendar without generating a
+    # month of data: explicit sample preflight must reject before any output.
+    # Pulse/tile/tail overhead is allowed beyond the requested active ceiling.
+    with tempfile.TemporaryDirectory(prefix="triad-month-preflight-") as scratch:
+        destination = pathlib.Path(scratch)/"month"
+        rejected = invoke("--mode", "export-sampled", *COMMON,
+                          "--rate", ".036", "--added", "1", "--sample-rate", "1",
+                          "--seconds", "3283200", "--channel", "none", "--rf-hz", "8270",
+                          "--export-max-samples", "1", "--output", str(destination), ok=False)
+        if "exceeds --export-max-samples" not in rejected.stderr or destination.exists():
+            raise AssertionError(f"month capture failed before the explicit export preflight: {rejected.stderr}")
+
     # A two-day coherent block is a planner input only; this short source case
     # proves it does not allocate a two-day waveform. Burst waits create a
     # source tile quantum that is distinct from a simple 400-ms dwell grid.

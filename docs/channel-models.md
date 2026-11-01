@@ -198,6 +198,49 @@ receiver's timing/template support does not cover echoes across a hop. The
 ordinary GUI Fake FHSS option does not enable the separate laboratory RF
 retune/settling model.
 
+## Isolated triad long-span path evolution
+
+The separate v3 streaming study optionally extends the shared sampled path
+through `datapump::triad::v3::StreamChannelConfig::path_evolution`; it does not add these
+controls to ordinary Robust playback. See
+[`triad_modem_v3.hpp`](../include/datapump/triad_modem_v3.hpp) and
+[`triad_simulation_stream.cpp`](../src/triad_simulation_stream.cpp).
+The default-off path preserves the earlier samples and RNG sequence.
+
+| Isolated `triad_long` controls | Meaning |
+| --- | --- |
+| `--ray-coherence-seconds T` | `0` disables evolution; positive `T` multiplies the direct and delayed inputs to `SpreadRay` by independent stationary proper-complex OU gains. Each gain has zero mean, unit mean power and correlation `exp(−abs(dt)/T)`. The existing `1/sqrt(2)` two-ray normalization, delay and Doppler remain. |
+| `--diurnal-phase-radians A`, `--diurnal-period-seconds P` | Add common path phase `A sin(2πt/P + phase0)` after ray composition. `A=0` disables it; `P` defaults to 86,400 seconds. Maximum instantaneous frequency excursion is `A/P` Hz and enters the deterministic capture check. |
+| `--outage-seconds START END`, `--outage-gain G`, `--outage-ramp-seconds R` | Attenuate the propagated signal on `[START,END)`, with cosine descent/ascent inside that interval. `G` is an amplitude factor in `[0,1]`; `R` must fit within half the interval. Thermal noise is added later and remains present. Both endpoints `−1` disable the outage. |
+| `--path-seed N` | Independent OU and initial-diurnal-phase seed root; an unset root inherits the channel seed. Selected phase is simulation-only metadata. |
+
+Here `t = n/(Fs × RX_clock_scale) − capture_lead_seconds`, not elapsed payload
+time after pulse padding. OU state advances at each physical RX sample using
+its exact sampled transition, including source silence and outages. Diurnal
+phase and outage attenuation precede the existing frequency-selective stage;
+its filter state and tails continue, and no second hop-output gate is added.
+An outage plateau can therefore retain downstream filter decay.
+
+These are explicit stress laws, not calibrated long-wave propagation. Fixed
+two-ray separation of 0.001 Hz gives deterministic beating; it does not imply
+a 1,000-second random coherence time. OU coherence is selected separately and
+its analog spectrum has unbounded tails. A low sample rate requires physical
+sampling-refinement evidence; the exact OU endpoint law alone does not prove
+that a narrow capture retains all informative energy.
+
+The isolated source permits integer rates down to 1 sample/s with shaped-band
+and capture guards. Below 64 samples/s the channel rejects FHSS, millisecond
+dropout, slow AGC, active sampled frontend, white/flicker/random-walk FM and
+white PM. It preserves eligible constant offsets, Wiener phase, fractional
+spread and selected selective perturbation. These restrictions avoid silently
+omitting requested fast effects; they do not change the ordinary channel's
+supported operating range. See the [v3 range and receiver scope](triad-v3.md#low-rate-and-38-day-representation).
+
+Physical presets do not choose receiver tap hypotheses in `triad_long`. For
+the public margin-1 `sub9-best` hypothesis, explicitly use
+`--tap-delay-ms .005 --tap-doppler-hz .001` with the coupled two-ray basis.
+Preserve different tap values when deliberately testing model mismatch.
+
 ## Focused evidence and limits
 
 Use the focused selectors that match the changed path:

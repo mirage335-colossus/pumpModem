@@ -1,0 +1,18 @@
+test_all_finite_phase_paths_match_dense_gaussian_mixture (test_triad_rbpf.RBPhaseTests.test_all_finite_phase_paths_match_dense_gaussian_mixture) ... ok
+test_covariance_is_observation_and_particle_independent (test_triad_rbpf.RBPhaseTests.test_covariance_is_observation_and_particle_independent) ... ok
+test_erasure_advances_time_without_evidence_or_history_growth (test_triad_rbpf.RBPhaseTests.test_erasure_advances_time_without_evidence_or_history_growth) ... ok
+test_fp32_bulk_retains_ranking_near_gate_and_long_recurrence (test_triad_rbpf.RBPhaseTests.test_fp32_bulk_retains_ranking_near_gate_and_long_recurrence) ... ok
+test_frequency_initialization_zero_bound_single_particle_and_default (test_triad_rbpf.RBPhaseTests.test_frequency_initialization_zero_bound_single_particle_and_default) ... ok
+test_integrated_random_walk_frequency_has_correct_covariance (test_triad_rbpf.RBPhaseTests.test_integrated_random_walk_frequency_has_correct_covariance) ... ok
+test_likelihood_not_log_estimate_converges_with_resampling (test_triad_rbpf.RBPhaseTests.test_likelihood_not_log_estimate_converges_with_resampling) ... ok
+test_memory_guard_covers_live_bulk_products_and_resampling_gather (test_triad_rbpf.RBPhaseTests.test_memory_guard_covers_live_bulk_products_and_resampling_gather) ... ok
+test_resampling_reproducibility_and_normalized_empty_observations (test_triad_rbpf.RBPhaseTests.test_resampling_reproducibility_and_normalized_empty_observations) ... ok
+test_singular_gram_invalid_inputs_and_allocation_guard (test_triad_rbpf.RBPhaseTests.test_singular_gram_invalid_inputs_and_allocation_guard) ... ok
+test_stratified_cfo_likelihood_mean_matches_dense_continuous_prior (test_triad_rbpf.RBPhaseTests.test_stratified_cfo_likelihood_mean_matches_dense_continuous_prior) ... ok
+test_stratified_frequency_strata_seed_weights_and_paired_rng (test_triad_rbpf.RBPhaseTests.test_stratified_frequency_strata_seed_weights_and_paired_rng) ... ok
+test_zero_phase_matches_existing_gaussian_with_broadcast_and_independent_grams (test_triad_rbpf.RBPhaseTests.test_zero_phase_matches_existing_gaussian_with_broadcast_and_independent_grams) ... ok
+
+----------------------------------------------------------------------
+Ran 13 tests in 1.591s
+
+OK

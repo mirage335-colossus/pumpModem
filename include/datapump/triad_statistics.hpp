@@ -55,7 +55,7 @@ struct PlannerInput {
 
     // Three-carrier format constraints. Pattern rates are in fine chips/s for
     // one carrier; the legacy GUI Rate maps to inner_rate_hz below.
-    double maximum_duration_seconds = 7 * 86400;
+    double maximum_duration_seconds = 38 * 86400;
     double dwell_seconds = 0.4;
     // Permitted durations are n*quantum+offset, n>=1. Zero quantum selects one
     // dwell. Both values must be whole dwell multiples, with -quantum<offset<=0.

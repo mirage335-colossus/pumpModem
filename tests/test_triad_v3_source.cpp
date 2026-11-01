@@ -168,6 +168,50 @@ void complete_tile_duration_checks() {
         }
     }
 }
+
+void month_and_low_sample_rate_checks() {
+    auto key=fixture_key();
+    for(double rate:{3.6,.36,.036,.0036}) {
+        Format f;f.inner_rate_hz=rate;f.added_symbols=1;
+        f.sample_rate=rate>1?4:1;f.bit_seconds=38*86400.;
+        PatternSource low(f,key,1);const auto& g=low.geometry();
+        check(g.bit_seconds>=38*86400.&&g.dwells>=20&&g.inner_coefficients>=64,
+              "month-long low-rate source lost duration or complexity");
+        check(low.working_bytes()<1024*1024,"low-rate source exceeds bounded tile workspace");
+        f.sample_rate=64;PatternSource reference(f,key,1);
+        check(reference.geometry().tile_count==g.tile_count&&
+              reference.geometry().fine_coefficients==g.fine_coefficients,
+              "sample rate changed private pattern geometry");
+        for(long double fraction:{.1L,.5L,.9L}) {
+            const auto seconds=fraction*g.bit_seconds;
+            const auto a=low.sample_at(g.calendar_origin_sample+seconds*(rate>1?4:1));
+            const auto b=reference.sample_at(reference.geometry().calendar_origin_sample+seconds*64);
+            check(std::isfinite(a.real())&&std::isfinite(a.imag())&&std::abs(a-b)<1e-8,
+                  "low-rate source differs at matching physical timestamps");
+        }
+        f.bit_seconds=8;PatternSource short_source(f,key,1);
+        check(short_source.working_bytes()==low.working_bytes(),"month duration grew coefficient workspace");
+    }
+    Format f;f.inner_rate_hz=36;f.added_symbols=1;f.sample_rate=9600;f.bit_seconds=38*86400.;
+    PatternSource month(f,key,0);
+    check(month.geometry().source_samples>std::numeric_limits<std::uint32_t>::max(),
+          "month source failed to exercise 64-bit sample coordinates");
+    const auto at=month.geometry().source_samples-month.geometry().calendar_origin_sample-1000;
+    std::array<Complex,37> whole{},split{};
+    month.render(at,whole);month.render(at,std::span(split).first(13));
+    month.render(at+13,std::span(split).subspan(13));
+    check(whole==split,"month-end random access changes across chunk boundaries");
+    check(std::all_of(whole.begin(),whole.end(),[](Complex v){return std::isfinite(v.real())&&std::isfinite(v.imag());}),
+          "month-end samples are not finite");
+    for(unsigned invalid:{0U,1U}) {
+        f.sample_rate=invalid;bool rejected=false;
+        try{(void)geometry(f);}catch(const std::exception&){rejected=true;}
+        check(rejected,"zero or undersampled shaped triplet was accepted");
+    }
+    f.inner_rate_hz=.036;f.sample_rate=1;f.fhss=true;bool rejected=false;
+    try{(void)geometry(f);}catch(const std::exception&){rejected=true;}
+    check(rejected,"low-sample source silently enabled unresolved FHSS ramps");
+}
 } // namespace
 
 int main() {
@@ -176,6 +220,7 @@ int main() {
         random_access_and_chunk_checks();
         protected_waveform_checks();
         complete_tile_duration_checks();
+        month_and_low_sample_rate_checks();
         std::cout << "triad v3 source: geometry, addressing, pulse, and chunk checks passed\n";
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

@@ -1,0 +1,226 @@
+{
+  "scope": "Known-variance static Gaussian-channel retained-observation score diagnostic; no receiver changes",
+  "probability_scope": "Presence admission for the specified true-signal model only; no competing bit, timing, epoch, or model likelihood is simulated. These probabilities do not establish correct-bit reception or wrong-bit admission rates.",
+  "source_sha256": {
+    "benchmark_math.py": "bacf1b9cd6577c7fb5136f31e1acc7e4ec70de5f6a532c044ca9f1cab8080ba3",
+    "day_frequency_diagnostic.py": "ceab65e0c6ee71e8161672347c5b45712b62c4d03d1200af6a7b589069126a42",
+    "day_oracle_diagnostic.py": "e0121aac948b4975038c231108fd515f145103b64f186e2d60fc2ecca9425eb5",
+    "ou_bound_diagnostic.py": "99fc05a66b23a6b10677b9e0a6445f7e181df4faa6a068d14a5334cbdbf089e3",
+    "ou_bound_validation.py": "b27b938fc7e7761305f7e6c839c60b6153465e01483a4c695048bb7b41bde6d6"
+  },
+  "input_sha256": {
+    "manifest.json": "4f2709ea545b319df1c046d5a46332fa5a0f1353e4d75cddc1563452360f3700",
+    "gram.c128": "0a4f7e246dc88a409c84a4206e0d600319c97dedd13e20d48e0211c66995c922",
+    "observation.c128": "3260464732c244966d622dfe02b341ec7b5d0250bd5263c9e29b1a9b415eb446",
+    "intervals.u64": "bccb643554ed89b428db5e6cabdc1314df686ce3648f5dfb8f2e064108acabe9"
+  },
+  "declared_frequency_bound_hz": 1e-06,
+  "noise_variance_source": "manifest simulation variance, treated as known for this diagnostic",
+  "quadrature_scope": "Finite normalized positive weights preserve H0 mixture normalization. Clipped cells approximate a continuous uniform prior; their nodes can lie outside its support. Integration error estimates are numerical, not certified physical-model bounds.",
+  "results": [
+    {
+      "candidate_bit": 0,
+      "uniform_finite_priors": [
+        {
+          "bound_hz": 1e-06,
+          "count": 3,
+          "uniform_discrete_score": 14.17755590973778,
+          "score_min_max": [
+            13.404756327798658,
+            14.46001272324262
+          ]
+        },
+        {
+          "bound_hz": 1e-06,
+          "count": 101,
+          "uniform_discrete_score": 14.313316374954255,
+          "score_min_max": [
+            13.404756327798658,
+            14.565257928675091
+          ]
+        },
+        {
+          "bound_hz": 1e-06,
+          "count": 1001,
+          "uniform_discrete_score": 14.315758103085294,
+          "score_min_max": [
+            13.404756327798658,
+            14.565263525047893
+          ]
+        },
+        {
+          "bound_hz": 1.9073486328125e-06,
+          "count": 3,
+          "uniform_discrete_score": 13.676159339995273,
+          "score_min_max": [
+            11.59038931919494,
+            14.46001272324262
+          ]
+        },
+        {
+          "bound_hz": 1.9073486328125e-06,
+          "count": 1001,
+          "uniform_discrete_score": 14.010026636456189,
+          "score_min_max": [
+            11.59038931919494,
+            14.565263879728835
+          ]
+        }
+      ],
+      "continuous_uniform_score": 14.316029496635293,
+      "continuous_integral_scaled_absolute_error_estimate": 1.7306102126199837e-14,
+      "clipped_cell_finite_mixtures": [
+        {
+          "nfft": 512,
+          "spacing_hz": 1.9073486328125e-06,
+          "active_bins": 3,
+          "weight_sum": 1.0,
+          "score": 14.421524381808842,
+          "difference_from_continuous_quadrature": 0.10549488517354888
+        },
+        {
+          "nfft": 1024,
+          "spacing_hz": 9.5367431640625e-07,
+          "active_bins": 3,
+          "weight_sum": 1.0,
+          "score": 14.262815278038396,
+          "difference_from_continuous_quadrature": -0.05321421859689757
+        },
+        {
+          "nfft": 2048,
+          "spacing_hz": 4.76837158203125e-07,
+          "active_bins": 5,
+          "weight_sum": 1.0,
+          "score": 14.303864593945256,
+          "difference_from_continuous_quadrature": -0.012164902690036783
+        },
+        {
+          "nfft": 4096,
+          "spacing_hz": 2.384185791015625e-07,
+          "active_bins": 9,
+          "weight_sum": 1.0,
+          "score": 14.313563679028277,
+          "difference_from_continuous_quadrature": -0.0024658176070158078
+        },
+        {
+          "nfft": 8192,
+          "spacing_hz": 1.1920928955078125e-07,
+          "active_bins": 17,
+          "weight_sum": 1.0,
+          "score": 14.315956281460409,
+          "difference_from_continuous_quadrature": -7.321517488456664e-05
+        },
+        {
+          "nfft": 16384,
+          "spacing_hz": 5.960464477539063e-08,
+          "active_bins": 35,
+          "weight_sum": 1.0,
+          "score": 14.315888917072147,
+          "difference_from_continuous_quadrature": -0.00014057956314594833
+        }
+      ]
+    },
+    {
+      "candidate_bit": 1,
+      "uniform_finite_priors": [
+        {
+          "bound_hz": 1e-06,
+          "count": 3,
+          "uniform_discrete_score": -1.087838177251466,
+          "score_min_max": [
+            -1.937293364778685,
+            -0.5767525719225528
+          ]
+        },
+        {
+          "bound_hz": 1e-06,
+          "count": 101,
+          "uniform_discrete_score": -1.1342378600341343,
+          "score_min_max": [
+            -1.937293364778685,
+            -0.5767525719225528
+          ]
+        },
+        {
+          "bound_hz": 1e-06,
+          "count": 1001,
+          "uniform_discrete_score": -1.1351206843852575,
+          "score_min_max": [
+            -1.937293364778685,
+            -0.5767525719225528
+          ]
+        },
+        {
+          "bound_hz": 1.9073486328125e-06,
+          "count": 3,
+          "uniform_discrete_score": -0.9039739382110568,
+          "score_min_max": [
+            -2.6770867808472736,
+            -0.17305781511278973
+          ]
+        },
+        {
+          "bound_hz": 1.9073486328125e-06,
+          "count": 1001,
+          "uniform_discrete_score": -1.0230918983166237,
+          "score_min_max": [
+            -2.6770867808472736,
+            -0.17305781511278973
+          ]
+        }
+      ],
+      "continuous_uniform_score": -1.1352188687302958,
+      "continuous_integral_scaled_absolute_error_estimate": 1.270285657037997e-14,
+      "clipped_cell_finite_mixtures": [
+        {
+          "nfft": 512,
+          "spacing_hz": 1.9073486328125e-06,
+          "active_bins": 3,
+          "weight_sum": 1.0,
+          "score": -1.164867773190215,
+          "difference_from_continuous_quadrature": -0.0296489044599193
+        },
+        {
+          "nfft": 1024,
+          "spacing_hz": 9.5367431640625e-07,
+          "active_bins": 3,
+          "weight_sum": 1.0,
+          "score": -1.11497768767939,
+          "difference_from_continuous_quadrature": 0.020241181050905777
+        },
+        {
+          "nfft": 2048,
+          "spacing_hz": 4.76837158203125e-07,
+          "active_bins": 5,
+          "weight_sum": 1.0,
+          "score": -1.130379243152281,
+          "difference_from_continuous_quadrature": 0.004839625578014761
+        },
+        {
+          "nfft": 4096,
+          "spacing_hz": 2.384185791015625e-07,
+          "active_bins": 9,
+          "weight_sum": 1.0,
+          "score": -1.1342297146212543,
+          "difference_from_continuous_quadrature": 0.0009891541090414346
+        },
+        {
+          "nfft": 8192,
+          "spacing_hz": 1.1920928955078125e-07,
+          "active_bins": 17,
+          "weight_sum": 1.0,
+          "score": -1.1351923641294754,
+          "difference_from_continuous_quadrature": 2.650460082032069e-05
+        },
+        {
+          "nfft": 16384,
+          "spacing_hz": 5.960464477539063e-08,
+          "active_bins": 35,
+          "weight_sum": 1.0,
+          "score": -1.1351597661473787,
+          "difference_from_continuous_quadrature": 5.910258291708104e-05
+        }
+      ]
+    }
+  ]
+}

@@ -119,6 +119,75 @@ class StaticFrequencyTests(unittest.TestCase):
             r=study.run(args);self.assertEqual(r['failed_physical_capture_records'],1)
             self.assertIn('Gaussian null',r['captures'][0]['error'])
 
+    def test_wrong_key_metadata_preserves_scores_and_is_not_noise_null_qualification(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path=Path(temp)/'path';path.mkdir();fixture.write_workspace(path,seed=516,observation=True,block_count=4,mixed_taps=True)
+            manifest_path=path/'manifest.json'
+            manifest=json.loads(manifest_path.read_text())
+            data_hashes={p.name:study.sha256(p) for p in path.iterdir() if p.name!='manifest.json'}
+            original=np.fromfile
+            def guarded(file,*args,**kwargs):
+                self.assertNotIn(Path(file.name).name,('mean.c128','signal_energy.f64'))
+                return original(file,*args,**kwargs)
+            results={}
+            for control in ('signal','null','wrong-key','unsupported-control'):
+                manifest['control']=control;manifest_path.write_text(json.dumps(manifest))
+                args=study.parse_args([str(path),'--output',str(Path(temp)/(control+'.json')),'--cn0','0'])
+                with patch.object(study.np,'fromfile',side_effect=guarded):
+                    results[control]=study.run(args)
+            for control in ('signal','null','wrong-key'):
+                self.assertEqual(results[control]['failed_physical_capture_records'],0)
+            for method in study.METHODS:
+                signal=results['signal']['captures'][0]['methods'][method]
+                for control in ('null','wrong-key'):
+                    actual=results[control]['captures'][0]['methods'][method]
+                    np.testing.assert_array_equal(actual['bit_log_scores'],signal['bit_log_scores'])
+                    self.assertEqual(actual['threshold'],signal['threshold'])
+                wrong_key=results['wrong-key']['summary_by_control']['wrong-key'][method]
+                null=results['null']['summary_by_control']['null'][method]
+                self.assertEqual(wrong_key['aggregate_counts'],null['aggregate_counts'])
+                self.assertIsNone(wrong_key['null_qualification_complete'])
+                self.assertTrue(null['null_qualification_complete'])
+                threshold=signal['threshold']
+                admitted=study.classify(np.asarray([[threshold+1,threshold-1]]),0,threshold,'wrong-key')
+                self.assertEqual(admitted,{'captures':1,'false_admitted':1,'not_admitted':0})
+            self.assertTrue(any('does not cover wrong-key signals' in text for text in results['wrong-key']['limitations']))
+            self.assertEqual(results['unsupported-control']['failed_physical_capture_records'],1)
+            self.assertIn('only actual signal/null/wrong-key controls',results['unsupported-control']['captures'][0]['error'])
+            self.assertEqual(data_hashes,{p.name:study.sha256(p) for p in path.iterdir() if p.name!='manifest.json'})
+
+    def test_controls_ignore_unusable_truth_metadata_and_hidden_oracle_arrays(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path=Path(temp)/'path';path.mkdir();fixture.write_workspace(path,seed=518,observation=True,block_count=4,mixed_taps=True)
+            manifest_path=path/'manifest.json';manifest=json.loads(manifest_path.read_text())
+            args=study.parse_args([str(path),'--output',str(Path(temp)/'signal.json'),'--cn0','0'])
+            baseline=study.run(args)
+            self.assertEqual(baseline['failed_physical_capture_records'],0)
+            actual_names=('gram.c128','observation.c128','received_energy.f64','intervals.u64','valid_rows.u64')
+            data_hashes={name:study.sha256(path/name) for name in actual_names}
+            for name,dtype in (('mean.c128','<c16'),('signal_energy.f64','<f8')):
+                cells=(path/name).stat().st_size//np.dtype(dtype).itemsize
+                np.full(cells,np.nan,dtype=dtype).tofile(path/name)
+            original=np.fromfile
+            def guarded(file,*args,**kwargs):
+                self.assertNotIn(Path(file.name).name,('mean.c128','signal_energy.f64'))
+                return original(file,*args,**kwargs)
+            for control in ('null','wrong-key'):
+                for i,unusable in enumerate((float('nan'),'not-a-truth-bit')):
+                    manifest.update(control=control,signal_bit=unusable,signal_bit_simulation_truth=unusable)
+                    manifest_path.write_text(json.dumps(manifest))
+                    args=study.parse_args([str(path),'--output',str(Path(temp)/(control+str(i)+'.json')),'--cn0','0'])
+                    with patch.object(study.np,'fromfile',side_effect=guarded):
+                        result=study.run(args)
+                    self.assertEqual(result['failed_physical_capture_records'],0)
+                    self.assertIsNone(result['captures'][0]['truth_bit_simulation_only'])
+                    for method in study.METHODS:
+                        actual=result['captures'][0]['methods'][method]
+                        expected=baseline['captures'][0]['methods'][method]
+                        np.testing.assert_array_equal(actual['bit_log_scores'],expected['bit_log_scores'])
+                        self.assertEqual(actual['threshold'],expected['threshold'])
+            self.assertEqual(data_hashes,{name:study.sha256(path/name) for name in actual_names})
+
 
 if __name__=='__main__':
     torch.set_num_threads(2)

@@ -114,6 +114,23 @@ struct SampledFrontendConfig {
             gain_step_seconds >= 0 || overload_recovery_seconds != 0;
     }
 };
+// Optional physical-path stress, separate from oscillator error and receiver
+// gain control. These are declared stochastic/deterministic models, not field
+// calibration. Physical time is n/(sample_rate*rx_clock_scale)-capture_lead_seconds;
+// sample zero can precede time zero. Off preserves the established channel exactly.
+struct PathEvolutionConfig {
+    // Independent stationary proper-complex OU gains on the direct and delayed
+    // rays: E[g]=0, E[|g|^2]=1, E[g(t+dt)conj(g(t))]=exp(-dt/coherence).
+    // Existing SpreadRay still supplies equal ray powers and Doppler separation.
+    double ray_coherence_seconds = 0;
+    double diurnal_phase_amplitude_radians = 0;
+    double diurnal_period_seconds = 86400;
+    // One signal-only attenuation interval [start,end). Ramps lie inside the
+    // interval, with cosine descent/ascent over outage_ramp_seconds at its ends.
+    // Both endpoints -1 disable it. Noise and path/filter state still advance.
+    double outage_start_seconds = -1, outage_end_seconds = -1;
+    double outage_gain = 0, outage_ramp_seconds = 60;
+};
 struct StreamChannelConfig {
     SimulationConfig effects{};
     // With physical effects.fhss, RF hops and dropout windows use the public
@@ -121,6 +138,7 @@ struct StreamChannelConfig {
     // dropout windows. RF dwell clocks remain independent of audio-clock ppm.
     OscillatorSpectrum tx_spectrum{}, rx_spectrum{};
     SampledFrontendConfig frontend{};
+    PathEvolutionConfig path_evolution{};
     double signal_gain = 1;
     // Absolute variance E|n|² of final complex sample noise. effects.snr_db
     // is unused: a stream is never normalized using its future whole power.
@@ -131,6 +149,7 @@ struct StreamChannelConfig {
     std::optional<std::uint64_t> oscillator_seed;
     std::optional<std::uint64_t> noise_seed;
     std::optional<std::uint64_t> frontend_seed;
+    std::optional<std::uint64_t> path_seed;
 };
 struct StreamChannelReport {
     std::uint64_t samples = 0, source_samples = 0, tail_samples = 0;
@@ -140,6 +159,7 @@ struct StreamChannelReport {
     std::uint64_t dac_clipped_components = 0, adc_clipped_components = 0;
     std::uint64_t impulse_events = 0, overload_samples = 0;
     double maximum_adc_input_component = 0;
+    double path_diurnal_initial_phase_radians = 0;
     bool gaussian_projection_supported = true;
     std::size_t working_bytes = 0;
 };
