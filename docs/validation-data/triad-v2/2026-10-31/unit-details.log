@@ -1,0 +1,6 @@
+coherent clean score=0.999993 margin=0.990454
+differential clean score=0.999983 margin=0.994189
+amplitude-only clean score=0.999941 margin=1.0059
+Rate36 worst repeated10ms distinguishing-energy loss=0.0321519
+searched score=0.997226 arrival=0.5375 epoch=-2 hypotheses=3577
+triad v2 checks passed

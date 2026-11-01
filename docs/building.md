@@ -406,7 +406,7 @@ test prerequisites before invoking CTest**; CTest by itself does not rebuild.
 | `native` | Selected backend's display-dependent workflow and conformance probes |
 | `packaging` | Runtime collection, checksums, corruption detection and relocation |
 | `build` | Build orchestration, dependency preparation and vendored source integrity |
-| `triad` | Isolated experimental three-carrier modem and sampled-I/Q study; no ordinary Robust receiver or native audio dependency |
+| `triad` | Isolated v1/v2 three-carrier modem checks and sampled-I/Q study smoke tests; no ordinary Robust receiver or native audio dependency |
 | `all` | All configured non-display tests, including expensive calibration |
 
 Groups overlap deliberately. `contract` is the maintenance gate for changes

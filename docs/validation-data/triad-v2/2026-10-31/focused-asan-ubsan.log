@@ -1,0 +1,46 @@
+Configuring sanitize in /home/user/___quick/p/_cur/dataPump/pumpModem/build/sanitize
+Preset CMake variables:
+
+  BUILD_TESTING="ON"
+  CMAKE_BUILD_TYPE="Debug"
+  CMAKE_EXPORT_COMPILE_COMMANDS="ON"
+  DATAPUMP_COMPILER_CACHE="ON"
+  DATAPUMP_SANITIZERS="ON"
+
+-- DataPump native dependency prefix: /home/user/___quick/p/_cur/dataPump/pumpModem/third_party/build-support/cache/sysroot/usr
+-- DataPump compiler cache: /usr/bin/ccache
+-- Could NOT find Gettext (missing: GETTEXT_MSGMERGE_EXECUTABLE GETTEXT_MSGFMT_EXECUTABLE) 
+-- DataPump build: /home/user/___quick/p/_cur/dataPump/pumpModem/build/sanitize (Debug, fltk, portable=OFF)
+-- DataPump targeted receive mitigation: index=compiler target supported; barrier=compiler target supported
+-- Configuring done (0.3s)
+-- Generating done (0.4s)
+-- Build files have been written to: /home/user/___quick/p/_cur/dataPump/pumpModem/build/sanitize
+Building datapump-tests-triad with 2 compile jobs
+[1/11] Building CXX object CMakeFiles/triad_experiment.dir/src/triad_simulation.cpp.o
+[2/11] Building CXX object CMakeFiles/test_triad_modem.dir/tests/test_triad_modem.cpp.o
+[3/11] Building CXX object CMakeFiles/test_triad_v2.dir/tests/test_triad_v2.cpp.o
+[4/11] Building CXX object CMakeFiles/triad_study.dir/tools/triad-study.cpp.o
+[5/11] Building CXX object CMakeFiles/triad_experiment.dir/src/triad_modem_v2.cpp.o
+[6/11] Linking CXX static library libtriad_experiment.a
+[7/11] Linking CXX executable test_triad_modem
+[8/11] Linking CXX executable test_triad_v2
+[9/11] Linking CXX executable triad_study
+[10/11] Building CXX object CMakeFiles/triad_examples.dir/tools/triad-examples.cpp.o
+[11/11] Linking CXX executable triad_examples
+Internal ctest changing into directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build/sanitize
+Test project /home/user/___quick/p/_cur/dataPump/pumpModem/build/sanitize
+    Start 422: triad_smoke
+    Start 421: triad_modem
+1/4 Test #421: triad_modem ......................   Passed    2.18 sec
+    Start 423: triad_v2
+2/4 Test #422: triad_smoke ......................   Passed    5.03 sec
+    Start 424: triad_examples_smoke
+3/4 Test #424: triad_examples_smoke .............   Passed    0.28 sec
+4/4 Test #423: triad_v2 .........................   Passed    3.67 sec
+
+100% tests passed, 0 tests failed out of 4
+
+Label Time Summary:
+triad    =  11.16 sec*proc (4 tests)
+
+Total Test time (real) =   5.86 sec

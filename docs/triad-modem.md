@@ -1,5 +1,10 @@
 # Experimental three-carrier Robust modem
 
+**Historical v1 prototype.** The [v2 experiment](triad-v2.md) implements the
+GUI's inner-Rate × Added-Symbols semantics and the requested Rate 360/36,
+Added ×10 configurations. V1 below uses a different fine-symbol convention;
+its dated measurements remain evidence only for that earlier format.
+
 This is a separate sampled-I/Q transmitter, receiver and propagation experiment.
 It does not change the ordinary Robust format, receiver, GUI, framing, pending
 progress, or physical-completion rules. Its finite, locally configured frames

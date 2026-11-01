@@ -18,6 +18,7 @@ set(_aliases
   "helper_live_cable_sim=helper_live_cable_tool"
   "helper_live_cable_calibration=helper_live_cable_tool"
   "triad_smoke=triad_study"
+  "triad_examples_smoke=triad_examples"
   "helper_coherent_frequency_study=test_helper_coherent_frequency"
   "helper_frequency_eme_regression=test_helper_measurement_eme"
   "helper_tracking_robustness=test_helper_tracking"

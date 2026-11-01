@@ -23,6 +23,10 @@ struct SimulationConfig {
     double sample_rate = 12'000;
     double occupied_bandwidth_hz = 2'250;
     double rf_hz = 30'000'000;
+    // Nominal analog/audio conversion IF whose residual survives complex
+    // direct conversion when the independent audio sample clocks differ.
+    // Zero preserves the original zero-centered baseband simulation.
+    double nominal_conversion_if_hz = 0;
     Oscillator tx{};
     Oscillator rx{};
     std::uint64_t seed = 1;
@@ -93,11 +97,15 @@ struct Capture {
     Oscillator rx_realization{};
 };
 
-// Conservative bound for independent end errors at one carrier. Drift is
-// bounded over duration_seconds about the configured starting offsets.
+// Conservative bound for independent end errors. RF ppm is scaled at rf_hz;
+// audio ppm is scaled only at nominal_conversion_if_hz. Drifts are bounded
+// over duration_seconds about each configured starting offset.
 double oscillator_bound_hz(double rf_hz, double per_end_ppm_bound,
                            double duration_seconds,
-                           double per_end_drift_ppm_per_second = 0);
+                           double per_end_drift_ppm_per_second = 0,
+                           double nominal_conversion_if_hz = 0,
+                           double per_end_audio_ppm_bound = 0,
+                           double per_end_audio_drift_ppm_per_second = 0);
 
 // Simulate an independently generated complex-baseband source. The receiver
 // consumes only Capture::iq; channel truth remains in SimulationConfig and

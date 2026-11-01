@@ -40,7 +40,7 @@ struct Random {
 bool finite_nonnegative(double x) { return std::isfinite(x) && x >= 0; }
 
 void validate(const SimulationConfig& c) {
-    const double values[] = {c.sample_rate, c.occupied_bandwidth_hz, c.rf_hz,
+    const double values[] = {c.sample_rate, c.occupied_bandwidth_hz, c.rf_hz, c.nominal_conversion_if_hz,
         c.tx.rf_ppm, c.tx.rf_drift_ppm_per_second, c.tx.phase_noise_rad_per_sqrt_second, c.tx.audio_ppm,
         c.rx.rf_ppm, c.rx.rf_drift_ppm_per_second, c.rx.phase_noise_rad_per_sqrt_second, c.rx.audio_ppm,
         c.timing_offset_seconds, c.capture_lead_seconds, c.capture_trail_seconds, c.static_doppler_hz, c.spread_delay_ms, c.spread_doppler_hz,
@@ -49,6 +49,7 @@ void validate(const SimulationConfig& c) {
     for (const auto value : values)
         if (!std::isfinite(value)) throw Error("triad simulation configuration contains a non-finite value");
     if (!(c.sample_rate > 0) || !(c.occupied_bandwidth_hz > 0) || !(c.rf_hz > 0) ||
+        c.nominal_conversion_if_hz < 0 ||
         c.occupied_bandwidth_hz >= c.sample_rate || c.dwell_seconds <= 0)
         throw Error("triad simulation sample clock, bandwidth, RF carrier or dwell is invalid");
     if (!finite_nonnegative(c.spread_delay_ms) || !finite_nonnegative(c.spread_doppler_hz) ||
@@ -158,12 +159,20 @@ bool dropout_at(const SimulationConfig& c, double t) {
 
 double oscillator_bound_hz(double rf_hz, double per_end_ppm_bound,
                            double duration_seconds,
-                           double per_end_drift_ppm_per_second) {
+                           double per_end_drift_ppm_per_second,
+                           double nominal_conversion_if_hz,
+                           double per_end_audio_ppm_bound,
+                           double per_end_audio_drift_ppm_per_second) {
     if (!finite_nonnegative(rf_hz) || !finite_nonnegative(per_end_ppm_bound) ||
-        !finite_nonnegative(duration_seconds) || !finite_nonnegative(per_end_drift_ppm_per_second))
+        !finite_nonnegative(duration_seconds) || !finite_nonnegative(per_end_drift_ppm_per_second) ||
+        !finite_nonnegative(nominal_conversion_if_hz) || !finite_nonnegative(per_end_audio_ppm_bound) ||
+        !finite_nonnegative(per_end_audio_drift_ppm_per_second))
         throw Error("triad oscillator bound arguments must be finite and nonnegative");
-    return rf_hz * 2.0 * (per_end_ppm_bound +
+    const double rf = rf_hz * 2.0 * (per_end_ppm_bound +
         per_end_drift_ppm_per_second * duration_seconds) * 1e-6;
+    const double audio = nominal_conversion_if_hz * 2.0 * (per_end_audio_ppm_bound +
+        per_end_audio_drift_ppm_per_second * duration_seconds) * 1e-6;
+    return rf + audio;
 }
 
 Capture simulate(std::span<const Complex> source, const SimulationConfig& c) {
@@ -257,11 +266,14 @@ Capture simulate(std::span<const Complex> source, const SimulationConfig& c) {
     const double maximum_hop = c.fhss && !c.hop_offsets_hz.empty() ? std::max(
         std::abs(*std::min_element(c.hop_offsets_hz.begin(), c.hop_offsets_hz.end())),
         std::abs(*std::max_element(c.hop_offsets_hz.begin(), c.hop_offsets_hz.end()))) : 0.0;
-    const double max_cfo = (c.rf_hz + maximum_hop) * (
+    const double rf_max_cfo = (c.rf_hz + maximum_hop) * (
         std::abs(c.tx.rf_ppm) + std::abs(c.rx.rf_ppm) +
         (std::abs(c.tx.rf_drift_ppm_per_second) + std::abs(c.rx.rf_drift_ppm_per_second)) *
             (source_duration + c.capture_lead_seconds + std::abs(c.timing_offset_seconds))
     ) * 1e-6 + std::abs(c.static_doppler_hz);
+    const double audio_if_max_cfo = c.nominal_conversion_if_hz *
+        (std::abs(txscale - 1.0) + std::abs(rxscale - 1.0));
+    const double max_cfo = rf_max_cfo + audio_if_max_cfo;
     if (!std::isfinite(max_cfo)) throw Error("triad duration-bounded CFO is not representable");
     if (c.sample_rate <= 2.0 * (max_cfo + c.occupied_bandwidth_hz / 2.0))
         throw Error("triad simulation sample rate aliases the duration-bounded CFO and occupied band");
@@ -288,7 +300,8 @@ Capture simulate(std::span<const Complex> source, const SimulationConfig& c) {
         const double hop = hop_at(c, t);
         const double rf_error = (c.rf_hz + hop) *
             (c.tx.rf_ppm + c.tx.rf_drift_ppm_per_second * t) * 1e-6;
-        tx_phase += tau * rf_error * dt +
+        const double audio_if_error = c.nominal_conversion_if_hz * (txscale - 1.0);
+        tx_phase += tau * (rf_error + audio_if_error) * dt +
             c.tx.phase_noise_rad_per_sqrt_second * std::sqrt(dt) * tx_noise.normal();
         transmitted[i] = c.signal_enabled ? source[i] * std::polar(1.0, tx_phase) : Complex{};
     }
@@ -367,8 +380,9 @@ Capture simulate(std::span<const Complex> source, const SimulationConfig& c) {
         // appears with the opposite sign in the receiver's local oscillator.
         const double rx_rf_error = (c.rf_hz + rx_hop) *
             (c.rx.rf_ppm + c.rx.rf_drift_ppm_per_second * rx_true_time) * 1e-6 - c.static_doppler_hz;
+        const double rx_audio_if_error = c.nominal_conversion_if_hz * (rxscale - 1.0);
         const double rx_dt = 1.0 / (c.sample_rate * rxscale);
-        rx_phase += tau * rx_rf_error * rx_dt +
+        rx_phase += tau * (rx_rf_error + rx_audio_if_error) * rx_dt +
             c.rx.phase_noise_rad_per_sqrt_second * std::sqrt(rx_dt) * rx_noise.normal();
         propagated *= std::polar(1.0, -rx_phase);
         signal_energy += std::norm(propagated);

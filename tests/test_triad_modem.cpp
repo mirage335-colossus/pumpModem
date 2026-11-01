@@ -148,6 +148,20 @@ void channel_checks() {
     shifted=simulate(x,c);
     const auto clockphase=std::arg(shifted.iq[3201]*std::conj(shifted.iq[3200]));
     check(std::abs(clockphase*c.sample_rate/(2*std::numbers::pi)-100*1.001/.999)<.03,"independent RX/TX audio scaling");
+    c.nominal_conversion_if_hz=1500;
+    shifted=simulate(x,c);
+    const auto ifphase=std::arg(shifted.iq[3201]*std::conj(shifted.iq[3200]));
+    check(std::abs(ifphase*c.sample_rate/(2*std::numbers::pi)-
+        (1600*1.001/.999-1500))<.03,"audio IF residual lost in complex downconversion");
+    check(std::abs(shifted.expected_max_cfo_hz-3)<1e-9,"audio IF CFO metadata");
+    check(std::abs(oscillator_bound_hz(30e6,.00015,8,0,1500,150)-.459)<1e-9,
+        "base crystal error incorrectly scaled at RF");
+    c.rx.audio_ppm=c.tx.audio_ppm;
+    shifted=simulate(x,c);
+    const auto commonclock=std::arg(shifted.iq[3201]*std::conj(shifted.iq[3200]));
+    check(std::abs(commonclock*c.sample_rate/(2*std::numbers::pi)-100)<.03,
+        "common audio clocks create spurious IF residual");
+    c.nominal_conversion_if_hz=0;
     c.tx=Oscillator{};c.rx=Oscillator{};
     std::vector<Complex> pulse(320);pulse[310]=1;
     c.spread_delay_ms=6;c.spread_doppler_hz=1;c.perturbation_fast_depth=.25;
