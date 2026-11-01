@@ -52,6 +52,7 @@ else()
 endif()
 include(cmake/VendoredLzma.cmake)
 add_library(datapump src/crypto.cpp src/helper_carrier.cpp src/helper_metadata.cpp src/helper_receiver.cpp src/helper_measurement.cpp src/helper_aided_phase.cpp src/helper_relative_clock.cpp src/helper_joint_estimator.cpp src/helper_frequency_recovery.cpp src/helper_dual_pilot_phase.cpp src/helper_frequency_measurement.cpp src/helper_coherent_frequency.cpp src/helper_stream_conditioner.cpp src/helper_startup_timing.cpp src/helper_phase_clock.cpp src/helper_assistance.cpp src/helper_frontend.cpp src/helper_tone_tracker.cpp src/stream_codec.cpp src/recovery.cpp src/attachment.cpp src/boundary_sync.cpp src/compression_short.cpp src/compression_lzma.cpp src/modem.cpp src/streaming_modem.cpp src/pattern_code.cpp src/pattern_receiver.cpp src/pattern_correlator.cpp src/search_parallel.cpp src/channel.cpp src/runtime.cpp src/resampler.cpp src/qr.cpp src/transfer.cpp src/tuning.cpp src/live.cpp src/live_receiver_layout.cpp src/signal_view.cpp third_party/qrcodegen/qrcodegen.cpp)
+target_sources(datapump PRIVATE src/tuning_presets.cpp)
 # Scalar, cached and batched receiver paths must preserve identical arithmetic.
 # AArch64 can fuse multiply/add by default where generic x86-64 cannot. Keep
 # separate rounding in both the library and its independent reference tests.
@@ -676,7 +677,7 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
   add_library(triad_experiment STATIC EXCLUDE_FROM_ALL
     src/crypto.cpp src/triad_modem.cpp src/triad_simulation.cpp src/triad_modem_v2.cpp
     src/triad_statistics.cpp src/triad_modem_v3.cpp src/triad_simulation_stream.cpp
-    src/triad_receiver_v3.cpp src/search_fft.cpp)
+    src/triad_receiver_v3.cpp src/search_fft.cpp src/tuning_presets.cpp)
   target_include_directories(triad_experiment PUBLIC include PRIVATE src)
   target_link_libraries(triad_experiment PUBLIC OpenSSL::Crypto Threads::Threads)
   if(MSVC)
@@ -1079,6 +1080,17 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
       ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_triad_long.py $<TARGET_FILE:triad_long>)
     set_tests_properties(triad_long_smoke PROPERTIES LABELS "triad" TIMEOUT 300)
     add_custom_target(test_triad_long_smoke DEPENDS triad_long)
+    add_test(NAME triad_configuration COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_triad_configuration.py $<TARGET_FILE:triad_long>)
+    set_tests_properties(triad_configuration PROPERTIES LABELS "triad" TIMEOUT 90)
+    add_custom_target(test_triad_configuration DEPENDS triad_long)
+    if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
+      foreach(_triad_python_test bounded_run diversity_export)
+        add_test(NAME triad_${_triad_python_test} COMMAND ${Python3_EXECUTABLE}
+          ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_triad_${_triad_python_test}.py)
+        set_tests_properties(triad_${_triad_python_test} PROPERTIES LABELS "triad" TIMEOUT 60)
+      endforeach()
+    endif()
     add_test(NAME helper_complete_clock_regression COMMAND ${Python3_EXECUTABLE}
       ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_helper_complete_clock_regression.py $<TARGET_FILE:test_helper_complete_study>)
     add_test(NAME helper_complete_inversion_regression COMMAND ${Python3_EXECUTABLE}

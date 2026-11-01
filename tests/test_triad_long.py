@@ -302,6 +302,8 @@ def main():
             raise AssertionError("statistics manifest omits explicit epoch or oscillator settings")
         if "not included" not in stats_manifest["source_hash_binding"] or not stats_manifest["oscillator_model"]["truth_fields_simulation_only"]:
             raise AssertionError("statistics manifest misstates hash binding or simulation-only truth")
+        if (stats / "received_energy.f64").exists():
+            raise AssertionError("received-energy output must require --stats-noisy")
         if stats_manifest["column_mapping"] != [[0], [1]]:
             raise AssertionError(f"flat candidate column mapping is wrong: {stats_manifest['column_mapping']}")
         gram = complex128_values(stats / "gram.c128")
@@ -367,6 +369,28 @@ def main():
             raise AssertionError("actual noisy projection output has invalid dimensions or values")
         if observations == complex128_values(noisy / "mean.c128"):
             raise AssertionError("noisy projection unexpectedly equals noiseless mean")
+
+        # Match noisy block energies against the independent raw sampled export
+        # on the same no-effect, nonzero-thermal-noise input and validity mask.
+        received = root / "fresh-stats-received-energy"
+        received_manifest = export_stats(received, "--stats-noisy")
+        if received_manifest["noise_variance"] <= 0:
+            raise AssertionError("received-energy fixture must use nonzero thermal noise")
+        if received_manifest["received_energy_shape"] != [received_manifest["block_count"]]:
+            raise AssertionError("received-energy shape differs from public block count")
+        received_values = list(struct.iter_unpack("<d", (received / "received_energy.f64").read_bytes()))
+        if len(received_values) != received_manifest["block_count"]:
+            raise AssertionError("received-energy file length differs from declared shape")
+        sampled_values = complex128_values(sampled / "observation.c128")
+        sampled_validity = (sampled / "validity.u8").read_bytes()
+        received_intervals = list(struct.iter_unpack("<QQ", (received / "intervals.u64").read_bytes()))
+        for block_index, (first_sample, stop_sample) in enumerate(received_intervals):
+            expected_energy = sum(value.real * value.real + value.imag * value.imag for value, valid in
+                                  zip(sampled_values[first_sample:stop_sample],
+                                      sampled_validity[first_sample:stop_sample]) if valid)
+            actual_energy = received_values[block_index][0]
+            if not math.isclose(actual_energy, expected_energy, rel_tol=2e-13, abs_tol=1e-12):
+                raise AssertionError(f"received noisy block energy differs from raw sampled fixture: block={block_index}, got={actual_energy}, expected={expected_energy}")
 
         # Channel seed changes actual samples while leaving the public design
         # matrix fixed; key seed changes the encrypted public basis.

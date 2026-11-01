@@ -1,5 +1,9 @@
 # Three-carrier modem v3 study
 
+The [noise-calibration and configuration-diversity extension](triad-noise-calibration.md)
+documents the common-scale and independent-residual likelihoods, their explicit
+noise assumptions, and the tighter clock/oscillator configuration study.
+
 V3 is the separate streaming experiment for one-bit transmissions whose active
 span can be hours or days. It does not change the ordinary Robust receiver or
 the earlier v1/v2 experimental formats. The implementation is in

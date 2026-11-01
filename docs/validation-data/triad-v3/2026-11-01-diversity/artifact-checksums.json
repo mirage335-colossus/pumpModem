@@ -1,0 +1,58 @@
+{
+  "known_channel_benchmarks.py": {
+    "bytes": 9714,
+    "sha256": "eaf65548d705b536faeb18b330d9ac6492d250d8a5fa58721f8d6da0c53bbfff"
+  },
+  "known-channel-benchmarks.json": {
+    "bytes": 15644,
+    "sha256": "56009ffaa7057d4d1f47726980ed56a90633d0a844d03b2e4ca256096f9affb5"
+  },
+  "technical-results.tar.gz": {
+    "bytes": 4716565,
+    "sha256": "8f9c1e4b2b499321bcb1aec55eac8d9fc6f90ca9fe09df3a0784ac0ab871dcae"
+  },
+  "technical-results.index.json": {
+    "bytes": 385618,
+    "sha256": "d42441ad59fdc3ea179ea153109995146f742387ffd86d25c069b0b270b29d64"
+  },
+  "compare_static_precision.py": {
+    "bytes": 1506,
+    "sha256": "f8fa8d682c77ca49e3c2271d906ffa6c70a1440ac91580ad9368820c766566c0"
+  },
+  "static-precision-comparison.json": {
+    "bytes": 8214,
+    "sha256": "d8d16bdb8630606c9508f870c570dfb8e57f6e1e22290376c3ad5fb02553c04f"
+  },
+  "tests-noise-final.log": {
+    "bytes": 8692,
+    "sha256": "8b360ff04f352911d1eab8e73967e6cf5224ff62f080582d989b5b5e70dd5a02"
+  },
+  "tests-static-final.log": {
+    "bytes": 1426,
+    "sha256": "444131ca875e5568d065f3b0ffd0a17a74a171cc77d8b82d07432ac4b646e8d6"
+  },
+  "tests-triad-final.log": {
+    "bytes": 4307,
+    "sha256": "49a9c64e9f5f4a1326e601440ffe60d7e649d3c952dd400a1e9e1e721540e683"
+  },
+  "source-provenance.json": {
+    "bytes": 1869,
+    "sha256": "fed9f19e99509e307483ff95b345ec6f69e6d4ec6591e346d9a44bb74ce59928"
+  },
+  "analysis.json": {
+    "bytes": 3258471,
+    "sha256": "45425efb7773818a344391e8b81329ac4914e785cb983edea762b17c64caaeb5"
+  },
+  "analyze_results.py": {
+    "bytes": 34022,
+    "sha256": "1d9bd4266665ae654fa54f15c6631299772b8ac686922bc4bb545ffc6a00eedd"
+  },
+  "compare_screens.py": {
+    "bytes": 1995,
+    "sha256": "2efc2c5f768868271fbc720d2d33910dc44f4b819fe73d6234fc7448231aa8c4"
+  },
+  "screen-comparison.json": {
+    "bytes": 12022,
+    "sha256": "a88eb49a136963bc0c22bff7517c0d462321da61faf1aa35acee40b29cd4513b"
+  }
+}

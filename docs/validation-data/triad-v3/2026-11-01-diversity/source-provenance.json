@@ -1,0 +1,21 @@
+{
+  "base_commit": "933cdfe92191cd575557d36ad16b81b936c3e5f2",
+  "current_source_hashes": {
+    "CMakeLists.txt": "413af4ed6bdf975d4f04847ac0a14ebcc1a21191074a82ba8c37f931c10251a1",
+    "cmake/TestGroups.cmake": "9a2cb01c13bc21e94e5437c71b65862e17b1b12616eddd70e45c9d33b6e012f5",
+    "src/tuning.cpp": "228578b2dc33b72e657d646d956ccb51aefbbabde1af730ef83a15e6785cb01e",
+    "src/tuning_presets.cpp": "31e1ac552bea10b24036f959485241532066e6aa343931c04a46a65e8734b293",
+    "tools/triad-diversity-export.py": "bb871b98d436ab45605ad8127513d92fc25fff0461cc66ed26e3c5967e4a9015",
+    "tools/triad-long.cpp": "a575494d40380bfdb2e79986c67f0cb9cac222612fd882ece7e39a525a18f06e",
+    "tools/triad-noise-batch-study.py": "5c0e0a0b78a725131854c38b86c215117860c4d4ca17470164ba710de4ff2213",
+    "tools/triad-noise-study.py": "97c404a87b27f2b250217dca8a7c787c0263f595b4e9e521a7972af12fba63a3",
+    "tools/triad-reblock.py": "9b717113fac9124c977c07703ca4485d87bf564ae037b49c550ac6ae7765c893",
+    "tools/triad-retained-energy.py": "5e7d4e775305d876427091180375082eb27f193f6ff37958f918362c3f9b764b",
+    "tools/triad-static-frequency-study.py": "5622df804c6ebd1c1233b761d62eeb84a10dd34c451743069f1778ac852b9363",
+    "tools/triad_bounded_run.py": "f117d6be27d38d055f5ab65af2f850c038501badd16cb5f524b5388530218cf2",
+    "tools/triad_noise_likelihood.py": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110",
+    "tools/triad_state_workspace.py": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923"
+  },
+  "deployed_source": "See technical-results.index.json and archived triad/ subtree; per-report hashes capture earlier compatible tool revisions. Current C++ timing recommendation metadata postdates deployed exporter; DSP unchanged by that recommendation patch.",
+  "archive_sha256": "8f9c1e4b2b499321bcb1aec55eac8d9fc6f90ca9fe09df3a0784ac0ab871dcae"
+}

@@ -1,0 +1,358 @@
+{
+  "archived_actual_energy_comparisons": [],
+  "assumptions": {
+    "detection_probability_formula": "P_D=Phi(sqrt(2*rho)-Qinv(p_false_per_hypothesis))",
+    "energy": "total received triplet power allocated to one bit, multiplied by useful full-power time; E/N0=(C/N0 linear)*T",
+    "family": "union bound over K=9 methods, D=3 durations, N=2 bit alternatives and one scheduled attempt every60seconds",
+    "formula": "rho_required=0.5*(Qinv(p_false_per_hypothesis)+Phiinv(P_D))**2",
+    "gate_distinction": "known-waveform Gaussian tail threshold is optimized for this detector; the study Markov log-LR gate is reported separately",
+    "nominal_time": "no shaping, outage, fading, burst-silence or multiple-bit energy allocation loss; elapsed observation time is not automatically useful signal time",
+    "score_allocation": "half total alpha is reserved for scores, half for calibration; N=2 calibration policies share the latter half",
+    "signal_model": "completely known deterministic complex waveform, phase, synchronization and channel in known white proper complex Gaussian noise"
+  },
+  "headline_nominal_cases": [
+    {
+      "E_N0_db": 19.56302500767287,
+      "E_N0_linear": 90.42791153434486,
+      "cn0_db_hz": -16.0,
+      "nominal_useful_full_power_signal_seconds": 3600.0,
+      "relaxed": {
+        "available_minus_required_known_waveform_energy_db": 6.403796662087798,
+        "ideal_known_waveform_detection_probability": 1.0,
+        "ideal_known_waveform_miss_probability": 5.388987525360589e-17
+      },
+      "required_nominal_useful_signal_seconds": {
+        "relaxed": 823.9916951649448,
+        "strict": 1403.012010519434
+      },
+      "strict": {
+        "available_minus_required_known_waveform_energy_db": 4.0924111193423105,
+        "ideal_known_waveform_detection_probability": 0.9999999999999203,
+        "ideal_known_waveform_miss_probability": 7.966393105264248e-14
+      }
+    },
+    {
+      "E_N0_db": 18.375437381428746,
+      "E_N0_linear": 68.79291907164435,
+      "cn0_db_hz": -34.0,
+      "nominal_useful_full_power_signal_seconds": 172800.0,
+      "relaxed": {
+        "available_minus_required_known_waveform_energy_db": 5.216209035843674,
+        "ideal_known_waveform_detection_probability": 0.9999999999760497,
+        "ideal_known_waveform_miss_probability": 2.3950270539231134e-11
+      },
+      "required_nominal_useful_signal_seconds": {
+        "relaxed": 51990.36118550062,
+        "strict": 88524.07324311585
+      },
+      "strict": {
+        "available_minus_required_known_waveform_energy_db": 2.9048234930981867,
+        "ideal_known_waveform_detection_probability": 0.9999999924561734,
+        "ideal_known_waveform_miss_probability": 7.543826617787246e-09
+      }
+    }
+  ],
+  "limitations": [
+    "Known-waveform signal-versus-noise detection is not correct reception of an unknown keyed bit and does not model legitimate nuisance transformations or codeword separation.",
+    "Unknown synchronization, phase/channel evolution, noise calibration, retained-projection losses and computational limits can require additional energy.",
+    "Nominal energy does not replace archived actual post-erasure signal energy; this default report includes no actual-energy claim.",
+    "The family union bound is conservative for correlated alternatives and is fixed-window accounting, not unrestricted sequential stopping.",
+    "A probability rounded to1 or a miss probability underflowed to0 is floating-point output, not a mathematical certainty.",
+    "No measured receiver gain, universal optimum, physical duration qualification or SNR-wall claim follows from these analytical references."
+  ],
+  "nominal_grid": [
+    {
+      "E_N0_db": 16.791812460476248,
+      "E_N0_linear": 47.772860466419665,
+      "cn0_db_hz": -4.0,
+      "nominal_useful_full_power_signal_seconds": 120.0,
+      "relaxed": {
+        "available_minus_required_known_waveform_energy_db": 3.6325841148911753,
+        "ideal_known_waveform_detection_probability": 0.9999981030924093,
+        "ideal_known_waveform_miss_probability": 1.8969075906150535e-06
+      },
+      "required_nominal_useful_signal_seconds": {
+        "relaxed": 51.99036118550064,
+        "strict": 88.5240732431159
+      },
+      "strict": {
+        "available_minus_required_known_waveform_energy_db": 1.321198572145688,
+        "ideal_known_waveform_detection_probability": 0.9998945603377957,
+        "ideal_known_waveform_miss_probability": 0.00010543966220434601
+      }
+    },
+    {
+      "E_N0_db": 31.563025007672874,
+      "E_N0_linear": 1433.1858139925898,
+      "cn0_db_hz": -4.0,
+      "nominal_useful_full_power_signal_seconds": 3600.0,
+      "relaxed": {
+        "available_minus_required_known_waveform_energy_db": 18.4037966620878,
+        "ideal_known_waveform_detection_probability": 1.0,
+        "ideal_known_waveform_miss_probability": 0.0
+      },
+      "required_nominal_useful_signal_seconds": {
+        "relaxed": 51.99036118550064,
+        "strict": 88.5240732431159
+      },
+      "strict": {
+        "available_minus_required_known_waveform_energy_db": 16.092411119342316,
+        "ideal_known_waveform_detection_probability": 1.0,
+        "ideal_known_waveform_miss_probability": 0.0
+      }
+    },
+    {
+      "E_N0_db": 48.37543738142874,
+      "E_N0_linear": 68792.91907164431,
+      "cn0_db_hz": -4.0,
+      "nominal_useful_full_power_signal_seconds": 172800.0,
+      "relaxed": {
+        "available_minus_required_known_waveform_energy_db": 35.21620903584367,
+        "ideal_known_waveform_detection_probability": 1.0,
+        "ideal_known_waveform_miss_probability": 0.0
+      },
+      "required_nominal_useful_signal_seconds": {
+        "relaxed": 51.99036118550064,
+        "strict": 88.5240732431159
+      },
+      "strict": {
+        "available_minus_required_known_waveform_energy_db": 32.90482349309818,
+        "ideal_known_waveform_detection_probability": 1.0,
+        "ideal_known_waveform_miss_probability": 0.0
+      }
+    },
+    {
+      "E_N0_db": 4.791812460476247,
+      "E_N0_linear": 3.0142637178114953,
+      "cn0_db_hz": -16.0,
+      "nominal_useful_full_power_signal_seconds": 120.0,
+      "relaxed": {
+        "available_minus_required_known_waveform_energy_db": -8.367415885108827,
+        "ideal_known_waveform_detection_probability": 0.003497589365460421,
+        "ideal_known_waveform_miss_probability": 0.9965024106345396
+      },
+      "required_nominal_useful_signal_seconds": {
+        "relaxed": 823.9916951649448,
+        "strict": 1403.012010519434
+      },
+      "strict": {
+        "available_minus_required_known_waveform_energy_db": -10.678801427854314,
+        "ideal_known_waveform_detection_probability": 0.0001508538920617687,
+        "ideal_known_waveform_miss_probability": 0.9998491461079382
+      }
+    },
+    {
+      "E_N0_db": 19.56302500767287,
+      "E_N0_linear": 90.42791153434486,
+      "cn0_db_hz": -16.0,
+      "nominal_useful_full_power_signal_seconds": 3600.0,
+      "relaxed": {
+        "available_minus_required_known_waveform_energy_db": 6.403796662087798,
+        "ideal_known_waveform_detection_probability": 1.0,
+        "ideal_known_waveform_miss_probability": 5.388987525360589e-17
+      },
+      "required_nominal_useful_signal_seconds": {
+        "relaxed": 823.9916951649448,
+        "strict": 1403.012010519434
+      },
+      "strict": {
+        "available_minus_required_known_waveform_energy_db": 4.0924111193423105,
+        "ideal_known_waveform_detection_probability": 0.9999999999999203,
+        "ideal_known_waveform_miss_probability": 7.966393105264248e-14
+      }
+    },
+    {
+      "E_N0_db": 36.375437381428746,
+      "E_N0_linear": 4340.539753648553,
+      "cn0_db_hz": -16.0,
+      "nominal_useful_full_power_signal_seconds": 172800.0,
+      "relaxed": {
+        "available_minus_required_known_waveform_energy_db": 23.216209035843676,
+        "ideal_known_waveform_detection_probability": 1.0,
+        "ideal_known_waveform_miss_probability": 0.0
+      },
+      "required_nominal_useful_signal_seconds": {
+        "relaxed": 823.9916951649448,
+        "strict": 1403.012010519434
+      },
+      "strict": {
+        "available_minus_required_known_waveform_energy_db": 20.904823493098185,
+        "ideal_known_waveform_detection_probability": 1.0,
+        "ideal_known_waveform_miss_probability": 0.0
+      }
+    },
+    {
+      "E_N0_db": -3.2081875395237507,
+      "E_N0_linear": 0.4777286046641968,
+      "cn0_db_hz": -24.0,
+      "nominal_useful_full_power_signal_seconds": 120.0,
+      "relaxed": {
+        "available_minus_required_known_waveform_energy_db": -16.367415885108823,
+        "ideal_known_waveform_detection_probability": 1.4905537379109104e-05,
+        "ideal_known_waveform_miss_probability": 0.9999850944626208
+      },
+      "required_nominal_useful_signal_seconds": {
+        "relaxed": 5199.0361185500615,
+        "strict": 8852.407324311585
+      },
+      "strict": {
+        "available_minus_required_known_waveform_energy_db": -18.67880142785431,
+        "ideal_known_waveform_detection_probability": 1.7747078328389926e-07,
+        "ideal_known_waveform_miss_probability": 0.9999998225292167
+      }
+    },
+    {
+      "E_N0_db": 11.563025007672874,
+      "E_N0_linear": 14.331858139925904,
+      "cn0_db_hz": -24.0,
+      "nominal_useful_full_power_signal_seconds": 3600.0,
+      "relaxed": {
+        "available_minus_required_known_waveform_energy_db": -1.5962033379121987,
+        "ideal_known_waveform_detection_probability": 0.5798348213001727,
+        "ideal_known_waveform_miss_probability": 0.4201651786998273
+      },
+      "required_nominal_useful_signal_seconds": {
+        "relaxed": 5199.0361185500615,
+        "strict": 8852.407324311585
+      },
+      "strict": {
+        "available_minus_required_known_waveform_energy_db": -3.907588880657686,
+        "ideal_known_waveform_detection_probability": 0.2372165910902082,
+        "ideal_known_waveform_miss_probability": 0.7627834089097918
+      }
+    },
+    {
+      "E_N0_db": 28.375437381428746,
+      "E_N0_linear": 687.9291907164434,
+      "cn0_db_hz": -24.0,
+      "nominal_useful_full_power_signal_seconds": 172800.0,
+      "relaxed": {
+        "available_minus_required_known_waveform_energy_db": 15.216209035843674,
+        "ideal_known_waveform_detection_probability": 1.0,
+        "ideal_known_waveform_miss_probability": 3.6971371652658046e-224
+      },
+      "required_nominal_useful_signal_seconds": {
+        "relaxed": 5199.0361185500615,
+        "strict": 8852.407324311585
+      },
+      "strict": {
+        "available_minus_required_known_waveform_energy_db": 12.904823493098187,
+        "ideal_known_waveform_detection_probability": 1.0,
+        "ideal_known_waveform_miss_probability": 1.3023086319001884e-211
+      }
+    },
+    {
+      "E_N0_db": -13.20818753952375,
+      "E_N0_linear": 0.04777286046641968,
+      "cn0_db_hz": -34.0,
+      "nominal_useful_full_power_signal_seconds": 120.0,
+      "relaxed": {
+        "available_minus_required_known_waveform_energy_db": -26.367415885108823,
+        "ideal_known_waveform_detection_probability": 6.385817678934692e-07,
+        "ideal_known_waveform_miss_probability": 0.9999993614182321
+      },
+      "required_nominal_useful_signal_seconds": {
+        "relaxed": 51990.36118550062,
+        "strict": 88524.07324311585
+      },
+      "strict": {
+        "available_minus_required_known_waveform_energy_db": -28.67880142785431,
+        "ideal_known_waveform_detection_probability": 4.2049362422245905e-09,
+        "ideal_known_waveform_miss_probability": 0.9999999957950637
+      }
+    },
+    {
+      "E_N0_db": 1.5630250076728736,
+      "E_N0_linear": 1.4331858139925904,
+      "cn0_db_hz": -34.0,
+      "nominal_useful_full_power_signal_seconds": 3600.0,
+      "relaxed": {
+        "available_minus_required_known_waveform_energy_db": -11.596203337912199,
+        "ideal_known_waveform_detection_probability": 0.0002707469694094414,
+        "ideal_known_waveform_miss_probability": 0.9997292530305906
+      },
+      "required_nominal_useful_signal_seconds": {
+        "relaxed": 51990.36118550062,
+        "strict": 88524.07324311585
+      },
+      "strict": {
+        "available_minus_required_known_waveform_energy_db": -13.907588880657686,
+        "ideal_known_waveform_detection_probability": 6.041107178339964e-06,
+        "ideal_known_waveform_miss_probability": 0.9999939588928216
+      }
+    },
+    {
+      "E_N0_db": 18.375437381428746,
+      "E_N0_linear": 68.79291907164435,
+      "cn0_db_hz": -34.0,
+      "nominal_useful_full_power_signal_seconds": 172800.0,
+      "relaxed": {
+        "available_minus_required_known_waveform_energy_db": 5.216209035843674,
+        "ideal_known_waveform_detection_probability": 0.9999999999760497,
+        "ideal_known_waveform_miss_probability": 2.3950270539231134e-11
+      },
+      "required_nominal_useful_signal_seconds": {
+        "relaxed": 51990.36118550062,
+        "strict": 88524.07324311585
+      },
+      "strict": {
+        "available_minus_required_known_waveform_energy_db": 2.9048234930981867,
+        "ideal_known_waveform_detection_probability": 0.9999999924561734,
+        "ideal_known_waveform_miss_probability": 7.543826617787246e-09
+      }
+    }
+  ],
+  "reproduce": "python known_channel_benchmarks.py; requires Python and SciPy, no local exports",
+  "schema": "triad-known-channel-benchmarks-v2",
+  "script_sha256": "eaf65548d705b536faeb18b330d9ac6492d250d8a5fa58721f8d6da0c53bbfff",
+  "software": {
+    "python": "3.13.5",
+    "scipy": "1.18.1"
+  },
+  "targets": {
+    "relaxed": {
+      "attempt_spacing_seconds": 60.0,
+      "bit_hypotheses_N": 2,
+      "calibration_allocation_note": "N=2 shares the calibration half-budget; it does not multiply the score family a second time",
+      "calibration_alpha_reserved": 0.005,
+      "calibration_alternatives": 2,
+      "duration_alternatives_D": 3,
+      "horizon_seconds": 43200.0,
+      "known_waveform_Z_detection_quantile": 1.2815515655446004,
+      "known_waveform_Z_false_threshold": 5.152379672448859,
+      "known_waveform_detection_probability_inversion_check": 0.8999999999999999,
+      "known_waveform_detection_probability_target": 0.9,
+      "method_alternatives_K": 9,
+      "name": "relaxed",
+      "per_hypothesis_false_tail": 1.286008230452675e-07,
+      "required_known_waveform_E_N0_db": 13.159228345585072,
+      "required_known_waveform_E_N0_linear": 20.697735587614023,
+      "scheduled_attempts": 720,
+      "score_alpha": 0.005,
+      "study_markov_log_LR_gate_separate_from_Z_detector": 15.866552625122411,
+      "total_false_admission_target": 0.01
+    },
+    "strict": {
+      "attempt_spacing_seconds": 60.0,
+      "bit_hypotheses_N": 2,
+      "calibration_allocation_note": "N=2 shares the calibration half-budget; it does not multiply the score family a second time",
+      "calibration_alpha_reserved": 5e-05,
+      "calibration_alternatives": 2,
+      "duration_alternatives_D": 3,
+      "horizon_seconds": 86400.0,
+      "known_waveform_Z_detection_quantile": 2.3263478740408408,
+      "known_waveform_Z_false_threshold": 6.069135235904342,
+      "known_waveform_detection_probability_inversion_check": 0.99,
+      "known_waveform_detection_probability_target": 0.99,
+      "method_alternatives_K": 9,
+      "name": "strict",
+      "per_hypothesis_false_tail": 6.430041152263375e-10,
+      "required_known_waveform_E_N0_db": 15.47061388833056,
+      "required_known_waveform_E_N0_linear": 35.242068324687416,
+      "scheduled_attempts": 1440,
+      "score_alpha": 5e-05,
+      "study_markov_log_LR_gate_separate_from_Z_detector": 21.16486999167045,
+      "total_false_admission_target": 0.0001
+    }
+  }
+}

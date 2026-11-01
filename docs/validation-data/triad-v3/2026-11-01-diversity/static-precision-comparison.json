@@ -1,0 +1,216 @@
+[
+  {
+    "cpu": "short-microwave-fp64",
+    "gpu": "short-microwave-gpu",
+    "pairs": [
+      {
+        "manifest_sha256": "4a992ebf670cb18698614661316141dc2a8df8c7c6bd3317f4f0ae9cd996df75",
+        "method": "static-frequency",
+        "maximum_absolute_log_score_error": 1.2724834583810463e-06,
+        "same_winner": true,
+        "same_admission": true
+      },
+      {
+        "manifest_sha256": "4a992ebf670cb18698614661316141dc2a8df8c7c6bd3317f4f0ae9cd996df75",
+        "method": "static-frequency-ucb",
+        "maximum_absolute_log_score_error": 7.08021085671362e-06,
+        "same_winner": true,
+        "same_admission": true
+      },
+      {
+        "manifest_sha256": "c4a11b96c01e0e65535ce1008ed3c2ef4c695f53813123e21375055330893856",
+        "method": "static-frequency",
+        "maximum_absolute_log_score_error": 4.408185903415074e-06,
+        "same_winner": true,
+        "same_admission": true
+      },
+      {
+        "manifest_sha256": "c4a11b96c01e0e65535ce1008ed3c2ef4c695f53813123e21375055330893856",
+        "method": "static-frequency-ucb",
+        "maximum_absolute_log_score_error": 5.167299638841882e-06,
+        "same_winner": true,
+        "same_admission": true
+      },
+      {
+        "manifest_sha256": "b48cdfb09eaf1bdb8e16b5ca40542a1958006e9f47dfd34c6ddede78a8e041e9",
+        "method": "static-frequency",
+        "maximum_absolute_log_score_error": 7.480654502955986e-06,
+        "same_winner": true,
+        "same_admission": true
+      },
+      {
+        "manifest_sha256": "b48cdfb09eaf1bdb8e16b5ca40542a1958006e9f47dfd34c6ddede78a8e041e9",
+        "method": "static-frequency-ucb",
+        "maximum_absolute_log_score_error": 9.554526439359279e-06,
+        "same_winner": true,
+        "same_admission": true
+      },
+      {
+        "manifest_sha256": "6fd42c33a5c7adcc9c2a74dc2890a29290ea2d9a50d68c365af39bc1fce9de8e",
+        "method": "static-frequency",
+        "maximum_absolute_log_score_error": 3.5625928553884023e-06,
+        "same_winner": true,
+        "same_admission": true
+      },
+      {
+        "manifest_sha256": "6fd42c33a5c7adcc9c2a74dc2890a29290ea2d9a50d68c365af39bc1fce9de8e",
+        "method": "static-frequency-ucb",
+        "maximum_absolute_log_score_error": 5.416035691041543e-06,
+        "same_winner": true,
+        "same_admission": true
+      },
+      {
+        "manifest_sha256": "56b254bb472d899bd81f265de6b7c3b41ab8bf9931ff44af140a3a42480662f5",
+        "method": "static-frequency",
+        "maximum_absolute_log_score_error": 2.7815845839995745e-06,
+        "same_winner": true,
+        "same_admission": true
+      },
+      {
+        "manifest_sha256": "56b254bb472d899bd81f265de6b7c3b41ab8bf9931ff44af140a3a42480662f5",
+        "method": "static-frequency-ucb",
+        "maximum_absolute_log_score_error": 3.5666437412373853e-06,
+        "same_winner": true,
+        "same_admission": true
+      },
+      {
+        "manifest_sha256": "e528ec2a47557e3df5848219ee5732e04d1260dde12414933d28580aead55b9e",
+        "method": "static-frequency",
+        "maximum_absolute_log_score_error": 7.272517727585637e-06,
+        "same_winner": true,
+        "same_admission": true
+      },
+      {
+        "manifest_sha256": "e528ec2a47557e3df5848219ee5732e04d1260dde12414933d28580aead55b9e",
+        "method": "static-frequency-ucb",
+        "maximum_absolute_log_score_error": 4.545569485259193e-06,
+        "same_winner": true,
+        "same_admission": true
+      },
+      {
+        "manifest_sha256": "db1df8f4db9b1603222ded815503842280d6aa094400b57d48cd4f49e9cb5a55",
+        "method": "static-frequency",
+        "maximum_absolute_log_score_error": 7.925443128442566e-07,
+        "same_winner": true,
+        "same_admission": true
+      },
+      {
+        "manifest_sha256": "db1df8f4db9b1603222ded815503842280d6aa094400b57d48cd4f49e9cb5a55",
+        "method": "static-frequency-ucb",
+        "maximum_absolute_log_score_error": 1.116364124698066e-06,
+        "same_winner": true,
+        "same_admission": true
+      },
+      {
+        "manifest_sha256": "2e86f0f10eace54e1c1306abf2489bb290e963b1e14bedb0561dda8cbb99b9e0",
+        "method": "static-frequency",
+        "maximum_absolute_log_score_error": 8.015532415583948e-06,
+        "same_winner": true,
+        "same_admission": true
+      },
+      {
+        "manifest_sha256": "2e86f0f10eace54e1c1306abf2489bb290e963b1e14bedb0561dda8cbb99b9e0",
+        "method": "static-frequency-ucb",
+        "maximum_absolute_log_score_error": 8.836969534797845e-06,
+        "same_winner": true,
+        "same_admission": true
+      },
+      {
+        "manifest_sha256": "2576e1db16268303f4f6a9bd86099d06ff94b17b333ff5ce2155f28b190800bc",
+        "method": "static-frequency",
+        "maximum_absolute_log_score_error": 1.2847850662467408e-05,
+        "same_winner": true,
+        "same_admission": true
+      },
+      {
+        "manifest_sha256": "2576e1db16268303f4f6a9bd86099d06ff94b17b333ff5ce2155f28b190800bc",
+        "method": "static-frequency-ucb",
+        "maximum_absolute_log_score_error": 7.819716657309073e-06,
+        "same_winner": true,
+        "same_admission": true
+      },
+      {
+        "manifest_sha256": "c746b8332a70947eb2d4793f65ed9fbbcac9db888e1edd4faad956da550e1660",
+        "method": "static-frequency",
+        "maximum_absolute_log_score_error": 8.00815436718949e-06,
+        "same_winner": true,
+        "same_admission": true
+      },
+      {
+        "manifest_sha256": "c746b8332a70947eb2d4793f65ed9fbbcac9db888e1edd4faad956da550e1660",
+        "method": "static-frequency-ucb",
+        "maximum_absolute_log_score_error": 8.332362376961555e-06,
+        "same_winner": true,
+        "same_admission": true
+      },
+      {
+        "manifest_sha256": "f1ac01e40a85711928894d2f6f4cd56eb88fb6c34452319c34a50c8758fcda43",
+        "method": "static-frequency",
+        "maximum_absolute_log_score_error": 3.5216181437647265e-06,
+        "same_winner": true,
+        "same_admission": true
+      },
+      {
+        "manifest_sha256": "f1ac01e40a85711928894d2f6f4cd56eb88fb6c34452319c34a50c8758fcda43",
+        "method": "static-frequency-ucb",
+        "maximum_absolute_log_score_error": 7.703647799672808e-07,
+        "same_winner": true,
+        "same_admission": true
+      },
+      {
+        "manifest_sha256": "1e0ff91b6c4c30ef250729025cadee5d11f8392178bf8d5ba25af6ebbf90bbd0",
+        "method": "static-frequency",
+        "maximum_absolute_log_score_error": 8.781574095451106e-06,
+        "same_winner": true,
+        "same_admission": true
+      },
+      {
+        "manifest_sha256": "1e0ff91b6c4c30ef250729025cadee5d11f8392178bf8d5ba25af6ebbf90bbd0",
+        "method": "static-frequency-ucb",
+        "maximum_absolute_log_score_error": 4.331481363806233e-06,
+        "same_winner": true,
+        "same_admission": true
+      }
+    ],
+    "max_error": 1.2847850662467408e-05,
+    "all_same_winner": true,
+    "all_same_admission": true
+  },
+  {
+    "cpu": "dense-ocxo-twoday",
+    "gpu": "dense-ocxo-gpu",
+    "pairs": [
+      {
+        "manifest_sha256": "bf18f7c3626ce36d6b43eeed8068291d8c5c32156a538a7043bd67c38c996c42",
+        "method": "static-frequency",
+        "maximum_absolute_log_score_error": 1.6216638556443286e-05,
+        "same_winner": true,
+        "same_admission": true
+      },
+      {
+        "manifest_sha256": "bf18f7c3626ce36d6b43eeed8068291d8c5c32156a538a7043bd67c38c996c42",
+        "method": "static-frequency-ucb",
+        "maximum_absolute_log_score_error": 2.2162310770568183e-05,
+        "same_winner": true,
+        "same_admission": true
+      },
+      {
+        "manifest_sha256": "63e042caced5769bbb22ea2ea8d99705011565cb08ed7840ab9abcd6cef3ae11",
+        "method": "static-frequency",
+        "maximum_absolute_log_score_error": 1.6708761663153382e-06,
+        "same_winner": true,
+        "same_admission": true
+      },
+      {
+        "manifest_sha256": "63e042caced5769bbb22ea2ea8d99705011565cb08ed7840ab9abcd6cef3ae11",
+        "method": "static-frequency-ucb",
+        "maximum_absolute_log_score_error": 5.763653902590704e-06,
+        "same_winner": true,
+        "same_admission": true
+      }
+    ],
+    "max_error": 2.2162310770568183e-05,
+    "all_same_winner": true,
+    "all_same_admission": true
+  }
+]

@@ -13,7 +13,8 @@ from tools.triad_state_workspace import BlockWorkspace, WorkspaceError
 
 
 def write_export(directory, grams, means=None, *, sample_rate=64.0, block_samples=8,
-                 intervals=None, valid=None, mapping=None, energies=None, observation=None):
+                 intervals=None, valid=None, mapping=None, energies=None, observation=None,
+                 received_energy=None):
     directory = Path(directory)
     G = np.asarray(grams, dtype="<c16")
     if G.ndim != 3 or G.shape[1] != G.shape[2]:
@@ -59,6 +60,12 @@ def write_export(directory, grams, means=None, *, sample_rate=64.0, block_sample
         obs.tofile(directory / "observation.c128")
         sizes["observation.c128"] = (directory / "observation.c128").stat().st_size
         manifest.update({"observation_file": "observation.c128", "observation_shape": [b,d]})
+    if received_energy is not None:
+        re = np.asarray(received_energy, dtype="<f8")
+        re.tofile(directory / "received_energy.f64")
+        sizes["received_energy.f64"] = (directory / "received_energy.f64").stat().st_size
+        manifest.update({"received_energy_file": "received_energy.f64", "received_energy_shape": [b],
+                         "received_energy_semantics": "per-block sum |y|^2 of actual noisy samples over valid rows from the same second channel pass; simulation evaluation only"})
     (directory / "manifest.json").write_text(json.dumps(manifest))
     return manifest
 
@@ -164,6 +171,62 @@ class WorkspaceTests(unittest.TestCase):
             np.testing.assert_allclose(blocks[0].gram, G[0]/variance)
             with self.assertRaises(ValueError):
                 list(ws.iter_observation(tile_blocks=0))
+
+    def test_received_blocks_use_explicit_reference_and_no_oracle(self):
+        G = np.broadcast_to(np.array([[2.0,.3j],[-.3j,1.0]]), (3,2,2)).copy()
+        raw = np.array([[2+1j,3-2j],[4+5j,-1+2j],[.2-.1j,8+0j]])
+        energy = np.sum(np.abs(raw)**2, axis=1)
+        with tempfile.TemporaryDirectory() as temp:
+            manifest=write_export(temp, G, sample_rate=64, block_samples=8,
+                                  observation=raw, received_energy=energy)
+            # The actual channel-noise setting is deliberately irrelevant to
+            # reference-normalized samples returned by this interface.
+            manifest["noise_variance"] = 987654.0
+            (Path(temp)/"manifest.json").write_text(json.dumps(manifest))
+            ws = BlockWorkspace(temp)
+            reference = 4.0
+            blocks = list(ws.iter_received_blocks(reference_variance=reference,tile_blocks=2))
+            self.assertEqual([b.index for b in blocks],[0,1,2])
+            self.assertEqual([b.valid_rows for b in blocks],[8,8,8])
+            self.assertEqual(blocks[1].dt_seconds,8/64)
+            np.testing.assert_allclose(blocks[0].r[0], raw[0]/reference)
+            np.testing.assert_allclose(blocks[0].gram,G[0]/reference)
+            self.assertAlmostEqual(blocks[0].received_energy,energy[0]/reference)
+            self.assertFalse(hasattr(blocks[0],"noise_variance"))
+            self.assertEqual(blocks[2].index,2)
+            doubled=list(ws.iter_received_blocks(reference_variance=reference/2,tile_blocks=2))
+            np.testing.assert_allclose(doubled[0].r,2*blocks[0].r)
+            np.testing.assert_allclose(doubled[0].gram,2*blocks[0].gram)
+            self.assertAlmostEqual(doubled[0].received_energy,2*blocks[0].received_energy)
+            tail=list(ws.iter_received_blocks(reference_variance=reference,start=2))
+            self.assertEqual(tail[0].dt_seconds,blocks[2].dt_seconds)
+            self.assertNotEqual(reference, ws.noise_variance)
+
+    def test_received_energy_missing_partial_and_invalid(self):
+        G=np.broadcast_to(np.eye(2),(2,2,2)).copy()
+        raw=np.ones((2,2),dtype=np.complex128)
+        with tempfile.TemporaryDirectory() as temp:
+            write_export(temp,G,observation=raw)
+            with self.assertRaisesRegex(WorkspaceError,"received_energy.f64.*regenerate"):
+                next(BlockWorkspace(temp).iter_received_blocks(reference_variance=1))
+
+        with tempfile.TemporaryDirectory() as temp:
+            m=write_export(temp,G,observation=raw,received_energy=[2,2])
+            (Path(temp)/"received_energy.f64").write_bytes(b"partial")
+            with self.assertRaisesRegex(WorkspaceError,"file size for received_energy.f64"):
+                BlockWorkspace(temp)
+
+        with tempfile.TemporaryDirectory() as temp:
+            write_export(temp,G,observation=raw,received_energy=[2,-1])
+            ws=BlockWorkspace(temp)
+            with self.assertRaisesRegex(WorkspaceError,"invalid received energy"):
+                list(ws.iter_received_blocks(reference_variance=1))
+
+        for invalid in (None,0.0,-1.0,float("nan"),float("inf")):
+            with tempfile.TemporaryDirectory() as temp:
+                write_export(temp,G,observation=raw,received_energy=[2,2])
+                with self.assertRaisesRegex(ValueError,"reference_variance"):
+                    next(BlockWorkspace(temp).iter_received_blocks(reference_variance=invalid))
 
     def test_joint_memory_limit_and_candidate_contract(self):
         with tempfile.TemporaryDirectory() as temp:

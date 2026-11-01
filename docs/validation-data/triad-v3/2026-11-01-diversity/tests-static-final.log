@@ -1,0 +1,12 @@
+test_actual_fft_direct_and_ucb_reference_scale_invariance (test_triad_static_frequency_study.StaticFrequencyTests.test_actual_fft_direct_and_ucb_reference_scale_invariance) ... ok
+test_candidate_and_frequency_mixtures_are_normalized_not_maximized (test_triad_static_frequency_study.StaticFrequencyTests.test_candidate_and_frequency_mixtures_are_normalized_not_maximized) ... ok
+test_channel_marginal_matches_independent_dense_gaussian_density (test_triad_static_frequency_study.StaticFrequencyTests.test_channel_marginal_matches_independent_dense_gaussian_density) ... ok
+test_density_is_normalized_under_independent_raw_complex_noise (test_triad_static_frequency_study.StaticFrequencyTests.test_density_is_normalized_under_independent_raw_complex_noise) ... ok
+test_fft_matches_direct_actual_centers_including_partial_last_block (test_triad_static_frequency_study.StaticFrequencyTests.test_fft_matches_direct_actual_centers_including_partial_last_block) ... ok
+test_memory_failures_and_alias_limits_are_explicit (test_triad_static_frequency_study.StaticFrequencyTests.test_memory_failures_and_alias_limits_are_explicit) ... ok
+test_no_simulator_means_are_read_and_frontend_mismatch_fails_closed (test_triad_static_frequency_study.StaticFrequencyTests.test_no_simulator_means_are_read_and_frontend_mismatch_fails_closed) ... ok
+
+----------------------------------------------------------------------
+Ran 7 tests in 0.266s
+
+OK

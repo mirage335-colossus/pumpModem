@@ -36,6 +36,19 @@ class DetectorBlock:
     center_seconds: float
 
 
+@dataclass(frozen=True)
+class ReceivedBlock:
+    """Actual sampled-observation statistics normalized by a caller reference."""
+    r: np.ndarray  # [1, dimension], A^H W y / reference_variance
+    gram: np.ndarray  # [dimension, dimension], A^H W A / reference_variance
+    received_energy: float  # sum |y|^2 over valid raw samples / reference_variance
+    valid_rows: int
+    interval: tuple[int, int]
+    center_seconds: float
+    dt_seconds: float
+    index: int
+
+
 class BlockWorkspace:
     """Read exported block Gram matrices with bounded memory.
 
@@ -187,6 +200,16 @@ class BlockWorkspace:
             if m.get("observation_file") != "observation.c128" or m.get("observation_shape") != [b, d]:
                 raise WorkspaceError("noisy observation metadata is inconsistent")
         self.has_observation = bool(m.get("stats_noisy"))
+        energy_name = m.get("received_energy_file")
+        energy_shape = m.get("received_energy_shape")
+        if energy_name is None and energy_shape is None:
+            self.has_received_energy = False
+        elif (energy_name == "received_energy.f64" and energy_shape == [b] and
+              m.get("received_energy_semantics") ==
+              "per-block sum |y|^2 of actual noisy samples over valid rows from the same second channel pass; simulation evaluation only"):
+            self.has_received_energy = True
+        else:
+            raise WorkspaceError("received-energy metadata is incomplete or inconsistent")
 
     def _validate_files(self):
         b, d, m = self.block_count, self.dimension, self.manifest
@@ -197,6 +220,8 @@ class BlockWorkspace:
         }
         if self.has_observation:
             sizes["observation.c128"] = b*d*16
+        if self.has_received_energy:
+            sizes["received_energy.f64"] = b*8
         recorded = m.get("file_sizes")
         if not isinstance(recorded, dict):
             raise WorkspaceError("file size table is missing")
@@ -369,4 +394,57 @@ class BlockWorkspace:
                     raise WorkspaceError("block centers are not strictly increasing")
                 previous_center = center
                 yield DetectorBlock(r, G, dt, (int(interval[0]), int(interval[1])), int(valid), first+offset, center)
+
+    def iter_received_blocks(self, *, reference_variance: float, start: int = 0,
+                              stop: int | None = None, tile_blocks: int = 256) -> Iterator[ReceivedBlock]:
+        """Yield actual observed projections and energy under an explicit reference.
+
+        The reference is supplied by the caller and may be an intentionally
+        uncertain working value. This path never uses or returns the actual
+        simulation noise variance from the manifest. The frontend's declared
+        ``gaussian_projection_supported`` flag is preserved on the workspace;
+        consumers must not infer a Gaussian likelihood guarantee from these
+        sufficient statistics when that flag is false.
+        """
+        if not self.has_observation:
+            raise WorkspaceError("actual received projections are missing; regenerate export-stats with --stats-noisy")
+        if not self.has_received_energy:
+            raise WorkspaceError("received_energy.f64 is missing; regenerate export-stats with the received-energy exporter")
+        if not self._finite_number(reference_variance) or reference_variance <= 0:
+            raise ValueError("reference_variance must be explicitly supplied, positive, and finite")
+        if isinstance(tile_blocks, bool) or not isinstance(tile_blocks, int) or tile_blocks < 1:
+            raise ValueError("tile_blocks must be a positive integer")
+        stop = self.block_count if stop is None else stop
+        if not 0 <= start <= stop <= self.block_count:
+            raise ValueError("invalid block range")
+        tile_blocks = min(tile_blocks, self.max_tile_blocks)
+        tile_estimate = tile_blocks * (4 * self.dimension * self.dimension * 16 +
+                                       4 * self.dimension * 16 + 256)
+        working_estimate = tile_estimate + self.dimension * self.dimension * 16 * 4 + self.dimension * 16 * 3 + 4096
+        if working_estimate > self.memory_limit_bytes:
+            raise WorkspaceError("requested actual-observation tile exceeds the workspace memory limit")
+        values = self._map("observation.c128", self._GRAM_DTYPE,
+                           (self.block_count, self.dimension))
+        energies = self._map("received_energy.f64", self._F64_DTYPE, (self.block_count,))
+        previous_center = self._preceding_center(start)
+        for first, tile in self._enumerated_public(start, stop, tile_blocks):
+            actual_tile = values[first:first+len(tile.intervals)]
+            energy_tile = energies[first:first+len(tile.intervals)]
+            for offset, (raw, Graw, interval, valid, energy) in enumerate(
+                    zip(actual_tile, tile.gram, tile.intervals, tile.valid_rows, energy_tile)):
+                index = first + offset
+                if not np.isfinite(raw).all():
+                    raise WorkspaceError(f"nonfinite actual observation near block {index}")
+                if not math.isfinite(float(energy)) or energy < 0:
+                    raise WorkspaceError(f"invalid received energy near block {index}")
+                G = Graw / reference_variance
+                r = (raw / reference_variance)[None, :]
+                center = (int(interval[0]) + int(interval[1])) / (2.0 * self.sample_rate)
+                dt = 0.0 if previous_center is None else center - previous_center
+                if dt <= 0 and previous_center is not None:
+                    raise WorkspaceError("block centers are not strictly increasing")
+                previous_center = center
+                yield ReceivedBlock(r, G, float(energy)/reference_variance,
+                                    int(valid), (int(interval[0]), int(interval[1])),
+                                    center, dt, index)
 

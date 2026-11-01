@@ -1,0 +1,75 @@
+test_actual_independent_paths_match_serial_and_shard_sizes (test_triad_noise_batch_study.NoiseBatchTests.test_actual_independent_paths_match_serial_and_shard_sizes) ... ok
+test_duplicate_paths_and_memory_fail_closed (test_triad_noise_batch_study.NoiseBatchTests.test_duplicate_paths_and_memory_fail_closed) ... ok
+test_graph_cache_guard_covers_all_working_pools_and_aggregate_resident (test_triad_noise_batch_study.NoiseBatchTests.test_graph_cache_guard_covers_all_working_pools_and_aggregate_resident) ... ok
+test_one_failed_calibration_path_does_not_hide_or_drop_the_other (test_triad_noise_batch_study.NoiseBatchTests.test_one_failed_calibration_path_does_not_hide_or_drop_the_other) ... ok
+test_profile_validation_closes_many_calendars_and_mismatch_under_low_fd_limit (test_triad_noise_batch_study.NoiseBatchTests.test_profile_validation_closes_many_calendars_and_mismatch_under_low_fd_limit) ... ok
+test_resident_device_cache_and_packing_are_charged_before_allocation (test_triad_noise_batch_study.NoiseBatchTests.test_resident_device_cache_and_packing_are_charged_before_allocation) ... ok
+test_resident_fp64_scores_gates_and_decisions_match_block_transfers (test_triad_noise_batch_study.NoiseBatchTests.test_resident_fp64_scores_gates_and_decisions_match_block_transfers) ... ok
+test_signal_failure_success_bound_and_failed_null_qualification (test_triad_noise_batch_study.NoiseBatchTests.test_signal_failure_success_bound_and_failed_null_qualification) ... ok
+test_unsupported_modes_and_missing_actual_energy_fail (test_triad_noise_batch_study.NoiseBatchTests.test_unsupported_modes_and_missing_actual_energy_fail) ... usage: python -m unittest [--batch-paths BATCH_PATHS]
+                          [--transfer-mode {block,resident}]
+python -m unittest: error: this adapter requires actual observations and stationary calibration
+ok
+test_angular_noise_monte_carlo_normalization (test_triad_noise_likelihood.NoiseLikelihoodTests.test_angular_noise_monte_carlo_normalization) ... ok
+test_angular_normalization_and_block_varying_noise_counterexample (test_triad_noise_likelihood.NoiseLikelihoodTests.test_angular_normalization_and_block_varying_noise_counterexample) ... ok
+test_candidate_axis_shared_calibration_and_no_subset_independence (test_triad_noise_likelihood.NoiseLikelihoodTests.test_candidate_axis_shared_calibration_and_no_subset_independence) ... ok
+test_conservative_gaussian_null_mgf_noncommuting_covariance (test_triad_noise_likelihood.NoiseLikelihoodTests.test_conservative_gaussian_null_mgf_noncommuting_covariance) ... ok
+test_dynamic_angular_dense_covariance_scale_and_chunk_invariance (test_triad_noise_likelihood.NoiseLikelihoodTests.test_dynamic_angular_dense_covariance_scale_and_chunk_invariance) ... ok
+test_erasure_gradient_and_malformed_input_guards (test_triad_noise_likelihood.NoiseLikelihoodTests.test_erasure_gradient_and_malformed_input_guards) ... ok
+test_near_unit_quadratic_fails_closed_in_helper_and_stream (test_triad_noise_likelihood.NoiseLikelihoodTests.test_near_unit_quadratic_fails_closed_in_helper_and_stream) ... ok
+test_python_energy_fp64_and_scalar_covariance_direction_oracle (test_triad_noise_likelihood.NoiseLikelihoodTests.test_python_energy_fp64_and_scalar_covariance_direction_oracle) ... ok
+test_residual_rank_projection_zero_and_cancellation_boundaries (test_triad_noise_likelihood.NoiseLikelihoodTests.test_residual_rank_projection_zero_and_cancellation_boundaries) ... ok
+test_ucb_receiver_dense_known_upper_and_varying_noise (test_triad_noise_likelihood.NoiseLikelihoodTests.test_ucb_receiver_dense_known_upper_and_varying_noise) ... ok
+test_variance_upper_coverage_and_budget_arithmetic (test_triad_noise_likelihood.NoiseLikelihoodTests.test_variance_upper_coverage_and_budget_arithmetic) ... ok
+test_whole_bank_residual_matches_independent_raw_svd (test_triad_noise_likelihood.NoiseLikelihoodTests.test_whole_bank_residual_matches_independent_raw_svd) ... ok
+test_actual_uses_explicit_reference_and_one_observation (test_triad_noise_study.NoiseStudyTests.test_actual_uses_explicit_reference_and_one_observation) ... ok
+test_cli_reports_capture_errors_and_exits_nonzero (test_triad_noise_study.NoiseStudyTests.test_cli_reports_capture_errors_and_exits_nonzero) ... ok
+test_independent_path_masks_and_known_only_reserved_budget (test_triad_noise_study.NoiseStudyTests.test_independent_path_masks_and_known_only_reserved_budget) ... ok
+test_joint_sampler_dense_raw_validation (test_triad_noise_study.NoiseStudyTests.test_joint_sampler_dense_raw_validation) ... ok
+test_many_actual_paths_do_not_accumulate_mmap_descriptors (test_triad_noise_study.NoiseStudyTests.test_many_actual_paths_do_not_accumulate_mmap_descriptors) ... ok
+test_mixed_tap_bank_selects_model_but_keeps_full_residual_bank (test_triad_noise_study.NoiseStudyTests.test_mixed_tap_bank_selects_model_but_keeps_full_residual_bank) ... ok
+test_phase_frequency_model_is_explicit_and_static_gps_prior_is_available (test_triad_noise_study.NoiseStudyTests.test_phase_frequency_model_is_explicit_and_static_gps_prior_is_available) ... ok
+test_piecewise_scale_skips_angular_instead_of_claiming_validity (test_triad_noise_study.NoiseStudyTests.test_piecewise_scale_skips_angular_instead_of_claiming_validity) ... ok
+test_projected_paired_controls_and_path_independence_report (test_triad_noise_study.NoiseStudyTests.test_projected_paired_controls_and_path_independence_report) ... ok
+test_rank_truncation_and_mixed_family_budget (test_triad_noise_study.NoiseStudyTests.test_rank_truncation_and_mixed_family_budget) ... ok
+test_stationary_pool_dense_gamma_and_deterministic_replay (test_triad_noise_study.NoiseStudyTests.test_stationary_pool_dense_gamma_and_deterministic_replay) ... ok
+test_stationary_sensitivity_budget_and_variable_power_rejection (test_triad_noise_study.NoiseStudyTests.test_stationary_sensitivity_budget_and_variable_power_rejection) ... usage: python -m unittest [-h] --output OUTPUT [--mode {actual,projected}]
+                          --cn0 CN0 [--reference-variance REFERENCE_VARIANCE]
+                          [--noise-scale NOISE_SCALE]
+                          [--noise-step-factor NOISE_STEP_FACTOR]
+                          [--noise-step-fraction NOISE_STEP_FRACTION]
+                          [--controls {signal,null} [{signal,null} ...]]
+                          [--trials TRIALS] [--seed SEED]
+                          [--split {development,calibration,holdout}]
+                          [--device DEVICE] [--precision {fp32,fp64}]
+                          [--threads THREADS] [--memory-gib MEMORY_GIB]
+                          [--tile-blocks TILE_BLOCKS]
+                          [--methods {gaussian-ou,angular-gaussian,residual-ucb,phase-frequency,phase-frequency-ucb} [{gaussian-ou,angular-gaussian,residual-ucb,phase-frequency,phase-frequency-ucb} ...]]
+                          [--coherences COHERENCES [COHERENCES ...]]
+                          [--taps {1,2}] [--phase-states PHASE_STATES]
+                          [--relative-phase-states RELATIVE_PHASE_STATES]
+                          [--frequency-bound FREQUENCY_BOUND]
+                          [--frequency-step FREQUENCY_STEP]
+                          [--frequency-model {ou,static,random_walk}]
+                          [--frequency-std FREQUENCY_STD]
+                          [--frequency-coherence FREQUENCY_COHERENCE]
+                          [--frequency-random-walk FREQUENCY_RANDOM_WALK]
+                          [--phase-diffusion PHASE_DIFFUSION]
+                          [--phase-implementation {reference,optimized,graph,graph-fp64}]
+                          [--false-probability FALSE_PROBABILITY]
+                          [--horizon-seconds HORIZON_SECONDS]
+                          [--attempt-spacing ATTEMPT_SPACING]
+                          [--duration-alternatives DURATION_ALTERNATIVES]
+                          [--selection-methods SELECTION_METHODS]
+                          [--calibration-scope {per-block,stationary}]
+                          [--calibration-alternatives CALIBRATION_ALTERNATIVES]
+                          [--projection-validation-trials PROJECTION_VALIDATION_TRIALS]
+                          inputs [inputs ...]
+python -m unittest: error: stationary UCB calibration cannot pool a nonconstant projected noise-step schedule
+ok
+
+----------------------------------------------------------------------
+Ran 33 tests in 0.979s
+
+OK
+{"attempted_capture_records": 2, "completed_capture_records": 1, "failed_capture_records": 1, "failed_records_are_excluded_from_reception_denominators": true, "output": "/tmp/tmp0bultzqd/with-error.json", "scores": "with-error.scores.npz", "wall_seconds_joint": 0.00241972399817314}

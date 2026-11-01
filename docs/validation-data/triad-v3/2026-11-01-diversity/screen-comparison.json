@@ -1,0 +1,380 @@
+{
+  "strict_K9_gate": 21.16486999167045,
+  "input_report_and_score_sha256": {
+    "gaussian-screens-pooled/added10matched.json": "203cb99d0ff86cd8594e407eea9521eb391256ed1f57395626c88d4068d88645",
+    "gaussian-screens-pooled/added10matched.scores.npz": "0959daa5b7cafba8962c4b0d2bc6c2285833209ac7db1778ecef6b8208061139",
+    "gaussian-screens-pooled/basecrystal500k.json": "80b51da523ea12703fa03ff484e0150cb4b053f0b4cc837a666707c090471a86",
+    "gaussian-screens-pooled/basecrystal500k.scores.npz": "3ad6dfac658a4b643e642a8a9ee0a0c198c8ca48df04cf31594b21240767aab2",
+    "gaussian-screens-pooled/burst_off.json": "3bb6c8f3062e0bbd66f8298f18a591d70ce36f24448d919c18456225b8e633cd",
+    "gaussian-screens-pooled/burst_off.scores.npz": "aef0a7a74d8e72b1fdf6690bbea919051b6cf48c95574d6f8361001b4eb86f58",
+    "gaussian-screens-pooled/epoch_search.json": "b589c20617082573b3aa039d3ed9ff1db3b07470f648dcabcc7fb6b688f0719c",
+    "gaussian-screens-pooled/epoch_search.scores.npz": "4945d17459561c4afe03f6b93c7b78eac102b691874fe7f43a009cf6d9f47f4a",
+    "gaussian-screens-pooled/erased10ms.json": "3d5b967985e6b14e80d67e3e4186bb321ff7f94c273fdab7e4bdb122ba558d4d",
+    "gaussian-screens-pooled/erased10ms.scores.npz": "54120a4d3e2a0088d3220a8f1ca1bc478b871f4ef84fef74bc0dfb3428023a6d",
+    "gaussian-screens-pooled/highrate_aligned.json": "ee5ba417dc3b7c9dda91d0c683eb216fc538290658ef8eb7fb6a8f4fa6a4a7f2",
+    "gaussian-screens-pooled/highrate_aligned.scores.npz": "e18033b1548d088811b547497fd52843418d1dbc606609aaff08fd81c3033d91",
+    "gaussian-screens-pooled/lowrate.json": "99815d6d509f49db9efcb1a3bede7e28986def4b366b2ba12137128dc5918f63",
+    "gaussian-screens-pooled/lowrate.scores.npz": "4f4392b5dfbc3a50e5c6f7af2c76b673b4b44b98d857442468630107c40428c7",
+    "gaussian-screens-pooled/margin3.json": "84ca87afc091498d9dbfe8351907611cb79e5826f704ac3cd75353ca3aea3609",
+    "gaussian-screens-pooled/margin3.scores.npz": "924db24dc65419de1da2fa93173dca7ec0186055da8d5221c277c83dfaa55500",
+    "gaussian-screens-pooled/microwave.json": "cf4426d8e0b5c84680ccce178ae3473a97031c296d47def6d06ec2efdefd70d7",
+    "gaussian-screens-pooled/microwave.scores.npz": "c91dd07bfd609735ceadf8429e38262747affe90991b09e9a778516462de1db8",
+    "gaussian-screens-pooled/selective5.json": "345fcffa373de22b2f3f8c238ba62af90b44f24734041985e9d2f5be2640aecd",
+    "gaussian-screens-pooled/selective5.scores.npz": "20a4e3ebf3df311bf3413b70e8976b5bbee24926c2489585447112147e58f97c",
+    "gaussian-screens-pooled/tap_mismatch.json": "fd52dee4042a7a6fecbc39b428c2c1734c00f5e6a81badcd70e52efe2072e765",
+    "gaussian-screens-pooled/tap_mismatch.scores.npz": "d55792d0b08ba931de7bb7bc907c36e55164efce30aa3dc14319087057bad82e",
+    "gaussian-screens-pooled/tight500k.json": "b20cf72eb0ecd433ae42c4b975cb9a49df431d4925c56b1d80056a620db42639",
+    "gaussian-screens-pooled/tight500k.scores.npz": "4a6552ea6cafdaafce05da160d4b25f2a01054c5aee74efaec181ec78c7ee7d4",
+    "phase-screens-pooled/added10matched.json": "ff90e26931784f559c76552a973d0e1d850119557caaaf33a733fc7767918967",
+    "phase-screens-pooled/added10matched.scores.npz": "967ae986a4aa18dc448c1645bbde0281d20c569592ffffdffa94a4bc5d446d49",
+    "phase-screens-pooled/basecrystal500k.json": "4ebfa7ef650353aab78a8c36530cd8c231d8c94e71965de643f6c6059a1e3039",
+    "phase-screens-pooled/basecrystal500k.scores.npz": "769d0d9ae5edc6c6c5f0b8c5a1579e0e618547e059512e03832fd3a19c1c6c67",
+    "phase-screens-pooled/burst_off.json": "c71bd6b59dcbe18bd1a27dac65f6a2b35b767156caa15ec67ef54943cfeb5793",
+    "phase-screens-pooled/burst_off.scores.npz": "c2618ccdd8c50f76e5d6d95532110177152dcd1729d8dabd88df8bef7549306e",
+    "phase-screens-pooled/epoch_search.json": "2da18b69bbd112131fc3cb814b66d34908bfd48a7948a571b5e76b9a7c4f57d3",
+    "phase-screens-pooled/epoch_search.scores.npz": "87817e3dd7a251e60278019073136cc0e81dbef46a357b89d95e8d697eeda3ac",
+    "phase-screens-pooled/erased10ms.json": "32975750872d1f597be07da41054f6319e7a2f03dd6c6be8ef21fb60cfad5853",
+    "phase-screens-pooled/erased10ms.scores.npz": "0cef6fdfccccd5759a6f0c50f2478a6906d460f6cc80fd0d04f1d3877cd13650",
+    "phase-screens-pooled/highrate_aligned.json": "78f714acee1eae6bbf1c91cc6f697de5183a7aff2b63f258aafaa337b18abb1b",
+    "phase-screens-pooled/highrate_aligned.scores.npz": "9ebc24977ec5f87a4a464d8d47b694fbc5df6f9e12134fdd7e18c6d3f57327ed",
+    "phase-screens-pooled/lowrate.json": "26f24f2e766931392783a160154f50823f5e4a528fd2b9200d4927170b614f19",
+    "phase-screens-pooled/lowrate.scores.npz": "679e8afc2ee06054e97c98f59b2f5063d6e2c05a85b291c557571eb66e6f5229",
+    "phase-screens-pooled/margin3.json": "d7c8f9fb41a7011c88c4f2c5d0929924ba3b6e9fa7efe1d3459e27f4bcaa55e1",
+    "phase-screens-pooled/margin3.scores.npz": "ed267780c84e6e6844ea0b05f4e82861525f283292240ac51a55ef61b3753c6d",
+    "phase-screens-pooled/microwave.json": "6f6770d2932f18766a10e94b332638102f0a19b6a2aa81aaaf69d284a74c35fa",
+    "phase-screens-pooled/microwave.scores.npz": "100c21a44b5b069f155bcae3cf2c87064eb0e035a1cbddc3ce879ce61e22128f",
+    "phase-screens-pooled/selective5.json": "ed737d9f6d4b4886604c4314ee5c858f7ce33a11d006d99c21484b8780b001e5",
+    "phase-screens-pooled/selective5.scores.npz": "68185b455b9cb41748fa4b4091d76766476eea80405d7ad7a345620d28c08e87",
+    "phase-screens-pooled/tap_mismatch.json": "6385654898891c8c4cec47d0ebd6a2f809bf9bdc3a9b9371c02c3441ac45fd16",
+    "phase-screens-pooled/tap_mismatch.scores.npz": "73c93877ca05b1242af6a44e8d8d16de853ca5bdec5ef9961ddc15a1ccaa5b4e",
+    "phase-screens-pooled/tight500k.json": "8e1c57c136be6dc8372d3980299c2899cf79720c5e1bc76e955d491b754ed711",
+    "phase-screens-pooled/tight500k.scores.npz": "494af7d5e272519ea3dc2166de39235bcfcbfb53b3674f26444c8cf5066c20bc"
+  },
+  "same_12_actual_paths_paired_across_five_methods": true,
+  "cases": {
+    "added10matched": {
+      "gaussian-ou": {
+        "correct": 12,
+        "wrong": 0,
+        "missed": 0
+      },
+      "angular-gaussian": {
+        "correct": 12,
+        "wrong": 0,
+        "missed": 0
+      },
+      "residual-ucb": {
+        "correct": 12,
+        "wrong": 0,
+        "missed": 0
+      },
+      "phase-frequency": {
+        "correct": 12,
+        "wrong": 0,
+        "missed": 0
+      },
+      "phase-frequency-ucb": {
+        "correct": 12,
+        "wrong": 0,
+        "missed": 0
+      }
+    },
+    "basecrystal500k": {
+      "gaussian-ou": {
+        "correct": 1,
+        "wrong": 0,
+        "missed": 11
+      },
+      "angular-gaussian": {
+        "correct": 1,
+        "wrong": 0,
+        "missed": 11
+      },
+      "residual-ucb": {
+        "correct": 0,
+        "wrong": 0,
+        "missed": 12
+      },
+      "phase-frequency": {
+        "correct": 11,
+        "wrong": 0,
+        "missed": 1
+      },
+      "phase-frequency-ucb": {
+        "correct": 11,
+        "wrong": 0,
+        "missed": 1
+      }
+    },
+    "burst_off": {
+      "gaussian-ou": {
+        "correct": 12,
+        "wrong": 0,
+        "missed": 0
+      },
+      "angular-gaussian": {
+        "correct": 12,
+        "wrong": 0,
+        "missed": 0
+      },
+      "residual-ucb": {
+        "correct": 11,
+        "wrong": 0,
+        "missed": 1
+      },
+      "phase-frequency": {
+        "correct": 12,
+        "wrong": 0,
+        "missed": 0
+      },
+      "phase-frequency-ucb": {
+        "correct": 11,
+        "wrong": 0,
+        "missed": 1
+      }
+    },
+    "epoch_search": {
+      "gaussian-ou": {
+        "correct": 8,
+        "wrong": 0,
+        "missed": 4
+      },
+      "angular-gaussian": {
+        "correct": 8,
+        "wrong": 0,
+        "missed": 4
+      },
+      "residual-ucb": {
+        "correct": 6,
+        "wrong": 0,
+        "missed": 6
+      },
+      "phase-frequency": {
+        "correct": 8,
+        "wrong": 0,
+        "missed": 4
+      },
+      "phase-frequency-ucb": {
+        "correct": 7,
+        "wrong": 0,
+        "missed": 5
+      }
+    },
+    "erased10ms": {
+      "gaussian-ou": {
+        "correct": 12,
+        "wrong": 0,
+        "missed": 0
+      },
+      "angular-gaussian": {
+        "correct": 12,
+        "wrong": 0,
+        "missed": 0
+      },
+      "residual-ucb": {
+        "correct": 10,
+        "wrong": 0,
+        "missed": 2
+      },
+      "phase-frequency": {
+        "correct": 12,
+        "wrong": 0,
+        "missed": 0
+      },
+      "phase-frequency-ucb": {
+        "correct": 11,
+        "wrong": 0,
+        "missed": 1
+      }
+    },
+    "highrate_aligned": {
+      "gaussian-ou": {
+        "correct": 12,
+        "wrong": 0,
+        "missed": 0
+      },
+      "angular-gaussian": {
+        "correct": 12,
+        "wrong": 0,
+        "missed": 0
+      },
+      "residual-ucb": {
+        "correct": 11,
+        "wrong": 0,
+        "missed": 1
+      },
+      "phase-frequency": {
+        "correct": 12,
+        "wrong": 0,
+        "missed": 0
+      },
+      "phase-frequency-ucb": {
+        "correct": 12,
+        "wrong": 0,
+        "missed": 0
+      }
+    },
+    "lowrate": {
+      "gaussian-ou": {
+        "correct": 12,
+        "wrong": 0,
+        "missed": 0
+      },
+      "angular-gaussian": {
+        "correct": 12,
+        "wrong": 0,
+        "missed": 0
+      },
+      "residual-ucb": {
+        "correct": 12,
+        "wrong": 0,
+        "missed": 0
+      },
+      "phase-frequency": {
+        "correct": 12,
+        "wrong": 0,
+        "missed": 0
+      },
+      "phase-frequency-ucb": {
+        "correct": 12,
+        "wrong": 0,
+        "missed": 0
+      }
+    },
+    "margin3": {
+      "gaussian-ou": {
+        "correct": 11,
+        "wrong": 0,
+        "missed": 1
+      },
+      "angular-gaussian": {
+        "correct": 11,
+        "wrong": 0,
+        "missed": 1
+      },
+      "residual-ucb": {
+        "correct": 11,
+        "wrong": 0,
+        "missed": 1
+      },
+      "phase-frequency": {
+        "correct": 11,
+        "wrong": 0,
+        "missed": 1
+      },
+      "phase-frequency-ucb": {
+        "correct": 11,
+        "wrong": 0,
+        "missed": 1
+      }
+    },
+    "microwave": {
+      "gaussian-ou": {
+        "correct": 0,
+        "wrong": 0,
+        "missed": 12
+      },
+      "angular-gaussian": {
+        "correct": 0,
+        "wrong": 0,
+        "missed": 12
+      },
+      "residual-ucb": {
+        "correct": 0,
+        "wrong": 0,
+        "missed": 12
+      },
+      "phase-frequency": {
+        "correct": 4,
+        "wrong": 0,
+        "missed": 8
+      },
+      "phase-frequency-ucb": {
+        "correct": 3,
+        "wrong": 0,
+        "missed": 9
+      }
+    },
+    "selective5": {
+      "gaussian-ou": {
+        "correct": 11,
+        "wrong": 0,
+        "missed": 1
+      },
+      "angular-gaussian": {
+        "correct": 11,
+        "wrong": 0,
+        "missed": 1
+      },
+      "residual-ucb": {
+        "correct": 11,
+        "wrong": 0,
+        "missed": 1
+      },
+      "phase-frequency": {
+        "correct": 11,
+        "wrong": 0,
+        "missed": 1
+      },
+      "phase-frequency-ucb": {
+        "correct": 11,
+        "wrong": 0,
+        "missed": 1
+      }
+    },
+    "tap_mismatch": {
+      "gaussian-ou": {
+        "correct": 0,
+        "wrong": 0,
+        "missed": 12
+      },
+      "angular-gaussian": {
+        "correct": 0,
+        "wrong": 0,
+        "missed": 12
+      },
+      "residual-ucb": {
+        "correct": 0,
+        "wrong": 0,
+        "missed": 12
+      },
+      "phase-frequency": {
+        "correct": 0,
+        "wrong": 0,
+        "missed": 12
+      },
+      "phase-frequency-ucb": {
+        "correct": 0,
+        "wrong": 0,
+        "missed": 12
+      }
+    },
+    "tight500k": {
+      "gaussian-ou": {
+        "correct": 11,
+        "wrong": 0,
+        "missed": 1
+      },
+      "angular-gaussian": {
+        "correct": 11,
+        "wrong": 0,
+        "missed": 1
+      },
+      "residual-ucb": {
+        "correct": 11,
+        "wrong": 0,
+        "missed": 1
+      },
+      "phase-frequency": {
+        "correct": 11,
+        "wrong": 0,
+        "missed": 1
+      },
+      "phase-frequency-ucb": {
+        "correct": 10,
+        "wrong": 0,
+        "missed": 2
+      }
+    }
+  }
+}
