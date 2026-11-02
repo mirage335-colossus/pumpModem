@@ -120,6 +120,53 @@ class GaussianWindowTests(unittest.TestCase):
             self.assertEqual(tuple(expected.shape), (2,))
             np.testing.assert_allclose(actual[trial].numpy(), expected.numpy(), rtol=2e-12, atol=2e-12)
 
+    def test_prior_reuse_matches_raw_oracle_and_exact_calendar_changes(self):
+        A, y, G, r, _ = fixture(blocks=11)
+        regular = np.arange(11, dtype=float) / 8
+        gapped = regular.copy(); gapped[6:] += 1024
+        irregular = regular.copy(); irregular[4] += 1 / 64
+        adjacent_float = regular.copy(); adjacent_float[4] = np.nextafter(adjacent_float[4], math.inf)
+        for centers, prior_solves in ((regular, 2), (gapped, 2), (irregular, 4), (adjacent_float, 4)):
+            with self.subTest(centers=centers):
+                # The real prior factor is shared; complex information factors
+                # still depend on every candidate's Gram and must be recomputed.
+                with patch("triad_gaussian_window.np.linalg.eigh", wraps=np.linalg.eigh) as eig:
+                    plan = prepare_windowed_gaussian(G, centers, doppler_width_hz=3,
+                                                     window_blocks=3, stationary_power=(.7, .3))
+                real_solves = sum(call.args[0].ndim == 2 and np.isrealobj(call.args[0])
+                                  for call in eig.call_args_list)
+                self.assertEqual(real_solves, prior_solves)
+                expected = dense_raw_oracle(A, y, centers, 3, 3, (.7, .3), 1.3)
+                np.testing.assert_allclose(plan.score(r, variance_scale=1.3).numpy(),
+                                           expected, rtol=2e-11, atol=2e-11)
+
+    def test_prior_reuse_preserves_zero_power_and_rank_deficient_windows(self):
+        A, y, G, r, _ = fixture(blocks=8)
+        centers = np.arange(8, dtype=float) / 8
+        for powers in ((1., 0.), (0., 0.)):
+            for width in (0., 3.):
+                with self.subTest(powers=powers, width=width):
+                    plan = prepare_windowed_gaussian(G, centers, doppler_width_hz=width,
+                                                     window_blocks=3, stationary_power=powers)
+                    expected = dense_raw_oracle(A, y, centers, width, 3, powers, 1.)
+                    np.testing.assert_allclose(plan.score(r).numpy(), expected, rtol=2e-11, atol=2e-11)
+                    # Separate construction cannot reuse a preceding window's
+                    # factor. Whole-array versus per-window Gram repair may
+                    # differ by rounding and eigenvector phase, so compare
+                    # retained ranks, represented covariance and likelihood.
+                    independent_score = np.zeros((r.shape[1], r.shape[2]))
+                    for window in plan._windows:
+                        first, stop = window.first, window.stop
+                        independent = prepare_windowed_gaussian(G[first:stop], centers[first:stop],
+                            doppler_width_hz=width, window_blocks=3, stationary_power=powers)
+                        other = independent._windows[0]
+                        self.assertEqual(window.transform.shape, other.transform.shape)
+                        np.testing.assert_allclose(window.eigenvalues, other.eigenvalues, rtol=2e-12, atol=2e-13)
+                        np.testing.assert_allclose(window.transform @ window.transform.conj().swapaxes(-1, -2),
+                            other.transform @ other.transform.conj().swapaxes(-1, -2), rtol=2e-12, atol=2e-13)
+                        independent_score += independent.score(r[first:stop]).numpy()
+                    np.testing.assert_allclose(plan.score(r).numpy(), independent_score, rtol=2e-12, atol=2e-12)
+
     def test_fp32_bulk_has_fp64_finish_and_matches_fp64(self):
         _, _, G, r, time = fixture(trials=7)
         plan = PreparedWindowedGaussian(G, time, doppler_width_hz=.001, window_blocks=4)

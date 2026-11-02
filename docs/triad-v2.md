@@ -53,6 +53,21 @@ the physical test link while retaining the configured planner target and
 waveform. No received-power renormalization compensates for channel loss.
 Four watts means the sum of all three carriers, not four watts each.
 
+The lower planner target is intentional and appropriate: it designs for more
+path loss than the nominal link predicts. Example 2's 20.0206 dB-Hz physical
+link and 8 dB-Hz target provide about 12.02 dB of nominal design margin.
+Testing the unchanged transmission with `--cn0 8` exercises that lower target,
+equivalent to about 192.02 dB path loss at the same transmit power and noise
+density. The stronger nominal-link test and the target-level test serve
+different purposes; success at the stronger level does not establish target
+receivability. The [recorded target-level tests](validation-data/triad-v2/2026-10-31/README.md#physical-links-and-marginal-sensitivity)
+did run at 8 dB-Hz, but the original 1.6-second-segment receiver admitted only
+5/16 correct coherent captures and 0/16 differential/amplitude-only captures.
+Thus that historical campaign tested the intended target without establishing
+90% or 99% correct admitted reception there. The
+[current reference convention](triad-v3.md#target-snr-link-margin-and-simulation-reference)
+preserves both the design margin and unnormalized channel energy changes.
+
 ## Pattern calendar
 
 V2 uses a global integer fine-symbol calendar. Added Symbols repeats each

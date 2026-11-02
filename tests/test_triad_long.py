@@ -47,6 +47,13 @@ def export_stats(directory, *extra):
     return json.loads((directory / "manifest.json").read_text())
 
 
+def export_group_stats(directory, *extra):
+    invoke("--mode", "export-group-stats", *COMMON, "--channel", "none", "--threads", "1",
+           "--chunk", "777", "--block-seconds", "4", "--output", str(directory),
+           *extra, timeout=45)
+    return json.loads((directory / "manifest.json").read_text())
+
+
 def export_sampled(directory, *extra):
     invoke("--mode", "export-sampled", *COMMON, "--channel", "none", "--threads", "2",
            "--chunk", "512", "--output", str(directory), *extra, timeout=60)
@@ -351,6 +358,163 @@ def main():
         ray_manifest = export_stats(rays, "--basis", "two-ray")
         if ray_manifest["dimension"] != 4 or ray_manifest["column_mapping"] != [[0], [1], [0, 2], [1, 3]]:
             raise AssertionError(f"two-ray columns were not uniquely deduplicated: {ray_manifest['column_mapping']}")
+
+        # The grouped export keeps each timing hypothesis in its own small
+        # residual-calibration space while scoring the exact same sampled
+        # observation. Compare every group with the corresponding principal
+        # submatrix of the existing full-bank export.
+        grouped_options = ("--start", "0", ".002", ".001", "--frequency", "0", ".1", ".1",
+                           "--basis", "two-ray")
+        full_bank = root / "full-bank"
+        full_bank_manifest = export_stats(full_bank, *grouped_options)
+        grouped = root / "grouped-bank"
+        grouped_manifest = export_group_stats(grouped, *grouped_options)
+        if grouped_manifest["format"] != "triad-group-block-stats-v1" or grouped_manifest["dimension"] != 4:
+            raise AssertionError(f"unexpected grouped block-statistics schema: {grouped_manifest}")
+        if grouped_manifest["group_count"] != 6 or len(grouped_manifest["groups"]) != 6:
+            raise AssertionError(f"synchronization groups do not match the public timing/frequency grid: {grouped_manifest['group_count']}")
+        if grouped_manifest["cross_group_gram_saved"] or grouped_manifest["conditional_noise_resampling_supported"]:
+            raise AssertionError("grouped metadata overstates saved cross-group statistics")
+        for file_name in ("intervals.u64", "valid_rows.u64", "signal_energy.f64"):
+            if (grouped/file_name).read_bytes() != (full_bank/file_name).read_bytes():
+                raise AssertionError(f"grouping changed shared capture calendar/statistic {file_name}")
+        old_dimension = full_bank_manifest["dimension"]
+        group_dimension = grouped_manifest["dimension"]
+        old_gram = complex128_values(full_bank/"gram.c128")
+        old_mean = complex128_values(full_bank/"mean.c128")
+        new_gram = complex128_values(grouped/"group_gram.c128")
+        new_mean = complex128_values(grouped/"group_mean.c128")
+        if len(new_gram) != grouped_manifest["block_count"] * 6 * 16 or len(new_mean) != grouped_manifest["block_count"] * 6 * 4:
+            raise AssertionError("grouped Gram/mean files differ from manifest extents")
+        for group_index, group in enumerate(grouped_manifest["groups"]):
+            candidates = [grouped_manifest["candidates"][i] for i in group["candidate_indices"]]
+            key = group["sync_key"]
+            for candidate in candidates:
+                if any(candidate[field] != key[field] for field in key):
+                    raise AssertionError("a group combines candidates with different public synchronization parameters")
+            if len(candidates) != 4 or candidates[0]["bit"] != 0 or candidates[1]["bit"] != 1:
+                raise AssertionError(f"group omitted one bit/channel alternative: {group['candidate_indices']}")
+            if group["column_mapping"] != [[0], [1], [0, 2], [1, 3]]:
+                raise AssertionError(f"two-ray group columns were not locally deduplicated: {group['column_mapping']}")
+            # Select old global columns using each public candidate's mapping;
+            # their unique order must agree with the group's local descriptors.
+            old_local_columns = []
+            for local_index in range(group_dimension):
+                matching = [
+                    global_column
+                    for candidate_index, local_mapping in zip(group["candidate_indices"], group["column_mapping"])
+                    for local_column, global_column in zip(local_mapping, full_bank_manifest["column_mapping"][candidate_index])
+                    if local_column == local_index
+                ]
+                if not matching or any(value != matching[0] for value in matching):
+                    raise AssertionError("local grouped column maps inconsistently to the full-bank projection")
+                old_local_columns.append(matching[0])
+            for block_index in range(grouped_manifest["block_count"]):
+                for i, old_i in enumerate(old_local_columns):
+                    new_mean_index = (block_index*6+group_index)*group_dimension+i
+                    old_mean_index = block_index*old_dimension+old_i
+                    if abs(new_mean[new_mean_index]-old_mean[old_mean_index]) > 1e-10*max(1.,abs(old_mean[old_mean_index])):
+                        raise AssertionError("grouped projection differs from the existing full-bank observation")
+                    for j, old_j in enumerate(old_local_columns):
+                        new_gram_index = ((block_index*6+group_index)*group_dimension+i)*group_dimension+j
+                        old_gram_index = (block_index*old_dimension+old_i)*old_dimension+old_j
+                        if abs(new_gram[new_gram_index]-old_gram[old_gram_index]) > 1e-10*max(1.,abs(old_gram[old_gram_index])):
+                            raise AssertionError("grouped Gram differs from the full-bank principal submatrix")
+
+        grouped_noisy = root / "grouped-bank-noisy"
+        grouped_noisy_manifest = export_group_stats(grouped_noisy, *grouped_options, "--stats-noisy")
+        full_noisy = root / "full-bank-noisy"
+        full_noisy_manifest = export_stats(full_noisy, *grouped_options, "--stats-noisy")
+        if grouped_noisy_manifest["sample_count"] != full_noisy_manifest["sample_count"]:
+            raise AssertionError("grouped noisy capture calendar differs from the full-bank capture")
+        grouped_received_energy = struct.unpack("<"+"d"*(grouped_noisy_manifest["block_count"]), (grouped_noisy/"received_energy.f64").read_bytes())
+        full_received_energy = struct.unpack("<"+"d"*(full_noisy_manifest["block_count"]), (full_noisy/"received_energy.f64").read_bytes())
+        if any(abs(a-b) > 1e-10*max(1., abs(b)) for a, b in zip(grouped_received_energy, full_received_energy)):
+            raise AssertionError("grouped actual-noisy scoring did not use one common received-energy stream")
+        group_observation = complex128_values(grouped_noisy/"group_observation.c128")
+        full_observation = complex128_values(full_noisy/"observation.c128")
+        for group_index, group in enumerate(grouped_noisy_manifest["groups"]):
+            local_old_columns = []
+            for local_index in range(group_dimension):
+                matching = [
+                    full_noisy_manifest["column_mapping"][candidate_index][position]
+                    for candidate_index, local_mapping in zip(group["candidate_indices"], group["column_mapping"])
+                    for position, local_column in enumerate(local_mapping) if local_column == local_index
+                ]
+                if not matching or any(value != matching[0] for value in matching):
+                    raise AssertionError("noisy grouped projection does not have a unique source column")
+                local_old_columns.append(matching[0])
+            for block_index in range(grouped_noisy_manifest["block_count"]):
+                for local_index, old_column in enumerate(local_old_columns):
+                    grouped_index = (block_index*6+group_index)*group_dimension+local_index
+                    old_index = block_index*full_noisy_manifest["dimension"]+old_column
+                    if abs(group_observation[grouped_index]-full_observation[old_index]) > 1e-10*max(1.,abs(full_observation[old_index])):
+                        raise AssertionError("grouped projection differs from the shared actual noisy observation")
+
+        direct_grouped = root / "grouped-direct-sampled"
+        direct_grouped_manifest = export_sampled(direct_grouped, *grouped_options)
+        direct_basis = complex128_values(direct_grouped/"basis.c128")
+        direct_y = complex128_values(direct_grouped/"observation.c128")
+        direct_valid = (direct_grouped/"validity.u8").read_bytes()
+        candidate_count, sample_count, direct_columns = direct_grouped_manifest["basis_shape"]
+        if sample_count != grouped_noisy_manifest["sample_count"] or candidate_count != grouped_noisy_manifest["candidate_count"]:
+            raise AssertionError("sampled direct-basis fixture differs from grouped observation geometry")
+        for group_index, group in enumerate(grouped_manifest["groups"]):
+            local_basis = [None] * group_dimension
+            for candidate_index, mapping in zip(group["candidate_indices"], group["column_mapping"]):
+                for basis_column, local_index in enumerate(mapping):
+                    if local_basis[local_index] is None:
+                        local_basis[local_index] = (candidate_index, basis_column)
+            if any(value is None for value in local_basis):
+                raise AssertionError("sampled templates do not cover every grouped local column")
+            for block_index, (first_sample, stop_sample) in enumerate(
+                    struct.iter_unpack("<QQ", (grouped_noisy/"intervals.u64").read_bytes())):
+                for i, (candidate_i, column_i) in enumerate(local_basis):
+                    offset_i = (candidate_i*sample_count+first_sample)*direct_columns+column_i
+                    template_i = direct_basis[offset_i:(candidate_i*sample_count+stop_sample)*direct_columns:direct_columns]
+                    expected_observation = sum(a.conjugate()*y for a,y,valid in zip(
+                        template_i,direct_y[first_sample:stop_sample],direct_valid[first_sample:stop_sample]) if valid)
+                    grouped_index = (block_index*6+group_index)*group_dimension+i
+                    if abs(expected_observation-group_observation[grouped_index]) > 2e-10*max(1.,abs(expected_observation)):
+                        raise AssertionError("grouped actual observation projection differs from direct sampled templates")
+                    for j, (candidate_j, column_j) in enumerate(local_basis):
+                        offset_j = (candidate_j*sample_count+first_sample)*direct_columns+column_j
+                        template_j = direct_basis[offset_j:(candidate_j*sample_count+stop_sample)*direct_columns:direct_columns]
+                        expected_gram = sum(a.conjugate()*b for a,b,valid in zip(
+                            template_i,template_j,direct_valid[first_sample:stop_sample]) if valid)
+                        grouped_gram_index = ((block_index*6+group_index)*group_dimension+i)*group_dimension+j
+                        if abs(expected_gram-new_gram[grouped_gram_index]) > 2e-10*max(1.,abs(expected_gram)):
+                            raise AssertionError("grouped Gram differs from direct sampled templates")
+
+        grouped_chunked = root / "grouped-bank-chunked"
+        export_group_stats(grouped_chunked, *grouped_options, "--chunk", "511")
+        for file_name in ("intervals.u64", "valid_rows.u64", "signal_energy.f64"):
+            if (grouped/file_name).read_bytes() != (grouped_chunked/file_name).read_bytes():
+                raise AssertionError(f"grouped chunking changed shared output {file_name}")
+        for file_name in ("group_gram.c128", "group_mean.c128"):
+            left, right = complex128_values(grouped/file_name), complex128_values(grouped_chunked/file_name)
+            if len(left) != len(right) or any(abs(a-b) > 1e-11*max(1.,abs(a),abs(b)) for a,b in zip(left,right)):
+                raise AssertionError(f"grouped chunking changed {file_name}")
+
+        grouped_erased = root / "grouped-erased"
+        erased_group_manifest = export_group_stats(grouped_erased, *grouped_options,
+                                                   "--dropout-ms", "40", "--dropout-start-ms", "100")
+        erased_valid = struct.unpack("<"+"Q"*erased_group_manifest["block_count"],
+                                     (grouped_erased/"valid_rows.u64").read_bytes())
+        if not any(value < stop-first for value,(first,stop) in zip(erased_valid,
+                    struct.iter_unpack("<QQ",(grouped_erased/"intervals.u64").read_bytes()))):
+            raise AssertionError("grouped export omitted configured erasure rows")
+
+        over_budget = root / "grouped-over-budget"
+        rejected_group = invoke("--mode", "export-group-stats", *COMMON, "--channel", "none",
+                                "--basis", "two-ray", "--start", "0", "10", ".01",
+                                "--export-max-mib", "1", "--output", str(over_budget), ok=False, timeout=20)
+        if "disk budget" not in rejected_group.stderr or over_budget.exists():
+            raise AssertionError(f"grouped disk preflight ran too late or failed unexpectedly: {rejected_group.stderr}")
+        group_collision = invoke("--mode", "export-group-stats", *COMMON, "--basis", "two-ray",
+                                 "--output", str(grouped), ok=False, timeout=20)
+        if "fresh output directory" not in group_collision.stderr:
+            raise AssertionError(f"grouped output collision failed unexpectedly: {group_collision.stderr}")
 
         erased = root / "fresh-stats-erased"
         erased_manifest = export_stats(erased, "--dropout-ms", "40", "--dropout-start-ms", "100")

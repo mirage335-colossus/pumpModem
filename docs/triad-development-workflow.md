@@ -30,6 +30,55 @@ information exclusions for both reception targets. These bounds do not cover
 the prior stable-ray `B=0` 850-day case or every channel law; keep their
 assumptions visible.
 
+For timing-related misses or wrong-bit admissions, start with the
+[finite-bank acquisition study](validation-data/triad-v3/2026-11-02-acquisition/README.md).
+`triad_long --mode export-group-stats` and `tools/triad_group_acquire.py`
+compare all declared timing groups against one actual sampled observation.
+This avoids the quadratic cross-group Gram storage of `export-stats`;
+it does not support independently resampling noise for each group. Keep a
+fixed physical likelihood window when comparing block sizes. The small exact
+Gaussian reference is an aligned classification benchmark, not an operational
+admission test. Its fixed 99%-classification comparison demonstrated a gap
+below 1 dB for one stipulated Gaussian model. Use the
+[cheap reproduction recipes](validation-data/triad-v3/2026-11-02-acquisition/reproduction/README.md):
+the exact quadratic-form simulation evaluated 4.2 million classification
+trials in about eight seconds on one CPU thread. Large sampled-waveform
+campaigns remain reproducible study evidence, not automatic regression
+prerequisites. The current acquisition campaign searches arrival only;
+frequency, clock drift and keyed-epoch uncertainty need their own declared
+banks and evidence.
+
+The same study includes an optional **pattern-consistency postprocessor** for
+structured wrong-key admissions. It compares one fixed bit across windows
+with a window-by-window bit-switching proxy, using the already scored
+observations. Keep its original admission gate and do not call the proxy an
+authentication test. In fresh high30/Each65 validation, the preselected
+`ln(100)` guard rejected all eight wrong-key cases at each of 12 and 20 dB-Hz,
+but reduced legitimate 8-dB-Hz, 246.4-second reception from 16/16 to 15/16.
+The diagnostic zero threshold retained 16/16; it was not promoted after seeing
+those outcomes. Small-sample confidence intervals, the lost reception, and
+the distinction from noise-only calibration are recorded in the study.
+Doubling actual duration from 123.2 to 246.4 seconds also changed four paired
+weak cases from 1/4 to 4/4 accepted, with measured post-channel energy ratios
+1.990–2.017. These observations do not qualify a 99% duration planner, a
+general blind receiver, or new multi-day/−60-dB-Hz performance.
+
+For a small, exact preparation optimization, the current Gaussian-window
+helper now reuses the immediately preceding prior root only when relative
+window-center bytes match exactly. It preserves irregular calendars and tails,
+uses bounded storage, and changes neither precision nor retained information.
+A separate post-campaign comparison found identical old/new factors and
+FP32/FP64 scores, with about 6% faster preparation on one retained four-group
+case. The 33 affected window, grouped-acquisition and conditional-sweep checks
+passed. Historical campaign receipts remain bound to the earlier helper;
+the study records both identities and does not claim a full-receiver speedup.
+
+Use the [Target SNR and simulation reference](triad-v3.md#target-snr-link-margin-and-simulation-reference)
+when planning or reporting experiments. A lower design target than the nominal
+physical link is intentional path-loss margin; test the target separately.
+Preserve and report modeled energy changes rather than renormalizing them
+away, and distinguish a target-level test from demonstrated target reliability.
+
 Start with the [development contract](development.md), the
 [shared channel-model contract](channel-models.md), and, for arithmetic or GPU
 work, the [precision-control guide](gpu-precision-controls.md) and

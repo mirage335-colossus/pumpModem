@@ -17,6 +17,7 @@
 #include <iostream>
 #include <limits>
 #include <numbers>
+#include <numeric>
 #include <random>
 #include <optional>
 #include <complex>
@@ -29,6 +30,9 @@
 #include <type_traits>
 #include <vector>
 #include <sstream>
+#include <set>
+#include <tuple>
+#include <memory>
 
 namespace {
 using namespace datapump;
@@ -225,7 +229,7 @@ Options parse(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         const std::string_view key(argv[i]);
         if (key == "--help" || key == "-h") {
-            std::cout << R"HELP(triad_long --mode configure|plan|run|export|export-sampled|export-stats [options]
+            std::cout << R"HELP(triad_long --mode configure|plan|run|export|export-sampled|export-stats|export-group-stats [options]
   --seconds S                 Requested active one-bit span (8..315576000 s, ten Julian years); rounded to complete private tiles.
   --rate HZ --added N --sample-rate HZ --rf-hz HZ
   --sample-rate-denominator N Reciprocal-integer sampling: N>1 requires --sample-rate 1; Fs=1/N Hz.
@@ -287,6 +291,7 @@ Options parse(int argc, char** argv) {
   --output DIRECTORY          Fresh export directory for exported arrays.
   --mode export-sampled       Export full complex128 public bases and actual noisy/frontend samples.
   --stats-noisy               export-stats also writes matched actual noisy projections.
+  --mode export-group-stats   Export timing-group Grams with independent local residual dimensions.
   --dac-bits N --adc-bits N    0=exact bypass, or 2..24 signed component quantization bits.
   --dac-enob B --adc-enob B    Synthetic Gaussian converter-error effective resolution (0=nominal).
   --dac-full-scale V --adc-full-scale V --dac-gain G --adc-gain G
@@ -416,7 +421,7 @@ Examples:
     }
     if (o.now) o.epoch = static_cast<std::uint64_t>(std::time(nullptr));
     if(o.mode=="resolve")o.mode="configure";
-    if (o.mode != "configure" && o.mode != "plan" && o.mode != "run" && o.mode != "export" && o.mode != "export-sampled" && o.mode != "export-stats") throw std::invalid_argument("mode must be configure, plan, run, export, export-sampled, or export-stats");
+    if (o.mode != "configure" && o.mode != "plan" && o.mode != "run" && o.mode != "export" && o.mode != "export-sampled" && o.mode != "export-stats" && o.mode != "export-group-stats") throw std::invalid_argument("mode must be configure, plan, run, export, export-sampled, export-stats, or export-group-stats");
     if (o.channel != "none" && o.channel != "hf") throw std::invalid_argument("channel must be none or hf");
     if (o.selective_model != "legacy-allpass" && o.selective_model != "dispersive-dft")
         throw std::invalid_argument("selective model must be legacy-allpass or dispersive-dft");
@@ -1841,6 +1846,317 @@ void export_stats(const Options& o) {
     std::filesystem::rename(directory/"manifest.json.partial",directory/"manifest.json");
 }
 
+struct GroupColumnSet {
+    std::vector<std::size_t> candidate_indices;
+    std::vector<ColumnRef> columns;
+    std::vector<std::vector<std::size_t>> mapping;
+    std::vector<std::size_t> generation_order;
+};
+using SyncKey=std::tuple<double,double,double,std::int64_t,double>;
+SyncKey sync_key(const Candidate& c) {
+    return {c.arrival_seconds,c.frequency_hz,c.clock_ppm,c.epoch_offset_seconds,
+            c.frequency_drift_hz_per_second};
+}
+
+// The grouped layout deliberately omits cross-group Gram products. Each
+// synchronization group retains both bit alternatives and all channel models,
+// so its orthogonal residual is independent of every score in that group.
+// Noise observations are still projected onto every group from one shared
+// sampled channel pass; group dependence is not discarded in simulation.
+void export_group_stats(const Options& o) {
+    if(o.output.empty())throw std::invalid_argument("--output directory is required for --mode export-group-stats");
+    const auto f=format_for(o);const auto g=geometry(f);
+    const auto key_seed=o.key_seed.value_or(o.seed),channel_seed=o.channel_seed.value_or(o.seed);
+    const auto txkey=key_for(key_seed,0);
+    const auto rxkey=o.control=="wrong-key"?key_for(key_seed^0x6a09e667f3bcc909ULL,0):key_for(key_seed,0);
+    auto candidates=candidates_for(o,f,rxkey);
+    const auto calendar=observation_calendar(o,f,g);const auto pad=calendar.pad,trail=calendar.trail;
+    const auto noise=static_cast<double>(effective_sample_rate(f))/std::pow(10.,o.cn0/10.);
+    if(!std::isfinite(noise)||noise<=0)throw std::invalid_argument("C/N0 is outside numeric range");
+    for(auto& c:candidates)c.arrival_seconds+=pad;
+
+    std::vector<GroupColumnSet> groups;
+    std::map<SyncKey,std::size_t> group_indices;
+    std::set<std::pair<std::uint8_t,std::int64_t>> source_keys;
+    for(std::size_t ci=0;ci<candidates.size();++ci) {
+        const auto [it,inserted]=group_indices.emplace(sync_key(candidates[ci]),groups.size());
+        if(inserted)groups.emplace_back();
+        auto& group=groups[it->second];group.candidate_indices.push_back(ci);
+        const auto& candidate=candidates[ci];source_keys.emplace(candidate.source_bit,candidate.epoch_offset_seconds);
+        const auto local_count=candidate.channel.taps.size()*(candidate.channel.linear_gain?2:1);
+        group.mapping.emplace_back();group.mapping.back().reserve(local_count);
+        for(std::size_t j=0;j<local_count;++j) {
+            auto key=column_key(candidate,j);
+            auto where=std::find_if(group.columns.begin(),group.columns.end(),[&](const ColumnRef& ref) {
+                return column_key(candidates[ref.candidate],ref.local)==key;
+            });
+            if(where==group.columns.end()) {
+                group.columns.push_back({ci,j});group.mapping.back().push_back(group.columns.size()-1);
+            } else {
+                group.mapping.back().push_back(static_cast<std::size_t>(where-group.columns.begin()));
+            }
+        }
+    }
+    // Build the broadest channel alternatives first. Their shared columns
+    // cover narrower alternatives, which can then be omitted at synthesis
+    // time without changing the public candidate or column-map ordering.
+    for(auto& group:groups) {
+        group.generation_order.resize(group.candidate_indices.size());
+        std::iota(group.generation_order.begin(),group.generation_order.end(),0);
+        std::stable_sort(group.generation_order.begin(),group.generation_order.end(),[&](std::size_t a,std::size_t b) {
+            return group.mapping[a].size()>group.mapping[b].size();
+        });
+    }
+    if(groups.empty())throw std::invalid_argument("grouped export has no candidates");
+    if(groups.size()>10000)throw std::invalid_argument("grouped export exceeds explicit 10000 synchronization-group cap");
+    const auto d=groups.front().columns.size();
+    if(d==0||d>64)throw std::invalid_argument("grouped export group dimension is outside the existing D<=64 local design bound");
+    for(const auto& group:groups)if(group.columns.size()!=d)
+        throw std::invalid_argument("grouped export requires the same local design dimension in every synchronization group");
+
+    const auto rows=calendar.samples;const auto block=block_samples(o,f);const auto blocks=rows/block+(rows%block!=0);
+    const long double group_count=groups.size(),dimension=d,block_count=blocks;
+    const long double gram_bytes=block_count*group_count*dimension*dimension*16;
+    const long double vector_bytes=block_count*group_count*dimension*16;
+    const long double shared_bytes=block_count*(16+8+8+(o.stats_noisy?8:0));
+    const long double total_bytes=gram_bytes+vector_bytes+shared_bytes+
+        (o.stats_noisy?(vector_bytes+rows):0);
+    if(rows>o.export_max_samples)throw std::invalid_argument("export-group-stats exceeds --export-max-samples (at most128000000)");
+    if(total_bytes>o.export_max_bytes)throw std::invalid_argument("export-group-stats exceeds explicit --export-max-mib disk budget");
+
+    const auto fs=effective_sample_rate(f);std::size_t max_local=0;
+    for(const auto& c:candidates)max_local=std::max(max_local,c.channel.taps.size()*(c.channel.linear_gain?2:1));
+    const long double scratch=static_cast<long double>(o.chunk)*(dimension+max_local+1)*sizeof(Complex)+
+        group_count*(dimension*dimension+2*dimension)*sizeof(Complex)+
+        static_cast<long double>(o.chunk)*2*sizeof(std::uint8_t)+65536;
+    const long double source_bytes=static_cast<long double>(source_keys.size())*g.source_workspace_bytes;
+    const long double channel_bytes=static_cast<long double>(g.source_workspace_bytes)+
+        static_cast<long double>(std::min<std::uint64_t>(rows,o.chunk))*sizeof(Complex)*3+calendar.channel_working_bytes;
+    if(scratch+source_bytes+channel_bytes>o.memory_bytes)
+        throw std::invalid_argument("export-group-stats bounded scratch/source estimate exceeds --memory-mib");
+
+    const auto directory=std::filesystem::path(o.output);
+    std::vector<std::string> names{"group_gram.c128","group_mean.c128","intervals.u64","valid_rows.u64","signal_energy.f64","manifest.json"};
+    if(o.stats_noisy){names.push_back("group_observation.c128");names.push_back("received_energy.f64");}
+    for(const auto& name:names)if(std::filesystem::exists(directory/name)||std::filesystem::exists(directory/(name+".partial")))
+        throw std::invalid_argument("grouped export files already exist; choose a fresh output directory");
+    if(std::filesystem::exists(directory/"validity-mask.tmp"))
+        throw std::invalid_argument("grouped export files already exist; choose a fresh output directory");
+    std::filesystem::create_directories(directory);
+    std::ofstream gram(directory/"group_gram.c128.partial",std::ios::binary),
+        mean(directory/"group_mean.c128.partial",std::ios::binary),
+        intervals(directory/"intervals.u64.partial",std::ios::binary),
+        valid_rows(directory/"valid_rows.u64.partial",std::ios::binary),
+        energy(directory/"signal_energy.f64.partial",std::ios::binary);
+    std::ofstream observation,received_energy;
+    if(o.stats_noisy){observation.open(directory/"group_observation.c128.partial",std::ios::binary);
+        received_energy.open(directory/"received_energy.f64.partial",std::ios::binary);}
+    if(!gram||!mean||!intervals||!valid_rows||!energy||
+       (o.stats_noisy&&(!observation||!received_energy)))
+        throw std::runtime_error("cannot create grouped statistics files");
+
+    // One keyed source object per bit/epoch, reused through every public
+    // frequency, clock, drift, and arrival hypothesis.
+    std::map<std::pair<std::uint8_t,std::int64_t>,std::unique_ptr<PatternSource>> sources;
+    for(const auto& source_key:source_keys) {
+        auto addressed=f;addressed.epoch=offset_epoch(f.epoch,source_key.second);
+        sources.emplace(source_key,std::make_unique<PatternSource>(addressed,rxkey,source_key.first));
+    }
+    std::vector<Complex> local_values(o.chunk*max_local),basis_values(o.chunk*d),samples(o.chunk);
+    std::vector<std::uint8_t> validity(o.chunk),expected_mask(o.chunk);
+    std::vector<Complex> block_gram(groups.size()*d*d),block_projection(groups.size()*d);
+    double block_energy=0,actual_signal_energy=0,actual_observed_energy=0;
+    double selected_truth_arrival=0,selected_truth_frequency=0,selected_truth_clock=0,selected_truth_drift=0;
+    std::uint64_t block_first=0,block_rows=0,block_valid=0,actual_channel_samples=0,actual_channel_tail=0;
+    StreamChannelReport frontend_report{};
+
+    auto emit_noiseless_block=[&] {
+        const auto stop=block_first+block_rows;
+        write_le_u64(intervals,block_first);write_le_u64(intervals,stop);write_le_u64(valid_rows,block_valid);write_le_f64(energy,block_energy);
+        for(auto value:block_gram)write_le_complex(gram,value);
+        for(auto value:block_projection)write_le_complex(mean,value);
+        block_first=stop;block_rows=0;block_valid=0;block_energy=0;
+        std::fill(block_gram.begin(),block_gram.end(),Complex{});std::fill(block_projection.begin(),block_projection.end(),Complex{});
+    };
+    auto pass=[&](bool noisy_pass) {
+        PatternSource truth(transmitter_format(o,f),txkey,o.signal_bit);
+        auto config=channel_config(o,f,g,channel_seed,noise,pad,trail,calendar.samples);
+        config.effects.noise_enabled=noisy_pass;StreamingChannel channel(truth,config);
+        if(channel.total_samples()!=rows)throw std::runtime_error("natural channel endpoint exceeds grouped-export calendar");
+        std::ifstream mask;
+        std::ofstream mask_output;
+        if(noisy_pass) {
+            mask.open(directory/"validity-mask.tmp",std::ios::binary);
+            if(!mask)throw std::runtime_error("cannot read grouped validity mask");
+        } else if(o.stats_noisy) {
+            mask_output.open(directory/"validity-mask.tmp",std::ios::binary);
+            if(!mask_output)throw std::runtime_error("cannot create grouped validity mask");
+        }
+        std::uint64_t at=0,received_block_rows=0;double received_block_energy=0;
+        std::vector<Complex> received_projection(groups.size()*d);
+        auto emit_noisy_block=[&] {
+            for(auto value:received_projection)write_le_complex(observation,value);
+            write_le_f64(received_energy,received_block_energy);
+            std::fill(received_projection.begin(),received_projection.end(),Complex{});received_block_energy=0;received_block_rows=0;
+        };
+        while(at<rows) {
+            const auto wanted=static_cast<std::size_t>(std::min<std::uint64_t>(o.chunk,rows-at));
+            const auto n=channel.read(std::span(samples).first(wanted),std::span(validity).first(wanted));
+            if(!n)throw std::runtime_error("channel ended before grouped-export calendar");
+            if(channel.position()-n!=at)throw std::runtime_error("noncontiguous grouped channel samples");
+            if(noisy_pass) {
+                mask.read(reinterpret_cast<char*>(expected_mask.data()),static_cast<std::streamsize>(n));
+                if(mask.gcount()!=static_cast<std::streamsize>(n)||!std::equal(expected_mask.begin(),expected_mask.begin()+n,validity.begin()))
+                    throw std::runtime_error("grouped noiseless and noisy channel erasure masks differ");
+            } else if(o.stats_noisy) {
+                mask_output.write(reinterpret_cast<const char*>(validity.data()),static_cast<std::streamsize>(n));
+            }
+            std::size_t chunk_offset=0;
+            while(chunk_offset<n) {
+                const auto current_block_rows=noisy_pass?received_block_rows:block_rows;
+                const auto capacity=block-static_cast<std::size_t>(current_block_rows);
+                const auto segment=std::min(capacity,n-chunk_offset);
+                double segment_received_energy=0;
+                for(std::size_t group_index=0;group_index<groups.size();++group_index) {
+                    const auto& group=groups[group_index];
+                    std::fill(basis_values.begin(),basis_values.begin()+segment*d,Complex{});
+                    std::array<std::uint8_t,64> covered{};
+                    for(const auto ci_index:group.generation_order) {
+                        const auto& mapping=group.mapping[ci_index];
+                        if(std::all_of(mapping.begin(),mapping.end(),[&](std::size_t target){return covered[target]!=0;}))continue;
+                        const auto candidate_index=group.candidate_indices[ci_index];const auto& candidate=candidates[candidate_index];
+                        const auto columns=mapping.size();
+                        auto source=sources.at({candidate.source_bit,candidate.epoch_offset_seconds}).get();
+                        shaped_basis(*source,candidate,fs,at+chunk_offset,segment,
+                                     std::span(local_values).first(segment*columns));
+                        for(std::size_t column=0;column<columns;++column) {
+                            const auto target=mapping[column];
+                            if(covered[target])continue;
+                            for(std::size_t row=0;row<segment;++row)
+                                basis_values[target*segment+row]=local_values[column*segment+row];
+                            covered[target]=1;
+                        }
+                    }
+                    for(std::size_t row=0;row<segment;++row) {
+                        const auto sample_index=chunk_offset+row;const bool valid=validity[sample_index]!=0;
+                        if(valid) {
+                            const auto y=samples[sample_index];
+                            for(std::size_t i=0;i<d;++i) {
+                                const auto ai=std::conj(basis_values[i*segment+row]);
+                                const auto projection_index=group_index*d+i;
+                                if(noisy_pass)received_projection[projection_index]+=ai*y;
+                                else {
+                                    block_projection[projection_index]+=ai*y;
+                                    for(std::size_t j=0;j<d;++j)
+                                        block_gram[(group_index*d+i)*d+j]+=ai*basis_values[j*segment+row];
+                                }
+                            }
+                        }
+                    }
+                }
+                if(!noisy_pass) {
+                    for(std::size_t row=0;row<segment;++row)if(validity[chunk_offset+row]) {
+                        ++block_valid;block_energy+=std::norm(samples[chunk_offset+row]);
+                    }
+                    block_rows+=segment;
+                    if(block_rows==block||at+chunk_offset+segment==rows)emit_noiseless_block();
+                } else {
+                    for(std::size_t row=0;row<segment;++row)if(validity[chunk_offset+row])
+                        segment_received_energy+=std::norm(samples[chunk_offset+row]);
+                    received_block_energy+=segment_received_energy;received_block_rows+=segment;
+                    if(received_block_rows==block||at+chunk_offset+segment==rows)emit_noisy_block();
+                }
+                chunk_offset+=segment;
+            }
+            at+=n;
+        }
+        if(mask.is_open())mask.close();if(mask_output.is_open()){mask_output.close();if(!mask_output)throw std::runtime_error("failed writing grouped validity mask");}
+        frontend_report=channel.report();
+        if(!noisy_pass) {
+            actual_signal_energy=channel.report().signal_energy;actual_observed_energy=channel.report().observed_energy;
+            actual_channel_samples=channel.report().samples;actual_channel_tail=channel.report().tail_samples;
+            selected_truth_arrival=truth_arrival(config);selected_truth_frequency=truth_frequency(config);
+            selected_truth_clock=truth_clock(config);selected_truth_drift=truth_drift(config);
+        }
+    };
+    pass(false);if(o.stats_noisy){pass(true);std::filesystem::remove(directory/"validity-mask.tmp");}
+    gram.close();mean.close();intervals.close();valid_rows.close();energy.close();
+    if(o.stats_noisy){observation.close();received_energy.close();}
+    if(!gram||!mean||!intervals||!valid_rows||!energy||(o.stats_noisy&&(!observation||!received_energy)))
+        throw std::runtime_error("failed writing grouped statistics files");
+
+    auto size_of=[&](const std::string& name){return std::filesystem::file_size(directory/(name+".partial"));};
+    const auto resolved=resolve_configuration(o);const auto rx_clock_half=resolved.oscillators?resolved.base_ppm*.5e-6:0.;
+    const auto arrival_low=pad+(resolved.active?std::min(o.start_low,resolved.arrival_center-resolved.arrival_half):o.start_low);
+    const auto arrival_high=pad+(resolved.active?std::max(o.start_high,resolved.arrival_center+resolved.arrival_half):o.start_high);
+    const auto physical_arrival_bounds=std::array<double,4>{arrival_low*(1-rx_clock_half),arrival_low*(1+rx_clock_half),
+        arrival_high*(1-rx_clock_half),arrival_high*(1+rx_clock_half)};
+    const auto [arrival_bound_low,arrival_bound_high]=std::minmax_element(physical_arrival_bounds.begin(),physical_arrival_bounds.end());
+    std::ofstream manifest(directory/"manifest.json.partial");
+    manifest<<std::setprecision(17)<<"{\"format\":\"triad-group-block-stats-v1\",\"byte_order\":\"little\",\"complex_type\":\"complex128\",\"real_type\":\"float64\",\"integer_type\":\"uint64\",\"layout\":\"block,group,row,column\",\"block_count\":"<<blocks
+       <<",\"group_count\":"<<groups.size()<<",\"dimension\":"<<d<<",\"sample_rate\":"<<fs<<",\"noise_variance\":"<<noise
+       <<",\"gram_file\":\"group_gram.c128\",\"gram_shape\":["<<blocks<<','<<groups.size()<<','<<d<<','<<d<<']'
+       <<",\"mean_file\":\"group_mean.c128\",\"mean_shape\":["<<blocks<<','<<groups.size()<<','<<d<<']'
+       <<",\"intervals_file\":\"intervals.u64\",\"intervals_shape\":["<<blocks<<",2]"
+       <<",\"valid_rows_file\":\"valid_rows.u64\",\"valid_rows_shape\":["<<blocks<<']'
+       <<",\"signal_energy_file\":\"signal_energy.f64\",\"signal_energy_shape\":["<<blocks<<']'
+       <<",\"sample_count\":"<<rows<<",\"block_samples\":"<<block<<",\"signal_bit_simulation_truth\":"<<static_cast<unsigned>(o.signal_bit)
+       <<",\"key_seed\":"<<key_seed<<",\"channel_seed\":"<<channel_seed<<",\"legacy_seed\":"<<o.seed<<",\"epoch\":"<<f.epoch
+       <<",\"source_samples\":"<<g.source_samples<<",\"requested_active_seconds\":"<<f.bit_seconds<<",\"actual_elapsed_seconds\":"<<g.bit_seconds
+       <<",\"nominal_payload_energy_seconds_lower\":"<<g.nominal_payload_energy_seconds<<",\"channel_signal_energy_samples\":"<<actual_signal_energy
+       <<",\"channel_observed_energy_samples\":"<<actual_observed_energy<<",\"channel_samples\":"<<actual_channel_samples<<",\"channel_tail_samples\":"<<actual_channel_tail
+       <<",\"capture_lead_seconds\":"<<pad<<",\"arrival_coordinate\":\"candidate arrivals include capture lead and use nominal RX capture seconds\""
+       <<",\"public_timing_bounds_capture_seconds\":["<<pad+o.start_low<<','<<pad+o.start_high<<']'
+       <<",\"initial_physical_arrival_bounds_capture_seconds\":["<<*arrival_bound_low<<','<<*arrival_bound_high<<']'
+       <<",\"physical_arrival_bounds_include_rx_sample_clock\":true"
+       <<",\"selected_truth_arrival_seconds_simulation_only\":"<<selected_truth_arrival<<",\"selected_truth_frequency_hz_simulation_only\":"<<selected_truth_frequency
+       <<",\"selected_truth_clock_ppm_simulation_only\":"<<selected_truth_clock<<",\"selected_truth_frequency_drift_hz_per_second_simulation_only\":"<<selected_truth_drift
+       <<",\"cn0_db_hz\":"<<o.cn0<<",\"control\":\""<<o.control<<"\",\"signal_enabled\":"<<(o.control!="null"?"true":"false")
+       <<",\"oscillator_model\":{\"relative_phase_diffusion_rad_sqrt_s\":"<<resolved.phase_diffusion<<",\"relative_white_fm_hz_sqrt_s\":"<<o.white_fm
+       <<",\"relative_random_walk_fm_hz_sqrt_s\":"<<o.random_walk_fm<<",\"relative_flicker_fm_rms_hz\":"<<o.flicker_fm
+       <<",\"flicker_tau_seconds\":["<<o.flicker_min_tau<<','<<o.flicker_max_tau<<"],\"flicker_bands\":"<<o.flicker_bands
+       <<",\"relative_white_pm_rms_rad\":"<<o.white_pm<<",\"truth_fields_simulation_only\":true}"
+       <<",\"candidate_count\":"<<candidates.size()<<",\"candidates\":[";
+    for(std::size_t ci=0;ci<candidates.size();++ci){if(ci)manifest<<',';json_candidate(manifest,candidates[ci]);}
+    manifest<<"],\"groups\":[";
+    for(std::size_t gi=0;gi<groups.size();++gi) {
+        if(gi)manifest<<',';const auto& group=groups[gi];const auto& c=candidates[group.candidate_indices.front()];
+        manifest<<"{\"sync_key\":{\"arrival_seconds\":"<<c.arrival_seconds<<",\"frequency_hz\":"<<c.frequency_hz
+            <<",\"clock_ppm\":"<<c.clock_ppm<<",\"epoch_offset_seconds\":"<<c.epoch_offset_seconds
+            <<",\"frequency_drift_hz_per_second\":"<<c.frequency_drift_hz_per_second<<"},\"candidate_indices\":[";
+        for(std::size_t i=0;i<group.candidate_indices.size();++i){if(i)manifest<<',';manifest<<group.candidate_indices[i];}
+        manifest<<"],\"column_mapping\":[";
+        for(std::size_t i=0;i<group.mapping.size();++i){if(i)manifest<<',';manifest<<'[';for(std::size_t j=0;j<group.mapping[i].size();++j){if(j)manifest<<',';manifest<<group.mapping[i][j];}manifest<<']';}
+        manifest<<"],\"column_descriptors\":[";
+        for(std::size_t i=0;i<group.columns.size();++i){if(i)manifest<<',';const auto& ref=group.columns[i];const auto& candidate=candidates[ref.candidate];
+            const auto local=ref.local,tap_i=local/(candidate.channel.linear_gain?2:1),gain_i=candidate.channel.linear_gain?local%2:0;
+            const auto& tap=candidate.channel.taps[tap_i];
+            manifest<<"{\"source_bit\":"<<static_cast<unsigned>(candidate.source_bit)<<",\"epoch_offset_seconds\":"<<candidate.epoch_offset_seconds
+                <<",\"arrival_seconds\":"<<candidate.arrival_seconds<<",\"frequency_hz\":"<<candidate.frequency_hz<<",\"clock_ppm\":"<<candidate.clock_ppm
+                <<",\"frequency_drift_hz_per_second\":"<<candidate.frequency_drift_hz_per_second<<",\"tap_delay_seconds\":"<<tap.delay_seconds
+                <<",\"tap_doppler_hz\":"<<tap.doppler_hz<<",\"linear_gain\":"<<(candidate.channel.linear_gain?"true":"false")
+                <<",\"gain_column\":"<<gain_i<<",\"candidate_index\":"<<ref.candidate<<'}';}
+        manifest<<"]}";
+    }
+    manifest<<"],\"cross_group_gram_saved\":false,\"conditional_noise_resampling_supported\":false"
+       <<",\"calibration_scope\":\"all timing candidates and both bits are retained; residual variance must be calibrated independently within each fixed group, with a family allocation across groups\""
+       <<",\"source_hash_binding\":\"not included; bind externally to the exact source and binary\""
+       <<",\"signal_energy_semantics\":";
+    json_string(manifest,o.frontend.active()?"post-erasure transformed no-thermal pass energy; not pure signal energy":"post-erasure actual signal energy; simulation evaluation only");
+    manifest<<",\"mean_semantics\":";json_string(manifest,o.frontend.active()?"grouped A^H W transformed no-thermal pass; simulation evaluation only":"grouped A^H W actual signal; simulation evaluation only");
+    manifest<<",\"receiver_metadata_warning\":\"All means/energies are simulation truth and are not receiver metadata\",\"stats_noisy\":"<<(o.stats_noisy?"true":"false")
+       <<",\"gaussian_projection_supported\":"<<(frontend_report.gaussian_projection_supported?"true":"false");
+    if(o.stats_noisy)manifest<<",\"observation_file\":\"group_observation.c128\",\"observation_shape\":["<<blocks<<','<<groups.size()<<','<<d<<"],\"observation_semantics\":\"A^H W y from the one shared actual noisy channel pass, projected separately for every fixed group\",\"received_energy_file\":\"received_energy.f64\",\"received_energy_shape\":["<<blocks<<"],\"received_energy_semantics\":\"common per-block actual noisy sample energy over valid rows\"";
+    manifest<<",\"file_sizes\":{\"group_gram.c128\":"<<size_of("group_gram.c128")<<",\"group_mean.c128\":"<<size_of("group_mean.c128")
+       <<",\"intervals.u64\":"<<size_of("intervals.u64")<<",\"valid_rows.u64\":"<<size_of("valid_rows.u64")<<",\"signal_energy.f64\":"<<size_of("signal_energy.f64");
+    if(o.stats_noisy)manifest<<",\"group_observation.c128\":"<<size_of("group_observation.c128")<<",\"received_energy.f64\":"<<size_of("received_energy.f64");
+    manifest<<'}';json_provenance(manifest,o,f,g);
+    json_endpoint_truth(manifest,channel_config(o,f,g,channel_seed,noise,pad,trail,calendar.samples));json_frontend_report(manifest,frontend_report);
+    manifest<<"}\n";manifest.close();if(!manifest)throw std::runtime_error("failed writing grouped statistics manifest");
+    for(const auto& name:names)if(name!="manifest.json")std::filesystem::rename(directory/(name+".partial"),directory/name);
+    std::filesystem::rename(directory/"manifest.json.partial",directory/"manifest.json");
+}
+
 } // namespace
 
 int main(int argc,char** argv) {
@@ -1857,7 +2173,8 @@ int main(int argc,char** argv) {
         if(options.mode=="run") run(options);
         else if(options.mode=="export") export_basis(options);
         else if(options.mode=="export-sampled") export_sampled(options);
-        else export_stats(options);
+        else if(options.mode=="export-stats") export_stats(options);
+        else export_group_stats(options);
         }
         return 0;
     } catch(const std::exception& e) {

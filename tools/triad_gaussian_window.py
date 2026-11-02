@@ -102,7 +102,8 @@ class PreparedWindowedGaussian:
         stored += self.candidates * self.blocks * self.taps * 8
         input_and_checks = 6 * math.prod(shape) * 16
         temporary = 24 * dimension**2 * 16
-        self.preparation_array_bound_bytes = stored + input_and_checks + temporary + self.blocks * 8
+        prior_key_bytes = 2 * min(self.window_blocks, self.blocks) * 8
+        self.preparation_array_bound_bytes = stored + input_and_checks + temporary + self.blocks * 8 + prior_key_bytes
         if self.preparation_array_bound_bytes > self.memory_limit_bytes:
             raise MemoryError("Gaussian window preparation exceeds explicit-array memory limit")
 
@@ -127,20 +128,30 @@ class PreparedWindowedGaussian:
         self.maximum_relative_prior_repair = 0.
         self.maximum_relative_information_repair = 0.
         windows = []
+        prior_time_key = None
+        root = None
         for first in range(0, self.blocks, self.window_blocks):
             stop = min(first + self.window_blocks, self.blocks)
             time = centers[first:stop] - centers[first]
-            argument = math.pi * self.doppler_width_hz * (time[:, None] - time[None, :])
-            with np.errstate(over="ignore"):
-                correlation = np.exp(-.5 * argument**2)
-            Q = np.kron(correlation, np.diag(powers))
-            q, u = np.linalg.eigh(Q)
-            qscale = max(float(abs(q).max()), np.finfo(float).tiny)
-            if q[0] < -relative_tolerance * qscale:
-                raise ValueError("Gaussian prior covariance lost positive semidefiniteness")
-            self.maximum_relative_prior_repair = max(self.maximum_relative_prior_repair, max(0., -float(q[0])) / qscale)
-            keep = q > 0
-            root = u[:, keep] * np.sqrt(q[keep])[None, :]
+            time_key = time.tobytes()
+            # Width, powers and tolerance are fixed within this constructor.
+            # Reuse only the immediately preceding, exactly identical calendar;
+            # irregular windows and partial tails never grow an unbounded cache.
+            if time_key != prior_time_key:
+                root = None  # Release the previous dense factor before replacing it.
+                argument = math.pi * self.doppler_width_hz * (time[:, None] - time[None, :])
+                with np.errstate(over="ignore"):
+                    correlation = np.exp(-.5 * argument**2)
+                Q = np.kron(correlation, np.diag(powers))
+                q, u = np.linalg.eigh(Q)
+                qscale = max(float(abs(q).max()), np.finfo(float).tiny)
+                if q[0] < -relative_tolerance * qscale:
+                    raise ValueError("Gaussian prior covariance lost positive semidefiniteness")
+                self.maximum_relative_prior_repair = max(self.maximum_relative_prior_repair, max(0., -float(q[0])) / qscale)
+                keep = q > 0
+                root = u[:, keep] * np.sqrt(q[keep])[None, :]
+                prior_time_key = time_key
+                del argument, correlation, Q, q, u, keep
             n, rank = root.shape
             transform = np.empty((self.candidates, n, rank), np.complex128)
             spectrum = np.empty((self.candidates, rank), np.float64)

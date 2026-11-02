@@ -382,6 +382,45 @@ acceptance disabled until an appropriate admission policy is established.
 Neither small numerical differences nor these software paths establish 99%
 reception or an operational rare-tail rate.
 
+## Target SNR, link margin and simulation reference
+
+**Target SNR is a bandwidth-independent, total-three-carrier design target.**
+It is specified as `C/N₀` in dB-Hz: numerically, the SNR if the complete
+received signal power were concentrated within a 1 Hz noise bandwidth. Rate,
+Added Symbols, carrier spacing and receiver sample rate do not redefine this
+reference. The three carriers share the stated total power; the reference is
+not the stated power on each carrier. For locally white noise and bandwidth
+`B` containing the same total signal power,
+`SNR_B [dB] = C/N₀ [dB-Hz] - 10 log10(B / 1 Hz)`.
+
+The physical link reference is nominal received power after the configured
+link-budget loss, divided by receiver noise density:
+`C/N₀ [dB-Hz] = received_power [dBm] - noise_density [dBm/Hz]`.
+**It is appropriate to preserve additional modeled energy changes.** Fading,
+selective modulation, outages, guards and burst gaps can change actual
+collected energy. The v3 simulator reports these effects rather than
+renormalizing the faded output or reducing the noise to restore the nominal
+C/N₀. Record the nominal power reference, actual signal energy, useful energy
+and elapsed duration separately. A silent interval is elapsed time, not
+full-power energy collection time.
+
+**It is also appropriate for the planning Target SNR to be lower than the
+nominal physical link C/N₀.** This intentionally designs the transmission for
+greater path loss than the nominal link budget predicts. The difference is
+design margin, not an inconsistent SNR definition. A stronger-link simulation
+is a valid baseline, but validation of the lower target requires simulations
+at that target (and any chosen below-target stress points), preserving the
+designed waveform/duration and declaring the channel and search conditions.
+Report correct admissions, wrong admissions, misses and control admissions
+with uncertainty; running a target-level test is distinct from demonstrating
+the required reception and false-admission probabilities there.
+
+In `triad_long`, `--mode plan --cn0 X` supplies the planning C/N₀, while
+`--mode run` and sampled exports use `--cn0 X` as the physical nominal test
+C/N₀. These are separate invocations; do not infer one value from the other.
+The older [v2 examples](triad-v2.md#configuration-mapping) explicitly retain
+their configured planner target when `--cn0` changes the physical test level.
+
 ## Bounds, planner and measurable targets
 
 The default operational target is 99% correct reception and at most `1e-4`
