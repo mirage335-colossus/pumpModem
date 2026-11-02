@@ -1,5 +1,10 @@
 # Three-carrier modem v3 study
 
+**Development and integration entry point:** use the
+[three-carrier development workflow](triad-development-workflow.md) for efficient
+simulation recipes, evidence-backed receiver choices and scope-based validation.
+Start with its small diagnostics before reproducing a full dated campaign.
+
 The [noise-calibration and configuration-diversity extension](triad-noise-calibration.md)
 documents the common-scale and independent-residual likelihoods, their explicit
 noise assumptions, and the tighter clock/oscillator configuration study.

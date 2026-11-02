@@ -4,6 +4,11 @@ Start with the maintained guides for current behavior and procedures. Topic page
 link relevant studies and historical material; check their dates, source revisions,
 assumptions and limits before applying their findings.
 
+**Implementing or integrating the new three-carrier Robust modem:** start with
+the [development workflow](triad-development-workflow.md). It maps the efficient
+simulation tools, evidence-backed receiver choices, small runnable diagnostics,
+workspace reuse and proportionate testing before larger sampled campaigns.
+
 **Developing Robust simulation software:** start with the
 [Doppler/delay spread and frequency-selective amplitude modulation guide](channel-models.md).
 It documents the shared APIs, model presets, processing order, bypass rules,
@@ -41,7 +46,7 @@ energy accounting, receiver alternatives and independent sampled boundary tests.
 | Build, test, install and release | [Development and delivery](indexes/development.md): native/SDK/browser builds, test groups, packaging, offline use and dependency provenance; [shell script inventory and compatibility](shell-scripts.md) |
 | GPU arithmetic and precision controls | [Stage allocation and dropdown experiments](gpu-precision-controls.md): measured cost versus numerical benefit, explicit bulk overrides, higher-precision exceptions, fallbacks and acceptance procedure; [current Search arithmetic](search-arithmetic.md). |
 | Robust Modem | [Waveform, receiver and weak-signal topics](indexes/robust.md): protocol, iterative search, CPU efficiency at low expected SNR, link planning, measurements and alternate-receiver research |
-| Experimental three-carrier Robust | [V3 streaming study](triad-v3.md): long observations, joint channel likelihoods, finite-horizon detection and conditional duration planning; [noise calibration and configuration diversity](triad-noise-calibration.md); [GPU optimization protocol](triad-gpu-optimization.md), [measured campaign](validation-data/triad-v3/2026-11-01-optimization/README.md), [tensor follow-up](validation-data/triad-v3/2026-11-01-tensor/README.md), [exhaustive native FP4 campaign](validation-data/triad-v3/2026-11-01-fp4/README.md) and [consumer GPU / RTX 4090 extension](validation-data/triad-v3/2026-11-01-consumer-gpu/README.md); [V2 configuration examples](triad-v2.md) and [v1 prototype and evidence](triad-modem.md). |
+| Experimental three-carrier Robust | [Development workflow](triad-development-workflow.md): efficient simulation, receiver selection and scoped validation; [V3 streaming study](triad-v3.md): long observations, joint channel likelihoods, finite-horizon detection and conditional duration planning; [noise calibration and configuration diversity](triad-noise-calibration.md); [GPU optimization protocol](triad-gpu-optimization.md), [measured campaign](validation-data/triad-v3/2026-11-01-optimization/README.md), [tensor follow-up](validation-data/triad-v3/2026-11-01-tensor/README.md), [exhaustive native FP4 campaign](validation-data/triad-v3/2026-11-01-fp4/README.md) and [consumer GPU / RTX 4090 extension](validation-data/triad-v3/2026-11-01-consumer-gpu/README.md); [V2 configuration examples](triad-v2.md) and [v1 prototype and evidence](triad-modem.md). |
 | Scheduled Robust bursts | [Symbol_Burst](symbol-burst.md): complete symbols with guarded backlog time; [Sched_Hop](scheduled-hops.md): keyed active/null scheduling, split long symbols, dilution, frequency-search widening, workspace and qualification limits; fullscreen configured search-band waterfall |
 | Fast Modem | [Formats, profiles and investigations](indexes/fast.md): QAM/LDPC, APSK, acoustic OFDM, cable/radio paths, expected SNR, recovery and physical measurements |
 | Legacy Modem | [BPSK31, BPSK125 and Olivia reference](legacy-modem.md), [Olivia interoperability fixtures](../tests/fixtures/legacy/README.md), [BPSK fixture provenance](../tests/fixtures/legacy/PSK-fixtures.md) |

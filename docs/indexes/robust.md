@@ -8,6 +8,11 @@ the sections relevant to the question; the document's revision and evidence
 determine applicability. CPU efficiency, expected SNR, C/N0, synchronization
 coverage and decoded-message reliability are related but distinct quantities.
 
+For the **new isolated three-carrier Robust modem**, start with the
+[development workflow](../triad-development-workflow.md). It identifies the v3
+implementation, efficient simulation tools, measured receiver choices and
+validation needed before ordinary-receiver integration.
+
 ## Implemented waveform and receive behavior
 
 For current Helper Carrier integration requirements and measured inexpensive
@@ -36,6 +41,7 @@ retain their individual scope and qualification limits.
 | [Batched iterative search](../search-compute.md) | Implementation reference: FFT acquisition, long-symbol CPU batching, workers, memory boundaries and reproducible workloads. |
 | [GPU precision and dropdown experiments](../gpu-precision-controls.md) | Start here for stage-specific precision decisions: current control semantics, measured bulk costs, high-value precision exceptions, forcing/fallback contracts and paired validation. |
 | [GPU precision evidence map](../validation-data/triad-v3/precision-controls/README.md) | Exact archived results, source/input hashes, directly browsable passing and failing test logs, and portable analysis checks. |
+| [Three-carrier development workflow](../triad-development-workflow.md) | Start here for isolated v3 implementation: cheap simulation recipes, reusable complex workspaces, evidence-backed receiver choices and scope-based testing. [V3 format and API guide](../triad-v3.md) describes the current experiment. |
 | [Experimental three-carrier modem v2](../triad-v2.md) | Separate sampled complex-I/Q study with GUI inner Rate × Added Symbols semantics, twenty-dwell diversity, continuous low-rate patterns, bounded parallel acquisition and the two requested HF link examples. [V1 evidence](../triad-modem.md) remains version-specific. |
 | [Symbol_Burst](../symbol-burst.md) | Local implementation: whole-symbol UTC scheduling, guarded listening, backlog processing and planner limits; see validation for qualification. |
 | [Symbol_Burst implementation handoff](../symbol-burst-implementation-plan.md) | Historical implementation plan: accepted timing decisions, integration stages and validation obligations. |

@@ -5,6 +5,18 @@ Current compatibility requirements are in [the development contract](docs/develo
 build and test stages are in [the build guide](docs/building.md#testing-stages).
 Search `src/`, `include/`, `tests/` and `cmake/` first when locating implementation.
 
+## New three-carrier Robust modem
+
+For implementing or integrating the isolated three-adjacent-carrier modem, start
+with the [development workflow](docs/triad-development-workflow.md), then the
+[current v3 guide](docs/triad-v3.md). The workflow maps reusable simulation tools,
+measured receiver choices, cheap diagnostics and validation escalation. Reuse
+retained complex workspaces before generating new sampled captures when the
+experiment permits it. Historical large campaigns are evidence, not routine
+regression prerequisites. Use the scope-based test guidance; shared-code changes
+and ordinary-receiver integration still require their applicable contracts and
+validation stages.
+
 ## GPU optimization and precision controls
 
 Before changing GPU arithmetic, precision selection or related performance

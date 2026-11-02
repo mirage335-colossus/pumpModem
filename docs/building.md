@@ -406,7 +406,7 @@ test prerequisites before invoking CTest**; CTest by itself does not rebuild.
 | `native` | Selected backend's display-dependent workflow and conformance probes |
 | `packaging` | Runtime collection, checksums, corruption detection and relocation |
 | `build` | Build orchestration, dependency preparation and vendored source integrity |
-| `triad` | Isolated v1/v2 three-carrier modem checks and sampled-I/Q study smoke tests; no ordinary Robust receiver or native audio dependency |
+| `triad` | Isolated v1/v2/v3 three-carrier modem, streaming channel/receiver, statistics, configuration and study smoke checks; no ordinary Robust receiver or native audio dependency |
 | `all` | All configured non-display tests, including expensive calibration |
 
 Groups overlap deliberately. `contract` is the maintenance gate for changes
@@ -451,6 +451,30 @@ tests but do not compile them. For individual work, existing targets such as
 `test_compression_short` continue to work.
 
 ## Testing stages
+
+### Isolated three-carrier research
+
+For the new Robust modem experiment, use the
+[three-carrier development workflow](triad-development-workflow.md) to choose
+the smallest useful simulation and the checks affected by the change. The
+`triad_experiment` library and its study executables are excluded from the
+default application build and do not link the ordinary Robust receiver or native
+audio. `./build.sh test triad --cli` builds the isolated group's prerequisites
+and runs its registered checks; optional Python research tools also have their
+own focused tests that are not all registered in this group.
+
+A dated Monte Carlo, GPU or multi-day sensitivity campaign is not automatically
+a regression prerequisite for an isolated study edit. Reuse unchanged evidence,
+run the affected focused checks, and add fresh sampled observations or long-span
+checks when the changed assumptions or intended claims require them. Documentation
+edits need link, command and consistency checks, not a new sensitivity campaign.
+
+This is a scope boundary, not a waiver for shared runtime changes. The isolated
+library reuses source such as crypto, FFT, tuning presets and channel helpers;
+changes to those sources can affect the application. Ordinary-receiver/GUI
+integration and release candidates still follow the preservation contract and
+the applicable candidate-validation stages below. A passing triad study cannot
+be reported as ordinary Robust or release qualification.
 
 ### CI package downloads
 
