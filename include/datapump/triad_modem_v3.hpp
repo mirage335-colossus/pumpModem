@@ -22,6 +22,11 @@ struct Format {
     unsigned added_symbols = 10;
     bool added_interleave = true;
     std::uint32_t sample_rate = 960;
+    // Integer samples/second, or (when sample_rate == 1) one sample every
+    // sample_rate_denominator seconds. This keeps sub-Hz UTC steps integral.
+    // The full uint32 range is representable; waveform/channel bandwidth and
+    // checked coordinate guards impose the usable limits for each case.
+    std::uint32_t sample_rate_denominator = 1;
     double bit_seconds = 16;
     std::uint64_t minimum_inner_coefficients = 64;
     bool fhss = false; // Envelope only; RF retuning is a channel operation.
@@ -30,6 +35,7 @@ struct Format {
     std::uint64_t epoch = 1793404800, symbol_ordinal = 0;
     unsigned burst_wait_tiles = 0;
 };
+double effective_sample_rate(const Format&);
 struct Geometry {
     double inner_chip_rate_hz = 0, fine_chip_rate_hz = 0;
     double carrier_spacing_hz = 0, occupied_bandwidth_hz = 0;
@@ -116,7 +122,7 @@ struct SampledFrontendConfig {
 };
 // Optional physical-path stress, separate from oscillator error and receiver
 // gain control. These are declared stochastic/deterministic models, not field
-// calibration. Physical time is n/(sample_rate*rx_clock_scale)-capture_lead_seconds;
+// calibration. Physical time is n/(effective_sample_rate*rx_clock_scale)-capture_lead_seconds;
 // sample zero can precede time zero. Off preserves the established channel exactly.
 struct PathEvolutionConfig {
     // Independent stationary proper-complex OU gains on the direct and delayed

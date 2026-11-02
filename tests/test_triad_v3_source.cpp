@@ -169,6 +169,91 @@ void complete_tile_duration_checks() {
     }
 }
 
+// Independent copy of the old linear calendar calculation, restricted to
+// modest fixtures. It fixes compatibility of the first feasible dwell and
+// protected coefficient count, rather than copying the new search strategy.
+std::uint64_t legacy_protected_cells(const Format& f,std::uint64_t dwells) {
+    const double fine=f.inner_rate_hz/6*f.added_symbols;
+    const long double edge=8/fine+std::max(f.ramp_seconds,8/fine)+f.margin_seconds;
+    if(!f.fhss){
+        const auto width=dwells*static_cast<long double>(f.dwell_seconds)-2*edge;
+        return width>0?static_cast<std::uint64_t>(std::floor(width*fine)):0;
+    }
+    const long double guard=f.quiet_seconds+f.ramp_seconds+f.margin_seconds+8/fine;
+    const auto cells=std::floor((static_cast<long double>(f.dwell_seconds)-2*guard)*fine);
+    check(cells>=1,"invalid legacy FHSS fixture");
+    return (dwells-2)*static_cast<std::uint64_t>(cells);
+}
+
+std::uint64_t legacy_tile_dwells(const Format& f) {
+    const double fine=f.inner_rate_hz/6*f.added_symbols;
+    const long double edge=8/fine+std::max(f.ramp_seconds,8/fine)+f.margin_seconds;
+    const long double guard=f.quiet_seconds+f.ramp_seconds+f.margin_seconds+8/fine;
+    const auto per_dwell=std::floor((f.fhss?f.dwell_seconds-2*guard:f.dwell_seconds)*fine);
+    std::uint64_t dwells=20;
+    if(per_dwell>=1){
+        dwells+=f.fhss?2:2*static_cast<std::uint64_t>(std::ceil(edge/f.dwell_seconds));
+        dwells+=static_cast<std::uint64_t>(std::ceil((f.added_symbols-1)/per_dwell));
+    }
+    while(legacy_protected_cells(f,dwells)<f.minimum_inner_coefficients*f.added_symbols){
+        check(dwells<100000,"legacy comparison fixture exceeds its bounded test budget");
+        ++dwells;
+    }
+    return dwells;
+}
+
+void tile_search_checks() {
+    const auto compare_legacy=[](const Format& f){
+        const auto dwells=legacy_tile_dwells(f);const auto g=geometry(f);
+        check(g.tile_seconds==static_cast<double>(dwells)*f.dwell_seconds,
+              "binary tile search changed a legacy calendar");
+        check(g.payload_fine_cells_per_tile==legacy_protected_cells(f,dwells)/f.added_symbols*f.added_symbols,
+              "binary tile search changed legacy payload coefficients");
+        const auto cells=static_cast<std::uint64_t>(std::ceil(g.tile_seconds*g.fine_chip_rate_hz+3));
+        check(g.source_workspace_bytes==cells*176+128*1024,
+              "binary tile search changed legacy workspace geometry");
+    };
+    for(double rate:{.036,.36,3.6,35.9,36.,359.3,360.})for(unsigned added:{1U,3U,10U}) {
+        Format f;f.inner_rate_hz=rate;f.added_symbols=added;f.sample_rate=9600;
+        compare_legacy(f);
+        f.minimum_inner_coefficients=97;f.ramp_seconds=.013;f.margin_seconds=.006;
+        compare_legacy(f);
+    }
+    for(double rate:{359.3,360.,3600.})for(unsigned added:{1U,3U,10U}) {
+        Format f;f.inner_rate_hz=rate;f.added_symbols=added;f.sample_rate=96000;
+        f.fhss=true;f.quiet_seconds=.01;f.ramp_seconds=.002;
+        compare_legacy(f);
+    }
+    Format f;f.inner_rate_hz=.000036;f.added_symbols=1;f.sample_rate=1;f.bit_seconds=38*86400.;
+    const auto g=geometry(f);
+    const auto dwells=static_cast<std::uint64_t>(std::llround(g.tile_seconds/f.dwell_seconds));
+    check(dwells>10000000&&g.tile_seconds>185*86400.&&g.tile_seconds<186*86400.,
+          "sub-millihertz pattern still has the old dwell-duration ceiling");
+    check(g.tile_count==1&&g.inner_coefficients>=64&&g.source_workspace_bytes<1024*1024,
+          "multi-month minimum pattern lost complexity or bounded workspace");
+    check(legacy_protected_cells(f,dwells)>=64&&legacy_protected_cells(f,dwells-1)<64,
+          "multi-month search did not select the first feasible dwell");
+    f.bit_seconds=2*g.tile_seconds;
+    check(geometry(f).tile_count==2,"multi-month exact tile boundary rounded upward");
+    f.bit_seconds=(2.+1e-6)*g.tile_seconds;
+    check(geometry(f).tile_count==3,"multi-month fractional tile boundary rounded downward");
+    f.inner_rate_hz=.000000036;f.bit_seconds=8;
+    const auto centuries=geometry(f);
+    check(centuries.dwells>std::numeric_limits<std::uint32_t>::max()&&
+          centuries.source_samples>std::numeric_limits<std::uint32_t>::max()&&
+          centuries.source_workspace_bytes==g.source_workspace_bytes,
+          "very-low-rate calendar lost 64-bit coordinates or bounded workspace");
+    f.inner_rate_hz=.036;f.minimum_inner_coefficients=1000000;
+    bool rejected=false;try{(void)geometry(f);}catch(const std::exception&){rejected=true;}
+    check(rejected,"search bypassed the bounded-cell workspace cap");
+    f.minimum_inner_coefficients=64;
+    for(double invalid:{std::numeric_limits<double>::min(),std::numeric_limits<double>::denorm_min()}) {
+        f.inner_rate_hz=invalid;rejected=false;
+        try{(void)geometry(f);}catch(const std::exception&){rejected=true;}
+        check(rejected,"unrepresentable tile duration bypassed checked coordinates");
+    }
+}
+
 void month_and_low_sample_rate_checks() {
     auto key=fixture_key();
     for(double rate:{3.6,.36,.036,.0036}) {
@@ -220,6 +305,7 @@ int main() {
         random_access_and_chunk_checks();
         protected_waveform_checks();
         complete_tile_duration_checks();
+        tile_search_checks();
         month_and_low_sample_rate_checks();
         std::cout << "triad v3 source: geometry, addressing, pulse, and chunk checks passed\n";
     } catch (const std::exception& error) {

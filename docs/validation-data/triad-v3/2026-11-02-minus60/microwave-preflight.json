@@ -1,0 +1,98 @@
+{
+  "calculation_notes": [
+    "The configured relative CFO bound is (RF_Hz \u00d7 shift_ppm + nominal_IF_Hz \u00d7 base_ppm) \u00d7 1e-6 divided by the minimum relative audio-clock ratio. At 5.8 GHz this is about 0.58 Hz; at 500 kHz it is about 50.15 microhertz.",
+    "The static frequency study requires the block-center CFO prior to remain strictly below 1/(2 \u00d7 block_duration). It defaults to a frequency grid step 1/(4 \u00d7 observation_duration); next-power-of-two FFT estimates apply that grid-shape rule and the full configured static CFO prior.",
+    "At 5.8 GHz, a 0.8-second block meets the CFO Nyquist condition but 81.1 million blocks exceed the static study 2^26 FFT cap; the finer 1/(4T) step requests 2^29. The 500 kHz example can use 8192-second blocks and fits a 2^15 static grid under the same model, subject to the other memory/work limits.",
+    "Two hertz is a capture-rate example because it exceeds twice the 0.58-Hz deterministic bound plus the modeled narrowband occupancy; 1 Hz fails the configure-mode deterministic capture check at 5.8 GHz.",
+    "At 2 samples/s, a 750-day raw export exceeds the CLI 128-million-row cap at both RF centers. This is an export limit, separate from streaming simulation and the static-study block/FFT limits.",
+    "These are current model, sampling, and implementation-resource constraints. They do not establish a physical link failure or a general impossibility: another acquisition architecture may avoid retaining all block projections or searching a uniform full-span CFO grid.",
+    "Configure-mode finite full-prior grid estimates at this 750-day duration are 300,895,874 frequency positions for 5.8 GHz and 26,019 for 500 kHz (about 11,561x). These are estimates, not materialized search banks or measured acquisition runtime."
+  ],
+  "configure_run": {
+    "allocation": "configure mode only; no waveform arrays, transmission, receiver, or large FFT allocated",
+    "command": "build/dev/triad_long --mode configure --seconds 64800000 --rate .0036 --sample-rate 2 --rf-hz {5800000000|500000} --base-oscillator gpsdo-ocxo --shift-oscillator gpsdo-ocxo --clock-sync GPS_10ms-1ms_region-0ms_offset --audio-error-ms 70 --margin 1",
+    "reported_duration": {
+      "requested_active_s": 64800000,
+      "rounded_active_s": 64848231.6,
+      "source_support_s": 64850901
+    }
+  },
+  "limitations": "No sampled-waveform receiver run, false-admission calibration, actual GPU run, or physical RF measurement was performed in this preflight.",
+  "rf_comparison": [
+    {
+      "block_center_nyquist_limit_s_strictly_less_than": "0.862068742525",
+      "ceil_blocks_over_source_support": 81063627,
+      "configure_capture_feasible": true,
+      "configure_capture_fs_hz": 2,
+      "configure_deterministic_nyquist_margin_hz": 0.8174996998408748,
+      "configure_full_prior_frequency_hypothesis_count": 300895874,
+      "configure_reported_deterministic_cfo_bound_hz": 0.5800001500290001,
+      "configure_reported_phase_diffusion_rad_sqrt_s": 0.00012341341494884352,
+      "frequency_grid_scope": "finite-grid estimate only, not a materialized or pruned receiver bank",
+      "illustrative_block_s": 0.8,
+      "next_power_of_two_block_fft": 134217728,
+      "raw_export_cap": 128000000,
+      "raw_sample_excess_over_cap": 1600000,
+      "raw_samples_at_2_hz_for_750d_requested_active_span": 129600000,
+      "raw_samples_at_2_hz_for_rounded_source_support": 129701802,
+      "raw_source_support_excess_over_cap": 1701802,
+      "rf_hz": 5800000000,
+      "static_study_explicit_fft_cap": 67108864,
+      "static_study_required_fft_at_step_1_over_4T": 536870912
+    },
+    {
+      "block_center_nyquist_limit_s_strictly_less_than": "9970.089730",
+      "ceil_blocks_over_source_support": 7917,
+      "configure_capture_feasible": true,
+      "configure_capture_fs_hz": 2,
+      "configure_deterministic_nyquist_margin_hz": 1.9773996998988699,
+      "configure_full_prior_frequency_hypothesis_count": 26019,
+      "configure_reported_deterministic_cfo_bound_hz": 5.01500000025075e-05,
+      "configure_reported_phase_diffusion_rad_sqrt_s": 0.00012341341494884352,
+      "frequency_grid_scope": "finite-grid estimate only, not a materialized or pruned receiver bank",
+      "illustrative_block_s": 8192,
+      "next_power_of_two_block_fft": 8192,
+      "raw_export_cap": 128000000,
+      "raw_sample_excess_over_cap": 1600000,
+      "raw_samples_at_2_hz_for_750d_requested_active_span": 129600000,
+      "raw_samples_at_2_hz_for_rounded_source_support": 129701802,
+      "raw_source_support_excess_over_cap": 1701802,
+      "rf_hz": 500000,
+      "static_study_explicit_fft_cap": 67108864,
+      "static_study_required_fft_at_step_1_over_4T": 32768
+    }
+  ],
+  "rf_comparison_ratio": {
+    "configure_frequency_hypothesis_count_5_8ghz_to_500khz": 11564.467273915216,
+    "deterministic_cfo_bound_5_8ghz_to_500khz": 11565.30707876371
+  },
+  "shared_model": {
+    "base_and_shift_oscillator": "gpsdo-ocxo",
+    "carrier_count": 3,
+    "clock_region_offset_audio": "GPS_10ms-1ms_region-0ms_offset; 70 ms audio-error bound per station",
+    "energy_scope": "nominal available energy C/N0 times requested active duration; not decoder performance",
+    "gui_inner_rate_hz": 0.0036,
+    "initial_arrival_half_width_s": 0.0905,
+    "nominal_total_energy_over_n0": {
+      "db": 18.116,
+      "linear": 64.8
+    },
+    "oscillator_prior": "each relative preset bound 0.0001 ppm, split symmetrically between TX and RX",
+    "phase_noise_model": "independent endpoint Wiener diffusion; model sigma is independent of RF center frequency",
+    "relative_phase_diffusion_rad_sqrt_s": 0.00012341341494884352,
+    "total_triplet_cn0_db_hz": -60
+  },
+  "source": {
+    "binary": "build/dev/triad_long",
+    "binary_mtime": "2026-11-01T17:37:58-06:00",
+    "binary_sha256": "fa30fb17b0ec1d021848a5a6c9375fae364e37c1f3617e76be19728c9fc98e90",
+    "cli_source": "tools/triad-long.cpp",
+    "git_head": "731d6f4a125ed06ccbf73e5eeb7244c202a1eaa9",
+    "preset_source": "src/tuning_presets.cpp",
+    "source_mtime": "2026-11-01T17:35:44-06:00",
+    "static_frequency_source": "tools/triad-static-frequency-study.py",
+    "working_tree": "dirty; unrelated concurrent work preserved"
+  },
+  "status": "analytical and configure-mode resource preflight; no waveform receiver campaign or physical result",
+  "title": "Microwave configuration feasibility preflight"
+}

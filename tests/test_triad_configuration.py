@@ -47,13 +47,44 @@ def main():
     check(month["capture"]["sub_64_hz_model"], "low-rate model scope omitted")
     check("no high-rate integration/decimation equivalence" in month["capture"]["sampling_model_limits"],
           "low-rate model claims unvalidated sample-rate equivalence")
-    near(month["duration"]["maximum_requested_active_seconds"], 3283200, "38-day request ceiling")
+    near(month["duration"]["maximum_requested_active_seconds"], 315576000, "ten-year request ceiling")
     near(month["duration"]["requested_active_seconds"], 3283200, "38-day request lost")
     check(month["duration"]["source_support_seconds"] > 3283200, "pulse/tile overhead was clipped to request ceiling")
     near(month["spread_doppler_hz"], .001, "low-rate Doppler preset lost")
     near(month["spread_delay_ms"], .005, "low-rate fractional delay lost")
     near(month["perturbation_slow_depth"], .01, "low-rate selected perturbation lost")
-    invoke("--mode", "configure", *COMMON, *low_rate, "--seconds", "3283201", ok=False)
+    invoke("--mode", "configure", *COMMON, *low_rate, "--seconds", "315576001", ok=False)
+    years = configure(*low_rate, "--rate", ".0036", "--sample-rate-denominator", "64",
+                      "--seconds", "86400000", "--symbol-burst", "3")
+    near(years["capture"]["sample_rate_hz"], 1/64, "effective reciprocal sample rate")
+    check((years["capture"]["sample_rate_numerator"], years["capture"]["sample_rate_denominator"]) == (1, 64),
+          "reciprocal rate provenance missing")
+    near(years["duration"]["requested_active_seconds"], 86400000, "year request lost")
+    near(years["calendar_timestamp_center_seconds"], .035, "sub-Hz calendar audio center", 2e-7)
+    near(years["initial_arrival_half_width_seconds"], .0905, "sub-Hz physical timing prior")
+    # Independent physical-second corner of the shared timestamp uncertainty:
+    # clock drift accumulates over support, while its .01-sample guard is now
+    # .64 seconds. The helper's rounding guard is small but deliberately kept.
+    fractional_clock = years["exact_relative_audio_ratio_bound_ppm"]*1e-6
+    expected_half = ((.0905+.64) + fractional_clock*(years["duration"]["source_support_seconds"]+.035))/(1-fractional_clock)
+    near(years["full_observation_calendar_half_width_seconds"], expected_half,
+         "sub-Hz calendar scaling lost a physical-second bound", 2e-7)
+    calendar = years["whole_bit_symbol_burst"]
+    check(all(calendar[name]["sample_phase"] == 0 for name in
+              ("support_begin", "payload_begin", "payload_end", "support_end", "next_support_begin")),
+          "reciprocal sample UTC calendar has fractional seconds")
+    check(calendar["payload_begin"]["epoch"]-calendar["support_begin"]["epoch"] ==
+          calendar["pulse_padding_samples_each_side"]*64, "sub-Hz halo UTC coordinate")
+    check(calendar["payload_end"]["epoch"]-calendar["payload_begin"]["epoch"] ==
+          calendar["useful_samples"]*64, "sub-Hz useful UTC extent")
+    after_wait = max(calendar["support_end"]["epoch"]+3*calendar["useful_samples"]*64,
+                     calendar["support_begin"]["epoch"]+60)
+    check(calendar["next_support_begin"]["epoch"] == ((after_wait+29)//30)*30,
+          "sub-Hz whole-bit burst waiting rule")
+    for invalid in (("--sample-rate-denominator", "0"), ("--sample-rate-denominator", "4294967296"),
+                    ("--sample-rate", "2", "--sample-rate-denominator", "2"),
+                    ("--sample-rate", "0", "--sample-rate-denominator", "64")):
+        invoke("--mode", "configure", *COMMON, *low_rate, *invalid, ok=False)
     invoke("--mode", "configure", *COMMON, *low_rate, "--sample-rate", "1.5", ok=False)
     invoke("--mode", "configure", *COMMON, *low_rate, "--rate", "3.6", ok=False)
     for impairment in (("--fhss",), ("--dropout-ms", "10"), ("--white-fm", ".001"),

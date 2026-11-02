@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -102,9 +103,26 @@ class LowRateCampaignTests(unittest.TestCase):
         self.assertNotEqual(campaign.seed_for(a, 0, "key"), campaign.seed_for(b, 0, "key"))
         self.assertNotEqual(campaign.seed_for(a, 0, "path"), campaign.seed_for(a, 1, "path"))
 
+    def test_reciprocal_rate_and_year_duration(self):
+        args = self.args("--seconds", "86400000", "--rate", ".0036", "--sample-rate-denominator", "64")
+        campaign.validate(args)
+        command, _ = campaign.make_command(args, 0, self.root / "path")
+        self.assertEqual(command[command.index("--sample-rate-denominator")+1], "64")
+        self.assertEqual(command[command.index("--seconds")+1], "86400000.0")
+        legacy = self.args()
+        identity = ["triad-lowrate-campaign-v1", "development", 3283200., .036, 1, -46., 0, 0, "noise"]
+        expected = int.from_bytes(hashlib.sha256(json.dumps(identity, separators=(",", ":")).encode()).digest()[:8], "little")
+        self.assertEqual(campaign.seed_for(legacy, 0, "noise"), expected)
+        reciprocal = self.args("--sample-rate-denominator", "64")
+        self.assertNotEqual(campaign.seed_for(legacy, 0, "noise"), campaign.seed_for(reciprocal, 0, "noise"))
+
     def test_configuration_bounds_fail_before_output_creation(self):
-        cases = [("--paths", "3"), ("--jobs", "33"), ("--seconds", "3283201"),
+        cases = [("--paths", "3"), ("--jobs", "33"), ("--seconds", "315576001"),
                  ("--rate", "3.6", "--sample-rate", "1"), ("--timeout", "0"),
+                 ("--sample-rate-denominator", "0"), ("--sample-rate-denominator", "4294967296"),
+                 ("--sample-rate", "2", "--sample-rate-denominator", "2"),
+                 ("--rate", ".036", "--sample-rate-denominator", "64"),
+                 ("--rate", ".0036", "--sample-rate-denominator", "64", "--block-seconds", "32"),
                  ("--outage-seconds", "1", "2"), ("--epoch-offsets", "0,0"),
                  ("--tap-delay-ms", "-1"), ("--tap-doppler-hz", "-1"),
                  ("--start", "0", "100", "1e-300"), ("--ray-coherence-seconds", "-1")]

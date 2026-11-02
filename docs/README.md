@@ -21,6 +21,12 @@ For isolated extremely weak, long-duration three-carrier work, the
 [sub-9-kHz study](validation-data/triad-v3/2026-11-01-sub9/README.md) records
 sampled observations lasting up to 38 days, receiver comparisons and the
 limits of their model-conditional reception and false-admission claims.
+The maintained [v3 guide](triad-v3.md) also covers reciprocal-integer sample
+clocks, a ten-Julian-year representation/planner ceiling, and the deterministic
+CFO batch receiver. The subsequent [−60 dB-Hz study](validation-data/triad-v3/2026-11-02-minus60/README.md)
+records 850–3,000-day sampled holdouts, lower-rate rounding costs, joint
+ray-frequency inference, measured GPU acceleration and remaining coherence limits.
+Its qualifications apply only to the declared models and acquisition conditions.
 
 ## Topic map
 

@@ -448,6 +448,40 @@ def main():
         if "exceeds --export-max-samples" not in rejected.stderr or destination.exists():
             raise AssertionError(f"month capture failed before the explicit export preflight: {rejected.stderr}")
 
+    # All export paths must agree on actual reciprocal-rate coordinates and
+    # C/N0 normalization. This renders one minimum private tile (~3k rows),
+    # not a year of samples, and compares actual noisy block energy to I/Q.
+    with tempfile.TemporaryDirectory(prefix="triad-subhz-exports-") as scratch:
+        root = pathlib.Path(scratch)
+        options = ("--rate", ".0036", "--added", "1", "--sample-rate", "1",
+                   "--sample-rate-denominator", "64", "--block-seconds", "4096",
+                   "--cn0", "-60", "--basis", "two-ray", "--tap-delay-ms", ".005",
+                   "--tap-doppler-hz", ".001", "--spread-preset", "sub9-best")
+        raw = export(root/"raw", *options)
+        sampled = export_sampled(root/"sampled", *options)
+        stats = export_stats(root/"stats", *options, "--stats-noisy")
+        for manifest in (raw, sampled, stats):
+            if (manifest["sample_rate"], manifest["sample_rate_numerator"], manifest["sample_rate_denominator"]) != (1/64, 1, 64):
+                raise AssertionError("export lost reciprocal sample-rate provenance")
+            noise = manifest.get("noise_variance", manifest.get("noise_variance_pre_frontend"))
+            if not math.isclose(noise, (1/64)*1e6, rel_tol=1e-12):
+                raise AssertionError("reciprocal sample noise no longer represents declared total C/N0")
+        if raw["signal_shape"][0] != sampled["sample_count"] or sampled["sample_count"] != stats["sample_count"]:
+            raise AssertionError("export calendars disagree at reciprocal Fs")
+        if sampled["block_samples"] != 64 or stats["block_samples"] != 64:
+            raise AssertionError("physical block duration was treated as a numerator-rate duration")
+        iq = complex128_values(root/"sampled"/"observation.c128")
+        energies = [v[0] for v in struct.iter_unpack("<d", (root/"stats"/"received_energy.f64").read_bytes())]
+        expected = [sum(abs(z)**2 for z in iq[start:start+64]) for start in range(0, len(iq), 64)]
+        if len(energies) != len(expected) or any(not math.isclose(a, b, rel_tol=2e-12, abs_tol=1e-8)
+                                                for a, b in zip(energies, expected)):
+            raise AssertionError("reciprocal actual block energies differ from sampled waveform")
+        rejected = invoke("--mode", "export-stats", *COMMON, "--rate", ".000036", "--added", "1",
+                          "--sample-rate", "1", "--sample-rate-denominator", "64", "--seconds", "86400000",
+                          "--export-max-samples", "1", "--output", str(root/"years"), ok=False)
+        if "exceeds --export-max-samples" not in rejected.stderr or (root/"years").exists():
+            raise AssertionError(f"year reciprocal capture missed bounded preflight: {rejected.stderr}")
+
     # A two-day coherent block is a planner input only; this short source case
     # proves it does not allocate a two-day waveform. Burst waits create a
     # source tile quantum that is distinct from a simple 400-ms dwell grid.

@@ -270,7 +270,7 @@ void validate_effects(const SimulationConfig& c, const Format& f) {
         c.perturbation_fast_depth, c.dropout_ms, c.dropout_start_ms,
         c.retune_offset_seconds, c.dwell_seconds};
     for (double x : finite_values) require(std::isfinite(x), "non-finite streaming channel configuration");
-    require(c.sample_rate == f.sample_rate && c.sample_rate > 0 &&
+    require(c.sample_rate == effective_sample_rate(f) && c.sample_rate > 0 &&
         c.occupied_bandwidth_hz > 0 && c.occupied_bandwidth_hz < c.sample_rate &&
         c.rf_hz > 0 && c.nominal_conversion_if_hz >= 0 &&
         c.dwell_seconds > 0, "streaming channel rate or bandwidth is invalid");
@@ -304,7 +304,7 @@ StreamChannelConfig checked_config(const StreamChannelConfig& cfg, const Format&
     validate_spectrum(cfg.rx_spectrum);
     validate_frontend(cfg.frontend, cfg.effects.sample_rate*(1+cfg.effects.rx.audio_ppm*1e-6));
     validate_path_evolution(cfg.path_evolution);
-    if (format.sample_rate < 64) {
+    if (effective_sample_rate(format) < 64) {
         const auto fast_spectrum = [](const OscillatorSpectrum& s) {
             return s.white_fm_hz_sqrt_seconds != 0 || s.random_walk_fm_hz_per_sqrt_second != 0 ||
                 s.flicker_fm_rms_hz != 0 || s.white_pm_rms_radians != 0;

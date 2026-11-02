@@ -46,6 +46,7 @@ struct Options {
     double start_low = 0, start_high = 0, start_step = 1;
     double frequency_low = 0, frequency_high = 0, frequency_step = .1;
     double sample_rate = 0;
+    std::uint32_t sample_rate_denominator = 1;
     double timing_loss_db = .5;
     double phase_diffusion = .5*std::numbers::pi/180, white_fm = 0, random_walk_fm = 0;
     double flicker_fm = 0, flicker_min_tau = .1, flicker_max_tau = 86400;
@@ -202,9 +203,10 @@ Options parse(int argc, char** argv) {
         const std::string_view key(argv[i]);
         if (key == "--help" || key == "-h") {
             std::cout << R"HELP(triad_long --mode configure|plan|run|export|export-sampled|export-stats [options]
-  --seconds S                 Requested active one-bit span (8..3283200 s, 38 days); rounded to complete private tiles.
+  --seconds S                 Requested active one-bit span (8..315576000 s, ten Julian years); rounded to complete private tiles.
   --rate HZ --added N --sample-rate HZ --rf-hz HZ
-                              Integer sample rates1..63 require FHSS/dropout/frontend/FM/white-PM off.
+  --sample-rate-denominator N Reciprocal-integer sampling: N>1 requires --sample-rate 1; Fs=1/N Hz.
+                              Rates below64 Hz require FHSS/dropout/frontend/FM/white-PM off.
                               Constant offsets, Wiener phase, two-ray spread and perturbation remain modeled.
   --base-oscillator ID --shift-oscillator ID   Existing tuning presets; unspecified partner=gpsdo-xo.
   --clock-sync GPS_10ms-1ms_region-0ms_offset | default
@@ -306,6 +308,7 @@ Examples:
         else if (key == "--frequency") { o.frequency_low=number(need(), "frequency minimum"); o.frequency_high=number(need(), "frequency maximum"); o.frequency_step=number(need(), "frequency step"); }
         else if (key == "--timing-loss-db") o.timing_loss_db=number(need(),"timing recommendation loss");
         else if (key == "--sample-rate") o.sample_rate = number(need(), "sample rate");
+        else if (key == "--sample-rate-denominator") o.sample_rate_denominator=bounded_integer<std::uint32_t>(need(),"sample rate denominator");
         else if (key == "--phase-diffusion") {o.phase_diffusion=number(need(),"Wiener phase diffusion");o.phase_diffusion_explicit=true;}
         else if (key == "--white-fm") o.white_fm=number(need(),"white FM");
         else if (key == "--random-walk-fm") o.random_walk_fm=number(need(),"random walk FM");
@@ -377,13 +380,15 @@ Examples:
     if (o.basis=="per-carrier")
         throw std::invalid_argument("per-carrier tap fits are not implemented; use the coupled shared-tap basis");
     if (o.control != "signal" && o.control != "null" && o.control != "wrong-key") throw std::invalid_argument("control must be signal, null, or wrong-key");
-    if (!(o.seconds >= 8 && o.seconds <= 38*86400.) ||
+    if (!(o.seconds >= 8 && o.seconds <= 315576000.) ||
         !(o.rate > 0 && o.rate <= 30000000) || !(o.rf_hz > 0 && o.rf_hz <= 10e9) ||
         !(o.sample_rate == 0 || (o.sample_rate >= 1 && o.sample_rate <= 10000000)) ||
         o.trials == 0 || o.trials > 100000 || o.threads == 0 || o.threads > 256 ||
         o.chunk == 0 || o.chunk > 1000000 || o.block == 0 || o.burst_wait_tiles>1000 ||
         o.signal_bit > 1 || o.added == 0 || o.added > 1000 || o.minimum_dwells < 20 || o.duration_alternatives==0)
         throw std::invalid_argument("invalid duration, trial count, resource setting, bit or pattern geometry");
+    if(!o.sample_rate_denominator || (o.sample_rate_denominator>1 && o.sample_rate!=1))
+        throw std::invalid_argument("sample rate denominator must be positive; denominator >1 requires explicit --sample-rate 1");
     if (!(o.correct > 0 && o.correct < 1 && o.false_probability > 0 && o.false_probability < 1 && o.horizon > 0 && o.attempt_spacing > 0))
         throw std::invalid_argument("probabilities must be in (0,1) and time inputs positive");
     if (!(o.start_step > 0 && o.frequency_step > 0 && o.start_low <= o.start_high && o.frequency_low <= o.frequency_high))
@@ -442,7 +447,7 @@ Examples:
     // These point-sampled low-rate models preserve their physical-second
     // parameters. Fast events and sample-rate-sensitive oscillator spectra
     // need a separately validated high-rate integration/decimation path.
-    if(o.sample_rate>0 && o.sample_rate<64 &&
+    if(o.sample_rate>0 && o.sample_rate/o.sample_rate_denominator<64 &&
        (o.fhss || o.dropout_ms>0 || o.frontend.active() || o.white_fm>0 ||
         o.random_walk_fm>0 || o.flicker_fm>0 || o.white_pm>0))
         throw std::invalid_argument("sub-64-Hz simulation requires FHSS, dropout, sampled frontend, white/flicker/random-walk FM and white-PM off; use at least 64 samples/s for those effects");
@@ -487,7 +492,15 @@ std::uint64_t ceil_utc_30(std::uint64_t epoch) {
     if(epoch>UINT64_MAX-add)throw std::invalid_argument("whole-bit burst UTC grid overflows");
     return epoch+add;
 }
-UtcSample add_utc_samples(UtcSample at,std::uint64_t samples,std::uint32_t rate) {
+UtcSample add_utc_samples(UtcSample at,std::uint64_t samples,const Format& format) {
+    if(format.sample_rate_denominator>1){
+        // The supported sub-Hz form has an integer number of physical seconds
+        // per sample, so no rounded floating timestamp enters the UTC epoch.
+        if(format.sample_rate!=1 || at.phase || samples>(UINT64_MAX-at.epoch)/format.sample_rate_denominator)
+            throw std::invalid_argument("whole-bit burst UTC support overflows");
+        return {at.epoch+samples*format.sample_rate_denominator,0};
+    }
+    const auto rate=format.sample_rate;
     const auto fraction=at.phase+samples%rate;
     const auto whole=samples/rate+fraction/rate;
     if(at.epoch>UINT64_MAX-whole)throw std::invalid_argument("whole-bit burst UTC support overflows");
@@ -497,13 +510,14 @@ struct WholeBitCalendar {UtcSample support_begin,payload_begin,payload_end,suppo
 WholeBitCalendar whole_bit_calendar(const Options& o,const Format& f,const Geometry& g) {
     WholeBitCalendar c;c.support_begin={o.symbol_burst_wait?ceil_utc_30(o.epoch):o.epoch,0};
     c.useful_samples=g.source_samples-2*g.calendar_origin_sample;
-    c.payload_begin=add_utc_samples(c.support_begin,g.calendar_origin_sample,f.sample_rate);
-    c.payload_end=add_utc_samples(c.payload_begin,c.useful_samples,f.sample_rate);
-    c.support_end=add_utc_samples(c.support_begin,g.source_samples,f.sample_rate);
+    c.payload_begin=add_utc_samples(c.support_begin,g.calendar_origin_sample,f);
+    c.payload_end=add_utc_samples(c.payload_begin,c.useful_samples,f);
+    c.support_end=add_utc_samples(c.support_begin,g.source_samples,f);
     if(o.symbol_burst_wait){
         if(c.useful_samples>UINT64_MAX/o.symbol_burst_wait)throw std::invalid_argument("whole-bit burst wait overflows");
-        auto next=add_utc_samples(c.support_end,c.useful_samples*o.symbol_burst_wait,f.sample_rate);
-        const auto minimum=add_utc_samples(c.support_begin,60ULL*f.sample_rate,f.sample_rate);
+        auto next=add_utc_samples(c.support_end,c.useful_samples*o.symbol_burst_wait,f);
+        if(c.support_begin.epoch>UINT64_MAX-60)throw std::invalid_argument("whole-bit burst UTC support overflows");
+        const UtcSample minimum{c.support_begin.epoch+60,c.support_begin.phase};
         if(next.epoch<minimum.epoch||(next.epoch==minimum.epoch&&next.phase<minimum.phase))next=minimum;
         if(next.phase){if(next.epoch==UINT64_MAX)throw std::invalid_argument("whole-bit burst next support overflows");++next.epoch;}
         c.next_support={ceil_utc_30(next.epoch),0};
@@ -517,6 +531,7 @@ Format format_for(const Options& o) {
     const auto fs=o.sample_rate ? o.sample_rate : std::max(960.,std::ceil(4.2*(f.inner_rate_hz/6*o.added)));
     if(!std::isfinite(fs)||fs!=std::floor(fs)||fs>std::numeric_limits<std::uint32_t>::max())throw std::invalid_argument("sample rate must be an integer in uint32 range");
     f.sample_rate=static_cast<std::uint32_t>(fs);
+    f.sample_rate_denominator=o.sample_rate_denominator;
     f.bit_seconds=o.seconds; f.minimum_inner_coefficients=64;
     f.fhss=o.fhss; f.dwell_seconds=.4; f.quiet_seconds=o.fhss?.055:0;
     f.ramp_seconds=o.fhss?(2./3600.):.02; f.margin_seconds=.005;
@@ -537,7 +552,7 @@ double configuration_capture_margin(const Options& o,const Format& f,const Geome
     const double spread=r.spread_doppler_hz*((r.slow_depth>0||r.fast_depth>0)?2:1);
     const double drift=std::abs(o.truth_frequency_drift)*(g.bit_seconds+2*r.arrival_half+2);
     const double diurnal=std::abs(o.path_evolution.diurnal_phase_amplitude_radians)/o.path_evolution.diurnal_period_seconds;
-    return f.sample_rate*rx_min-g.occupied_bandwidth_hz*tx_max-2*(oscillator+spread+drift+diurnal);
+    return effective_sample_rate(f)*rx_min-g.occupied_bandwidth_hz*tx_max-2*(oscillator+spread+drift+diurnal);
 }
 
 void json_string(std::ostream& out,std::string_view value) {
@@ -608,12 +623,24 @@ void json_configuration(std::ostream& out,const Options& o,const Format& f,const
         if(std::find(o.epoch_offsets.begin(),o.epoch_offsets.end(),i)==o.epoch_offsets.end())epoch_covered=false;
     double calendar_half=0,calendar_center=0;
     if(r.clock){
-        const auto map=clock_sync::calendar_arrival_map(*r.clock,static_cast<long double>(f.epoch),
-            static_cast<long double>(f.epoch),0,f.sample_rate,1./f.sample_rate,
-            clock_bound*1e-6,clock_sync::audio_lag_radius(o.audio_error_seconds),g.source_samples,o.audio_error_seconds);
+        // The shared helper accepts integer rates. Express its entire timing
+        // problem in virtual seconds t'=t/D for reciprocal Fs=1/D. Its result
+        // is already in actual sample coordinates; no result rescaling applies.
+        // Keeping this identity branch unchanged preserves legacy coordinates.
+        auto policy=*r.clock;
+        const auto divisor=static_cast<long double>(f.sample_rate_denominator);
+        if(f.sample_rate_denominator>1){
+            policy.accuracy_seconds/=f.sample_rate_denominator;
+            policy.region_seconds/=f.sample_rate_denominator;
+            policy.offset_seconds/=f.sample_rate_denominator;
+        }
+        const auto map=clock_sync::calendar_arrival_map(policy,static_cast<long double>(f.epoch)/divisor,
+            static_cast<long double>(f.epoch)/divisor,0,f.sample_rate,1./f.sample_rate,
+            clock_bound*1e-6,clock_sync::audio_lag_radius(o.audio_error_seconds)/f.sample_rate_denominator,
+            g.source_samples,o.audio_error_seconds/f.sample_rate_denominator);
         if(!map)throw std::invalid_argument("resolved clock calendar cannot represent the observation");
-        calendar_half=static_cast<double>(map->half_width_samples/f.sample_rate);
-        calendar_center=static_cast<double>(map->origin_samples/f.sample_rate);
+        calendar_half=static_cast<double>(map->half_width_samples/effective_sample_rate(f));
+        calendar_center=static_cast<double>(map->origin_samples/effective_sample_rate(f));
     }
     const auto [clock_min,clock_max]=std::minmax_element(o.clocks_ppm.begin(),o.clocks_ppm.end());
     const auto count=[](long double span,long double step){return std::ceil(span/step)+1;};
@@ -678,20 +705,22 @@ void json_configuration(std::ostream& out,const Options& o,const Format& f,const
        <<",\"timing_model_limits\":\"finite keyed patterns, truncated pulse, sampled interpolation, channel uncertainty, outages and clock/timing joint mismatch require independent validation\""
        <<",\"clock_step_model\":\"endpoint displacement over the complete bit equals timing_maximum_step_seconds; same approximate timing loss budget\""
        <<",\"whole_bit_frequency_maximum_step_hz\":"<<frequency_step
-       <<",\"block_frequency_maximum_step_hz\":"<<f.sample_rate/(4.*block_samples(o,f))
+       <<",\"block_frequency_maximum_step_hz\":"<<effective_sample_rate(f)/(4.*block_samples(o,f))
        <<",\"clock_maximum_step_ppm\":"<<rate_step<<",\"timing_positions\":"<<count(2*calendar_half,timing_step)
        <<",\"whole_bit_frequency_positions\":"<<count(2*frequency_bound,frequency_step)<<",\"clock_positions\":"<<count(2*clock_bound,rate_step)
        <<",\"scope\":\"finite-grid estimates only; no implicit bank generation, pruning, phase-path count or reception guarantee\"}"
-       <<",\"capture\":{\"sample_rate_hz\":"<<f.sample_rate<<",\"fine_rate_per_carrier_hz\":"<<g.fine_chip_rate_hz
+       <<",\"capture\":{\"sample_rate_hz\":"<<effective_sample_rate(f)
+       <<",\"sample_rate_numerator\":"<<f.sample_rate<<",\"sample_rate_denominator\":"<<f.sample_rate_denominator
+       <<",\"fine_rate_per_carrier_hz\":"<<g.fine_chip_rate_hz
        <<",\"nominal_triplet_bandwidth_hz\":"<<g.occupied_bandwidth_hz<<",\"deterministic_nyquist_margin_hz\":"<<configuration_capture_margin(o,f,g)
        <<",\"feasible_for_deterministic_prior\":"<<(configuration_capture_margin(o,f,g)>0?"true":"false")
        <<",\"scope\":\"whole deterministic RF/audio-error bound, public CFO grid and maximum diurnal instantaneous frequency; stochastic oscillator and OU-path spectral tails are not a bounded capture guarantee\""
-       <<",\"sub_64_hz_model\":"<<(f.sample_rate<64?"true":"false")
+       <<",\"sub_64_hz_model\":"<<(effective_sample_rate(f)<64?"true":"false")
        <<",\"sampling_model_limits\":\"below 64 samples/s: FHSS, dropout, active sampled frontend, slow AGC, white/flicker/random-walk FM and white PM are rejected; constant offsets, Wiener phase, fractional two-ray propagation and selected selective perturbations remain modeled in physical seconds; no high-rate integration/decimation equivalence is claimed\"}"
-       <<",\"duration\":{\"maximum_requested_active_seconds\":3283200,\"requested_active_seconds\":"<<f.bit_seconds
+       <<",\"duration\":{\"maximum_requested_active_seconds\":315576000,\"requested_active_seconds\":"<<f.bit_seconds
        <<",\"rounded_active_seconds\":"<<g.tile_count*g.tile_seconds<<",\"elapsed_source_calendar_seconds\":"<<g.bit_seconds
-       <<",\"source_support_seconds\":"<<static_cast<long double>(g.source_samples)/f.sample_rate
-       <<",\"scope\":\"38-day requested-active limit; complete private tiles, internal burst waits, pulse padding and channel/capture tails may extend actual elapsed duration\"}"
+       <<",\"source_support_seconds\":"<<static_cast<long double>(g.source_samples)/effective_sample_rate(f)
+       <<",\"scope\":\"ten-Julian-year requested-active limit; complete private tiles, internal burst waits, pulse padding and channel/capture tails may extend actual elapsed duration\"}"
        <<",\"whole_bit_symbol_burst\":{\"enabled\":"<<(o.symbol_burst_wait?"true":"false")<<",\"wait_useful_symbols\":"<<o.symbol_burst_wait
        <<",\"changes_inside_one_bit\":false,\"internal_wait_tiles\":"<<o.burst_wait_tiles
        <<",\"requested_earliest_support_epoch\":"<<o.epoch<<",\"useful_samples\":"<<calendar.useful_samples
@@ -713,7 +742,8 @@ void json_provenance(std::ostream& out,const Options& o,const Format& f,const Ge
     const auto noise_seed=o.noise_seed.value_or(o.channel_seed.value_or(o.seed))+trial;
     const auto frontend_seed=o.frontend_seed.value_or(o.channel_seed.value_or(o.seed))+trial;
     const auto path_seed=o.path_seed.value_or(o.channel_seed.value_or(o.seed))+trial;
-    out<<",\"duration_alternatives\":"<<o.duration_alternatives
+    out<<",\"sample_rate_numerator\":"<<f.sample_rate<<",\"sample_rate_denominator\":"<<f.sample_rate_denominator
+       <<",\"duration_alternatives\":"<<o.duration_alternatives
        <<",\"false_admission_probability_per_horizon\":"<<o.false_probability
        <<",\"monitoring_horizon_seconds\":"<<o.horizon<<",\"attempt_spacing_seconds\":"<<o.attempt_spacing
        <<",\"random_seed_roots\":{\"channel\":"<<channel_seed<<",\"oscillator\":"<<oscillator_seed
@@ -747,7 +777,7 @@ void json_provenance(std::ostream& out,const Options& o,const Format& f,const Ge
     json_string(out,resolve_configuration(o).oscillators?"independent TX/RX endpoint errors; truth_clock_ppm reports their exact ratio":"RX0ppm; TX carries declared relative error");
     out<<",\"physical_rf_retuning\":false,\"path_evolution\":";json_path_evolution(out,o);out<<'}'
        <<",\"source_hash_note\":\"source and binary hashes must be bound externally to this uncommitted study build\"";
-    if(configured_physics(o)||path_evolution_active(o)||o.truth_epoch_offset||o.nominal_if_hz!=1500||f.sample_rate<64||o.seconds>7*86400.){out<<",\"resolved_configuration\":";json_configuration(out,o,f,g);}
+    if(configured_physics(o)||path_evolution_active(o)||o.truth_epoch_offset||o.nominal_if_hz!=1500||effective_sample_rate(f)<64||o.seconds>7*86400.){out<<",\"resolved_configuration\":";json_configuration(out,o,f,g);}
     const auto& front=o.frontend;
     auto converter=[&](const ConverterConfig& c){
         out<<"{\"nominal_bits\":"<<c.nominal_bits<<",\"effective_bits\":"<<(c.effective_bits>0?c.effective_bits:c.nominal_bits)
@@ -808,7 +838,7 @@ statistics::PlannerInput planner_input(const Options& o, std::uint64_t candidate
     p.search.wrong_message_competitors=std::max<std::uint64_t>(1,candidates/2);
     p.dwell_seconds=.4; p.minimum_dwells=o.minimum_dwells;
     p.inner_rate_hz=o.rate; p.added_symbols=o.added; p.minimum_inner_coefficients=64;
-    p.coherence_block_seconds=static_cast<double>(block)/f.sample_rate;
+    p.coherence_block_seconds=static_cast<double>(block)/effective_sample_rate(f);
     p.rank_per_block=o.basis=="two-ray"?2:1;
     // Use the complete source-tile calendar, including silent burst waits.
     // The steady-state fraction is a lower bound even though the final wait
@@ -820,7 +850,7 @@ statistics::PlannerInput planner_input(const Options& o, std::uint64_t candidate
     p.minimum_dwells=std::max(p.minimum_dwells,static_cast<std::uint64_t>(std::ceil(g.tile_seconds/.4)));
     p.maximum_outage_fraction=o.outage; p.retained_energy_fraction=o.retained_energy;
     p.wrong_projection_fraction=o.wrong_projection;
-    p.baseband_samples_per_second=f.sample_rate;
+    p.baseband_samples_per_second=effective_sample_rate(f);
     const auto workers=std::min<std::uint64_t>(o.threads,candidates);
     p.candidate_batch_size=workers;p.sample_tile_size=std::min(o.chunk,block);
     p.bytes_per_complex_sample=sizeof(Complex); // Generic planner charges three streams: conservative for <=2 taps.
@@ -918,7 +948,7 @@ std::vector<Candidate> candidates_for(const Options& o, const Format& f, const C
 
 std::size_t block_samples(const Options& o,const Format& f) {
     if(o.block_seconds<0)return o.block;
-    auto scaled=static_cast<long double>(o.block_seconds)*f.sample_rate;
+    auto scaled=static_cast<long double>(o.block_seconds)*effective_sample_rate(f);
     const auto nearest=std::round(scaled);
     if(std::abs(scaled-nearest)<=4*std::numeric_limits<double>::epsilon()*std::max(1.L,std::abs(scaled)))scaled=nearest;
     const long double samples=std::ceil(scaled);
@@ -929,7 +959,7 @@ std::size_t block_samples(const Options& o,const Format& f) {
 StreamChannelConfig channel_config(const Options& o,const Format& base,const Geometry& nominal,
                                    std::uint64_t seed,double noise,double pad,double trail) {
     StreamChannelConfig channel_cfg; channel_cfg.frontend=o.frontend; channel_cfg.path_evolution=o.path_evolution;
-    channel_cfg.effects.sample_rate=base.sample_rate;
+    channel_cfg.effects.sample_rate=effective_sample_rate(base);
     channel_cfg.effects.occupied_bandwidth_hz=nominal.occupied_bandwidth_hz;
     channel_cfg.effects.rf_hz=o.rf_hz; channel_cfg.effects.nominal_conversion_if_hz=o.nominal_if_hz;
     channel_cfg.effects.seed=seed; channel_cfg.effects.signal_enabled=o.control!="null";
@@ -1044,7 +1074,7 @@ ObservationCalendar observation_calendar(const Options& o,const Format& f,const 
     const auto lower_clock=resolved.active?std::min(*lo,-resolved.clock_bound_ppm):*lo;
     const auto upper_clock=resolved.active?std::max(*hi,resolved.clock_bound_ppm):*hi;
     const long double slow=1+lower_clock*1e-6,fast=1+upper_clock*1e-6;
-    const long double source_seconds=static_cast<long double>(g.source_samples)/f.sample_rate;
+    const long double source_seconds=static_cast<long double>(g.source_samples)/effective_sample_rate(f);
     const auto delay=std::max(resolved.spread_delay_ms*.001,o.basis=="two-ray"?o.tap_delay_ms*.001:0.);
     const auto start_low=resolved.active?std::min(o.start_low,resolved.arrival_center-resolved.arrival_half):o.start_low;
     const auto start_high=resolved.active?std::max(o.start_high,resolved.arrival_center+resolved.arrival_half):o.start_high;
@@ -1057,15 +1087,15 @@ ObservationCalendar observation_calendar(const Options& o,const Format& f,const 
         c.pad+std::max(0.,o.start_high)+source_seconds/slow+delay+2+frontend_tail;
     // The requested active span is capped separately. Complete private tiles,
     // source pulse support and channel/capture tails can extend that span.
-    if(!std::isfinite(end)||end*f.sample_rate>UINT64_MAX)throw std::invalid_argument("public capture exceeds the coordinate study guard");
-    c.samples=static_cast<std::uint64_t>(std::ceil(end*f.sample_rate));return c;
+    if(!std::isfinite(end)||end*effective_sample_rate(f)>UINT64_MAX)throw std::invalid_argument("public capture exceeds the coordinate study guard");
+    c.samples=static_cast<std::uint64_t>(std::ceil(end*effective_sample_rate(f)));return c;
 }
 
 void run(const Options& o) {
     const auto base=format_for(o); const auto nominal=geometry(base);
     const auto calendar=observation_calendar(o,base,nominal);
     const auto pad=calendar.pad,trail=calendar.trail;
-    const auto noise=static_cast<double>(base.sample_rate)/std::pow(10.,o.cn0/10.);
+    const auto noise=static_cast<double>(effective_sample_rate(base))/std::pow(10.,o.cn0/10.);
     if (!std::isfinite(noise) || noise<=0) throw std::invalid_argument("C/N0 is outside numeric range");
     std::size_t total_correct=0,total_wrong=0,total_missed=0,total_false=0;
     for (unsigned trial=0;trial<o.trials;++trial) {
@@ -1102,8 +1132,8 @@ void run(const Options& o) {
             const auto now=Clock::now();
             if(now-last_progress>=std::chrono::seconds(2)) {
                 std::cerr<<"trial="<<trial<<" source_seconds="<<std::fixed<<std::setprecision(1)
-                         <<static_cast<double>(channel.position())/base.sample_rate<<"/"
-                         <<static_cast<double>(calendar.samples)/base.sample_rate<<" working_bytes="
+                         <<static_cast<double>(channel.position())/effective_sample_rate(base)<<"/"
+                         <<static_cast<double>(calendar.samples)/effective_sample_rate(base)<<" working_bytes="
                          <<(source.working_bytes()+channel.report().working_bytes+receiver.working_bytes())<<"\n";
                 last_progress=now;
             }
@@ -1121,7 +1151,7 @@ void run(const Options& o) {
         std::cout<<std::setprecision(12)<<"{\"mode\":\"run\",\"version\":3,\"trial\":"<<trial
             <<",\"seed\":"<<seed<<",\"key_seed\":"<<key_seed<<",\"channel_seed\":"<<channel_seed<<",\"epoch\":"<<base.epoch<<",\"control\":\""<<o.control
             <<"\",\"channel\":\""<<channel_name(o)<<"\",\"cn0_db_hz\":"<<o.cn0
-            <<",\"complex_noise_variance\":"<<noise<<",\"noise_reference_power\":1,\"sample_rate\":"<<base.sample_rate
+            <<",\"complex_noise_variance\":"<<noise<<",\"noise_reference_power\":1,\"sample_rate\":"<<effective_sample_rate(base)
             <<",\"occupied_bandwidth_hz\":"<<nominal.occupied_bandwidth_hz
             <<",\"requested_active_seconds\":"<<base.bit_seconds<<",\"bit_seconds\":"<<nominal.bit_seconds<<",\"inner_rate_hz\":"<<base.inner_rate_hz
             <<",\"added_symbols\":"<<base.added_symbols<<",\"fine_rate_hz\":"<<nominal.fine_chip_rate_hz
@@ -1187,7 +1217,7 @@ void export_basis(const Options& o) {
     auto candidates=candidates_for(o,f,rxkey);
     const auto calendar=observation_calendar(o,f,g);
     const auto pad=calendar.pad,trail=calendar.trail;
-    const auto noise=static_cast<double>(f.sample_rate)/std::pow(10.,o.cn0/10.);
+    const auto noise=static_cast<double>(effective_sample_rate(f))/std::pow(10.,o.cn0/10.);
     if(!std::isfinite(noise)||noise<=0)throw std::invalid_argument("C/N0 is outside numeric range");
     auto config=channel_config(o,f,g,channel_seed,noise,pad,trail);config.effects.noise_enabled=false;
     PatternSource truth(transmitter_format(o,f),txkey,o.signal_bit);StreamingChannel channel(truth,config);
@@ -1227,7 +1257,7 @@ void export_basis(const Options& o) {
         const auto actual_columns=c.channel.taps.size()*(c.channel.linear_gain?2:1);
         std::vector<Complex> values(o.chunk*actual_columns);
         for(std::uint64_t at=0;at<rows;){const auto n=static_cast<std::size_t>(std::min<std::uint64_t>(o.chunk,rows-at));
-            shaped_basis(candidate,c,f.sample_rate,at,n,std::span(values).first(n*actual_columns));
+            shaped_basis(candidate,c,effective_sample_rate(f),at,n,std::span(values).first(n*actual_columns));
             for(std::size_t j=0;j<n;++j)for(std::size_t k=0;k<columns;++k)
                 packed[j*columns+k]=k<actual_columns?pack(values[k*n+j]):std::complex<float>{};
             basis.write(reinterpret_cast<const char*>(packed.data()),static_cast<std::streamsize>(n*columns*sizeof(packed[0])));at+=n;
@@ -1237,7 +1267,7 @@ void export_basis(const Options& o) {
     basis.close();signal.close();if(!basis||!signal)throw std::runtime_error("failed writing GPU study files");
     std::ofstream manifest(directory/"manifest.json.partial");
     manifest<<std::setprecision(17)<<"{\"format\":\"triad-long-basis-v1\",\"byte_order\":\"native\",\"complex_type\":\"complex64\",\"layout\":\"candidate,sample,column\",\"basis_file\":\"basis.c64\",\"basis_shape\":["<<candidates.size()<<','<<rows<<','<<columns
-        <<"],\"signal_file\":\"signal.c64\",\"signal_shape\":["<<rows<<"],\"sample_rate\":"<<f.sample_rate
+        <<"],\"signal_file\":\"signal.c64\",\"signal_shape\":["<<rows<<"],\"sample_rate\":"<<effective_sample_rate(f)
         <<",\"inner_rate_hz\":"<<f.inner_rate_hz<<",\"fine_rate_hz\":"<<g.fine_chip_rate_hz
         <<",\"carrier_spacing_hz\":"<<g.carrier_spacing_hz<<",\"occupied_bandwidth_hz\":"<<g.occupied_bandwidth_hz
         <<",\"added_symbols\":"<<f.added_symbols<<",\"encrypted\":"<<(f.encrypt?"true":"false")
@@ -1315,7 +1345,7 @@ void export_sampled(const Options& o) {
     const auto rxkey=o.control=="wrong-key"?key_for(key_seed^0x6a09e667f3bcc909ULL,0):key_for(key_seed,0);
     auto candidates=candidates_for(o,f,rxkey);
     const auto calendar=observation_calendar(o,f,g);const auto pad=calendar.pad,trail=calendar.trail;
-    const auto noise=static_cast<double>(f.sample_rate)/std::pow(10.,o.cn0/10.);
+    const auto noise=static_cast<double>(effective_sample_rate(f))/std::pow(10.,o.cn0/10.);
     if(!std::isfinite(noise)||noise<=0)throw std::invalid_argument("C/N0 is outside numeric range");
     auto config=channel_config(o,f,g,channel_seed,noise,pad,trail);
     config.effects.noise_enabled=true;
@@ -1370,7 +1400,7 @@ void export_sampled(const Options& o) {
         std::vector<Complex> values(o.chunk*actual_columns);
         for(std::uint64_t at=0;at<rows;){
             const auto n=static_cast<std::size_t>(std::min<std::uint64_t>(o.chunk,rows-at));
-            shaped_basis(candidate,c,f.sample_rate,at,n,std::span(values).first(n*actual_columns));
+            shaped_basis(candidate,c,effective_sample_rate(f),at,n,std::span(values).first(n*actual_columns));
             for(std::size_t r=0;r<n;++r){
                 for(std::size_t k=0;k<actual_columns;++k)row_values[k]=values[k*n+r];
                 write_row(std::span(row_values).first(actual_columns));
@@ -1387,7 +1417,7 @@ void export_sampled(const Options& o) {
     std::ofstream manifest(directory/"manifest.json.partial");
     manifest<<std::setprecision(17)<<"{\"format\":\"triad-sampled-waveforms-v1\",\"byte_order\":\"little\",\"complex_type\":\"complex128\",\"integer_type\":\"uint8\",\"layout\":\"candidate,sample,column\",\"basis_file\":\"basis.c128\",\"basis_shape\":["<<candidates.size()<<','<<rows<<','<<columns
         <<"],\"observation_file\":\"observation.c128\",\"observation_shape\":["<<rows<<"],\"validity_file\":\"validity.u8\",\"validity_shape\":["<<rows<<']'
-        <<",\"sample_rate\":"<<f.sample_rate<<",\"sample_count\":"<<rows<<",\"template_sample_count\":"<<rows<<",\"observation_sample_count\":"<<rows<<",\"block_samples\":"<<block_samples(o,f)<<",\"chunk_samples\":"<<o.chunk
+        <<",\"sample_rate\":"<<effective_sample_rate(f)<<",\"sample_count\":"<<rows<<",\"template_sample_count\":"<<rows<<",\"observation_sample_count\":"<<rows<<",\"block_samples\":"<<block_samples(o,f)<<",\"chunk_samples\":"<<o.chunk
         <<",\"noise_variance_pre_frontend\":"<<noise<<",\"cn0_db_hz\":"<<o.cn0<<",\"noise_reference_power\":1"
         <<",\"signal_bit_simulation_truth\":"<<static_cast<unsigned>(o.signal_bit)<<",\"signal_enabled\":"<<(o.control!="null"?"true":"false")
         <<",\"seed\":"<<o.seed<<",\"key_seed\":"<<key_seed<<",\"channel_seed\":"<<channel_seed<<",\"epoch\":"<<f.epoch
@@ -1419,7 +1449,7 @@ void export_stats(const Options& o) {
     const auto rxkey=o.control=="wrong-key"?key_for(key_seed^0x6a09e667f3bcc909ULL,0):key_for(key_seed,0);
     auto candidates=candidates_for(o,f,rxkey);
     const auto calendar=observation_calendar(o,f,g);const auto pad=calendar.pad,trail=calendar.trail;
-    const auto noise=static_cast<double>(f.sample_rate)/std::pow(10.,o.cn0/10.);
+    const auto noise=static_cast<double>(effective_sample_rate(f))/std::pow(10.,o.cn0/10.);
     if(!std::isfinite(noise)||noise<=0)throw std::invalid_argument("C/N0 is outside numeric range");
     for(auto& c:candidates)c.arrival_seconds+=pad;
     const auto rows=calendar.samples;
@@ -1491,7 +1521,7 @@ void export_stats(const Options& o) {
                 if(o.stats_noisy)mask.write(reinterpret_cast<const char*>(validity.data()),static_cast<std::streamsize>(n));
                 std::fill(basis_values.begin(),basis_values.begin()+n*d,Complex{});
                 for(std::size_t ci=0;ci<candidates.size();++ci){const auto cols=mapping[ci].size();
-                    shaped_basis(*sources[ci],candidates[ci],f.sample_rate,at,n,std::span(local_values).first(n*cols));
+                    shaped_basis(*sources[ci],candidates[ci],effective_sample_rate(f),at,n,std::span(local_values).first(n*cols));
                     for(std::size_t j=0;j<cols;++j){const auto target=mapping[ci][j];
                         for(std::size_t r=0;r<n;++r)basis_values[target*n+r]=local_values[j*n+r];}}
                 for(std::size_t r=0;r<n;++r){const bool valid=validity[r]!=0;
@@ -1525,7 +1555,7 @@ void export_stats(const Options& o) {
                 if(mask.gcount()!=static_cast<std::streamsize>(n)||!std::equal(expected_mask.begin(),expected_mask.begin()+n,validity.begin()))
                     throw std::runtime_error("noisy and noiseless channel erasure masks differ");
                 std::fill(basis_values.begin(),basis_values.begin()+n*d,Complex{});
-                for(std::size_t ci=0;ci<candidates.size();++ci){const auto cols=mapping[ci].size();shaped_basis(*sources[ci],candidates[ci],f.sample_rate,at,n,std::span(local_values).first(n*cols));
+                for(std::size_t ci=0;ci<candidates.size();++ci){const auto cols=mapping[ci].size();shaped_basis(*sources[ci],candidates[ci],effective_sample_rate(f),at,n,std::span(local_values).first(n*cols));
                     for(std::size_t j=0;j<cols;++j)for(std::size_t r=0;r<n;++r)basis_values[mapping[ci][j]*n+r]=local_values[j*n+r];}
                 for(std::size_t r=0;r<n;++r){if(validity[r]){block_received_energy+=std::norm(samples[r]);for(std::size_t j=0;j<d;++j)projection[j]+=std::conj(basis_values[j*n+r])*samples[r];}
                     ++block_count;if(block_count==block||at+r+1==rows){
@@ -1558,7 +1588,7 @@ void export_stats(const Options& o) {
         physical_arrival_bounds.begin(),physical_arrival_bounds.end());
     std::ofstream manifest(directory/"manifest.json.partial");
     manifest<<std::setprecision(17)<<"{\"format\":\"triad-block-stats-v1\",\"byte_order\":\"little\",\"complex_type\":\"complex128\",\"real_type\":\"float64\",\"integer_type\":\"uint64\",\"layout\":\"block,row,column\",\"block_count\":"<<blocks
-       <<",\"dimension\":"<<d<<",\"sample_rate\":"<<f.sample_rate<<",\"noise_variance\":"<<noise
+       <<",\"dimension\":"<<d<<",\"sample_rate\":"<<effective_sample_rate(f)<<",\"noise_variance\":"<<noise
        <<",\"gram_file\":\"gram.c128\",\"gram_shape\":["<<blocks<<','<<d<<','<<d<<"],\"mean_file\":\"mean.c128\",\"mean_shape\":["<<blocks<<','<<d<<']'
        <<",\"intervals_file\":\"intervals.u64\",\"intervals_shape\":["<<blocks<<",2],\"valid_rows_file\":\"valid_rows.u64\",\"valid_rows_shape\":["<<blocks<<']'
        <<",\"signal_energy_file\":\"signal_energy.f64\",\"signal_energy_shape\":["<<blocks<<']'

@@ -49,6 +49,8 @@ def parse_args(argv=None):
     p.add_argument("--tap-powers", type=float, nargs="+", help="proper-complex per-tap variances; default total power one")
     p.add_argument("--coherence", type=float, default=math.inf, help="Gaussian tap OU coherence seconds; inf gives static taps")
     p.add_argument("--frequency-bound", type=float, default=0., help="initial common CFO prior +/- Hz, independent of basis tap Dopplers")
+    p.add_argument("--frequency-initialization", choices=("iid", "stratified", "midpoint-grid"), default="iid",
+                   help="CFO prior bank; midpoint-grid is a deterministic discrete prior requiring zero phase/frequency diffusion and no resampling")
     p.add_argument("--phase-diffusion", type=float, default=0., help="common Wiener phase rad/sqrt(second)")
     p.add_argument("--frequency-random-walk", type=float, default=0., help="common Brownian frequency Hz/sqrt(second)")
     p.add_argument("--particles", type=int, default=128)
@@ -95,7 +97,8 @@ def parse_args(argv=None):
             raise ValueError("tap power count must match --taps")
         a.phase_prior = RBPhasePrior(a.frequency_bound, a.phase_diffusion, a.frequency_random_walk)
         RBPhaseFilter(a.tap_prior, a.phase_prior, particles=a.particles, seed=a.seed,
-                      resampling=a.resampling, ess_fraction=a.ess_fraction, memory_limit_bytes=a.memory_limit_bytes)
+                      resampling=a.resampling, ess_fraction=a.ess_fraction, memory_limit_bytes=a.memory_limit_bytes,
+                      frequency_initialization=a.frequency_initialization)
         a.budget = FalseAdmissionBudget(false_probability=a.false_probability,
             attempts=math.ceil(a.horizon_seconds/a.attempt_spacing), duration_alternatives=a.duration_alternatives,
             model_alternatives=a.selection_methods, candidates=2, calibration_segments=a.calibration_alternatives)
@@ -205,7 +208,7 @@ def infer(workspace, mapping, labels, reference, args, upper, algorithm_seed):
         raise MemoryError("full-bank preparation and RB state exceed declared memory limit")
     states = {method: RBPhaseFilter(args.tap_prior, args.phase_prior, particles=args.particles,
                 seed=algorithm_seed, dtype=dtype, resampling=args.resampling, ess_fraction=args.ess_fraction,
-                memory_limit_bytes=per_filter_bytes) for method in args.methods}
+                memory_limit_bytes=per_filter_bytes, frequency_initialization=args.frequency_initialization) for method in args.methods}
     cpu_preparation = transfer_inference = 0.
     for r, G, energy, valid, dt in actual_blocks(workspace, reference):
         t0 = time.perf_counter()
@@ -300,6 +303,9 @@ def run(args):
     result = {"schema": "triad-rbpf-study-v1", "source_sha256": sha256(__file__),
         "dependency_sha256": {name: sha256(Path(__file__).with_name(name)) for name in ("triad_rbpf.py", "triad_gaussian_state.py", "triad_noise_likelihood.py", "triad_state_workspace.py")},
         "configuration": config, "family": args.budget.diagnostics(), "captures": captures,
+        "frequency_prior_scope": ("deterministic equal-weight midpoint grid; normalized discrete CFO prior, not an unbiased continuous-prior estimate"
+                                  if args.frequency_initialization == "midpoint-grid" else
+                                  "predeclared randomized prior-path bank; see per-method calibration scope for resampling randomness"),
         "summary_by_control": {control: {method: summary(captures, method, control) for method in args.methods}
             for control in ("signal", "null", "wrong-key") if any(c["control"] == control for c in captures)},
         "failed_physical_capture_records": sum(c["status"] != "completed" for c in captures),
@@ -311,6 +317,7 @@ def run(args):
             "K11/D4 is the expanded study family, distinct from earlier K9/D3 operational gates; all additional selected alternatives must be charged.",
             "No-resampling LR is conditional on a predeclared independent prior-path bank; adaptive SMC is calibrated jointly over null noise and independent algorithm randomness, not every fixed adaptive seed.",
             "Known-reference rbpf needs correct noise variance; rbpf-ucb assumes one constant unknown white proper-complex Gaussian variance and uses full-bank independent residuals.",
+            "Midpoint-grid uses a normalized finite CFO mixture with zero oscillator diffusion and no resampling; it does not inherit a continuous-prior unbiasedness claim. Every additionally selected prior/receiver configuration needs predeclared method-family accounting.",
             "Wrong-key controls contain mismatched-key signals; their false admissions are empirical rejection checks, not covered by the Gaussian noise-only false-admission bound.",
             "Only finite exported acquisition alternatives are covered; acquisition priors are uniform normalized mixtures per bit, not maxima.",
             "First center initializes stationary circular tap prior and phase zero; deltas are physical center separations including erasures and the partial last block.",

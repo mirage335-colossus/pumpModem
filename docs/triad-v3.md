@@ -5,7 +5,7 @@ documents the common-scale and independent-residual likelihoods, their explicit
 noise assumptions, and the tighter clock/oscillator configuration study.
 
 V3 is the separate streaming experiment for one-bit transmissions whose active
-span can be hours or days. It does not change the ordinary Robust receiver or
+span can be hours, days or longer. It does not change the ordinary Robust receiver or
 the earlier v1/v2 experimental formats. The implementation is in
 [`triad_modem_v3.hpp`](../include/datapump/triad_modem_v3.hpp),
 [`triad_statistics.hpp`](../include/datapump/triad_statistics.hpp), and their
@@ -108,10 +108,12 @@ guarantee. Multi-day checkpoint/restart and operational recovery remain
 unimplemented. See the [validation record](validation-data/triad-v3/2026-10-31/README.md)
 for conditions, counts, confidence limits and exclusions.
 
-### Low-rate and 38-day representation
+### Reciprocal sample rates and long-duration representation
 
-The CLI accepts a requested active duration through 38 days (`3,283,200 s`),
-and the generic planner's default maximum has the same value. Complete-tile
+The CLI accepts a requested active duration through ten Julian years
+(`315,576,000 s`), and the generic planner's default maximum has the same value.
+This is an implementation ceiling, not a demonstrated communication duration.
+Complete-tile
 rounding, pulse padding, burst waits and channel tails can make the actual
 elapsed capture longer. Reports distinguish these quantities. Source/sample
 addresses and tile crypto addresses use checked 64-bit coordinates; extending
@@ -120,10 +122,29 @@ its epoch/key-addressed pattern. Range support alone does not establish a
 reception probability. The linked sub-9-kHz study records the measured cases;
 checkpoint/restart is not implemented.
 
-Explicit integer sample rates can be as low as 1 sample/s. Geometry still
+`Format.sample_rate` is an unsigned 32-bit numerator and
+`Format.sample_rate_denominator` is an unsigned 32-bit denominator, defaulting
+to one. Supported clocks are integer Hz or reciprocal-integer Hz: a denominator
+greater than one requires numerator one. For example,
+`--sample-rate 1 --sample-rate-denominator 60` selects one sample every
+60 seconds. The effective rate is used throughout source/channel time,
+correlation bases, noise variance, capture extent and exports. Manifests retain
+`sample_rate_numerator`, `sample_rate_denominator` and effective `sample_rate`.
+Reciprocal-clock UTC sample steps use checked integer seconds rather than
+accumulated floating-point offsets. Denominator one preserves existing default
+seed behavior; matching seeds at different rates still does not couple the
+physical stochastic trajectories.
+
+The full positive uint32 denominator range is representable, subject to
+waveform bandwidth, capture and coordinate limits. Geometry still
 requires `Fs >= 4 × fine_rate` and `Fs > 1.1 × nominal_triplet_bandwidth`, plus
-the sampled channel's oscillator/capture checks. The CLI's automatic sample-rate
-choice is unchanged. Useful initial geometries with Added Symbols off are:
+the sampled channel's oscillator/capture checks. The deterministic capture bound
+includes the complete declared oscillator/public-frequency envelope, ray
+Doppler, drift and diurnal excursion; a narrow payload bandwidth alone does not
+make a reciprocal rate valid. An aliased declared capture is rejected. Stochastic
+oscillator and OU spectral tails are not a bounded capture guarantee. The CLI's
+automatic sample-rate choice is unchanged. Useful initial waveform geometries
+with Added Symbols off are:
 
 | GUI-style Rate | Fine rate per carrier | Nominal triplet bandwidth | Explicit sample rate |
 | ---: | ---: | ---: | ---: |
@@ -131,6 +152,13 @@ choice is unchanged. Useful initial geometries with Added Symbols off are:
 | 0.36 Hz | 0.06 Hz | 0.225 Hz | 1 Hz |
 | 0.036 Hz | 0.006 Hz | 0.0225 Hz | 1 Hz |
 | 0.0036 Hz | 0.0006 Hz | 0.00225 Hz | 1 Hz |
+| 0.00036 Hz | 0.00006 Hz | 0.000225 Hz | 1/60 Hz |
+
+These rows are geometry examples, not full-channel sampling qualifications.
+Protected tile construction brackets and searches the required dwell count in
+logarithmic work rather than stepping through a ten-million-dwell scan limit.
+The minimum 64 inner coefficients, complete-cell alignment and bounded tile
+workspace still apply; lower rates cannot bypass minimum pattern complexity.
 
 Below 64 samples/s, FHSS, millisecond dwell dropout, active sampled frontend,
 slow AGC, white/flicker/random-walk FM and white PM are rejected. Constant
@@ -142,6 +170,16 @@ Grams and retained information at finer sampling rates before using it for a
 sensitivity claim. Equal RNG seeds at different sample rates do not create
 identical stochastic trajectories. The 400-ms source calendar and whole-cell
 interleave remain in force; unsupported 10-ms erasures are not silently dropped.
+
+[`tools/triad-sampling-refinement.py`](../tools/triad-sampling-refinement.py)
+accepts integer `--sample-rates` and reciprocal `--sample-periods` in seconds.
+The selected grid must be distinct and nonoverlapping; its highest effective
+rate is the refinement reference. It aligns samples on their exact rational
+lattices, including nonnested periods. Outage comparisons use one common
+physical span and ramp across rates, increasing the ramp to at least four
+samples at the slowest selected rate when necessary. Reports retain requested
+and effective outage settings and any adjustment. These remain deterministic
+sampled-waveform comparisons, not an analog reference or detection calibration.
 
 The export limits remain explicit: at most 128 million samples and the selected
 disk budget (8 GiB by default). They can reject an export even when the bounded
@@ -302,6 +340,12 @@ unknown-channel reception. The script exposes the useful-energy fraction,
 noise density and family counts. Its default expanded study family is
 `K=11` methods, `D=4` durations and two bit hypotheses, with one scheduled
 attempt per minute and half the false-admission budget allocated to scores.
+`--attempt-spacing-seconds` changes that declared schedule for both strict and
+relaxed calculations; its default remains 60 seconds. A spacing at least as long
+as the corresponding horizon means one scheduled attempt. Fewer attempts reduce
+the family-allocation penalty only by restricting operation; they are not a
+receiver sensitivity gain. The bound does not establish optimal calibration of
+correlated repeated windows or arbitrary adaptive monitoring.
 This differs from the earlier measured `K=9/D=3` family. Its inverse duration
 assumes a completely known waveform, phase, alignment and channel; it is not
 the practical decoder's duration planner. Raising the generic planner's range
@@ -352,7 +396,7 @@ fixed pre-noise hypotheses, missingness independence, or a real channel model.
 
 The duration planner uses `C/N₀` in dB-Hz and the total nominal triplet power
 reference. In the CLI's unit-power reference, complex noise variance is
-`sample_rate / 10^(C/N₀/10)`. Its conditional model calculates usable time after
+`effective_sample_rate / 10^(C/N₀/10)`. Its conditional model calculates usable time after
 startup, channel outage, and retained-energy fractions; projection rank from
 the number and rank of coherence blocks; a finite-family null-score upper
 bound; a noncentral true-score lower bound; and a wrong-bit upper bound using
@@ -364,6 +408,15 @@ The planner reports elapsed duration and the corresponding active-duration
 input for the transmitter separately. It also estimates operations and tiled workspace. These resource
 estimates use a configured operation count per sample and hypothesis; they are
 not measured throughput predictions.
+
+The default ten-Julian-year horizon does not force a scan of every possible
+duration before returning an early solution. The ordered exhaustive search
+charges its cap to durations actually evaluated and permits at most 2,000,001
+evaluations. If that budget is exhausted with unvisited durations remaining, it
+throws `duration search exhausted bounded planner grid; unvisited durations remain`;
+it does not report that no feasible duration exists. Rank changes are not assumed
+to make the separation margin monotone, so no binary-search shortcut silently
+skips duration alternatives.
 
 The planner's success status is conditional on caller-supplied bounds for
 retained energy, wrong-codeword projection, outage, and an equal-rank fixed
@@ -564,6 +617,16 @@ replicas are numerical diagnostics, not additional independent transmissions;
 it reports likelihood averages and variability without selecting a best seed
 or qualifying an additional receiver family.
 
+The optional `frequency_initialization="midpoint-grid"` instead assigns equal
+mass to deterministic CFO-stratum midpoints. It declares a normalized discrete
+CFO prior, not an unbiased estimate of a continuous uniform prior. The core and
+adapter require zero oscillator phase diffusion, zero frequency random walk
+and no resampling for this mode. Gaussian channel taps may still evolve with
+the declared OU coherence; a circular tap prior marginalizes constant initial
+phase. There is no implied phase-tracking capability, and grid/prior refinement
+must test mismatch separately. Any additionally selected grid or prior belongs
+in the predeclared receiver family.
+
 [`triad-rbpf-study.py`](../tools/triad-rbpf-study.py) consumes actual noisy
 exported correlations, public full-bank Grams, received energy and physical
 intervals. `rbpf` requires a correct caller-declared white Gaussian noise
@@ -585,6 +648,34 @@ memory estimate separately from framework/cache overhead and measured device
 usage. [`triad-rbpf-benchmark.py`](../tools/triad-rbpf-benchmark.py) compares
 identical predeclared phase banks across CPU/GPU and precisions; a kernel
 timing does not establish end-to-end sampled-receiver acceleration.
+
+[`triad-cfo-batch-study.py`](../tools/triad-cfo-batch-study.py) provides a separate
+actual-observation adapter for that deterministic model, reporting the method
+as `cfo-grid-ucb`. It prepares each path's full-bank residual noise upper bound,
+then retains the projected correlations and Grams for a resident batch across
+paths, candidates and CFO grid points. It requires actual observations and
+received energies, compatible geometry and relative candidate columns, and
+identical physical block calendars; it does not silently align unlike captures.
+Absolute epochs and keys may differ. Simulation means, true noise variance and
+selected physical truth do not enter scoring.
+
+The batch size defaults to eight (supported range 1–256), with explicit array
+memory preflight; CUDA use is capped at 75% of reported free GPU memory as well
+as the requested budget. Retained batch data grows with blocks and must fit
+that budget. This is distinct from the duration-bounded C++ streaming receiver.
+FP32 selects complex64 bulk particle products; full-bank residual projection,
+Grams, covariance preparation and sensitive phase/evidence reductions remain
+FP64, and TF32 is disabled. Reports separate preparation, transfer, resident
+inference, joint wall time, array bounds and device allocation. CPU/GPU code
+paths are implemented; acceleration for this new batch adapter is not yet
+measured or qualified here.
+
+The adapter defaults to an expanded configurable `K=16/D=8` selection family,
+not the older `K=11/D=4` campaign. Its noise bound assumes one stationary white
+proper-complex variance per path and independent whole-bank residual
+calibration. Wrong-key rejection is an empirical control, not covered by the
+noise-only false-admission theorem. It remains a fixed-window detector, not an
+anytime rule or a validated duration planner.
 
 The conditional-channel strategy has prior communication-system research,
 including [Kim, Pun and Iltis, MERL TR2010-095](https://www.merl.com/publications/docs/TR2010-095.pdf).
@@ -777,3 +868,62 @@ These are separately budgeted receivers, not an automatically selected or
 OR-combined collection. Selecting among their outcomes requires additional
 model/duration-family accounting. See the validation record for actual
 measurements and remaining benchmark gaps.
+
+## Joint common and relative ray-frequency likelihood
+
+[`triad-ray-frequency-study.py`](../tools/triad-ray-frequency-study.py) consumes
+actual noisy block statistics with public two-ray candidate mappings for both
+bits. Its retained model is `A0 exp(j 2π f t_b)` and
+`A1 exp(j 2π (f + δ) t_b)`, where `t_b` is the physical block center, `f` is
+common CFO and `δ` is a constant relative ray-Doppler correction. The public
+tap delays remain fixed. Each candidate has two static proper-complex Gaussian
+coefficients of variance 0.5; the likelihood integrates those coefficients
+jointly. It does not track OU ray evolution or arbitrary intra-block phase.
+Input candidate metadata must describe the intended public two-ray basis;
+this adapter does not infer a physical tap model from hidden simulation truth.
+
+Complex correlations accumulate in their original ray-column coordinates
+before the Gaussian coefficient integral. The per-ray frequency transforms
+precede any summed-Gram whitening that would mix differently rotating columns.
+The off-diagonal Gram is also frequency dependent:
+`G01(δ) = Σ_b G01,b exp(+j 2π δ t_b)`.
+Its positive exponent requires negative-index FFT bins relative to the
+correlation transform convention. Dropping that cross-Gram or changing its
+sign changes the joint likelihood. The combined outward-rounded `f + δ` grid
+must remain strictly below block-center Nyquist; this guard is additional to
+the sampled-waveform capture checks.
+
+Defaults are `--frequency-bound 1e-6`, `--ray-frequency-bound 2e-7` and maximum
+common FFT-lattice spacing `1/(8T)`. Common CFO has a uniform finite-grid prior.
+`--zero-ray-mass .5` places half the relative-frequency prior at `δ=0` and
+spreads the remainder uniformly over the finite relative grid, including zero.
+With the same common grid, coefficient model and observations, this guarantees
+`logLR_joint >= logLR_zero_relative - ln(2)`. It is a likelihood inequality,
+not a sensitivity penalty in dB or a comparison against a different older FFT
+grid. Outward endpoints and the default spacing are recorded conventions, not
+certified shaped-waveform mismatch bounds. Any selected grid, prior or model
+alternative requires family accounting.
+
+`ray-frequency` requires a correct declared white-noise variance.
+`ray-frequency-ucb` uses independent full-bank residual calibration for one
+stationary white proper-complex noise variance. Both use actual observations,
+received energies, physical intervals and the complete bank Gram; neither uses
+the hidden signal mean or true channel to score candidates. The default
+selection family is `K=16/D=8`, with both candidate bits accounted for. The
+noise-only bound does not qualify wrong-key signals or adaptive monitoring.
+
+FP32 selects complex64 correlation FFTs. Cross-Gram FFTs, Gram diagonals,
+residual/rank calculations, small Cholesky/triangular solves, quadratics and
+mixture reductions remain FP64; TF32 is disabled. Reports separately time the
+correlation FFT, FP64 Gram FFT/diagonal stage, FP64 solves/mixtures and CPU
+projection preparation. Frequency pairs are tiled under an explicit memory
+bound, with CUDA arrays also capped at 75% of reported free device memory;
+framework overhead is separate. Seven focused [direct-oracle tests](../tests/test_triad_ray_frequency.py)
+passed for the reviewed implementation. Actual GPU campaigns remain separate:
+this contract makes no acceleration, sensitivity or general optimality claim.
+
+Measured results are recorded in the [−60 dB-Hz campaign](validation-data/triad-v3/2026-11-02-minus60/README.md):
+five frozen long-span holdouts, joint-ray mismatch diagnostics, actual CPU/GPU
+timings, precision comparisons and retained evidence audits. Consult its exact
+channel, acquisition, energy and confidence assumptions before using those
+results as duration-planning evidence.

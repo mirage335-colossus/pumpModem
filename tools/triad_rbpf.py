@@ -65,6 +65,10 @@ class RBPhaseFilter:
     with the same normalized 1/N starting weights. The average empirical
     measure over jitter randomness equals the continuous uniform CFO prior;
     individual particle frequencies need not each have that full prior.
+    'midpoint-grid' instead declares a deterministic, equal-weight discrete CFO
+    prior. It is restricted to constant CFO, zero Wiener phase diffusion and
+    no resampling. It is not an unbiased continuous-prior estimate or an FFT
+    approximation. The Gaussian taps may still have their declared dynamics.
 
     phase_increment_radians is a no-resampling oracle/finite-bank interface. It
     replaces the oscillator transition for that update and must supply exactly
@@ -90,8 +94,8 @@ class RBPhaseFilter:
             raise ValueError("RB bulk arithmetic must be complex64 or complex128")
         if resampling not in ("none", "multinomial", "systematic"):
             raise ValueError("resampling must be none, multinomial, or systematic")
-        if frequency_initialization not in ("iid", "stratified"):
-            raise ValueError("frequency_initialization must be iid or stratified")
+        if frequency_initialization not in ("iid", "stratified", "midpoint-grid"):
+            raise ValueError("frequency_initialization must be iid, stratified, or midpoint-grid")
         if not math.isfinite(ess_fraction) or not 0 < ess_fraction <= 1:
             raise ValueError("ESS fraction must be in (0,1]")
         if not math.isfinite(relative_tolerance) or not 0 < relative_tolerance < .01:
@@ -99,6 +103,10 @@ class RBPhaseFilter:
         if isinstance(memory_limit_bytes, bool) or not isinstance(memory_limit_bytes, int) or memory_limit_bytes < 4096:
             raise ValueError("memory limit must be an integer of at least 4096 bytes")
         self.tap_prior, self.phase_prior = tap_prior, phase_prior or RBPhasePrior()
+        if frequency_initialization == "midpoint-grid" and (
+                self.phase_prior.phase_diffusion_rad_sqrt_second
+                or self.phase_prior.frequency_random_walk_hz_sqrt_second or resampling != "none"):
+            raise ValueError("midpoint-grid requires zero phase/frequency diffusion and no resampling")
         self.particles, self.seed, self.dtype = particles, seed, dtype
         self.resampling, self.ess_fraction = resampling, float(ess_fraction)
         self.frequency_initialization = frequency_initialization
@@ -147,13 +155,19 @@ class RBPhaseFilter:
             if self.frequency_initialization == "iid":
                 self.frequency = (2*torch.rand(self.phase.shape, dtype=torch.float64, device=r.device,
                                                generator=self._generator)-1)*self.phase_prior.frequency_bound_hz
-            else:
+            elif self.frequency_initialization == "stratified":
                 # Exactly the IID branch's number/order of uniform draws; no
                 # permutation draws, so subsequent oscillator RNG is paired.
                 jitter = torch.rand(self.phase.shape, dtype=torch.float64,
                                     device=r.device, generator=self._generator)
                 strata = torch.arange(self.particles, dtype=torch.float64, device=r.device)
                 self.frequency = (2*(strata+jitter)/self.particles-1)*self.phase_prior.frequency_bound_hz
+            else:
+                # Finite prior with exactly equal mass at every midpoint. There
+                # is no jitter, random permutation, or consumed initial draw.
+                indices = torch.arange(self.particles, dtype=torch.float64, device=r.device)
+                grid = self.phase_prior.frequency_bound_hz*(2*(indices+.5)/self.particles-1)
+                self.frequency = grid.expand(count, self.particles).clone()
         else:
             self.frequency = torch.zeros_like(self.phase)
         self.log_weights = torch.full_like(self.phase, -math.log(self.particles))
@@ -343,6 +357,11 @@ class RBPhaseFilter:
                 "covariance_dtype": "torch.complex128", "phase_frequency_and_evidence_dtype": "torch.float64",
                 "tf32_allowed": False, "resampling": self.resampling,
                 "frequency_initialization": self.frequency_initialization,
+                "frequency_prior_model": {
+                    "iid": "independent uniform draws; continuous uniform prior recovered in expectation over independent draws",
+                    "stratified": "equal-stratum independent jitter; continuous uniform prior recovered in expectation over independent jitter",
+                    "midpoint-grid": "deterministic equal-weight midpoint grid; discrete CFO prior, not an unbiased continuous-prior estimate"
+                }[self.frequency_initialization],
                 "ess_fraction": self.ess_fraction, "minimum_effective_particles": float(self._minimum_ess.min()),
                 "minimum_particle_weight": float(self._minimum_weight.min()),
                 "maximum_particle_weight": float(self._maximum_weight.max()),

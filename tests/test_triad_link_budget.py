@@ -41,6 +41,28 @@ class TriadLinkBudgetTests(unittest.TestCase):
                             norm.isf(target["per_hypothesis_false_tail"]))
         self.assertAlmostEqual(achieved, .99)
 
+    def test_configurable_attempt_schedules_adjust_family_accounting_only(self):
+        expected = {
+            86400.0: (1, 1),  # one completion over each fixed target horizon
+            3600.0: (24, 12),
+            60.0: (1440, 720),
+        }
+        strict_energies = []
+        for spacing, (strict_attempts, relaxed_attempts) in expected.items():
+            report = budget.build_report(attempt_spacing_seconds=spacing)
+            self.assertEqual(report["inputs"]["attempt_spacing_seconds"], spacing)
+            strict = report["targets"]["strict"]
+            relaxed = report["targets"]["relaxed"]
+            self.assertEqual(strict["scheduled_attempts"], strict_attempts)
+            self.assertEqual(relaxed["scheduled_attempts"], relaxed_attempts)
+            self.assertEqual(strict["attempt_spacing_seconds"], spacing)
+            self.assertAlmostEqual(strict["target_detection_probability"], .99)
+            self.assertAlmostEqual(strict["total_false_admission_target"], 1e-4)
+            self.assertIn("not receiver gain", report["assumptions"]["attempt_schedule"])
+            strict_energies.append(strict["required_known_waveform_E_N0_db"])
+        self.assertLess(strict_energies[0], strict_energies[1])
+        self.assertLess(strict_energies[1], strict_energies[2])
+
     def test_fraction_scales_useful_duration_and_elapsed_time(self):
         report = budget.build_report(days=38, useful_energy_fraction=.25)
         self.assertEqual(report["inputs"]["elapsed_seconds"], 38 * 86400)
@@ -56,7 +78,8 @@ class TriadLinkBudgetTests(unittest.TestCase):
                        {"useful_energy_fraction": 0},
                        {"useful_energy_fraction": 1.1},
                        {"noise_densities_dbm_hz": ()}, {"methods": 0},
-                       {"durations": 1.5}):
+                       {"durations": 1.5}, {"attempt_spacing_seconds": 0},
+                       {"attempt_spacing_seconds": math.inf}):
             with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
                 budget.build_report(**kwargs)
         with self.assertRaises(ValueError):

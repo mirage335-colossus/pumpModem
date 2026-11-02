@@ -270,6 +270,26 @@ void duration_calendar_checks() {
     rejects([] { auto bad = supported(); bad.duration_offset_seconds = .4;
                  (void)plan_duration(bad); }, "positive duration offset accepted");
 }
+void bounded_search_horizon_checks() {
+    const auto defaults = plan_duration(PlannerInput{});
+    check(defaults.duration_found && defaults.status == PlannerStatus::unsupported_assumptions,
+          "long default horizon rejected an early conditional solution");
+    auto short_input = supported();
+    const auto short_plan = plan_duration(short_input);
+    short_input.maximum_duration_seconds = 10 * 365.25 * 86400;
+    const auto extended = plan_duration(short_input);
+    check(extended.duration_seconds == short_plan.duration_seconds &&
+          extended.separation_margin == short_plan.separation_margin,
+          "extending horizon changed the first feasible duration");
+    auto exhausted = short_input;
+    exhausted.cn0_db_hz = -100;
+    bool explicit_exhaustion = false;
+    try { (void)plan_duration(exhausted); }
+    catch (const std::invalid_argument& error) {
+        explicit_exhaustion = std::string(error.what()).find("unvisited durations remain") != std::string::npos;
+    }
+    check(explicit_exhaustion, "bounded search concealed unvisited durations as physical infeasibility");
+}
 } // namespace
 
 int main() {
@@ -280,6 +300,7 @@ int main() {
         long_span_checks();
         extreme_and_complexity_checks();
         duration_calendar_checks();
+        bounded_search_horizon_checks();
         std::cout << "triad statistics: conditional bounds, planner, scaling, and long-span checks passed\n";
         return 0;
     } catch (const std::exception& error) {

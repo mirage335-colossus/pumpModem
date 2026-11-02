@@ -42,7 +42,7 @@ std::vector<Complex> capture(std::size_t chunk_size, StreamChannelConfig cfg,
                              const Format& f, StreamChannelReport* report = nullptr) {
     const auto key = fixture_key();
     PatternSource source(f, key, 1);
-    cfg.effects.sample_rate = f.sample_rate;
+    cfg.effects.sample_rate = effective_sample_rate(f);
     cfg.effects.occupied_bandwidth_hz = geometry(f).occupied_bandwidth_hz;
     cfg.effects.rf_hz = 30e6;
     cfg.effects.seed = 0x13579bdf;
@@ -722,6 +722,107 @@ void low_rate_path_configuration_checks() {
                               c.path_evolution.outage_ramp_seconds = 2; });
 }
 
+void reciprocal_rate_checks() {
+    auto low = fixture_format();
+    low.inner_rate_hz = .0036;
+    low.added_symbols = 1;
+    low.sample_rate = 1;
+    low.sample_rate_denominator = 64;
+    check(effective_sample_rate(low) == 1./64, "reciprocal sample rate lost its denominator");
+    auto invalid = low;
+    invalid.sample_rate_denominator = 0;
+    rejects([&] { (void)geometry(invalid); }, "zero sample-rate denominator was accepted");
+    invalid = low; invalid.sample_rate = 2;
+    rejects([&] { (void)geometry(invalid); }, "unsupported non-reciprocal rational rate was accepted");
+    invalid = low; invalid.sample_rate_denominator = UINT32_MAX;
+    check(effective_sample_rate(invalid) > 0, "uint32 reciprocal rate was not representable");
+    rejects([&] { (void)geometry(invalid); }, "sub-Hz shaped bandwidth guard was skipped");
+    invalid = low; invalid.fhss = true;
+    rejects([&] { (void)geometry(invalid); }, "sub-Hz source silently sampled FHSS ramps");
+
+    const auto key = fixture_key();
+    PatternSource source(low, key, 1);
+    StreamChannelConfig cfg;
+    cfg.effects.sample_rate = effective_sample_rate(low);
+    cfg.effects.occupied_bandwidth_hz = source.geometry().occupied_bandwidth_hz;
+    cfg.effects.noise_enabled = false;
+    cfg.effects.spread_delay_ms = .005;
+    cfg.effects.spread_doppler_hz = .001;
+    cfg.complex_noise_variance = 0;
+    auto bad_cfg = cfg; bad_cfg.effects.sample_rate = 1;
+    rejects([&] { StreamingChannel channel(source, bad_cfg); }, "integer numerator replaced effective channel Fs");
+    bad_cfg = cfg; bad_cfg.effects.spread_doppler_hz = .01;
+    rejects([&] { StreamingChannel channel(source, bad_cfg); }, "sub-Hz Doppler alias was accepted");
+    bad_cfg = cfg; bad_cfg.effects.dropout_ms = 10;
+    rejects([&] { StreamingChannel channel(source, bad_cfg); }, "sub-Hz source silently skipped 10-ms loss");
+
+    // Independently sample the same continuous deterministic waveform/path.
+    // Align the public source-calendar origin: the two-sample padding has
+    // different duration at different Fs. This is not RNG path coupling.
+    auto high = low; high.sample_rate_denominator = 1;
+    auto high_cfg = cfg;
+    high_cfg.effects.capture_lead_seconds =
+        geometry(low).calendar_origin_sample/effective_sample_rate(low)-
+        geometry(high).calendar_origin_sample/effective_sample_rate(high);
+    check(high_cfg.effects.capture_lead_seconds >= 0, "refinement origin order changed");
+    const auto coarse = capture(79, cfg, low);
+    check(coarse == capture(193, cfg, low), "sub-Hz channel depends on read partition");
+    const auto fine = capture(4096, high_cfg, high);
+    long double coarse_energy = 0, fine_energy = 0, squared_error = 0;
+    std::size_t compared = 0;
+    for (std::size_t n = 0; n < fine.size(); ++n) fine_energy += std::norm(fine[n]);
+    for (std::size_t n = 0; n < coarse.size(); ++n) {
+        coarse_energy += 64*std::norm(coarse[n]);
+        if (n*64 < fine.size()) {
+            squared_error += std::norm(coarse[n]-fine[n*64]);
+            ++compared;
+        }
+    }
+    check(compared > 2000 && fine_energy > 0, "sub-Hz refinement compared insufficient signal");
+    const auto relative_energy = std::abs(coarse_energy/fine_energy-1);
+    const auto relative_error = std::sqrt(64*squared_error/fine_energy);
+    check(relative_energy < 5e-4 && relative_error < 2e-6,
+          "sub-Hz sampled waveform or two-ray propagation disagrees with 1-Hz refinement");
+    std::cout << "reciprocal sampled refinement relative energy=" << relative_energy
+              << " waveform RMS=" << relative_error << '\n';
+
+    // At reciprocal Fs the stochastic laws must advance by physical seconds,
+    // not by one nominal second and not by dropping 63 updates of an old run.
+    low.bit_seconds = 524288;
+    StreamChannelConfig flat;
+    flat.effects.noise_enabled = false;
+    const auto baseline = capture(251, flat, low);
+    auto ou = flat;
+    ou.path_seed = 20261101;
+    ou.path_evolution.ray_coherence_seconds = 128;
+    const auto faded = capture(257, ou, low);
+    auto phase = flat;
+    phase.effects.tx.phase_noise_rad_per_sqrt_second = .02;
+    const auto rotated = capture(263, phase, low);
+    long double power = 0, lag = 0, phase_sum = 0, phase_squares = 0;
+    Complex previous_gain{}, previous_rotation{};
+    std::size_t count = 0, lag_count = 0;
+    bool previous_valid = false;
+    for (std::size_t n = 0; n < baseline.size(); ++n) {
+        if (std::norm(baseline[n]) < 1e-6) { previous_valid = false; continue; }
+        const auto gain = faded[n]/baseline[n], rotation = rotated[n]/baseline[n];
+        power += std::norm(gain); ++count;
+        if (previous_valid) {
+            lag += (gain*std::conj(previous_gain)).real();
+            const auto difference = std::arg(rotation*std::conj(previous_rotation));
+            phase_sum += difference; phase_squares += difference*difference; ++lag_count;
+        }
+        previous_gain = gain; previous_rotation = rotation; previous_valid = true;
+    }
+    check(count > 5000 && lag_count > 5000, "sub-Hz stochastic diagnostic retained too few rows");
+    const auto mean_phase = phase_sum/lag_count;
+    const auto phase_variance = phase_squares/lag_count-mean_phase*mean_phase;
+    check(std::abs(power/count-1) < .12 && std::abs(lag/lag_count-std::exp(-64./128)) < .09,
+          "sub-Hz OU covariance used an incorrect physical timestep");
+    check(std::abs(mean_phase) < .015 && std::abs(phase_variance-.02*.02*64) < .003,
+          "sub-Hz Wiener phase variance used an incorrect physical timestep");
+}
+
 // This is an extent/prefix resource check, not a two-day sampled propagation
 // run. Full-duration evidence must separately drain and score the entire stream.
 void long_extent_prefix_and_tail_checks() {
@@ -801,6 +902,7 @@ int main() {
         path_evolution_deterministic_checks();
         path_ou_statistics_checks();
         low_rate_path_configuration_checks();
+        reciprocal_rate_checks();
         long_extent_prefix_and_tail_checks();
         std::cout << "triad v3 streaming channel checks passed\n";
         return 0;

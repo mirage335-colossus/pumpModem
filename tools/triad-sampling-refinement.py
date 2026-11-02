@@ -10,6 +10,7 @@ receiver sensitivity or a calibrated physical propagation model.
 from __future__ import annotations
 
 import argparse
+from fractions import Fraction
 import hashlib
 import json
 import math
@@ -119,14 +120,71 @@ def run(command, directory, timeout, term_grace=2.):
     return result
 
 
+def sampling_grid(sample_rates, sample_periods):
+    if any(not 1 <= value <= 2**32-1 for value in [*sample_rates, *sample_periods]):
+        raise ValueError("sample rates and periods must be positive uint32 integers")
+    grid = [Fraction(fs) for fs in sample_rates] + [Fraction(1, period) for period in sample_periods]
+    if not grid or len(grid) != len(set(grid)):
+        raise ValueError("sample rates/periods must be nonempty, distinct and nonoverlapping")
+    return sorted(grid)
+
+
+def sampling_fields(fs):
+    fs = Fraction(fs)
+    return {"sample_rate": fs.numerator if fs.denominator == 1 else float(fs),
+            "sample_rate_numerator": fs.numerator, "sample_rate_denominator": fs.denominator,
+            "sample_period_seconds": float(1/fs)}
+
+
+def sampling_label(fs):
+    fs = Fraction(fs)
+    return str(fs.numerator) if fs.denominator == 1 else f"{fs.numerator}over{fs.denominator}"
+
+
 def base_command(args, rate, fs):
-    return [str(args.binary), "--mode", "export", "--seconds", "8", "--rate", str(rate),
-            "--added", "1", "--sample-rate", str(fs), "--rf-hz", "8000",
+    fs = Fraction(fs)
+    command = [str(args.binary), "--mode", "export", "--seconds", "8", "--rate", str(rate),
+            "--added", "1", "--sample-rate", str(fs.numerator), "--rf-hz", "8000",
             "--spread-preset", "sub9-best", "--margin", "1", "--selective-perturbation", "off",
             "--phase-diffusion", "0", "--basis", "two-ray", "--tap-delay-ms", ".005",
             "--tap-doppler-hz", ".001", "--threads", "1", "--chunk", "4096",
             "--memory-mib", "32", "--export-max-mib", "256", "--key-seed", str(SEEDS["key"]),
             "--channel-seed", str(SEEDS["channel"]), "--path-seed", str(SEEDS["path"])]
+    if fs.denominator > 1:
+        command += ["--sample-rate-denominator", str(fs.denominator)]
+    return command
+
+
+def capture_eligibility(rate, fs, profile):
+    """Declared no-offset sub9-best case only; runtime remains authoritative."""
+    bandwidth = 3*1.25*rate/6
+    if float(fs) <= 1.1*bandwidth:
+        return {"status": "unsupported_shaped_bandwidth", "required_sample_rate_exclusive": 1.1*bandwidth}
+    diurnal = .5/86400 if profile == "diurnal" else 0.
+    required = bandwidth + 2*(.001 + diurnal)
+    if float(fs) <= required:
+        return {"status": "unsupported_deterministic_capture", "required_sample_rate_exclusive": required,
+                "reason": "triplet bandwidth plus twice the selected ray Doppler and diurnal excursion"}
+    return None
+
+
+def outage_profile(args, manifest, fs):
+    elapsed = manifest["actual_elapsed_seconds"]
+    requested_span = args.outage_span_seconds if args.outage_span_seconds is not None else min(400., elapsed*.3)
+    requested_ramp = args.outage_ramp_seconds if args.outage_ramp_seconds is not None else min(30., requested_span/8)
+    # One physical profile for the complete selected grid: no shorter ramps
+    # secretly used for its faster members. Keep a nonzero plateau as well.
+    ramp = max(requested_ramp, 4/float(min(args.sampling_grid)))
+    span = max(requested_span, 3*ramp)
+    center = manifest["source_format"]["calendar_origin_sample"]/float(fs) + elapsed*.5
+    return {"start_seconds": center-span/2, "end_seconds": center+span/2,
+            "span_seconds": span, "ramp_seconds": ramp,
+            "requested_span_seconds": requested_span, "requested_ramp_seconds": requested_ramp,
+            "slowest_selected_sample_rate_hz": float(min(args.sampling_grid)),
+            "ramp_samples_at_slowest_rate": ramp*float(min(args.sampling_grid)),
+            "adjusted_for_sampling": span != requested_span or ramp != requested_ramp,
+            "clipped_to_tile": False,
+            "coordinate": "mid-payload calendar plus this source's padding origin; common span/ramp across Fs"}
 
 
 def inspect(directory):
@@ -142,14 +200,23 @@ def inspect(directory):
         raise ValueError("unexpected timing or oscillator draws")
     if m["truth_clock_ppm"] or m["truth_frequency_hz"] or m["truth_frequency_drift_hz_per_second"]:
         raise ValueError("nonzero unplanned truth parameters")
-    fs = m["sample_rate"]
+    numerator = m.get("sample_rate_numerator", m["sample_rate"])
+    denominator = m.get("sample_rate_denominator", 1)
+    if (not isinstance(numerator, int) or isinstance(numerator, bool) or
+            not isinstance(denominator, int) or isinstance(denominator, bool) or
+            numerator <= 0 or denominator <= 0 or (denominator > 1 and numerator != 1)):
+        raise ValueError("invalid exported rational sample clock")
+    rational_fs = Fraction(numerator, denominator)
+    fs = float(rational_fs)
+    if not math.isclose(fs, m["sample_rate"], rel_tol=1e-12, abs_tol=0):
+        raise ValueError("effective sample rate disagrees with exported rational clock")
     # No clock policy and zero initial physical timing: truth_arrival is exactly
     # the public capture lead. Do not use this equality for arbitrary captures.
     lead = m["truth_arrival_seconds"]
     origin = m["source_format"]["calendar_origin_sample"] / fs
     signal = np.memmap(directory / m["signal_file"], dtype=np.complex64, mode="r", shape=tuple(m["signal_shape"]))
     basis = np.memmap(directory / m["basis_file"], dtype=np.complex64, mode="r", shape=tuple(m["basis_shape"]))
-    return {"manifest": m, "fs": fs, "lead": lead, "origin": origin,
+    return {"manifest": m, "fs": fs, "rational_fs": rational_fs, "lead": lead, "origin": origin,
             "signal": signal, "basis": basis, "rows": len(signal)}
 
 
@@ -199,7 +266,7 @@ def metrics(data):
             separation.append({"candidates": [j, i], "tap_count": a["tap_count"],
                                "principal_cosines": singular.tolist(),
                                "worst_projection_fraction": float(singular[0]**2) if singular.size else None})
-    return {"samples": data["rows"], "sample_rate": data["fs"],
+    return {"samples": data["rows"], **sampling_fields(data["rational_fs"]),
             "observation_seconds": data["rows"]/data["fs"],
             "requested_active_seconds": m["requested_active_seconds"],
             "rounded_active_seconds": m["actual_elapsed_seconds"],
@@ -210,31 +277,44 @@ def metrics(data):
             "gram_real_seconds": gram.real.tolist(), "gram_imag_seconds": gram.imag.tolist()}, gram
 
 
+def aligned_sample_grid(data, reference):
+    fs, rf = data["rational_fs"], reference["rational_fs"]
+    origin = Fraction(data["manifest"]["source_format"]["calendar_origin_sample"])/fs
+    ref_origin = Fraction(reference["manifest"]["source_format"]["calendar_origin_sample"])/rf
+    shift = ref_origin + Fraction(str(reference["lead"])) - origin - Fraction(str(data["lead"]))
+    # Exact rational sample lattice, including nonnested periods of3 and4 seconds.
+    # Retain only coincident physical payload times; never interpolate curves.
+    scale, offset = rf/fs, rf*shift
+    divisor = math.lcm(scale.denominator, offset.denominator)
+    a, b = int(scale*divisor), int(offset*divisor)
+    common = math.gcd(a, divisor)
+    if b % common:
+        raise ValueError("requested calendars have no coincident comparison samples")
+    stride = divisor//common
+    residue = 0 if stride == 1 else (-b//common)*pow(a//common, -1, stride) % stride
+    lower = max(0, math.ceil(-offset/scale))
+    upper = min(data["rows"]-1, math.floor((reference["rows"]-1-offset)/scale))
+    first = lower + (residue-lower) % stride
+    count = max(0, (upper-first)//stride+1)
+    if not count:
+        raise ValueError("aligned captures have no common sample extent")
+    return first, stride, int(first*scale+offset), int(stride*scale), count, scale, offset
+
+
 def compare(data, reference, gram, reference_gram):
-    fs, rf = data["fs"], reference["fs"]
-    shift = reference["origin"] + reference["lead"] - data["origin"] - data["lead"]
-    # Mapping n_ref=Fs_ref*(n/Fs + shift) aligns payload calendars, not sample0.
-    # These prescribed integer sample rates and sample-quantized halo origins
-    # give coincident sample times; reject accidental interpolation shortcuts.
-    scale = rf/fs
-    offset = rf*shift
-    if abs(scale-round(scale)) > 1e-9 or abs(offset-round(offset)) > 1e-8:
-        raise ValueError("requested calendars do not have coincident comparison samples")
-    step, offset = round(scale), round(offset)
-    lo = max(0, math.ceil(-offset/step))
-    hi = min(data["rows"], (reference["rows"]-1-offset)//step+1)
+    first, stride, ref_first, ref_stride, count, scale, offset = aligned_sample_grid(data, reference)
     delta = data["origin"]-reference["origin"]
     difference = ref_energy = 0.
     source_difference = source_energy = 0.
     inner = 0j
     low_energy = 0.
-    for start in range(lo, hi, 32768):
-        end = min(hi, start+32768)
-        indices = np.arange(start, end)*step+offset
-        y = np.asarray(data["signal"][start:end], dtype=np.complex128)
-        r = np.asarray(reference["signal"][indices], dtype=np.complex128)
-        x = np.asarray(data["basis"][0, start:end, 0], dtype=np.complex128)
-        xr = np.asarray(reference["basis"][0, indices, 0], dtype=np.complex128)
+    for start in range(0, count, 32768):
+        row = np.arange(start, min(count, start+32768))
+        indices, ref_indices = first+row*stride, ref_first+row*ref_stride
+        y = np.asarray(data["signal"][indices], dtype=np.complex128)
+        r = np.asarray(reference["signal"][ref_indices], dtype=np.complex128)
+        x = np.asarray(data["basis"][0, indices, 0], dtype=np.complex128)
+        xr = np.asarray(reference["basis"][0, ref_indices, 0], dtype=np.complex128)
         difference += float(np.vdot(y-r, y-r).real)
         ref_energy += float(np.vdot(r, r).real)
         low_energy += float(np.vdot(y, y).real)
@@ -251,9 +331,10 @@ def compare(data, reference, gram, reference_gram):
             phases.append(np.exp(2j*np.pi*f*delta))
     phases = np.asarray(phases)
     corrected_gram = phases[:, None] * gram * phases.conj()[None, :]
-    return {"reference_sample_rate": rf, "common_sample_rows": hi-lo,
+    return {"reference_sample_rate": reference["fs"], "common_sample_rows": count,
             "payload_calendar_origin_difference_seconds": delta,
-            "reference_index_scale": step, "reference_index_offset": offset,
+            "reference_index_scale": float(scale), "reference_index_offset": float(offset),
+            "compared_sample_stride": stride, "reference_compared_sample_stride": ref_stride,
             "raw_aligned_signal_relative_l2": math.sqrt(difference/ref_energy),
             "aligned_signal_squared_correlation": float(abs(inner)**2/(low_energy*ref_energy)),
             "aligned_flat_source_basis_relative_l2": math.sqrt(source_difference/source_energy),
@@ -263,17 +344,20 @@ def compare(data, reference, gram, reference_gram):
             "raw_curve_scope": "includes changed deterministic ray/diurnal phase at payload origin; not solely discretization error"}
 
 
-def main():
+def parse_args(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--binary", type=Path, default=ROOT/"build/dev/triad_long")
     p.add_argument("--output", type=Path, required=True)
     p.add_argument("--rates", type=float, nargs="+", default=[.36, .036])
-    p.add_argument("--sample-rates", type=int, nargs="+", default=[1, 4, 64])
+    p.add_argument("--sample-rates", type=int, nargs="*", default=[1, 4, 64], help="integer Hz; empty list selects only --sample-periods")
+    p.add_argument("--sample-periods", type=int, nargs="*", default=[], help="integer seconds/sample; combine with --sample-rates without overlaps")
     p.add_argument("--profiles", choices=PROFILES, nargs="+", default=list(PROFILES))
     p.add_argument("--timeout", type=float, default=300, help="export runtime ceiling; shared runner adds bounded cleanup")
     p.add_argument("--term-grace", type=float, default=2, help="TERM grace before shared runner KILL/reap (0..30s)")
+    p.add_argument("--outage-span-seconds", type=float, help="requested common span; default min(400s,0.3*tile); expanded to at least3 ramps")
+    p.add_argument("--outage-ramp-seconds", type=float, help="requested common ramp; default min(30s,span/8); floor4 slowest-grid samples")
     p.add_argument("--keep-raw", action="store_true")
-    args = p.parse_args()
+    args = p.parse_args(argv)
     args.binary = args.binary.resolve(strict=True)
     if not math.isfinite(args.timeout) or not 1 <= args.timeout <= 1800:
         p.error("timeout must be in1..1800 seconds")
@@ -281,17 +365,33 @@ def main():
         p.error("term grace must be positive and at most30 seconds")
     if not args.rates or any(not math.isfinite(r) or r <= 0 for r in args.rates):
         p.error("rates must be finite and positive")
-    if any(fs not in (1, 4, 64) for fs in args.sample_rates) or 64 not in args.sample_rates:
-        p.error("sample rates must be distinct members of1,4,64 and include64")
-    if len(args.sample_rates) != len(set(args.sample_rates)):
-        p.error("sample rates must be distinct")
+    try:
+        args.sampling_grid = sampling_grid(args.sample_rates, args.sample_periods)
+    except ValueError as error:
+        p.error(str(error))
+    if len(set(args.rates)) != len(args.rates) or len(set(args.profiles)) != len(args.profiles):
+        p.error("rates and profiles must be distinct")
+    if "outage" in args.profiles and ("baseline" not in args.profiles or args.profiles.index("baseline") > args.profiles.index("outage")):
+        p.error("outage requires baseline earlier in --profiles")
+    for name in ("outage_span_seconds", "outage_ramp_seconds"):
+        value = getattr(args, name)
+        if value is not None and (not math.isfinite(value) or value <= 0):
+            p.error(name + " must be positive finite")
+    return args
+
+
+def main():
+    args = parse_args()
+    reference_fs = max(args.sampling_grid)
     args.output.mkdir(parents=True, exist_ok=False)
     report = {"schema": "triad-deterministic-sampling-refinement-v1", "binary": str(args.binary),
               "binary_sha256": sha256(args.binary), "script_sha256": sha256(__file__),
               "runner_sha256": sha256(RUNNER),
+              "sampling_grid": [sampling_fields(fs) for fs in args.sampling_grid],
+              "reference_sample_rate": float(reference_fs),
               "seeds": SEEDS, "numpy_version": np.__version__, "cases": [], "comparisons": [],
               "limits": ["Deterministic waveform/channel only: no stochastic cross-rate path equivalence.",
-                         "Fs64 is a refinement reference, not an analog or field-measurement certificate.",
+                         "The highest selected Fs is a refinement reference, not an analog or field-measurement certificate.",
                          "Complex64 exports; FP64 Gram and energy reductions with numerical rank cutoff1e-10.",
                          "Projection uses the actual summed waveform and full cross-column Gram; no independent-carrier assumption.",
                          "No noise, detection probability, false-admission calibration or sensitivity conclusion.",
@@ -300,11 +400,13 @@ def main():
         baseline_manifests = {}
         for profile in args.profiles:
             loaded, grams, entries = {}, {}, {}
-            for fs in sorted(args.sample_rates):
-                if fs <= 4.125*rate/6:
-                    report["cases"].append({"rate": rate, "sample_rate": fs, "status": "unsupported_shaped_bandwidth"})
+            for fs in args.sampling_grid:
+                entry = {"rate": rate, "profile": profile, **sampling_fields(fs)}
+                unsupported = capture_eligibility(rate, fs, profile)
+                if unsupported:
+                    report["cases"].append({**entry, **unsupported})
                     continue
-                label = f"rate-{rate:g}-{profile}-fs-{fs}"
+                label = f"rate-{rate:g}-{profile}-fs-{sampling_label(fs)}"
                 directory = args.output/label
                 command = base_command(args, rate, fs)
                 if profile == "diurnal":
@@ -314,16 +416,18 @@ def main():
                     # at this rate. Mid-payload coordinates ensure nonzero signal
                     # overlap, unlike a fixed100..500s interval at very low rates.
                     if fs not in baseline_manifests:
-                        raise ValueError("outage requires baseline earlier in --profiles")
+                        report["cases"].append({**entry, "status": "baseline_unavailable"})
+                        continue
                     b = baseline_manifests[fs]
-                    center = b["source_format"]["calendar_origin_sample"]/fs + b["actual_elapsed_seconds"]*.5
-                    half = min(200., b["actual_elapsed_seconds"]*.15)
-                    ramp = min(30., half*.25)
-                    command += ["--outage-seconds", str(center-half), str(center+half),
-                                "--outage-gain", "0", "--outage-ramp-seconds", str(ramp)]
+                    outage = outage_profile(args, b, fs)
+                    entry["outage_sampling_profile"] = outage
+                    if outage["start_seconds"] < 0:
+                        report["cases"].append({**entry, "status": "unsupported_outage_extent"})
+                        continue
+                    command += ["--outage-seconds", str(outage["start_seconds"]), str(outage["end_seconds"]),
+                                "--outage-gain", "0", "--outage-ramp-seconds", str(outage["ramp_seconds"])]
                 command += ["--output", str(directory)]
                 print(json.dumps({"start": label}), flush=True)
-                entry = {"rate": rate, "profile": profile, "sample_rate": fs}
                 entry.update(run(command, directory, args.timeout, args.term_grace))
                 report["cases"].append(entry)
                 if entry["status"] == "cancelled":
@@ -332,6 +436,8 @@ def main():
                     return entry["returncode"]
                 if entry["status"] == "complete":
                     data = inspect(directory)
+                    if data["rational_fs"] != fs:
+                        raise ValueError("exporter sample clock differs from requested rate")
                     entry["metrics"], gram = metrics(data)
                     entry["file_sha256"] = {n: sha256(directory/n) for n in ("manifest.json", "basis.c64", "signal.c64")}
                     if profile == "baseline":
@@ -339,20 +445,23 @@ def main():
                     loaded[fs], grams[fs], entries[fs] = data, gram, entry
                 save(args.output/"results.json", report)
                 print(json.dumps({"finished": label, "status": entry["status"], "seconds": entry["elapsed_seconds"]}), flush=True)
-            if 64 in loaded:
+            if reference_fs in loaded:
                 for fs, data in loaded.items():
-                    if fs != 64:
-                        result = {"rate": rate, "profile": profile, "sample_rate": fs}
-                        result.update(compare(data, loaded[64], grams[fs], grams[64]))
-                        result["signal_energy_ratio_to_reference"] = entries[fs]["metrics"]["signal_energy_seconds"]/entries[64]["metrics"]["signal_energy_seconds"]
+                    if fs != reference_fs:
+                        result = {"rate": rate, "profile": profile, **sampling_fields(fs)}
+                        result.update(compare(data, loaded[reference_fs], grams[fs], grams[reference_fs]))
+                        result["signal_energy_ratio_to_reference"] = entries[fs]["metrics"]["signal_energy_seconds"]/entries[reference_fs]["metrics"]["signal_energy_seconds"]
                         report["comparisons"].append(result)
+            elif loaded:
+                report["comparisons"].append({"rate": rate, "profile": profile,
+                    "reference_sample_rate": float(reference_fs), "status": "reference_unavailable"})
             for fs, data in loaded.items():
                 # Close mapped files before optional unlink; retain commands,
                 # manifests, logs and hashes as compact reproducibility evidence.
                 data["signal"]._mmap.close()
                 data["basis"]._mmap.close()
                 if not args.keep_raw:
-                    directory = args.output/f"rate-{rate:g}-{profile}-fs-{fs}"
+                    directory = args.output/f"rate-{rate:g}-{profile}-fs-{sampling_label(fs)}"
                     for name in ("basis.c64", "signal.c64"):
                         (directory/name).unlink()
             save(args.output/"results.json", report)

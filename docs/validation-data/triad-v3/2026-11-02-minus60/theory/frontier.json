@@ -1,0 +1,2900 @@
+{
+  "OU_and_static_Gaussian_rows": [
+    {
+      "C_times_coherence": 0.01,
+      "H1_logLR_mean": 0.008154838595114398,
+      "H1_logLR_variance": 0.016391,
+      "admission": [
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 3.177211654958981e-05
+          },
+          "log_gate": 22.721063389585737,
+          "profile": "minute-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 5.404498627849272e-05
+          },
+          "log_gate": 17.4227460230377,
+          "profile": "minute-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 4.728164220655031e-05
+          },
+          "log_gate": 18.626718827363636,
+          "profile": "hourly-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 9.237209640497741e-05
+          },
+          "log_gate": 13.328401460815599,
+          "profile": "hourly-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 6.874677062781108e-05
+          },
+          "log_gate": 15.44866499701569,
+          "profile": "daily-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.00013959174533211715
+          },
+          "log_gate": 10.843494811027599,
+          "profile": "daily-relaxed"
+        }
+      ],
+      "asymptotic_KL_rate_nats_per_second": 2.4875775821945956e-09,
+      "coherence_seconds": 10000.0,
+      "low_Ctau_rate_approximation_nats_per_second": 2.5e-09,
+      "nominal_mean_energy_E_N0": 3.2832,
+      "two_ray_log_determinant": 3.2750451614048854,
+      "useful_days": 38.0,
+      "useful_seconds": 3283200.0
+    },
+    {
+      "C_times_coherence": 0.09999999999999999,
+      "H1_logLR_mean": 0.07708039738951848,
+      "H1_logLR_variance": 0.16166,
+      "admission": [
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.000315181001723912
+          },
+          "log_gate": 22.721063389585737,
+          "profile": "minute-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.0005370161519739974
+          },
+          "log_gate": 17.4227460230377,
+          "profile": "minute-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.0004695995634968063
+          },
+          "log_gate": 18.626718827363636,
+          "profile": "hourly-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.0009197813125088387
+          },
+          "log_gate": 13.328401460815599,
+          "profile": "hourly-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.0006837042266470161
+          },
+          "log_gate": 15.44866499701569,
+          "profile": "daily-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.0013926921562675766
+          },
+          "log_gate": 10.843494811027599,
+          "profile": "daily-relaxed"
+        }
+      ],
+      "asymptotic_KL_rate_nats_per_second": 2.382303659696906e-08,
+      "coherence_seconds": 100000.0,
+      "low_Ctau_rate_approximation_nats_per_second": 2.4999999999999996e-08,
+      "nominal_mean_energy_E_N0": 3.2832,
+      "two_ray_log_determinant": 3.2061196026104817,
+      "useful_days": 38.0,
+      "useful_seconds": 3283200.0
+    },
+    {
+      "C_times_coherence": 1.0,
+      "H1_logLR_mean": 0.5035550756109666,
+      "H1_logLR_variance": 1.3919517132443444,
+      "admission": [
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.0028119689723412763
+          },
+          "log_gate": 22.721063389585737,
+          "profile": "minute-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.004839030070884842
+          },
+          "log_gate": 17.4227460230377,
+          "profile": "minute-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.004220068594747036
+          },
+          "log_gate": 18.626718827363636,
+          "profile": "hourly-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.008391892177270195
+          },
+          "log_gate": 13.328401460815599,
+          "profile": "hourly-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.006193381426612605
+          },
+          "log_gate": 15.44866499701569,
+          "profile": "daily-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.012851991465514903
+          },
+          "log_gate": 10.843494811027599,
+          "profile": "daily-relaxed"
+        }
+      ],
+      "asymptotic_KL_rate_nats_per_second": 1.715728752538099e-07,
+      "coherence_seconds": 1000000.0,
+      "low_Ctau_rate_approximation_nats_per_second": 2.5e-07,
+      "nominal_mean_energy_E_N0": 3.2832,
+      "two_ray_log_determinant": 2.7796449243890335,
+      "useful_days": 38.0,
+      "useful_seconds": 3283200.0
+    },
+    {
+      "C_times_coherence": 10.0,
+      "H1_logLR_mean": 1.1489467125077129,
+      "H1_logLR_variance": 4.380771894209401,
+      "admission": [
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.009326010063320305
+          },
+          "log_gate": 22.721063389585737,
+          "profile": "minute-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.016272251581100055
+          },
+          "log_gate": 17.4227460230377,
+          "profile": "minute-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.014138213263147008
+          },
+          "log_gate": 18.626718827363636,
+          "profile": "hourly-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.028685012137037388
+          },
+          "log_gate": 13.328401460815599,
+          "profile": "hourly-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.0209744084581424
+          },
+          "log_gate": 15.44866499701569,
+          "profile": "daily-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.044535864865913696
+          },
+          "log_gate": 10.843494811027599,
+          "profile": "daily-relaxed"
+        }
+      ],
+      "asymptotic_KL_rate_nats_per_second": 5.3667504192892e-07,
+      "coherence_seconds": 10000000.0,
+      "low_Ctau_rate_approximation_nats_per_second": 2.4999999999999998e-06,
+      "nominal_mean_energy_E_N0": 3.2832,
+      "two_ray_log_determinant": 2.134253287492287,
+      "useful_days": 38.0,
+      "useful_seconds": 3283200.0
+    },
+    {
+      "C_times_coherence": 100.0,
+      "H1_logLR_mean": 1.3184659780130845,
+      "H1_logLR_variance": 5.2736427766368426,
+      "admission": [
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.011381680690840374
+          },
+          "log_gate": 22.721063389585737,
+          "profile": "minute-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.019929005028727305
+          },
+          "log_gate": 17.4227460230377,
+          "profile": "minute-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.017299181850536898
+          },
+          "log_gate": 18.626718827363636,
+          "profile": "hourly-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.03527232574199235
+          },
+          "log_gate": 13.328401460815599,
+          "profile": "hourly-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.02573309948866662
+          },
+          "log_gate": 15.44866499701569,
+          "profile": "daily-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.05493388361446776
+          },
+          "log_gate": 10.843494811027599,
+          "profile": "daily-relaxed"
+        }
+      ],
+      "asymptotic_KL_rate_nats_per_second": 8.190024875775822e-07,
+      "coherence_seconds": 100000000.0,
+      "low_Ctau_rate_approximation_nats_per_second": 2.4999999999999998e-05,
+      "nominal_mean_energy_E_N0": 3.2832,
+      "two_ray_log_determinant": 1.9647340219869154,
+      "useful_days": 38.0,
+      "useful_seconds": 3283200.0
+    },
+    {
+      "C_times_coherence": null,
+      "H1_logLR_mean": 1.340430411632547,
+      "H1_logLR_variance": 5.38970112,
+      "admission": [
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.011652874499326673
+          },
+          "exact_H0_false_probability_per_component": 2.3612694847900297e-16,
+          "exact_H1_presence_probability": 4.784348919384736e-06,
+          "log_gate": 22.721063389585737,
+          "profile": "minute-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.02041317028705784
+          },
+          "exact_H0_false_probability_per_component": 9.413564821744243e-13,
+          "exact_H1_presence_probability": 9.634814881202042e-05,
+          "log_gate": 17.4227460230377,
+          "profile": "minute-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.017717305181624992
+          },
+          "exact_H0_false_probability_per_component": 1.4380068425350852e-13,
+          "exact_H1_presence_probability": 4.892479740084599e-05,
+          "log_gate": 18.626718827363636,
+          "profile": "hourly-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.036147951132468104
+          },
+          "exact_H0_false_probability_per_component": 5.439209515301693e-10,
+          "exact_H1_presence_probability": 0.0009394496815662899,
+          "log_gate": 13.328401460815599,
+          "profile": "hourly-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.026364275336547772
+          },
+          "exact_H0_false_probability_per_component": 2.0331863996640554e-11,
+          "exact_H1_presence_probability": 0.00029056224808272164,
+          "log_gate": 15.44866499701569,
+          "profile": "daily-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.05631993178057042
+          },
+          "exact_H0_false_probability_per_component": 2.5019129599217946e-08,
+          "exact_H1_presence_probability": 0.0036413027482263597,
+          "log_gate": 10.843494811027599,
+          "profile": "daily-relaxed"
+        }
+      ],
+      "asymptotic_KL_rate_nats_per_second": 1e-06,
+      "coherence_seconds": "infinity",
+      "low_Ctau_rate_approximation_nats_per_second": null,
+      "nominal_mean_energy_E_N0": 3.2832,
+      "two_ray_log_determinant": 1.942769588367453,
+      "useful_days": 38.0,
+      "useful_seconds": 3283200.0
+    },
+    {
+      "C_times_coherence": 0.01,
+      "H1_logLR_mean": 0.053719299652656365,
+      "H1_logLR_variance": 0.107975,
+      "admission": [
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.00021010223986693254
+          },
+          "log_gate": 22.721063389585737,
+          "profile": "minute-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.0003577806395432107
+          },
+          "log_gate": 17.4227460230377,
+          "profile": "minute-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.0003129127071040947
+          },
+          "log_gate": 18.626718827363636,
+          "profile": "hourly-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.0006123629724411732
+          },
+          "log_gate": 13.328401460815599,
+          "profile": "hourly-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.0004553748887688642
+          },
+          "log_gate": 15.44866499701569,
+          "profile": "daily-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.0009266074500967012
+          },
+          "log_gate": 10.843494811027599,
+          "profile": "daily-relaxed"
+        }
+      ],
+      "asymptotic_KL_rate_nats_per_second": 2.4875775821945956e-09,
+      "coherence_seconds": 10000.0,
+      "low_Ctau_rate_approximation_nats_per_second": 2.5e-09,
+      "nominal_mean_energy_E_N0": 21.6,
+      "two_ray_log_determinant": 21.546280700347342,
+      "useful_days": 250.0,
+      "useful_seconds": 21600000.0
+    },
+    {
+      "C_times_coherence": 0.09999999999999999,
+      "H1_logLR_mean": 0.5134421941288814,
+      "H1_logLR_variance": 1.0775,
+      "admission": [
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.002180044617833557
+          },
+          "log_gate": 22.721063389585737,
+          "profile": "minute-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.003754328505860179
+          },
+          "log_gate": 17.4227460230377,
+          "profile": "minute-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.0032734015743634904
+          },
+          "log_gate": 18.626718827363636,
+          "profile": "hourly-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.0065184244459066416
+          },
+          "log_gate": 13.328401460815599,
+          "profile": "hourly-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.0048072980592336265
+          },
+          "log_gate": 15.44866499701569,
+          "profile": "daily-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.009996522131750559
+          },
+          "log_gate": 10.843494811027599,
+          "profile": "daily-relaxed"
+        }
+      ],
+      "asymptotic_KL_rate_nats_per_second": 2.382303659696906e-08,
+      "coherence_seconds": 100000.0,
+      "low_Ctau_rate_approximation_nats_per_second": 2.4999999999999996e-08,
+      "nominal_mean_energy_E_N0": 21.6,
+      "two_ray_log_determinant": 21.08655780587112,
+      "useful_days": 250.0,
+      "useful_seconds": 21600000.0
+    },
+    {
+      "C_times_coherence": 1.0,
+      "H1_logLR_mean": 3.6462156602038482,
+      "H1_logLR_variance": 10.55,
+      "admission": [
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.028178432659387444
+          },
+          "log_gate": 22.721063389585737,
+          "profile": "minute-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.05265974413746685
+          },
+          "log_gate": 17.4227460230377,
+          "profile": "minute-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.0449002135043725
+          },
+          "log_gate": 18.626718827363636,
+          "profile": "hourly-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.10115564632680751
+          },
+          "log_gate": 13.328401460815599,
+          "profile": "hourly-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.07040476584541622
+          },
+          "log_gate": 15.44866499701569,
+          "profile": "daily-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.16920384986087278
+          },
+          "log_gate": 10.843494811027599,
+          "profile": "daily-relaxed"
+        }
+      ],
+      "asymptotic_KL_rate_nats_per_second": 1.715728752538099e-07,
+      "coherence_seconds": 1000000.0,
+      "low_Ctau_rate_approximation_nats_per_second": 2.5e-07,
+      "nominal_mean_energy_E_N0": 21.6,
+      "two_ray_log_determinant": 17.95378433979615,
+      "useful_days": 250.0,
+      "useful_seconds": 21600000.0
+    },
+    {
+      "C_times_coherence": 10.0,
+      "H1_logLR_mean": 10.912770052397176,
+      "H1_logLR_variance": 83.3324970885611,
+      "admission": [
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.37407701788559217
+          },
+          "log_gate": 22.721063389585737,
+          "profile": "minute-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.6628826896357043
+          },
+          "log_gate": 17.4227460230377,
+          "profile": "minute-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.5834076867773222
+          },
+          "log_gate": 18.626718827363636,
+          "profile": "hourly-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.9345584737845607
+          },
+          "log_gate": 13.328401460815599,
+          "profile": "hourly-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.8019924103047067
+          },
+          "log_gate": 15.44866499701569,
+          "profile": "daily-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 5.758597037168059e-05,
+            "upper": 1.0
+          },
+          "log_gate": 10.843494811027599,
+          "profile": "daily-relaxed"
+        }
+      ],
+      "asymptotic_KL_rate_nats_per_second": 5.3667504192892e-07,
+      "coherence_seconds": 10000000.0,
+      "low_Ctau_rate_approximation_nats_per_second": 2.4999999999999998e-06,
+      "nominal_mean_energy_E_N0": 21.6,
+      "two_ray_log_determinant": 10.687229947602825,
+      "useful_days": 250.0,
+      "useful_seconds": 21600000.0
+    },
+    {
+      "C_times_coherence": 100.0,
+      "H1_logLR_mean": 15.48602483307122,
+      "H1_logLR_variance": 203.0234417128685,
+      "admission": [
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.7950192197564728
+          },
+          "log_gate": 22.721063389585737,
+          "profile": "minute-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.9818599873817978
+          },
+          "log_gate": 17.4227460230377,
+          "profile": "minute-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.9536658405165995
+          },
+          "log_gate": 18.626718827363636,
+          "profile": "hourly-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.022416053335446662,
+            "upper": 1.0
+          },
+          "log_gate": 13.328401460815599,
+          "profile": "hourly-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 6.874810823580927e-06,
+            "upper": 1.0
+          },
+          "log_gate": 15.44866499701569,
+          "profile": "daily-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.09597211837102541,
+            "upper": 1.0
+          },
+          "log_gate": 10.843494811027599,
+          "profile": "daily-relaxed"
+        }
+      ],
+      "asymptotic_KL_rate_nats_per_second": 8.190024875775822e-07,
+      "coherence_seconds": 100000000.0,
+      "low_Ctau_rate_approximation_nats_per_second": 2.4999999999999998e-05,
+      "nominal_mean_energy_E_N0": 21.6,
+      "two_ray_log_determinant": 6.11397516692878,
+      "useful_days": 250.0,
+      "useful_seconds": 21600000.0
+    },
+    {
+      "C_times_coherence": null,
+      "H1_logLR_mean": 16.663800937056763,
+      "H1_logLR_variance": 233.28,
+      "admission": [
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.8640946394251084
+          },
+          "exact_H0_false_probability_per_component": 2.34878864996974e-12,
+          "exact_H1_presence_probability": 0.27503519434229,
+          "log_gate": 22.721063389585737,
+          "profile": "minute-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.9975369558645547
+          },
+          "exact_H0_false_probability_per_component": 6.249690671772749e-10,
+          "exact_H1_presence_probability": 0.38731912615900943,
+          "log_gate": 17.4227460230377,
+          "profile": "minute-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.983751540754799
+          },
+          "exact_H0_false_probability_per_component": 1.7638811275982285e-10,
+          "exact_H1_presence_probability": 0.3590406104031305,
+          "log_gate": 18.626718827363636,
+          "profile": "hourly-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.04551827781067695,
+            "upper": 1.0
+          },
+          "exact_H0_false_probability_per_component": 4.5146488031559775e-08,
+          "exact_H1_presence_probability": 0.49599378009299977,
+          "log_gate": 13.328401460815599,
+          "profile": "hourly-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.006289730016529734,
+            "upper": 1.0
+          },
+          "exact_H0_false_probability_per_component": 4.944028021562457e-09,
+          "exact_H1_presence_probability": 0.4373153601235962,
+          "log_gate": 15.44866499701569,
+          "profile": "daily-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.12680219812231522,
+            "upper": 1.0
+          },
+          "exact_H0_false_probability_per_component": 5.935662059519394e-07,
+          "exact_H1_presence_probability": 0.5709341704353226,
+          "log_gate": 10.843494811027599,
+          "profile": "daily-relaxed"
+        }
+      ],
+      "asymptotic_KL_rate_nats_per_second": 1e-06,
+      "coherence_seconds": "infinity",
+      "low_Ctau_rate_approximation_nats_per_second": null,
+      "nominal_mean_energy_E_N0": 21.6,
+      "two_ray_log_determinant": 4.936199062943238,
+      "useful_days": 250.0,
+      "useful_seconds": 21600000.0
+    },
+    {
+      "C_times_coherence": 0.01,
+      "H1_logLR_mean": 0.08595830511789833,
+      "H1_logLR_variance": 0.172775,
+      "admission": [
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.00033710829771850217
+          },
+          "log_gate": 22.721063389585737,
+          "profile": "minute-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.0005745053304064787
+          },
+          "log_gate": 17.4227460230377,
+          "profile": "minute-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.0005023513682198301
+          },
+          "log_gate": 18.626718827363636,
+          "profile": "hourly-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.0009842762153354431
+          },
+          "log_gate": 13.328401460815599,
+          "profile": "hourly-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.0007315223697623233
+          },
+          "log_gate": 15.44866499701569,
+          "profile": "daily-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.0014907586337404525
+          },
+          "log_gate": 10.843494811027599,
+          "profile": "daily-relaxed"
+        }
+      ],
+      "asymptotic_KL_rate_nats_per_second": 2.4875775821945956e-09,
+      "coherence_seconds": 10000.0,
+      "low_Ctau_rate_approximation_nats_per_second": 2.5e-09,
+      "nominal_mean_energy_E_N0": 34.56,
+      "two_ray_log_determinant": 34.474041694882104,
+      "useful_days": 400.0,
+      "useful_seconds": 34560000.0
+    },
+    {
+      "C_times_coherence": 0.09999999999999999,
+      "H1_logLR_mean": 0.8221887484256004,
+      "H1_logLR_variance": 1.7255,
+      "admission": [
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.0035851847864721694
+          },
+          "log_gate": 22.721063389585737,
+          "profile": "minute-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.006222412906512133
+          },
+          "log_gate": 17.4227460230377,
+          "profile": "minute-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.005413727514997868
+          },
+          "log_gate": 18.626718827363636,
+          "profile": "hourly-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.010911848826979906
+          },
+          "log_gate": 13.328401460815599,
+          "profile": "hourly-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.00800104581804563
+          },
+          "log_gate": 15.44866499701569,
+          "profile": "daily-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.0168914825921637
+          },
+          "log_gate": 10.843494811027599,
+          "profile": "daily-relaxed"
+        }
+      ],
+      "asymptotic_KL_rate_nats_per_second": 2.382303659696906e-08,
+      "coherence_seconds": 100000.0,
+      "low_Ctau_rate_approximation_nats_per_second": 2.4999999999999996e-08,
+      "nominal_mean_energy_E_N0": 34.56,
+      "two_ray_log_determinant": 33.7378112515744,
+      "useful_days": 400.0,
+      "useful_seconds": 34560000.0
+    },
+    {
+      "C_times_coherence": 1.0,
+      "H1_logLR_mean": 5.869800123493225,
+      "H1_logLR_variance": 17.03,
+      "admission": [
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.05657899909371319
+          },
+          "log_gate": 22.721063389585737,
+          "profile": "minute-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.11315572591843331
+          },
+          "log_gate": 17.4227460230377,
+          "profile": "minute-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.0947326979937503
+          },
+          "log_gate": 18.626718827363636,
+          "profile": "hourly-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.23437693350721173
+          },
+          "log_gate": 13.328401460815599,
+          "profile": "hourly-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.15654781851472133
+          },
+          "log_gate": 15.44866499701569,
+          "profile": "daily-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.4077319300541953
+          },
+          "log_gate": 10.843494811027599,
+          "profile": "daily-relaxed"
+        }
+      ],
+      "asymptotic_KL_rate_nats_per_second": 1.715728752538099e-07,
+      "coherence_seconds": 1000000.0,
+      "low_Ctau_rate_approximation_nats_per_second": 2.5e-07,
+      "nominal_mean_energy_E_N0": 34.56,
+      "two_ray_log_determinant": 28.690199876506775,
+      "useful_days": 400.0,
+      "useful_seconds": 34560000.0
+    },
+    {
+      "C_times_coherence": 10.0,
+      "H1_logLR_mean": 17.868078250747725,
+      "H1_logLR_variance": 147.82489410687694,
+      "admission": [
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.8625745994733041
+          },
+          "log_gate": 22.721063389585737,
+          "profile": "minute-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0013397952015247654,
+            "upper": 1.0
+          },
+          "log_gate": 17.4227460230377,
+          "profile": "minute-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.9961217394995568
+          },
+          "log_gate": 18.626718827363636,
+          "profile": "hourly-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.12235486456879373,
+            "upper": 1.0
+          },
+          "log_gate": 13.328401460815599,
+          "profile": "hourly-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.03808966265050064,
+            "upper": 1.0
+          },
+          "log_gate": 15.44866499701569,
+          "profile": "daily-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.25026553703910964,
+            "upper": 1.0
+          },
+          "log_gate": 10.843494811027599,
+          "profile": "daily-relaxed"
+        }
+      ],
+      "asymptotic_KL_rate_nats_per_second": 5.3667504192892e-07,
+      "coherence_seconds": 10000000.0,
+      "low_Ctau_rate_approximation_nats_per_second": 2.4999999999999998e-06,
+      "nominal_mean_energy_E_N0": 34.56,
+      "two_ray_log_determinant": 16.691921749252273,
+      "useful_days": 400.0,
+      "useful_seconds": 34560000.0
+    },
+    {
+      "C_times_coherence": 100.0,
+      "H1_logLR_mean": 26.08404951926473,
+      "H1_logLR_variance": 480.43634693383854,
+      "admission": [
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.022999018167232144,
+            "upper": 1.0
+          },
+          "log_gate": 22.721063389585737,
+          "profile": "minute-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.13505728165310882,
+            "upper": 1.0
+          },
+          "log_gate": 17.4227460230377,
+          "profile": "minute-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.1037440075720511,
+            "upper": 1.0
+          },
+          "log_gate": 18.626718827363636,
+          "profile": "hourly-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.2529866322039573,
+            "upper": 1.0
+          },
+          "log_gate": 13.328401460815599,
+          "profile": "hourly-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.19056833046762078,
+            "upper": 1.0
+          },
+          "log_gate": 15.44866499701569,
+          "profile": "daily-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.3259028626646897,
+            "upper": 1.0
+          },
+          "log_gate": 10.843494811027599,
+          "profile": "daily-relaxed"
+        }
+      ],
+      "asymptotic_KL_rate_nats_per_second": 8.190024875775822e-07,
+      "coherence_seconds": 100000000.0,
+      "low_Ctau_rate_approximation_nats_per_second": 2.4999999999999998e-05,
+      "nominal_mean_energy_E_N0": 34.56,
+      "two_ray_log_determinant": 8.47595048073527,
+      "useful_days": 400.0,
+      "useful_seconds": 34560000.0
+    },
+    {
+      "C_times_coherence": null,
+      "H1_logLR_mean": 28.74838486794799,
+      "H1_logLR_variance": 597.1968,
+      "admission": [
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.05734356343483896,
+            "upper": 1.0
+          },
+          "exact_H0_false_probability_per_component": 2.4279494688519357e-12,
+          "exact_H1_presence_probability": 0.5085531424707701,
+          "log_gate": 22.721063389585737,
+          "profile": "minute-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.17681040456292918,
+            "upper": 1.0
+          },
+          "exact_H0_false_probability_per_component": 5.412321609191987e-10,
+          "exact_H1_presence_probability": 0.6111124213579024,
+          "log_gate": 17.4227460230377,
+          "profile": "minute-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.146428738357488,
+            "upper": 1.0
+          },
+          "exact_H0_false_probability_per_component": 1.5898247479241827e-10,
+          "exact_H1_presence_probability": 0.58692132014731,
+          "log_gate": 18.626718827363636,
+          "profile": "hourly-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.28477085731644153,
+            "upper": 1.0
+          },
+          "exact_H0_false_probability_per_component": 3.4187360480350706e-08,
+          "exact_H1_presence_probability": 0.6962328760375605,
+          "log_gate": 13.328401460815599,
+          "profile": "hourly-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.22850699861046084,
+            "upper": 1.0
+          },
+          "exact_H0_false_probability_per_component": 4.011826535711742e-09,
+          "exact_H1_presence_probability": 0.6516901128141135,
+          "log_gate": 15.44866499701569,
+          "profile": "daily-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.3493042215796373,
+            "upper": 1.0
+          },
+          "exact_H0_false_probability_per_component": 4.1509119723445215e-07,
+          "exact_H1_presence_probability": 0.749059413851249,
+          "log_gate": 10.843494811027599,
+          "profile": "daily-relaxed"
+        }
+      ],
+      "asymptotic_KL_rate_nats_per_second": 1e-06,
+      "coherence_seconds": "infinity",
+      "low_Ctau_rate_approximation_nats_per_second": null,
+      "nominal_mean_energy_E_N0": 34.56,
+      "two_ray_log_determinant": 5.811615132052008,
+      "useful_days": 400.0,
+      "useful_seconds": 34560000.0
+    },
+    {
+      "C_times_coherence": 0.01,
+      "H1_logLR_mean": 0.1611826512034629,
+      "H1_logLR_variance": 0.323975,
+      "admission": [
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.0006361529332671767
+          },
+          "log_gate": 22.721063389585737,
+          "profile": "minute-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.0010861237005524982
+          },
+          "log_gate": 17.4227460230377,
+          "profile": "minute-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.0009492382033153936
+          },
+          "log_gate": 18.626718827363636,
+          "profile": "hourly-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.0018651450617625056
+          },
+          "log_gate": 13.328401460815599,
+          "profile": "hourly-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.0013843246124272176
+          },
+          "log_gate": 15.44866499701569,
+          "profile": "daily-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.0028310641457286565
+          },
+          "log_gate": 10.843494811027599,
+          "profile": "daily-relaxed"
+        }
+      ],
+      "asymptotic_KL_rate_nats_per_second": 2.4875775821945956e-09,
+      "coherence_seconds": 10000.0,
+      "low_Ctau_rate_approximation_nats_per_second": 2.5e-09,
+      "nominal_mean_energy_E_N0": 64.8,
+      "two_ray_log_determinant": 64.63881734879654,
+      "useful_days": 750.0,
+      "useful_seconds": 64800000.0
+    },
+    {
+      "C_times_coherence": 0.09999999999999999,
+      "H1_logLR_mean": 1.5425973751179447,
+      "H1_logLR_variance": 3.2375,
+      "admission": [
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.007166337706045874
+          },
+          "log_gate": 22.721063389585737,
+          "profile": "minute-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.012675369309601899
+          },
+          "log_gate": 17.4227460230377,
+          "profile": "minute-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.010970682393143865
+          },
+          "log_gate": 18.626718827363636,
+          "profile": "hourly-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.02277641062327342
+          },
+          "log_gate": 13.328401460815599,
+          "profile": "hourly-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.01646608837388478
+          },
+          "log_gate": 15.44866499701569,
+          "profile": "daily-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.036074757459932154
+          },
+          "log_gate": 10.843494811027599,
+          "profile": "daily-relaxed"
+        }
+      ],
+      "asymptotic_KL_rate_nats_per_second": 2.382303659696906e-08,
+      "coherence_seconds": 100000.0,
+      "low_Ctau_rate_approximation_nats_per_second": 2.4999999999999996e-08,
+      "nominal_mean_energy_E_N0": 64.8,
+      "two_ray_log_determinant": 63.257402624882054,
+      "useful_days": 750.0,
+      "useful_seconds": 64800000.0
+    },
+    {
+      "C_times_coherence": 1.0,
+      "H1_logLR_mean": 11.058163871168436,
+      "H1_logLR_variance": 32.15,
+      "admission": [
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.191171929813561
+          },
+          "log_gate": 22.721063389585737,
+          "profile": "minute-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.4424845386296564
+          },
+          "log_gate": 17.4227460230377,
+          "profile": "minute-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.35948689328768774
+          },
+          "log_gate": 18.626718827363636,
+          "profile": "hourly-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.8618383643997442
+          },
+          "log_gate": 13.328401460815599,
+          "profile": "hourly-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.6251640674542583
+          },
+          "log_gate": 15.44866499701569,
+          "profile": "daily-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0014313171468812128,
+            "upper": 1.0
+          },
+          "log_gate": 10.843494811027599,
+          "profile": "daily-relaxed"
+        }
+      ],
+      "asymptotic_KL_rate_nats_per_second": 1.715728752538099e-07,
+      "coherence_seconds": 1000000.0,
+      "low_Ctau_rate_approximation_nats_per_second": 2.5e-07,
+      "nominal_mean_energy_E_N0": 64.8,
+      "two_ray_log_determinant": 53.741836128831565,
+      "useful_days": 750.0,
+      "useful_seconds": 64800000.0
+    },
+    {
+      "C_times_coherence": 10.0,
+      "H1_logLR_mean": 34.09713151861452,
+      "H1_logLR_variance": 299.00005881438,
+      "admission": [
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.3020784301215007,
+            "upper": 1.0
+          },
+          "log_gate": 22.721063389585737,
+          "profile": "minute-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.4818339266776605,
+            "upper": 1.0
+          },
+          "log_gate": 17.4227460230377,
+          "profile": "minute-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.44458234092353327,
+            "upper": 1.0
+          },
+          "log_gate": 18.626718827363636,
+          "profile": "hourly-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.5906016731146834,
+            "upper": 1.0
+          },
+          "log_gate": 13.328401460815599,
+          "profile": "hourly-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.5376993324211341,
+            "upper": 1.0
+          },
+          "log_gate": 15.44866499701569,
+          "profile": "daily-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.6439338108682428,
+            "upper": 1.0
+          },
+          "log_gate": 10.843494811027599,
+          "profile": "daily-relaxed"
+        }
+      ],
+      "asymptotic_KL_rate_nats_per_second": 5.3667504192892e-07,
+      "coherence_seconds": 10000000.0,
+      "low_Ctau_rate_approximation_nats_per_second": 2.4999999999999998e-06,
+      "nominal_mean_energy_E_N0": 64.8,
+      "two_ray_log_determinant": 30.70286848138548,
+      "useful_days": 750.0,
+      "useful_seconds": 64800000.0
+    },
+    {
+      "C_times_coherence": 100.0,
+      "H1_logLR_mean": 50.84939670503824,
+      "H1_logLR_variance": 1424.06025842602,
+      "admission": [
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.35715984718367366,
+            "upper": 1.0
+          },
+          "log_gate": 22.721063389585737,
+          "profile": "minute-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.43965547854529274,
+            "upper": 1.0
+          },
+          "log_gate": 17.4227460230377,
+          "profile": "minute-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.4216688265666091,
+            "upper": 1.0
+          },
+          "log_gate": 18.626718827363636,
+          "profile": "hourly-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.4971335043009787,
+            "upper": 1.0
+          },
+          "log_gate": 13.328401460815599,
+          "profile": "hourly-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.46809281072570064,
+            "upper": 1.0
+          },
+          "log_gate": 15.44866499701569,
+          "profile": "daily-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.529163503970952,
+            "upper": 1.0
+          },
+          "log_gate": 10.843494811027599,
+          "profile": "daily-relaxed"
+        }
+      ],
+      "asymptotic_KL_rate_nats_per_second": 8.190024875775822e-07,
+      "coherence_seconds": 100000000.0,
+      "low_Ctau_rate_approximation_nats_per_second": 2.4999999999999998e-05,
+      "nominal_mean_energy_E_N0": 64.8,
+      "two_ray_log_determinant": 13.950603294961763,
+      "useful_days": 750.0,
+      "useful_seconds": 64800000.0
+    },
+    {
+      "C_times_coherence": null,
+      "H1_logLR_mean": 57.78288820003469,
+      "H1_logLR_variance": 2099.52,
+      "admission": [
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.36929599810501906,
+            "upper": 1.0
+          },
+          "exact_H0_false_probability_per_component": 1.5371489235871813e-12,
+          "exact_H1_presence_probability": 0.7659466197820987,
+          "log_gate": 22.721063389585737,
+          "profile": "minute-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.43689367894805153,
+            "upper": 1.0
+          },
+          "exact_H0_false_probability_per_component": 2.9958066970166485e-10,
+          "exact_H1_presence_probability": 0.8251111120837442,
+          "log_gate": 17.4227460230377,
+          "profile": "minute-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.4220537879233368,
+            "upper": 1.0
+          },
+          "exact_H0_false_probability_per_component": 9.069887838847301e-11,
+          "exact_H1_presence_probability": 0.8118527877682821,
+          "log_gate": 18.626718827363636,
+          "profile": "hourly-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.48487156052700014,
+            "upper": 1.0
+          },
+          "exact_H0_false_probability_per_component": 1.7109605862806337e-08,
+          "exact_H1_presence_probability": 0.8688127531459132,
+          "log_gate": 13.328401460815599,
+          "profile": "hourly-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.46051429502538044,
+            "upper": 1.0
+          },
+          "exact_H0_false_probability_per_component": 2.1143864528059847e-09,
+          "exact_H1_presence_probability": 0.8464900642989421,
+          "log_gate": 15.44866499701569,
+          "profile": "daily-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.5120602873562526,
+            "upper": 1.0
+          },
+          "exact_H0_false_probability_per_component": 1.9583846277434126e-07,
+          "exact_H1_presence_probability": 0.89387430532874,
+          "log_gate": 10.843494811027599,
+          "profile": "daily-relaxed"
+        }
+      ],
+      "asymptotic_KL_rate_nats_per_second": 1e-06,
+      "coherence_seconds": "infinity",
+      "low_Ctau_rate_approximation_nats_per_second": null,
+      "nominal_mean_energy_E_N0": 64.8,
+      "two_ray_log_determinant": 7.01711179996531,
+      "useful_days": 750.0,
+      "useful_seconds": 64800000.0
+    },
+    {
+      "C_times_coherence": 0.01,
+      "H1_logLR_mean": 0.21491432697886617,
+      "H1_logLR_variance": 0.431975,
+      "admission": [
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.000852091072552511
+          },
+          "log_gate": 22.721063389585737,
+          "profile": "minute-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.0014567103682687293
+          },
+          "log_gate": 17.4227460230377,
+          "profile": "minute-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.0012726613113507206
+          },
+          "log_gate": 18.626718827363636,
+          "profile": "hourly-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.0025057205690602463
+          },
+          "log_gate": 13.328401460815599,
+          "profile": "hourly-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.0018579639058528051
+          },
+          "log_gate": 15.44866499701569,
+          "profile": "daily-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.003809347084360564
+          },
+          "log_gate": 10.843494811027599,
+          "profile": "daily-relaxed"
+        }
+      ],
+      "asymptotic_KL_rate_nats_per_second": 2.4875775821945956e-09,
+      "coherence_seconds": 10000.0,
+      "low_Ctau_rate_approximation_nats_per_second": 2.5e-09,
+      "nominal_mean_energy_E_N0": 86.4,
+      "two_ray_log_determinant": 86.18508567302113,
+      "useful_days": 1000.0,
+      "useful_seconds": 86400000.0
+    },
+    {
+      "C_times_coherence": 0.09999999999999999,
+      "H1_logLR_mean": 2.0571749656124765,
+      "H1_logLR_variance": 4.3175,
+      "admission": [
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.010010113639233388
+          },
+          "log_gate": 22.721063389585737,
+          "profile": "minute-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.017958285489657035
+          },
+          "log_gate": 17.4227460230377,
+          "profile": "minute-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.015482275085755613
+          },
+          "log_gate": 18.626718827363636,
+          "profile": "hourly-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.032868180581717206
+          },
+          "log_gate": 13.328401460815599,
+          "profile": "hourly-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.02350945619951438
+          },
+          "log_gate": 15.44866499701569,
+          "profile": "daily-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.05296446663218402
+          },
+          "log_gate": 10.843494811027599,
+          "profile": "daily-relaxed"
+        }
+      ],
+      "asymptotic_KL_rate_nats_per_second": 2.382303659696906e-08,
+      "coherence_seconds": 100000.0,
+      "low_Ctau_rate_approximation_nats_per_second": 2.4999999999999996e-08,
+      "nominal_mean_energy_E_N0": 86.4,
+      "two_ray_log_determinant": 84.34282503438753,
+      "useful_days": 1000.0,
+      "useful_seconds": 86400000.0
+    },
+    {
+      "C_times_coherence": 1.0,
+      "H1_logLR_mean": 14.76413797665073,
+      "H1_logLR_variance": 42.95,
+      "admission": [
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.4041871263217792
+          },
+          "log_gate": 22.721063389585737,
+          "profile": "minute-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.858687493664651
+          },
+          "log_gate": 17.4227460230377,
+          "profile": "minute-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.7421867671164969
+          },
+          "log_gate": 18.626718827363636,
+          "profile": "hourly-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.04579600102984814,
+            "upper": 1.0
+          },
+          "log_gate": 13.328401460815599,
+          "profile": "hourly-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.989207908886506
+          },
+          "log_gate": 15.44866499701569,
+          "profile": "daily-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.26356417272438387,
+            "upper": 1.0
+          },
+          "log_gate": 10.843494811027599,
+          "profile": "daily-relaxed"
+        }
+      ],
+      "asymptotic_KL_rate_nats_per_second": 1.715728752538099e-07,
+      "coherence_seconds": 1000000.0,
+      "low_Ctau_rate_approximation_nats_per_second": 2.5e-07,
+      "nominal_mean_energy_E_N0": 86.4,
+      "two_ray_log_determinant": 71.63586202334928,
+      "useful_days": 1000.0,
+      "useful_seconds": 86400000.0
+    },
+    {
+      "C_times_coherence": 10.0,
+      "H1_logLR_mean": 45.689312424279194,
+      "H1_logLR_variance": 407.0000007822244,
+      "admission": [
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.5644918371735335,
+            "upper": 1.0
+          },
+          "log_gate": 22.721063389585737,
+          "profile": "minute-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.6625203867709719,
+            "upper": 1.0
+          },
+          "log_gate": 17.4227460230377,
+          "profile": "minute-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.642789427939849,
+            "upper": 1.0
+          },
+          "log_gate": 18.626718827363636,
+          "profile": "hourly-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.7201265246673225,
+            "upper": 1.0
+          },
+          "log_gate": 13.328401460815599,
+          "profile": "hourly-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.6920158914951232,
+            "upper": 1.0
+          },
+          "log_gate": 15.44866499701569,
+          "profile": "daily-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.748956194831895,
+            "upper": 1.0
+          },
+          "log_gate": 10.843494811027599,
+          "profile": "daily-relaxed"
+        }
+      ],
+      "asymptotic_KL_rate_nats_per_second": 5.3667504192892e-07,
+      "coherence_seconds": 10000000.0,
+      "low_Ctau_rate_approximation_nats_per_second": 2.4999999999999998e-06,
+      "nominal_mean_energy_E_N0": 86.4,
+      "two_ray_log_determinant": 40.710687575720804,
+      "useful_days": 1000.0,
+      "useful_seconds": 86400000.0
+    },
+    {
+      "C_times_coherence": 100.0,
+      "H1_logLR_mean": 68.53984751672012,
+      "H1_logLR_variance": 2264.0983339878376,
+      "admission": [
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.48112307881355176,
+            "upper": 1.0
+          },
+          "log_gate": 22.721063389585737,
+          "profile": "minute-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.5357653984882905,
+            "upper": 1.0
+          },
+          "log_gate": 17.4227460230377,
+          "profile": "minute-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.5238908594110684,
+            "upper": 1.0
+          },
+          "log_gate": 18.626718827363636,
+          "profile": "hourly-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.5738089310091224,
+            "upper": 1.0
+          },
+          "log_gate": 13.328401460815599,
+          "profile": "hourly-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.5545544171430907,
+            "upper": 1.0
+          },
+          "log_gate": 15.44866499701569,
+          "profile": "daily-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.5951883585199289,
+            "upper": 1.0
+          },
+          "log_gate": 10.843494811027599,
+          "profile": "daily-relaxed"
+        }
+      ],
+      "asymptotic_KL_rate_nats_per_second": 8.190024875775822e-07,
+      "coherence_seconds": 100000000.0,
+      "low_Ctau_rate_approximation_nats_per_second": 2.4999999999999998e-05,
+      "nominal_mean_energy_E_N0": 86.4,
+      "two_ray_log_determinant": 17.860152483279883,
+      "useful_days": 1000.0,
+      "useful_seconds": 86400000.0
+    },
+    {
+      "C_times_coherence": null,
+      "H1_logLR_mean": 78.8225504218327,
+      "H1_logLR_variance": 3732.48,
+      "admission": [
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.45747708377055435,
+            "upper": 1.0
+          },
+          "exact_H0_false_probability_per_component": 1.1017341533261706e-12,
+          "exact_H1_presence_probability": 0.8437240542275559,
+          "log_gate": 22.721063389585737,
+          "profile": "minute-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.5024962612249898,
+            "upper": 1.0
+          },
+          "exact_H0_false_probability_per_component": 2.068998987417513e-10,
+          "exact_H1_presence_probability": 0.8850587129474339,
+          "log_gate": 17.4227460230377,
+          "profile": "minute-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.4925950523396663,
+            "upper": 1.0
+          },
+          "exact_H0_false_probability_per_component": 6.316164565629604e-11,
+          "exact_H1_presence_probability": 0.8759278640502672,
+          "log_gate": 18.626718827363636,
+          "profile": "hourly-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.5347174070778399,
+            "upper": 1.0
+          },
+          "exact_H0_false_probability_per_component": 1.1497019061014875e-08,
+          "exact_H1_presence_probability": 0.9146291534446499,
+          "log_gate": 13.328401460815599,
+          "profile": "hourly-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.5183107023667878,
+            "upper": 1.0
+          },
+          "exact_H0_false_probability_per_component": 1.4408351149758985e-09,
+          "exact_H1_presence_probability": 0.8996247549290324,
+          "log_gate": 15.44866499701569,
+          "profile": "daily-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.5531907559222238,
+            "upper": 1.0
+          },
+          "exact_H0_false_probability_per_component": 1.295389300211133e-07,
+          "exact_H1_presence_probability": 0.9312295903498112,
+          "log_gate": 10.843494811027599,
+          "profile": "daily-relaxed"
+        }
+      ],
+      "asymptotic_KL_rate_nats_per_second": 1e-06,
+      "coherence_seconds": "infinity",
+      "low_Ctau_rate_approximation_nats_per_second": null,
+      "nominal_mean_energy_E_N0": 86.4,
+      "two_ray_log_determinant": 7.577449578167305,
+      "useful_days": 1000.0,
+      "useful_seconds": 86400000.0
+    },
+    {
+      "C_times_coherence": 0.01,
+      "H1_logLR_mean": 0.3223776785296727,
+      "H1_logLR_variance": 0.647975,
+      "admission": [
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.0012898898483305395
+          },
+          "log_gate": 22.721063389585737,
+          "profile": "minute-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.0022109862291292623
+          },
+          "log_gate": 17.4227460230377,
+          "profile": "minute-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.0019302383751875673
+          },
+          "log_gate": 18.626718827363636,
+          "profile": "hourly-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.003816003140959843
+          },
+          "log_gate": 13.328401460815599,
+          "profile": "hourly-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.002824004438613312
+          },
+          "log_gate": 15.44866499701569,
+          "profile": "daily-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.005819687936242934
+          },
+          "log_gate": 10.843494811027599,
+          "profile": "daily-relaxed"
+        }
+      ],
+      "asymptotic_KL_rate_nats_per_second": 2.4875775821945956e-09,
+      "coherence_seconds": 10000.0,
+      "low_Ctau_rate_approximation_nats_per_second": 2.5e-09,
+      "nominal_mean_energy_E_N0": 129.6,
+      "two_ray_log_determinant": 129.27762232147032,
+      "useful_days": 1500.0,
+      "useful_seconds": 129600000.0
+    },
+    {
+      "C_times_coherence": 0.09999999999999999,
+      "H1_logLR_mean": 3.08633014660154,
+      "H1_logLR_variance": 6.4775,
+      "admission": [
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.016524224175570288
+          },
+          "log_gate": 22.721063389585737,
+          "profile": "minute-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.030552757971571396
+          },
+          "log_gate": 17.4227460230377,
+          "profile": "minute-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.026120933817960098
+          },
+          "log_gate": 18.626718827363636,
+          "profile": "hourly-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.058158053084002834
+          },
+          "log_gate": 13.328401460815599,
+          "profile": "hourly-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.04066104139157164
+          },
+          "log_gate": 15.44866499701569,
+          "profile": "daily-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.09718518744804837
+          },
+          "log_gate": 10.843494811027599,
+          "profile": "daily-relaxed"
+        }
+      ],
+      "asymptotic_KL_rate_nats_per_second": 2.382303659696906e-08,
+      "coherence_seconds": 100000.0,
+      "low_Ctau_rate_approximation_nats_per_second": 2.4999999999999996e-08,
+      "nominal_mean_energy_E_N0": 129.6,
+      "two_ray_log_determinant": 126.51366985339845,
+      "useful_days": 1500.0,
+      "useful_seconds": 129600000.0
+    },
+    {
+      "C_times_coherence": 1.0,
+      "H1_logLR_mean": 22.17608618761532,
+      "H1_logLR_variance": 64.55,
+      "admission": [
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.9954199862757346
+          },
+          "log_gate": 22.721063389585737,
+          "profile": "minute-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.2592740726743716,
+            "upper": 1.0
+          },
+          "log_gate": 17.4227460230377,
+          "profile": "minute-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.16329661487264277,
+            "upper": 1.0
+          },
+          "log_gate": 18.626718827363636,
+          "profile": "hourly-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.5480689575444093,
+            "upper": 1.0
+          },
+          "log_gate": 13.328401460815599,
+          "profile": "hourly-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.4121568113818033,
+            "upper": 1.0
+          },
+          "log_gate": 15.44866499701569,
+          "profile": "daily-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.6655052665937383,
+            "upper": 1.0
+          },
+          "log_gate": 10.843494811027599,
+          "profile": "daily-relaxed"
+        }
+      ],
+      "asymptotic_KL_rate_nats_per_second": 1.715728752538099e-07,
+      "coherence_seconds": 1000000.0,
+      "low_Ctau_rate_approximation_nats_per_second": 2.5e-07,
+      "nominal_mean_energy_E_N0": 129.6,
+      "two_ray_log_determinant": 107.42391381238468,
+      "useful_days": 1500.0,
+      "useful_seconds": 129600000.0
+    },
+    {
+      "C_times_coherence": 10.0,
+      "H1_logLR_mean": 68.87367423560853,
+      "H1_logLR_variance": 623.0000000001384,
+      "admission": [
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.7737066352674916,
+            "upper": 1.0
+          },
+          "log_gate": 22.721063389585737,
+          "profile": "minute-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.8094916585034436,
+            "upper": 1.0
+          },
+          "log_gate": 17.4227460230377,
+          "profile": "minute-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.8020812618452743,
+            "upper": 1.0
+          },
+          "log_gate": 18.626718827363636,
+          "profile": "hourly-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.8319974627143307,
+            "upper": 1.0
+          },
+          "log_gate": 13.328401460815599,
+          "profile": "hourly-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.820834482861488,
+            "upper": 1.0
+          },
+          "log_gate": 15.44866499701569,
+          "profile": "daily-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.8438792805812961,
+            "upper": 1.0
+          },
+          "log_gate": 10.843494811027599,
+          "profile": "daily-relaxed"
+        }
+      ],
+      "asymptotic_KL_rate_nats_per_second": 5.3667504192892e-07,
+      "coherence_seconds": 10000000.0,
+      "low_Ctau_rate_approximation_nats_per_second": 2.4999999999999998e-06,
+      "nominal_mean_energy_E_N0": 129.6,
+      "two_ray_log_determinant": 60.72632576439146,
+      "useful_days": 1500.0,
+      "useful_seconds": 129600000.0
+    },
+    {
+      "C_times_coherence": 100.0,
+      "H1_logLR_mean": 103.9207549415692,
+      "H1_logLR_variance": 4167.175374863149,
+      "admission": [
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.612736388352527,
+            "upper": 1.0
+          },
+          "log_gate": 22.721063389585737,
+          "profile": "minute-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.6422743216515462,
+            "upper": 1.0
+          },
+          "log_gate": 17.4227460230377,
+          "profile": "minute-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.6358079823792212,
+            "upper": 1.0
+          },
+          "log_gate": 18.626718827363636,
+          "profile": "hourly-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.6632354211066861,
+            "upper": 1.0
+          },
+          "log_gate": 13.328401460815599,
+          "profile": "hourly-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.6525757461264537,
+            "upper": 1.0
+          },
+          "log_gate": 15.44866499701569,
+          "profile": "daily-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.6752146390025514,
+            "upper": 1.0
+          },
+          "log_gate": 10.843494811027599,
+          "profile": "daily-relaxed"
+        }
+      ],
+      "asymptotic_KL_rate_nats_per_second": 8.190024875775822e-07,
+      "coherence_seconds": 100000000.0,
+      "low_Ctau_rate_approximation_nats_per_second": 2.4999999999999998e-05,
+      "nominal_mean_energy_E_N0": 129.6,
+      "two_ray_log_determinant": 25.679245058430794,
+      "useful_days": 1500.0,
+      "useful_seconds": 129600000.0
+    },
+    {
+      "C_times_coherence": null,
+      "H1_logLR_mean": 121.22676032333746,
+      "H1_logLR_variance": 8398.08,
+      "admission": [
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.5360549061125864,
+            "upper": 1.0
+          },
+          "exact_H0_false_probability_per_component": 6.315278908201199e-13,
+          "exact_H1_presence_probability": 0.9158438629480404,
+          "log_gate": 22.721063389585737,
+          "profile": "minute-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.5619921131463198,
+            "upper": 1.0
+          },
+          "exact_H0_false_probability_per_component": 1.1442827663762525e-10,
+          "exact_H1_presence_probability": 0.9389604703059992,
+          "log_gate": 17.4227460230377,
+          "profile": "minute-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.55624056946324,
+            "upper": 1.0
+          },
+          "exact_H0_false_probability_per_component": 3.521143649622281e-11,
+          "exact_H1_presence_probability": 0.9339244020163415,
+          "log_gate": 18.626718827363636,
+          "profile": "hourly-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.5809369724406935,
+            "upper": 1.0
+          },
+          "exact_H0_false_probability_per_component": 6.1953846994377815e-09,
+          "exact_H1_presence_probability": 0.9549998588348843,
+          "log_gate": 13.328401460815599,
+          "profile": "hourly-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.5712440209102485,
+            "upper": 1.0
+          },
+          "exact_H0_false_probability_per_component": 7.867596141235781e-10,
+          "exact_H1_presence_probability": 0.9469125531970164,
+          "log_gate": 15.44866499701569,
+          "profile": "daily-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.5919804924275244,
+            "upper": 1.0
+          },
+          "exact_H0_false_probability_per_component": 6.878940433311691e-08,
+          "exact_H1_presence_probability": 0.9638263371082656,
+          "log_gate": 10.843494811027599,
+          "profile": "daily-relaxed"
+        }
+      ],
+      "asymptotic_KL_rate_nats_per_second": 1e-06,
+      "coherence_seconds": "infinity",
+      "low_Ctau_rate_approximation_nats_per_second": null,
+      "nominal_mean_energy_E_N0": 129.6,
+      "two_ray_log_determinant": 8.373239676662543,
+      "useful_days": 1500.0,
+      "useful_seconds": 129600000.0
+    },
+    {
+      "C_times_coherence": 0.01,
+      "H1_logLR_mean": 0.7850074069558948,
+      "H1_logLR_variance": 1.577855,
+      "admission": [
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.0032683476732999644
+          },
+          "log_gate": 22.721063389585737,
+          "profile": "minute-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.005667741383829398
+          },
+          "log_gate": 17.4227460230377,
+          "profile": "minute-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.0049322685189002674
+          },
+          "log_gate": 18.626718827363636,
+          "profile": "hourly-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.009928949922424735
+          },
+          "log_gate": 13.328401460815599,
+          "profile": "hourly-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.007284625280675161
+          },
+          "log_gate": 15.44866499701569,
+          "profile": "daily-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.015356100024682733
+          },
+          "log_gate": 10.843494811027599,
+          "profile": "daily-relaxed"
+        }
+      ],
+      "asymptotic_KL_rate_nats_per_second": 2.4875775821945956e-09,
+      "coherence_seconds": 10000.0,
+      "low_Ctau_rate_approximation_nats_per_second": 2.5e-09,
+      "nominal_mean_energy_E_N0": 315.576,
+      "two_ray_log_determinant": 314.7909925930441,
+      "useful_days": 3652.5,
+      "useful_seconds": 315576000.0
+    },
+    {
+      "C_times_coherence": 0.09999999999999999,
+      "H1_logLR_mean": 7.516843200759458,
+      "H1_logLR_variance": 15.7763,
+      "admission": [
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.06388598601506933
+          },
+          "log_gate": 22.721063389585737,
+          "profile": "minute-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.13850619222815
+          },
+          "log_gate": 17.4227460230377,
+          "profile": "minute-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.11333089954986827
+          },
+          "log_gate": 18.626718827363636,
+          "profile": "hourly-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.31838825045071284
+          },
+          "log_gate": 13.328401460815599,
+          "profile": "hourly-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.2004864728846786
+          },
+          "log_gate": 15.44866499701569,
+          "profile": "daily-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.0,
+            "upper": 0.5877268690253443
+          },
+          "log_gate": 10.843494811027599,
+          "profile": "daily-relaxed"
+        }
+      ],
+      "asymptotic_KL_rate_nats_per_second": 2.382303659696906e-08,
+      "coherence_seconds": 100000.0,
+      "low_Ctau_rate_approximation_nats_per_second": 2.4999999999999996e-08,
+      "nominal_mean_energy_E_N0": 315.576,
+      "two_ray_log_determinant": 308.05915679924055,
+      "useful_days": 3652.5,
+      "useful_seconds": 315576000.0
+    },
+    {
+      "C_times_coherence": 1.0,
+      "H1_logLR_mean": 54.08452323581787,
+      "H1_logLR_variance": 157.538,
+      "admission": [
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.8619546414965653,
+            "upper": 1.0
+          },
+          "log_gate": 22.721063389585737,
+          "profile": "minute-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.895088244720405,
+            "upper": 1.0
+          },
+          "log_gate": 17.4227460230377,
+          "profile": "minute-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.8886495052549213,
+            "upper": 1.0
+          },
+          "log_gate": 18.626718827363636,
+          "profile": "hourly-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.9133739983543583,
+            "upper": 1.0
+          },
+          "log_gate": 13.328401460815599,
+          "profile": "hourly-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.9045379030944837,
+            "upper": 1.0
+          },
+          "log_gate": 15.44866499701569,
+          "profile": "daily-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.9222926586487424,
+            "upper": 1.0
+          },
+          "log_gate": 10.843494811027599,
+          "profile": "daily-relaxed"
+        }
+      ],
+      "asymptotic_KL_rate_nats_per_second": 1.715728752538099e-07,
+      "coherence_seconds": 1000000.0,
+      "low_Ctau_rate_approximation_nats_per_second": 2.5e-07,
+      "nominal_mean_energy_E_N0": 315.576,
+      "two_ray_log_determinant": 261.49147676418215,
+      "useful_days": 3652.5,
+      "useful_seconds": 315576000.0
+    },
+    {
+      "C_times_coherence": 10.0,
+      "H1_logLR_mean": 168.68235183338138,
+      "H1_logLR_variance": 1552.88,
+      "admission": [
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.9320627925347592,
+            "upper": 1.0
+          },
+          "log_gate": 22.721063389585737,
+          "profile": "minute-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.9364416396753642,
+            "upper": 1.0
+          },
+          "log_gate": 17.4227460230377,
+          "profile": "minute-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.9354836913723361,
+            "upper": 1.0
+          },
+          "log_gate": 18.626718827363636,
+          "profile": "hourly-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.9395477916396205,
+            "upper": 1.0
+          },
+          "log_gate": 13.328401460815599,
+          "profile": "hourly-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.937967781197489,
+            "upper": 1.0
+          },
+          "log_gate": 15.44866499701569,
+          "profile": "daily-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.9413254404644626,
+            "upper": 1.0
+          },
+          "log_gate": 10.843494811027599,
+          "profile": "daily-relaxed"
+        }
+      ],
+      "asymptotic_KL_rate_nats_per_second": 5.3667504192892e-07,
+      "coherence_seconds": 10000000.0,
+      "low_Ctau_rate_approximation_nats_per_second": 2.4999999999999998e-06,
+      "nominal_mean_energy_E_N0": 315.576,
+      "two_ray_log_determinant": 146.89364816661862,
+      "useful_days": 3652.5,
+      "useful_seconds": 315576000.0
+    },
+    {
+      "C_times_coherence": 100.0,
+      "H1_logLR_mean": 256.2355615712911,
+      "H1_logLR_variance": 13283.338179819537,
+      "admission": [
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.8041162648269892,
+            "upper": 1.0
+          },
+          "log_gate": 22.721063389585737,
+          "profile": "minute-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.8110878582021125,
+            "upper": 1.0
+          },
+          "log_gate": 17.4227460230377,
+          "profile": "minute-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.8095341194245087,
+            "upper": 1.0
+          },
+          "log_gate": 18.626718827363636,
+          "profile": "hourly-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.8162422491185244,
+            "upper": 1.0
+          },
+          "log_gate": 13.328401460815599,
+          "profile": "hourly-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.8135977082662582,
+            "upper": 1.0
+          },
+          "log_gate": 15.44866499701569,
+          "profile": "daily-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.8192757971102665,
+            "upper": 1.0
+          },
+          "log_gate": 10.843494811027599,
+          "profile": "daily-relaxed"
+        }
+      ],
+      "asymptotic_KL_rate_nats_per_second": 8.190024875775822e-07,
+      "coherence_seconds": 100000000.0,
+      "low_Ctau_rate_approximation_nats_per_second": 2.4999999999999998e-05,
+      "nominal_mean_energy_E_N0": 315.576,
+      "two_ray_log_determinant": 59.34043842870889,
+      "useful_days": 3652.5,
+      "useful_seconds": 315576000.0
+    },
+    {
+      "C_times_coherence": null,
+      "H1_logLR_mean": 305.44086004158584,
+      "H1_logLR_variance": 49794.105888,
+      "admission": [
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.6161552242791882,
+            "upper": 1.0
+          },
+          "exact_H0_false_probability_per_component": 1.4879906320099538e-13,
+          "exact_H1_presence_probability": 0.9811072186632961,
+          "log_gate": 22.721063389585737,
+          "profile": "minute-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.6248990314397395,
+            "upper": 1.0
+          },
+          "exact_H0_false_probability_per_component": 2.5958885969070046e-11,
+          "exact_H1_presence_probability": 0.9864131768670475,
+          "log_gate": 17.4227460230377,
+          "profile": "minute-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.6229331996706451,
+            "upper": 1.0
+          },
+          "exact_H0_false_probability_per_component": 8.054366201637881e-12,
+          "exact_H1_presence_probability": 0.9852740249477061,
+          "log_gate": 18.626718827363636,
+          "profile": "hourly-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.6314926906177694,
+            "upper": 1.0
+          },
+          "exact_H0_false_probability_per_component": 1.3692532569480283e-09,
+          "exact_H1_presence_probability": 0.9899810138206558,
+          "log_gate": 13.328401460815599,
+          "profile": "hourly-relaxed"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.6280957320793916,
+            "upper": 1.0
+          },
+          "exact_H0_false_probability_per_component": 1.7617162715671155e-10,
+          "exact_H1_presence_probability": 0.9881933334515525,
+          "log_gate": 15.44866499701569,
+          "profile": "daily-strict"
+        },
+        {
+          "H1_presence_Cantelli_bounds": {
+            "lower": 0.6354262615684054,
+            "upper": 1.0
+          },
+          "exact_H0_false_probability_per_component": 1.4995923217371705e-08,
+          "exact_H1_presence_probability": 0.9919072389823278,
+          "log_gate": 10.843494811027599,
+          "profile": "daily-relaxed"
+        }
+      ],
+      "asymptotic_KL_rate_nats_per_second": 1e-06,
+      "coherence_seconds": "infinity",
+      "low_Ctau_rate_approximation_nats_per_second": null,
+      "nominal_mean_energy_E_N0": 315.576,
+      "two_ray_log_determinant": 10.13513995841419,
+      "useful_days": 3652.5,
+      "useful_seconds": 315576000.0
+    }
+  ],
+  "archived_formula_parity": {
+    "finite_grid_points": 35,
+    "maximum_relative_logdet_difference": 2.7701122224460252e-14,
+    "maximum_relative_variance_difference": 5.726225220181192e-15,
+    "scope": "same analytical formulas, independently arranged numerical evaluation; not independent physical validation"
+  },
+  "assumptions_and_limits": [
+    "C is total-triplet C/N0 in Hz (inverse seconds), not an information rate; nominal expected E/N0=C*T.",
+    "All T is usable full-power-equivalent time; no outage, shaping, start/stop or interleaving overhead is charged.",
+    "The OU presence observer knows the transmitted waveform, timing, epoch, deterministic ray Dopplers and common oscillator phase; only stationary proper-complex Gaussian ray coefficients are marginalized.",
+    "Two ray observation channels are exactly orthogonal, each with nominal power1/2. This is an ideal observation model, not the summed sampled triad waveform.",
+    "Gaussian noise is white with exactly known stationary spectral density. No noise-scale calibration error is simulated.",
+    "The static Gaussian prior includes random realized total power and deep fades; it is distinct from the physical simulator's fixed equal-power rays.",
+    "The likelihood gate uses Markov's null bound and union accounting over16 method,8 duration,2 bit alternatives and the declared attempts. Half of the total alpha goes to scores and half remains reserved for calibration. It is not an exact Neyman-Pearson null quantile for the OU law.",
+    "Daily means one scheduled attempt in either the24-hour strict horizon or12-hour relaxed horizon. A sparser schedule is an operational restriction, not a receiver gain.",
+    "OU moments are evaluated at80 decimal digits, then rounded to FP64. Cantelli bounds are evaluated in FP64 from those rounded moments; no interval-arithmetic certificate is claimed.",
+    "These presence probabilities and moment bounds do not include a competing wrong-bit likelihood or establish correct-bit reception. An upper bound here does not exclude all alternative detectors at the same overall false-admission probability.",
+    "Known-waveform energy requirements apply only to their assigned per-component Gaussian false tail. The family union allocation is conservative and not a universal fundamental minimum duration.",
+    "No normal approximation, Monte Carlo trial, sampled channel simulation or empirical rare-tail extrapolation is used."
+  ],
+  "cn0_db_hz": -60.0,
+  "cn0_linear_hz": 1e-06,
+  "equations": {
+    "Cantelli": "P(X>=g)<=v/(v+(g-m)^2) when g>m; P(X>=g)>=1-v/(v+(m-g)^2) when m>g",
+    "H1_logLR": "sum_j lambda_j*Exp_j(1)-sum_j log(1+lambda_j), summed across both rays",
+    "asymptotic_KL_rate": "C*(C*tau)/(sqrt(1+C*tau)+1)^2; tends to C^2*tau/4 only when C*tau << 1",
+    "logdet_one_ray": "-T/tau+log(cosh(z*T/tau)+(1+C*tau/2)/z*sinh(z*T/tau)); z=sqrt(1+C*tau)",
+    "mean": "C*T-2*logdet_one_ray",
+    "ray_kernel": "K_c(t,s)=(C/2)*exp(-abs(t-s)/tau), c=1,2 independently observed orthogonal rays",
+    "static_limit": "logLR_H1=(C*T/2)*Gamma(2,1)-2*log(1+C*T/2)",
+    "variance": "C^2/2*(T*tau-tau^2/2*(1-exp(-2*T/tau)))"
+  },
+  "known_waveform_and_gate_profiles": [
+    {
+      "declared_schedule": "minute",
+      "id": "minute-strict",
+      "known_waveform_reference": {
+        "attempt_spacing_seconds": 60.0,
+        "bit_hypotheses_N": 2,
+        "duration_alternatives_D": 8,
+        "horizon_seconds": 86400.0,
+        "inversion_check_detection_probability": 0.99,
+        "known_waveform_Z_detection_quantile": 2.3263478740408408,
+        "known_waveform_Z_false_threshold": 6.314368218454082,
+        "method_alternatives_K": 16,
+        "per_hypothesis_false_tail": 1.3563368055555557e-10,
+        "required_known_waveform_E_N0_db": 15.720694758984324,
+        "required_known_waveform_E_N0_linear": 37.330987295550365,
+        "scheduled_attempts": 1440,
+        "score_alpha": 5e-05,
+        "target_detection_probability": 0.99,
+        "total_false_admission_target": 0.0001
+      },
+      "matched_LR_log_gate": 22.721063389585737,
+      "required_known_waveform_useful_days_at_minus60": 432.0716122170182,
+      "required_known_waveform_useful_seconds_at_minus60": 37330987.29555037,
+      "target_profile": "strict"
+    },
+    {
+      "declared_schedule": "minute",
+      "id": "minute-relaxed",
+      "known_waveform_reference": {
+        "attempt_spacing_seconds": 60.0,
+        "bit_hypotheses_N": 2,
+        "duration_alternatives_D": 8,
+        "horizon_seconds": 43200.0,
+        "inversion_check_detection_probability": 0.8999999999999999,
+        "known_waveform_Z_detection_quantile": 1.2815515655446004,
+        "known_waveform_Z_false_threshold": 5.436775345839774,
+        "method_alternatives_K": 16,
+        "per_hypothesis_false_tail": 2.7126736111111112e-08,
+        "required_known_waveform_E_N0_db": 13.534922696039345,
+        "required_known_waveform_E_N0_linear": 22.567958244115747,
+        "scheduled_attempts": 720,
+        "score_alpha": 0.005,
+        "target_detection_probability": 0.9,
+        "total_false_admission_target": 0.01
+      },
+      "matched_LR_log_gate": 17.4227460230377,
+      "required_known_waveform_useful_days_at_minus60": 261.2032204180063,
+      "required_known_waveform_useful_seconds_at_minus60": 22567958.244115748,
+      "target_profile": "relaxed"
+    },
+    {
+      "declared_schedule": "hourly",
+      "id": "hourly-strict",
+      "known_waveform_reference": {
+        "attempt_spacing_seconds": 3600.0,
+        "bit_hypotheses_N": 2,
+        "duration_alternatives_D": 8,
+        "horizon_seconds": 86400.0,
+        "inversion_check_detection_probability": 0.99,
+        "known_waveform_Z_detection_quantile": 2.3263478740408408,
+        "known_waveform_Z_false_threshold": 5.647539532247912,
+        "method_alternatives_K": 16,
+        "per_hypothesis_false_tail": 8.138020833333334e-09,
+        "required_known_waveform_E_N0_db": 15.02310202335466,
+        "required_known_waveform_E_N0_linear": 31.791440184085182,
+        "scheduled_attempts": 24,
+        "score_alpha": 5e-05,
+        "target_detection_probability": 0.99,
+        "total_false_admission_target": 0.0001
+      },
+      "matched_LR_log_gate": 18.626718827363636,
+      "required_known_waveform_useful_days_at_minus60": 367.95648361209703,
+      "required_known_waveform_useful_seconds_at_minus60": 31791440.184085183,
+      "target_profile": "strict"
+    },
+    {
+      "declared_schedule": "hourly",
+      "id": "hourly-relaxed",
+      "known_waveform_reference": {
+        "attempt_spacing_seconds": 3600.0,
+        "bit_hypotheses_N": 2,
+        "duration_alternatives_D": 8,
+        "horizon_seconds": 43200.0,
+        "inversion_check_detection_probability": 0.8999999999999999,
+        "known_waveform_Z_detection_quantile": 1.2815515655446004,
+        "known_waveform_Z_false_threshold": 4.654022769188739,
+        "method_alternatives_K": 16,
+        "per_hypothesis_false_tail": 1.6276041666666668e-06,
+        "required_known_waveform_E_N0_db": 12.458955009045825,
+        "required_known_waveform_E_N0_linear": 17.61552134157256,
+        "scheduled_attempts": 12,
+        "score_alpha": 0.005,
+        "target_detection_probability": 0.9,
+        "total_false_admission_target": 0.01
+      },
+      "matched_LR_log_gate": 13.328401460815599,
+      "required_known_waveform_useful_days_at_minus60": 203.88334886079352,
+      "required_known_waveform_useful_seconds_at_minus60": 17615521.34157256,
+      "target_profile": "relaxed"
+    },
+    {
+      "declared_schedule": "daily",
+      "id": "daily-strict",
+      "known_waveform_reference": {
+        "attempt_spacing_seconds": 86400.0,
+        "bit_hypotheses_N": 2,
+        "duration_alternatives_D": 8,
+        "horizon_seconds": 86400.0,
+        "inversion_check_detection_probability": 0.99,
+        "known_waveform_Z_detection_quantile": 2.3263478740408408,
+        "known_waveform_Z_false_threshold": 5.07347052719214,
+        "method_alternatives_K": 16,
+        "per_hypothesis_false_tail": 1.953125e-07,
+        "required_known_waveform_E_N0_db": 14.374121280384657,
+        "required_known_waveform_E_N0_linear": 27.378656185613114,
+        "scheduled_attempts": 1,
+        "score_alpha": 5e-05,
+        "target_detection_probability": 0.99,
+        "total_false_admission_target": 0.0001
+      },
+      "matched_LR_log_gate": 15.44866499701569,
+      "required_known_waveform_useful_days_at_minus60": 316.8825947408925,
+      "required_known_waveform_useful_seconds_at_minus60": 27378656.185613114,
+      "target_profile": "strict"
+    },
+    {
+      "declared_schedule": "daily",
+      "id": "daily-relaxed",
+      "known_waveform_reference": {
+        "attempt_spacing_seconds": 86400.0,
+        "bit_hypotheses_N": 2,
+        "duration_alternatives_D": 8,
+        "horizon_seconds": 43200.0,
+        "inversion_check_detection_probability": 0.8999999999999999,
+        "known_waveform_Z_detection_quantile": 1.2815515655446004,
+        "known_waveform_Z_false_threshold": 4.112955916936896,
+        "method_alternatives_K": 16,
+        "per_hypothesis_false_tail": 1.953125e-05,
+        "required_known_waveform_E_N0_db": 11.62873603984763,
+        "required_known_waveform_E_N0_linear": 14.550355489274422,
+        "scheduled_attempts": 1,
+        "score_alpha": 0.005,
+        "target_detection_probability": 0.9,
+        "total_false_admission_target": 0.01
+      },
+      "matched_LR_log_gate": 10.843494811027599,
+      "required_known_waveform_useful_days_at_minus60": 168.40689223697248,
+      "required_known_waveform_useful_seconds_at_minus60": 14550355.489274422,
+      "target_profile": "relaxed"
+    }
+  ],
+  "numeric_environment": {
+    "mpmath_decimal_digits": 80,
+    "mpmath_version": "1.3.0",
+    "scipy_version": "1.18.1"
+  },
+  "research_context": [
+    {
+      "relevance": "Analyzes how low-SNR channel estimation and achievable rates depend jointly on coherence and SNR; it does not validate this modem or these finite-duration detection targets.",
+      "title": "On Channel Coherence in the Low SNR Regime",
+      "url": "https://www.mit.edu/~medard/allerton1.pdf"
+    },
+    {
+      "relevance": "Studies underspread continuous-time fading capacity and channel-model sensitivity; capacity conclusions are not directly transferred into one-bit presence probabilities.",
+      "title": "On the Sensitivity of Continuous-Time Noncoherent Fading Channel Capacity",
+      "url": "https://arxiv.org/abs/1107.2527"
+    }
+  ],
+  "schema": "triad-minus60-presence-frontier-v1",
+  "scope": "Analytical presence evidence for specified ideal signal models; no sampled-waveform or practical receiver measurement.",
+  "source_sha256": {
+    "docs/validation-data/triad-v3/2026-11-01-sub9/theory/benchmark_math.py": "bacf1b9cd6577c7fb5136f31e1acc7e4ec70de5f6a532c044ca9f1cab8080ba3",
+    "docs/validation-data/triad-v3/2026-11-02-minus60/theory/frontier.py": "90dc2161a275331b9a2598210745bd1ecb317e28f325fb74be703a2c39e47cb1",
+    "tools/triad-link-budget.py": "74de2229a69acf7a6462d8f19a113a6f94de40a502b68e8ac9eda30c665cc9c2"
+  }
+}

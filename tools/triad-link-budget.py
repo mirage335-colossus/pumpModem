@@ -111,10 +111,12 @@ def build_report(radiated_power_w: float = 1e-3, path_loss_db: float = 200.0,
                  noise_densities_dbm_hz=(-164.0, -154.0, -144.0),
                  days: float = 38.0, useful_energy_fraction: float = 1.0,
                  methods: int = 11, durations: int = 4,
-                 bit_hypotheses: int = 2) -> dict:
+                 bit_hypotheses: int = 2,
+                 attempt_spacing_seconds: float = ATTEMPT_SPACING_SECONDS) -> dict:
     radiated_power_w = _positive_finite("radiated power watts", radiated_power_w)
     path_loss_db = _finite("path loss dB", path_loss_db)
     days = _positive_finite("days", days)
+    attempt_spacing_seconds = _positive_finite("attempt spacing seconds", attempt_spacing_seconds)
     if not math.isfinite(useful_energy_fraction) or not 0 < useful_energy_fraction <= 1:
         raise ValueError("useful energy fraction must be finite and in (0, 1]")
     noise_densities_dbm_hz = tuple(_finite("noise density dBm/Hz", n)
@@ -129,8 +131,10 @@ def build_report(radiated_power_w: float = 1e-3, path_loss_db: float = 200.0,
     useful_seconds = _derived_finite("useful waveform seconds",
                                      elapsed_seconds * useful_energy_fraction, positive=True)
     targets = {
-        "strict": required_energy(0.99, 1e-4, 86400.0, methods, durations, bit_hypotheses),
-        "relaxed": required_energy(0.90, 1e-2, 43200.0, methods, durations, bit_hypotheses),
+        "strict": required_energy(0.99, 1e-4, 86400.0, methods, durations,
+                                  bit_hypotheses, attempt_spacing_seconds),
+        "relaxed": required_energy(0.90, 1e-2, 43200.0, methods, durations,
+                                   bit_hypotheses, attempt_spacing_seconds),
     }
     rows = []
     for noise_dbm_hz in noise_densities_dbm_hz:
@@ -178,6 +182,7 @@ def build_report(radiated_power_w: float = 1e-3, path_loss_db: float = 200.0,
             "methods_K": methods,
             "durations_D": durations,
             "bit_hypotheses_N": bit_hypotheses,
+            "attempt_spacing_seconds": attempt_spacing_seconds,
         },
         "targets": targets,
         "noise_sweep": rows,
@@ -187,7 +192,8 @@ def build_report(radiated_power_w: float = 1e-3, path_loss_db: float = 200.0,
             "useful_energy_fraction": "A user-supplied fraction in (0,1] captures energy lost to outage, silence, shaping, or other effects; default 1 is an optimistic upper bound.",
             "noise": "Noise density is an explicit user input; no receiver noise temperature or noise figure is inferred.",
             "detector": "Detection probabilities and required energies are optimistic completely known-waveform, known-phase, known-sync, known-channel Gaussian references, not correct-bit performance for unknown keyed patterns or a practical decoder planner.",
-            "family": "Strict: PD=.99, total alpha=1e-4, 86400-second horizon. Relaxed: PD=.90, total alpha=.01, 43200-second horizon. Half of alpha is allocated to scores; one attempt every 60 seconds, union bound across K methods, D durations, and N bit hypotheses.",
+            "family": f"Strict: PD=.99, total alpha=1e-4, 86400-second horizon. Relaxed: PD=.90, total alpha=.01, 43200-second horizon. Half of alpha is allocated to scores; one attempt every {attempt_spacing_seconds:g} seconds, union bound across K methods, D durations, and N bit hypotheses.",
+            "attempt_schedule": "The declared attempt spacing changes the multiplicity used for family-wise false-admission accounting. It is an explicit scheduling assumption, not receiver gain or sensitivity improvement.",
             "family_status": "Default K=11/D=4 is the expanded low-rate study family, including two proposed RBPF methods; it is not the earlier measured K=9/D=3 campaign. Counts remain configurable and must cover every selected alternative.",
         },
         "limitations": [
@@ -209,13 +215,17 @@ def main(argv=None) -> int:
     parser.add_argument("--methods", type=int, default=11)
     parser.add_argument("--durations", type=int, default=4)
     parser.add_argument("--bit-hypotheses", type=int, default=2)
+    parser.add_argument("--attempt-spacing-seconds", type=float,
+                        default=ATTEMPT_SPACING_SECONDS,
+                        help="declared interval between operational attempts; use 86400, 3600, or 60 for daily, hourly, or minute schedules (spacing at least a horizon gives one attempt)")
     parser.add_argument("--output", type=argparse.FileType("w"), default="-")
     args = parser.parse_args(argv)
     try:
         report = build_report(args.radiated_power_w, args.path_loss_db,
             args.noise_density_dbm_hz if args.noise_density_dbm_hz is not None
             else (-164.0, -154.0, -144.0), args.days, args.useful_energy_fraction,
-            args.methods, args.durations, args.bit_hypotheses)
+            args.methods, args.durations, args.bit_hypotheses,
+            args.attempt_spacing_seconds)
     except ValueError as exc:
         parser.error(str(exc))
     json.dump(report, args.output, indent=2, sort_keys=True, allow_nan=False)

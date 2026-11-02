@@ -295,11 +295,17 @@ DurationPlan plan_duration(const PlannerInput& p) {
         result.status_name = planner_status_name(result.status);
         return result;
     }
-    require(max_step - first_step <= 2'000'000,
-            "duration search exceeds bounded planner grid");
+    // Charge the bounded work budget to candidates actually evaluated. A long
+    // allowed horizon must not reject an otherwise cheap early solution. This
+    // remains an exhaustive ordered search; rank changes are not assumed to
+    // make the separation margin monotone.
+    std::uint64_t evaluated = 0;
     bool resource_exceeded = false;
     for (std::uint64_t step = first_step; step <= max_step;
          ++step) {
+        require(evaluated < 2'000'001,
+                "duration search exhausted bounded planner grid; unvisited durations remain");
+        ++evaluated;
         const auto duration_wide = static_cast<long double>(step) * quantum + offset;
         require(std::isfinite(duration_wide) && duration_wide > 0 &&
                 duration_wide <= std::numeric_limits<double>::max(), "duration exceeds numeric range");

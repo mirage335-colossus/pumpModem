@@ -25,7 +25,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "tools" / "triad_bounded_run.py"
-MAX_SECONDS = 38 * 86400
+MAX_SECONDS = 315576000  # Ten Julian years; rounded private tiles/tails may extend it.
 MAX_INDEX = 1_000_000_000
 SEED_DOMAINS = ("key", "channel", "oscillator", "noise", "frontend", "path")
 EXPORT_FILES = ("gram.c128", "mean.c128", "intervals.u64", "valid_rows.u64",
@@ -51,6 +51,8 @@ def parser():
     p.add_argument("--seconds", type=finite, required=True)
     p.add_argument("--rate", type=finite, default=.036)
     p.add_argument("--sample-rate", type=int, default=1)
+    p.add_argument("--sample-rate-denominator", type=int, default=1,
+                   help="N>1 requires sample-rate 1 and gives one sample per N physical seconds")
     p.add_argument("--cn0", type=finite, required=True, help="total triplet C/N0, dB-Hz")
     p.add_argument("--block-seconds", type=finite, default=1024)
     p.add_argument("--jobs", type=int, default=1)
@@ -87,10 +89,13 @@ def validate(args):
         if not math.isfinite(getattr(args, name)):
             raise ValueError(name + " must be finite")
     if not 8 <= args.seconds <= MAX_SECONDS or args.rate <= 0:
-        raise ValueError("seconds must be in [8,3283200] and rate positive")
-    if not 1 <= args.sample_rate <= 10_000_000 or args.sample_rate <= 4.125 * args.rate / 6:
+        raise ValueError("seconds must be in [8,315576000] and rate positive")
+    if not 1 <= args.sample_rate_denominator <= (1 << 32)-1 or (args.sample_rate_denominator > 1 and args.sample_rate != 1):
+        raise ValueError("sample rate denominator must be positive uint32; denominator >1 requires numerator 1")
+    fs = args.sample_rate / args.sample_rate_denominator
+    if not 1 <= args.sample_rate <= 10_000_000 or fs <= 4.125 * args.rate / 6:
         raise ValueError("sample rate fails the Added=1 shaped-band geometry guard")
-    if args.block_seconds <= 0 or args.block_seconds * args.sample_rate < 1:
+    if args.block_seconds <= 0 or args.block_seconds * fs < 1:
         raise ValueError("a block must contain at least one sample")
     if not 0 < args.timeout <= 7 * 86400 or not 0 < args.term_grace <= 30:
         raise ValueError("timeout or cleanup grace exceeds bounded-runner limits")
@@ -135,6 +140,10 @@ def seed_for(args, index, domain):
     # equal seeds at different Fs would not couple continuous stochastic paths.
     identity = ["triad-lowrate-campaign-v1", args.split, args.seconds, args.rate,
                 args.sample_rate, args.cn0, index, index % 2, domain]
+    # Preserve every existing integer-Fs fixture. Reciprocal-Fs roots have a
+    # separate explicit identity; matching seeds do not couple sampled paths.
+    if args.sample_rate_denominator != 1:
+        identity += ["sample-rate-denominator", args.sample_rate_denominator]
     return int.from_bytes(hashlib.sha256(json.dumps(identity, separators=(",", ":")).encode()).digest()[:8], "little")
 
 
@@ -143,6 +152,7 @@ def make_command(args, index, output):
     epoch = 1_800_000_000 + 60 * index
     cmd = [str(args.binary), "--mode", "export-stats", "--seconds", str(args.seconds),
            "--rate", str(args.rate), "--added", "1", "--sample-rate", str(args.sample_rate),
+           "--sample-rate-denominator", str(args.sample_rate_denominator),
            "--rf-hz", "8270", "--base-oscillator", "gpsdo-ocxo", "--shift-oscillator", "gpsdo-ocxo",
            "--spread-preset", "sub9-best", "--selective-perturbation", args.selective_perturbation,
            "--margin", "1", "--clock-sync", "GPS_10ms-1ms_region-0ms_offset", "--audio-error-ms", "70",
@@ -284,7 +294,7 @@ def run(args):
               "paths_succeeded": sum(r.get("returncode") == 0 for r in results),
               "paths_not_started": args.paths-started-unknown_start, "cancelled": cancelled.is_set(),
               "attempt_accounting": "Attempted means bounded runner subprocess successfully launched; cancellation before launch is not started. Unexpected worker exceptions with unavailable launch evidence are counted separately as start unknown.",
-              "seed_derivation": "SHA256(split, duration, rate, Fs, CN0, global path index, bit, domain); independent key/channel/oscillator/noise/frontend/path roots; block size and path stress settings excluded for paired refinement",
+              "seed_derivation": "SHA256(split, duration, rate, Fs numerator, CN0, global path index, bit, domain; append labeled denominator only when !=1); integer-Fs legacy roots preserved; independent key/channel/oscillator/noise/frontend/path roots; block size and path stress settings excluded for paired refinement",
               "acquisition_scope": "Public nominal or explicit timing/epoch bank; configured timing, oscillator and sample-clock truth remain independently drawn. A single nominal branch is not known alignment and does not cover all declared uncertainties.",
               "model_scope": "Encrypted one-bit sampled source; Added Symbols=1, FHSS off, burst off, 8270 Hz, GPSDO OCXO endpoints, margin1, sub9-best two rays. Receiver tap basis defaults explicitly match 0.005 ms/0.001 Hz; overrides change the receiver basis only for mismatch experiments. Explicit illustrative models, not field calibration. C/N0 supplied externally; no antenna efficiency assumed.",
               "results": sorted(results, key=lambda r: r["path_index"])}

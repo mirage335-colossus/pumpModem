@@ -119,6 +119,7 @@ void shaped_basis(PatternSource& source,const Candidate& candidate,double sample
     const auto columns=column_count(candidate);require(output.size()==checked_multiply(columns,rows),"triad v3 shaped basis extent mismatch");
     require(std::isfinite(sample_rate)&&sample_rate>0,"triad v3 invalid basis sample rate");
     const auto rate=1+candidate.clock_ppm*1e-6;
+    const auto source_sample_rate=effective_sample_rate(source.format());
     for(std::size_t row=0;row<rows;++row){const auto index=checked_add(first_sample,row);const auto time=static_cast<long double>(index)/sample_rate;
         const auto carrier_phase=std::remainder(tau*(candidate.frequency_hz*time+.5L*candidate.frequency_drift_hz_per_second*time*time),tau);
         const auto common=std::polar(1.,static_cast<double>(carrier_phase));
@@ -127,7 +128,7 @@ void shaped_basis(PatternSource& source,const Candidate& candidate,double sample
             // multiplying back can cross a finite RRC support endpoint.
             const auto receiver_coordinate=static_cast<long double>(index)-
                 static_cast<long double>(candidate.arrival_seconds+path.delay_seconds)*sample_rate;
-            const auto coordinate=receiver_coordinate*rate*(static_cast<long double>(source.format().sample_rate)/sample_rate);
+            const auto coordinate=receiver_coordinate*rate*(static_cast<long double>(source_sample_rate)/sample_rate);
             const auto phase=std::remainder(tau*path.doppler_hz*time,tau);
             const auto value=source.sample_at(coordinate)*common*std::polar(1.,static_cast<double>(phase));
             finite(value);const auto column=tap*(candidate.channel.linear_gain?2:1);output[column*rows+row]=value;
@@ -152,14 +153,14 @@ struct StreamingReceiver::Impl {
     std::uint64_t next_input=0,observation_end=0,block_first=0,block_rows=0;
     std::size_t workspace=0,maximum_basis=0;
     bool finished=false;
-    double wall=0,cpu=0;
+    double wall=0,cpu=0,sample_rate=0;
     explicit Impl(const ReceiverConfig& value,const Crypto& key):shape(v3::geometry(value.format)){
         const auto minimum_state=checked_sum({shape.source_workspace_bytes,8192});
         require(value.candidates.size()<=value.memory_limit_bytes/std::max<std::size_t>(1,minimum_state),"triad v3 candidate preparation exceeds memory cap");
         for(const auto& candidate:value.candidates){
             require(!candidate.channel.taps.empty()&&candidate.channel.taps.size()<=maximum_columns/2,"triad v3 invalid tap count");
         }
-        config=value;
+        config=value;sample_rate=effective_sample_rate(config.format);
         require(!config.candidates.empty(),"triad v3 empty candidate bank");
         require(config.threads>=1&&config.threads<=256,"triad v3 invalid worker count");
         require(config.block_samples>0&&config.maximum_chunk_samples>0,"triad v3 zero receiver block/chunk");
@@ -177,8 +178,8 @@ struct StreamingReceiver::Impl {
             require(!candidate.channel.linear_gain||(std::isfinite(candidate.channel.gain_reference_seconds)&&std::isfinite(candidate.channel.gain_scale_seconds)&&candidate.channel.gain_scale_seconds>0),"triad v3 invalid gain basis");
             maximum_basis=std::max(maximum_basis,column_count(candidate));double delay=0;
             for(const auto& tap:candidate.channel.taps){require(std::isfinite(tap.delay_seconds)&&tap.delay_seconds>=0&&std::isfinite(tap.doppler_hz),"triad v3 invalid channel tap");delay=std::max(delay,tap.delay_seconds);}
-            const auto endpoint=static_cast<long double>(candidate.arrival_seconds+delay)+static_cast<long double>(shape.source_samples)/config.format.sample_rate/(1+candidate.clock_ppm*1e-6);
-            last=std::max(last,endpoint*config.format.sample_rate);epoch_with_offset(config.format.epoch,candidate.epoch_offset_seconds);
+            const auto endpoint=static_cast<long double>(candidate.arrival_seconds+delay)+static_cast<long double>(shape.source_samples)/sample_rate/(1+candidate.clock_ppm*1e-6);
+            last=std::max(last,endpoint*sample_rate);epoch_with_offset(config.format.epoch,candidate.epoch_offset_seconds);
         }
         require(zero&&one,"triad v3 binary reception needs both bit hypotheses");
         require(last<=UINT64_MAX,"triad v3 observation coordinate overflow");
@@ -186,8 +187,8 @@ struct StreamingReceiver::Impl {
         require(config.observation_samples>0,"triad v3 empty observation calendar");
         observation_end=checked_add(config.observation_first_sample,config.observation_samples);
         for(const auto& candidate:config.candidates){double delay=0;for(const auto& tap:candidate.channel.taps)delay=std::max(delay,tap.delay_seconds);
-            const auto first=candidate.arrival_seconds*config.format.sample_rate;
-            const auto end=(candidate.arrival_seconds+delay+static_cast<double>(shape.source_samples)/config.format.sample_rate/(1+candidate.clock_ppm*1e-6))*config.format.sample_rate;
+            const auto first=candidate.arrival_seconds*sample_rate;
+            const auto end=(candidate.arrival_seconds+delay+static_cast<double>(shape.source_samples)/sample_rate/(1+candidate.clock_ppm*1e-6))*sample_rate;
             require(static_cast<long double>(first)+.5L>=config.observation_first_sample&&end<=static_cast<long double>(observation_end)+.5,"triad v3 observation omits candidate waveform support");}
         const auto workers=worker_count(config.threads,config.candidates.size());
         const auto tile=std::min(config.block_samples,config.maximum_chunk_samples);
@@ -224,8 +225,8 @@ struct StreamingReceiver::Impl {
             std::uint64_t present=0;for(std::size_t row=0;row<count;++row){if(mask.empty()||mask[row]){finite(observed[row]);++present;}}
             report.scored_samples=checked_add(report.scored_samples,present);report.missing_samples=checked_add(report.missing_samples,count-present);report.all_samples_observed&=present==count;
             parallel(states.size(),config.threads,[&](std::size_t index,unsigned worker){auto& state=states[index];auto candidate=config.candidates[index];
-                if(candidate.channel.linear_gain){const auto length=std::min<std::uint64_t>(config.block_samples,observation_end-block_first);candidate.channel.gain_reference_seconds=(static_cast<double>(block_first)+.5*static_cast<double>(length))/config.format.sample_rate;candidate.channel.gain_scale_seconds=static_cast<double>(length)/config.format.sample_rate;}
-                const auto columns=state.qr.columns;auto matrix=std::span(scratch[worker]).first(checked_multiply(columns,count));shaped_basis(*state.source,candidate,config.format.sample_rate,coordinate,count,matrix);
+                if(candidate.channel.linear_gain){const auto length=std::min<std::uint64_t>(config.block_samples,observation_end-block_first);candidate.channel.gain_reference_seconds=(static_cast<double>(block_first)+.5*static_cast<double>(length))/sample_rate;candidate.channel.gain_scale_seconds=static_cast<double>(length)/sample_rate;}
+                const auto columns=state.qr.columns;auto matrix=std::span(scratch[worker]).first(checked_multiply(columns,count));shaped_basis(*state.source,candidate,sample_rate,coordinate,count,matrix);
                 std::array<Complex,maximum_columns> row_values{};for(std::size_t row=0;row<count;++row){if(!mask.empty()&&!mask[row])continue;for(std::size_t column=0;column<columns;++column)row_values[column]=matrix[column*count+row];state.qr.append(std::span(row_values).first(columns),observed[row]);}
             });
             for(const auto& state:states)report.basis_values=checked_add(report.basis_values,checked_multiply(state.qr.columns,count));

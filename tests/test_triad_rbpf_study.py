@@ -181,6 +181,50 @@ class RBStudyTests(unittest.TestCase):
             self.assertIn('only actual signal/null/wrong-key', report['captures'][0]['error'])
             self.assertEqual(report['captures'][0]['methods'], {})
 
+    def test_frequency_initialization_default_parity_and_explicit_modes(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path=self.workspace(temp)
+            default=study.run(self.args(path,Path(temp)/'default.json','--frequency-bound','.4','--phase-diffusion','.1'))
+            explicit=study.run(self.args(path,Path(temp)/'iid.json','--frequency-bound','.4','--phase-diffusion','.1','--frequency-initialization','iid'))
+            for method in study.METHODS:
+                self.assertEqual(default['captures'][0]['methods'][method]['bit_log_scores'],explicit['captures'][0]['methods'][method]['bit_log_scores'])
+            for mode in ('iid','stratified','midpoint-grid'):
+                report=study.run(self.args(path,Path(temp)/(mode+'-zero.json'),'--frequency-initialization',mode))
+                self.assertEqual(report['failed_physical_capture_records'],0)
+                self.assertEqual(report['configuration']['frequency_initialization'],mode)
+                for method in study.METHODS:
+                    self.assertEqual(report['captures'][0]['methods'][method]['diagnostics']['frequency_initialization'],mode)
+            self.assertIn('not an unbiased continuous-prior',report['frequency_prior_scope'])
+
+    def test_midpoint_adapter_matches_independent_finite_gaussian_mixture(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path=self.workspace(temp)
+            args=self.args(path,Path(temp)/'midpoint.json','--methods','rbpf','--frequency-bound','.4','--frequency-initialization','midpoint-grid')
+            report=study.run(args);self.assertEqual(report['failed_physical_capture_records'],0)
+            ws=study.BlockWorkspace(path)
+            _,mapping,labels=study.candidate_mapping(ws,2)
+            frequencies=.4*(2*(np.arange(8)+.5)/8-1)
+            state=GaussianStateFilter(GaussianPrior((.5,.5),math.inf))
+            time_from_first_center=0.
+            for r,G,_,_,dt in study.actual_blocks(ws,1.):
+                time_from_first_center+=dt
+                rotation=np.exp(-2j*math.pi*frequencies*time_from_first_center)
+                rr=rotation[:,None,None]*r[mapping][None]
+                gg=G[mapping[:,:,None],mapping[:,None,:]][None]
+                state.update(torch.from_numpy(rr),torch.from_numpy(gg),dt)
+            candidate=torch.logsumexp(state.finish(),dim=0)-math.log(8)
+            expected=study.mix_candidates(candidate,labels)
+            np.testing.assert_allclose(report['captures'][0]['methods']['rbpf']['bit_log_scores'],expected[0],atol=2e-12)
+            other=study.run(self.args(path,Path(temp)/'midpoint-other-seed.json','--methods','rbpf','--frequency-bound','.4','--frequency-initialization','midpoint-grid','--seed','999'))
+            self.assertEqual(report['captures'][0]['methods']['rbpf']['bit_log_scores'],other['captures'][0]['methods']['rbpf']['bit_log_scores'])
+
+    def test_midpoint_incompatible_dynamics_rejected_at_cli(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path=self.workspace(temp)
+            for extra in [('--phase-diffusion','.01'),('--frequency-random-walk','.01'),('--resampling','multinomial'),('--resampling','systematic')]:
+                with self.subTest(extra=extra),contextlib.redirect_stderr(io.StringIO()),self.assertRaises(SystemExit):
+                    self.args(path,Path(temp)/'bad.json','--frequency-initialization','midpoint-grid',*extra)
+
     def test_cuda_initialization_precedes_allocator_peak_reset(self):
         with tempfile.TemporaryDirectory() as temp:
             path = self.workspace(temp)

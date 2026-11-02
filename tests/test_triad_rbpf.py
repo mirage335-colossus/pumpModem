@@ -43,6 +43,61 @@ def dense_score(designs, ys, times, phases, prior):
 
 
 class RBPhaseTests(unittest.TestCase):
+    def test_midpoint_grid_matches_independent_gaussian_frequency_mixture(self):
+        rng = np.random.default_rng(680)
+        n, bound = 7, .19
+        frequencies = bound*(2*(np.arange(n)+.5)/n-1)
+        times = [0., .4, 1.9, 3.2, 5.8, 6.1]
+        for coherence in (2.3, math.inf):
+            prior = GaussianPrior((.4, .6), coherence_seconds=coherence, frequency_hz=.012)
+            rb = RBPhaseFilter(prior, RBPhasePrior(bound), particles=n,
+                               frequency_initialization="midpoint-grid")
+            references = [GaussianStateFilter(prior) for _ in frequencies]
+            for i, time in enumerate(times):
+                A = cn(rng, (2, 3, 4, 2))
+                y = cn(rng, (2, 3, 4))
+                G = np.swapaxes(A.conj(), -1, -2)@A
+                r = (np.swapaxes(A.conj(), -1, -2)@y[..., None])[..., 0]
+                if i == 3:
+                    r *= 0.; G *= 0.
+                dt = 0. if i == 0 else time-times[i-1]
+                rb.update(tensor(r), tensor(G), dt)
+                for frequency, reference in zip(frequencies, references):
+                    reference.update(tensor(r*np.exp(-2j*np.pi*frequency*time)), tensor(G), dt)
+                expected = logsumexp(np.stack([f.finish().numpy() for f in references]), axis=0)-math.log(n)
+                np.testing.assert_allclose(rb.finish(), expected, rtol=2e-12, atol=2e-12)
+            self.assertIn("discrete CFO prior", rb.diagnostics()["frequency_prior_model"])
+            self.assertEqual(rb.diagnostics()["resampling_events_total"], 0)
+
+    def test_midpoint_grid_seed_independence_no_draws_and_degenerate_bounds(self):
+        prior = GaussianPrior((.7,), coherence_seconds=4.)
+        for bound, n in ((0., 5), (.3, 1), (.3, 6)):
+            receivers = [RBPhaseFilter(prior, RBPhasePrior(bound), particles=n, seed=seed,
+                                      frequency_initialization="midpoint-grid") for seed in (30, 987)]
+            r, G = tensor([[.4+.7j], [1.2-.4j]]), tensor([[.8]])
+            for f in receivers:
+                f.update(torch.zeros_like(r), torch.zeros_like(G), 0.)
+                expected = bound*(2*(torch.arange(n, dtype=torch.float64)+.5)/n-1)
+                torch.testing.assert_close(f.frequency, expected.expand(2, n), atol=0., rtol=0.)
+                torch.testing.assert_close(f.log_weights.exp().sum(-1), torch.ones(2, dtype=torch.float64), atol=1e-14, rtol=0.)
+                initial_generator = torch.Generator(device="cpu").manual_seed(f.seed)
+                self.assertTrue(torch.equal(f._generator.get_state(), initial_generator.get_state()))
+                f.update(r, G, .9)
+                self.assertTrue(torch.equal(f._generator.get_state(), initial_generator.get_state()))
+            torch.testing.assert_close(receivers[0].finish(), receivers[1].finish(), atol=0., rtol=0.)
+            if bound == 0. or n == 1:
+                reference = GaussianStateFilter(prior)
+                reference.update(r, G, 0.)
+                torch.testing.assert_close(receivers[0].finish(), reference.finish(), atol=1e-13, rtol=1e-13)
+
+    def test_midpoint_grid_rejects_stochastic_dynamics_and_resampling(self):
+        prior = GaussianPrior((1.,))
+        for phase, mode in ((RBPhasePrior(phase_diffusion_rad_sqrt_second=.01), "none"),
+                            (RBPhasePrior(frequency_random_walk_hz_sqrt_second=.001), "none"),
+                            (RBPhasePrior(), "multinomial"), (RBPhasePrior(), "systematic")):
+            with self.subTest(phase=phase, mode=mode), self.assertRaisesRegex(ValueError, "midpoint-grid"):
+                RBPhaseFilter(prior, phase, frequency_initialization="midpoint-grid", resampling=mode)
+
     def test_stratified_frequency_strata_seed_weights_and_paired_rng(self):
         n, bound, seed = 17, .1234, 9021
         prior, phase = GaussianPrior((1.,)), RBPhasePrior(bound, .05, .001)

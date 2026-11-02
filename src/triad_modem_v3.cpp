@@ -60,18 +60,26 @@ Chip pattern(const std::uint8_t* bytes,unsigned bit,const std::uint8_t* outer){
 }
 }
 
+double effective_sample_rate(const Format& f){
+    require(f.sample_rate>0&&f.sample_rate_denominator>0&&
+            (f.sample_rate_denominator==1||f.sample_rate==1),
+            "triad v3 sample rate must be an integer or reciprocal integer Hz");
+    return static_cast<double>(f.sample_rate)/f.sample_rate_denominator;
+}
+
 Geometry geometry(const Format& f){
+    const auto sample_rate=effective_sample_rate(f);
     require(std::isfinite(f.inner_rate_hz)&&f.inner_rate_hz>0&&f.inner_rate_hz<=30e6,"triad v3 invalid Rate");
     require(f.added_symbols>=1&&f.added_symbols<=1000&&f.minimum_inner_coefficients>=64,
             "triad v3 invalid Added Symbols or minimum complexity");
-    require(f.sample_rate>=1&&std::isfinite(f.bit_seconds)&&f.bit_seconds>0,"triad v3 invalid duration/sample rate");
-    require(f.sample_rate>=64||!f.fhss,"triad v3 sub-64-Hz source requires FHSS off");
+    require(std::isfinite(f.bit_seconds)&&f.bit_seconds>0,"triad v3 invalid duration/sample rate");
+    require(sample_rate>=64||!f.fhss,"triad v3 sub-64-Hz source requires FHSS off");
     require(std::isfinite(f.dwell_seconds)&&std::abs(f.dwell_seconds-.4)<1e-12,"triad v3 dwell must be400ms");
     require(std::isfinite(f.quiet_seconds)&&f.quiet_seconds>=0&&std::isfinite(f.ramp_seconds)&&f.ramp_seconds>0&&
         std::isfinite(f.margin_seconds)&&f.margin_seconds>=.001&&f.burst_wait_tiles<=1000,"triad v3 invalid margins/burst");
     Geometry g;g.inner_chip_rate_hz=f.inner_rate_hz/6;g.fine_chip_rate_hz=g.inner_chip_rate_hz*f.added_symbols;
     g.carrier_spacing_hz=1.25*g.fine_chip_rate_hz;g.occupied_bandwidth_hz=3*g.carrier_spacing_hz;
-    require(f.sample_rate>=4*g.fine_chip_rate_hz&&f.sample_rate>1.1*g.occupied_bandwidth_hz,
+    require(sample_rate>=4*g.fine_chip_rate_hz&&sample_rate>1.1*g.occupied_bandwidth_hz,
             "triad v3 sample rate cannot contain shaped adjacent carriers");
     require(f.minimum_inner_coefficients<=maximum_tile_cells/f.added_symbols,"triad v3 tile complexity exceeds workspace cap");
     const auto needed=f.minimum_inner_coefficients*f.added_symbols;
@@ -83,15 +91,37 @@ Geometry geometry(const Format& f){
     if(f.fhss)require(guaranteed_per_dwell>=1,"triad v3 FHSS has no protected dwell cells");
     std::uint64_t tile_dwells=20;
     if(guaranteed_per_dwell>=1){
-        const auto lost_endpoints=f.fhss?2:2*coordinate(endpoint/f.dwell_seconds,"triad v3 endpoint extent overflow");
+        const auto lost_endpoints=f.fhss?2.L:2.L*coordinate(endpoint/f.dwell_seconds,"triad v3 endpoint extent overflow");
         const auto lost_truncation=coordinate((f.added_symbols-1)/guaranteed_per_dwell,"triad v3 Added extent overflow");
-        tile_dwells+=lost_endpoints+lost_truncation;
+        tile_dwells=coordinate(tile_dwells+lost_endpoints+lost_truncation,"triad v3 initial tile dwell overflow");
     }
-    while(lower_cells(f,g.fine_chip_rate_hz,tile_dwells)<needed){
-        require(tile_dwells<10'000'000,"triad v3 protected tile duration is unsupported");++tile_dwells;
-        require(static_cast<long double>(tile_dwells)*f.dwell_seconds*g.fine_chip_rate_hz<=maximum_tile_cells,
-                "triad v3 protected tile exceeds bounded source workspace");
+    const auto cell_extent=[&](std::uint64_t dwells){
+        return static_cast<long double>(dwells)*f.dwell_seconds*g.fine_chip_rate_hz;
+    };
+    const auto within_workspace=[&](std::uint64_t dwells){
+        const auto cells=cell_extent(dwells);
+        return std::isfinite(cells)&&cells<=maximum_tile_cells;
+    };
+    // Start at exactly the established conservative count. Both protected-cell
+    // count and raw extent are monotone, so a workspace boundary can serve as
+    // an upper bracket without converting an out-of-range cell count to uint64.
+    const auto reached=[&](std::uint64_t dwells){
+        return !within_workspace(dwells)||lower_cells(f,g.fine_chip_rate_hz,dwells)>=needed;
+    };
+    if(!reached(tile_dwells)){
+        constexpr auto last_dwell=(std::uint64_t{1}<<63)-1;
+        auto low=tile_dwells,high=tile_dwells;
+        do{
+            require(high<last_dwell,"triad v3 protected tile dwell coordinate overflow");
+            high=high>last_dwell/2?last_dwell:2*high;
+        }while(!reached(high));
+        while(high-low>1){
+            const auto middle=low+(high-low)/2;
+            if(reached(middle))high=middle;else low=middle;
+        }
+        tile_dwells=high;
     }
+    require(within_workspace(tile_dwells),"triad v3 protected tile exceeds bounded source workspace");
     g.tile_seconds=static_cast<double>(tile_dwells)*f.dwell_seconds;
     const auto max_cells=coordinate(g.tile_seconds*g.fine_chip_rate_hz+3,"triad v3 tile extent overflow");
     require(max_cells<=maximum_tile_cells,"triad v3 tile exceeds bounded source workspace");
@@ -116,9 +146,9 @@ Geometry geometry(const Format& f){
     g.inner_coefficients=g.fine_coefficients/f.added_symbols;
     // A guaranteed allocation bound, not measured energy after finite shaping.
     g.nominal_payload_energy_seconds=static_cast<double>(g.fine_coefficients)/g.fine_chip_rate_hz;
-    const auto halo=coordinate(8.L*f.sample_rate/g.fine_chip_rate_hz,"triad v3 pulse halo overflow")+2;
+    const auto halo=coordinate(8.L*sample_rate/g.fine_chip_rate_hz,"triad v3 pulse halo overflow")+2;
     g.calendar_origin_sample=halo;
-    g.source_samples=coordinate(elapsed*f.sample_rate+2*halo,"triad v3 source extent overflow");
+    g.source_samples=coordinate(elapsed*sample_rate+2*halo,"triad v3 source extent overflow");
     // Two full coefficient tiles, integer calendars/permutation, temporary
     // keystreams and allocator/crypto overhead. No term grows with bit duration.
     g.source_workspace_bytes=static_cast<std::size_t>(max_cells*176+128*1024);
@@ -127,11 +157,11 @@ Geometry geometry(const Format& f){
 
 struct PatternSource::Impl {
     struct Tile {std::uint64_t id=0,first=0;std::vector<Chip> chips;};
-    Format format;Geometry geom;Crypto master;unsigned bit=0;std::uint64_t halo=0;
+    Format format;Geometry geom;Crypto master;unsigned bit=0;std::uint64_t halo=0;double sample_rate=0;
     std::array<std::optional<Tile>,2> tiles;
     Impl(const Format& f,const Crypto& key,std::uint8_t source_bit):format(f),geom(v3::geometry(f)),master(key){
         require(source_bit<=1,"triad v3 source must be one binary bit");
-        halo=geom.calendar_origin_sample;
+        halo=geom.calendar_origin_sample;sample_rate=effective_sample_rate(f);
         const auto mask=child(master,"payload",f,0).stream(StreamPurpose::Data,f.epoch,0,1);
         bit=source_bit^(f.encrypt?(mask[0]&1U):0U);
     }
@@ -210,7 +240,7 @@ std::size_t PatternSource::working_bytes()const{return impl_->geom.source_worksp
 std::array<Complex,3> PatternSource::carrier_samples_at(long double sample){
     Chip output{};const auto& g=impl_->geom;
     if(!std::isfinite(sample)||sample<0||sample>=g.source_samples)return output;
-    const long double t=(sample-impl_->halo)/impl_->format.sample_rate;
+    const long double t=(sample-impl_->halo)/impl_->sample_rate;
     const auto envelope=impl_->envelope(t);if(envelope==0)return output;
     const auto first_real=std::max(0.L,std::ceil(t*g.fine_chip_rate_hz-8.5L));
     const auto last_real=std::min(static_cast<long double>(g.fine_cells)-1,std::floor(t*g.fine_chip_rate_hz+7.5L));
@@ -222,7 +252,7 @@ std::array<Complex,3> PatternSource::carrier_samples_at(long double sample){
 }
 Complex PatternSource::sample_at(long double sample){
     if(!std::isfinite(sample)||sample<0||sample>=impl_->geom.source_samples)return {};
-    const auto carriers=carrier_samples_at(sample);const auto t=(sample-impl_->halo)/impl_->format.sample_rate;
+    const auto carriers=carrier_samples_at(sample);const auto t=(sample-impl_->halo)/impl_->sample_rate;
     Complex result{};for(unsigned c=0;c<3;++c){const auto cycles=(static_cast<int>(c)-1)*impl_->geom.carrier_spacing_hz*t;
         result+=carriers[c]*std::polar(1.,static_cast<double>(tau*std::remainder(cycles,1.L)));}return result;
 }

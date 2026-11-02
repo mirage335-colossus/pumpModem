@@ -1,0 +1,462 @@
+{
+  "schema": "triad-minus60-precision-edge-analysis-v1",
+  "analysis_source_sha256": "facc0382cfe22a27719ddf1a6cdf7c9e025f85a6c4e952b3dd8b9a3f2380c7f1",
+  "benchmark_support_source_sha256": "6a39bd01cd397690e7aed0624a31f3fd8c7755d513492b6182de4a7609f56642",
+  "plan_sha256": "32831189c7416fc129f338f6b444d8cc837e5f874627c2d1814c0cd038352e4a",
+  "jobs": [
+    {
+      "name": "static400-development-cpu-fp64",
+      "group": "static400-development",
+      "device": "cpu",
+      "precision": "fp64",
+      "particles": 1024,
+      "report": "static400-development-cpu-fp64.json",
+      "report_present": true,
+      "runner_returncode": 0,
+      "runner_elapsed_seconds": 5.267670174012892,
+      "status": "completed",
+      "report_sha256": "2c02075457d8b1aad513463c80406245bd23902bdf96658f7e212b5791763cc0",
+      "capture_count": 8,
+      "correct_accepted": 3,
+      "wrong_accepted": 0,
+      "missed": 5,
+      "tool_wall_seconds": 3.743240605981555
+    },
+    {
+      "name": "static400-development-gpu-fp32",
+      "group": "static400-development",
+      "device": "cuda:0",
+      "precision": "fp32",
+      "particles": 1024,
+      "report": "static400-development-gpu-fp32.json",
+      "report_present": true,
+      "runner_returncode": 0,
+      "runner_elapsed_seconds": 4.066659338015597,
+      "status": "completed",
+      "report_sha256": "71a76d37a5f1528f90e83f78a0898a82698202bbf33ff625c63cd39a111ad30b",
+      "capture_count": 8,
+      "correct_accepted": 3,
+      "wrong_accepted": 0,
+      "missed": 5,
+      "tool_wall_seconds": 2.2394127920269966
+    },
+    {
+      "name": "static850-rate00036-posthoc-cpu-fp64",
+      "group": "static850-rate00036-posthoc",
+      "device": "cpu",
+      "precision": "fp64",
+      "particles": 1024,
+      "report": "static850-rate00036-posthoc-cpu-fp64.json",
+      "report_present": true,
+      "runner_returncode": 0,
+      "runner_elapsed_seconds": 4.11853338702349,
+      "status": "completed",
+      "report_sha256": "cdaa461e7cfd69a51d29ecca67ebc5acb5c104509e83f4cec777a24eee04af6c",
+      "capture_count": 3,
+      "correct_accepted": 2,
+      "wrong_accepted": 0,
+      "missed": 1,
+      "tool_wall_seconds": 2.7431614699889906
+    },
+    {
+      "name": "static850-rate00036-posthoc-gpu-fp32",
+      "group": "static850-rate00036-posthoc",
+      "device": "cuda:0",
+      "precision": "fp32",
+      "particles": 1024,
+      "report": "static850-rate00036-posthoc-gpu-fp32.json",
+      "report_present": true,
+      "runner_returncode": 0,
+      "runner_elapsed_seconds": 5.467681648035068,
+      "status": "completed",
+      "report_sha256": "b129eced60d7e4a37746d67eb42fd56f8cde52bfdf12994183f99d8d2b8cfa02",
+      "capture_count": 3,
+      "correct_accepted": 2,
+      "wrong_accepted": 0,
+      "missed": 1,
+      "tool_wall_seconds": 3.6552256789873354
+    }
+  ],
+  "groups": [
+    {
+      "name": "static400-development",
+      "selection": "All eight existing400-day development paths; chosen to include prior accepted and missed detections, not a new independent qualification.",
+      "path_indices": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "comparison": {
+        "reference": "static400-development-cpu-fp64",
+        "candidate": "static400-development-gpu-fp32",
+        "status": "completed",
+        "common_paths": 8,
+        "reference_paths": 8,
+        "candidate_paths": 8,
+        "maximum_absolute_log_score_difference": 1.5062436009571911e-06,
+        "maximum_relative_log_score_difference": 1.2203323015651422e-07,
+        "winning_bit_disagreements": 0,
+        "admission_disagreements": 0,
+        "reference_minimum_bit_score_margin": 9.928517875271382,
+        "reference_minimum_distance_to_gate": 3.138993111905066,
+        "per_path": [
+          {
+            "path": "static400/path-00000",
+            "bit_log_score_delta": [
+              8.2289330194385e-07,
+              1.0744215739322271e-08
+            ],
+            "same_winning_bit": true,
+            "same_gate_decision": true
+          },
+          {
+            "path": "static400/path-00001",
+            "bit_log_score_delta": [
+              1.0708247488722122e-07,
+              -2.8546059382961175e-07
+            ],
+            "same_winning_bit": true,
+            "same_gate_decision": true
+          },
+          {
+            "path": "static400/path-00002",
+            "bit_log_score_delta": [
+              1.2691644357687437e-07,
+              -7.030746118630304e-08
+            ],
+            "same_winning_bit": true,
+            "same_gate_decision": true
+          },
+          {
+            "path": "static400/path-00003",
+            "bit_log_score_delta": [
+              3.081414767791557e-08,
+              -1.06183543735483e-06
+            ],
+            "same_winning_bit": true,
+            "same_gate_decision": true
+          },
+          {
+            "path": "static400/path-00004",
+            "bit_log_score_delta": [
+              1.3654485613301404e-06,
+              -7.623550857260852e-08
+            ],
+            "same_winning_bit": true,
+            "same_gate_decision": true
+          },
+          {
+            "path": "static400/path-00005",
+            "bit_log_score_delta": [
+              -9.189599303738305e-08,
+              7.292627834942778e-07
+            ],
+            "same_winning_bit": true,
+            "same_gate_decision": true
+          },
+          {
+            "path": "static400/path-00006",
+            "bit_log_score_delta": [
+              -4.517006741977525e-07,
+              9.086329866292431e-08
+            ],
+            "same_winning_bit": true,
+            "same_gate_decision": true
+          },
+          {
+            "path": "static400/path-00007",
+            "bit_log_score_delta": [
+              -1.2641972491067577e-07,
+              -1.5062436009571911e-06
+            ],
+            "same_winning_bit": true,
+            "same_gate_decision": true
+          }
+        ]
+      },
+      "status": "completed",
+      "per_path_distances": [
+        {
+          "path": "static400/path-00000",
+          "cpu_fp64_bit_log_scores": [
+            30.243001353716735,
+            -2.263020571529242
+          ],
+          "gpu_fp32_bit_log_scores": [
+            30.243002176610037,
+            -2.2630205607850264
+          ],
+          "threshold": 22.72106338958574,
+          "cpu_signed_winning_score_minus_gate": 7.521937964130995,
+          "gpu_signed_winning_score_minus_gate": 7.521938787024297,
+          "cpu_bit_score_margin": 32.506021925245975,
+          "maximum_absolute_score_error": 8.2289330194385e-07
+        },
+        {
+          "path": "static400/path-00001",
+          "cpu_fp64_bit_log_scores": [
+            -3.2181782090496163,
+            11.295071108782324
+          ],
+          "gpu_fp32_bit_log_scores": [
+            -3.2181781019671414,
+            11.29507082332173
+          ],
+          "threshold": 22.72106338958574,
+          "cpu_signed_winning_score_minus_gate": -11.425992280803417,
+          "gpu_signed_winning_score_minus_gate": -11.42599256626401,
+          "cpu_bit_score_margin": 14.51324931783194,
+          "maximum_absolute_score_error": 2.8546059382961175e-07
+        },
+        {
+          "path": "static400/path-00002",
+          "cpu_fp64_bit_log_scores": [
+            26.85124954860862,
+            -2.019915323041983
+          ],
+          "gpu_fp32_bit_log_scores": [
+            26.851249675525064,
+            -2.0199153933494443
+          ],
+          "threshold": 22.72106338958574,
+          "cpu_signed_winning_score_minus_gate": 4.13018615902288,
+          "gpu_signed_winning_score_minus_gate": 4.130186285939324,
+          "cpu_bit_score_margin": 28.871164871650603,
+          "maximum_absolute_score_error": 1.2691644357687437e-07
+        },
+        {
+          "path": "static400/path-00003",
+          "cpu_fp64_bit_log_scores": [
+            -2.7491781905484194,
+            27.96676437745626
+          ],
+          "gpu_fp32_bit_log_scores": [
+            -2.7491781597342717,
+            27.966763315620824
+          ],
+          "threshold": 22.72106338958574,
+          "cpu_signed_winning_score_minus_gate": 5.245700987870521,
+          "gpu_signed_winning_score_minus_gate": 5.245699926035083,
+          "cpu_bit_score_margin": 30.71594256800468,
+          "maximum_absolute_score_error": 1.06183543735483e-06
+        },
+        {
+          "path": "static400/path-00004",
+          "cpu_fp64_bit_log_scores": [
+            18.241700515260142,
+            -1.985834911768261
+          ],
+          "gpu_fp32_bit_log_scores": [
+            18.241701880708703,
+            -1.9858349880037696
+          ],
+          "threshold": 22.72106338958574,
+          "cpu_signed_winning_score_minus_gate": -4.479362874325599,
+          "gpu_signed_winning_score_minus_gate": -4.479361508877037,
+          "cpu_bit_score_margin": 20.227535427028403,
+          "maximum_absolute_score_error": 1.3654485613301404e-06
+        },
+        {
+          "path": "static400/path-00005",
+          "cpu_fp64_bit_log_scores": [
+            -3.0200072062271777,
+            19.582070277680675
+          ],
+          "gpu_fp32_bit_log_scores": [
+            -3.0200072981231707,
+            19.58207100694346
+          ],
+          "threshold": 22.72106338958574,
+          "cpu_signed_winning_score_minus_gate": -3.138993111905066,
+          "gpu_signed_winning_score_minus_gate": -3.1389923826422823,
+          "cpu_bit_score_margin": 22.602077483907852,
+          "maximum_absolute_score_error": 7.292627834942778e-07
+        },
+        {
+          "path": "static400/path-00006",
+          "cpu_fp64_bit_log_scores": [
+            6.5430729648194745,
+            -3.385444910451908
+          ],
+          "gpu_fp32_bit_log_scores": [
+            6.5430725131188,
+            -3.3854448195886095
+          ],
+          "threshold": 22.72106338958574,
+          "cpu_signed_winning_score_minus_gate": -16.177990424766264,
+          "gpu_signed_winning_score_minus_gate": -16.17799087646694,
+          "cpu_bit_score_margin": 9.928517875271382,
+          "maximum_absolute_score_error": 4.517006741977525e-07
+        },
+        {
+          "path": "static400/path-00007",
+          "cpu_fp64_bit_log_scores": [
+            -2.8358832419348925,
+            12.342897086517763
+          ],
+          "gpu_fp32_bit_log_scores": [
+            -2.8358833683546174,
+            12.342895580274162
+          ],
+          "threshold": 22.72106338958574,
+          "cpu_signed_winning_score_minus_gate": -10.378166303067978,
+          "gpu_signed_winning_score_minus_gate": -10.378167809311579,
+          "cpu_bit_score_margin": 15.178780328452655,
+          "maximum_absolute_score_error": 1.5062436009571911e-06
+        }
+      ],
+      "closest_reference_gate_case": {
+        "path": "static400/path-00005",
+        "cpu_fp64_bit_log_scores": [
+          -3.0200072062271777,
+          19.582070277680675
+        ],
+        "gpu_fp32_bit_log_scores": [
+          -3.0200072981231707,
+          19.58207100694346
+        ],
+        "threshold": 22.72106338958574,
+        "cpu_signed_winning_score_minus_gate": -3.138993111905066,
+        "gpu_signed_winning_score_minus_gate": -3.1389923826422823,
+        "cpu_bit_score_margin": 22.602077483907852,
+        "maximum_absolute_score_error": 7.292627834942778e-07
+      },
+      "observed_gate_distance_over_maximum_score_error": 2083987.6829420496,
+      "proximity_scope": "Exact observed distance for these reused captures. Observed arithmetic differences are not a worst-case numerical bound and do not qualify arbitrarily closer scores."
+    },
+    {
+      "name": "static850-rate00036-posthoc",
+      "selection": "Posthoc diagnostic: sole prior static-frequency-ucb miss76 and two accepted cases nearest the prior gate196,56. Selection used the already observed holdout results; these are not new holdout evidence.",
+      "path_indices": [
+        56,
+        76,
+        196
+      ],
+      "comparison": {
+        "reference": "static850-rate00036-posthoc-cpu-fp64",
+        "candidate": "static850-rate00036-posthoc-gpu-fp32",
+        "status": "completed",
+        "common_paths": 3,
+        "reference_paths": 3,
+        "candidate_paths": 3,
+        "maximum_absolute_log_score_difference": 6.6094527824134275e-06,
+        "maximum_relative_log_score_difference": 3.7563133383442004e-07,
+        "winning_bit_disagreements": 0,
+        "admission_disagreements": 0,
+        "reference_minimum_bit_score_margin": 21.68977362940873,
+        "reference_minimum_distance_to_gate": 3.1177674522865537,
+        "per_path": [
+          {
+            "path": "static850-rate00036/path-00056",
+            "bit_log_score_delta": [
+              -5.946175850368718e-06,
+              4.844676393389591e-07
+            ],
+            "same_winning_bit": true,
+            "same_gate_decision": true
+          },
+          {
+            "path": "static850-rate00036/path-00076",
+            "bit_log_score_delta": [
+              -6.6094527824134275e-06,
+              -5.792435775475724e-08
+            ],
+            "same_winning_bit": true,
+            "same_gate_decision": true
+          },
+          {
+            "path": "static850-rate00036/path-00196",
+            "bit_log_score_delta": [
+              -4.4701510404365763e-07,
+              9.423988478474143e-08
+            ],
+            "same_winning_bit": true,
+            "same_gate_decision": true
+          }
+        ]
+      },
+      "status": "completed",
+      "per_path_distances": [
+        {
+          "path": "static850-rate00036/path-00056",
+          "cpu_fp64_bit_log_scores": [
+            28.952192457376817,
+            -3.3276220209313956
+          ],
+          "gpu_fp32_bit_log_scores": [
+            28.952186511200967,
+            -3.3276215364637562
+          ],
+          "threshold": 22.72106338958574,
+          "cpu_signed_winning_score_minus_gate": 6.231129067791077,
+          "gpu_signed_winning_score_minus_gate": 6.2311231216152265,
+          "cpu_bit_score_margin": 32.27981447830821,
+          "maximum_absolute_score_error": 5.946175850368718e-06
+        },
+        {
+          "path": "static850-rate00036/path-00076",
+          "cpu_fp64_bit_log_scores": [
+            17.5955842526356,
+            -4.094189376773131
+          ],
+          "gpu_fp32_bit_log_scores": [
+            17.595577643182818,
+            -4.094189434697489
+          ],
+          "threshold": 22.72106338958574,
+          "cpu_signed_winning_score_minus_gate": -5.1254791369501405,
+          "gpu_signed_winning_score_minus_gate": -5.125485746402923,
+          "cpu_bit_score_margin": 21.68977362940873,
+          "maximum_absolute_score_error": 6.6094527824134275e-06
+        },
+        {
+          "path": "static850-rate00036/path-00196",
+          "cpu_fp64_bit_log_scores": [
+            25.838830841872294,
+            -3.509453116641611
+          ],
+          "gpu_fp32_bit_log_scores": [
+            25.83883039485719,
+            -3.5094530224017264
+          ],
+          "threshold": 22.72106338958574,
+          "cpu_signed_winning_score_minus_gate": 3.1177674522865537,
+          "gpu_signed_winning_score_minus_gate": 3.1177670052714497,
+          "cpu_bit_score_margin": 29.348283958513907,
+          "maximum_absolute_score_error": 4.4701510404365763e-07
+        }
+      ],
+      "closest_reference_gate_case": {
+        "path": "static850-rate00036/path-00196",
+        "cpu_fp64_bit_log_scores": [
+          25.838830841872294,
+          -3.509453116641611
+        ],
+        "gpu_fp32_bit_log_scores": [
+          25.83883039485719,
+          -3.5094530224017264
+        ],
+        "threshold": 22.72106338958574,
+        "cpu_signed_winning_score_minus_gate": 3.1177674522865537,
+        "gpu_signed_winning_score_minus_gate": 3.1177670052714497,
+        "cpu_bit_score_margin": 29.348283958513907,
+        "maximum_absolute_score_error": 4.4701510404365763e-07
+      },
+      "observed_gate_distance_over_maximum_score_error": 471713.40123381704,
+      "proximity_scope": "Exact observed distance for these reused captures. Observed arithmetic differences are not a worst-case numerical bound and do not qualify arbitrarily closer scores."
+    }
+  ],
+  "all_planned_jobs_completed": true,
+  "all_pairs_same_rank_and_gate": true,
+  "limitations": [
+    "Posthoc diagnostic selection from existing development and holdout results; no new independent detection qualification.",
+    "CPUFP64 and GPUFP32 use the same1024-point discrete CFO grid, physical observations and Gaussian channel prior. Prior FFT scores were used only to select cases.",
+    "Actual nearest gate distances are reported. Agreement several log units from a gate is not a demonstration at machine-precision distance.",
+    "Missing/failed pairs cannot establish arithmetic agreement; no replacement cases or modified gates are chosen."
+  ]
+}
