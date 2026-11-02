@@ -1,0 +1,1729 @@
+{
+  "schema": "triad-compression-audit-v1",
+  "source_sha256": "d81e9fd9082b345509dbf611c205e894383027c37f8d60af76fb586de5f4cafd",
+  "plans": {
+    "compression-actual-export-plan.json": "c3c2eb7792855fd750687a83397fa83b7d9404d0708025a9e077c54a1612d00e",
+    "compression-actual-score-plan.json": "6e92ce3fa6ea2642eb9a5f64106ce3398b6e0c17fb89b28b5b718815a4ecb025"
+  },
+  "paired_statistics_passed": true,
+  "actual_score_reports_complete": true,
+  "passed": true,
+  "pairs_expected": 8,
+  "pairs_passed": 8,
+  "pairs": [
+    {
+      "status": "completed",
+      "passed": true,
+      "fine_input": "/workspace/triad/local-evidence/spread/aligned/g10-aligned-fine-actual-near/path-00000",
+      "coarse_input": "/workspace/triad/local-evidence/spread/aligned/g10-aligned-fine-paired-coarse-actual-near/path-00000",
+      "metadata_parity": true,
+      "unexpected_metadata_differences": [],
+      "full_capture_support_equal": true,
+      "fine_samples": 447454,
+      "coarse_samples": 447454,
+      "compared_prefix_samples": 447454,
+      "fine_uncompared_tail_samples": 0,
+      "coarse_uncompared_tail_samples": 0,
+      "fine_block_samples": 8,
+      "coarse_block_samples": 32,
+      "last_compared_coarse_fine_blocks": 4,
+      "last_fine_interval_rows": 6,
+      "last_coarse_interval_rows": 30,
+      "tail_interpretation": "Identical sample support; the final partial block, if any, is summed with its actual row count and no invented padding.",
+      "statistics": {
+        "gram": {
+          "passed": true,
+          "coarse_blocks_compared": 13983,
+          "max_absolute_error": 5.684341886080802e-14,
+          "max_tolerance_ratio": 3.701766267455395e-05,
+          "relative_l2_error": 1.886900268830949e-16,
+          "fine_aggregated_scalar_total": null,
+          "coarse_scalar_total": null,
+          "comparison": "abs(error) <= 2e-10 + 2e-11*abs(coarse)"
+        },
+        "mean": {
+          "passed": true,
+          "coarse_blocks_compared": 13983,
+          "max_absolute_error": 5.859285502108464e-14,
+          "max_tolerance_ratio": 4.0636044782284965e-05,
+          "relative_l2_error": 1.9347593773385753e-16,
+          "fine_aggregated_scalar_total": null,
+          "coarse_scalar_total": null,
+          "comparison": "abs(error) <= 2e-10 + 2e-11*abs(coarse)"
+        },
+        "observation": {
+          "passed": true,
+          "coarse_blocks_compared": 13983,
+          "max_absolute_error": 2.8457214390443806e-13,
+          "max_tolerance_ratio": 0.00019814657515439458,
+          "relative_l2_error": 2.2036832288935201e-16,
+          "fine_aggregated_scalar_total": null,
+          "coarse_scalar_total": null,
+          "comparison": "abs(error) <= 2e-10 + 2e-11*abs(coarse)"
+        },
+        "signal_energy": {
+          "passed": true,
+          "coarse_blocks_compared": 13983,
+          "max_absolute_error": 1.1368683772161603e-13,
+          "max_tolerance_ratio": 3.087560659657426e-05,
+          "relative_l2_error": 1.865068216460261e-16,
+          "fine_aggregated_scalar_total": 439689.38286526507,
+          "coarse_scalar_total": 439689.38286526507,
+          "comparison": "abs(error) <= 2e-10 + 2e-11*abs(coarse)"
+        },
+        "received_energy": {
+          "passed": true,
+          "coarse_blocks_compared": 13983,
+          "max_absolute_error": 1.4551915228366852e-11,
+          "max_tolerance_ratio": 3.866859448368334e-05,
+          "relative_l2_error": 1.7898986860435128e-16,
+          "fine_aggregated_scalar_total": 229364674.3321447,
+          "coarse_scalar_total": 229364674.3321447,
+          "comparison": "abs(error) <= 2e-10 + 2e-11*abs(coarse)"
+        },
+        "valid_rows": {
+          "passed": true,
+          "coarse_blocks_compared": 13983,
+          "max_absolute_error": 0.0,
+          "max_tolerance_ratio": null,
+          "relative_l2_error": 0.0,
+          "fine_aggregated_scalar_total": 447454.0,
+          "coarse_scalar_total": 447454.0,
+          "comparison": "exact integer"
+        }
+      },
+      "signal_energy_seconds": {
+        "fine": 858.7683259087208,
+        "coarse": 858.7683259087208
+      },
+      "source_identity": {
+        "key_seed": 14064891684761714133,
+        "epoch": 1800000000,
+        "signal_bit": 0,
+        "control": "signal",
+        "random_seed_roots": {
+          "channel": 494751299519879690,
+          "oscillator": 17595315783297970224,
+          "noise": 14709250197979271245,
+          "frontend": 5145987418269382699,
+          "path": 2994814980300918890,
+          "oscillator_explicit": true,
+          "noise_explicit": true,
+          "frontend_explicit": true,
+          "path_explicit": true,
+          "fallback": "unset oscillator/noise/frontend/path roots inherit the resolved channel seed",
+          "channel_root_scope": "static timing/CFO/clock/drift truth, spread ray, and frequency-selective perturbation",
+          "oscillator_root_scope": "TX/RX oscillator spectra and FHSS phase resets",
+          "noise_root_scope": "thermal noise only",
+          "frontend_root_scope": "DAC/ADC conversion, impulse process, and tone phase",
+          "path_root_scope": "independent stationary OU or Gaussian-FIR ray gains and initial diurnal path phase"
+        },
+        "source_samples": 446401,
+        "channel_samples": 447454,
+        "channel_tail_samples": 14
+      },
+      "file_provenance": {
+        "fine": {
+          "manifest.json": {
+            "sha256": "35c92aa394ad9b261c0b26ab5592d7954aeb7150a1476c08e5d81df84c7131d3"
+          },
+          "intervals.u64": {
+            "sha256": "e14dfa28c9567a4ba1bb01974748a446e7c279996d8474df4005c59f22d0072a",
+            "bytes": 894912
+          },
+          "gram.c128": {
+            "sha256": "39242c4f714a55d0966d60b862abbe436ccdc6d841ef5518560f166763d3caff",
+            "bytes": 14318592
+          },
+          "mean.c128": {
+            "sha256": "0510e59be4d1cfe7a99c95101b6955b4b03c0035ce4f1f7c5e79679b52d8cad8",
+            "bytes": 3579648
+          },
+          "observation.c128": {
+            "sha256": "49dde34e6aec481565588a653e5a7c1b49f0830619fcb8c7bc63db2de50f2c70",
+            "bytes": 3579648
+          },
+          "signal_energy.f64": {
+            "sha256": "f9d4a9c0eeea8748e183dbdf7e0d1eb6187d4d6a13c5c0de002c472cf275bfc5",
+            "bytes": 447456
+          },
+          "received_energy.f64": {
+            "sha256": "48eda3c95bc498266cab2fd615d78cb71cccdffbd28e021c24ab8d35acecefeb",
+            "bytes": 447456
+          },
+          "valid_rows.u64": {
+            "sha256": "02331f843d77a16ab7f0ffc1fed0feadeef45af47b80feae66186e2fcece26b8",
+            "bytes": 447456
+          }
+        },
+        "coarse": {
+          "manifest.json": {
+            "sha256": "6d86cb7c843b304eedd3e2968a194b79bffdb33b07de29399452bae5ad2d6428"
+          },
+          "intervals.u64": {
+            "sha256": "ba5d4c62a3376ffbed26de02d148b0cdb6d3bdc6ee6d4f0fa7f61bea1ee63d5c",
+            "bytes": 223728
+          },
+          "gram.c128": {
+            "sha256": "8a0bb9e0a2fe437932ed5818afeca4157faa266a023e423562b2fb082b48ed68",
+            "bytes": 3579648
+          },
+          "mean.c128": {
+            "sha256": "ada400404daffecd67885e500edbc2f6b896d1d32715aa460c7da62b2b7d263e",
+            "bytes": 894912
+          },
+          "observation.c128": {
+            "sha256": "6594b82c24afb5cc382e68677115dcaf34360eb7f31b31eb036afd676f203928",
+            "bytes": 894912
+          },
+          "signal_energy.f64": {
+            "sha256": "26be25fc3c81b93057d26398060c4398a3f2c3ac42c3090c10a0a7049775c662",
+            "bytes": 111864
+          },
+          "received_energy.f64": {
+            "sha256": "f5ec8adebae0ec89a3423bb024b7f0362da133e8afce941d95913a5c0f5c0d8e",
+            "bytes": 111864
+          },
+          "valid_rows.u64": {
+            "sha256": "9c6db424e1e76fdf909660ed13a0feaea3374eb3dfe310a9e7d1f290a968a75d",
+            "bytes": 111864
+          }
+        }
+      },
+      "wall_seconds": 0.06434676900971681
+    },
+    {
+      "status": "completed",
+      "passed": true,
+      "fine_input": "/workspace/triad/local-evidence/spread/aligned/g10-aligned-fine-actual-near/path-00001",
+      "coarse_input": "/workspace/triad/local-evidence/spread/aligned/g10-aligned-fine-paired-coarse-actual-near/path-00001",
+      "metadata_parity": true,
+      "unexpected_metadata_differences": [],
+      "full_capture_support_equal": true,
+      "fine_samples": 447454,
+      "coarse_samples": 447454,
+      "compared_prefix_samples": 447454,
+      "fine_uncompared_tail_samples": 0,
+      "coarse_uncompared_tail_samples": 0,
+      "fine_block_samples": 8,
+      "coarse_block_samples": 32,
+      "last_compared_coarse_fine_blocks": 4,
+      "last_fine_interval_rows": 6,
+      "last_coarse_interval_rows": 30,
+      "tail_interpretation": "Identical sample support; the final partial block, if any, is summed with its actual row count and no invented padding.",
+      "statistics": {
+        "gram": {
+          "passed": true,
+          "coarse_blocks_compared": 13983,
+          "max_absolute_error": 5.684341886080802e-14,
+          "max_tolerance_ratio": 3.4761966845048976e-05,
+          "relative_l2_error": 1.8739111083246632e-16,
+          "fine_aggregated_scalar_total": null,
+          "coarse_scalar_total": null,
+          "comparison": "abs(error) <= 2e-10 + 2e-11*abs(coarse)"
+        },
+        "mean": {
+          "passed": true,
+          "coarse_blocks_compared": 13983,
+          "max_absolute_error": 8.556067554929068e-14,
+          "max_tolerance_ratio": 3.419194070645162e-05,
+          "relative_l2_error": 1.9506845899937894e-16,
+          "fine_aggregated_scalar_total": null,
+          "coarse_scalar_total": null,
+          "comparison": "abs(error) <= 2e-10 + 2e-11*abs(coarse)"
+        },
+        "observation": {
+          "passed": true,
+          "coarse_blocks_compared": 13983,
+          "max_absolute_error": 2.411662016538279e-13,
+          "max_tolerance_ratio": 0.00018569271567323551,
+          "relative_l2_error": 2.1911108989518262e-16,
+          "fine_aggregated_scalar_total": null,
+          "coarse_scalar_total": null,
+          "comparison": "abs(error) <= 2e-10 + 2e-11*abs(coarse)"
+        },
+        "signal_energy": {
+          "passed": true,
+          "coarse_blocks_compared": 13983,
+          "max_absolute_error": 1.7053025658242404e-13,
+          "max_tolerance_ratio": 4.038352048310552e-05,
+          "relative_l2_error": 1.9277189967924632e-16,
+          "fine_aggregated_scalar_total": 444704.7051359463,
+          "coarse_scalar_total": 444704.7051359463,
+          "comparison": "abs(error) <= 2e-10 + 2e-11*abs(coarse)"
+        },
+        "received_energy": {
+          "passed": true,
+          "coarse_blocks_compared": 13983,
+          "max_absolute_error": 1.4551915228366852e-11,
+          "max_tolerance_ratio": 3.814917147531489e-05,
+          "relative_l2_error": 1.7927390308160542e-16,
+          "fine_aggregated_scalar_total": 229838304.60276142,
+          "coarse_scalar_total": 229838304.60276142,
+          "comparison": "abs(error) <= 2e-10 + 2e-11*abs(coarse)"
+        },
+        "valid_rows": {
+          "passed": true,
+          "coarse_blocks_compared": 13983,
+          "max_absolute_error": 0.0,
+          "max_tolerance_ratio": null,
+          "relative_l2_error": 0.0,
+          "fine_aggregated_scalar_total": 447454.0,
+          "coarse_scalar_total": 447454.0,
+          "comparison": "exact integer"
+        }
+      },
+      "signal_energy_seconds": {
+        "fine": 868.5638772186451,
+        "coarse": 868.5638772186451
+      },
+      "source_identity": {
+        "key_seed": 6471518047953075815,
+        "epoch": 1800000060,
+        "signal_bit": 1,
+        "control": "signal",
+        "random_seed_roots": {
+          "channel": 10545791470921575798,
+          "oscillator": 10682439886235178657,
+          "noise": 8996090913807415939,
+          "frontend": 12971704141527705805,
+          "path": 2412205832164981987,
+          "oscillator_explicit": true,
+          "noise_explicit": true,
+          "frontend_explicit": true,
+          "path_explicit": true,
+          "fallback": "unset oscillator/noise/frontend/path roots inherit the resolved channel seed",
+          "channel_root_scope": "static timing/CFO/clock/drift truth, spread ray, and frequency-selective perturbation",
+          "oscillator_root_scope": "TX/RX oscillator spectra and FHSS phase resets",
+          "noise_root_scope": "thermal noise only",
+          "frontend_root_scope": "DAC/ADC conversion, impulse process, and tone phase",
+          "path_root_scope": "independent stationary OU or Gaussian-FIR ray gains and initial diurnal path phase"
+        },
+        "source_samples": 446401,
+        "channel_samples": 447454,
+        "channel_tail_samples": 15
+      },
+      "file_provenance": {
+        "fine": {
+          "manifest.json": {
+            "sha256": "b58c434fd316b510ef424baf4261a71612293bad496dfd13c07058c1741b5737"
+          },
+          "intervals.u64": {
+            "sha256": "e14dfa28c9567a4ba1bb01974748a446e7c279996d8474df4005c59f22d0072a",
+            "bytes": 894912
+          },
+          "gram.c128": {
+            "sha256": "6ed44ad39b7038851040c94ba1e3945cb721f636f5dd1c9a509276fa43cd6b03",
+            "bytes": 14318592
+          },
+          "mean.c128": {
+            "sha256": "25464357d785dca862787389139d65b482c54c0218bea79510d6e89aa6d62dca",
+            "bytes": 3579648
+          },
+          "observation.c128": {
+            "sha256": "6974d2f7f45abd7ddd63be85ce5f546c53aa188a282ffd11a96eead98d4a02e8",
+            "bytes": 3579648
+          },
+          "signal_energy.f64": {
+            "sha256": "ad53c7de1dfd40a1fa7fe04a3674aca50f5b8a78eca82b16dd7a73bac717b3fa",
+            "bytes": 447456
+          },
+          "received_energy.f64": {
+            "sha256": "687e38cbb5b62e5fc6863650ecb623d48843c9f7705936dae77cac04ac61ada7",
+            "bytes": 447456
+          },
+          "valid_rows.u64": {
+            "sha256": "02331f843d77a16ab7f0ffc1fed0feadeef45af47b80feae66186e2fcece26b8",
+            "bytes": 447456
+          }
+        },
+        "coarse": {
+          "manifest.json": {
+            "sha256": "6027e0e57cfbf4ce2f9d5cb889b533119bfe4372f23440a78d522e49727ab50a"
+          },
+          "intervals.u64": {
+            "sha256": "ba5d4c62a3376ffbed26de02d148b0cdb6d3bdc6ee6d4f0fa7f61bea1ee63d5c",
+            "bytes": 223728
+          },
+          "gram.c128": {
+            "sha256": "d4ca63fc5b9cb0146e5ec34dc68fd753b194ebf9bc45a652973094f9ae9e8d58",
+            "bytes": 3579648
+          },
+          "mean.c128": {
+            "sha256": "01649cebf26b3ab277b8ac97151295ec51dd3259532fad6ac1decedd5ffc7687",
+            "bytes": 894912
+          },
+          "observation.c128": {
+            "sha256": "1c075bc96732113ae84e95efc0c76f178c9eafa489d07aaf6ec842f97e7c7529",
+            "bytes": 894912
+          },
+          "signal_energy.f64": {
+            "sha256": "42a3cd6aee92927457b17d9ad14b6cfd4c69f450a0cf8aa2e2ae0c02ac1aa0df",
+            "bytes": 111864
+          },
+          "received_energy.f64": {
+            "sha256": "946d2643ec4c54ece9292d6f8c113a8eddc9d7e103c2c88e62eb01115f3861b4",
+            "bytes": 111864
+          },
+          "valid_rows.u64": {
+            "sha256": "9c6db424e1e76fdf909660ed13a0feaea3374eb3dfe310a9e7d1f290a968a75d",
+            "bytes": 111864
+          }
+        }
+      },
+      "wall_seconds": 0.02542588103096932
+    },
+    {
+      "status": "completed",
+      "passed": true,
+      "fine_input": "/workspace/triad/local-evidence/spread/aligned/g10-aligned-fine-actual-near/path-00002",
+      "coarse_input": "/workspace/triad/local-evidence/spread/aligned/g10-aligned-fine-paired-coarse-actual-near/path-00002",
+      "metadata_parity": true,
+      "unexpected_metadata_differences": [],
+      "full_capture_support_equal": true,
+      "fine_samples": 447454,
+      "coarse_samples": 447454,
+      "compared_prefix_samples": 447454,
+      "fine_uncompared_tail_samples": 0,
+      "coarse_uncompared_tail_samples": 0,
+      "fine_block_samples": 8,
+      "coarse_block_samples": 32,
+      "last_compared_coarse_fine_blocks": 4,
+      "last_fine_interval_rows": 6,
+      "last_coarse_interval_rows": 30,
+      "tail_interpretation": "Identical sample support; the final partial block, if any, is summed with its actual row count and no invented padding.",
+      "statistics": {
+        "gram": {
+          "passed": true,
+          "coarse_blocks_compared": 13983,
+          "max_absolute_error": 5.859285502108464e-14,
+          "max_tolerance_ratio": 3.536042564221148e-05,
+          "relative_l2_error": 1.8891351256749048e-16,
+          "fine_aggregated_scalar_total": null,
+          "coarse_scalar_total": null,
+          "comparison": "abs(error) <= 2e-10 + 2e-11*abs(coarse)"
+        },
+        "mean": {
+          "passed": true,
+          "coarse_blocks_compared": 13983,
+          "max_absolute_error": 4.4938668397781776e-14,
+          "max_tolerance_ratio": 3.275231344529663e-05,
+          "relative_l2_error": 1.9325614552080046e-16,
+          "fine_aggregated_scalar_total": null,
+          "coarse_scalar_total": null,
+          "comparison": "abs(error) <= 2e-10 + 2e-11*abs(coarse)"
+        },
+        "observation": {
+          "passed": true,
+          "coarse_blocks_compared": 13983,
+          "max_absolute_error": 2.3437142008433856e-13,
+          "max_tolerance_ratio": 0.00013117760606778578,
+          "relative_l2_error": 2.202044664029389e-16,
+          "fine_aggregated_scalar_total": null,
+          "coarse_scalar_total": null,
+          "comparison": "abs(error) <= 2e-10 + 2e-11*abs(coarse)"
+        },
+        "signal_energy": {
+          "passed": true,
+          "coarse_blocks_compared": 13983,
+          "max_absolute_error": 1.1368683772161603e-13,
+          "max_tolerance_ratio": 3.6173869619008017e-05,
+          "relative_l2_error": 1.908719291420039e-16,
+          "fine_aggregated_scalar_total": 438081.37609123753,
+          "coarse_scalar_total": 438081.37609123753,
+          "comparison": "abs(error) <= 2e-10 + 2e-11*abs(coarse)"
+        },
+        "received_energy": {
+          "passed": true,
+          "coarse_blocks_compared": 13983,
+          "max_absolute_error": 1.4551915228366852e-11,
+          "max_tolerance_ratio": 3.261648457102195e-05,
+          "relative_l2_error": 1.7883371562515103e-16,
+          "fine_aggregated_scalar_total": 230426880.1133274,
+          "coarse_scalar_total": 230426880.1133274,
+          "comparison": "abs(error) <= 2e-10 + 2e-11*abs(coarse)"
+        },
+        "valid_rows": {
+          "passed": true,
+          "coarse_blocks_compared": 13983,
+          "max_absolute_error": 0.0,
+          "max_tolerance_ratio": null,
+          "relative_l2_error": 0.0,
+          "fine_aggregated_scalar_total": 447454.0,
+          "coarse_scalar_total": 447454.0,
+          "comparison": "exact integer"
+        }
+      },
+      "signal_energy_seconds": {
+        "fine": 855.6276876781983,
+        "coarse": 855.6276876781983
+      },
+      "source_identity": {
+        "key_seed": 14008589144874616248,
+        "epoch": 1800000120,
+        "signal_bit": 0,
+        "control": "signal",
+        "random_seed_roots": {
+          "channel": 13115000213644348890,
+          "oscillator": 13555883943251181951,
+          "noise": 1518931682937258412,
+          "frontend": 10659788661454750101,
+          "path": 5707006900909549550,
+          "oscillator_explicit": true,
+          "noise_explicit": true,
+          "frontend_explicit": true,
+          "path_explicit": true,
+          "fallback": "unset oscillator/noise/frontend/path roots inherit the resolved channel seed",
+          "channel_root_scope": "static timing/CFO/clock/drift truth, spread ray, and frequency-selective perturbation",
+          "oscillator_root_scope": "TX/RX oscillator spectra and FHSS phase resets",
+          "noise_root_scope": "thermal noise only",
+          "frontend_root_scope": "DAC/ADC conversion, impulse process, and tone phase",
+          "path_root_scope": "independent stationary OU or Gaussian-FIR ray gains and initial diurnal path phase"
+        },
+        "source_samples": 446401,
+        "channel_samples": 447454,
+        "channel_tail_samples": 15
+      },
+      "file_provenance": {
+        "fine": {
+          "manifest.json": {
+            "sha256": "d8bebc29dab6e18a67a0744669e1d9929425cff1562dc7f32c4c5d0dd1ed43d8"
+          },
+          "intervals.u64": {
+            "sha256": "e14dfa28c9567a4ba1bb01974748a446e7c279996d8474df4005c59f22d0072a",
+            "bytes": 894912
+          },
+          "gram.c128": {
+            "sha256": "6acfa5036560c3bd252bf9d31e9492cf85fdd81ba4ca3e0c3c844792e81835dd",
+            "bytes": 14318592
+          },
+          "mean.c128": {
+            "sha256": "730e2c27941e6b1e47c61c8c10ef95d394ed564e04ff49d872bef99bec3f7fcb",
+            "bytes": 3579648
+          },
+          "observation.c128": {
+            "sha256": "26e63f3e4209d1541ca6bc28304ef8d0475db6be344e07a2fc754051165ca2d9",
+            "bytes": 3579648
+          },
+          "signal_energy.f64": {
+            "sha256": "d34b4490be42044fb0ea26004604fc0d723d8b946c75fa4c81fc9082c44e4e0f",
+            "bytes": 447456
+          },
+          "received_energy.f64": {
+            "sha256": "a612e79f9b35468a222413bef6535c8aceea38a4642e93df5550b8d17e9aac20",
+            "bytes": 447456
+          },
+          "valid_rows.u64": {
+            "sha256": "02331f843d77a16ab7f0ffc1fed0feadeef45af47b80feae66186e2fcece26b8",
+            "bytes": 447456
+          }
+        },
+        "coarse": {
+          "manifest.json": {
+            "sha256": "b3da4c849e9ddd21badc61eb058a724c914453293e790ece1553079b9128451e"
+          },
+          "intervals.u64": {
+            "sha256": "ba5d4c62a3376ffbed26de02d148b0cdb6d3bdc6ee6d4f0fa7f61bea1ee63d5c",
+            "bytes": 223728
+          },
+          "gram.c128": {
+            "sha256": "cc53ecfbb7100d78cf65ac44032681e08a956acb2d26186e29e5fdc692b88ef3",
+            "bytes": 3579648
+          },
+          "mean.c128": {
+            "sha256": "b5ca6f963160cd898cd87aea91a96a1f27bd7ce456e083ddccb13c7d290ecee4",
+            "bytes": 894912
+          },
+          "observation.c128": {
+            "sha256": "41df4f81117caf7025321b1279ac46c6f53097e15c43e55b7a9050df1abd7f10",
+            "bytes": 894912
+          },
+          "signal_energy.f64": {
+            "sha256": "983eb20d91befc6eabc74696a0935413e4eb2a1491d20eb8025765d6cc5bb9d4",
+            "bytes": 111864
+          },
+          "received_energy.f64": {
+            "sha256": "4ffaa260f4188a9018b468e0df2302281ac4925dc5b117ba53c6b793542e222c",
+            "bytes": 111864
+          },
+          "valid_rows.u64": {
+            "sha256": "9c6db424e1e76fdf909660ed13a0feaea3374eb3dfe310a9e7d1f290a968a75d",
+            "bytes": 111864
+          }
+        }
+      },
+      "wall_seconds": 0.026984922937117517
+    },
+    {
+      "status": "completed",
+      "passed": true,
+      "fine_input": "/workspace/triad/local-evidence/spread/aligned/g10-aligned-fine-actual-near/path-00003",
+      "coarse_input": "/workspace/triad/local-evidence/spread/aligned/g10-aligned-fine-paired-coarse-actual-near/path-00003",
+      "metadata_parity": true,
+      "unexpected_metadata_differences": [],
+      "full_capture_support_equal": true,
+      "fine_samples": 447454,
+      "coarse_samples": 447454,
+      "compared_prefix_samples": 447454,
+      "fine_uncompared_tail_samples": 0,
+      "coarse_uncompared_tail_samples": 0,
+      "fine_block_samples": 8,
+      "coarse_block_samples": 32,
+      "last_compared_coarse_fine_blocks": 4,
+      "last_fine_interval_rows": 6,
+      "last_coarse_interval_rows": 30,
+      "tail_interpretation": "Identical sample support; the final partial block, if any, is summed with its actual row count and no invented padding.",
+      "statistics": {
+        "gram": {
+          "passed": true,
+          "coarse_blocks_compared": 13983,
+          "max_absolute_error": 5.695433295429594e-14,
+          "max_tolerance_ratio": 4.457430614108172e-05,
+          "relative_l2_error": 1.8846032081734054e-16,
+          "fine_aggregated_scalar_total": null,
+          "coarse_scalar_total": null,
+          "comparison": "abs(error) <= 2e-10 + 2e-11*abs(coarse)"
+        },
+        "mean": {
+          "passed": true,
+          "coarse_blocks_compared": 13983,
+          "max_absolute_error": 7.105427357601002e-14,
+          "max_tolerance_ratio": 3.572073099453495e-05,
+          "relative_l2_error": 1.932081169886988e-16,
+          "fine_aggregated_scalar_total": null,
+          "coarse_scalar_total": null,
+          "comparison": "abs(error) <= 2e-10 + 2e-11*abs(coarse)"
+        },
+        "observation": {
+          "passed": true,
+          "coarse_blocks_compared": 13983,
+          "max_absolute_error": 2.278173318171838e-13,
+          "max_tolerance_ratio": 0.00016709075304054146,
+          "relative_l2_error": 2.1997291203113288e-16,
+          "fine_aggregated_scalar_total": null,
+          "coarse_scalar_total": null,
+          "comparison": "abs(error) <= 2e-10 + 2e-11*abs(coarse)"
+        },
+        "signal_energy": {
+          "passed": true,
+          "coarse_blocks_compared": 13983,
+          "max_absolute_error": 1.7053025658242404e-13,
+          "max_tolerance_ratio": 3.2163157299806e-05,
+          "relative_l2_error": 1.902706340685325e-16,
+          "fine_aggregated_scalar_total": 449271.23450500524,
+          "coarse_scalar_total": 449271.23450500524,
+          "comparison": "abs(error) <= 2e-10 + 2e-11*abs(coarse)"
+        },
+        "received_energy": {
+          "passed": true,
+          "coarse_blocks_compared": 13983,
+          "max_absolute_error": 1.4551915228366852e-11,
+          "max_tolerance_ratio": 3.366113692220296e-05,
+          "relative_l2_error": 1.8087966283840467e-16,
+          "fine_aggregated_scalar_total": 229769767.67946693,
+          "coarse_scalar_total": 229769767.67946693,
+          "comparison": "abs(error) <= 2e-10 + 2e-11*abs(coarse)"
+        },
+        "valid_rows": {
+          "passed": true,
+          "coarse_blocks_compared": 13983,
+          "max_absolute_error": 0.0,
+          "max_tolerance_ratio": null,
+          "relative_l2_error": 0.0,
+          "fine_aggregated_scalar_total": 447454.0,
+          "coarse_scalar_total": 447454.0,
+          "comparison": "exact integer"
+        }
+      },
+      "signal_energy_seconds": {
+        "fine": 877.4828798925884,
+        "coarse": 877.4828798925884
+      },
+      "source_identity": {
+        "key_seed": 13970500798460350735,
+        "epoch": 1800000180,
+        "signal_bit": 1,
+        "control": "signal",
+        "random_seed_roots": {
+          "channel": 8598711703474275078,
+          "oscillator": 613157484412549398,
+          "noise": 6858490290140826753,
+          "frontend": 7766862081610510568,
+          "path": 4363325311270842503,
+          "oscillator_explicit": true,
+          "noise_explicit": true,
+          "frontend_explicit": true,
+          "path_explicit": true,
+          "fallback": "unset oscillator/noise/frontend/path roots inherit the resolved channel seed",
+          "channel_root_scope": "static timing/CFO/clock/drift truth, spread ray, and frequency-selective perturbation",
+          "oscillator_root_scope": "TX/RX oscillator spectra and FHSS phase resets",
+          "noise_root_scope": "thermal noise only",
+          "frontend_root_scope": "DAC/ADC conversion, impulse process, and tone phase",
+          "path_root_scope": "independent stationary OU or Gaussian-FIR ray gains and initial diurnal path phase"
+        },
+        "source_samples": 446401,
+        "channel_samples": 447454,
+        "channel_tail_samples": 14
+      },
+      "file_provenance": {
+        "fine": {
+          "manifest.json": {
+            "sha256": "6648820a53f2d7f8dbba1bc1a33f68d508e1ea742fc70e4359a8ee2e50ed5072"
+          },
+          "intervals.u64": {
+            "sha256": "e14dfa28c9567a4ba1bb01974748a446e7c279996d8474df4005c59f22d0072a",
+            "bytes": 894912
+          },
+          "gram.c128": {
+            "sha256": "dfc625d84540196327e90deb0172b602dae96794780572c5109f8174bf8c5df7",
+            "bytes": 14318592
+          },
+          "mean.c128": {
+            "sha256": "b0a9b22b27d62bf2a15561d77b346df476d0f3d33772d03cd2c1e266692aa9fb",
+            "bytes": 3579648
+          },
+          "observation.c128": {
+            "sha256": "59da74bdcc38eecf98108331bf03d771bb3137eecd9a041f83b940d01c16153b",
+            "bytes": 3579648
+          },
+          "signal_energy.f64": {
+            "sha256": "20a25f4c594ceae304317e0a425c91ff527abcc5892f0507ac74c70980893f0e",
+            "bytes": 447456
+          },
+          "received_energy.f64": {
+            "sha256": "1d0bd65e7c427267ba8bd9ed5ccca393381aadae345914258ec7772f154b9653",
+            "bytes": 447456
+          },
+          "valid_rows.u64": {
+            "sha256": "02331f843d77a16ab7f0ffc1fed0feadeef45af47b80feae66186e2fcece26b8",
+            "bytes": 447456
+          }
+        },
+        "coarse": {
+          "manifest.json": {
+            "sha256": "085b281adb8690152f7ef55636d221bff9323ef7744076619744b41c82e99062"
+          },
+          "intervals.u64": {
+            "sha256": "ba5d4c62a3376ffbed26de02d148b0cdb6d3bdc6ee6d4f0fa7f61bea1ee63d5c",
+            "bytes": 223728
+          },
+          "gram.c128": {
+            "sha256": "3d1ad418161f9f102568fde974c6f05736915bdbe41c33e1d025d4e1f38dd0a5",
+            "bytes": 3579648
+          },
+          "mean.c128": {
+            "sha256": "41ab23faff30d939062897b955dff9404d7f647d3669823179e230098efc14fb",
+            "bytes": 894912
+          },
+          "observation.c128": {
+            "sha256": "fa9ef5abdd4e2fa681953cdf232c395036368979aff0c3d4fbb88c9c36360ce8",
+            "bytes": 894912
+          },
+          "signal_energy.f64": {
+            "sha256": "0289e5bf0afa417d599eff00723e7dabf7b7c5faceabac8ad00d1ad23e1bf904",
+            "bytes": 111864
+          },
+          "received_energy.f64": {
+            "sha256": "18c24bbfe73d306b9a6c9af3906ea269c9d211de4b31a0c594f7af92e90078ff",
+            "bytes": 111864
+          },
+          "valid_rows.u64": {
+            "sha256": "9c6db424e1e76fdf909660ed13a0feaea3374eb3dfe310a9e7d1f290a968a75d",
+            "bytes": 111864
+          }
+        }
+      },
+      "wall_seconds": 0.025391231989488006
+    },
+    {
+      "status": "completed",
+      "passed": true,
+      "fine_input": "/workspace/triad/local-evidence/spread/aligned/g30-aligned-fine-actual-near/path-00000",
+      "coarse_input": "/workspace/triad/local-evidence/spread/aligned/g30-aligned-fine-paired-coarse-actual-near/path-00000",
+      "metadata_parity": true,
+      "unexpected_metadata_differences": [],
+      "full_capture_support_equal": true,
+      "fine_samples": 257079,
+      "coarse_samples": 257079,
+      "compared_prefix_samples": 257079,
+      "fine_uncompared_tail_samples": 0,
+      "coarse_uncompared_tail_samples": 0,
+      "fine_block_samples": 8,
+      "coarse_block_samples": 32,
+      "last_compared_coarse_fine_blocks": 3,
+      "last_fine_interval_rows": 7,
+      "last_coarse_interval_rows": 23,
+      "tail_interpretation": "Identical sample support; the final partial block, if any, is summed with its actual row count and no invented padding.",
+      "statistics": {
+        "gram": {
+          "passed": true,
+          "coarse_blocks_compared": 8034,
+          "max_absolute_error": 3.552713678800501e-14,
+          "max_tolerance_ratio": 3.154499905571426e-05,
+          "relative_l2_error": 1.929589561804628e-16,
+          "fine_aggregated_scalar_total": null,
+          "coarse_scalar_total": null,
+          "comparison": "abs(error) <= 2e-10 + 2e-11*abs(coarse)"
+        },
+        "mean": {
+          "passed": true,
+          "coarse_blocks_compared": 8034,
+          "max_absolute_error": 2.929642751054232e-14,
+          "max_tolerance_ratio": 3.077977810643762e-05,
+          "relative_l2_error": 1.9598571420981012e-16,
+          "fine_aggregated_scalar_total": null,
+          "coarse_scalar_total": null,
+          "comparison": "abs(error) <= 2e-10 + 2e-11*abs(coarse)"
+        },
+        "observation": {
+          "passed": true,
+          "coarse_blocks_compared": 8034,
+          "max_absolute_error": 1.1457157353758233e-13,
+          "max_tolerance_ratio": 0.00011515810955642388,
+          "relative_l2_error": 2.190316757691195e-16,
+          "fine_aggregated_scalar_total": null,
+          "coarse_scalar_total": null,
+          "comparison": "abs(error) <= 2e-10 + 2e-11*abs(coarse)"
+        },
+        "signal_energy": {
+          "passed": true,
+          "coarse_blocks_compared": 8034,
+          "max_absolute_error": 8.526512829121202e-14,
+          "max_tolerance_ratio": 3.209772884506136e-05,
+          "relative_l2_error": 1.866014533341623e-16,
+          "fine_aggregated_scalar_total": 248966.74814650812,
+          "coarse_scalar_total": 248966.74814650812,
+          "comparison": "abs(error) <= 2e-10 + 2e-11*abs(coarse)"
+        },
+        "received_energy": {
+          "passed": true,
+          "coarse_blocks_compared": 8034,
+          "max_absolute_error": 5.4569682106375694e-12,
+          "max_tolerance_ratio": 3.709624958144217e-05,
+          "relative_l2_error": 1.7694135607603563e-16,
+          "fine_aggregated_scalar_total": 53045468.5601096,
+          "coarse_scalar_total": 53045468.5601096,
+          "comparison": "abs(error) <= 2e-10 + 2e-11*abs(coarse)"
+        },
+        "valid_rows": {
+          "passed": true,
+          "coarse_blocks_compared": 8034,
+          "max_absolute_error": 0.0,
+          "max_tolerance_ratio": null,
+          "relative_l2_error": 0.0,
+          "fine_aggregated_scalar_total": 257079.0,
+          "coarse_scalar_total": 257079.0,
+          "comparison": "exact integer"
+        }
+      },
+      "signal_energy_seconds": {
+        "fine": 121.56579499341217,
+        "coarse": 121.56579499341217
+      },
+      "source_identity": {
+        "key_seed": 4594933008067618570,
+        "epoch": 1800000000,
+        "signal_bit": 0,
+        "control": "signal",
+        "random_seed_roots": {
+          "channel": 10299933545218661832,
+          "oscillator": 2404757043617209596,
+          "noise": 8086318454682422439,
+          "frontend": 8018300408110355927,
+          "path": 11793610411479225692,
+          "oscillator_explicit": true,
+          "noise_explicit": true,
+          "frontend_explicit": true,
+          "path_explicit": true,
+          "fallback": "unset oscillator/noise/frontend/path roots inherit the resolved channel seed",
+          "channel_root_scope": "static timing/CFO/clock/drift truth, spread ray, and frequency-selective perturbation",
+          "oscillator_root_scope": "TX/RX oscillator spectra and FHSS phase resets",
+          "noise_root_scope": "thermal noise only",
+          "frontend_root_scope": "DAC/ADC conversion, impulse process, and tone phase",
+          "path_root_scope": "independent stationary OU or Gaussian-FIR ray gains and initial diurnal path phase"
+        },
+        "source_samples": 252866,
+        "channel_samples": 257079,
+        "channel_tail_samples": 26
+      },
+      "file_provenance": {
+        "fine": {
+          "manifest.json": {
+            "sha256": "a3c652f4232ee833f45244efe197c4d412460f5f85946b9ecc1f22b801485178"
+          },
+          "intervals.u64": {
+            "sha256": "6b3dff6261c9735112a342e3b5397b9ed0d76fce9e7f09046b645cd34682dd7b",
+            "bytes": 514160
+          },
+          "gram.c128": {
+            "sha256": "0e97444be51f971be9d153519f877526bff789fe3fc1e2596d18da17521075fe",
+            "bytes": 8226560
+          },
+          "mean.c128": {
+            "sha256": "db8510a0fca01ecfe05cb823abdf0ac080ef25b3898651e55987c1b968e2698b",
+            "bytes": 2056640
+          },
+          "observation.c128": {
+            "sha256": "c2588de3608e9d12b465c95101dac3a4edcd880c253ca1fe9818af12cda62c24",
+            "bytes": 2056640
+          },
+          "signal_energy.f64": {
+            "sha256": "61c14126c2528b7bc1bbf451d04008fc70b53c63543bfcf25659d4321007c70c",
+            "bytes": 257080
+          },
+          "received_energy.f64": {
+            "sha256": "bbc8600bec03b8d2f7450c96626e369f23ba6efc4da48be9a71c6d11f403056a",
+            "bytes": 257080
+          },
+          "valid_rows.u64": {
+            "sha256": "dfc897a0352ffd4e5cadd4306fe9226c312421970602b43cd248f4303dfb23ba",
+            "bytes": 257080
+          }
+        },
+        "coarse": {
+          "manifest.json": {
+            "sha256": "76e1511e16d3faa2d47e0365090190d4c79b42012e77aa67bc7b556b85916811"
+          },
+          "intervals.u64": {
+            "sha256": "3394cac55b81257f3bcd198ee8fe5ced01e55d8b3c3f3f47b396e8c8dd58fb75",
+            "bytes": 128544
+          },
+          "gram.c128": {
+            "sha256": "0a546d5c31536473c5ab350bc22949474c029a85bc073be9131e01bb8a75563f",
+            "bytes": 2056704
+          },
+          "mean.c128": {
+            "sha256": "24fbde4c277e943c553c86e20115353249dd8f7763f33c86ae0b0b40a038cd5e",
+            "bytes": 514176
+          },
+          "observation.c128": {
+            "sha256": "9e62dc77d83ec346ba1a1266d21666016cdb037ea734bd93456570518c44449e",
+            "bytes": 514176
+          },
+          "signal_energy.f64": {
+            "sha256": "dbce5d3765e8f7e8e79e6decf1142735cdd4a04e23d9266f94be0e663db834f0",
+            "bytes": 64272
+          },
+          "received_energy.f64": {
+            "sha256": "c2f25e3c04730ace5538786634f3d77fedc698cbd18ccc2c28a45a3f5a579a52",
+            "bytes": 64272
+          },
+          "valid_rows.u64": {
+            "sha256": "6f9fec29f8fdde58e4e663999bf6e7a4c93dd775b959531eb5968d8586a3f405",
+            "bytes": 64272
+          }
+        }
+      },
+      "wall_seconds": 0.016758895944803953
+    },
+    {
+      "status": "completed",
+      "passed": true,
+      "fine_input": "/workspace/triad/local-evidence/spread/aligned/g30-aligned-fine-actual-near/path-00001",
+      "coarse_input": "/workspace/triad/local-evidence/spread/aligned/g30-aligned-fine-paired-coarse-actual-near/path-00001",
+      "metadata_parity": true,
+      "unexpected_metadata_differences": [],
+      "full_capture_support_equal": true,
+      "fine_samples": 257079,
+      "coarse_samples": 257079,
+      "compared_prefix_samples": 257079,
+      "fine_uncompared_tail_samples": 0,
+      "coarse_uncompared_tail_samples": 0,
+      "fine_block_samples": 8,
+      "coarse_block_samples": 32,
+      "last_compared_coarse_fine_blocks": 3,
+      "last_fine_interval_rows": 7,
+      "last_coarse_interval_rows": 23,
+      "tail_interpretation": "Identical sample support; the final partial block, if any, is summed with its actual row count and no invented padding.",
+      "statistics": {
+        "gram": {
+          "passed": true,
+          "coarse_blocks_compared": 8034,
+          "max_absolute_error": 3.552713678800501e-14,
+          "max_tolerance_ratio": 4.167844452055415e-05,
+          "relative_l2_error": 1.9233871861376857e-16,
+          "fine_aggregated_scalar_total": null,
+          "coarse_scalar_total": null,
+          "comparison": "abs(error) <= 2e-10 + 2e-11*abs(coarse)"
+        },
+        "mean": {
+          "passed": true,
+          "coarse_blocks_compared": 8034,
+          "max_absolute_error": 3.557151798805476e-14,
+          "max_tolerance_ratio": 2.8703617468895712e-05,
+          "relative_l2_error": 1.9618112388126767e-16,
+          "fine_aggregated_scalar_total": null,
+          "coarse_scalar_total": null,
+          "comparison": "abs(error) <= 2e-10 + 2e-11*abs(coarse)"
+        },
+        "observation": {
+          "passed": true,
+          "coarse_blocks_compared": 8034,
+          "max_absolute_error": 1.4210854715202004e-13,
+          "max_tolerance_ratio": 0.00010191750868175131,
+          "relative_l2_error": 2.1934317932639922e-16,
+          "fine_aggregated_scalar_total": null,
+          "coarse_scalar_total": null,
+          "comparison": "abs(error) <= 2e-10 + 2e-11*abs(coarse)"
+        },
+        "signal_energy": {
+          "passed": true,
+          "coarse_blocks_compared": 8034,
+          "max_absolute_error": 8.526512829121202e-14,
+          "max_tolerance_ratio": 3.0342156454255704e-05,
+          "relative_l2_error": 1.887285429978098e-16,
+          "fine_aggregated_scalar_total": 256196.20336260356,
+          "coarse_scalar_total": 256196.2033626036,
+          "comparison": "abs(error) <= 2e-10 + 2e-11*abs(coarse)"
+        },
+        "received_energy": {
+          "passed": true,
+          "coarse_blocks_compared": 8034,
+          "max_absolute_error": 7.275957614183426e-12,
+          "max_tolerance_ratio": 3.798182041827996e-05,
+          "relative_l2_error": 1.7505918114203465e-16,
+          "fine_aggregated_scalar_total": 52953997.74656134,
+          "coarse_scalar_total": 52953997.74656133,
+          "comparison": "abs(error) <= 2e-10 + 2e-11*abs(coarse)"
+        },
+        "valid_rows": {
+          "passed": true,
+          "coarse_blocks_compared": 8034,
+          "max_absolute_error": 0.0,
+          "max_tolerance_ratio": null,
+          "relative_l2_error": 0.0,
+          "fine_aggregated_scalar_total": 257079.0,
+          "coarse_scalar_total": 257079.0,
+          "comparison": "exact integer"
+        }
+      },
+      "signal_energy_seconds": {
+        "fine": 125.09580242314627,
+        "coarse": 125.0958024231463
+      },
+      "source_identity": {
+        "key_seed": 15027615998868180080,
+        "epoch": 1800000060,
+        "signal_bit": 1,
+        "control": "signal",
+        "random_seed_roots": {
+          "channel": 7257425867999949052,
+          "oscillator": 2087823583409745497,
+          "noise": 5203237853985505965,
+          "frontend": 765280763313459643,
+          "path": 12720518193406824550,
+          "oscillator_explicit": true,
+          "noise_explicit": true,
+          "frontend_explicit": true,
+          "path_explicit": true,
+          "fallback": "unset oscillator/noise/frontend/path roots inherit the resolved channel seed",
+          "channel_root_scope": "static timing/CFO/clock/drift truth, spread ray, and frequency-selective perturbation",
+          "oscillator_root_scope": "TX/RX oscillator spectra and FHSS phase resets",
+          "noise_root_scope": "thermal noise only",
+          "frontend_root_scope": "DAC/ADC conversion, impulse process, and tone phase",
+          "path_root_scope": "independent stationary OU or Gaussian-FIR ray gains and initial diurnal path phase"
+        },
+        "source_samples": 252866,
+        "channel_samples": 257079,
+        "channel_tail_samples": 26
+      },
+      "file_provenance": {
+        "fine": {
+          "manifest.json": {
+            "sha256": "92170facd2d6c9fd636bf9f631745e985431df11db93b3709eb95c899d4bf5cd"
+          },
+          "intervals.u64": {
+            "sha256": "6b3dff6261c9735112a342e3b5397b9ed0d76fce9e7f09046b645cd34682dd7b",
+            "bytes": 514160
+          },
+          "gram.c128": {
+            "sha256": "cda56796e732dc26c06f44ddb724a3c39a0d5f14e5ed799aee0bdcc9c5ff3e6c",
+            "bytes": 8226560
+          },
+          "mean.c128": {
+            "sha256": "8f361fd69c3e3c4f857c57e23bf9cc23b66e28df9de18bc4f4364845b0357b60",
+            "bytes": 2056640
+          },
+          "observation.c128": {
+            "sha256": "b41d3f0ca135f1f4f8f09a114a366689849f7e0cff63b3643ab43f0e0596a169",
+            "bytes": 2056640
+          },
+          "signal_energy.f64": {
+            "sha256": "8977d0f861b9cf69597cebb0e1848d72c48d60e38f9e05280d04a43d0e4f8a71",
+            "bytes": 257080
+          },
+          "received_energy.f64": {
+            "sha256": "7b7cb0fe6eb727b615ad573bc940a5ab0832c8d46b4f762cf0a127c9d737c63a",
+            "bytes": 257080
+          },
+          "valid_rows.u64": {
+            "sha256": "dfc897a0352ffd4e5cadd4306fe9226c312421970602b43cd248f4303dfb23ba",
+            "bytes": 257080
+          }
+        },
+        "coarse": {
+          "manifest.json": {
+            "sha256": "a266786c4f90abfc1c50f4e587c1742bc999c9c96c679f30b0a5435d73eed8f4"
+          },
+          "intervals.u64": {
+            "sha256": "3394cac55b81257f3bcd198ee8fe5ced01e55d8b3c3f3f47b396e8c8dd58fb75",
+            "bytes": 128544
+          },
+          "gram.c128": {
+            "sha256": "aec497972d32fb01ffe2bce909bdfeb5b0dd7c341ec574f4be85300eb1d57814",
+            "bytes": 2056704
+          },
+          "mean.c128": {
+            "sha256": "d83dd3bece8db7c9bff09db67e3f5c90714ee4f8b42f166b366e50d305f35fa2",
+            "bytes": 514176
+          },
+          "observation.c128": {
+            "sha256": "6dce80b19d8a778be71b1c7359986a9be70ee174de17e35c90e56acc339dd77c",
+            "bytes": 514176
+          },
+          "signal_energy.f64": {
+            "sha256": "f40d9f9ca06903a11e94b92d6dbe3dc469d2d287612ef0abc216169629a9cb39",
+            "bytes": 64272
+          },
+          "received_energy.f64": {
+            "sha256": "93d333a877a2d50eda943e0c1758af6d564f65d9dc39972f058e5a3a9b6378ba",
+            "bytes": 64272
+          },
+          "valid_rows.u64": {
+            "sha256": "6f9fec29f8fdde58e4e663999bf6e7a4c93dd775b959531eb5968d8586a3f405",
+            "bytes": 64272
+          }
+        }
+      },
+      "wall_seconds": 0.015665060025639832
+    },
+    {
+      "status": "completed",
+      "passed": true,
+      "fine_input": "/workspace/triad/local-evidence/spread/aligned/g30-aligned-fine-actual-near/path-00002",
+      "coarse_input": "/workspace/triad/local-evidence/spread/aligned/g30-aligned-fine-paired-coarse-actual-near/path-00002",
+      "metadata_parity": true,
+      "unexpected_metadata_differences": [],
+      "full_capture_support_equal": true,
+      "fine_samples": 257079,
+      "coarse_samples": 257079,
+      "compared_prefix_samples": 257079,
+      "fine_uncompared_tail_samples": 0,
+      "coarse_uncompared_tail_samples": 0,
+      "fine_block_samples": 8,
+      "coarse_block_samples": 32,
+      "last_compared_coarse_fine_blocks": 3,
+      "last_fine_interval_rows": 7,
+      "last_coarse_interval_rows": 23,
+      "tail_interpretation": "Identical sample support; the final partial block, if any, is summed with its actual row count and no invented padding.",
+      "statistics": {
+        "gram": {
+          "passed": true,
+          "coarse_blocks_compared": 8034,
+          "max_absolute_error": 3.552713678800501e-14,
+          "max_tolerance_ratio": 3.668342501141946e-05,
+          "relative_l2_error": 1.9338288656011998e-16,
+          "fine_aggregated_scalar_total": null,
+          "coarse_scalar_total": null,
+          "comparison": "abs(error) <= 2e-10 + 2e-11*abs(coarse)"
+        },
+        "mean": {
+          "passed": true,
+          "coarse_blocks_compared": 8034,
+          "max_absolute_error": 3.1776437161565096e-14,
+          "max_tolerance_ratio": 3.052578016243409e-05,
+          "relative_l2_error": 1.9630057676534358e-16,
+          "fine_aggregated_scalar_total": null,
+          "coarse_scalar_total": null,
+          "comparison": "abs(error) <= 2e-10 + 2e-11*abs(coarse)"
+        },
+        "observation": {
+          "passed": true,
+          "coarse_blocks_compared": 8034,
+          "max_absolute_error": 1.1457157353758233e-13,
+          "max_tolerance_ratio": 9.302753523893626e-05,
+          "relative_l2_error": 2.1999316548649027e-16,
+          "fine_aggregated_scalar_total": null,
+          "coarse_scalar_total": null,
+          "comparison": "abs(error) <= 2e-10 + 2e-11*abs(coarse)"
+        },
+        "signal_energy": {
+          "passed": true,
+          "coarse_blocks_compared": 8034,
+          "max_absolute_error": 8.526512829121202e-14,
+          "max_tolerance_ratio": 3.0620733649989245e-05,
+          "relative_l2_error": 1.8222968026380849e-16,
+          "fine_aggregated_scalar_total": 251235.75951765888,
+          "coarse_scalar_total": 251235.75951765888,
+          "comparison": "abs(error) <= 2e-10 + 2e-11*abs(coarse)"
+        },
+        "received_energy": {
+          "passed": true,
+          "coarse_blocks_compared": 8034,
+          "max_absolute_error": 7.275957614183426e-12,
+          "max_tolerance_ratio": 3.611073642982803e-05,
+          "relative_l2_error": 1.752187138563139e-16,
+          "fine_aggregated_scalar_total": 52819558.38609526,
+          "coarse_scalar_total": 52819558.386095256,
+          "comparison": "abs(error) <= 2e-10 + 2e-11*abs(coarse)"
+        },
+        "valid_rows": {
+          "passed": true,
+          "coarse_blocks_compared": 8034,
+          "max_absolute_error": 0.0,
+          "max_tolerance_ratio": null,
+          "relative_l2_error": 0.0,
+          "fine_aggregated_scalar_total": 257079.0,
+          "coarse_scalar_total": 257079.0,
+          "comparison": "exact integer"
+        }
+      },
+      "signal_energy_seconds": {
+        "fine": 122.67371070198188,
+        "coarse": 122.67371070198188
+      },
+      "source_identity": {
+        "key_seed": 13775914033217296037,
+        "epoch": 1800000120,
+        "signal_bit": 0,
+        "control": "signal",
+        "random_seed_roots": {
+          "channel": 260542639656548963,
+          "oscillator": 18306980736658311872,
+          "noise": 1782587384566784055,
+          "frontend": 2741748760734481224,
+          "path": 360532701588918805,
+          "oscillator_explicit": true,
+          "noise_explicit": true,
+          "frontend_explicit": true,
+          "path_explicit": true,
+          "fallback": "unset oscillator/noise/frontend/path roots inherit the resolved channel seed",
+          "channel_root_scope": "static timing/CFO/clock/drift truth, spread ray, and frequency-selective perturbation",
+          "oscillator_root_scope": "TX/RX oscillator spectra and FHSS phase resets",
+          "noise_root_scope": "thermal noise only",
+          "frontend_root_scope": "DAC/ADC conversion, impulse process, and tone phase",
+          "path_root_scope": "independent stationary OU or Gaussian-FIR ray gains and initial diurnal path phase"
+        },
+        "source_samples": 252866,
+        "channel_samples": 257079,
+        "channel_tail_samples": 26
+      },
+      "file_provenance": {
+        "fine": {
+          "manifest.json": {
+            "sha256": "1cbd0332065f4e0480eaf2ed65d0f066f132d8ae39e0617584979ce578fe0a19"
+          },
+          "intervals.u64": {
+            "sha256": "6b3dff6261c9735112a342e3b5397b9ed0d76fce9e7f09046b645cd34682dd7b",
+            "bytes": 514160
+          },
+          "gram.c128": {
+            "sha256": "2fd9c8c53ad11caa90f9811a1ee3b08f4e6a7dd17b03cc3e3a300b8e57716dfd",
+            "bytes": 8226560
+          },
+          "mean.c128": {
+            "sha256": "d3bed60f45470be6171b9fe461e72ace50df1bacc4cdca7bf6fca30d7b501b95",
+            "bytes": 2056640
+          },
+          "observation.c128": {
+            "sha256": "0428d1319fe4f589c9b24f2b586d29e789dee2920b0abf273f4872d83ae80610",
+            "bytes": 2056640
+          },
+          "signal_energy.f64": {
+            "sha256": "0085779c3157e4a6ec54dcbcf3e2c64dc19ab8f4f5ed3bc7a26d5c87a6e0e804",
+            "bytes": 257080
+          },
+          "received_energy.f64": {
+            "sha256": "90624eb2f9367a4a5b564852894eb97d0ce338c8f3bd4141a7c5b0fc8ed07a79",
+            "bytes": 257080
+          },
+          "valid_rows.u64": {
+            "sha256": "dfc897a0352ffd4e5cadd4306fe9226c312421970602b43cd248f4303dfb23ba",
+            "bytes": 257080
+          }
+        },
+        "coarse": {
+          "manifest.json": {
+            "sha256": "1da3c9ee7775bf3b847828859eb3e5194d8918707cbf66237ad8c02fa0b943f4"
+          },
+          "intervals.u64": {
+            "sha256": "3394cac55b81257f3bcd198ee8fe5ced01e55d8b3c3f3f47b396e8c8dd58fb75",
+            "bytes": 128544
+          },
+          "gram.c128": {
+            "sha256": "5837ca8b4166cbcf124428ae8469aace6a54df09d5e625b6d407dcc3b72a4a19",
+            "bytes": 2056704
+          },
+          "mean.c128": {
+            "sha256": "baa8562de22897095e7c64d5b1720d43e31786b2bfb6160a2af6dd34931698c5",
+            "bytes": 514176
+          },
+          "observation.c128": {
+            "sha256": "ab6f64b65f7301813930b7f5ff369633ff7e1840b72963a8913f27898547d54e",
+            "bytes": 514176
+          },
+          "signal_energy.f64": {
+            "sha256": "37a43d28d350aa1cbac21bf54993f759af94035bd73376f8e970424a37ecf56a",
+            "bytes": 64272
+          },
+          "received_energy.f64": {
+            "sha256": "8d650017c46568fe05c6a35a61a3ac8d6284e7013baba92de33c4e1dfd733d7d",
+            "bytes": 64272
+          },
+          "valid_rows.u64": {
+            "sha256": "6f9fec29f8fdde58e4e663999bf6e7a4c93dd775b959531eb5968d8586a3f405",
+            "bytes": 64272
+          }
+        }
+      },
+      "wall_seconds": 0.016489700064994395
+    },
+    {
+      "status": "completed",
+      "passed": true,
+      "fine_input": "/workspace/triad/local-evidence/spread/aligned/g30-aligned-fine-actual-near/path-00003",
+      "coarse_input": "/workspace/triad/local-evidence/spread/aligned/g30-aligned-fine-paired-coarse-actual-near/path-00003",
+      "metadata_parity": true,
+      "unexpected_metadata_differences": [],
+      "full_capture_support_equal": true,
+      "fine_samples": 257079,
+      "coarse_samples": 257079,
+      "compared_prefix_samples": 257079,
+      "fine_uncompared_tail_samples": 0,
+      "coarse_uncompared_tail_samples": 0,
+      "fine_block_samples": 8,
+      "coarse_block_samples": 32,
+      "last_compared_coarse_fine_blocks": 3,
+      "last_fine_interval_rows": 7,
+      "last_coarse_interval_rows": 23,
+      "tail_interpretation": "Identical sample support; the final partial block, if any, is summed with its actual row count and no invented padding.",
+      "statistics": {
+        "gram": {
+          "passed": true,
+          "coarse_blocks_compared": 8034,
+          "max_absolute_error": 2.842170943040401e-14,
+          "max_tolerance_ratio": 3.280368092682566e-05,
+          "relative_l2_error": 1.929240324946272e-16,
+          "fine_aggregated_scalar_total": null,
+          "coarse_scalar_total": null,
+          "comparison": "abs(error) <= 2e-10 + 2e-11*abs(coarse)"
+        },
+        "mean": {
+          "passed": true,
+          "coarse_blocks_compared": 8034,
+          "max_absolute_error": 4.3220627292571254e-14,
+          "max_tolerance_ratio": 4.005595465126913e-05,
+          "relative_l2_error": 1.9411562736434244e-16,
+          "fine_aggregated_scalar_total": null,
+          "coarse_scalar_total": null,
+          "comparison": "abs(error) <= 2e-10 + 2e-11*abs(coarse)"
+        },
+        "observation": {
+          "passed": true,
+          "coarse_blocks_compared": 8034,
+          "max_absolute_error": 1.1718571004216928e-13,
+          "max_tolerance_ratio": 0.00011100022593495753,
+          "relative_l2_error": 2.1695308474940413e-16,
+          "fine_aggregated_scalar_total": null,
+          "coarse_scalar_total": null,
+          "comparison": "abs(error) <= 2e-10 + 2e-11*abs(coarse)"
+        },
+        "signal_energy": {
+          "passed": true,
+          "coarse_blocks_compared": 8034,
+          "max_absolute_error": 5.684341886080802e-14,
+          "max_tolerance_ratio": 3.0488769868505318e-05,
+          "relative_l2_error": 1.7702853946560655e-16,
+          "fine_aggregated_scalar_total": 248008.7476286556,
+          "coarse_scalar_total": 248008.7476286556,
+          "comparison": "abs(error) <= 2e-10 + 2e-11*abs(coarse)"
+        },
+        "received_energy": {
+          "passed": true,
+          "coarse_blocks_compared": 8034,
+          "max_absolute_error": 5.4569682106375694e-12,
+          "max_tolerance_ratio": 3.52210276982409e-05,
+          "relative_l2_error": 1.7692230311052948e-16,
+          "fine_aggregated_scalar_total": 52941282.83473233,
+          "coarse_scalar_total": 52941282.83473233,
+          "comparison": "abs(error) <= 2e-10 + 2e-11*abs(coarse)"
+        },
+        "valid_rows": {
+          "passed": true,
+          "coarse_blocks_compared": 8034,
+          "max_absolute_error": 0.0,
+          "max_tolerance_ratio": null,
+          "relative_l2_error": 0.0,
+          "fine_aggregated_scalar_total": 257079.0,
+          "coarse_scalar_total": 257079.0,
+          "comparison": "exact integer"
+        }
+      },
+      "signal_energy_seconds": {
+        "fine": 121.0980213030545,
+        "coarse": 121.0980213030545
+      },
+      "source_identity": {
+        "key_seed": 11388864515979510824,
+        "epoch": 1800000180,
+        "signal_bit": 1,
+        "control": "signal",
+        "random_seed_roots": {
+          "channel": 10647110825891896266,
+          "oscillator": 12311423123579678208,
+          "noise": 6027879086786623646,
+          "frontend": 411304283803022840,
+          "path": 5689395634720456864,
+          "oscillator_explicit": true,
+          "noise_explicit": true,
+          "frontend_explicit": true,
+          "path_explicit": true,
+          "fallback": "unset oscillator/noise/frontend/path roots inherit the resolved channel seed",
+          "channel_root_scope": "static timing/CFO/clock/drift truth, spread ray, and frequency-selective perturbation",
+          "oscillator_root_scope": "TX/RX oscillator spectra and FHSS phase resets",
+          "noise_root_scope": "thermal noise only",
+          "frontend_root_scope": "DAC/ADC conversion, impulse process, and tone phase",
+          "path_root_scope": "independent stationary OU or Gaussian-FIR ray gains and initial diurnal path phase"
+        },
+        "source_samples": 252866,
+        "channel_samples": 257079,
+        "channel_tail_samples": 26
+      },
+      "file_provenance": {
+        "fine": {
+          "manifest.json": {
+            "sha256": "ff7bab1dabf6dd0f55d1836fdb3cd39e3752ba371c4cfbbd513f726431a57b96"
+          },
+          "intervals.u64": {
+            "sha256": "6b3dff6261c9735112a342e3b5397b9ed0d76fce9e7f09046b645cd34682dd7b",
+            "bytes": 514160
+          },
+          "gram.c128": {
+            "sha256": "205b55af42d5177c4dccf4ce720c95835c5a8e39fe3da7e2fbb0d69394442686",
+            "bytes": 8226560
+          },
+          "mean.c128": {
+            "sha256": "8a275a94aeacc7c5b05da21e8b51c51d310097e51e756eaceabd66b53deb7fd4",
+            "bytes": 2056640
+          },
+          "observation.c128": {
+            "sha256": "5d5299b6c796b2c514edad7c1b4ce93ed3902cbbed0920ede1e5cec4b24e3353",
+            "bytes": 2056640
+          },
+          "signal_energy.f64": {
+            "sha256": "8d21d1dd60f5e6bf810c142bcabef75462aa1618fb3b72f3745b78fbc6193c5d",
+            "bytes": 257080
+          },
+          "received_energy.f64": {
+            "sha256": "3f536e383d3841ad1266ab63cf599db85f8eaaccf9561df1d51744e5302c5d01",
+            "bytes": 257080
+          },
+          "valid_rows.u64": {
+            "sha256": "dfc897a0352ffd4e5cadd4306fe9226c312421970602b43cd248f4303dfb23ba",
+            "bytes": 257080
+          }
+        },
+        "coarse": {
+          "manifest.json": {
+            "sha256": "d8a6efd85ea109e2a891228918518cd82984368c1e97d307f2b1837a994ae357"
+          },
+          "intervals.u64": {
+            "sha256": "3394cac55b81257f3bcd198ee8fe5ced01e55d8b3c3f3f47b396e8c8dd58fb75",
+            "bytes": 128544
+          },
+          "gram.c128": {
+            "sha256": "535948f5ea4616d88a60b520c0d2541985d06e5d2478c6e947ee03cade7fadbb",
+            "bytes": 2056704
+          },
+          "mean.c128": {
+            "sha256": "5128c951635952823a3a32609afce163055bd4f9836f28d34e7d52f0cf14bb58",
+            "bytes": 514176
+          },
+          "observation.c128": {
+            "sha256": "f545717027a8bbece5de43f0f1d945686987bf6122f0ee14b8e71e6987ca7104",
+            "bytes": 514176
+          },
+          "signal_energy.f64": {
+            "sha256": "670d24d3611c0cf81ed70b1e886df0c65fc0a0d8fdf68e74e31dbce7c4ae42c6",
+            "bytes": 64272
+          },
+          "received_energy.f64": {
+            "sha256": "40edf22b5bef6e3e1dab5f93297d6c08ed037a24f2204bb5ae368e9d70618799",
+            "bytes": 64272
+          },
+          "valid_rows.u64": {
+            "sha256": "6f9fec29f8fdde58e4e663999bf6e7a4c93dd775b959531eb5968d8586a3f405",
+            "bytes": 64272
+          }
+        }
+      },
+      "wall_seconds": 0.01638733095023781
+    }
+  ],
+  "actual_score_reports": [
+    {
+      "status": "completed",
+      "passed": true,
+      "name": "g10-aligned-fine-actual-near",
+      "report_sha256": "9758ab6a1483d8f10ce46bba86004531b4932e0ceaa99887b2f93b01b3c5c26b",
+      "window_blocks": 32,
+      "doppler_width_hz": 10.0,
+      "counts": {
+        "signal_attempts": 4,
+        "correct_accepted": 2,
+        "wrong_accepted": 0,
+        "missed": 2,
+        "raw_correct": 4,
+        "failed_paths": 0
+      },
+      "path_errors": [],
+      "paths": [
+        {
+          "input": "/workspace/triad/local-evidence/spread/aligned/g10-aligned-fine-actual-near/path-00000",
+          "truth_bit": 0,
+          "winner_bit": 0,
+          "bit_log_scores": [
+            2.0593733185803633,
+            -15.093569076873326
+          ],
+          "threshold": 22.72106338958574,
+          "outcome": "missed"
+        },
+        {
+          "input": "/workspace/triad/local-evidence/spread/aligned/g10-aligned-fine-actual-near/path-00001",
+          "truth_bit": 1,
+          "winner_bit": 1,
+          "bit_log_scores": [
+            -16.227857725762007,
+            34.11680196943741
+          ],
+          "threshold": 22.72106338958574,
+          "outcome": "correct_accepted"
+        },
+        {
+          "input": "/workspace/triad/local-evidence/spread/aligned/g10-aligned-fine-actual-near/path-00002",
+          "truth_bit": 0,
+          "winner_bit": 0,
+          "bit_log_scores": [
+            16.815974987483443,
+            -3.968782674171634
+          ],
+          "threshold": 22.72106338958574,
+          "outcome": "missed"
+        },
+        {
+          "input": "/workspace/triad/local-evidence/spread/aligned/g10-aligned-fine-actual-near/path-00003",
+          "truth_bit": 1,
+          "winner_bit": 1,
+          "bit_log_scores": [
+            -8.186469352680355,
+            30.03797953968974
+          ],
+          "threshold": 22.72106338958574,
+          "outcome": "correct_accepted"
+        }
+      ],
+      "scope": "Four actual paths per configuration are paired diagnostics; not reliability qualification. Fine/coarse evidence compresses the same observation only when the separate statistics audit passes."
+    },
+    {
+      "status": "completed",
+      "passed": true,
+      "name": "g30-aligned-fine-actual-near",
+      "report_sha256": "cab66ceec4826ed2b9277d566084a1a2e01e80372f9de6f405584c3f84d4c4f0",
+      "window_blocks": 32,
+      "doppler_width_hz": 30.0,
+      "counts": {
+        "signal_attempts": 4,
+        "correct_accepted": 4,
+        "wrong_accepted": 0,
+        "missed": 0,
+        "raw_correct": 4,
+        "failed_paths": 0
+      },
+      "path_errors": [],
+      "paths": [
+        {
+          "input": "/workspace/triad/local-evidence/spread/aligned/g30-aligned-fine-actual-near/path-00000",
+          "truth_bit": 0,
+          "winner_bit": 0,
+          "bit_log_scores": [
+            48.29001407276868,
+            -35.524021436626654
+          ],
+          "threshold": 22.72106338958574,
+          "outcome": "correct_accepted"
+        },
+        {
+          "input": "/workspace/triad/local-evidence/spread/aligned/g30-aligned-fine-actual-near/path-00001",
+          "truth_bit": 1,
+          "winner_bit": 1,
+          "bit_log_scores": [
+            -25.671012306719046,
+            49.18294674154817
+          ],
+          "threshold": 22.72106338958574,
+          "outcome": "correct_accepted"
+        },
+        {
+          "input": "/workspace/triad/local-evidence/spread/aligned/g30-aligned-fine-actual-near/path-00002",
+          "truth_bit": 0,
+          "winner_bit": 0,
+          "bit_log_scores": [
+            34.774217568209544,
+            -31.252350672120922
+          ],
+          "threshold": 22.72106338958574,
+          "outcome": "correct_accepted"
+        },
+        {
+          "input": "/workspace/triad/local-evidence/spread/aligned/g30-aligned-fine-actual-near/path-00003",
+          "truth_bit": 1,
+          "winner_bit": 1,
+          "bit_log_scores": [
+            -38.019808870633995,
+            30.78275743304543
+          ],
+          "threshold": 22.72106338958574,
+          "outcome": "correct_accepted"
+        }
+      ],
+      "scope": "Four actual paths per configuration are paired diagnostics; not reliability qualification. Fine/coarse evidence compresses the same observation only when the separate statistics audit passes."
+    },
+    {
+      "status": "completed",
+      "passed": true,
+      "name": "g10-aligned-fine-paired-coarse-actual-near",
+      "report_sha256": "7e1bbe802a976b3c5c81d9c6719921ff5fcf8a54905cbee6098e9fa9bc760694",
+      "window_blocks": 8,
+      "doppler_width_hz": 10.0,
+      "counts": {
+        "signal_attempts": 4,
+        "correct_accepted": 2,
+        "wrong_accepted": 0,
+        "missed": 2,
+        "raw_correct": 4,
+        "failed_paths": 0
+      },
+      "path_errors": [],
+      "paths": [
+        {
+          "input": "/workspace/triad/local-evidence/spread/aligned/g10-aligned-fine-paired-coarse-actual-near/path-00000",
+          "truth_bit": 0,
+          "winner_bit": 0,
+          "bit_log_scores": [
+            -3.5367515511424443,
+            -10.232515836794747
+          ],
+          "threshold": 22.72106338958574,
+          "outcome": "missed"
+        },
+        {
+          "input": "/workspace/triad/local-evidence/spread/aligned/g10-aligned-fine-paired-coarse-actual-near/path-00001",
+          "truth_bit": 1,
+          "winner_bit": 1,
+          "bit_log_scores": [
+            -15.50870805176351,
+            31.75553822758433
+          ],
+          "threshold": 22.72106338958574,
+          "outcome": "correct_accepted"
+        },
+        {
+          "input": "/workspace/triad/local-evidence/spread/aligned/g10-aligned-fine-paired-coarse-actual-near/path-00002",
+          "truth_bit": 0,
+          "winner_bit": 0,
+          "bit_log_scores": [
+            16.126290193433668,
+            -4.745374525183914
+          ],
+          "threshold": 22.72106338958574,
+          "outcome": "missed"
+        },
+        {
+          "input": "/workspace/triad/local-evidence/spread/aligned/g10-aligned-fine-paired-coarse-actual-near/path-00003",
+          "truth_bit": 1,
+          "winner_bit": 1,
+          "bit_log_scores": [
+            -13.581482846869445,
+            32.97381461249503
+          ],
+          "threshold": 22.72106338958574,
+          "outcome": "correct_accepted"
+        }
+      ],
+      "scope": "Four actual paths per configuration are paired diagnostics; not reliability qualification. Fine/coarse evidence compresses the same observation only when the separate statistics audit passes."
+    },
+    {
+      "status": "completed",
+      "passed": true,
+      "name": "g30-aligned-fine-paired-coarse-actual-near",
+      "report_sha256": "3b13b849be17b5ba9d24748e0b956316f29c5f2e0d29c1e2f2046cd9d3ade101",
+      "window_blocks": 8,
+      "doppler_width_hz": 30.0,
+      "counts": {
+        "signal_attempts": 4,
+        "correct_accepted": 4,
+        "wrong_accepted": 0,
+        "missed": 0,
+        "raw_correct": 4,
+        "failed_paths": 0
+      },
+      "path_errors": [],
+      "paths": [
+        {
+          "input": "/workspace/triad/local-evidence/spread/aligned/g30-aligned-fine-paired-coarse-actual-near/path-00000",
+          "truth_bit": 0,
+          "winner_bit": 0,
+          "bit_log_scores": [
+            47.06995817960912,
+            -32.93254246548256
+          ],
+          "threshold": 22.72106338958574,
+          "outcome": "correct_accepted"
+        },
+        {
+          "input": "/workspace/triad/local-evidence/spread/aligned/g30-aligned-fine-paired-coarse-actual-near/path-00001",
+          "truth_bit": 1,
+          "winner_bit": 1,
+          "bit_log_scores": [
+            -28.397272321238972,
+            48.014862221502064
+          ],
+          "threshold": 22.72106338958574,
+          "outcome": "correct_accepted"
+        },
+        {
+          "input": "/workspace/triad/local-evidence/spread/aligned/g30-aligned-fine-paired-coarse-actual-near/path-00002",
+          "truth_bit": 0,
+          "winner_bit": 0,
+          "bit_log_scores": [
+            34.12536511522526,
+            -31.050621357890666
+          ],
+          "threshold": 22.72106338958574,
+          "outcome": "correct_accepted"
+        },
+        {
+          "input": "/workspace/triad/local-evidence/spread/aligned/g30-aligned-fine-paired-coarse-actual-near/path-00003",
+          "truth_bit": 1,
+          "winner_bit": 1,
+          "bit_log_scores": [
+            -33.897185187912385,
+            32.7265667470549
+          ],
+          "threshold": 22.72106338958574,
+          "outcome": "correct_accepted"
+        }
+      ],
+      "scope": "Four actual paths per configuration are paired diagnostics; not reliability qualification. Fine/coarse evidence compresses the same observation only when the separate statistics audit passes."
+    }
+  ],
+  "wall_seconds": 0.21589526103343815,
+  "limitations": [
+    "Agreement is over exported sufficient statistics; raw sample identity is not independently proved without raw I/Q.",
+    "Plans, physical metadata, key/epoch and separate noise/path/oscillator roots must match; projected-noise replicas are not substituted.",
+    "Residual noise calibration rank and block-center channel approximation can change with blocking, even for the identical sampled observation.",
+    "The final short block is legitimate rounding; different capture extents are not silently trimmed or called paired.",
+    "No receiver improvement, daily false-admission qualification or correct-reception probability follows from four paired paths."
+  ]
+}

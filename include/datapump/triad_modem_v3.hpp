@@ -129,6 +129,13 @@ struct PathEvolutionConfig {
     // rays: E[g]=0, E[|g|^2]=1, E[g(t+dt)conj(g(t))]=exp(-dt/coherence).
     // Existing SpreadRay still supplies equal ray powers and Doppler separation.
     double ray_coherence_seconds = 0;
+    // Alternative to OU: B=2*sigma of a Gaussian Doppler PSD per ray, independent
+    // of SpreadRay's center separation. A stationary finite FIR teacher uses
+    // h[k] proportional to exp[-(pi*B*dt*k)^2], |k|<=ceil(5/(pi*B*dt)),
+    // normalized to sum h^2=1. At most8193 taps; zero is exact bypass.
+    // Capture allows an additional6*B total bandwidth (6sigma each edge),
+    // a declared spectral-tail convention, never a hard support guarantee.
+    double gaussian_doppler_width_hz = 0;
     double diurnal_phase_amplitude_radians = 0;
     double diurnal_period_seconds = 86400;
     // One signal-only attenuation interval [start,end). Ramps lie inside the
@@ -166,6 +173,10 @@ struct StreamChannelReport {
     std::uint64_t impulse_events = 0, overload_samples = 0;
     double maximum_adc_input_component = 0;
     double path_diurnal_initial_phase_radians = 0;
+    double path_gaussian_sample_interval_seconds = 0;
+    // Simulation-model diagnostics, not receiver channel realizations. Exact
+    // finite-teacher covariance at lag m is sum_k h[k]h[k+m]; empty when off.
+    std::vector<double> path_gaussian_fir_coefficients;
     bool gaussian_projection_supported = true;
     std::size_t working_bytes = 0;
 };
@@ -181,6 +192,9 @@ public:
     // sample and0 for actual erased input. Noise/channel state always advances.
     std::size_t read(std::span<Complex>, std::span<std::uint8_t> validity = {});
     const StreamChannelReport& report() const;
+    // Stationary covariance of one Gaussian ray gain;0 when disabled or lag
+    // exceeds finite support. Physical lag=lag_samples*reported sample interval.
+    double path_gaussian_covariance(std::uint64_t lag_samples) const;
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

@@ -28,6 +28,10 @@ RUNNER = ROOT / "tools" / "triad_bounded_run.py"
 MAX_SECONDS = 315576000  # Ten Julian years; rounded private tiles/tails may extend it.
 MAX_INDEX = 1_000_000_000
 SEED_DOMAINS = ("key", "channel", "oscillator", "noise", "frontend", "path")
+# Canonical IDs in src/tuning_presets.cpp; arbitrary values use the explicit
+# nominal physical overrides below, never receiver tap-basis parameters.
+SPREAD_PRESETS = ("none", "sub9-best", "sub9-moderate", "sub9-worst", "hf-best",
+                  "hf-moderate", "hf-worst", "aurora-best", "aurora-worst", "eme-focused")
 EXPORT_FILES = ("gram.c128", "mean.c128", "intervals.u64", "valid_rows.u64",
                 "signal_energy.f64", "observation.c128", "received_energy.f64")
 
@@ -54,6 +58,13 @@ def parser():
     p.add_argument("--sample-rate-denominator", type=int, default=1,
                    help="N>1 requires sample-rate 1 and gives one sample per N physical seconds")
     p.add_argument("--cn0", type=finite, required=True, help="total triplet C/N0, dB-Hz")
+    p.add_argument("--rf-hz", type=finite, default=8270,
+                   help="physical RF frequency in (0,10e9] Hz; oscillator effects scale with it")
+    p.add_argument("--spread-preset", choices=SPREAD_PRESETS, default="sub9-best")
+    p.add_argument("--spread-delay-ms", type=finite,
+                   help="optional nominal physical excess delay override; independent of receiver tap basis")
+    p.add_argument("--spread-doppler-hz", type=finite,
+                   help="optional nominal physical Doppler separation override; independent of receiver tap basis")
     p.add_argument("--block-seconds", type=finite, default=1024)
     p.add_argument("--jobs", type=int, default=1)
     p.add_argument("--timeout", type=finite, default=1800, help="per-path wall time; cleanup has an additional bounded allowance")
@@ -63,6 +74,8 @@ def parser():
     p.add_argument("--tap-doppler-hz", type=finite, default=.001,
                    help="receiver delayed-tap Doppler basis; default matches physical sub9-best")
     p.add_argument("--ray-coherence-seconds", type=finite, default=0)
+    p.add_argument("--ray-gaussian-width-hz", type=finite, default=0,
+                   help="physical Gaussian ray width B=2*sigma in Hz; 0 disables; exclusive with positive ray coherence")
     p.add_argument("--diurnal-phase-radians", type=finite, default=0)
     p.add_argument("--diurnal-period-seconds", type=finite, default=86400)
     p.add_argument("--outage-seconds", type=finite, nargs=2, default=(-1., -1.), metavar=("START", "END"))
@@ -77,6 +90,14 @@ def parser():
 def validate(args):
     if args.control not in ("signal", "null", "wrong-key"):
         raise ValueError("unsupported sampled control")
+    if args.spread_preset not in SPREAD_PRESETS:
+        raise ValueError("unsupported physical spread preset")
+    if not math.isfinite(args.rf_hz) or not 0 < args.rf_hz <= 10e9:
+        raise ValueError("RF frequency must be finite and in (0,10e9] Hz")
+    for name in ("spread_delay_ms", "spread_doppler_hz"):
+        value = getattr(args, name)
+        if value is not None and (not math.isfinite(value) or value < 0):
+            raise ValueError(name + " must be nonnegative and finite")
     if not 2 <= args.paths <= 10000 or args.paths % 2:
         raise ValueError("paths must be even and in [2,10000]")
     if not 0 <= args.start_index <= MAX_INDEX or args.start_index + args.paths - 1 > MAX_INDEX:
@@ -84,7 +105,7 @@ def validate(args):
     if not 1 <= args.jobs <= 32:
         raise ValueError("jobs must be in [1,32]")
     for name in ("seconds", "rate", "cn0", "block_seconds", "timeout", "term_grace",
-                 "ray_coherence_seconds", "diurnal_phase_radians", "diurnal_period_seconds",
+                 "ray_coherence_seconds", "ray_gaussian_width_hz", "diurnal_phase_radians", "diurnal_period_seconds",
                  "outage_gain", "outage_ramp_seconds", "tap_delay_ms", "tap_doppler_hz"):
         if not math.isfinite(getattr(args, name)):
             raise ValueError(name + " must be finite")
@@ -101,6 +122,10 @@ def validate(args):
         raise ValueError("timeout or cleanup grace exceeds bounded-runner limits")
     if args.ray_coherence_seconds < 0 or args.diurnal_phase_radians < 0 or args.diurnal_period_seconds <= 0:
         raise ValueError("invalid path evolution parameters")
+    if args.ray_gaussian_width_hz < 0:
+        raise ValueError("Gaussian ray width must be nonnegative")
+    if args.ray_gaussian_width_hz > 0 and args.ray_coherence_seconds > 0:
+        raise ValueError("Gaussian ray width and ray coherence cannot both be positive")
     if args.tap_delay_ms < 0 or args.tap_doppler_hz < 0:
         raise ValueError("receiver tap delay and Doppler must be nonnegative")
     if not math.isfinite(args.diurnal_phase_radians / args.diurnal_period_seconds):
@@ -136,7 +161,8 @@ def validate(args):
 
 def seed_for(args, index, domain):
     # Omit projection partition and physical stress parameters: paired block or
-    # model comparisons use the same underlying random roots. Fs participates;
+    # model comparisons, including RF and spread overrides, use the same roots.
+    # This pairs random draws, not necessarily equal physical paths. Fs participates;
     # equal seeds at different Fs would not couple continuous stochastic paths.
     identity = ["triad-lowrate-campaign-v1", args.split, args.seconds, args.rate,
                 args.sample_rate, args.cn0, index, index % 2, domain]
@@ -153,8 +179,8 @@ def make_command(args, index, output):
     cmd = [str(args.binary), "--mode", "export-stats", "--seconds", str(args.seconds),
            "--rate", str(args.rate), "--added", "1", "--sample-rate", str(args.sample_rate),
            "--sample-rate-denominator", str(args.sample_rate_denominator),
-           "--rf-hz", "8270", "--base-oscillator", "gpsdo-ocxo", "--shift-oscillator", "gpsdo-ocxo",
-           "--spread-preset", "sub9-best", "--selective-perturbation", args.selective_perturbation,
+           "--rf-hz", format(args.rf_hz, ".17g"), "--base-oscillator", "gpsdo-ocxo", "--shift-oscillator", "gpsdo-ocxo",
+           "--spread-preset", args.spread_preset, "--selective-perturbation", args.selective_perturbation,
            "--margin", "1", "--clock-sync", "GPS_10ms-1ms_region-0ms_offset", "--audio-error-ms", "70",
            "--basis", "two-ray", "--cn0", str(args.cn0), "--block-seconds", str(args.block_seconds),
            "--tap-delay-ms", str(args.tap_delay_ms), "--tap-doppler-hz", str(args.tap_doppler_hz),
@@ -167,6 +193,12 @@ def make_command(args, index, output):
            "--diurnal-period-seconds", str(args.diurnal_period_seconds),
            "--outage-seconds", *map(str, args.outage_seconds),
            "--outage-gain", str(args.outage_gain), "--outage-ramp-seconds", str(args.outage_ramp_seconds)]
+    if args.spread_delay_ms is not None:
+        cmd += ["--spread-delay-ms", format(args.spread_delay_ms, ".17g")]
+    if args.spread_doppler_hz is not None:
+        cmd += ["--spread-doppler-hz", format(args.spread_doppler_hz, ".17g")]
+    if args.ray_gaussian_width_hz > 0:
+        cmd += ["--ray-gaussian-width-hz", format(args.ray_gaussian_width_hz, ".17g")]
     for domain in SEED_DOMAINS:
         cmd += ["--" + domain + "-seed", str(seeds[domain + "_seed"])]
     return cmd, {"source_bit": index % 2, "epoch": epoch, "control": args.control, **seeds}
@@ -294,9 +326,9 @@ def run(args):
               "paths_succeeded": sum(r.get("returncode") == 0 for r in results),
               "paths_not_started": args.paths-started-unknown_start, "cancelled": cancelled.is_set(),
               "attempt_accounting": "Attempted means bounded runner subprocess successfully launched; cancellation before launch is not started. Unexpected worker exceptions with unavailable launch evidence are counted separately as start unknown.",
-              "seed_derivation": "SHA256(split, duration, rate, Fs numerator, CN0, global path index, bit, domain; append labeled denominator only when !=1); integer-Fs legacy roots preserved; independent key/channel/oscillator/noise/frontend/path roots; block size and path stress settings excluded for paired refinement",
+              "seed_derivation": "SHA256(split, duration, rate, Fs numerator, CN0, global path index, bit, domain; append labeled denominator only when !=1); integer-Fs legacy roots preserved; independent key/channel/oscillator/noise/frontend/path roots; block size, RF, spread preset/overrides, controls and path stress settings excluded to pair random roots, not necessarily identical physical paths",
               "acquisition_scope": "Public nominal or explicit timing/epoch bank; configured timing, oscillator and sample-clock truth remain independently drawn. A single nominal branch is not known alignment and does not cover all declared uncertainties.",
-              "model_scope": "Encrypted one-bit sampled source; Added Symbols=1, FHSS off, burst off, 8270 Hz, GPSDO OCXO endpoints, margin1, sub9-best two rays. Receiver tap basis defaults explicitly match 0.005 ms/0.001 Hz; overrides change the receiver basis only for mismatch experiments. Explicit illustrative models, not field calibration. C/N0 supplied externally; no antenna efficiency assumed.",
+              "model_scope": "Encrypted one-bit sampled source; Added Symbols=1, FHSS off, burst off, GPSDO OCXO endpoints, margin 1. Defaults: RF 8270 Hz and sub9-best two rays; selected RF, spread preset and nominal physical overrides are in arguments/export metadata. Receiver tap basis independently defaults to 0.005 ms/0.001 Hz and is never changed from physical truth. Explicit illustrative models, not field calibration. C/N0 supplied externally; no antenna efficiency assumed.",
               "results": sorted(results, key=lambda r: r["path_index"])}
     with (args.output / "campaign.json").open("x") as stream:
         json.dump(report, stream, indent=2, sort_keys=True, allow_nan=False)

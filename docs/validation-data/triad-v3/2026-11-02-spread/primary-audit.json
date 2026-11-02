@@ -1,0 +1,2023 @@
+{
+  "administrative_failure_audit": {
+    "path": "local-evidence/triad-spread-audits/administrative-failure-analysis.json",
+    "sha256": "3450e184e539a5b29051e0521214fb35b7558a5fc91f07266021f0e432979dd4",
+    "summary": {
+      "actual_method_path_observations": 288,
+      "conditional_method_noise_trials": 0,
+      "distinct_observed_physical_input_paths": 300,
+      "failed_path_records": 12,
+      "reports": 1,
+      "unclassified_failed_actual_path_records": 12,
+      "unknown_schema_documents": 300
+    }
+  },
+  "assumptions_and_limits": [
+    "Pointwise one-sided confidence endpoints, not simultaneous intervals or selection-corrected performance guarantees across cohorts, rates, receiver choices, strict/relaxed gates or adaptive development.",
+    "Within-bit independent identically distributed Bernoulli outcomes from the declared simulation population are required for per-bit CP; globally distinct seed roots support recorded independence design but do not prove PRNG independence or field validity.",
+    "Balanced-mean lower bounds allow different bit-stratum success probabilities. All-success equal-stratum cases use AM-GM; partial-success cases use Bonferroni per-bit bounds. Pooled CP assumes a common success probability and is labeled separately.",
+    "Fixed aligned/tightly bounded acquisition model and selected channel/oscillator/noise settings only; this is not generic all-purpose blind-acquisition or RF hardware qualification.",
+    "Conditional noise replicas, paired receiver/compression variants and administrative reruns are not additional independent primary physical paths.",
+    "No empirical daily false-admission qualification is established by the signal matrix or sparse null controls. Analytical gate guarantees require the detector/calibration and declared candidate/attempt/model/duration families assumptions.",
+    "G1 jobs explicitly select one calibration alternative, other primary jobs select two; do not silently combine their policies into an unallocated common selectable family.",
+    "This receipt binds reviewed artifacts by hashes after execution; it is not proof of a prior timestamped source/binary hash commitment.",
+    "Archive inventory binding and remote-to-local archive integrity remain root-owned final packaging checks."
+  ],
+  "case_receipts_digest_scope": "ordered cohort/index/source/manifest hash/score-array-key receipts checked during this run",
+  "case_receipts_sha256": "96d3309e24ea32c046696821341ab565c3847cf72a18c3d01db17dfccde112a4",
+  "cohorts": [
+    {
+      "bits": {
+        "0": 150,
+        "1": 150
+      },
+      "calibration_alternatives": 2,
+      "cn0_db_hz": -60.0,
+      "duration_alternatives": 8,
+      "gaussian_doppler_width_hz": 0,
+      "inner_rate_hz": 0.0036,
+      "method": "static-fft-ucb",
+      "name": "stable-005-m60",
+      "physical_cases": 300,
+      "relaxed": {
+        "balanced_mean_bound_method": "balanced-all-success AM-GM bound; independent Bernoulli outcomes within each bit stratum, equal stratum weights; p0 may differ from p1",
+        "balanced_mean_correct_probability_lower_95": 0.9900639180555423,
+        "by_bit": {
+          "0": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 1.0,
+              "lower_one_sided_95": 0.9802265618354915,
+              "successes": 150,
+              "trials": 150,
+              "upper_one_sided_95": 1.0
+            },
+            "counts": {
+              "correct_accepted": 150,
+              "missed": 0,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          },
+          "1": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 1.0,
+              "lower_one_sided_95": 0.9802265618354915,
+              "successes": 150,
+              "trials": 150,
+              "upper_one_sided_95": 1.0
+            },
+            "counts": {
+              "correct_accepted": 150,
+              "missed": 0,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          }
+        },
+        "correct_accepted_pooled_cp_assuming_identical_success_probability": {
+          "fraction": 1.0,
+          "lower_one_sided_95": 0.9900639180555423,
+          "successes": 300,
+          "trials": 300,
+          "upper_one_sided_95": 1.0
+        },
+        "counts": {
+          "correct_accepted": 300,
+          "missed": 0,
+          "raw_correct": 300,
+          "trials": 300,
+          "wrong_accepted": 0
+        }
+      },
+      "report": "holdout-scores/stable-005-m60-complete.json",
+      "report_sha256": "d5d981a41f37607fb6b35da1d505bec39c17f9090d6e9034047f048af87e913d",
+      "requested_seconds": 73440000.0,
+      "sample_rate_hz": 0.125,
+      "scores_sha256": "8be83e690a615ff1eb67985dba977e9a92c11920aa4b99ff7f2fdca932b042e1",
+      "selection_methods": 16,
+      "strict": {
+        "balanced_mean_bound_method": "balanced-all-success AM-GM bound; independent Bernoulli outcomes within each bit stratum, equal stratum weights; p0 may differ from p1",
+        "balanced_mean_correct_probability_lower_95": 0.9900639180555423,
+        "by_bit": {
+          "0": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 1.0,
+              "lower_one_sided_95": 0.9802265618354915,
+              "successes": 150,
+              "trials": 150,
+              "upper_one_sided_95": 1.0
+            },
+            "counts": {
+              "correct_accepted": 150,
+              "missed": 0,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          },
+          "1": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 1.0,
+              "lower_one_sided_95": 0.9802265618354915,
+              "successes": 150,
+              "trials": 150,
+              "upper_one_sided_95": 1.0
+            },
+            "counts": {
+              "correct_accepted": 150,
+              "missed": 0,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          }
+        },
+        "correct_accepted_pooled_cp_assuming_identical_success_probability": {
+          "fraction": 1.0,
+          "lower_one_sided_95": 0.9900639180555423,
+          "successes": 300,
+          "trials": 300,
+          "upper_one_sided_95": 1.0
+        },
+        "counts": {
+          "correct_accepted": 300,
+          "missed": 0,
+          "raw_correct": 300,
+          "trials": 300,
+          "wrong_accepted": 0
+        }
+      }
+    },
+    {
+      "bits": {
+        "0": 150,
+        "1": 150
+      },
+      "calibration_alternatives": 2,
+      "cn0_db_hz": -28.0,
+      "duration_alternatives": 8,
+      "gaussian_doppler_width_hz": 0.001,
+      "inner_rate_hz": 0.036,
+      "method": "gaussian-window-ucb",
+      "name": "g001-m28",
+      "physical_cases": 300,
+      "relaxed": {
+        "balanced_mean_bound_method": "average of per-bit one-sided 97.5% CP lower bounds (Bonferroni gives pointwise 95% lower bound for balanced mean)",
+        "balanced_mean_correct_probability_lower_95": 0.7491572993379824,
+        "by_bit": {
+          "0": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 0.8,
+              "lower_one_sided_95": 0.7386530353034877,
+              "successes": 120,
+              "trials": 150,
+              "upper_one_sided_95": 0.8522116431201171
+            },
+            "counts": {
+              "correct_accepted": 120,
+              "missed": 30,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          },
+          "1": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 0.84,
+              "lower_one_sided_95": 0.7824273541276063,
+              "successes": 126,
+              "trials": 150,
+              "upper_one_sided_95": 0.8871540433308196
+            },
+            "counts": {
+              "correct_accepted": 126,
+              "missed": 24,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          }
+        },
+        "correct_accepted_pooled_cp_assuming_identical_success_probability": {
+          "fraction": 0.82,
+          "lower_one_sided_95": 0.7795291214083102,
+          "successes": 246,
+          "trials": 300,
+          "upper_one_sided_95": 0.8556703385567721
+        },
+        "counts": {
+          "correct_accepted": 246,
+          "missed": 54,
+          "raw_correct": 300,
+          "trials": 300,
+          "wrong_accepted": 0
+        }
+      },
+      "report": "holdout-scores/g001-m28.json",
+      "report_sha256": "15c41588a754558487c71843a3044f300ba5fb63946633ac26d0f3874b3258a1",
+      "requested_seconds": 86400.0,
+      "sample_rate_hz": 0.25,
+      "scores_sha256": "c5cc0add9342c22063ea047fa393bcfb757136236017e3f4b9e57cc6421fbf90",
+      "selection_methods": 16,
+      "strict": {
+        "balanced_mean_bound_method": "average of per-bit one-sided 97.5% CP lower bounds (Bonferroni gives pointwise 95% lower bound for balanced mean)",
+        "balanced_mean_correct_probability_lower_95": 0.4901794468755259,
+        "by_bit": {
+          "0": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 0.6,
+              "lower_one_sided_95": 0.5298124433314264,
+              "successes": 90,
+              "trials": 150,
+              "upper_one_sided_95": 0.6671814485309044
+            },
+            "counts": {
+              "correct_accepted": 90,
+              "missed": 60,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          },
+          "1": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 0.5466666666666666,
+              "lower_one_sided_95": 0.47623171153337723,
+              "successes": 82,
+              "trials": 150,
+              "upper_one_sided_95": 0.6157000673378361
+            },
+            "counts": {
+              "correct_accepted": 82,
+              "missed": 68,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          }
+        },
+        "correct_accepted_pooled_cp_assuming_identical_success_probability": {
+          "fraction": 0.5733333333333334,
+          "lower_one_sided_95": 0.5243086696760604,
+          "successes": 172,
+          "trials": 300,
+          "upper_one_sided_95": 0.6212709336270696
+        },
+        "counts": {
+          "correct_accepted": 172,
+          "missed": 128,
+          "raw_correct": 300,
+          "trials": 300,
+          "wrong_accepted": 0
+        }
+      }
+    },
+    {
+      "bits": {
+        "0": 150,
+        "1": 150
+      },
+      "calibration_alternatives": 2,
+      "cn0_db_hz": -26.0,
+      "duration_alternatives": 8,
+      "gaussian_doppler_width_hz": 0.001,
+      "inner_rate_hz": 0.036,
+      "method": "gaussian-window-ucb",
+      "name": "g001-m26",
+      "physical_cases": 300,
+      "relaxed": {
+        "balanced_mean_bound_method": "average of per-bit one-sided 97.5% CP lower bounds (Bonferroni gives pointwise 95% lower bound for balanced mean)",
+        "balanced_mean_correct_probability_lower_95": 0.9695621175466556,
+        "by_bit": {
+          "0": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 0.9933333333333333,
+              "lower_one_sided_95": 0.9687661830790572,
+              "successes": 149,
+              "trials": 150,
+              "upper_one_sided_95": 0.9996581031641314
+            },
+            "counts": {
+              "correct_accepted": 149,
+              "missed": 1,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          },
+          "1": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 1.0,
+              "lower_one_sided_95": 0.9802265618354915,
+              "successes": 150,
+              "trials": 150,
+              "upper_one_sided_95": 1.0
+            },
+            "counts": {
+              "correct_accepted": 150,
+              "missed": 0,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          }
+        },
+        "correct_accepted_pooled_cp_assuming_identical_success_probability": {
+          "fraction": 0.9966666666666667,
+          "lower_one_sided_95": 0.9842854451084161,
+          "successes": 299,
+          "trials": 300,
+          "upper_one_sided_95": 0.9998290369678865
+        },
+        "counts": {
+          "correct_accepted": 299,
+          "missed": 1,
+          "raw_correct": 300,
+          "trials": 300,
+          "wrong_accepted": 0
+        }
+      },
+      "report": "holdout-scores/g001-m26.json",
+      "report_sha256": "0fe75909808f502ca6fb486be30c791ff8e0affaf193dccd6f1b21d2395f471f",
+      "requested_seconds": 86400.0,
+      "sample_rate_hz": 0.25,
+      "scores_sha256": "ee3d5b06955e74f51d58dd32dd6c70bedf3741fde719ec3634d1061598a384d0",
+      "selection_methods": 16,
+      "strict": {
+        "balanced_mean_bound_method": "average of per-bit one-sided 97.5% CP lower bounds (Bonferroni gives pointwise 95% lower bound for balanced mean)",
+        "balanced_mean_correct_probability_lower_95": 0.9695621175466556,
+        "by_bit": {
+          "0": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 0.9933333333333333,
+              "lower_one_sided_95": 0.9687661830790572,
+              "successes": 149,
+              "trials": 150,
+              "upper_one_sided_95": 0.9996581031641314
+            },
+            "counts": {
+              "correct_accepted": 149,
+              "missed": 1,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          },
+          "1": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 1.0,
+              "lower_one_sided_95": 0.9802265618354915,
+              "successes": 150,
+              "trials": 150,
+              "upper_one_sided_95": 1.0
+            },
+            "counts": {
+              "correct_accepted": 150,
+              "missed": 0,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          }
+        },
+        "correct_accepted_pooled_cp_assuming_identical_success_probability": {
+          "fraction": 0.9966666666666667,
+          "lower_one_sided_95": 0.9842854451084161,
+          "successes": 299,
+          "trials": 300,
+          "upper_one_sided_95": 0.9998290369678865
+        },
+        "counts": {
+          "correct_accepted": 299,
+          "missed": 1,
+          "raw_correct": 300,
+          "trials": 300,
+          "wrong_accepted": 0
+        }
+      }
+    },
+    {
+      "bits": {
+        "0": 150,
+        "1": 150
+      },
+      "calibration_alternatives": 2,
+      "cn0_db_hz": -24.0,
+      "duration_alternatives": 8,
+      "gaussian_doppler_width_hz": 0.001,
+      "inner_rate_hz": 0.036,
+      "method": "gaussian-window-ucb",
+      "name": "g001-m24",
+      "physical_cases": 300,
+      "relaxed": {
+        "balanced_mean_bound_method": "balanced-all-success AM-GM bound; independent Bernoulli outcomes within each bit stratum, equal stratum weights; p0 may differ from p1",
+        "balanced_mean_correct_probability_lower_95": 0.9900639180555423,
+        "by_bit": {
+          "0": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 1.0,
+              "lower_one_sided_95": 0.9802265618354915,
+              "successes": 150,
+              "trials": 150,
+              "upper_one_sided_95": 1.0
+            },
+            "counts": {
+              "correct_accepted": 150,
+              "missed": 0,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          },
+          "1": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 1.0,
+              "lower_one_sided_95": 0.9802265618354915,
+              "successes": 150,
+              "trials": 150,
+              "upper_one_sided_95": 1.0
+            },
+            "counts": {
+              "correct_accepted": 150,
+              "missed": 0,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          }
+        },
+        "correct_accepted_pooled_cp_assuming_identical_success_probability": {
+          "fraction": 1.0,
+          "lower_one_sided_95": 0.9900639180555423,
+          "successes": 300,
+          "trials": 300,
+          "upper_one_sided_95": 1.0
+        },
+        "counts": {
+          "correct_accepted": 300,
+          "missed": 0,
+          "raw_correct": 300,
+          "trials": 300,
+          "wrong_accepted": 0
+        }
+      },
+      "report": "holdout-scores/g001-m24.json",
+      "report_sha256": "025e0c7d661c9a572dfe61554557cca7104c072e364a9d0651d1c0927f45b13e",
+      "requested_seconds": 86400.0,
+      "sample_rate_hz": 0.25,
+      "scores_sha256": "e4a8c5b663841078863f97c831abd85bd32b89b1efd7f89eaa98dc84cc97adf0",
+      "selection_methods": 16,
+      "strict": {
+        "balanced_mean_bound_method": "balanced-all-success AM-GM bound; independent Bernoulli outcomes within each bit stratum, equal stratum weights; p0 may differ from p1",
+        "balanced_mean_correct_probability_lower_95": 0.9900639180555423,
+        "by_bit": {
+          "0": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 1.0,
+              "lower_one_sided_95": 0.9802265618354915,
+              "successes": 150,
+              "trials": 150,
+              "upper_one_sided_95": 1.0
+            },
+            "counts": {
+              "correct_accepted": 150,
+              "missed": 0,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          },
+          "1": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 1.0,
+              "lower_one_sided_95": 0.9802265618354915,
+              "successes": 150,
+              "trials": 150,
+              "upper_one_sided_95": 1.0
+            },
+            "counts": {
+              "correct_accepted": 150,
+              "missed": 0,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          }
+        },
+        "correct_accepted_pooled_cp_assuming_identical_success_probability": {
+          "fraction": 1.0,
+          "lower_one_sided_95": 0.9900639180555423,
+          "successes": 300,
+          "trials": 300,
+          "upper_one_sided_95": 1.0
+        },
+        "counts": {
+          "correct_accepted": 300,
+          "missed": 0,
+          "raw_correct": 300,
+          "trials": 300,
+          "wrong_accepted": 0
+        }
+      }
+    },
+    {
+      "bits": {
+        "0": 150,
+        "1": 150
+      },
+      "calibration_alternatives": 2,
+      "cn0_db_hz": -27.0,
+      "duration_alternatives": 8,
+      "gaussian_doppler_width_hz": 0.001,
+      "inner_rate_hz": 0.036,
+      "method": "gaussian-window-ucb",
+      "name": "g001-m27-refine",
+      "physical_cases": 300,
+      "relaxed": {
+        "balanced_mean_bound_method": "average of per-bit one-sided 97.5% CP lower bounds (Bonferroni gives pointwise 95% lower bound for balanced mean)",
+        "balanced_mean_correct_probability_lower_95": 0.9240521543021559,
+        "by_bit": {
+          "0": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 0.96,
+              "lower_one_sided_95": 0.9225820028401281,
+              "successes": 144,
+              "trials": 150,
+              "upper_one_sided_95": 0.9824390377782961
+            },
+            "counts": {
+              "correct_accepted": 144,
+              "missed": 6,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          },
+          "1": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 0.9733333333333334,
+              "lower_one_sided_95": 0.940018959698507,
+              "successes": 146,
+              "trials": 150,
+              "upper_one_sided_95": 0.9908410715268886
+            },
+            "counts": {
+              "correct_accepted": 146,
+              "missed": 4,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          }
+        },
+        "correct_accepted_pooled_cp_assuming_identical_success_probability": {
+          "fraction": 0.9666666666666667,
+          "lower_one_sided_95": 0.9441152594854414,
+          "successes": 290,
+          "trials": 300,
+          "upper_one_sided_95": 0.9818061609223666
+        },
+        "counts": {
+          "correct_accepted": 290,
+          "missed": 10,
+          "raw_correct": 300,
+          "trials": 300,
+          "wrong_accepted": 0
+        }
+      },
+      "report": "holdout-scores/g001-m27-refine.json",
+      "report_sha256": "e4a02346cd9b5dcba8c3747887efcda85e4671a913ebf611ba62198a5013f4af",
+      "requested_seconds": 86400.0,
+      "sample_rate_hz": 0.25,
+      "scores_sha256": "b38ff8a537c8d172afc263e28f71d7da1f5470e322503f13bcef550154137bcc",
+      "selection_methods": 16,
+      "strict": {
+        "balanced_mean_bound_method": "average of per-bit one-sided 97.5% CP lower bounds (Bonferroni gives pointwise 95% lower bound for balanced mean)",
+        "balanced_mean_correct_probability_lower_95": 0.8767922948868677,
+        "by_bit": {
+          "0": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 0.92,
+              "lower_one_sided_95": 0.8736050730777156,
+              "successes": 138,
+              "trials": 150,
+              "upper_one_sided_95": 0.953191548507194
+            },
+            "counts": {
+              "correct_accepted": 138,
+              "missed": 12,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          },
+          "1": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 0.94,
+              "lower_one_sided_95": 0.8976359158157361,
+              "successes": 141,
+              "trials": 150,
+              "upper_one_sided_95": 0.9683453525601804
+            },
+            "counts": {
+              "correct_accepted": 141,
+              "missed": 9,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          }
+        },
+        "correct_accepted_pooled_cp_assuming_identical_success_probability": {
+          "fraction": 0.93,
+          "lower_one_sided_95": 0.9007607390099107,
+          "successes": 279,
+          "trials": 300,
+          "upper_one_sided_95": 0.9526177295307711
+        },
+        "counts": {
+          "correct_accepted": 279,
+          "missed": 21,
+          "raw_correct": 300,
+          "trials": 300,
+          "wrong_accepted": 0
+        }
+      }
+    },
+    {
+      "bits": {
+        "0": 300,
+        "1": 300
+      },
+      "calibration_alternatives": 2,
+      "cn0_db_hz": -25.0,
+      "duration_alternatives": 8,
+      "gaussian_doppler_width_hz": 0.001,
+      "inner_rate_hz": 0.036,
+      "method": "gaussian-window-ucb",
+      "name": "g001-m25-refine",
+      "physical_cases": 600,
+      "relaxed": {
+        "balanced_mean_bound_method": "balanced-all-success AM-GM bound; independent Bernoulli outcomes within each bit stratum, equal stratum weights; p0 may differ from p1",
+        "balanced_mean_correct_probability_lower_95": 0.9950195566196387,
+        "by_bit": {
+          "0": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 1.0,
+              "lower_one_sided_95": 0.9900639180555423,
+              "successes": 300,
+              "trials": 300,
+              "upper_one_sided_95": 1.0
+            },
+            "counts": {
+              "correct_accepted": 300,
+              "missed": 0,
+              "raw_correct": 300,
+              "trials": 300,
+              "wrong_accepted": 0
+            }
+          },
+          "1": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 1.0,
+              "lower_one_sided_95": 0.9900639180555423,
+              "successes": 300,
+              "trials": 300,
+              "upper_one_sided_95": 1.0
+            },
+            "counts": {
+              "correct_accepted": 300,
+              "missed": 0,
+              "raw_correct": 300,
+              "trials": 300,
+              "wrong_accepted": 0
+            }
+          }
+        },
+        "correct_accepted_pooled_cp_assuming_identical_success_probability": {
+          "fraction": 1.0,
+          "lower_one_sided_95": 0.9950195566196387,
+          "successes": 600,
+          "trials": 600,
+          "upper_one_sided_95": 1.0
+        },
+        "counts": {
+          "correct_accepted": 600,
+          "missed": 0,
+          "raw_correct": 600,
+          "trials": 600,
+          "wrong_accepted": 0
+        }
+      },
+      "report": "holdout-scores/g001-m25-refine.json",
+      "report_sha256": "afc12031e9a7d7712d704cee23fc8ba81587b5b588d70eb89bdee4977cae3c62",
+      "requested_seconds": 86400.0,
+      "sample_rate_hz": 0.25,
+      "scores_sha256": "f870517f23908868c44bd365dfd31b4b2fe8986856861d9d887139e59cfdb614",
+      "selection_methods": 16,
+      "strict": {
+        "balanced_mean_bound_method": "balanced-all-success AM-GM bound; independent Bernoulli outcomes within each bit stratum, equal stratum weights; p0 may differ from p1",
+        "balanced_mean_correct_probability_lower_95": 0.9950195566196387,
+        "by_bit": {
+          "0": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 1.0,
+              "lower_one_sided_95": 0.9900639180555423,
+              "successes": 300,
+              "trials": 300,
+              "upper_one_sided_95": 1.0
+            },
+            "counts": {
+              "correct_accepted": 300,
+              "missed": 0,
+              "raw_correct": 300,
+              "trials": 300,
+              "wrong_accepted": 0
+            }
+          },
+          "1": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 1.0,
+              "lower_one_sided_95": 0.9900639180555423,
+              "successes": 300,
+              "trials": 300,
+              "upper_one_sided_95": 1.0
+            },
+            "counts": {
+              "correct_accepted": 300,
+              "missed": 0,
+              "raw_correct": 300,
+              "trials": 300,
+              "wrong_accepted": 0
+            }
+          }
+        },
+        "correct_accepted_pooled_cp_assuming_identical_success_probability": {
+          "fraction": 1.0,
+          "lower_one_sided_95": 0.9950195566196387,
+          "successes": 600,
+          "trials": 600,
+          "upper_one_sided_95": 1.0
+        },
+        "counts": {
+          "correct_accepted": 600,
+          "missed": 0,
+          "raw_correct": 600,
+          "trials": 600,
+          "wrong_accepted": 0
+        }
+      }
+    },
+    {
+      "bits": {
+        "0": 150,
+        "1": 150
+      },
+      "calibration_alternatives": 2,
+      "cn0_db_hz": -24.0,
+      "duration_alternatives": 8,
+      "gaussian_doppler_width_hz": 0.01,
+      "inner_rate_hz": 0.36,
+      "method": "gaussian-window-ucb",
+      "name": "g01-m24",
+      "physical_cases": 300,
+      "relaxed": {
+        "balanced_mean_bound_method": "average of per-bit one-sided 97.5% CP lower bounds (Bonferroni gives pointwise 95% lower bound for balanced mean)",
+        "balanced_mean_correct_probability_lower_95": 0.7233934268078379,
+        "by_bit": {
+          "0": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 0.78,
+              "lower_one_sided_95": 0.717082578660089,
+              "successes": 117,
+              "trials": 150,
+              "upper_one_sided_95": 0.8344114900280241
+            },
+            "counts": {
+              "correct_accepted": 117,
+              "missed": 33,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          },
+          "1": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 0.8133333333333334,
+              "lower_one_sided_95": 0.7531445337050877,
+              "successes": 122,
+              "trials": 150,
+              "upper_one_sided_95": 0.8639632163144373
+            },
+            "counts": {
+              "correct_accepted": 122,
+              "missed": 28,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          }
+        },
+        "correct_accepted_pooled_cp_assuming_identical_success_probability": {
+          "fraction": 0.7966666666666666,
+          "lower_one_sided_95": 0.75465233763347,
+          "successes": 239,
+          "trials": 300,
+          "upper_one_sided_95": 0.8342412138740074
+        },
+        "counts": {
+          "correct_accepted": 239,
+          "missed": 61,
+          "raw_correct": 300,
+          "trials": 300,
+          "wrong_accepted": 0
+        }
+      },
+      "report": "holdout-scores/g01-m24.json",
+      "report_sha256": "40c336449106791679bc0f16e91d13a00feea366f21ca4fc25b898e43b0c3d4f",
+      "requested_seconds": 86400.0,
+      "sample_rate_hz": 2.0,
+      "scores_sha256": "6d328286505bdce1bd5470bdb73e48da8a85f2a19938cd804efb920c16e715d9",
+      "selection_methods": 16,
+      "strict": {
+        "balanced_mean_bound_method": "average of per-bit one-sided 97.5% CP lower bounds (Bonferroni gives pointwise 95% lower bound for balanced mean)",
+        "balanced_mean_correct_probability_lower_95": 0.4305622732792058,
+        "by_bit": {
+          "0": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 0.4866666666666667,
+              "lower_one_sided_95": 0.4168669333397415,
+              "successes": 73,
+              "trials": 150,
+              "upper_one_sided_95": 0.5568667522093314
+            },
+            "counts": {
+              "correct_accepted": 73,
+              "missed": 77,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          },
+          "1": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 0.54,
+              "lower_one_sided_95": 0.4695883199744448,
+              "successes": 81,
+              "trials": 150,
+              "upper_one_sided_95": 0.60921042762686
+            },
+            "counts": {
+              "correct_accepted": 81,
+              "missed": 69,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          }
+        },
+        "correct_accepted_pooled_cp_assuming_identical_success_probability": {
+          "fraction": 0.5133333333333333,
+          "lower_one_sided_95": 0.4642600828759187,
+          "successes": 154,
+          "trials": 300,
+          "upper_one_sided_95": 0.5622090227408081
+        },
+        "counts": {
+          "correct_accepted": 154,
+          "missed": 146,
+          "raw_correct": 300,
+          "trials": 300,
+          "wrong_accepted": 0
+        }
+      }
+    },
+    {
+      "bits": {
+        "0": 150,
+        "1": 150
+      },
+      "calibration_alternatives": 2,
+      "cn0_db_hz": -22.0,
+      "duration_alternatives": 8,
+      "gaussian_doppler_width_hz": 0.01,
+      "inner_rate_hz": 0.36,
+      "method": "gaussian-window-ucb",
+      "name": "g01-m22",
+      "physical_cases": 300,
+      "relaxed": {
+        "balanced_mean_bound_method": "balanced-all-success AM-GM bound; independent Bernoulli outcomes within each bit stratum, equal stratum weights; p0 may differ from p1",
+        "balanced_mean_correct_probability_lower_95": 0.9900639180555423,
+        "by_bit": {
+          "0": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 1.0,
+              "lower_one_sided_95": 0.9802265618354915,
+              "successes": 150,
+              "trials": 150,
+              "upper_one_sided_95": 1.0
+            },
+            "counts": {
+              "correct_accepted": 150,
+              "missed": 0,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          },
+          "1": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 1.0,
+              "lower_one_sided_95": 0.9802265618354915,
+              "successes": 150,
+              "trials": 150,
+              "upper_one_sided_95": 1.0
+            },
+            "counts": {
+              "correct_accepted": 150,
+              "missed": 0,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          }
+        },
+        "correct_accepted_pooled_cp_assuming_identical_success_probability": {
+          "fraction": 1.0,
+          "lower_one_sided_95": 0.9900639180555423,
+          "successes": 300,
+          "trials": 300,
+          "upper_one_sided_95": 1.0
+        },
+        "counts": {
+          "correct_accepted": 300,
+          "missed": 0,
+          "raw_correct": 300,
+          "trials": 300,
+          "wrong_accepted": 0
+        }
+      },
+      "report": "holdout-scores/g01-m22.json",
+      "report_sha256": "8b0de64558824df44dc1d6d09a78e3f0066d70efacdf4c87c6f83842a9bc225f",
+      "requested_seconds": 86400.0,
+      "sample_rate_hz": 2.0,
+      "scores_sha256": "8fcbf102902998582c76d5aca1b0e3df853b6e9252d67a3eaa1902efc2e5b430",
+      "selection_methods": 16,
+      "strict": {
+        "balanced_mean_bound_method": "balanced-all-success AM-GM bound; independent Bernoulli outcomes within each bit stratum, equal stratum weights; p0 may differ from p1",
+        "balanced_mean_correct_probability_lower_95": 0.9900639180555423,
+        "by_bit": {
+          "0": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 1.0,
+              "lower_one_sided_95": 0.9802265618354915,
+              "successes": 150,
+              "trials": 150,
+              "upper_one_sided_95": 1.0
+            },
+            "counts": {
+              "correct_accepted": 150,
+              "missed": 0,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          },
+          "1": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 1.0,
+              "lower_one_sided_95": 0.9802265618354915,
+              "successes": 150,
+              "trials": 150,
+              "upper_one_sided_95": 1.0
+            },
+            "counts": {
+              "correct_accepted": 150,
+              "missed": 0,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          }
+        },
+        "correct_accepted_pooled_cp_assuming_identical_success_probability": {
+          "fraction": 1.0,
+          "lower_one_sided_95": 0.9900639180555423,
+          "successes": 300,
+          "trials": 300,
+          "upper_one_sided_95": 1.0
+        },
+        "counts": {
+          "correct_accepted": 300,
+          "missed": 0,
+          "raw_correct": 300,
+          "trials": 300,
+          "wrong_accepted": 0
+        }
+      }
+    },
+    {
+      "bits": {
+        "0": 150,
+        "1": 150
+      },
+      "calibration_alternatives": 2,
+      "cn0_db_hz": -20.0,
+      "duration_alternatives": 8,
+      "gaussian_doppler_width_hz": 0.01,
+      "inner_rate_hz": 0.36,
+      "method": "gaussian-window-ucb",
+      "name": "g01-m20",
+      "physical_cases": 300,
+      "relaxed": {
+        "balanced_mean_bound_method": "balanced-all-success AM-GM bound; independent Bernoulli outcomes within each bit stratum, equal stratum weights; p0 may differ from p1",
+        "balanced_mean_correct_probability_lower_95": 0.9900639180555423,
+        "by_bit": {
+          "0": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 1.0,
+              "lower_one_sided_95": 0.9802265618354915,
+              "successes": 150,
+              "trials": 150,
+              "upper_one_sided_95": 1.0
+            },
+            "counts": {
+              "correct_accepted": 150,
+              "missed": 0,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          },
+          "1": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 1.0,
+              "lower_one_sided_95": 0.9802265618354915,
+              "successes": 150,
+              "trials": 150,
+              "upper_one_sided_95": 1.0
+            },
+            "counts": {
+              "correct_accepted": 150,
+              "missed": 0,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          }
+        },
+        "correct_accepted_pooled_cp_assuming_identical_success_probability": {
+          "fraction": 1.0,
+          "lower_one_sided_95": 0.9900639180555423,
+          "successes": 300,
+          "trials": 300,
+          "upper_one_sided_95": 1.0
+        },
+        "counts": {
+          "correct_accepted": 300,
+          "missed": 0,
+          "raw_correct": 300,
+          "trials": 300,
+          "wrong_accepted": 0
+        }
+      },
+      "report": "holdout-scores/g01-m20.json",
+      "report_sha256": "197957e72fc236762a9bfff45803b512bc4625df1660045fa6a02479b0b1ba69",
+      "requested_seconds": 86400.0,
+      "sample_rate_hz": 2.0,
+      "scores_sha256": "5b9491d05fb3f3d123befa451de5a11f6dce9f5f0efac6dd3d089aeaf31c1532",
+      "selection_methods": 16,
+      "strict": {
+        "balanced_mean_bound_method": "balanced-all-success AM-GM bound; independent Bernoulli outcomes within each bit stratum, equal stratum weights; p0 may differ from p1",
+        "balanced_mean_correct_probability_lower_95": 0.9900639180555423,
+        "by_bit": {
+          "0": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 1.0,
+              "lower_one_sided_95": 0.9802265618354915,
+              "successes": 150,
+              "trials": 150,
+              "upper_one_sided_95": 1.0
+            },
+            "counts": {
+              "correct_accepted": 150,
+              "missed": 0,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          },
+          "1": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 1.0,
+              "lower_one_sided_95": 0.9802265618354915,
+              "successes": 150,
+              "trials": 150,
+              "upper_one_sided_95": 1.0
+            },
+            "counts": {
+              "correct_accepted": 150,
+              "missed": 0,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          }
+        },
+        "correct_accepted_pooled_cp_assuming_identical_success_probability": {
+          "fraction": 1.0,
+          "lower_one_sided_95": 0.9900639180555423,
+          "successes": 300,
+          "trials": 300,
+          "upper_one_sided_95": 1.0
+        },
+        "counts": {
+          "correct_accepted": 300,
+          "missed": 0,
+          "raw_correct": 300,
+          "trials": 300,
+          "wrong_accepted": 0
+        }
+      }
+    },
+    {
+      "bits": {
+        "0": 150,
+        "1": 150
+      },
+      "calibration_alternatives": 1,
+      "cn0_db_hz": -14.0,
+      "duration_alternatives": 8,
+      "gaussian_doppler_width_hz": 0.1,
+      "inner_rate_hz": 3.6,
+      "method": "gaussian-window-ucb",
+      "name": "g1-t8640-cn0m14",
+      "physical_cases": 300,
+      "relaxed": {
+        "balanced_mean_bound_method": "average of per-bit one-sided 97.5% CP lower bounds (Bonferroni gives pointwise 95% lower bound for balanced mean)",
+        "balanced_mean_correct_probability_lower_95": 0.37847895390090747,
+        "by_bit": {
+          "0": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 0.44,
+              "lower_one_sided_95": 0.3713565830391175,
+              "successes": 66,
+              "trials": 150,
+              "upper_one_sided_95": 0.5104457126978268
+            },
+            "counts": {
+              "correct_accepted": 66,
+              "missed": 84,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          },
+          "1": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 0.48,
+              "lower_one_sided_95": 0.41032983577604026,
+              "successes": 72,
+              "trials": 150,
+              "upper_one_sided_95": 0.5502707077863533
+            },
+            "counts": {
+              "correct_accepted": 72,
+              "missed": 78,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          }
+        },
+        "correct_accepted_pooled_cp_assuming_identical_success_probability": {
+          "fraction": 0.46,
+          "lower_one_sided_95": 0.41145632444187674,
+          "successes": 138,
+          "trials": 300,
+          "upper_one_sided_95": 0.509136429150999
+        },
+        "counts": {
+          "correct_accepted": 138,
+          "missed": 162,
+          "raw_correct": 300,
+          "trials": 300,
+          "wrong_accepted": 0
+        }
+      },
+      "report": "g1-holdout-scores/g1-t8640-cn0m14.json",
+      "report_sha256": "35ff1b282a976e8aaecc82ecf99b176fb8be2278298521b0739091ae3180e4d7",
+      "requested_seconds": 8640.0,
+      "sample_rate_hz": 16.0,
+      "scores_sha256": "d3413cecd964f4d98772b9ee1bd2ffcc65361f841d5636a82d19a930bb5ee704",
+      "selection_methods": 16,
+      "strict": {
+        "balanced_mean_bound_method": "average of per-bit one-sided 97.5% CP lower bounds (Bonferroni gives pointwise 95% lower bound for balanced mean)",
+        "balanced_mean_correct_probability_lower_95": 0.12496447960356635,
+        "by_bit": {
+          "0": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 0.19333333333333333,
+              "lower_one_sided_95": 0.14190045994491818,
+              "successes": 29,
+              "trials": 150,
+              "upper_one_sided_95": 0.25411287989831793
+            },
+            "counts": {
+              "correct_accepted": 29,
+              "missed": 121,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          },
+          "1": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 0.17333333333333334,
+              "lower_one_sided_95": 0.12438622024240943,
+              "successes": 26,
+              "trials": 150,
+              "upper_one_sided_95": 0.23226686124291418
+            },
+            "counts": {
+              "correct_accepted": 26,
+              "missed": 124,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          }
+        },
+        "correct_accepted_pooled_cp_assuming_identical_success_probability": {
+          "fraction": 0.18333333333333332,
+          "lower_one_sided_95": 0.14737775462101182,
+          "successes": 55,
+          "trials": 300,
+          "upper_one_sided_95": 0.22403765721820432
+        },
+        "counts": {
+          "correct_accepted": 55,
+          "missed": 245,
+          "raw_correct": 300,
+          "trials": 300,
+          "wrong_accepted": 0
+        }
+      }
+    },
+    {
+      "bits": {
+        "0": 150,
+        "1": 150
+      },
+      "calibration_alternatives": 1,
+      "cn0_db_hz": -12.0,
+      "duration_alternatives": 8,
+      "gaussian_doppler_width_hz": 0.1,
+      "inner_rate_hz": 3.6,
+      "method": "gaussian-window-ucb",
+      "name": "g1-t8640-cn0m12",
+      "physical_cases": 300,
+      "relaxed": {
+        "balanced_mean_bound_method": "balanced-all-success AM-GM bound; independent Bernoulli outcomes within each bit stratum, equal stratum weights; p0 may differ from p1",
+        "balanced_mean_correct_probability_lower_95": 0.9900639180555423,
+        "by_bit": {
+          "0": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 1.0,
+              "lower_one_sided_95": 0.9802265618354915,
+              "successes": 150,
+              "trials": 150,
+              "upper_one_sided_95": 1.0
+            },
+            "counts": {
+              "correct_accepted": 150,
+              "missed": 0,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          },
+          "1": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 1.0,
+              "lower_one_sided_95": 0.9802265618354915,
+              "successes": 150,
+              "trials": 150,
+              "upper_one_sided_95": 1.0
+            },
+            "counts": {
+              "correct_accepted": 150,
+              "missed": 0,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          }
+        },
+        "correct_accepted_pooled_cp_assuming_identical_success_probability": {
+          "fraction": 1.0,
+          "lower_one_sided_95": 0.9900639180555423,
+          "successes": 300,
+          "trials": 300,
+          "upper_one_sided_95": 1.0
+        },
+        "counts": {
+          "correct_accepted": 300,
+          "missed": 0,
+          "raw_correct": 300,
+          "trials": 300,
+          "wrong_accepted": 0
+        }
+      },
+      "report": "g1-holdout-scores/g1-t8640-cn0m12.json",
+      "report_sha256": "977ded5661f52b93d4bb55199bb33b40aa96aeeb015326cb17417bcae1b30750",
+      "requested_seconds": 8640.0,
+      "sample_rate_hz": 16.0,
+      "scores_sha256": "46e0718441fa75a7e087c29699809f3cfd5aa6a701e408549601163bfcf286fa",
+      "selection_methods": 16,
+      "strict": {
+        "balanced_mean_bound_method": "average of per-bit one-sided 97.5% CP lower bounds (Bonferroni gives pointwise 95% lower bound for balanced mean)",
+        "balanced_mean_correct_probability_lower_95": 0.9482744777909652,
+        "by_bit": {
+          "0": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 0.9733333333333334,
+              "lower_one_sided_95": 0.940018959698507,
+              "successes": 146,
+              "trials": 150,
+              "upper_one_sided_95": 0.9908410715268886
+            },
+            "counts": {
+              "correct_accepted": 146,
+              "missed": 4,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          },
+          "1": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 0.9933333333333333,
+              "lower_one_sided_95": 0.9687661830790572,
+              "successes": 149,
+              "trials": 150,
+              "upper_one_sided_95": 0.9996581031641314
+            },
+            "counts": {
+              "correct_accepted": 149,
+              "missed": 1,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          }
+        },
+        "correct_accepted_pooled_cp_assuming_identical_success_probability": {
+          "fraction": 0.9833333333333333,
+          "lower_one_sided_95": 0.965277755698705,
+          "successes": 295,
+          "trials": 300,
+          "upper_one_sided_95": 0.9934104677610244
+        },
+        "counts": {
+          "correct_accepted": 295,
+          "missed": 5,
+          "raw_correct": 300,
+          "trials": 300,
+          "wrong_accepted": 0
+        }
+      }
+    },
+    {
+      "bits": {
+        "0": 150,
+        "1": 150
+      },
+      "calibration_alternatives": 1,
+      "cn0_db_hz": -10.0,
+      "duration_alternatives": 8,
+      "gaussian_doppler_width_hz": 0.1,
+      "inner_rate_hz": 3.6,
+      "method": "gaussian-window-ucb",
+      "name": "g1-t8640-cn0m10",
+      "physical_cases": 300,
+      "relaxed": {
+        "balanced_mean_bound_method": "balanced-all-success AM-GM bound; independent Bernoulli outcomes within each bit stratum, equal stratum weights; p0 may differ from p1",
+        "balanced_mean_correct_probability_lower_95": 0.9900639180555423,
+        "by_bit": {
+          "0": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 1.0,
+              "lower_one_sided_95": 0.9802265618354915,
+              "successes": 150,
+              "trials": 150,
+              "upper_one_sided_95": 1.0
+            },
+            "counts": {
+              "correct_accepted": 150,
+              "missed": 0,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          },
+          "1": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 1.0,
+              "lower_one_sided_95": 0.9802265618354915,
+              "successes": 150,
+              "trials": 150,
+              "upper_one_sided_95": 1.0
+            },
+            "counts": {
+              "correct_accepted": 150,
+              "missed": 0,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          }
+        },
+        "correct_accepted_pooled_cp_assuming_identical_success_probability": {
+          "fraction": 1.0,
+          "lower_one_sided_95": 0.9900639180555423,
+          "successes": 300,
+          "trials": 300,
+          "upper_one_sided_95": 1.0
+        },
+        "counts": {
+          "correct_accepted": 300,
+          "missed": 0,
+          "raw_correct": 300,
+          "trials": 300,
+          "wrong_accepted": 0
+        }
+      },
+      "report": "g1-holdout-scores/g1-t8640-cn0m10.json",
+      "report_sha256": "d173cd1b73b2e06c6f5caa25cc176184288d78a54f8d5c29a939c1a21596ecec",
+      "requested_seconds": 8640.0,
+      "sample_rate_hz": 16.0,
+      "scores_sha256": "e80f46c8d43b6d870b91aee6afc51ab986f142781e5b08486ccb32799c3d0b51",
+      "selection_methods": 16,
+      "strict": {
+        "balanced_mean_bound_method": "balanced-all-success AM-GM bound; independent Bernoulli outcomes within each bit stratum, equal stratum weights; p0 may differ from p1",
+        "balanced_mean_correct_probability_lower_95": 0.9900639180555423,
+        "by_bit": {
+          "0": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 1.0,
+              "lower_one_sided_95": 0.9802265618354915,
+              "successes": 150,
+              "trials": 150,
+              "upper_one_sided_95": 1.0
+            },
+            "counts": {
+              "correct_accepted": 150,
+              "missed": 0,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          },
+          "1": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 1.0,
+              "lower_one_sided_95": 0.9802265618354915,
+              "successes": 150,
+              "trials": 150,
+              "upper_one_sided_95": 1.0
+            },
+            "counts": {
+              "correct_accepted": 150,
+              "missed": 0,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          }
+        },
+        "correct_accepted_pooled_cp_assuming_identical_success_probability": {
+          "fraction": 1.0,
+          "lower_one_sided_95": 0.9900639180555423,
+          "successes": 300,
+          "trials": 300,
+          "upper_one_sided_95": 1.0
+        },
+        "counts": {
+          "correct_accepted": 300,
+          "missed": 0,
+          "raw_correct": 300,
+          "trials": 300,
+          "wrong_accepted": 0
+        }
+      }
+    },
+    {
+      "bits": {
+        "0": 16,
+        "1": 16
+      },
+      "calibration_alternatives": 1,
+      "cn0_db_hz": -18.0,
+      "duration_alternatives": 8,
+      "gaussian_doppler_width_hz": 0.1,
+      "inner_rate_hz": 3.6,
+      "method": "gaussian-window-ucb",
+      "name": "g1-t86400-cn0m18",
+      "physical_cases": 32,
+      "relaxed": {
+        "balanced_mean_bound_method": "average of per-bit one-sided 97.5% CP lower bounds (Bonferroni gives pointwise 95% lower bound for balanced mean)",
+        "balanced_mean_correct_probability_lower_95": 0.6571015123581022,
+        "by_bit": {
+          "0": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 0.875,
+              "lower_one_sided_95": 0.6561748007704107,
+              "successes": 14,
+              "trials": 16,
+              "upper_one_sided_95": 0.9773212172775543
+            },
+            "counts": {
+              "correct_accepted": 14,
+              "missed": 2,
+              "raw_correct": 16,
+              "trials": 16,
+              "wrong_accepted": 0
+            }
+          },
+          "1": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 0.9375,
+              "lower_one_sided_95": 0.7360426027114314,
+              "successes": 15,
+              "trials": 16,
+              "upper_one_sided_95": 0.9967993022898115
+            },
+            "counts": {
+              "correct_accepted": 15,
+              "missed": 1,
+              "raw_correct": 16,
+              "trials": 16,
+              "wrong_accepted": 0
+            }
+          }
+        },
+        "correct_accepted_pooled_cp_assuming_identical_success_probability": {
+          "fraction": 0.90625,
+          "lower_one_sided_95": 0.7751838914107743,
+          "successes": 29,
+          "trials": 32,
+          "upper_one_sided_95": 0.9739569539514824
+        },
+        "counts": {
+          "correct_accepted": 29,
+          "missed": 3,
+          "raw_correct": 32,
+          "trials": 32,
+          "wrong_accepted": 0
+        }
+      },
+      "report": "g1-holdout-scores/g1-t86400-cn0m18.json",
+      "report_sha256": "5d9ca3f6cd29882f77043b4a42b73fe71289c29d56718f3325373d2914e039f4",
+      "requested_seconds": 86400.0,
+      "sample_rate_hz": 16.0,
+      "scores_sha256": "4426f5962b4766f1c74a3bfe5df9ab7bbb7a5f6d3d5de75b8533044ca79f5af7",
+      "selection_methods": 16,
+      "strict": {
+        "balanced_mean_bound_method": "average of per-bit one-sided 97.5% CP lower bounds (Bonferroni gives pointwise 95% lower bound for balanced mean)",
+        "balanced_mean_correct_probability_lower_95": 0.5463764716273045,
+        "by_bit": {
+          "0": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 0.75,
+              "lower_one_sided_95": 0.5156035789063309,
+              "successes": 12,
+              "trials": 16,
+              "upper_one_sided_95": 0.9097475669695725
+            },
+            "counts": {
+              "correct_accepted": 12,
+              "missed": 4,
+              "raw_correct": 16,
+              "trials": 16,
+              "wrong_accepted": 0
+            }
+          },
+          "1": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 0.875,
+              "lower_one_sided_95": 0.6561748007704107,
+              "successes": 14,
+              "trials": 16,
+              "upper_one_sided_95": 0.9773212172775543
+            },
+            "counts": {
+              "correct_accepted": 14,
+              "missed": 2,
+              "raw_correct": 16,
+              "trials": 16,
+              "wrong_accepted": 0
+            }
+          }
+        },
+        "correct_accepted_pooled_cp_assuming_identical_success_probability": {
+          "fraction": 0.8125,
+          "lower_one_sided_95": 0.6631260814910092,
+          "successes": 26,
+          "trials": 32,
+          "upper_one_sided_95": 0.9150454649120554
+        },
+        "counts": {
+          "correct_accepted": 26,
+          "missed": 6,
+          "raw_correct": 32,
+          "trials": 32,
+          "wrong_accepted": 0
+        }
+      }
+    },
+    {
+      "bits": {
+        "0": 16,
+        "1": 16
+      },
+      "calibration_alternatives": 1,
+      "cn0_db_hz": -16.0,
+      "duration_alternatives": 8,
+      "gaussian_doppler_width_hz": 0.1,
+      "inner_rate_hz": 3.6,
+      "method": "gaussian-window-ucb",
+      "name": "g1-t86400-cn0m16",
+      "physical_cases": 32,
+      "relaxed": {
+        "balanced_mean_bound_method": "balanced-all-success AM-GM bound; independent Bernoulli outcomes within each bit stratum, equal stratum weights; p0 may differ from p1",
+        "balanced_mean_correct_probability_lower_95": 0.9106318010137352,
+        "by_bit": {
+          "0": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 1.0,
+              "lower_one_sided_95": 0.8292502770175191,
+              "successes": 16,
+              "trials": 16,
+              "upper_one_sided_95": 1.0
+            },
+            "counts": {
+              "correct_accepted": 16,
+              "missed": 0,
+              "raw_correct": 16,
+              "trials": 16,
+              "wrong_accepted": 0
+            }
+          },
+          "1": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 1.0,
+              "lower_one_sided_95": 0.8292502770175191,
+              "successes": 16,
+              "trials": 16,
+              "upper_one_sided_95": 1.0
+            },
+            "counts": {
+              "correct_accepted": 16,
+              "missed": 0,
+              "raw_correct": 16,
+              "trials": 16,
+              "wrong_accepted": 0
+            }
+          }
+        },
+        "correct_accepted_pooled_cp_assuming_identical_success_probability": {
+          "fraction": 1.0,
+          "lower_one_sided_95": 0.9106318010137352,
+          "successes": 32,
+          "trials": 32,
+          "upper_one_sided_95": 1.0
+        },
+        "counts": {
+          "correct_accepted": 32,
+          "missed": 0,
+          "raw_correct": 32,
+          "trials": 32,
+          "wrong_accepted": 0
+        }
+      },
+      "report": "g1-holdout-scores/g1-t86400-cn0m16.json",
+      "report_sha256": "8708b3525e6acde44056a33b3c04930f6bc24c48032aa7c2c09f353f8d9445c5",
+      "requested_seconds": 86400.0,
+      "sample_rate_hz": 16.0,
+      "scores_sha256": "14732c2489abaeef5a06eca2eb57dbfc127aaf2bce2f636928ef73c2fadebea1",
+      "selection_methods": 16,
+      "strict": {
+        "balanced_mean_bound_method": "balanced-all-success AM-GM bound; independent Bernoulli outcomes within each bit stratum, equal stratum weights; p0 may differ from p1",
+        "balanced_mean_correct_probability_lower_95": 0.9106318010137352,
+        "by_bit": {
+          "0": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 1.0,
+              "lower_one_sided_95": 0.8292502770175191,
+              "successes": 16,
+              "trials": 16,
+              "upper_one_sided_95": 1.0
+            },
+            "counts": {
+              "correct_accepted": 16,
+              "missed": 0,
+              "raw_correct": 16,
+              "trials": 16,
+              "wrong_accepted": 0
+            }
+          },
+          "1": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 1.0,
+              "lower_one_sided_95": 0.8292502770175191,
+              "successes": 16,
+              "trials": 16,
+              "upper_one_sided_95": 1.0
+            },
+            "counts": {
+              "correct_accepted": 16,
+              "missed": 0,
+              "raw_correct": 16,
+              "trials": 16,
+              "wrong_accepted": 0
+            }
+          }
+        },
+        "correct_accepted_pooled_cp_assuming_identical_success_probability": {
+          "fraction": 1.0,
+          "lower_one_sided_95": 0.9106318010137352,
+          "successes": 32,
+          "trials": 32,
+          "upper_one_sided_95": 1.0
+        },
+        "counts": {
+          "correct_accepted": 32,
+          "missed": 0,
+          "raw_correct": 32,
+          "trials": 32,
+          "wrong_accepted": 0
+        }
+      }
+    },
+    {
+      "bits": {
+        "0": 16,
+        "1": 16
+      },
+      "calibration_alternatives": 1,
+      "cn0_db_hz": -14.0,
+      "duration_alternatives": 8,
+      "gaussian_doppler_width_hz": 0.1,
+      "inner_rate_hz": 3.6,
+      "method": "gaussian-window-ucb",
+      "name": "g1-t86400-cn0m14",
+      "physical_cases": 32,
+      "relaxed": {
+        "balanced_mean_bound_method": "balanced-all-success AM-GM bound; independent Bernoulli outcomes within each bit stratum, equal stratum weights; p0 may differ from p1",
+        "balanced_mean_correct_probability_lower_95": 0.9106318010137352,
+        "by_bit": {
+          "0": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 1.0,
+              "lower_one_sided_95": 0.8292502770175191,
+              "successes": 16,
+              "trials": 16,
+              "upper_one_sided_95": 1.0
+            },
+            "counts": {
+              "correct_accepted": 16,
+              "missed": 0,
+              "raw_correct": 16,
+              "trials": 16,
+              "wrong_accepted": 0
+            }
+          },
+          "1": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 1.0,
+              "lower_one_sided_95": 0.8292502770175191,
+              "successes": 16,
+              "trials": 16,
+              "upper_one_sided_95": 1.0
+            },
+            "counts": {
+              "correct_accepted": 16,
+              "missed": 0,
+              "raw_correct": 16,
+              "trials": 16,
+              "wrong_accepted": 0
+            }
+          }
+        },
+        "correct_accepted_pooled_cp_assuming_identical_success_probability": {
+          "fraction": 1.0,
+          "lower_one_sided_95": 0.9106318010137352,
+          "successes": 32,
+          "trials": 32,
+          "upper_one_sided_95": 1.0
+        },
+        "counts": {
+          "correct_accepted": 32,
+          "missed": 0,
+          "raw_correct": 32,
+          "trials": 32,
+          "wrong_accepted": 0
+        }
+      },
+      "report": "g1-holdout-scores/g1-t86400-cn0m14.json",
+      "report_sha256": "bff2be5c509c175da35f37d60d23ea8a9fd6db3ab914cb9614f056e2f0bd63d3",
+      "requested_seconds": 86400.0,
+      "sample_rate_hz": 16.0,
+      "scores_sha256": "9ce5a5310b4dbab769c5b6cb88c0f19fd3759ef9e0901d27dba5d8dbb4292eb6",
+      "selection_methods": 16,
+      "strict": {
+        "balanced_mean_bound_method": "balanced-all-success AM-GM bound; independent Bernoulli outcomes within each bit stratum, equal stratum weights; p0 may differ from p1",
+        "balanced_mean_correct_probability_lower_95": 0.9106318010137352,
+        "by_bit": {
+          "0": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 1.0,
+              "lower_one_sided_95": 0.8292502770175191,
+              "successes": 16,
+              "trials": 16,
+              "upper_one_sided_95": 1.0
+            },
+            "counts": {
+              "correct_accepted": 16,
+              "missed": 0,
+              "raw_correct": 16,
+              "trials": 16,
+              "wrong_accepted": 0
+            }
+          },
+          "1": {
+            "correct_accepted_pointwise_cp": {
+              "fraction": 1.0,
+              "lower_one_sided_95": 0.8292502770175191,
+              "successes": 16,
+              "trials": 16,
+              "upper_one_sided_95": 1.0
+            },
+            "counts": {
+              "correct_accepted": 16,
+              "missed": 0,
+              "raw_correct": 16,
+              "trials": 16,
+              "wrong_accepted": 0
+            }
+          }
+        },
+        "correct_accepted_pooled_cp_assuming_identical_success_probability": {
+          "fraction": 1.0,
+          "lower_one_sided_95": 0.9106318010137352,
+          "successes": 32,
+          "trials": 32,
+          "upper_one_sided_95": 1.0
+        },
+        "counts": {
+          "correct_accepted": 32,
+          "missed": 0,
+          "raw_correct": 32,
+          "trials": 32,
+          "wrong_accepted": 0
+        }
+      }
+    }
+  ],
+  "created_utc": "2026-11-02T03:52:30.313444+00:00",
+  "executed_checks": [
+    "exact combined 15-job plan equality to original component jobs with final stable replacement",
+    "exact complete planned case-index coverage, one record per primary index, balanced bit strata",
+    "all six exact uint64 seed derivations checked against row metadata, exporter argv and actual manifests; globally distinct roots",
+    "full generation argv reconstructed using hash-matching driver; all defaults and explicit generation options compared to frozen export plans",
+    "all receiver defaults and explicit options reconstructed using hash-matching receiver parser and matched to report configuration; full budget diagnostics matched",
+    "actual manifest SHA matched to receiver input receipt and remote raw audit; manifest content matched embedded export receipt",
+    "manifest physical duration/rate/Fs/spread/Doppler-width/noise-variance/block/encryption/noisy-stat fields checked",
+    "all saved primary score NPZ SHA hashes and finite 1x2 rows verified; strict and relaxed independent recount including per-bit counts",
+    "all current 516 generation source inputs, receiver source and nine dependency file hashes match recorded running-source fingerprints",
+    "stable resumption exact failed-index identity and original-success score bit identity",
+    "remote full-raw summary and exact primary plan coverage reviewed; local receipt does not repeat raw receiver inference"
+  ],
+  "metadata_root": "local-evidence/triad-spread-all-metadata",
+  "plan_root": "docs/validation-data/triad-v3/2026-11-02-spread/reproduction",
+  "plans_sha256": {
+    "boundary-export-plan.json": "56f2e54d803e1cdb9e2a204b63315793809bb54d3fa4f40e4f34d87f7956cdce",
+    "boundary-score-plan.json": "15858e58a19ebcb8fdc6c4e054afb30ec43e477147cb5ad3bc0278c974f9728d",
+    "g1-export-plan.json": "92a526f63426259b148d67f2ea047c20200bc26f6b40518da7abf6849d299682",
+    "g1-score-plan.json": "b8170edcb27ba77c91d07ba7a67526945ab3986887c30e4322fed2831f06df06",
+    "holdout-export-plan.json": "49f40b640e7a18a7a15432b01df41682ea3e39df39640d243b51e402fb1d5579",
+    "holdout-score-plan.json": "e22c8c64a067512f68da45e5799cc46ddc2c16431866d6f2ce2090d98e8759d7",
+    "primary-score-plan.json": "e0391e49003a18a1c8e7054b8a6b2fa07ff03aa348455a2284f38e07afdf3620",
+    "stable-resume-export-plan.json": "a019d523e5f35f4b64549400b6f09c8b184d763905949eb58b62bd9bad612fdf",
+    "stable-resume-score-plan.json": "893e152cfa3e560c5e2b30f24c141068722a6aaab8a093d59b9a6e8fe9b5a9ba"
+  },
+  "primary_physical_cases": 3996,
+  "relaxed_gate": 17.4227460230377,
+  "relaxed_scope": "Same strict-UCB-calibrated scores re-gated; no independent recalibration or additional physical trials.",
+  "remote_full_raw_audit": {
+    "path": "local-evidence/triad-spread-audits/full-analysis.json",
+    "primary_verified_file_records": 23976,
+    "scope": "Independently reviewed remote audit records and cross-bound all 3996 primary manifest/score input hashes. Raw arrays were hashed by the recorded remote analyzer; this reviewer did not independently re-read omitted raw arrays locally.",
+    "sha256": "7e521f4ac3007067f9f56b86e2d520b15d05f79085c92ff902c2b9cc10c055c2",
+    "summary": {
+      "actual_method_path_observations": 4012,
+      "conditional_method_noise_trials": 62208,
+      "distinct_observed_physical_input_paths": 4152,
+      "failed_path_records": 0,
+      "reports": 65,
+      "unclassified_failed_actual_path_records": 0,
+      "unknown_schema_documents": 4268
+    },
+    "verified_file_records": 24912
+  },
+  "reproducer": {
+    "example_command": "PYTHONDONTWRITEBYTECODE=1 OMP_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2 MKL_NUM_THREADS=2 /tmp/triad-weak-env/bin/python /tmp/spread-primary-audit.py",
+    "path": "/tmp/spread-primary-audit.py",
+    "sha256": "3fdfee0c7dbdc384e40e2090d97a15890c39aa7062408ba2c76fb461963fa320"
+  },
+  "reviewer": "/root/noise_review",
+  "runtime": {
+    "executable": "/tmp/triad-weak-env/bin/python",
+    "numpy": "2.5.4",
+    "python": "3.13.5 (main, Aug 10 2026, 12:06:59) [GCC 14.2.0]"
+  },
+  "schema": "triad-spread-independent-primary-review-v1",
+  "scientific_qualification": false,
+  "source_binding": {
+    "all_generation_files_match_current_checkout": true,
+    "all_receiver_files_match_current_checkout": true,
+    "binary_scope": "One recorded supplied-binary hash across all cases. This audit does not prove that these sources built that binary, nor independently rehash a remote binary.",
+    "generation_file_count": 516,
+    "generation_source_fingerprint": "6dfb23649e4ab42e1722113c29ca6d69c6a62c3934aefe452b63602cf6bdadf9",
+    "receiver_dependency_sha256": {
+      "triad-cfo-batch-study.py": "5c7fb6f8b0ad8cadeaae8591d9fb0e3d489fb5eb4c14962faf800ad46a661665",
+      "triad-noise-study.py": "960040dc2a9a00910185a5b79f8af8c84410ffd3b8b7327256399543f396a621",
+      "triad-rbpf-study.py": "34a9797ed7119dcf6545b6be759b8f506cbdaf6ac9ece886b82fa699cd5d085f",
+      "triad-static-frequency-study.py": "f56aef3067e956cc9ddc649d39bae0c598b93f25a4f0916b82d6fb1e7b020868",
+      "triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba",
+      "triad_gaussian_window.py": "dd5d8083999a97f66f74673264f80117b06557c45b3f4646a88e9668a29d03ee",
+      "triad_noise_likelihood.py": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110",
+      "triad_rbpf.py": "d4b64c3a830acd3bd15433421da0e003ba1aa9810bf1dd904c57082d94c3bd54",
+      "triad_state_workspace.py": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923"
+    },
+    "receiver_source_sha256": "67ab97612bf2e74ada2b0f7b399651748935d8fcbea9bacc40d76e2bd055f67b",
+    "recorded_binary_sha256": "324304e31185c9503a5bb5b85a5944fe7cc04d8bc1b32c2b6ef6e412ef80fe59"
+  },
+  "stable_administrative_resumption": {
+    "final_physical_cases": 300,
+    "final_report": "local-evidence/triad-spread-all-metadata/holdout-scores/stable-005-m60-complete.json",
+    "final_strict_correct_accepted": 300,
+    "original_campaign_sha256": "cb4b4b7bd1b890c8227a089c7321b9b0800b1ee48ac3d85c359efd2bd9f07640",
+    "original_campaign_status": "timed out, not passed",
+    "original_complete_indices": [
+      0,
+      287
+    ],
+    "original_failed_report_retained": "local-evidence/triad-spread-all-metadata/holdout-scores/stable-005-m60.json",
+    "original_failure_indices": [
+      288,
+      289,
+      290,
+      291,
+      292,
+      293,
+      294,
+      295,
+      296,
+      297,
+      298,
+      299
+    ],
+    "original_score_report_sha256": "eb3454feb2cd517762780b8bc0e5a513e937c07cf2b2173e16e6d59746adbcaf",
+    "original_success_score_arrays_bit_identical": 288,
+    "resume_campaign_sha256": "1a6e5f260657e49dc53d8c3f51de3dc809e48384135edc473670aa0dd9ba5618",
+    "resumed_indices": [
+      288,
+      289,
+      290,
+      291,
+      292,
+      293,
+      294,
+      295,
+      296,
+      297,
+      298,
+      299
+    ],
+    "resumed_same_frozen_seeds_configuration": true
+  },
+  "state": "accepted-scoped-recount-and-bindings",
+  "strict_execution_total": {
+    "correct_accepted": 3444,
+    "missed": 552,
+    "raw_correct": 3996,
+    "trials": 3996,
+    "wrong_accepted": 0
+  },
+  "strict_gate": 22.721063389585737,
+  "totals_scope": "Execution accounting only; distinct channel/SNR/duration populations are not a pooled performance estimate."
+}

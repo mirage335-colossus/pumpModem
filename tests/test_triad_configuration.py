@@ -102,6 +102,9 @@ def main():
     path_off = c["path_evolution"]
     check(not path_off["active"], "physical path stress is not off by default")
     near(path_off["ray_coherence_seconds"], 0, "default ray coherence")
+    near(path_off["gaussian_doppler_width_hz"], 0, "Gaussian ray model must default off")
+    check("fixed unit ray gains" in path_off["ray_model"] and "OU" not in path_off["ray_model"],
+          "default fixed rays were mislabeled as stochastic OU gains")
     near(path_off["diurnal_phase_amplitude_radians"], 0, "default diurnal phase")
     near(path_off["diurnal_period_seconds"], 86400, "default diurnal period")
     check(path_off["outage_start_seconds"] == path_off["outage_end_seconds"] == -1,
@@ -122,7 +125,22 @@ def main():
     near(path["outage_end_seconds"], 1000, "physical outage end")
     near(path["outage_gain"], .1, "physical outage attenuation")
     near(path["outage_ramp_seconds"], 60, "physical outage ramps")
-    for invalid in (("--ray-coherence-seconds", "-1"), ("--diurnal-phase-radians", "-1"),
+    gaussian = configure("--ray-gaussian-width-hz", ".001")
+    gp = gaussian["path_evolution"]
+    check(gp["active"], "Gaussian ray width did not activate physical path evolution")
+    near(gp["ray_coherence_seconds"], 0, "Gaussian rays silently enabled OU")
+    near(gp["gaussian_doppler_width_hz"], .001, "Gaussian target width")
+    near(gp["gaussian_doppler_standard_deviation_hz"], .0005, "Gaussian width is not two sigma")
+    near(gp["gaussian_capture_total_allowance_hz"], .006, "Gaussian six-sigma capture edges")
+    near(gaussian["capture"]["deterministic_nyquist_margin_hz"],
+         c["capture"]["deterministic_nyquist_margin_hz"]-.006, "Gaussian capture allowance omitted or doubled")
+    near(gaussian["spread_doppler_hz"], c["spread_doppler_hz"], "ray width changed independent Doppler centers")
+    check("FIR" in gp["ray_model"] and "B=2*sigma" in gp["gaussian_target_correlation"],
+          "Gaussian teacher conventions missing")
+    for invalid in (("--ray-coherence-seconds", "-1"), ("--ray-gaussian-width-hz", "-1"),
+                    ("--ray-gaussian-width-hz", "1e308"),
+                    ("--ray-gaussian-width-hz", ".001", "--ray-coherence-seconds", "1000"),
+                    ("--diurnal-phase-radians", "-1"),
                     ("--diurnal-period-seconds", "0"), ("--diurnal-period-seconds", "nan"),
                     ("--diurnal-phase-radians", "1e308", "--diurnal-period-seconds", "1e-100"),
                     ("--outage-seconds", "-1", "100"), ("--outage-seconds", "10", "10"),
@@ -131,7 +149,7 @@ def main():
                     ("--trials", "2", "--path-seed", str((1 << 64)-1))):
         invoke("--mode", "configure", *COMMON, *invalid, ok=False)
     for nonfinite in ("inf", "-inf", "nan"):
-        for option in ("--ray-coherence-seconds", "--diurnal-phase-radians",
+        for option in ("--ray-coherence-seconds", "--ray-gaussian-width-hz", "--diurnal-phase-radians",
                        "--diurnal-period-seconds", "--outage-gain", "--outage-ramp-seconds"):
             result = invoke("--mode", "configure", *COMMON, option, nonfinite, ok=False)
             check(not rows(result), "nonfinite path scalar emitted configuration JSON")
@@ -139,6 +157,7 @@ def main():
             result = invoke("--mode", "configure", *COMMON, "--outage-seconds", *endpoints, ok=False)
             check(not rows(result), "nonfinite outage endpoint emitted configuration JSON")
     invoke("--mode", "plan", "--ray-coherence-seconds", "1000", ok=False)
+    invoke("--mode", "plan", "--ray-gaussian-width-hz", ".001", ok=False)
     near(c["base_nominal_relative_bound_ppm"], .0001, "base relative accuracy")
     near(c["shift_nominal_relative_bound_ppm"], .0001, "RF relative accuracy")
     near(c["relative_phase_diffusion_rad_sqrt_s"], math.sqrt(2)*.5*math.pi/180, "combined relative phase")
@@ -174,9 +193,52 @@ def main():
     scaled = configure("--margin", "3")
     near(scaled["spread_delay_ms"], 1.5, "spread margin once")
     near(scaled["spread_doppler_hz"], .3, "Doppler margin once")
+    check(scaled["spread_margin_applied_once"], "preset margin application not reported")
     near(scaled["perturbation_slow_depth"], .01, "margin must not scale modulation depth")
     near(scaled["deterministic_oscillator_cfo_bound_hz"], c["deterministic_oscillator_cfo_bound_hz"], "margin must not widen oscillator truth")
     near(scaled["search_estimates"]["margin_frequency_half_width_hz"], 3*c["deterministic_oscillator_cfo_bound_hz"], "search margin")
+    explicit_same = configure("--margin", "3", "--spread-delay-ms", ".5", "--spread-doppler-hz", ".1")
+    for field in ("spread_delay_ms", "spread_doppler_hz", "perturbation_slow_depth", "perturbation_fast_depth"):
+        near(explicit_same[field], scaled[field], "nominal override parity: "+field)
+    delay_only = configure("--margin", "3", "--spread-delay-ms", "2")
+    near(delay_only["spread_delay_ms"], 6, "delay override was not nominal")
+    near(delay_only["spread_doppler_hz"], .3, "delay override changed untouched preset Doppler")
+    doppler_only = configure("--margin", "3", "--spread-doppler-hz", ".2")
+    near(doppler_only["spread_delay_ms"], 1.5, "Doppler override changed untouched preset delay")
+    near(doppler_only["spread_doppler_hz"], .6, "Doppler override margin applied twice")
+    paired = configure("--spread-delay-ms", ".2", "--spread-doppler-hz", ".05",
+                       "--spread-preset", "sub9-best", "--margin", "3")
+    near(paired["spread_delay_ms"], .6, "preset order erased explicit delay")
+    near(paired["spread_doppler_hz"], .15, "preset order erased explicit Doppler")
+    inputs = paired["spread_inputs"]
+    check(inputs["selected_preset"] == "sub9-best", "override replaced selected preset provenance")
+    near(inputs["delay_ms_override_nominal"], .2, "delay nominal override provenance")
+    near(inputs["doppler_hz_override_nominal"], .05, "Doppler nominal override provenance")
+    near(inputs["applied_margin"], 3, "override effective margin provenance")
+    check(c["spread_inputs"]["delay_ms_override_nominal"] is None and
+          c["spread_inputs"]["doppler_hz_override_nominal"] is None, "unset overrides acquired defaults")
+    legacy_args = ("--mode", "configure", "--rate", "36", "--added", "1", "--sample-rate", "64",
+                   "--seconds", "8", "--channel", "hf", "--margin", "3")
+    legacy = rows(invoke(*legacy_args))[0]["configuration"]
+    near(legacy["spread_delay_ms"], 1.5, "legacy manual effective delay changed without override")
+    near(legacy["spread_doppler_hz"], .3, "legacy manual effective Doppler changed without override")
+    check(not legacy["spread_margin_applied_once"] and legacy["spread_inputs"]["applied_margin"] == 1,
+          "legacy manual channel falsely reports applying margin")
+    fallback = rows(invoke(*legacy_args, "--spread-delay-ms", "2"))[0]["configuration"]
+    near(fallback["spread_delay_ms"], 6, "manual fallback override delay")
+    near(fallback["spread_doppler_hz"], .9, "manual fallback nominal base Doppler")
+    check(fallback["spread_margin_applied_once"], "explicit override margin application not reported")
+    zero_delay = configure("--spread-preset", "none", "--spread-delay-ms", ".5")
+    near(zero_delay["spread_delay_ms"], .5, "delay-only physical channel")
+    near(zero_delay["spread_doppler_hz"], 0, "delay-only physical channel added Doppler")
+    zero_doppler = configure("--spread-preset", "none", "--spread-doppler-hz", ".1")
+    near(zero_doppler["spread_delay_ms"], 0, "Doppler-only physical channel added delay")
+    near(zero_doppler["spread_doppler_hz"], .1, "Doppler-only physical channel")
+    for flag in ("--spread-delay-ms", "--spread-doppler-hz"):
+        for value in ("-1", "nan", "inf", "-inf"):
+            invoke("--mode", "configure", *COMMON, flag, value, ok=False)
+        invoke("--mode", "configure", *COMMON, "--margin", "1000", flag, "1e308", ok=False)
+        invoke("--mode", "plan", flag, "0", ok=False)
     no_if = configure("--nominal-if-hz", "0")
     check(no_if["deterministic_oscillator_cfo_bound_hz"] < c["deterministic_oscillator_cfo_bound_hz"], "IF contribution omitted")
 
@@ -204,6 +266,24 @@ def main():
                      "--output", str(diurnal_impossible), ok=False)
         check("cannot fit the sampled baseband" in bad.stderr and not diurnal_impossible.exists(),
               "diurnal instantaneous frequency escaped capture preflight")
+        gaussian_impossible = root/"gaussian-impossible"
+        bad = invoke("--mode", "export-stats", *COMMON, "--ray-gaussian-width-hz", "100",
+                     "--output", str(gaussian_impossible), ok=False)
+        check("cannot fit the sampled baseband" in bad.stderr and not gaussian_impossible.exists(),
+              "Gaussian capture allowance escaped preflight")
+        gaussian_output = root/"gaussian-teacher"
+        invoke("--mode", "export-stats", *COMMON, "--ray-gaussian-width-hz", ".5",
+               "--block-seconds", "4", "--output", str(gaussian_output))
+        gm = json.loads((gaussian_output/"manifest.json").read_text())
+        teacher = gm["path_truth_simulation_only"]["gaussian_ray_teacher"]
+        coefficients = teacher["fir_coefficients"]
+        check(1 < len(coefficients) <= 8193 and len(coefficients)%2 == 1,
+              "actual Gaussian FIR shape was not serialized")
+        near(sum(v*v for v in coefficients), 1, "actual Gaussian FIR variance normalization")
+        rx_scale = 1+gm["endpoint_truth"]["rx_audio_ppm"]*1e-6
+        near(teacher["sample_interval_seconds"], 1/(64*rx_scale), "actual Gaussian teacher physical timestep")
+        near(gm["channel_model"]["path_evolution"]["gaussian_doppler_width_hz"], .5,
+             "export lost Gaussian width input")
         # CLI path seeds change the actual propagated samples while public
         # templates and independent endpoint draws stay fixed.
         path_outputs = []
@@ -228,6 +308,30 @@ def main():
               "hidden path seed changed public templates")
         check((path_outputs[0][0]/"mean.c128").read_bytes() != (path_outputs[1][0]/"mean.c128").read_bytes(),
               "CLI path seed did not reach actual propagated samples")
+        spread_outputs = []
+        for name, extra in (("spread-legacy", ()),
+                            ("spread-same", ("--spread-delay-ms", ".5", "--spread-doppler-hz", ".1")),
+                            ("spread-changed", ("--spread-doppler-hz", ".2"))):
+            destination = root/name
+            invoke("--mode", "export-stats", *COMMON, "--phase-diffusion", "0", "--margin", "3",
+                   "--basis", "two-ray", "--tap-delay-ms", ".05", "--tap-doppler-hz", ".02",
+                   "--block-seconds", "4", "--output", str(destination), *extra)
+            manifest = json.loads((destination/"manifest.json").read_text())
+            near(manifest["channel_model"]["spread_inputs"]["applied_margin"], 3, "export omitted spread margin")
+            check(manifest["channel_model"]["spread_inputs"]["selected_preset"] == "hf-best",
+                  "export override lost selected preset")
+            for candidate in manifest["candidates"]:
+                if len(candidate["taps"]) > 1:
+                    near(candidate["taps"][1]["delay_seconds"], .00005, "physical override changed receive delay basis")
+                    near(candidate["taps"][1]["doppler_hz"], .02, "physical override changed receive Doppler basis")
+            spread_outputs.append(destination)
+        for filename in ("gram.c128", "mean.c128", "signal_energy.f64"):
+            check((spread_outputs[0]/filename).read_bytes() == (spread_outputs[1]/filename).read_bytes(),
+                  "explicit matching spread override changed legacy waveform: "+filename)
+        check((spread_outputs[0]/"gram.c128").read_bytes() == (spread_outputs[2]/"gram.c128").read_bytes(),
+              "physical spread override changed public receive templates")
+        check((spread_outputs[0]/"mean.c128").read_bytes() != (spread_outputs[2]/"mean.c128").read_bytes(),
+              "physical Doppler override did not reach propagated samples")
         manifests = []
         for name, frequency in (("a", ("0", "0", "1")), ("b", ("-.01", ".01", ".01"))):
             destination = root/name

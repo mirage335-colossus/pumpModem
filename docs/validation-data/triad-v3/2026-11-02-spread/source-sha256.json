@@ -1,0 +1,18 @@
+{
+  "base_commit": "514b8961105d7ee69288c07a968f54b2b32b01c3",
+  "scope": "Changed runtime and focused-test files at final local14/14triadpass; documentation is independently maintained.",
+  "files": {
+    "include/datapump/triad_modem_v3.hpp": "41a4d2c24ec05b29987faf5ce08aba8f6e0c6045c4488a283dd3b68bbeb5c5bc",
+    "src/triad_gaussian_fading.hpp": "97f26b082d7d68123952bde7ccb9f97148c5977cf741cf6c15c76e77fcc20944",
+    "src/triad_simulation_stream.cpp": "d31d3fe05f95bd1d09efbb37bc5904e00bcaf94920be4cc31f8ee687c5c01402",
+    "tests/test_triad_conditional_sweep.py": "4aa3ff286210eed5fd142fa78c1d7c5b44ed8af91b646265920197b39ba6d743",
+    "tests/test_triad_configuration.py": "a632438df33c16819f1fbf237914e5dde5201b76d54bbc1290c2e7e19c6ac8e7",
+    "tests/test_triad_gaussian_window.py": "fc414703b09aa735181c33956953be56e6759a829bb3faf58e6356e96b366608",
+    "tests/test_triad_lowrate_campaign.py": "19e4f4e40b2783de190c03ec2b496375c840c855dc57baed184860afb8324ba1",
+    "tests/test_triad_v3_channel.cpp": "ec9f34d516ed83133ac38828fce5c31f7d1727c3e86386c0a55d856f438aac0e",
+    "tools/triad-conditional-sweep.py": "67ab97612bf2e74ada2b0f7b399651748935d8fcbea9bacc40d76e2bd055f67b",
+    "tools/triad-long.cpp": "ce85416e25f21a13cbf8c18820c45d839a2534fc85c97861bc382109b55e807e",
+    "tools/triad-lowrate-campaign.py": "2842480c008ab54dddc7304972e31942ff34f41409a9ea3794d755d1e9c03a09",
+    "tools/triad_gaussian_window.py": "dd5d8083999a97f66f74673264f80117b06557c45b3f4646a88e9668a29d03ee"
+  }
+}

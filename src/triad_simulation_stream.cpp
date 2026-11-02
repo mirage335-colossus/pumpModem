@@ -2,6 +2,7 @@
 
 #include "channel_perturbation.hpp"
 #include "channel_spread.hpp"
+#include "triad_gaussian_fading.hpp"
 #include "datapump/types.hpp"
 
 #include <algorithm>
@@ -79,11 +80,15 @@ void validate_frontend(const SampledFrontendConfig& f, double sample_rate) {
 
 void validate_path_evolution(const PathEvolutionConfig& p) {
     require(finite_nonnegative(p.ray_coherence_seconds) &&
+            finite_nonnegative(p.gaussian_doppler_width_hz) &&
             finite_nonnegative(p.diurnal_phase_amplitude_radians) &&
             std::isfinite(p.diurnal_period_seconds) && p.diurnal_period_seconds > 0 &&
             std::isfinite(p.outage_start_seconds) && std::isfinite(p.outage_end_seconds) &&
             std::isfinite(p.outage_gain) && p.outage_gain >= 0 && p.outage_gain <= 1 &&
             finite_nonnegative(p.outage_ramp_seconds), "invalid physical-path evolution");
+    require(!(p.ray_coherence_seconds > 0 && p.gaussian_doppler_width_hz > 0),
+            "OU and Gaussian Doppler ray evolution are mutually exclusive");
+    require(std::isfinite(6*p.gaussian_doppler_width_hz), "Gaussian path capture allowance overflow");
     const bool outage_off = p.outage_start_seconds == -1 && p.outage_end_seconds == -1;
     require(outage_off || (p.outage_start_seconds >= 0 && p.outage_end_seconds > p.outage_start_seconds &&
             p.outage_ramp_seconds <= (p.outage_end_seconds-p.outage_start_seconds)*.5),
@@ -336,6 +341,7 @@ struct StreamingChannel::Impl {
     Rng path_rng;
     Complex direct_gain{1,0}, delayed_gain{1,0};
     double path_gain_decay = 1, path_gain_innovation = 0;
+    std::unique_ptr<detail::GaussianRayFading> gaussian_path;
     std::unique_ptr<SpreadRay> spread;
     std::unique_ptr<FrequencySelectivePerturbation> perturbation;
     std::vector<long double> hop_prefix;
@@ -439,9 +445,21 @@ struct StreamingChannel::Impl {
             (spread_enabled ? effects.spread_doppler_hz : 0) +
             (perturb_enabled ? effects.spread_doppler_hz : 0) +
             config.path_evolution.diurnal_phase_amplitude_radians/config.path_evolution.diurnal_period_seconds;
+        // Six sigma at each spectral edge: declared allowance for Gaussian
+        // tails, not a proof that a stochastic finite-FIR spectrum is compact.
+        const double gaussian_allowance = 6*config.path_evolution.gaussian_doppler_width_hz;
         require(std::isfinite(cfo_bound) &&
-                effects.sample_rate * rx_scale > effects.occupied_bandwidth_hz * tx_scale + 2 * cfo_bound,
-                "stream channel sample clock aliases the deterministic oscillator and baseband offset");
+                effects.sample_rate * rx_scale > effects.occupied_bandwidth_hz * tx_scale + 2 * cfo_bound + gaussian_allowance,
+                "stream channel sample clock cannot contain deterministic offsets and Gaussian-tail allowance");
+
+        if (config.path_evolution.gaussian_doppler_width_hz > 0) {
+            gaussian_path = std::make_unique<detail::GaussianRayFading>(
+                config.path_evolution.gaussian_doppler_width_hz, dt_rx,
+                root_seed(config.path_seed,effects.seed));
+            const auto coefficients = gaussian_path->coefficients();
+            stats.path_gaussian_fir_coefficients.assign(coefficients.begin(), coefficients.end());
+            stats.path_gaussian_sample_interval_seconds = dt_rx;
+        }
 
         const auto history_count = static_cast<std::size_t>(delay_samples + 64);
         const auto prefix_count = effects.fhss ? effects.hop_offsets_hz.size() + 1 : 0;
@@ -453,6 +471,8 @@ struct StreamingChannel::Impl {
         stats.working_bytes = sizeof(*this) + 4096 + history_count * sizeof(Complex) +
             effects.hop_offsets_hz.capacity() * sizeof(double) + prefix_count * sizeof(long double) +
             spectrum_values * 2 * sizeof(double) +
+            (gaussian_path ? gaussian_path->working_bytes() : 0) +
+            stats.path_gaussian_fir_coefficients.capacity()*sizeof(double) +
             (spread_enabled ? sizeof(SpreadRay) : 0) +
             (perturb_enabled ? sizeof(FrequencySelectivePerturbation) : 0);
         require(stats.working_bytes <= kHistoryLimitBytes + 1024 * 1024,
@@ -584,6 +604,13 @@ struct StreamingChannel::Impl {
             direct_gain = path_gain_decay*direct_gain + path_gain_innovation*Complex{direct_real,direct_imag};
             delayed_gain = path_gain_decay*delayed_gain + path_gain_innovation*Complex{delayed_real,delayed_imag};
         }
+        if (gaussian_path) {
+            // Every physical RX row advances both stationary histories, even
+            // source silence, hop guards, outages and disabled signal controls.
+            const auto gains = gaussian_path->next();
+            direct *= gains[0];
+            delayed *= gains[1];
+        }
         Complex propagated = spread ? spread->process(direct, delayed) : direct;
         const auto& path = config.path_evolution;
         if (path.diurnal_phase_amplitude_radians > 0) {
@@ -692,5 +719,8 @@ std::size_t StreamingChannel::read(std::span<Complex> output,
     return impl_->read(output, validity);
 }
 const StreamChannelReport& StreamingChannel::report() const { return impl_->stats; }
+double StreamingChannel::path_gaussian_covariance(std::uint64_t lag_samples) const {
+    return impl_->gaussian_path ? impl_->gaussian_path->covariance(lag_samples) : 0;
+}
 
 } // namespace datapump::triad::v3

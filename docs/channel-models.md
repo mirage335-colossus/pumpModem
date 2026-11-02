@@ -209,37 +209,71 @@ The default-off path preserves the earlier samples and RNG sequence.
 
 | Isolated `triad_long` controls | Meaning |
 | --- | --- |
-| `--ray-coherence-seconds T` | `0` disables evolution; positive `T` multiplies the direct and delayed inputs to `SpreadRay` by independent stationary proper-complex OU gains. Each gain has zero mean, unit mean power and correlation `exp(−abs(dt)/T)`. The existing `1/sqrt(2)` two-ray normalization, delay and Doppler remain. |
+| `--ray-coherence-seconds T` | `0` disables OU evolution; positive `T` multiplies the direct and delayed inputs to `SpreadRay` by independent stationary proper-complex OU gains. Each gain has zero mean, unit mean power and correlation `exp(−abs(dt)/T)`. The existing `1/sqrt(2)` two-ray normalization, delay and Doppler remain. |
+| `--ray-gaussian-width-hz B` | Alternative stationary proper-complex ray gains with a Gaussian target Doppler spectrum of width `B = 2σ` Hz, independent of the ray-center separation. `0` disables this model; positive width and positive OU coherence are mutually exclusive. |
 | `--diurnal-phase-radians A`, `--diurnal-period-seconds P` | Add common path phase `A sin(2πt/P + phase0)` after ray composition. `A=0` disables it; `P` defaults to 86,400 seconds. Maximum instantaneous frequency excursion is `A/P` Hz and enters the deterministic capture check. |
 | `--outage-seconds START END`, `--outage-gain G`, `--outage-ramp-seconds R` | Attenuate the propagated signal on `[START,END)`, with cosine descent/ascent inside that interval. `G` is an amplitude factor in `[0,1]`; `R` must fit within half the interval. Thermal noise is added later and remains present. Both endpoints `−1` disable the outage. |
-| `--path-seed N` | Independent OU and initial-diurnal-phase seed root; an unset root inherits the channel seed. Selected phase is simulation-only metadata. |
+| `--path-seed N` | Independent OU/Gaussian-ray and initial-diurnal-phase seed root; an unset root inherits the channel seed. Selected phase is simulation-only metadata. |
 
 Here `t = n/(Fs × RX_clock_scale) − capture_lead_seconds`, not elapsed payload
 time after pulse padding. OU state advances at each physical RX sample using
-its exact sampled transition, including source silence and outages. Diurnal
+its exact sampled transition; Gaussian FIR history likewise advances through
+source silence, outages and read boundaries. Diurnal
 phase and outage attenuation precede the existing frequency-selective stage;
 its filter state and tails continue, and no second hop-output gate is added.
 An outage plateau can therefore retain downstream filter decay.
 
+The Gaussian model is a finite sampled teacher, implemented in
+[`triad_gaussian_fading.hpp`](../src/triad_gaussian_fading.hpp). Its two independent
+innovation histories are initialized at stationarity. For physical sample
+interval `dt = 1/(Fs × RX_clock_scale)`, the symmetric kernel is proportional
+to `exp[−(π B dt k)²]` for `|k| <= ceil(5/(π B dt))` and normalized so
+`sum h[k]² = 1`. The target continuous covariance is
+`exp[−(π B τ)²/2]`; the actual finite covariance at integer lag `m` is
+`sum h[k] h[k+m]`. Reports retain the actual kernel and physical timestep as
+simulation-only diagnostics. The 8,193-tap workspace/work cap rejects excessive
+kernel lengths rather than silently shortening them.
+
+Capture preflight adds `6B` to the required total bandwidth: `3B = 6σ` at
+each spectral edge. This is an explicit tail allowance, not compact spectral
+support or a guarantee against aliasing. Sampling refinement must check the
+finite teacher and waveform together. With both stochastic ray controls off,
+the ray gains remain fixed at unity; the legacy samples and RNG sequence are
+preserved.
+
 These are explicit stress laws, not calibrated long-wave propagation. Fixed
 two-ray separation of 0.001 Hz gives deterministic beating; it does not imply
-a 1,000-second random coherence time. OU coherence is selected separately and
-its analog spectrum has unbounded tails. A low sample rate requires physical
-sampling-refinement evidence; the exact OU endpoint law alone does not prove
-that a narrow capture retains all informative energy.
+a 1,000-second random coherence time. OU coherence and Gaussian spectral width
+are separately selected alternatives, both with unbounded target spectral tails.
+A low sample rate requires physical sampling-refinement evidence; the exact OU
+endpoint law or a Gaussian capture allowance alone does not prove that a narrow
+capture retains all informative energy.
 
-The isolated source permits integer rates down to 1 sample/s with shaped-band
-and capture guards. Below 64 samples/s the channel rejects FHSS, millisecond
+The isolated source permits integer rates down to 1 sample/s and supported
+reciprocal-integer rates below it, with shaped-band and capture guards. Below
+64 samples/s the channel rejects FHSS, millisecond
 dropout, slow AGC, active sampled frontend, white/flicker/random-walk FM and
 white PM. It preserves eligible constant offsets, Wiener phase, fractional
 spread and selected selective perturbation. These restrictions avoid silently
 omitting requested fast effects; they do not change the ordinary channel's
-supported operating range. See the [v3 range and receiver scope](triad-v3.md#low-rate-and-38-day-representation).
+supported operating range. See the [v3 range and receiver scope](triad-v3.md#reciprocal-sample-rates-and-long-duration-representation).
+
+The isolated `--spread-delay-ms` and `--spread-doppler-hz` controls override
+their own nominal physical dimensions before margin is applied once. The
+selected preset supplies any dimension not overridden. Without a preset, the
+legacy `--channel` values supply the base; with neither preset nor override,
+those legacy values retain their already-effective interpretation. The
+`spread_inputs` metadata records overrides, resolved values and applied margin.
+These controls do not alter receiver hypotheses or scale the separately selected
+Gaussian width.
 
 Physical presets do not choose receiver tap hypotheses in `triad_long`. For
 the public margin-1 `sub9-best` hypothesis, explicitly use
 `--tap-delay-ms .005 --tap-doppler-hz .001` with the coupled two-ray basis.
 Preserve different tap values when deliberately testing model mismatch.
+The [spread study](validation-data/triad-v3/2026-11-02-spread/README.md) keeps
+stable ray separation, stochastic width, delay mismatch and receiver compression
+as distinct experimental dimensions.
 
 ## Focused evidence and limits
 

@@ -82,6 +82,7 @@ struct Options {
     SampledFrontendConfig frontend{};
     PathEvolutionConfig path_evolution{};
     std::optional<std::string> base_oscillator,shift_oscillator,clock_sync_text,spread_preset,selective_perturbation;
+    std::optional<double> spread_delay_ms,spread_doppler_hz;
     double audio_error_seconds=clock_sync::default_audio_error_seconds,margin=1,nominal_if_hz=1500;
     bool audio_error_explicit=false,margin_explicit=false,phase_diffusion_explicit=false;
     unsigned symbol_burst_wait=0;
@@ -91,11 +92,11 @@ struct Options {
 
 bool path_evolution_active(const Options& o) {
     const auto& p=o.path_evolution;
-    return p.ray_coherence_seconds>0||p.diurnal_phase_amplitude_radians>0||p.outage_start_seconds>=0;
+    return p.ray_coherence_seconds>0||p.gaussian_doppler_width_hz>0||p.diurnal_phase_amplitude_radians>0||p.outage_start_seconds>=0;
 }
 
 bool configured_physics(const Options& o) {
-    return o.base_oscillator||o.shift_oscillator||o.clock_sync_text||o.spread_preset||
+    return o.base_oscillator||o.shift_oscillator||o.clock_sync_text||o.spread_preset||o.spread_delay_ms||o.spread_doppler_hz||
         o.selective_perturbation||o.audio_error_explicit||o.margin_explicit||o.symbol_burst_wait||
         o.truth_frequency_hz!=0||o.truth_frequency_drift!=0;
 }
@@ -104,6 +105,7 @@ struct ResolvedConfiguration {
     std::string base_id="manual",shift_id="manual",spread_id="manual",perturbation_id="manual";
     double base_ppm=0,rf_ppm=0,phase_diffusion=0;
     double spread_delay_ms=0,spread_doppler_hz=0,slow_depth=0,fast_depth=0;
+    double nominal_spread_delay_ms=0,nominal_spread_doppler_hz=0;
     std::optional<clock_sync::Policy> clock;
     double arrival_center=0,arrival_half=0,clock_bound_ppm=0,frequency_bound_hz=0;
 };
@@ -126,6 +128,22 @@ ResolvedConfiguration resolve_configuration(const Options& o) {
     if(o.spread_preset){const auto p=tuning::parse_spread_preset(*o.spread_preset);r.spread_id=p.id;
         r.spread_delay_ms=p.delay_ms*o.margin;r.spread_doppler_hz=p.doppler_hz*o.margin;
         r.slow_depth=r.fast_depth=p.default_perturbation?.65:0;r.perturbation_id=p.default_perturbation?"each-65":"off";}
+    // Preset dimensions are nominal and margin is applied once. Keep legacy
+    // --channel hf's already-effective 1.5ms/.3Hz unchanged when no override
+    // is selected. With overrides, that fallback is the nominal base instead.
+    if(o.spread_preset){const auto p=tuning::parse_spread_preset(*o.spread_preset);
+        r.nominal_spread_delay_ms=p.delay_ms;r.nominal_spread_doppler_hz=p.doppler_hz;
+    }else{r.nominal_spread_delay_ms=r.spread_delay_ms;r.nominal_spread_doppler_hz=r.spread_doppler_hz;}
+    if(o.spread_delay_ms||o.spread_doppler_hz){
+        for(const auto value:{o.spread_delay_ms,o.spread_doppler_hz})
+            if(value&&(!std::isfinite(*value)||*value<0))throw std::invalid_argument("physical spread overrides must be finite and nonnegative");
+        if(o.spread_delay_ms)r.nominal_spread_delay_ms=*o.spread_delay_ms;
+        if(o.spread_doppler_hz)r.nominal_spread_doppler_hz=*o.spread_doppler_hz;
+        r.spread_delay_ms=r.nominal_spread_delay_ms*o.margin;
+        r.spread_doppler_hz=r.nominal_spread_doppler_hz*o.margin;
+    }
+    if(!std::isfinite(r.spread_delay_ms)||!std::isfinite(r.spread_doppler_hz))
+        throw std::invalid_argument("effective physical spread exceeds numeric range");
     if(o.selective_perturbation){
         const auto& text=*o.selective_perturbation;r.perturbation_id=text;r.slow_depth=r.fast_depth=0;
         bool found=text=="off";
@@ -212,6 +230,9 @@ Options parse(int argc, char** argv) {
   --clock-sync GPS_10ms-1ms_region-0ms_offset | default
   --audio-error-ms MS --margin X --nominal-if-hz HZ
   --spread-preset ID --selective-perturbation off|slow-N|fast-N|each-N
+  --spread-delay-ms MS --spread-doppler-hz HZ
+                              Optional physical nominal overrides; preset base, then margin once.
+                              Receiver --tap-* basis remains independently selected.
   --symbol-burst off|1|2|3|5|10  Whole-bit UTC calendar; no waits inside this one-bit source.
   --truth-epoch-offset N --truth-frequency-hz HZ --truth-frequency-drift HZ/S
                               Configured physical truth is independent of the public acquisition bank.
@@ -231,6 +252,8 @@ Options parse(int argc, char** argv) {
   --white-fm HZ*SQRT(S) --random-walk-fm HZ/SQRT(S)
   --flicker-fm RMS-HZ --flicker-tau MIN MAX --flicker-bands N --white-pm RMS-RAD
   --ray-coherence-seconds S    Independent stationary complex OU ray gains; 0 disables.
+  --ray-gaussian-width-hz B    Independent stationary complex FIR ray gains; Gaussian target width B=2*sigma.
+                              0 disables; mutually exclusive with positive OU coherence. Ray-center separation is independent.
   --diurnal-phase-radians A --diurnal-period-seconds S   Sinusoidal common path phase; A=0 disables.
   --outage-seconds START END --outage-gain G --outage-ramp-seconds S
                               Physical-path attenuation, separate from planner --outage; -1 -1 disables.
@@ -285,6 +308,8 @@ Examples:
         else if (key == "--margin") {o.margin=number(need(),"search/spread margin");o.margin_explicit=true;}
         else if (key == "--nominal-if-hz") o.nominal_if_hz=number(need(),"nominal conversion IF");
         else if (key == "--spread-preset") o.spread_preset=std::string(need());
+        else if (key == "--spread-delay-ms") o.spread_delay_ms=number(need(),"physical spread delay");
+        else if (key == "--spread-doppler-hz") o.spread_doppler_hz=number(need(),"physical spread Doppler");
         else if (key == "--selective-perturbation") o.selective_perturbation=std::string(need());
         else if (key == "--symbol-burst") o.symbol_burst_wait=parse_whole_bit_burst(need());
         else if (key == "--truth-epoch-offset") o.truth_epoch_offset=signed_integer(need(),"truth epoch offset");
@@ -317,6 +342,7 @@ Examples:
         else if (key == "--flicker-bands") o.flicker_bands=bounded_integer<unsigned>(need(),"flicker bands");
         else if (key == "--white-pm") o.white_pm=number(need(),"white PM");
         else if (key == "--ray-coherence-seconds") o.path_evolution.ray_coherence_seconds=number(need(),"ray coherence");
+        else if (key == "--ray-gaussian-width-hz") o.path_evolution.gaussian_doppler_width_hz=number(need(),"Gaussian ray Doppler width");
         else if (key == "--diurnal-phase-radians") o.path_evolution.diurnal_phase_amplitude_radians=number(need(),"diurnal phase amplitude");
         else if (key == "--diurnal-period-seconds") o.path_evolution.diurnal_period_seconds=number(need(),"diurnal period");
         else if (key == "--outage-seconds") {o.path_evolution.outage_start_seconds=number(need(),"path outage start");o.path_evolution.outage_end_seconds=number(need(),"path outage end");}
@@ -402,13 +428,17 @@ Examples:
          o.dropout_every_dwells>0&&o.dropout_start_ms+o.dropout_ms<=400))
         throw std::invalid_argument("invalid flicker band or dwell-erasure parameters");
     const auto& path=o.path_evolution;
-    for(const auto x:{path.ray_coherence_seconds,path.diurnal_phase_amplitude_radians,
+    for(const auto x:{path.ray_coherence_seconds,path.gaussian_doppler_width_hz,path.diurnal_phase_amplitude_radians,
                       path.diurnal_period_seconds,path.outage_start_seconds,path.outage_end_seconds,
                       path.outage_gain,path.outage_ramp_seconds})
         if(!std::isfinite(x))throw std::invalid_argument("physical-path evolution parameters must be finite");
-    if(!(path.ray_coherence_seconds>=0&&path.diurnal_phase_amplitude_radians>=0&&path.diurnal_period_seconds>0&&
+    if(!(path.ray_coherence_seconds>=0&&path.gaussian_doppler_width_hz>=0&&path.diurnal_phase_amplitude_radians>=0&&path.diurnal_period_seconds>0&&
          path.outage_gain>=0&&path.outage_gain<=1&&path.outage_ramp_seconds>=0))
         throw std::invalid_argument("invalid physical-path evolution");
+    if(path.ray_coherence_seconds>0&&path.gaussian_doppler_width_hz>0)
+        throw std::invalid_argument("OU ray coherence and Gaussian ray Doppler width are mutually exclusive");
+    if(!std::isfinite(6*path.gaussian_doppler_width_hz))
+        throw std::invalid_argument("Gaussian ray capture allowance exceeds numeric range");
     if(!((path.outage_start_seconds==-1&&path.outage_end_seconds==-1)||
          (path.outage_start_seconds>=0&&path.outage_end_seconds>path.outage_start_seconds&&
           path.outage_ramp_seconds<=(path.outage_end_seconds-path.outage_start_seconds)*.5)))
@@ -552,7 +582,8 @@ double configuration_capture_margin(const Options& o,const Format& f,const Geome
     const double spread=r.spread_doppler_hz*((r.slow_depth>0||r.fast_depth>0)?2:1);
     const double drift=std::abs(o.truth_frequency_drift)*(g.bit_seconds+2*r.arrival_half+2);
     const double diurnal=std::abs(o.path_evolution.diurnal_phase_amplitude_radians)/o.path_evolution.diurnal_period_seconds;
-    return effective_sample_rate(f)*rx_min-g.occupied_bandwidth_hz*tx_max-2*(oscillator+spread+drift+diurnal);
+    return effective_sample_rate(f)*rx_min-g.occupied_bandwidth_hz*tx_max-2*(oscillator+spread+drift+diurnal)
+        -6*o.path_evolution.gaussian_doppler_width_hz;
 }
 
 void json_string(std::ostream& out,std::string_view value) {
@@ -565,19 +596,43 @@ void json_string(std::ostream& out,std::string_view value) {
     }
     out<<'"';
 }
+void json_spread_inputs(std::ostream& out,const Options& o,const ResolvedConfiguration& r) {
+    out<<"{\"selected_preset\":";json_string(out,r.spread_id);
+    out<<",\"fallback_channel\":";json_string(out,o.channel);
+    out<<",\"delay_ms_override_nominal\":";
+    if(o.spread_delay_ms)out<<*o.spread_delay_ms;else out<<"null";
+    out<<",\"doppler_hz_override_nominal\":";
+    if(o.spread_doppler_hz)out<<*o.spread_doppler_hz;else out<<"null";
+    out<<",\"resolved_nominal_delay_ms\":"<<r.nominal_spread_delay_ms
+       <<",\"resolved_nominal_doppler_hz\":"<<r.nominal_spread_doppler_hz
+       <<",\"applied_margin\":"<<((o.spread_preset||o.spread_delay_ms||o.spread_doppler_hz)?o.margin:1)
+       <<",\"effective_delay_ms\":"<<r.spread_delay_ms<<",\"effective_doppler_hz\":"<<r.spread_doppler_hz
+       <<",\"semantics\":\"selected preset supplies nominal dimensions; explicit physical overrides replace their own nominal dimension before one margin multiplication; without preset, legacy channel values supply the base, and remain already effective when no override is supplied; receiver tap basis is independent\"}";
+}
 void json_path_evolution(std::ostream& out,const Options& o) {
     const auto& p=o.path_evolution;
     out<<"{\"active\":"<<(path_evolution_active(o)?"true":"false")
        <<",\"ray_coherence_seconds\":"<<p.ray_coherence_seconds
+       <<",\"gaussian_doppler_width_hz\":"<<p.gaussian_doppler_width_hz
+       <<",\"gaussian_doppler_standard_deviation_hz\":"<<p.gaussian_doppler_width_hz/2
+       <<",\"gaussian_capture_total_allowance_hz\":"<<6*p.gaussian_doppler_width_hz
+       <<",\"gaussian_target_correlation\":\"exp(-0.5*(pi*B*tau)^2); B=2*sigma of each ray Gaussian Doppler PSD; existing ray-center separation is independent\""
+       <<",\"gaussian_teacher\":\"stationary proper-complex white Gaussian innovations convolved with a discrete L2-normalized Gaussian FIR; finite truncation and sampling approximate the target covariance; actual FIR shape is reported separately\""
        <<",\"diurnal_phase_amplitude_radians\":"<<p.diurnal_phase_amplitude_radians
        <<",\"diurnal_period_seconds\":"<<p.diurnal_period_seconds
        <<",\"maximum_diurnal_instantaneous_frequency_hz\":"<<std::abs(p.diurnal_phase_amplitude_radians)/p.diurnal_period_seconds
        <<",\"outage_start_seconds\":"<<p.outage_start_seconds<<",\"outage_end_seconds\":"<<p.outage_end_seconds
        <<",\"outage_gain\":"<<p.outage_gain<<",\"outage_ramp_seconds\":"<<p.outage_ramp_seconds
        <<",\"time_coordinate\":\"physical RX time n/(Fs*rx_clock_scale)-capture_lead_seconds\""
-       <<",\"ray_model\":\"independent stationary proper-complex OU gains: zero mean, unit mean power, correlation exp(-abs(dt)/coherence); existing equal-power two-ray delay and Doppler retained\""
+       <<",\"ray_model\":";
+    json_string(out,p.gaussian_doppler_width_hz>0?
+        "independent stationary proper-complex Gaussian-spectrum FIR gains: zero mean, unit mean power; existing equal-power two-ray delay and Doppler centers retained":
+        p.ray_coherence_seconds>0?
+        "independent stationary proper-complex OU gains: zero mean, unit mean power, correlation exp(-abs(dt)/coherence); existing equal-power two-ray delay and Doppler retained":
+        "fixed unit ray gains; existing equal-power two-ray delay and Doppler retained when selected");
+    out
        <<",\"outage_model\":\"signal-only attenuation on [start,end), with cosine descent/ascent inside the interval; thermal noise and path/filter state continue\""
-       <<",\"scope\":\"declared physical-path stress, not field calibration; OU is point sampled and has an unbounded analog spectrum, so finite deterministic capture bounds are not a bandwidth guarantee and sampling-rate refinement is required\"}";
+       <<",\"scope\":\"declared physical-path stress, not field calibration; OU is point sampled and has an unbounded analog spectrum; the Gaussian FIR target also has unbounded spectral tails and its six-sigma-per-edge capture allowance is not strict support, so finite deterministic capture bounds are not a bandwidth guarantee and sampling-rate refinement is required\"}";
 }
 // Expected normalized autocorrelation for independent zero-mean random chips,
 // equal mean carrier powers and one shared complex gain. The infinite RRC
@@ -658,11 +713,13 @@ void json_configuration(std::ostream& out,const Options& o,const Format& f,const
        <<",\"relative_phase_diffusion_rad_sqrt_s\":"<<r.phase_diffusion
        <<",\"per_endpoint_phase_diffusion_rad_sqrt_s\":"<<r.phase_diffusion/std::sqrt(2.)
        <<",\"phase_override_explicit\":"<<(o.phase_diffusion_explicit?"true":"false")
-       <<",\"margin\":"<<o.margin<<",\"oscillator_truth_margin_applied\":false,\"spread_margin_applied_once\":true"
+       <<",\"margin\":"<<o.margin<<",\"oscillator_truth_margin_applied\":false,\"spread_margin_applied_once\":"
+       <<((o.spread_preset||o.spread_delay_ms||o.spread_doppler_hz)?"true":"false")
        <<",\"spread_preset\":";json_string(out,r.spread_id);out<<",\"selective_perturbation\":";json_string(out,r.perturbation_id);
     out<<",\"spread_delay_ms\":"<<r.spread_delay_ms<<",\"spread_doppler_hz\":"<<r.spread_doppler_hz
        <<",\"perturbation_slow_depth\":"<<r.slow_depth<<",\"perturbation_fast_depth\":"<<r.fast_depth
-       <<",\"path_evolution\":";json_path_evolution(out,o);
+       <<",\"spread_inputs\":";json_spread_inputs(out,o,r);
+    out<<",\"path_evolution\":";json_path_evolution(out,o);
     out
        <<",\"audio_error_seconds_per_station\":"<<o.audio_error_seconds
        <<",\"audio_lag_interval_per_station\":[0,"<<o.audio_error_seconds<<"],\"clock_sync\":";
@@ -714,7 +771,7 @@ void json_configuration(std::ostream& out,const Options& o,const Format& f,const
        <<",\"fine_rate_per_carrier_hz\":"<<g.fine_chip_rate_hz
        <<",\"nominal_triplet_bandwidth_hz\":"<<g.occupied_bandwidth_hz<<",\"deterministic_nyquist_margin_hz\":"<<configuration_capture_margin(o,f,g)
        <<",\"feasible_for_deterministic_prior\":"<<(configuration_capture_margin(o,f,g)>0?"true":"false")
-       <<",\"scope\":\"whole deterministic RF/audio-error bound, public CFO grid and maximum diurnal instantaneous frequency; stochastic oscillator and OU-path spectral tails are not a bounded capture guarantee\""
+       <<",\"scope\":\"whole deterministic RF/audio-error bound, public CFO grid, maximum diurnal instantaneous frequency and Gaussian-ray allowance of six sigma per edge; stochastic oscillator and ray spectral tails are not a bounded capture guarantee\""
        <<",\"sub_64_hz_model\":"<<(effective_sample_rate(f)<64?"true":"false")
        <<",\"sampling_model_limits\":\"below 64 samples/s: FHSS, dropout, active sampled frontend, slow AGC, white/flicker/random-walk FM and white PM are rejected; constant offsets, Wiener phase, fractional two-ray propagation and selected selective perturbations remain modeled in physical seconds; no high-rate integration/decimation equivalence is claimed\"}"
        <<",\"duration\":{\"maximum_requested_active_seconds\":315576000,\"requested_active_seconds\":"<<f.bit_seconds
@@ -752,7 +809,7 @@ void json_provenance(std::ostream& out,const Options& o,const Format& f,const Ge
        <<",\"noise_explicit\":"<<(o.noise_seed?"true":"false")
        <<",\"frontend_explicit\":"<<(o.frontend_seed?"true":"false")
        <<",\"path_explicit\":"<<(o.path_seed?"true":"false")
-       <<",\"fallback\":\"unset oscillator/noise/frontend/path roots inherit the resolved channel seed\",\"channel_root_scope\":\"static timing/CFO/clock/drift truth, spread ray, and frequency-selective perturbation\",\"oscillator_root_scope\":\"TX/RX oscillator spectra and FHSS phase resets\",\"noise_root_scope\":\"thermal noise only\",\"frontend_root_scope\":\"DAC/ADC conversion, impulse process, and tone phase\",\"path_root_scope\":\"independent stationary ray OU gains and initial diurnal path phase\"}"
+       <<",\"fallback\":\"unset oscillator/noise/frontend/path roots inherit the resolved channel seed\",\"channel_root_scope\":\"static timing/CFO/clock/drift truth, spread ray, and frequency-selective perturbation\",\"oscillator_root_scope\":\"TX/RX oscillator spectra and FHSS phase resets\",\"noise_root_scope\":\"thermal noise only\",\"frontend_root_scope\":\"DAC/ADC conversion, impulse process, and tone phase\",\"path_root_scope\":\"independent stationary OU or Gaussian-FIR ray gains and initial diurnal path phase\"}"
        <<",\"command_argv\":[";
     for(std::size_t i=0;i<o.command_argv.size();++i){if(i)out<<',';json_string(out,o.command_argv[i]);}
     out<<"],\"source_format\":{\"version\":3,\"inner_rate_hz\":"<<f.inner_rate_hz
@@ -775,7 +832,8 @@ void json_provenance(std::ostream& out,const Options& o,const Format& f,const Ge
        <<",\"flicker_bands\":"<<o.flicker_bands
        <<",\"sample_clock_reference\":";
     json_string(out,resolve_configuration(o).oscillators?"independent TX/RX endpoint errors; truth_clock_ppm reports their exact ratio":"RX0ppm; TX carries declared relative error");
-    out<<",\"physical_rf_retuning\":false,\"path_evolution\":";json_path_evolution(out,o);out<<'}'
+    out<<",\"physical_rf_retuning\":false,\"spread_inputs\":";json_spread_inputs(out,o,resolve_configuration(o));
+    out<<",\"path_evolution\":";json_path_evolution(out,o);out<<'}'
        <<",\"source_hash_note\":\"source and binary hashes must be bound externally to this uncommitted study build\"";
     if(configured_physics(o)||path_evolution_active(o)||o.truth_epoch_offset||o.nominal_if_hz!=1500||effective_sample_rate(f)<64||o.seconds>7*86400.){out<<",\"resolved_configuration\":";json_configuration(out,o,f,g);}
     const auto& front=o.frontend;
@@ -805,7 +863,12 @@ void json_provenance(std::ostream& out,const Options& o,const Format& f,const Ge
 
 void json_frontend_report(std::ostream& out,const StreamChannelReport& r) {
     out<<",\"path_truth_simulation_only\":{\"diurnal_initial_phase_radians\":"<<r.path_diurnal_initial_phase_radians
-       <<",\"scope\":\"seeded physical truth; never a receiver search input\"}";
+       <<",\"gaussian_ray_teacher\":{\"sample_interval_seconds\":"<<r.path_gaussian_sample_interval_seconds
+       <<",\"fir_coefficients\":[";
+    for(std::size_t i=0;i<r.path_gaussian_fir_coefficients.size();++i){if(i)out<<',';out<<r.path_gaussian_fir_coefficients[i];}
+    out<<"],\"covariance_formula\":\"R[m]=sum(k=0..L-1-m,h[k]*h[k+m]) for 0<=m<L, otherwise 0; lag_seconds=m*sample_interval_seconds; proper-complex variance R[0]=1 when active\""
+       <<",\"scope\":\"actual finite sampled teacher covariance; empty coefficients and zero sample interval when disabled; evaluation/oracle diagnostics only, distinct from ideal Gaussian target\"}"
+       <<",\"scope\":\"seeded physical truth; never a practical receiver search input\"}";
     out<<",\"frontend_report\":{\"dac_clipped_components\":"<<r.dac_clipped_components
        <<",\"adc_clipped_components\":"<<r.adc_clipped_components<<",\"impulse_events\":"<<r.impulse_events
        <<",\"overload_samples\":"<<r.overload_samples<<",\"maximum_adc_input_component\":"<<r.maximum_adc_input_component

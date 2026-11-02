@@ -1,0 +1,44 @@
+{
+  "schema": "triad-spread-archive-verification-v1",
+  "archive": "local-evidence/triad-spread-final/evidence.tar.gz",
+  "archive_bytes": 139317355,
+  "archive_sha256": "0993791313d687d2742495260266b330ef6f4b7177d4ffa31f687402c06906f0",
+  "artifact_integrity_passed": true,
+  "retained_files_rehashed": 13015,
+  "omitted_files_accounted": 29071,
+  "full_remote_input_hash_receipts_bound": 24912,
+  "inventory_sha256": "ff5fc4db7358d7de357c3f836b7701bf73b8189da7eacff4fef523962fe94639",
+  "array_inventory_sha256": "b0ed40e8185dfe67157daf884a3acef5909e5c653e2b9b738c7e1503a23a47d0",
+  "full_analysis_sha256": "e838bf798c1cda34634a16a5cc2b8793dac1780472d595178ffb11802cc4d876",
+  "full_analysis_summary": {
+    "actual_method_path_observations": 4012,
+    "conditional_method_noise_trials": 78592,
+    "distinct_observed_physical_input_paths": 4152,
+    "failed_path_records": 0,
+    "reports": 69,
+    "unclassified_failed_actual_path_records": 0,
+    "unknown_schema_documents": 4273
+  },
+  "collector_summary": {
+    "files": 42086,
+    "omitted_files": 29071,
+    "retained_files": 13015,
+    "source_bytes": 14457531698
+  },
+  "selected_raw_bytes": 61375272,
+  "selected_workspaces": [
+    "aligned/g10-aligned-fine-actual-near/path-00000",
+    "aligned/g10-aligned-fine-paired-coarse-actual-near/path-00000",
+    "aligned/g30-aligned-fine-actual-near/path-00000",
+    "aligned/g30-aligned-fine-paired-coarse-actual-near/path-00000",
+    "g1-holdout/g1-t8640-cn0m10/path-20000",
+    "holdout/g001-m25-refine/path-10000",
+    "holdout/g001-m26/path-00216",
+    "holdout/g01-m22/path-10000",
+    "holdout/stable-005-m60/path-00000",
+    "screen/g001/path-00000",
+    "screen/g001/path-00001"
+  ],
+  "partial_validity_masks_retained_as_explicit_receipts": 12,
+  "scope": "Exact archive SHA plus every retained-file byte hash checked locally; omitted bytes bound only to original remote hashes and full pre-compaction audit. Does not revalidate omitted numerical data or establish scientific qualification."
+}

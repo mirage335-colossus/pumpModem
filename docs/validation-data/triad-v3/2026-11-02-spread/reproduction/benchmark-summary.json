@@ -1,0 +1,566 @@
+{
+  "claims_and_limits": [
+    "Each CPU/GPU pair reused the same sampled input hashes and random draw seed/control schedule; score and gate parity is checked over every stored trial row.",
+    "Runtime is a single sequential sample per backend. Wall includes process setup and context startup; receiver-call time includes backend dispatch and synchronization and is not kernel-only timing.",
+    "Receiver timing is separated from noise generation/UCB and explicit Gaussian-window plan preparation. It does not establish latency or throughput over other shapes, GPUs, concurrency levels or physical conditions.",
+    "0 false admissions in 2048 conditional null trials per method are specific to these two fixed paths and do not qualify an operational false-admission probability.",
+    "These signal outcomes are conditional noise replicas on two fixed physical paths, not independent channel population trials."
+  ],
+  "job_outcomes": [
+    {
+      "name": "cfo-cpu-fp32",
+      "receipt_outcome": "completed",
+      "returncode": 0,
+      "runner_elapsed_seconds": 105.57185735192616,
+      "timed_out": false
+    },
+    {
+      "name": "cfo-cuda-fp32",
+      "receipt_outcome": "completed",
+      "returncode": 0,
+      "runner_elapsed_seconds": 12.10973908205051,
+      "timed_out": false
+    },
+    {
+      "name": "window-cpu-fp32",
+      "receipt_outcome": "completed",
+      "returncode": 0,
+      "runner_elapsed_seconds": 6.83694207505323,
+      "timed_out": false
+    },
+    {
+      "name": "window-cuda-fp32",
+      "receipt_outcome": "completed",
+      "returncode": 0,
+      "runner_elapsed_seconds": 6.568425061996095,
+      "timed_out": false
+    }
+  ],
+  "pairs": {
+    "cfo-ou-ucb": {
+      "actual_diagnostics": {
+        "CPU": {
+          "blocks": 1543,
+          "bulk_dtype": "torch.complex64",
+          "calibration_scope": "conditional on a predeclared prior-path bank independent of observations",
+          "covariance_dtype": "torch.complex128",
+          "ess_fraction": 0.5,
+          "estimated_array_peak_bytes": 86245376,
+          "frequency_grid": "equal-weight midpoint finite CFO grid",
+          "frequency_initialization": "midpoint-grid",
+          "frequency_prior_model": "deterministic equal-weight midpoint grid; discrete CFO prior, not an unbiased continuous-prior estimate",
+          "leading_shape": [
+            1024,
+            2
+          ],
+          "likelihood_scope": "block-constant common phase, proper Gaussian tap dynamics, exact conditional tap integration; no admission, anytime or physical optimality claim",
+          "maximum_particle_weight": 0.0080467402727189,
+          "maximum_relative_gram_psd_repair": 0.0,
+          "memory_limit_bytes": 12884901888,
+          "memory_scope": "owned bounded state; excludes caller statistics, RNG implementation, framework and temporary workspace",
+          "minimum_effective_particles": 127.96171808768665,
+          "minimum_particle_weight": 0.007582280367396348,
+          "minimum_relative_covariance_eigenvalue": 0.0,
+          "owned_state_bytes": 10698896,
+          "particles": 128,
+          "phase_frequency_and_evidence_dtype": "torch.float64",
+          "phase_increment_override_used": false,
+          "resampling": "none",
+          "resampling_events_maximum_per_item": 0,
+          "resampling_events_total": 0,
+          "taps": 2,
+          "tf32_allowed": false
+        },
+        "CUDA": {
+          "blocks": 1543,
+          "bulk_dtype": "torch.complex64",
+          "calibration_scope": "conditional on a predeclared prior-path bank independent of observations",
+          "covariance_dtype": "torch.complex128",
+          "ess_fraction": 0.5,
+          "estimated_array_peak_bytes": 86245376,
+          "frequency_grid": "equal-weight midpoint finite CFO grid",
+          "frequency_initialization": "midpoint-grid",
+          "frequency_prior_model": "deterministic equal-weight midpoint grid; discrete CFO prior, not an unbiased continuous-prior estimate",
+          "leading_shape": [
+            1024,
+            2
+          ],
+          "likelihood_scope": "block-constant common phase, proper Gaussian tap dynamics, exact conditional tap integration; no admission, anytime or physical optimality claim",
+          "maximum_particle_weight": 0.008046741392856155,
+          "maximum_relative_gram_psd_repair": 0.0,
+          "memory_limit_bytes": 12884901888,
+          "memory_scope": "owned bounded state; excludes caller statistics, RNG implementation, framework and temporary workspace",
+          "minimum_effective_particles": 127.9617181567878,
+          "minimum_particle_weight": 0.007582282200275201,
+          "minimum_relative_covariance_eigenvalue": 0.0,
+          "owned_state_bytes": 10698896,
+          "particles": 128,
+          "phase_frequency_and_evidence_dtype": "torch.float64",
+          "phase_increment_override_used": false,
+          "resampling": "none",
+          "resampling_events_maximum_per_item": 0,
+          "resampling_events_total": 0,
+          "taps": 2,
+          "tf32_allowed": false
+        }
+      },
+      "matched_inputs": {
+        "same_configuration_except_device": true,
+        "same_noise_seed_and_draw_schedule": true,
+        "same_npz_key_set": true,
+        "same_sampled_input_hashes": true,
+        "same_source_and_dependency_hashes": true,
+        "score_archive_sha256_verified": {
+          "cfo-cpu": "a1d9309ad681335e2580d5bf4e4f8a24f95cced169e886d4448a4a27ddd95fe9",
+          "cfo-cuda": "caaf4b081067bf1ac145ccf9abd75cd3d7763fbcf1c73f9b49a7018179a6d8c2"
+        }
+      },
+      "method": "cfo-ou-ucb",
+      "observed_runtime_ratios": {
+        "outer_CPU_over_GPU_wall": 8.717929976576338,
+        "receiver_call_CPU_over_GPU": 16.14663537396403
+      },
+      "reports": {
+        "cfo-cpu": {
+          "arithmetic": {
+            "bulk_fft_and_state": "fp32",
+            "cfo_covariance_and_all_evidence": "FP64",
+            "gaussian_ou_covariance": "same selected width as GaussianStateFilter",
+            "sampler_rank_noise_ucb_gram": "FP64",
+            "tf32_allowed": false
+          },
+          "counts": {
+            "by_physical_path_index": {
+              "0": {
+                "null": {
+                  "false_admitted": 0,
+                  "not_admitted": 1024,
+                  "trials": 1024
+                },
+                "signal": {
+                  "correct_accepted": 661,
+                  "missed": 363,
+                  "raw_correct": 1024,
+                  "trials": 1024,
+                  "wrong_accepted": 0
+                }
+              },
+              "1": {
+                "null": {
+                  "false_admitted": 0,
+                  "not_admitted": 1024,
+                  "trials": 1024
+                },
+                "signal": {
+                  "correct_accepted": 637,
+                  "missed": 387,
+                  "raw_correct": 1024,
+                  "trials": 1024,
+                  "wrong_accepted": 0
+                }
+              }
+            },
+            "total": {
+              "null": {
+                "false_admitted": 0,
+                "not_admitted": 2048,
+                "trials": 2048
+              },
+              "signal": {
+                "correct_accepted": 1298,
+                "missed": 750,
+                "raw_correct": 2048,
+                "trials": 2048,
+                "wrong_accepted": 0
+              }
+            }
+          },
+          "cuda_memory": null,
+          "device": "cpu",
+          "json_sha256": "b05c77321e54650fa474e907ca5e4197882ae3be1b05cc29fa7669b1026697e2",
+          "runtime": {
+            "explicit_receiver_preparation_seconds": 0.0,
+            "noise_sampling_plus_UCB_seconds": 5.614201655029319,
+            "receiver_call_minus_explicit_preparation_seconds": 98.43126415996812,
+            "receiver_call_seconds_including_explicit_preparation": 98.43126415996812,
+            "runner_minus_tool_wall_seconds": 1.5155211178353056,
+            "runner_wall_seconds": 105.57185735192616,
+            "sampled_design_load_seconds": 0.0021277839550748467,
+            "timing_scope": "Wall-clock and receiver-call measurements from one sequential run per device. Receiver call includes backend dispatch/synchronization and any explicit receiver plan preparation; it is not kernel-only timing.",
+            "tool_wall_seconds": 104.05633623409085,
+            "tool_wall_unattributed_after_load_sampler_receiver_seconds": 0.008742635138332844
+          },
+          "scores_sha256": "a1d9309ad681335e2580d5bf4e4f8a24f95cced169e886d4448a4a27ddd95fe9",
+          "wall_seconds": 104.05633623409085
+        },
+        "cfo-cuda": {
+          "arithmetic": {
+            "bulk_fft_and_state": "fp32",
+            "cfo_covariance_and_all_evidence": "FP64",
+            "gaussian_ou_covariance": "same selected width as GaussianStateFilter",
+            "sampler_rank_noise_ucb_gram": "FP64",
+            "tf32_allowed": false
+          },
+          "counts": {
+            "by_physical_path_index": {
+              "0": {
+                "null": {
+                  "false_admitted": 0,
+                  "not_admitted": 1024,
+                  "trials": 1024
+                },
+                "signal": {
+                  "correct_accepted": 661,
+                  "missed": 363,
+                  "raw_correct": 1024,
+                  "trials": 1024,
+                  "wrong_accepted": 0
+                }
+              },
+              "1": {
+                "null": {
+                  "false_admitted": 0,
+                  "not_admitted": 1024,
+                  "trials": 1024
+                },
+                "signal": {
+                  "correct_accepted": 637,
+                  "missed": 387,
+                  "raw_correct": 1024,
+                  "trials": 1024,
+                  "wrong_accepted": 0
+                }
+              }
+            },
+            "total": {
+              "null": {
+                "false_admitted": 0,
+                "not_admitted": 2048,
+                "trials": 2048
+              },
+              "signal": {
+                "correct_accepted": 1298,
+                "missed": 750,
+                "raw_correct": 2048,
+                "trials": 2048,
+                "wrong_accepted": 0
+              }
+            }
+          },
+          "cuda_memory": {
+            "maximum_allocated_bytes": 2525522944,
+            "maximum_reserved_bytes": 4731174912
+          },
+          "device": "cuda:0",
+          "json_sha256": "8a4d1e4b495b41fb051347db1d6b670777de68e6fae6ddd4842d9e9fd8262ab9",
+          "runtime": {
+            "explicit_receiver_preparation_seconds": 0.0,
+            "noise_sampling_plus_UCB_seconds": 4.047795376041904,
+            "receiver_call_minus_explicit_preparation_seconds": 6.096085152123123,
+            "receiver_call_seconds_including_explicit_preparation": 6.096085152123123,
+            "runner_minus_tool_wall_seconds": 1.9546726420521736,
+            "runner_wall_seconds": 12.10973908205051,
+            "sampled_design_load_seconds": 0.0025176790077239275,
+            "timing_scope": "Wall-clock and receiver-call measurements from one sequential run per device. Receiver call includes backend dispatch/synchronization and any explicit receiver plan preparation; it is not kernel-only timing.",
+            "tool_wall_seconds": 10.155066439998336,
+            "tool_wall_unattributed_after_load_sampler_receiver_seconds": 0.00866823282558471
+          },
+          "scores_sha256": "caaf4b081067bf1ac145ccf9abd75cd3d7763fbcf1c73f9b49a7018179a6d8c2",
+          "wall_seconds": 10.155066439998336
+        }
+      },
+      "score_parity": {
+        "admission_gate_disagreements": 0,
+        "argmax_bit_disagreements": 0,
+        "maximum_absolute_log_score_difference": 1.7395211671100697e-07,
+        "median_absolute_difference": 2.5135796111186437e-08,
+        "minimum_winner_to_runnerup_score_margin": 0.007214979489720719,
+        "p99_absolute_difference": 1.0324820042484363e-07,
+        "score_arrays_compared": 4,
+        "score_rows_compared": 4096,
+        "score_rows_within_max_backend_delta_of_gate": 0,
+        "smallest_absolute_gate_margin": 0.006983582525652565,
+        "threshold": 22.72106338958574
+      }
+    },
+    "gaussian-window-ucb": {
+      "actual_diagnostics": {
+        "CPU": {
+          "blocks": 1543,
+          "candidates": 2,
+          "doppler_width_hz": 0.001,
+          "maximum_relative_gram_repair": 0.0,
+          "maximum_relative_information_repair": 8.373435410845256e-16,
+          "maximum_relative_prior_repair": 5.251699721248824e-16,
+          "maximum_window_dimension": 64,
+          "maximum_window_rank": 55,
+          "memory_scope": "explicit owned factors and per-window arrays only; caller observations and framework/solver workspace excluded",
+          "model_scope": "normalized independent-window proper-complex Gaussian coefficient alternative with physical-center Gaussian covariance; not a full matched Gaussian-FIR receiver or anytime admission rule",
+          "owned_factor_bytes": 5455456,
+          "preparation_arithmetic": "CPU complex128/float64 PSD square roots and information eigensolves; no covariance inverse",
+          "preparation_array_bound_bytes": 9117336,
+          "preparation_seconds_this_call": 0.03634129907004535,
+          "prepared_plan_reused": false,
+          "sampling_scope": "block-center coefficient approximation and independent-window boundaries require physical sampling/window refinement",
+          "score_arithmetic": "explicit complex64/128 correlation GEMM; FP64 weights, squares, determinant and evidence",
+          "stationary_power": [
+            0.5,
+            0.5
+          ],
+          "taps": 2,
+          "variance_scope": "one stationary chosen variance/reference ratio per trial/candidate, not per block; independent bound and its failure budget are caller responsibilities",
+          "window_blocks": 32,
+          "windows": 49
+        },
+        "CUDA": {
+          "blocks": 1543,
+          "candidates": 2,
+          "doppler_width_hz": 0.001,
+          "maximum_relative_gram_repair": 0.0,
+          "maximum_relative_information_repair": 8.373435410845256e-16,
+          "maximum_relative_prior_repair": 5.251699721248824e-16,
+          "maximum_window_dimension": 64,
+          "maximum_window_rank": 55,
+          "memory_scope": "explicit owned factors and per-window arrays only; caller observations and framework/solver workspace excluded",
+          "model_scope": "normalized independent-window proper-complex Gaussian coefficient alternative with physical-center Gaussian covariance; not a full matched Gaussian-FIR receiver or anytime admission rule",
+          "owned_factor_bytes": 5455456,
+          "preparation_arithmetic": "CPU complex128/float64 PSD square roots and information eigensolves; no covariance inverse",
+          "preparation_array_bound_bytes": 9117336,
+          "preparation_seconds_this_call": 0.03468294895719737,
+          "prepared_plan_reused": false,
+          "sampling_scope": "block-center coefficient approximation and independent-window boundaries require physical sampling/window refinement",
+          "score_arithmetic": "explicit complex64/128 correlation GEMM; FP64 weights, squares, determinant and evidence",
+          "stationary_power": [
+            0.5,
+            0.5
+          ],
+          "taps": 2,
+          "variance_scope": "one stationary chosen variance/reference ratio per trial/candidate, not per block; independent bound and its failure budget are caller responsibilities",
+          "window_blocks": 32,
+          "windows": 49
+        }
+      },
+      "matched_inputs": {
+        "same_configuration_except_device": true,
+        "same_noise_seed_and_draw_schedule": true,
+        "same_npz_key_set": true,
+        "same_sampled_input_hashes": true,
+        "same_source_and_dependency_hashes": true,
+        "score_archive_sha256_verified": {
+          "window-cpu": "32487367be8bbf1a3fdefbc9efc3e37ef4760ead787a99b8a3aa8c1fd1c9500d",
+          "window-cuda": "539c5057e9f5556ea6a15c2fec9efa6f824ae95821f46e6e82d16b86de96c79d"
+        }
+      },
+      "method": "gaussian-window-ucb",
+      "observed_runtime_ratios": {
+        "outer_CPU_over_GPU_wall": 1.0408799690219097,
+        "receiver_call_CPU_over_GPU": 0.9847391055522203
+      },
+      "reports": {
+        "window-cpu": {
+          "arithmetic": {
+            "bulk_fft_and_state": "fp32",
+            "cfo_covariance_and_all_evidence": "FP64",
+            "gaussian_ou_covariance": "same selected width as GaussianStateFilter",
+            "sampler_rank_noise_ucb_gram": "FP64",
+            "tf32_allowed": false
+          },
+          "counts": {
+            "by_physical_path_index": {
+              "0": {
+                "null": {
+                  "false_admitted": 0,
+                  "not_admitted": 1024,
+                  "trials": 1024
+                },
+                "signal": {
+                  "correct_accepted": 670,
+                  "missed": 354,
+                  "raw_correct": 1024,
+                  "trials": 1024,
+                  "wrong_accepted": 0
+                }
+              },
+              "1": {
+                "null": {
+                  "false_admitted": 0,
+                  "not_admitted": 1024,
+                  "trials": 1024
+                },
+                "signal": {
+                  "correct_accepted": 618,
+                  "missed": 406,
+                  "raw_correct": 1024,
+                  "trials": 1024,
+                  "wrong_accepted": 0
+                }
+              }
+            },
+            "total": {
+              "null": {
+                "false_admitted": 0,
+                "not_admitted": 2048,
+                "trials": 2048
+              },
+              "signal": {
+                "correct_accepted": 1288,
+                "missed": 760,
+                "raw_correct": 2048,
+                "trials": 2048,
+                "wrong_accepted": 0
+              }
+            }
+          },
+          "cuda_memory": null,
+          "device": "cpu",
+          "json_sha256": "486fff2dd4317fa16ff8e66fec9a59df32a948abb718df29bbd30048dfb0abbd",
+          "runtime": {
+            "explicit_receiver_preparation_seconds": 0.06982830306515098,
+            "noise_sampling_plus_UCB_seconds": 4.80124095804058,
+            "receiver_call_minus_explicit_preparation_seconds": 0.5006449179491028,
+            "receiver_call_seconds_including_explicit_preparation": 0.5704732210142538,
+            "runner_minus_tool_wall_seconds": 1.4534356109797955,
+            "runner_wall_seconds": 6.83694207505323,
+            "sampled_design_load_seconds": 0.0023069019662216306,
+            "timing_scope": "Wall-clock and receiver-call measurements from one sequential run per device. Receiver call includes backend dispatch/synchronization and any explicit receiver plan preparation; it is not kernel-only timing.",
+            "tool_wall_seconds": 5.3835064640734345,
+            "tool_wall_unattributed_after_load_sampler_receiver_seconds": 0.009485383052378893
+          },
+          "scores_sha256": "32487367be8bbf1a3fdefbc9efc3e37ef4760ead787a99b8a3aa8c1fd1c9500d",
+          "wall_seconds": 5.3835064640734345
+        },
+        "window-cuda": {
+          "arithmetic": {
+            "bulk_fft_and_state": "fp32",
+            "cfo_covariance_and_all_evidence": "FP64",
+            "gaussian_ou_covariance": "same selected width as GaussianStateFilter",
+            "sampler_rank_noise_ucb_gram": "FP64",
+            "tf32_allowed": false
+          },
+          "counts": {
+            "by_physical_path_index": {
+              "0": {
+                "null": {
+                  "false_admitted": 0,
+                  "not_admitted": 1024,
+                  "trials": 1024
+                },
+                "signal": {
+                  "correct_accepted": 670,
+                  "missed": 354,
+                  "raw_correct": 1024,
+                  "trials": 1024,
+                  "wrong_accepted": 0
+                }
+              },
+              "1": {
+                "null": {
+                  "false_admitted": 0,
+                  "not_admitted": 1024,
+                  "trials": 1024
+                },
+                "signal": {
+                  "correct_accepted": 618,
+                  "missed": 406,
+                  "raw_correct": 1024,
+                  "trials": 1024,
+                  "wrong_accepted": 0
+                }
+              }
+            },
+            "total": {
+              "null": {
+                "false_admitted": 0,
+                "not_admitted": 2048,
+                "trials": 2048
+              },
+              "signal": {
+                "correct_accepted": 1288,
+                "missed": 760,
+                "raw_correct": 2048,
+                "trials": 2048,
+                "wrong_accepted": 0
+              }
+            }
+          },
+          "cuda_memory": {
+            "maximum_allocated_bytes": 16138240,
+            "maximum_reserved_bytes": 29360128
+          },
+          "device": "cuda:0",
+          "json_sha256": "7aee42ed36cd932ab0cb059f8ae02349a1207d240a934962959fef878295b6e8",
+          "runtime": {
+            "explicit_receiver_preparation_seconds": 0.0675890400307253,
+            "noise_sampling_plus_UCB_seconds": 4.100188100128435,
+            "receiver_call_minus_explicit_preparation_seconds": 0.5117250318871811,
+            "receiver_call_seconds_including_explicit_preparation": 0.5793140719179064,
+            "runner_minus_tool_wall_seconds": 1.8768277160124853,
+            "runner_wall_seconds": 6.568425061996095,
+            "sampled_design_load_seconds": 0.00224374292884022,
+            "timing_scope": "Wall-clock and receiver-call measurements from one sequential run per device. Receiver call includes backend dispatch/synchronization and any explicit receiver plan preparation; it is not kernel-only timing.",
+            "tool_wall_seconds": 4.69159734598361,
+            "tool_wall_unattributed_after_load_sampler_receiver_seconds": 0.009851431008428335
+          },
+          "scores_sha256": "539c5057e9f5556ea6a15c2fec9efa6f824ae95821f46e6e82d16b86de96c79d",
+          "wall_seconds": 4.69159734598361
+        }
+      },
+      "score_parity": {
+        "admission_gate_disagreements": 0,
+        "argmax_bit_disagreements": 0,
+        "maximum_absolute_log_score_difference": 1.4441888779970213e-05,
+        "median_absolute_difference": 1.9651988574231893e-06,
+        "minimum_winner_to_runnerup_score_margin": 0.008860510661641285,
+        "p99_absolute_difference": 8.793236917448156e-06,
+        "score_arrays_compared": 4,
+        "score_rows_compared": 4096,
+        "score_rows_within_max_backend_delta_of_gate": 0,
+        "smallest_absolute_gate_margin": 0.014692384711228357,
+        "threshold": 22.72106338958574
+      }
+    }
+  },
+  "precision_observation": {
+    "claim_limit": "Observed parity is for these paired runs and inputs; it is not universal GPU arithmetic equivalence.",
+    "configured_bulk_precision": "FP32; TF32 disabled",
+    "sensitive_stages": "sampler/rank/noise/UCB/Gram and CFO covariance/evidence use FP64; covariance/evidence diagnostics report complex128/float64 for receiver preparation/evidence"
+  },
+  "readme_paragraph_proposal": "A sequential 1024-trial CPU/GPU comparison on two fixed g001 paths at -28 dB-Hz completed all four jobs without timeout. Both receiver pairs used the same input hashes and draw seeds; all 4096 score-row vectors per pair had identical winner and admission-gate decisions (CFO maximum absolute score delta 1.74e-07; window 1.44e-05). Correct accepted signal counts were CFO 1298/2048 and Gaussian-window 1288/2048, with zero wrong accepts; each method had zero admissions in 2048 conditional null trials on these paths. Outer CPU/GPU wall times were CFO 105.572/12.110 s (ratio 8.72\u00d7) and window 6.837/6.568 s (ratio 1.04\u00d7); receiver-call times were 98.431/6.096 s and 0.570/0.579 s. For window mode, sampler/UCB consumed 4.801/4.100 s and explicit plan preparation 0.070/0.068 s of those calls. FP32 bulk arithmetic retained FP64 sensitive calibration/evidence stages with TF32 disabled. These are single-run measurements, not universal GPU speedup or false-alarm qualification.",
+  "reproduction": {
+    "analyzer_command": "/tmp/triad-weak-env/bin/python docs/validation-data/triad-v3/2026-11-02-spread/reproduction/summarize_benchmark.py",
+    "input_reports": [
+      {
+        "path": "cfo-cpu.json",
+        "scores_file": "cfo-cpu.scores.npz",
+        "scores_sha256": "a1d9309ad681335e2580d5bf4e4f8a24f95cced169e886d4448a4a27ddd95fe9",
+        "sha256": "b05c77321e54650fa474e907ca5e4197882ae3be1b05cc29fa7669b1026697e2"
+      },
+      {
+        "path": "cfo-cuda.json",
+        "scores_file": "cfo-cuda.scores.npz",
+        "scores_sha256": "caaf4b081067bf1ac145ccf9abd75cd3d7763fbcf1c73f9b49a7018179a6d8c2",
+        "sha256": "8a4d1e4b495b41fb051347db1d6b670777de68e6fae6ddd4842d9e9fd8262ab9"
+      },
+      {
+        "path": "window-cpu.json",
+        "scores_file": "window-cpu.scores.npz",
+        "scores_sha256": "32487367be8bbf1a3fdefbc9efc3e37ef4760ead787a99b8a3aa8c1fd1c9500d",
+        "sha256": "486fff2dd4317fa16ff8e66fec9a59df32a948abb718df29bbd30048dfb0abbd"
+      },
+      {
+        "path": "window-cuda.json",
+        "scores_file": "window-cuda.scores.npz",
+        "scores_sha256": "539c5057e9f5556ea6a15c2fec9efa6f824ae95821f46e6e82d16b86de96c79d",
+        "sha256": "7aee42ed36cd932ab0cb059f8ae02349a1207d240a934962959fef878295b6e8"
+      }
+    ],
+    "original_invalid_plan": "/home/user/___quick/p/_cur/dataPump/pumpModem/docs/validation-data/triad-v3/2026-11-02-spread/reproduction/benchmark-plan-original.json",
+    "original_setup_failure": "The first runner invocation stopped at KeyError('jobs') before launching a child; it produced no measurements. This summary covers only the repaired plan's later completed run.",
+    "plan": "/home/user/___quick/p/_cur/dataPump/pumpModem/docs/validation-data/triad-v3/2026-11-02-spread/reproduction/benchmark-plan.json",
+    "plan_sha256": "846f6aa870798e41b3f1e81e52a827e6adeefbe156d84eaf8f373e33cf97381e",
+    "runner_results": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-spread-benchmark/benchmark-fixed-jobs/results.json",
+    "runner_results_sha256": "0cc96267707de6c1e7846aa637eba063da1342f056659ee5e3e21b228d6f6936"
+  },
+  "schema": "triad-spread-1024-cpu-cuda-benchmark-summary-v1",
+  "scope": "One completed sequential CPU/GPU run per method on two frozen sampled paths, 1024 conditional noise trials per path and control at -28 dB-Hz. Descriptive runtime/score parity only."
+}

@@ -1,0 +1,11 @@
+{
+  "schema": "triad-spread-final-audit-binding-v1",
+  "primary_review_sha256": "271c58f7063b71eec08de3b4bbb68253fedaf84814defb945a1bdf3e40c1a70c",
+  "reviewed_full_audit_sha256": "7e521f4ac3007067f9f56b86e2d520b15d05f79085c92ff902c2b9cc10c055c2",
+  "final_archived_full_audit_sha256": "e838bf798c1cda34634a16a5cc2b8793dac1780472d595178ffb11802cc4d876",
+  "all_prior_input_file_checks_identical": true,
+  "all_prior_65_report_records_identical": true,
+  "primary_15_job_plan_binding_identical": true,
+  "added_reports": "Four sequential CPU/GPU benchmark reports; no primary data or primary report changed.",
+  "archive_verification_sha256": "2ca5c6c832d306493ac9a9361c7c1c34b01985b585a596cb6e9e90c2844e9e30"
+}

@@ -1,0 +1,92 @@
+{
+  "scope": "Public design assumed-model necessary information thresholds, separate from physical receiver success.",
+  "jobs": [
+    {
+      "name": "information-g001",
+      "timeout_seconds": 600,
+      "argv": [
+        "/workspace/triad-env/bin/python",
+        "/workspace/triad/docs/validation-data/triad-v3/2026-11-02-spread/theory/actual_window_information.py",
+        "--workspace",
+        "/workspace/triad/local-evidence/spread/screen/g001/path-00000",
+        "--workspace",
+        "/workspace/triad/local-evidence/spread/screen/g001/path-00001",
+        "--workspace",
+        "/workspace/triad/local-evidence/spread/screen/g001/path-00002",
+        "--workspace",
+        "/workspace/triad/local-evidence/spread/screen/g001/path-00003",
+        "--cn0-grid=-34,-32,-30,-28,-26,-24",
+        "--window-blocks",
+        "16",
+        "32",
+        "64",
+        "--doppler-width",
+        "0.001",
+        "--tap-powers",
+        ".5,.5",
+        "--memory-mib",
+        "1024",
+        "--output",
+        "/workspace/triad/local-evidence/spread/information/g001.json"
+      ]
+    },
+    {
+      "name": "information-g01",
+      "timeout_seconds": 600,
+      "argv": [
+        "/workspace/triad-env/bin/python",
+        "/workspace/triad/docs/validation-data/triad-v3/2026-11-02-spread/theory/actual_window_information.py",
+        "--workspace",
+        "/workspace/triad/local-evidence/spread/screen/g01/path-00000",
+        "--workspace",
+        "/workspace/triad/local-evidence/spread/screen/g01/path-00001",
+        "--workspace",
+        "/workspace/triad/local-evidence/spread/screen/g01/path-00002",
+        "--workspace",
+        "/workspace/triad/local-evidence/spread/screen/g01/path-00003",
+        "--cn0-grid=-28,-26,-24,-22,-20",
+        "--window-blocks",
+        "16",
+        "32",
+        "64",
+        "--doppler-width",
+        "0.01",
+        "--tap-powers",
+        ".5,.5",
+        "--memory-mib",
+        "1024",
+        "--output",
+        "/workspace/triad/local-evidence/spread/information/g01.json"
+      ]
+    },
+    {
+      "name": "information-g1",
+      "timeout_seconds": 600,
+      "argv": [
+        "/workspace/triad-env/bin/python",
+        "/workspace/triad/docs/validation-data/triad-v3/2026-11-02-spread/theory/actual_window_information.py",
+        "--workspace",
+        "/workspace/triad/local-evidence/spread/screen/g1/path-00000",
+        "--workspace",
+        "/workspace/triad/local-evidence/spread/screen/g1/path-00001",
+        "--workspace",
+        "/workspace/triad/local-evidence/spread/screen/g1/path-00002",
+        "--workspace",
+        "/workspace/triad/local-evidence/spread/screen/g1/path-00003",
+        "--cn0-grid=-20,-18,-16,-14,-12,-10",
+        "--window-blocks",
+        "16",
+        "32",
+        "64",
+        "--doppler-width",
+        "0.1",
+        "--tap-powers",
+        ".5,.5",
+        "--memory-mib",
+        "1024",
+        "--output",
+        "/workspace/triad/local-evidence/spread/information/g1.json"
+      ]
+    }
+  ]
+}

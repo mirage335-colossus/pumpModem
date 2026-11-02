@@ -1,0 +1,666 @@
+{
+  "bounds": {
+    "absolute_peak_amplitude_bound": 3.0058289615470173,
+    "absolute_peak_power_bound": 9.03500774607482,
+    "amplitudes": [
+      0.6324555320336759,
+      1.0,
+      1.2649110640673518
+    ],
+    "carrier_gain": 0.5773502691896257,
+    "chip_triplet_coefficient_norm_squared": 1.0,
+    "gram_rows": [
+      {
+        "absolute_row_sum": 1.0062601899550672,
+        "carrier_difference_per_chip": 0.0,
+        "entries": [
+          [
+            0.0,
+            0.0
+          ],
+          [
+            -1.4650445185476196e-05,
+            0.0
+          ],
+          [
+            6.437552329215533e-06,
+            0.0
+          ],
+          [
+            5.598825966696935e-05,
+            0.0
+          ],
+          [
+            -0.0001710867253803662,
+            0.0
+          ],
+          [
+            0.00025942989939134106,
+            0.0
+          ],
+          [
+            -0.00012527243333872949,
+            0.0
+          ],
+          [
+            -0.0005720682352996514,
+            0.0
+          ],
+          [
+            0.0011415749046709994,
+            0.0
+          ],
+          [
+            4.456242293438436e-05,
+            0.0
+          ],
+          [
+            0.00017278693309796093,
+            0.0
+          ],
+          [
+            -0.0002312594786903254,
+            0.0
+          ],
+          [
+            0.00018037033986222686,
+            0.0
+          ],
+          [
+            -8.19073148429747e-05,
+            0.0
+          ],
+          [
+            -1.059460716364702e-05,
+            0.0
+          ],
+          [
+            6.643626236499385e-05,
+            0.0
+          ],
+          [
+            0.9999913383266286,
+            0.0
+          ],
+          [
+            6.643626236499385e-05,
+            0.0
+          ],
+          [
+            -1.059460716364702e-05,
+            0.0
+          ],
+          [
+            -8.19073148429747e-05,
+            0.0
+          ],
+          [
+            0.00018037033986222686,
+            0.0
+          ],
+          [
+            -0.0002312594786903254,
+            0.0
+          ],
+          [
+            0.00017278693309796093,
+            0.0
+          ],
+          [
+            4.456242293438436e-05,
+            0.0
+          ],
+          [
+            0.0011415749046709994,
+            0.0
+          ],
+          [
+            -0.0005720682352996514,
+            0.0
+          ],
+          [
+            -0.00012527243333872949,
+            0.0
+          ],
+          [
+            0.00025942989939134106,
+            0.0
+          ],
+          [
+            -0.0001710867253803662,
+            0.0
+          ],
+          [
+            5.598825966696935e-05,
+            0.0
+          ],
+          [
+            6.437552329215533e-06,
+            0.0
+          ],
+          [
+            -1.4650445185476196e-05,
+            0.0
+          ],
+          [
+            0.0,
+            0.0
+          ]
+        ]
+      },
+      {
+        "absolute_row_sum": 0.0068679739579048885,
+        "carrier_difference_per_chip": 1.25,
+        "entries": [
+          [
+            0.0,
+            0.0
+          ],
+          [
+            -9.369231299640426e-06,
+            -9.36923129964047e-06
+          ],
+          [
+            -5.810830065850793e-20,
+            2.7073833355730187e-05
+          ],
+          [
+            3.0119408094048982e-05,
+            -3.0119408094048867e-05
+          ],
+          [
+            -8.823948424774233e-05,
+            -1.6239755046298728e-19
+          ],
+          [
+            0.00015358071587728305,
+            0.00015358071587728356
+          ],
+          [
+            7.466123937097502e-19,
+            -0.0004830265152241393
+          ],
+          [
+            -0.0006428618592814354,
+            0.0006428618592814335
+          ],
+          [
+            0.00033575806209085635,
+            4.435196136938489e-19
+          ],
+          [
+            0.00037947849321580613,
+            0.0003794784932158071
+          ],
+          [
+            2.231290751040353e-19,
+            -0.000339688602053691
+          ],
+          [
+            -0.00012536053485536543,
+            0.0001253605348553657
+          ],
+          [
+            8.8723912103492e-05,
+            -2.851411383412136e-19
+          ],
+          [
+            -4.265093661487679e-05,
+            -4.2650936614876585e-05
+          ],
+          [
+            1.0529388812340628e-20,
+            5.4060260304508736e-05
+          ],
+          [
+            3.161864203122341e-05,
+            -3.1618642031222784e-05
+          ],
+          [
+            -3.2495606069405565e-05,
+            -1.6703295641391892e-18
+          ],
+          [
+            3.16186420312226e-05,
+            3.1618642031224776e-05
+          ],
+          [
+            2.775043096580914e-19,
+            -5.4060260304509116e-05
+          ],
+          [
+            -4.265093661487697e-05,
+            4.265093661487652e-05
+          ],
+          [
+            8.87239121034921e-05,
+            2.757698217734928e-19
+          ],
+          [
+            -0.00012536053485536543,
+            -0.00012536053485536573
+          ],
+          [
+            3.065274924131629e-19,
+            0.00033968860205369107
+          ],
+          [
+            0.00037947849321580613,
+            -0.00037947849321580705
+          ],
+          [
+            0.00033575806209085635,
+            -4.636617201034566e-19
+          ],
+          [
+            -0.0006428618592814354,
+            -0.0006428618592814335
+          ],
+          [
+            7.45342981662211e-19,
+            0.0004830265152241393
+          ],
+          [
+            0.00015358071587728305,
+            -0.00015358071587728356
+          ],
+          [
+            -8.823948424774233e-05,
+            1.6320442960761581e-19
+          ],
+          [
+            3.0119408094048982e-05,
+            3.0119408094048867e-05
+          ],
+          [
+            -5.798060465144506e-20,
+            -2.7073833355730187e-05
+          ],
+          [
+            -9.369231299640426e-06,
+            9.36923129964047e-06
+          ],
+          [
+            0.0,
+            0.0
+          ]
+        ]
+      },
+      {
+        "absolute_row_sum": 0.00044865149492531346,
+        "carrier_difference_per_chip": 2.5,
+        "entries": [
+          [
+            0.0,
+            0.0
+          ],
+          [
+            1.959073883255277e-20,
+            -4.036905097015843e-06
+          ],
+          [
+            -1.9050188400570745e-06,
+            -8.908916142955104e-21
+          ],
+          [
+            -2.82462016659428e-20,
+            5.601944733729913e-06
+          ],
+          [
+            -7.384556829202805e-08,
+            1.1724800506799e-21
+          ],
+          [
+            -1.0398278100311558e-19,
+            2.8436108833894777e-05
+          ],
+          [
+            1.654765983477883e-05,
+            6.029567639082785e-20
+          ],
+          [
+            -1.4933608586302654e-19,
+            5.502149632930509e-05
+          ],
+          [
+            5.946683598187067e-07,
+            2.363344965955615e-19
+          ],
+          [
+            -1.7794454093847928e-19,
+            5.5627585962601656e-05
+          ],
+          [
+            -1.6313426458762138e-05,
+            -3.8171076546872015e-20
+          ],
+          [
+            7.576881353166821e-20,
+            2.8502159724946576e-05
+          ],
+          [
+            1.4387701274471373e-07,
+            5.170605325678792e-19
+          ],
+          [
+            -1.1793610301536047e-18,
+            5.561976196513666e-06
+          ],
+          [
+            1.8971170714026386e-06,
+            4.8714356823624705e-19
+          ],
+          [
+            -3.538427662884731e-19,
+            -4.0534538204898205e-06
+          ],
+          [
+            -1.7007236607255635e-08,
+            -5.392505762923373e-18
+          ],
+          [
+            -1.0609858234799493e-18,
+            4.053453820488715e-06
+          ],
+          [
+            1.897117071402799e-06,
+            1.4902403714681974e-18
+          ],
+          [
+            -8.63032998445337e-19,
+            -5.561976196513877e-06
+          ],
+          [
+            1.4387701274473869e-07,
+            -6.1042537765901975e-19
+          ],
+          [
+            9.512122095022914e-20,
+            -2.8502159724946498e-05
+          ],
+          [
+            -1.6313426458762155e-05,
+            7.775290962845322e-20
+          ],
+          [
+            -1.997945168190675e-19,
+            -5.562758596260169e-05
+          ],
+          [
+            5.946683598187126e-07,
+            -2.3116906386289757e-19
+          ],
+          [
+            -1.4599675773014997e-19,
+            -5.5021496329305096e-05
+          ],
+          [
+            1.654765983477883e-05,
+            -6.252937423745073e-20
+          ],
+          [
+            -1.0288645649875312e-19,
+            -2.8436108833894774e-05
+          ],
+          [
+            -7.384556829202752e-08,
+            -4.722231945397452e-22
+          ],
+          [
+            -2.9022303875670675e-20,
+            -5.601944733729914e-06
+          ],
+          [
+            -1.9050188400570745e-06,
+            8.583291324944776e-21
+          ],
+          [
+            1.9763516182999783e-20,
+            4.036905097015843e-06
+          ],
+          [
+            0.0,
+            0.0
+          ]
+        ]
+      }
+    ],
+    "lookup_piecewise_linear_energy": 0.9999913383266286,
+    "maximizing_phase_grid_index": 128,
+    "numerical_absolute_padding": 1e-09,
+    "phase_grid_resolution": 256,
+    "pulse_endpoint_value": -0.005052703585781864,
+    "sum_absolute_pulse_max_unpadded": 1.7968897973207938,
+    "synthesis_Gram_row_bound_unpadded": 1.0199961378708768,
+    "synthesis_energy_operator_bound": 1.019996138870877
+  },
+  "derivation": [
+    "Each fine chip permutes the same three amplitudes; their absolute sum is A and their squared sum is3 up to the actual FP64 constants. Data encryption and phase rotations do not increase these bounds.",
+    "The three modulation phasors have unit magnitude. With gain g and common envelope e(t) in[0,1], |x(t)|<=g*A*sum_k|p(u-k)|, u=t*fine_rate-.5.",
+    "Within every interval between phase knots j/256, each shifted table pulse is affine, hence its absolute value and their sum are convex. Maxima lie at knot endpoints. Both support endpoints are explicitly included; their discontinuous truncation cannot increase an interior supremum.",
+    "For energy, consider the finite synthesis family p(u-k)*exp(2pi*i*f_c*u), f_c in{-1.25,0,1.25}. Its Gram entries have magnitudes depending only on integer lag and carrier difference0,1.25,2.5.",
+    "The Gram spectral norm is at most its maximum absolute row sum B. Finite chip sequences are principal submatrices of this family. Thus integral|x|\u00b2dt<=B*g\u00b2*sum_chip,sum_carrier|a|\u00b2/fine_rate<=B*(3g\u00b2)*ceil(T*fine_rate)/fine_rate. Multiplication by an envelope bounded by one cannot increase energy.",
+    "Each Gram integrand is a quadratic polynomial times an exponential on1/256-chip cells. The exponential moments use20 power-series terms; |nu|<=2pi*2.5/256. FP64 summations use fsum, with an extra1e-9 engineering padding on pulse and Gram bounds.",
+    "For independent Gaussian ray gains with equal nominal powers, source energy<=E and absolute squared envelope<=P give D<=min(C*E,C\u00b2*P*E*J,C\u00b2*P\u00b2*I), where J and I use the complete delayed observation support. This uses absolute nominal-power bounds, not an unproved PAPR or E<=T claim."
+  ],
+  "discrete_FIR_peak_only_examples": [
+    {
+      "FIR_coefficient_sha256": "d55b072c50ab18b00f8f0d1d6b0ae9d248a2ce81b77935d492045d073fc93279",
+      "FIR_covariance_zero": 0.9999999999999998,
+      "FIR_tap_count": 797,
+      "Gaussian_discrete_KL_upper_nats": 7.267132467056317,
+      "interpolated_source_absolute_peak_power_bound": 9.03508197742335,
+      "one_completion_admission_probability_upper": {
+        "relaxed-one-completion-global-alpha": 1.0,
+        "strict-one-completion-global-alpha": 0.837246378772878
+      },
+      "sample_count_upper": 78894017,
+      "sample_interval_seconds": 4,
+      "scope": "Actual finite-FIR covariance, zero sample-clock error and an integer-aligned direct arrival at the stated physicaldt,5us delayed ray, unit sourcegain, extra gain/perturbation/frontend stages off; nominalC=1e-6,T=tenyears. Includes fixed fractional delayed-ray interpolation L1 gain and both8-sample tails. Uses peak-only discreteenergy, not the continuous pulse-Gram estimate; does not cover arbitrary fractional arrival or clock drift.",
+      "source_discrete_energy_seconds_upper": 2851255644.492925,
+      "source_interpolation_absolute_gain_bound": 1.0000041079763375,
+      "width_2sigma_hz": 0.001
+    },
+    {
+      "FIR_coefficient_sha256": "8f37ad1610d87f4d16a967bb15af7e209906930a8f9d7770c06be12f46109532",
+      "FIR_covariance_zero": 0.9999999999999999,
+      "FIR_tap_count": 201,
+      "Gaussian_discrete_KL_upper_nats": 7.267047629349255,
+      "interpolated_source_absolute_peak_power_bound": 9.035026317444949,
+      "one_completion_admission_probability_upper": {
+        "relaxed-one-completion-global-alpha": 1.0,
+        "strict-one-completion-global-alpha": 0.8372385582544917
+      },
+      "sample_count_upper": 19723517,
+      "sample_interval_seconds": 16,
+      "scope": "Actual finite-FIR covariance, zero sample-clock error and an integer-aligned direct arrival at the stated physicaldt,5us delayed ray, unit sourcegain, extra gain/perturbation/frontend stages off; nominalC=1e-6,T=tenyears. Includes fixed fractional delayed-ray interpolation L1 gain and both8-sample tails. Uses peak-only discreteenergy, not the continuous pulse-Gram estimate; does not cover arbitrary fractional arrival or clock drift.",
+      "source_discrete_energy_seconds_upper": 2851239922.6811657,
+      "source_interpolation_absolute_gain_bound": 1.0000010277445857,
+      "width_2sigma_hz": 0.001
+    },
+    {
+      "FIR_coefficient_sha256": "80c19759a5c655aee26b5887a3d8534d366a9ea3b85f3fbe13112b050536146a",
+      "FIR_covariance_zero": 0.9999999999999999,
+      "FIR_tap_count": 51,
+      "Gaussian_discrete_KL_upper_nats": 7.26704406211921,
+      "interpolated_source_absolute_peak_power_bound": 9.035012402468643,
+      "one_completion_admission_probability_upper": {
+        "relaxed-one-completion-global-alpha": 1.0,
+        "strict-one-completion-global-alpha": 0.8372382294188121
+      },
+      "sample_count_upper": 4930892,
+      "sample_interval_seconds": 64,
+      "scope": "Actual finite-FIR covariance, zero sample-clock error and an integer-aligned direct arrival at the stated physicaldt,5us delayed ray, unit sourcegain, extra gain/perturbation/frontend stages off; nominalC=1e-6,T=tenyears. Includes fixed fractional delayed-ray interpolation L1 gain and both8-sample tails. Uses peak-only discreteenergy, not the continuous pulse-Gram estimate; does not cover arbitrary fractional arrival or clock drift.",
+      "source_discrete_energy_seconds_upper": 2851242904.0149384,
+      "source_interpolation_absolute_gain_bound": 1.0000002576861777,
+      "width_2sigma_hz": 0.001
+    }
+  ],
+  "pulse_table_sha256": "00bb6eec5164bb6e3fa7d674ec37bba44bfbf255e92afa441a45865406204d51",
+  "schema": "triad-v3-actual-table-envelope-bound-v1",
+  "scope_and_limits": [
+    "Principal use: isolatedv3 Added1,FHSSoff,burst off; the inspected source envelopes only reduce amplitude. No source normalization to exact mean power1 is assumed.",
+    "The energy bound applies to actual active elapsed durationT, after private-tile rounding, not a shorter requested duration. A ten-year requested duration may round above ten years and needs its actualT substituted.",
+    "The actual shared pulse table is probed from the checked source revision. The bound concerns the continuous piecewise-linear source model; it does not certify physical DAC reconstruction or additional analog filters.",
+    "The continuous Gram-energy bound is not automatically a bound on point-sampled energy. Discrete examples instead use peak times samplecount and the actual probed Gaussian FIR covariance, at the explicitly stated physical sample interval.",
+    "Table/Gram calculations and padding are numerical analytical evidence, not a formal interval-arithmetic proof covering every compiler/libm or extreme coordinate roundoff behavior.",
+    "The Gaussian-channel information connection additionally assumes the continuous normalized scatter correlation, known white noise, fixedsource waveform, and no unaccounted modulation/gain stage. FIR spectral approximation, oscillator steering, frequency-selective perturbation and frontend processing need their own model relation.",
+    "Stochastic channel gain is unbounded; P andE bound the transmitted deterministic envelope, not the faded received realization. Independent zero-mean ray gains are marginalized in the Gaussian covariance.",
+    "No receiver success rate is inferred. No ordinary Robust implementation is changed."
+  ],
+  "source_sha256": {
+    "docs/validation-data/triad-v3/2026-11-02-spread/theory/pulse_bound_probe.cpp": "a42fa1bda0898a98217beb42c553d072214fff61fb31523531863273943e9a48",
+    "docs/validation-data/triad-v3/2026-11-02-spread/theory/spread_frontier.py": "1cb721aced69d63c90f6e4b1a4e70965c30d81e2300a3c7fec8f637812139189",
+    "docs/validation-data/triad-v3/2026-11-02-spread/theory/transmitter_bound.py": "ca5c59fb3202d5b833dbad6faf06ef86d6282c2f1205d6197139675a8075b6c7",
+    "include/datapump/pattern_pulse.hpp": "f3053ed41fa5cbca182ae4dcf5ff4796b030a3cb15527f617d7a765e7f989312",
+    "src/triad_gaussian_fading.hpp": "97f26b082d7d68123952bde7ccb9f97148c5977cf741cf6c15c76e77fcc20944",
+    "src/triad_modem_v3.cpp": "cb6cac016e57edcd4f6ebc70f09c68cc47380e3b772cdbe047d7a3b93e9b434c",
+    "src/triad_simulation_stream.cpp": "d31d3fe05f95bd1d09efbb37bc5904e00bcaf94920be4cc31f8ee687c5c01402"
+  },
+  "ten_year_minus60_examples": [
+    {
+      "GUI_inner_rate_hz": 0.036,
+      "Gaussian_channel_KL_upper_nats": 0.8204008319047791,
+      "Gaussian_width_2sigma_hz_or_matched_HWHM": 0.001,
+      "absolute_peak_power_bound": 9.03500774607482,
+      "active_elapsed_seconds": 315576000.0,
+      "cn0_db_hz_nominal_power_one": -60.0,
+      "fine_rate_hz_per_carrier": 0.005999999999999999,
+      "full_delayed_observation_seconds": 315576000.000005,
+      "nonzero_coefficient_count_upper": 1893456,
+      "one_completion_admission_probability_upper": {
+        "relaxed-one-completion-global-alpha": 0.31130698716057814,
+        "strict-one-completion-global-alpha": 0.13127906864918196
+      },
+      "source_average_power_upper": 1.019996138870877,
+      "source_energy_seconds_upper": 321886301.5203159,
+      "spectrum": "gaussian"
+    },
+    {
+      "GUI_inner_rate_hz": 0.036,
+      "Gaussian_channel_KL_upper_nats": 0.39311845053408884,
+      "Gaussian_width_2sigma_hz_or_matched_HWHM": 0.001,
+      "absolute_peak_power_bound": 9.03500774607482,
+      "active_elapsed_seconds": 315576000.0,
+      "cn0_db_hz_nominal_power_one": -60.0,
+      "fine_rate_hz_per_carrier": 0.005999999999999999,
+      "full_delayed_observation_seconds": 315576000.000005,
+      "nonzero_coefficient_count_upper": 1893456,
+      "one_completion_admission_probability_upper": {
+        "relaxed-one-completion-global-alpha": 0.18879609646003256,
+        "strict-one-completion-global-alpha": 0.07029288047810704
+      },
+      "source_average_power_upper": 1.019996138870877,
+      "source_energy_seconds_upper": 321886301.5203159,
+      "spectrum": "ou"
+    },
+    {
+      "GUI_inner_rate_hz": 0.0036,
+      "Gaussian_channel_KL_upper_nats": 0.820402565033686,
+      "Gaussian_width_2sigma_hz_or_matched_HWHM": 0.001,
+      "absolute_peak_power_bound": 9.03500774607482,
+      "active_elapsed_seconds": 315576000.0,
+      "cn0_db_hz_nominal_power_one": -60.0,
+      "fine_rate_hz_per_carrier": 0.0006,
+      "full_delayed_observation_seconds": 315576000.000005,
+      "nonzero_coefficient_count_upper": 189346,
+      "one_completion_admission_probability_upper": {
+        "relaxed-one-completion-global-alpha": 0.3113074431145677,
+        "strict-one-completion-global-alpha": 0.13127930539780508
+      },
+      "source_average_power_upper": 1.0199982936526917,
+      "source_energy_seconds_upper": 321886981.5177418,
+      "spectrum": "gaussian"
+    },
+    {
+      "GUI_inner_rate_hz": 0.0036,
+      "Gaussian_channel_KL_upper_nats": 0.39311928101222093,
+      "Gaussian_width_2sigma_hz_or_matched_HWHM": 0.001,
+      "absolute_peak_power_bound": 9.03500774607482,
+      "active_elapsed_seconds": 315576000.0,
+      "cn0_db_hz_nominal_power_one": -60.0,
+      "fine_rate_hz_per_carrier": 0.0006,
+      "full_delayed_observation_seconds": 315576000.000005,
+      "nonzero_coefficient_count_upper": 189346,
+      "one_completion_admission_probability_upper": {
+        "relaxed-one-completion-global-alpha": 0.1887963611737605,
+        "strict-one-completion-global-alpha": 0.07029300577575943
+      },
+      "source_average_power_upper": 1.0199982936526917,
+      "source_energy_seconds_upper": 321886981.5177418,
+      "spectrum": "ou"
+    },
+    {
+      "GUI_inner_rate_hz": 0.00036,
+      "Gaussian_channel_KL_upper_nats": 0.8204198963227555,
+      "Gaussian_width_2sigma_hz_or_matched_HWHM": 0.001,
+      "absolute_peak_power_bound": 9.03500774607482,
+      "active_elapsed_seconds": 315576000.0,
+      "cn0_db_hz_nominal_power_one": -60.0,
+      "fine_rate_hz_per_carrier": 6e-05,
+      "full_delayed_observation_seconds": 315576000.000005,
+      "nonzero_coefficient_count_upper": 18935,
+      "one_completion_admission_probability_upper": {
+        "relaxed-one-completion-global-alpha": 0.311312002640433,
+        "strict-one-completion-global-alpha": 0.13128167288034384
+      },
+      "source_average_power_upper": 1.0200198414708372,
+      "source_energy_seconds_upper": 321893781.49200094,
+      "spectrum": "gaussian"
+    },
+    {
+      "GUI_inner_rate_hz": 0.00036,
+      "Gaussian_channel_KL_upper_nats": 0.3931275857935422,
+      "Gaussian_width_2sigma_hz_or_matched_HWHM": 0.001,
+      "absolute_peak_power_bound": 9.03500774607482,
+      "active_elapsed_seconds": 315576000.0,
+      "cn0_db_hz_nominal_power_one": -60.0,
+      "fine_rate_hz_per_carrier": 6e-05,
+      "full_delayed_observation_seconds": 315576000.000005,
+      "nonzero_coefficient_count_upper": 18935,
+      "one_completion_admission_probability_upper": {
+        "relaxed-one-completion-global-alpha": 0.18879900830301866,
+        "strict-one-completion-global-alpha": 0.0702942587502902
+      },
+      "source_average_power_upper": 1.0200198414708372,
+      "source_energy_seconds_upper": 321893781.49200094,
+      "spectrum": "ou"
+    },
+    {
+      "GUI_inner_rate_hz": 3.6e-05,
+      "Gaussian_channel_KL_upper_nats": 0.820636537436123,
+      "Gaussian_width_2sigma_hz_or_matched_HWHM": 0.001,
+      "absolute_peak_power_bound": 9.03500774607482,
+      "active_elapsed_seconds": 315576000.0,
+      "cn0_db_hz_nominal_power_one": -60.0,
+      "fine_rate_hz_per_carrier": 6e-06,
+      "full_delayed_observation_seconds": 315576000.000005,
+      "nonzero_coefficient_count_upper": 1894,
+      "one_completion_admission_probability_upper": {
+        "relaxed-one-completion-global-alpha": 0.3113689945615688,
+        "strict-one-completion-global-alpha": 0.13131126584568428
+      },
+      "source_average_power_upper": 1.0202891891976582,
+      "source_energy_seconds_upper": 321978781.17024016,
+      "spectrum": "gaussian"
+    },
+    {
+      "GUI_inner_rate_hz": 3.6e-05,
+      "Gaussian_channel_KL_upper_nats": 0.3932313955600575,
+      "Gaussian_width_2sigma_hz_or_matched_HWHM": 0.001,
+      "absolute_peak_power_bound": 9.03500774607482,
+      "active_elapsed_seconds": 315576000.0,
+      "cn0_db_hz_nominal_power_one": -60.0,
+      "fine_rate_hz_per_carrier": 6e-06,
+      "full_delayed_observation_seconds": 315576000.000005,
+      "nonzero_coefficient_count_upper": 1894,
+      "one_completion_admission_probability_upper": {
+        "relaxed-one-completion-global-alpha": 0.18883209618838084,
+        "strict-one-completion-global-alpha": 0.07030992062614874
+      },
+      "source_average_power_upper": 1.0202891891976582,
+      "source_energy_seconds_upper": 321978781.17024016,
+      "spectrum": "ou"
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "schema": "triad-spread-local-checks-v1",
+  "scope": "Focused isolated triad check; unrelated ordinary receiver regression excluded by user instruction.",
+  "build": {
+    "command": "CCACHE_DIR=/tmp/triad-spread-ccache ./build.sh test triad",
+    "passed": 14,
+    "failed": 0,
+    "wall_seconds": 19.3,
+    "initial_attempt": "Failed ccache setup on read-only cache; unchanged code passed using writable cache."
+  },
+  "gaussian_window_unittests": {
+    "passed": 7,
+    "failed": 0,
+    "seconds": 0.389
+  },
+  "logs": {
+    "triad-spread-final-build.log": {
+      "sha256": "1d71bcdabc9677ddfe0508fc933527e7baabad26478db3f6131a44f967cd3bd4",
+      "bytes": 3134
+    },
+    "triad-spread-final-build-retry.log": {
+      "sha256": "fe6ae1cca4fb1cd866e77f5f4b8fe097eb5e00985db5c590450ae05ca8826b0f",
+      "bytes": 4421
+    },
+    "triad-spread-window-tests-final.log": {
+      "sha256": "affcb873513b4ccf418ec22657a55fe6665f8cd3cbcc9c7e3c791b215ea6eab6",
+      "bytes": 1338
+    }
+  }
+}

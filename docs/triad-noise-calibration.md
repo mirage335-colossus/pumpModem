@@ -26,6 +26,7 @@ addresses and public candidate bank remain the same for paired comparisons.
 | Phase/frequency reference | A normalized mixture over phase/frequency trajectories and tap amplitudes | Known white proper complex Gaussian variance |
 | Residual-UCB phase/frequency | The same trajectory mixture, with independent conservative variance bounds | The same segment-wise condition as residual-UCB Gaussian |
 | Static-frequency Gaussian / UCB | Whole-observation complex sums over a bounded FFT frequency bank, followed by joint Gaussian tap marginalization | Known variance, or one unknown stationary white-Gaussian variance calibrated from whole-bank residuals |
+| Windowed Gaussian-spectrum / UCB | Joint complex block/tap covariance within fixed nonoverlapping windows, with reusable factors | One unknown stationary white proper-complex Gaussian variance, calibrated from the full scored bank |
 
 An unmodified known-variance reference with deliberately wrong noise power is
 a failure control, not a calibrated receiver. Likewise, a common-scale angular
@@ -121,6 +122,57 @@ hash-checks that replay; the independent-path batch adapter retains one bounded
 shard of the prepared statistics. A declared changing-noise schedule is rejected
 for stationary UCB pooling, and common-scale angular inference is marked
 unsupported for that schedule.
+
+## Gaussian-spectrum windows and paired sweeps
+
+[`triad_gaussian_window.py`](../tools/triad_gaussian_window.py) uses the public
+Grams and physical block-center timestamps to construct a Gaussian tap prior
+with correlation `exp[−(π B Δt)²/2]`, where `B = 2σ` is the assumed Doppler
+spectral width. This is independent of any deterministic ray-center separation
+already represented in the waveform basis. Within each nonoverlapping window,
+PSD square-root/eigenvalue preparation gives the normalized log-determinant and
+quadratic terms; rank-deficient Grams and zero-energy blocks remain supported.
+Factors are reused across many trials and stationary noise upper bounds.
+Per-block-changing noise scales are unsupported by this reuse interface.
+
+The receiver treats its windows as independent and its coefficients as constant
+within each retained block. These are alternative-model assumptions, not claims
+that the physical Gaussian FIR channel has either property. Ignored variation
+within blocks and covariance across window boundaries can lose sensitivity.
+Compare shorter blocks, longer windows and assumed-width mismatch on the same
+sampled observations. Keep enough valid rows outside the full candidate-bank
+span to obtain a positive residual calibration degree of freedom; finer blocks
+can otherwise make UCB calibration unavailable. The window receiver does not
+add a residual-CFO bank beyond the exported candidates.
+
+[`triad-conditional-sweep.py`](../tools/triad-conditional-sweep.py) compares this
+method with static FFT, Gaussian OU and deterministic midpoint-CFO/OU likelihoods.
+Its conditional mode uses the full-bank joint Gaussian sampler to regenerate
+correlations **and noisy total energy** for each C/N₀. This preserves
+their dependence and the orthogonal residual contribution. All methods share
+each draw. Repeated noise draws on one sampled path remain conditional trials;
+they cannot be pooled as new independent channel or oscillator realizations.
+Nonlinear/non-Gaussian frontend exports are rejected for this projection model.
+
+`--mode actual-noisy` uses `observation.c128`, `received_energy.f64`, public
+Grams and the physical validity calendar. It accepts one observed trial per
+path, rejects injected C/N₀ sweeps/replications, and never reads simulator means
+or signal energies for scoring. Both modes pool residuals orthogonal to the
+whole scored bank to obtain one noise upper bound per path/trial. The analytical
+noise-only allowance requires a single unknown stationary white proper-complex
+Gaussian variance and the stated independent-residual construction. A physical
+channel-prior mismatch can reduce reception without invalidating that null
+argument; colored or changing noise is a different issue.
+
+The wrapper defaults to the configurable `K=16` receiver/model alternatives
+and `D=8` duration alternatives, with one scheduled attempt per 60 seconds and
+the strict target below. Width, window and method choices made after inspecting
+scores must still fit the declared family. These fixed-window allocations do
+not implement continuous acquisition scheduling or unrestricted sequential
+stopping. Wrong-key rejection remains an empirical control, distinct from a
+noise-only false-admission bound. The
+[spread study](validation-data/triad-v3/2026-11-02-spread/README.md) records the
+sampled model, receiver refinement, computational costs and evidence limits.
 
 ## Operational accounting and benchmark distinctions
 

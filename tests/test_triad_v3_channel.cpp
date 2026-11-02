@@ -1,10 +1,13 @@
 #include "datapump/triad_modem_v3.hpp"
 #include "channel_spread.hpp"
+#include "triad_gaussian_fading.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <iostream>
+#include <limits>
+#include <numbers>
 #include <stdexcept>
 #include <vector>
 
@@ -823,6 +826,139 @@ void reciprocal_rate_checks() {
           "sub-Hz Wiener phase variance used an incorrect physical timestep");
 }
 
+void gaussian_path_kernel_and_statistics_checks() {
+    using detail::GaussianRayFading;
+    constexpr double width = .001, dt = 64;
+    GaussianRayFading path(width, dt, 20261105);
+    const auto h = path.coefficients();
+    check(h.size() == 51, "Gaussian path truncated support differs from its declared kernel");
+    long double energy = 0;
+    for (std::size_t k = 0; k < h.size(); ++k) {
+        energy += static_cast<long double>(h[k])*h[k];
+        check(h[k] == h[h.size()-1-k], "Gaussian path kernel is not symmetric");
+    }
+    check(std::abs(energy-1) < 2e-14 && std::abs(path.covariance(0)-1) < 2e-14,
+          "Gaussian path kernel is not normalized to unit mean ray power");
+    for (std::size_t lag = 0; lag < h.size(); ++lag) {
+        const double time = lag*dt;
+        const double target = std::exp(-.5*std::pow(std::numbers::pi*width*time,2));
+        check(std::abs(path.covariance(lag)-target) < 1e-10,
+              "finite Gaussian path covariance disagrees with the resolved Gaussian target");
+    }
+    check(path.covariance(h.size()) == 0 && path.covariance(UINT64_MAX) == 0,
+          "Gaussian finite-kernel covariance extends beyond its history");
+    GaussianRayFading large(.0004, 1, 91);
+    check(large.coefficients().size() <= GaussianRayFading::maximum_taps &&
+          large.working_bytes()+large.coefficients().size()*sizeof(double) < 400*1024,
+          "Gaussian path exceeds its declared bounded workspace including report copy");
+    rejects([&] { GaussianRayFading oversized(.00038, 1, 1); }, "Gaussian path silently clipped excessive kernel support");
+    rejects([&] { GaussianRayFading invalid(0, dt, 1); }, "Gaussian helper accepted zero width");
+    rejects([&] { GaussianRayFading invalid(width, 0, 1); }, "Gaussian helper accepted zero physical timestep");
+
+    constexpr std::size_t count = 65'536, lag = 4;
+    std::array<Complex,lag> previous{};
+    Complex mean{}, proper{}, cross{}, covariance{};
+    long double power0 = 0, power1 = 0;
+    for (std::size_t n = 0; n < count; ++n) {
+        const auto gains = path.next();
+        mean += gains[0]; proper += gains[0]*gains[0]; cross += gains[0]*std::conj(gains[1]);
+        power0 += std::norm(gains[0]); power1 += std::norm(gains[1]);
+        if (n >= lag) covariance += gains[0]*std::conj(previous[n%lag]);
+        previous[n%lag] = gains[0];
+    }
+    mean /= count; proper /= count; cross /= count; covariance /= count-lag;
+    power0 /= count; power1 /= count;
+    check(std::abs(power0-1) < .06 && std::abs(power1-1) < .06 &&
+          std::abs(mean) < .06 && std::abs(proper) < .08 && std::abs(cross) < .06 &&
+          std::abs(covariance-Complex{path.covariance(lag),0}) < .06,
+          "Gaussian ray moments/covariance/independence failed fixed-seed numerical diagnostic");
+    long double initial_power = 0;
+    for (std::uint64_t seed = 0; seed < 2048; ++seed) {
+        GaussianRayFading first(width, dt, seed);
+        initial_power += std::norm(first.next()[0]);
+    }
+    initial_power /= 2048;
+    check(std::abs(initial_power-1) < .12,
+          "Gaussian ray warm history did not give stationary first-sample power");
+    std::cout << "Gaussian path FIR rows=" << count << " taps=" << h.size()
+              << " powers=" << power0 << ',' << power1 << " lag4=" << covariance
+              << " expected=" << path.covariance(lag) << " cross=" << cross
+              << " initial power=" << initial_power << '\n';
+}
+
+void gaussian_path_sampled_channel_checks() {
+    auto f = fixture_format();
+    f.inner_rate_hz = .0036; f.added_symbols = 1;
+    f.sample_rate = 1; f.sample_rate_denominator = 64;
+    const double fs = effective_sample_rate(f);
+    StreamChannelConfig cfg;
+    cfg.effects.noise_enabled = false;
+    const auto baseline = capture(73, cfg, f);
+    auto off = cfg;
+    off.path_seed = 20261105;
+    StreamChannelReport off_report;
+    check(baseline == capture(193, off, f, &off_report) &&
+          off_report.path_gaussian_fir_coefficients.empty() && off_report.path_gaussian_sample_interval_seconds == 0,
+          "Gaussian Off changed established output, RNG or metadata");
+
+    cfg.path_seed = 20261105;
+    cfg.path_evolution.gaussian_doppler_width_hz = .001;
+    cfg.effects.spread_doppler_hz = .001; // Two coincident rays with known center separation.
+    StreamChannelReport report;
+    const auto faded = capture(73, cfg, f, &report);
+    check(faded == capture(193, cfg, f), "Gaussian FIR history depends on stream chunk boundaries");
+    detail::GaussianRayFading reference(.001, 64, *cfg.path_seed);
+    modem::detail::SpreadRay ray(fs, .001, 0x13579bdf ^ 0x325449415443484eULL);
+    check(report.path_gaussian_sample_interval_seconds == 64 &&
+          report.path_gaussian_fir_coefficients.size() == reference.coefficients().size(),
+          "Gaussian path report omitted physical timestep or finite kernel");
+    check(faded.size() == baseline.size(), "Gaussian ray evolution changed waveform support");
+    for (std::size_t n = 0; n < faded.size(); ++n) {
+        const auto gain = reference.next();
+        const auto expected = ray.process(baseline[n]*gain[0],baseline[n]*gain[1]);
+        check(std::abs(faded[n]-expected) < 2e-12,
+              "sampled Gaussian rays lost physical-time state or shared two-ray composition through source silence");
+    }
+    auto outage = cfg;
+    outage.path_evolution.outage_start_seconds = 50'000;
+    outage.path_evolution.outage_end_seconds = 60'000;
+    outage.path_evolution.outage_ramp_seconds = 256;
+    const auto interrupted = capture(257, outage, f);
+    for (std::size_t n = 0; n < faded.size(); ++n)
+        if (n*64 >= 60'000) check(interrupted[n] == faded[n], "Gaussian ray history stopped during signal outage");
+    auto noise = cfg;
+    noise.effects.signal_enabled = false; noise.effects.noise_enabled = true;
+    noise.complex_noise_variance = .1; noise.noise_seed = 912;
+    const auto noise0 = capture(73, noise, f);
+    noise.path_seed = 20261106;
+    check(noise0 == capture(193, noise, f), "Gaussian teacher seed changed independent thermal noise");
+
+    const auto key = fixture_key();
+    PatternSource source(f, key, 1);
+    cfg.effects.sample_rate = fs;
+    cfg.effects.occupied_bandwidth_hz = geometry(f).occupied_bandwidth_hz;
+    cfg.effects.rx.audio_ppm = .01;
+    StreamingChannel channel(source, cfg);
+    const double physical_dt = 1/(fs*(1+.01e-6));
+    detail::GaussianRayFading physical(.001, physical_dt, *cfg.path_seed);
+    check(channel.report().path_gaussian_sample_interval_seconds == physical_dt &&
+          channel.path_gaussian_covariance(4) == physical.covariance(4),
+          "Gaussian covariance metadata ignored independent RX physical sample clock");
+    auto reject_change = [&](auto change) {
+        auto invalid = cfg; change(invalid);
+        rejects([&] { StreamingChannel rejected(source, invalid); }, "invalid Gaussian path configuration was accepted");
+    };
+    reject_change([](auto& c) { c.path_evolution.ray_coherence_seconds = 600; });
+    reject_change([](auto& c) { c.path_evolution.gaussian_doppler_width_hz = -1; });
+    reject_change([](auto& c) { c.path_evolution.gaussian_doppler_width_hz = std::numeric_limits<double>::infinity(); });
+    reject_change([](auto& c) { c.path_evolution.gaussian_doppler_width_hz = .003; });
+    reject_change([](auto& c) { c.path_evolution.gaussian_doppler_width_hz = 1e-8; });
+    cfg.path_evolution.gaussian_doppler_width_hz = 0;
+    StreamingChannel bypass(source, cfg);
+    check(bypass.path_gaussian_covariance(0) == 0 && bypass.report().path_gaussian_fir_coefficients.empty(),
+          "disabled Gaussian teacher retained stochastic covariance");
+}
+
 // This is an extent/prefix resource check, not a two-day sampled propagation
 // run. Full-duration evidence must separately drain and score the entire stream.
 void long_extent_prefix_and_tail_checks() {
@@ -903,6 +1039,8 @@ int main() {
         path_ou_statistics_checks();
         low_rate_path_configuration_checks();
         reciprocal_rate_checks();
+        gaussian_path_kernel_and_statistics_checks();
+        gaussian_path_sampled_channel_checks();
         long_extent_prefix_and_tail_checks();
         std::cout << "triad v3 streaming channel checks passed\n";
         return 0;

@@ -32,6 +32,9 @@ adds low-rate representation, sampled month-long observations, evolving-ray
 stress cases and conditional-channel phase-particle likelihoods. Its measured
 reception probabilities apply to the declared sampled models and acquisition
 conditions; the record separates these from ideal presence-detection bounds.
+The [spread-boundary study](validation-data/triad-v3/2026-11-02-spread/README.md)
+separates deterministic ray-center changes from stochastic Doppler width and
+tests the receiver's block/window approximations under explicit duration limits.
 
 Before changing arithmetic or relating these experiments to a precision
 dropdown, read the [precision-control experiment guide](gpu-precision-controls.md).
@@ -241,18 +244,31 @@ measurements or a device-specific Allan-deviation model.
 ### Optional long-span path evolution
 
 `StreamChannelConfig.path_evolution` adds independent stationary proper-complex
-OU ray gains, common sinusoidal path phase and one finite signal outage to the
-isolated streaming channel. Defaults are off and preserve the earlier sample
-and RNG sequence. The [channel-model contract](channel-models.md#isolated-triad-long-span-path-evolution)
+OU or Gaussian-spectrum ray gains, common sinusoidal path phase and one finite
+signal outage to the isolated streaming channel. Defaults are off and preserve
+the earlier sample and RNG sequence. The
+[channel-model contract](channel-models.md#isolated-triad-long-span-path-evolution)
 defines their units, order, seed and time coordinate. CLI controls are
-`--ray-coherence-seconds`, `--diurnal-phase-radians`,
+`--ray-coherence-seconds`, `--ray-gaussian-width-hz`, `--diurnal-phase-radians`,
 `--diurnal-period-seconds`, `--outage-seconds START END`, `--outage-gain`,
 `--outage-ramp-seconds` and `--path-seed`.
 
 These are independently selected stress models. A 0.001-Hz separation of two
-fixed rays describes beating; it does not by itself set an OU coherence time.
-OU paths have unbounded spectral tails, so the deterministic capture check is
-not an analog bandwidth guarantee. GPSDO presets likewise remain declared
+fixed rays describes beating; it does not by itself set an OU coherence time
+or a Gaussian Doppler width. The Gaussian width is `B = 2σ` Hz, implemented by
+independent stationary finite FIR ray gains, and is mutually exclusive with
+positive OU coherence. The teacher reports its actual normalized kernel and
+physical RX timestep; its 8,193-tap cap is explicit. The `6B` total capture
+allowance reserves six Gaussian standard deviations at each edge, not hard
+spectral support. Both stochastic alternatives need sampling refinement, so the
+deterministic capture check is not an analog bandwidth guarantee.
+
+`--spread-delay-ms` and `--spread-doppler-hz` instead override nominal physical
+ray geometry before one margin multiplication. They leave the public receiver
+`--tap-delay-ms` and `--tap-doppler-hz` hypotheses independent; the
+[channel-model contract](channel-models.md#isolated-triad-long-span-path-evolution)
+also specifies legacy-channel fallback and default-off behavior.
+GPSDO presets likewise remain declared
 simulation inputs over a long observation, not measured device behavior.
 NIST describes methods for evaluating actual GPSDO frequency/time uncertainty
 ([Lombardi, 2016](https://www.nist.gov/publications/evaluating-frequency-and-time-uncertainty-gps-disciplined-oscillators-and-clocks));
@@ -577,6 +593,41 @@ nearly singular whitening and sensitive reductions use FP64. The Gaussian and
 phase/frequency bulk may use FP32 or FP64, but their accumulated log evidence is
 FP64; the FP32 CUDA path disables TF32 and lower-precision matrix multiply.
 FP64 reference comparisons remain important near an admission threshold.
+
+### Windowed Gaussian Doppler likelihood
+
+[`triad_gaussian_window.py`](../tools/triad_gaussian_window.py) prepares a
+Gaussian coefficient prior across physical block centers within each fixed,
+nonoverlapping window. Its covariance is `exp[−(π B Δt)²/2]` times each tap's
+declared stationary power; ray Doppler already represented in the sampled
+basis is not added again. PSD square-root/eigenvalue preparation supports
+rank-deficient Grams without inverting a nearly singular channel covariance.
+Prepared factors are reused across observations and stationary residual-noise
+upper bounds, then scored with batched complex matrix products.
+
+Independent windows and block-center coefficients define the receiver's
+alternative model. The sampled Gaussian FIR teacher can evolve within a block
+and remain correlated across windows. Shorter-block and longer-window checks
+must measure those losses; a normalized likelihood is not evidence that the
+alternative matches the physical channel. This method has no additional
+residual-CFO search beyond the exported candidate bank.
+
+[`triad-conditional-sweep.py`](../tools/triad-conditional-sweep.py) compares
+`static-fft-ucb`, `gaussian-ou-ucb`, `cfo-ou-ucb` and `gaussian-window-ucb` on
+common observations. Conditional mode draws full-bank correlations and noisy
+total energy jointly from each sampled path; repetitions vary thermal noise,
+not the physical path. `--mode actual-noisy` instead reads the actual noisy
+correlations and received energy, with one observed trial per path and no
+C/N₀ injection or sweep. Simulation means, signal energies and selected truth
+are excluded from receiver scoring. See the
+[noise-calibration assumptions](triad-noise-calibration.md#gaussian-spectrum-windows-and-paired-sweeps)
+for the stationary full-bank UCB and configurable `K=16/D=8` family accounting.
+
+Gaussian-window preparation and evidence use FP64; optional FP32 applies to
+the bulk correlation/transform products, with TF32 disabled. The retained
+factor/cache sizes scale with observation blocks and have explicit memory
+preflight. This is a reusable exported-workspace receiver, not a new bounded
+C++ streaming mode, an anytime stopping rule or an automatic duration inverse.
 
 ### Conditional Gaussian channel with phase particles
 

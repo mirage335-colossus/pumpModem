@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import signal
 import subprocess
 import sys
@@ -66,6 +67,9 @@ class LowRateCampaignTests(unittest.TestCase):
         self.assertNotIn("--no-encrypt", command)
         self.assertNotIn("--fhss", command)
         self.assertNotIn("--burst-wait-tiles", command)
+        self.assertNotIn("--spread-delay-ms", command)
+        self.assertNotIn("--spread-doppler-hz", command)
+        self.assertNotIn("--ray-gaussian-width-hz", command)
         self.assertIn("--stats-noisy", command)
         self.assertEqual(identity["source_bit"], 1)
         seeds = [identity[d+"_seed"] for d in campaign.SEED_DOMAINS]
@@ -80,6 +84,67 @@ class LowRateCampaignTests(unittest.TestCase):
         self.assertEqual(command[command.index("--tap-delay-ms")+1], "1.5")
         self.assertEqual(command[command.index("--tap-doppler-hz")+1], "0.3")
         self.assertEqual(command[command.index("--spread-preset")+1], "sub9-best")
+
+    def test_physical_rf_and_spread_options_preserve_receiver_basis_and_seeds(self):
+        baseline = self.args()
+        args = self.args("--rf-hz", "5800000000", "--spread-preset", "hf-best",
+                         "--spread-delay-ms", "1.25", "--spread-doppler-hz", ".125")
+        campaign.validate(args)
+        command, _ = campaign.make_command(args, 4, self.root / "path")
+        for flag, value in (("--rf-hz", "5800000000"), ("--spread-preset", "hf-best"),
+                            ("--spread-delay-ms", "1.25"), ("--spread-doppler-hz", "0.125"),
+                            ("--tap-delay-ms", "0.005"), ("--tap-doppler-hz", "0.001")):
+            self.assertEqual(command[command.index(flag)+1], value)
+        for domain in campaign.SEED_DOMAINS:
+            self.assertEqual(campaign.seed_for(baseline, 4, domain), campaign.seed_for(args, 4, domain))
+        # Explicit zero differs from omission, and either dimension may be
+        # overridden alone without implicitly replacing the other dimension.
+        args = self.args("--spread-delay-ms", "0")
+        campaign.validate(args)
+        command, _ = campaign.make_command(args, 0, self.root / "path")
+        self.assertEqual(command[command.index("--spread-delay-ms")+1], "0")
+        self.assertNotIn("--spread-doppler-hz", command)
+
+    def test_spread_choices_match_canonical_ids_and_invalid_physics_rejected(self):
+        source = (SCRIPT.parents[1] / "src" / "tuning_presets.cpp").read_text()
+        canonical = re.findall(r'SpreadPreset\{"([^"]+)"', source)
+        self.assertEqual(list(campaign.SPREAD_PRESETS), canonical)
+        for preset in canonical:
+            args = self.args("--spread-preset", preset)
+            campaign.validate(args)
+            command, _ = campaign.make_command(args, 0, self.root / "path")
+            self.assertEqual(command[command.index("--spread-preset")+1], preset)
+        for name, value in (("rf_hz", 0), ("rf_hz", -1), ("rf_hz", float("inf")), ("rf_hz", 11e9),
+                            ("spread_delay_ms", -1), ("spread_delay_ms", float("nan")),
+                            ("spread_doppler_hz", -1), ("spread_doppler_hz", float("inf")),
+                            ("spread_preset", "unknown")):
+            args = self.args()
+            setattr(args, name, value)
+            with self.subTest(name=name, value=value), self.assertRaises(ValueError):
+                campaign.validate(args)
+            self.assertFalse((self.root / "result").exists())
+        campaign.validate(self.args("--rf-hz", "10000000000"))
+
+    def test_gaussian_ray_width_forwarding_pairing_and_exclusions(self):
+        baseline = self.args()
+        explicit_off = self.args("--ray-gaussian-width-hz", "0")
+        self.assertEqual(campaign.make_command(baseline, 0, self.root / "path"),
+                         campaign.make_command(explicit_off, 0, self.root / "path"))
+        args = self.args("--ray-gaussian-width-hz", ".125")
+        campaign.validate(args)
+        command, _ = campaign.make_command(args, 0, self.root / "path")
+        self.assertEqual(command[command.index("--ray-gaussian-width-hz")+1], "0.125")
+        self.assertEqual(command[command.index("--tap-doppler-hz")+1], "0.001")
+        for domain in campaign.SEED_DOMAINS:
+            self.assertEqual(campaign.seed_for(baseline, 0, domain), campaign.seed_for(args, 0, domain))
+        for width in (-1, float("nan"), float("inf")):
+            invalid = self.args()
+            invalid.ray_gaussian_width_hz = width
+            with self.subTest(width=width), self.assertRaises(ValueError):
+                campaign.validate(invalid)
+        with self.assertRaises(ValueError):
+            campaign.validate(self.args("--ray-gaussian-width-hz", ".125", "--ray-coherence-seconds", "100"))
+        self.assertFalse((self.root / "result").exists())
 
     def test_sampled_controls_forward_without_changing_seed_identity(self):
         base = self.args()
