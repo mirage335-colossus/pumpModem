@@ -1,0 +1,2712 @@
+{
+  "schema": "triad-posthoc-wrong-key-diagnostic-v1",
+  "source_sha256": "c455ac092cbe3cf39dc8ee050e4c855f29ea4b3ddcdee8547525fe10a063fcb8",
+  "focused_self_checks": {
+    "dense_raw_covariance_geometry": "passed",
+    "dense_raw_gaussian_mean_score": "passed",
+    "synthetic_operating_point_accounting": "passed"
+  },
+  "dependency_sha256": {
+    "triad-retained-energy.py": "5e7d4e775305d876427091180375082eb27f193f6ff37958f918362c3f9b764b",
+    "triad_gaussian_window.py": "dd5d8083999a97f66f74673264f80117b06557c45b3f4646a88e9668a29d03ee",
+    "triad_state_workspace.py": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923"
+  },
+  "warning": "Post-hoc diagnosis only. Primary gates/results remain unchanged. Noise-only LR calibration never promised rejection of arbitrary wrong-key signals.",
+  "score_tradeoffs": [
+    {
+      "profile": "g01slowrate",
+      "input_bindings": [
+        {
+          "json": "local-evidence/triad-selective/followup-complete/followup-scores/g01slowrate-each-65-cn0m24-signal-batch00.json",
+          "json_sha256": "49db3e6403df1fd53c3db7c8840a1c21a162493c6e7cf1f7359b4d764703b5dd",
+          "npz": "local-evidence/triad-selective/followup-complete/followup-scores/g01slowrate-each-65-cn0m24-signal-batch00.scores.npz",
+          "npz_sha256": "35e7fc489d665b20eb47f05f1a75f5ebb5d2f826c7f2799e0bc957ceacd7b4a7"
+        },
+        {
+          "json": "local-evidence/triad-selective/followup-complete/followup-scores/g01slowrate-each-65-cn0m24-signal-batch01.json",
+          "json_sha256": "857beb87e18262c727a3b09f24ea9096b9bee2efc0b1c24c7c4bae9c4c7bac0c",
+          "npz": "local-evidence/triad-selective/followup-complete/followup-scores/g01slowrate-each-65-cn0m24-signal-batch01.scores.npz",
+          "npz_sha256": "c2f2c82f4dc9b694ac672af36f27ad3822bb9c0d5c4c1f8f3937f3efdd97f8b4"
+        },
+        {
+          "json": "local-evidence/triad-selective/followup-complete/followup-scores/g01slowrate-each-65-cn0m24-signal-batch02.json",
+          "json_sha256": "c1d6101e883b63e8cb029a0302d51403ca68a53b2cb058e630f6d385834036f6",
+          "npz": "local-evidence/triad-selective/followup-complete/followup-scores/g01slowrate-each-65-cn0m24-signal-batch02.scores.npz",
+          "npz_sha256": "6358f160d6f5d64a2ef1bc2e99bd2b4deab9d746bc4098cc99d0854118252652"
+        },
+        {
+          "json": "local-evidence/triad-selective/followup-complete/followup-scores/g01slowrate-each-65-cn0m24-signal-batch03.json",
+          "json_sha256": "0238bfe59df442b2c6cfd00eeab7da71a6d20893786de00a55121d8090364fdc",
+          "npz": "local-evidence/triad-selective/followup-complete/followup-scores/g01slowrate-each-65-cn0m24-signal-batch03.scores.npz",
+          "npz_sha256": "ed0c1401bb305124de215cec806f15c4e2bc285fa2b92395ef43b5c7a0167b64"
+        },
+        {
+          "json": "local-evidence/triad-selective/followup-complete/followup-scores/g01slowrate-each-65-cn0m24-signal-batch04.json",
+          "json_sha256": "bd36b8870b1842ffb9dfa088520efac038d4a18065f536bb1df9937a295f2383",
+          "npz": "local-evidence/triad-selective/followup-complete/followup-scores/g01slowrate-each-65-cn0m24-signal-batch04.scores.npz",
+          "npz_sha256": "bc269a8f4eb573a2169b78cbca0bcb7d7e81645ff799789acc4d90f5354ee9ce"
+        },
+        {
+          "json": "local-evidence/triad-selective/followup-complete/followup-scores/g01slowrate-each-65-cn0m24-signal-batch05.json",
+          "json_sha256": "09f34beb898fc3b677de832d726e99a6deb4ceee08be38afb9905086dc571259",
+          "npz": "local-evidence/triad-selective/followup-complete/followup-scores/g01slowrate-each-65-cn0m24-signal-batch05.scores.npz",
+          "npz_sha256": "2d29c8f7eac9777f7b2e1a2b3d84004391a39184660b215327be7547ecab16c5"
+        },
+        {
+          "json": "local-evidence/triad-selective/followup-complete/followup-scores/g01slowrate-each-65-cn0m24-wrong-key-batch00.json",
+          "json_sha256": "7324e8c9332ed51f9dd4abef7b0a0177ad80b5ca3d9a29aceaa5f63fd4711bdf",
+          "npz": "local-evidence/triad-selective/followup-complete/followup-scores/g01slowrate-each-65-cn0m24-wrong-key-batch00.scores.npz",
+          "npz_sha256": "95c5611e21ecaf08fae95fde5b4fee87c23a95a7da6807173b344c6c3700ebc0"
+        }
+      ],
+      "strict_log_threshold": 22.72106338958574,
+      "relaxed_log_threshold": 17.422746023037703,
+      "signal_score_maximum_quantiles": [
+        28.04952094896405,
+        32.946747075825705,
+        40.15603765435006,
+        55.232457441738575,
+        90.18316497995876
+      ],
+      "signal_margin_quantiles": [
+        7.1373092195401995,
+        17.03187872524168,
+        29.120335407274506,
+        41.20921827111043,
+        72.96001601767773
+      ],
+      "wrong_key_score_maximum_quantiles": [
+        -1.675892880380491,
+        6.986304432716698,
+        13.910442329010788,
+        18.37969259220769,
+        30.364536506570523
+      ],
+      "wrong_key_margin_quantiles": [
+        0.3128237605137869,
+        3.133146685895054,
+        6.195871279183312,
+        9.945817062537863,
+        17.082752229878785
+      ],
+      "operating_points": [
+        {
+          "log_lr_threshold": 17.422746023037703,
+          "log_lr_margin_minimum": 0.0,
+          "signal_trials": 300,
+          "correct_accepted": 300,
+          "wrong_bit_accepted": 0,
+          "missed": 0,
+          "wrong_key_trials": 32,
+          "wrong_key_admitted": 10
+        },
+        {
+          "log_lr_threshold": 17.422746023037703,
+          "log_lr_margin_minimum": 10.0,
+          "signal_trials": 300,
+          "correct_accepted": 299,
+          "wrong_bit_accepted": 0,
+          "missed": 1,
+          "wrong_key_trials": 32,
+          "wrong_key_admitted": 5
+        },
+        {
+          "log_lr_threshold": 17.422746023037703,
+          "log_lr_margin_minimum": 15.0,
+          "signal_trials": 300,
+          "correct_accepted": 298,
+          "wrong_bit_accepted": 0,
+          "missed": 2,
+          "wrong_key_trials": 32,
+          "wrong_key_admitted": 2
+        },
+        {
+          "log_lr_threshold": 17.422746023037703,
+          "log_lr_margin_minimum": 20.0,
+          "signal_trials": 300,
+          "correct_accepted": 296,
+          "wrong_bit_accepted": 0,
+          "missed": 4,
+          "wrong_key_trials": 32,
+          "wrong_key_admitted": 0
+        },
+        {
+          "log_lr_threshold": 17.422746023037703,
+          "log_lr_margin_minimum": 25.0,
+          "signal_trials": 300,
+          "correct_accepted": 289,
+          "wrong_bit_accepted": 0,
+          "missed": 11,
+          "wrong_key_trials": 32,
+          "wrong_key_admitted": 0
+        },
+        {
+          "log_lr_threshold": 17.422746023037703,
+          "log_lr_margin_minimum": 30.0,
+          "signal_trials": 300,
+          "correct_accepted": 265,
+          "wrong_bit_accepted": 0,
+          "missed": 35,
+          "wrong_key_trials": 32,
+          "wrong_key_admitted": 0
+        },
+        {
+          "log_lr_threshold": 22.72106338958574,
+          "log_lr_margin_minimum": 0.0,
+          "signal_trials": 300,
+          "correct_accepted": 300,
+          "wrong_bit_accepted": 0,
+          "missed": 0,
+          "wrong_key_trials": 32,
+          "wrong_key_admitted": 6
+        },
+        {
+          "log_lr_threshold": 22.72106338958574,
+          "log_lr_margin_minimum": 10.0,
+          "signal_trials": 300,
+          "correct_accepted": 299,
+          "wrong_bit_accepted": 0,
+          "missed": 1,
+          "wrong_key_trials": 32,
+          "wrong_key_admitted": 3
+        },
+        {
+          "log_lr_threshold": 22.72106338958574,
+          "log_lr_margin_minimum": 15.0,
+          "signal_trials": 300,
+          "correct_accepted": 298,
+          "wrong_bit_accepted": 0,
+          "missed": 2,
+          "wrong_key_trials": 32,
+          "wrong_key_admitted": 1
+        },
+        {
+          "log_lr_threshold": 22.72106338958574,
+          "log_lr_margin_minimum": 20.0,
+          "signal_trials": 300,
+          "correct_accepted": 296,
+          "wrong_bit_accepted": 0,
+          "missed": 4,
+          "wrong_key_trials": 32,
+          "wrong_key_admitted": 0
+        },
+        {
+          "log_lr_threshold": 22.72106338958574,
+          "log_lr_margin_minimum": 25.0,
+          "signal_trials": 300,
+          "correct_accepted": 289,
+          "wrong_bit_accepted": 0,
+          "missed": 11,
+          "wrong_key_trials": 32,
+          "wrong_key_admitted": 0
+        },
+        {
+          "log_lr_threshold": 22.72106338958574,
+          "log_lr_margin_minimum": 30.0,
+          "signal_trials": 300,
+          "correct_accepted": 265,
+          "wrong_bit_accepted": 0,
+          "missed": 35,
+          "wrong_key_trials": 32,
+          "wrong_key_admitted": 0
+        },
+        {
+          "log_lr_threshold": 25.0,
+          "log_lr_margin_minimum": 0.0,
+          "signal_trials": 300,
+          "correct_accepted": 300,
+          "wrong_bit_accepted": 0,
+          "missed": 0,
+          "wrong_key_trials": 32,
+          "wrong_key_admitted": 5
+        },
+        {
+          "log_lr_threshold": 30.0,
+          "log_lr_margin_minimum": 0.0,
+          "signal_trials": 300,
+          "correct_accepted": 299,
+          "wrong_bit_accepted": 0,
+          "missed": 1,
+          "wrong_key_trials": 32,
+          "wrong_key_admitted": 1
+        },
+        {
+          "log_lr_threshold": 35.0,
+          "log_lr_margin_minimum": 0.0,
+          "signal_trials": 300,
+          "correct_accepted": 287,
+          "wrong_bit_accepted": 0,
+          "missed": 13,
+          "wrong_key_trials": 32,
+          "wrong_key_admitted": 0
+        },
+        {
+          "log_lr_threshold": 40.0,
+          "log_lr_margin_minimum": 0.0,
+          "signal_trials": 300,
+          "correct_accepted": 270,
+          "wrong_bit_accepted": 0,
+          "missed": 30,
+          "wrong_key_trials": 32,
+          "wrong_key_admitted": 0
+        }
+      ],
+      "scope": "post-hoc empirical tradeoff on these reused samples only; no selected new gate, confidence guarantee, continuous-operation wrong-key bound or new qualification"
+    },
+    {
+      "profile": "g1slowrate",
+      "input_bindings": [
+        {
+          "json": "local-evidence/triad-selective/followup-complete/followup-scores/g1slowrate-each-65-cn0m14-signal-batch00.json",
+          "json_sha256": "5d3ed8b5461d43b1f5c67ac81b71d1ea32940a17eb19259daed2d0bd096576b4",
+          "npz": "local-evidence/triad-selective/followup-complete/followup-scores/g1slowrate-each-65-cn0m14-signal-batch00.scores.npz",
+          "npz_sha256": "929eee680247b39a4a6d1456c18b19ea7d4380b12c3177c5319cbf8bd067589b"
+        },
+        {
+          "json": "local-evidence/triad-selective/followup-complete/followup-scores/g1slowrate-each-65-cn0m14-signal-batch01.json",
+          "json_sha256": "3b768dfbc4e3276eee052857ff5932d44d2aa935e99e5a2c504191e00602c881",
+          "npz": "local-evidence/triad-selective/followup-complete/followup-scores/g1slowrate-each-65-cn0m14-signal-batch01.scores.npz",
+          "npz_sha256": "59661bac578519b5555c809a44acbd00299cd140cdc1640a92120384cef0e878"
+        },
+        {
+          "json": "local-evidence/triad-selective/followup-complete/followup-scores/g1slowrate-each-65-cn0m14-signal-batch02.json",
+          "json_sha256": "f07ebe8cfc9607f1f4bf1bb4eb2635aabd8601b1e59ab3c3409f3de3fcde7866",
+          "npz": "local-evidence/triad-selective/followup-complete/followup-scores/g1slowrate-each-65-cn0m14-signal-batch02.scores.npz",
+          "npz_sha256": "5bd0064a57919d0b1c8de724bed4c13750fbfe8c093375b63899cc03187bdbf4"
+        },
+        {
+          "json": "local-evidence/triad-selective/followup-complete/followup-scores/g1slowrate-each-65-cn0m14-signal-batch03.json",
+          "json_sha256": "bc1c2cb5fef990cde911ba61726e9a5979923b06ba7333d21316ba383290b7ee",
+          "npz": "local-evidence/triad-selective/followup-complete/followup-scores/g1slowrate-each-65-cn0m14-signal-batch03.scores.npz",
+          "npz_sha256": "136966d30f3f3659bdadd97effb6cff693bd8effee7da2e391a48142880d37ee"
+        },
+        {
+          "json": "local-evidence/triad-selective/followup-complete/followup-scores/g1slowrate-each-65-cn0m14-signal-batch04.json",
+          "json_sha256": "7dc75e722e9d123df4d5ca20cdb254d727e5d59b8a30345a7dd0dbd50838d85d",
+          "npz": "local-evidence/triad-selective/followup-complete/followup-scores/g1slowrate-each-65-cn0m14-signal-batch04.scores.npz",
+          "npz_sha256": "b9f299a7ed5fb8890c6e9856cfe0308614b0559390c0a6c15c39a494b0c470f5"
+        },
+        {
+          "json": "local-evidence/triad-selective/followup-complete/followup-scores/g1slowrate-each-65-cn0m14-signal-batch05.json",
+          "json_sha256": "81c9ad064ecda5516196fed5a17fab8b76e22bdb10ce66935f0533aec0b80473",
+          "npz": "local-evidence/triad-selective/followup-complete/followup-scores/g1slowrate-each-65-cn0m14-signal-batch05.scores.npz",
+          "npz_sha256": "e3ca507f88e8f4042d5f02d3cc1eae8656a1896ce63961801f8451ed324fe374"
+        },
+        {
+          "json": "local-evidence/triad-selective/followup-complete/followup-scores/g1slowrate-each-65-cn0m14-wrong-key-batch00.json",
+          "json_sha256": "753bab4f36f402024b378f3c746ce8ea4a06c67841bf80f439a1348e7cb606d5",
+          "npz": "local-evidence/triad-selective/followup-complete/followup-scores/g1slowrate-each-65-cn0m14-wrong-key-batch00.scores.npz",
+          "npz_sha256": "105c909cb32254b8b120190ad203c7827730823958fa328769d4bcaad2f9f588"
+        }
+      ],
+      "strict_log_threshold": 22.72106338958574,
+      "relaxed_log_threshold": 17.422746023037703,
+      "signal_score_maximum_quantiles": [
+        16.68453292183325,
+        24.10098395008827,
+        33.07108070226105,
+        46.12361184073687,
+        74.67703707922556
+      ],
+      "signal_margin_quantiles": [
+        10.896257647499414,
+        17.15600418861121,
+        22.5687673310591,
+        32.96316510078995,
+        54.02551173612184
+      ],
+      "wrong_key_score_maximum_quantiles": [
+        0.048067709714773775,
+        8.687036277428042,
+        14.303058335044966,
+        21.618065904083114,
+        31.359163232488015
+      ],
+      "wrong_key_margin_quantiles": [
+        0.12401867897423458,
+        2.596993613021995,
+        6.382535668361907,
+        9.881063185814995,
+        21.645548950444017
+      ],
+      "operating_points": [
+        {
+          "log_lr_threshold": 17.422746023037703,
+          "log_lr_margin_minimum": 0.0,
+          "signal_trials": 300,
+          "correct_accepted": 299,
+          "wrong_bit_accepted": 0,
+          "missed": 1,
+          "wrong_key_trials": 32,
+          "wrong_key_admitted": 13
+        },
+        {
+          "log_lr_threshold": 17.422746023037703,
+          "log_lr_margin_minimum": 10.0,
+          "signal_trials": 300,
+          "correct_accepted": 299,
+          "wrong_bit_accepted": 0,
+          "missed": 1,
+          "wrong_key_trials": 32,
+          "wrong_key_admitted": 5
+        },
+        {
+          "log_lr_threshold": 17.422746023037703,
+          "log_lr_margin_minimum": 15.0,
+          "signal_trials": 300,
+          "correct_accepted": 297,
+          "wrong_bit_accepted": 0,
+          "missed": 3,
+          "wrong_key_trials": 32,
+          "wrong_key_admitted": 2
+        },
+        {
+          "log_lr_threshold": 17.422746023037703,
+          "log_lr_margin_minimum": 20.0,
+          "signal_trials": 300,
+          "correct_accepted": 283,
+          "wrong_bit_accepted": 0,
+          "missed": 17,
+          "wrong_key_trials": 32,
+          "wrong_key_admitted": 1
+        },
+        {
+          "log_lr_threshold": 17.422746023037703,
+          "log_lr_margin_minimum": 25.0,
+          "signal_trials": 300,
+          "correct_accepted": 248,
+          "wrong_bit_accepted": 0,
+          "missed": 52,
+          "wrong_key_trials": 32,
+          "wrong_key_admitted": 0
+        },
+        {
+          "log_lr_threshold": 17.422746023037703,
+          "log_lr_margin_minimum": 30.0,
+          "signal_trials": 300,
+          "correct_accepted": 195,
+          "wrong_bit_accepted": 0,
+          "missed": 105,
+          "wrong_key_trials": 32,
+          "wrong_key_admitted": 0
+        },
+        {
+          "log_lr_threshold": 22.72106338958574,
+          "log_lr_margin_minimum": 0.0,
+          "signal_trials": 300,
+          "correct_accepted": 297,
+          "wrong_bit_accepted": 0,
+          "missed": 3,
+          "wrong_key_trials": 32,
+          "wrong_key_admitted": 7
+        },
+        {
+          "log_lr_threshold": 22.72106338958574,
+          "log_lr_margin_minimum": 10.0,
+          "signal_trials": 300,
+          "correct_accepted": 297,
+          "wrong_bit_accepted": 0,
+          "missed": 3,
+          "wrong_key_trials": 32,
+          "wrong_key_admitted": 2
+        },
+        {
+          "log_lr_threshold": 22.72106338958574,
+          "log_lr_margin_minimum": 15.0,
+          "signal_trials": 300,
+          "correct_accepted": 295,
+          "wrong_bit_accepted": 0,
+          "missed": 5,
+          "wrong_key_trials": 32,
+          "wrong_key_admitted": 1
+        },
+        {
+          "log_lr_threshold": 22.72106338958574,
+          "log_lr_margin_minimum": 20.0,
+          "signal_trials": 300,
+          "correct_accepted": 282,
+          "wrong_bit_accepted": 0,
+          "missed": 18,
+          "wrong_key_trials": 32,
+          "wrong_key_admitted": 0
+        },
+        {
+          "log_lr_threshold": 22.72106338958574,
+          "log_lr_margin_minimum": 25.0,
+          "signal_trials": 300,
+          "correct_accepted": 247,
+          "wrong_bit_accepted": 0,
+          "missed": 53,
+          "wrong_key_trials": 32,
+          "wrong_key_admitted": 0
+        },
+        {
+          "log_lr_threshold": 22.72106338958574,
+          "log_lr_margin_minimum": 30.0,
+          "signal_trials": 300,
+          "correct_accepted": 194,
+          "wrong_bit_accepted": 0,
+          "missed": 106,
+          "wrong_key_trials": 32,
+          "wrong_key_admitted": 0
+        },
+        {
+          "log_lr_threshold": 25.0,
+          "log_lr_margin_minimum": 0.0,
+          "signal_trials": 300,
+          "correct_accepted": 293,
+          "wrong_bit_accepted": 0,
+          "missed": 7,
+          "wrong_key_trials": 32,
+          "wrong_key_admitted": 4
+        },
+        {
+          "log_lr_threshold": 30.0,
+          "log_lr_margin_minimum": 0.0,
+          "signal_trials": 300,
+          "correct_accepted": 281,
+          "wrong_bit_accepted": 0,
+          "missed": 19,
+          "wrong_key_trials": 32,
+          "wrong_key_admitted": 1
+        },
+        {
+          "log_lr_threshold": 35.0,
+          "log_lr_margin_minimum": 0.0,
+          "signal_trials": 300,
+          "correct_accepted": 254,
+          "wrong_bit_accepted": 0,
+          "missed": 46,
+          "wrong_key_trials": 32,
+          "wrong_key_admitted": 0
+        },
+        {
+          "log_lr_threshold": 40.0,
+          "log_lr_margin_minimum": 0.0,
+          "signal_trials": 300,
+          "correct_accepted": 208,
+          "wrong_bit_accepted": 0,
+          "missed": 92,
+          "wrong_key_trials": 32,
+          "wrong_key_admitted": 0
+        }
+      ],
+      "scope": "post-hoc empirical tradeoff on these reused samples only; no selected new gate, confidence guarantee, continuous-operation wrong-key bound or new qualification"
+    }
+  ],
+  "raw_workspace_diagnostics": [
+    {
+      "input": "local-evidence/triad-selective/key-diagnostic/followup/g01slowrate-each-65-cn0m24-signal/batch00/path-90001",
+      "input_hashes": {
+        "manifest.json": "f9b7e5fd2ea68f939923a5ac8f81806b0a607b2dff204540ec7ff56e8ef4dc1c",
+        "gram.c128": "d8f5c52f97730d3b85450976567a65e35b8d8fd277df1c94399c333a1382a1a7",
+        "mean.c128": "4b62b2089d864d27f82f0cc556b08c26afd344b5a6f50c847f9ec984b22eb8ec",
+        "signal_energy.f64": "813a05ea6ad67c725a000000d03c98d110805f81414bb5c4819014d19fd64670",
+        "intervals.u64": "b362a0151cc9bf90415120a3bd520dc08659810f80385423567d7fe87771a5db",
+        "valid_rows.u64": "e159203a3f7f136f2bbb3a58300fa3ec4e31da0ef85c4cb35ee06dfe9a4bc491",
+        "observation.c128": "70fd5d86018238c03dde1fa2f8998a0dd5c24b5fdb545ea62bdffefe874e0018",
+        "received_energy.f64": "3894dbd75c6d73a55ea56e4ba22c67b0c6b92dadd2e10f550f2756076afa2656"
+      },
+      "diagnostic_only_simulation_truth": true,
+      "sample_rate_hz": 2.0,
+      "sample_count": 197348,
+      "sampled_observation_seconds": 98674.0,
+      "block_count": 12335,
+      "full_bank_columns": 4,
+      "signal_control": "signal",
+      "energy_reference_simulation_truth_only": {
+        "noise_variance_per_complex_sample": 502.3772863019159,
+        "declared_cn0_db_hz": -24,
+        "source_samples": 197343,
+        "requested_active_seconds": 86400,
+        "actual_elapsed_seconds": 96002.40000000001,
+        "source_format": {
+          "version": 3,
+          "inner_rate_hz": 0.036,
+          "added_symbols": 1,
+          "added_interleave": true,
+          "encrypted": true,
+          "symbol_ordinal": 0,
+          "minimum_inner_coefficients": 64,
+          "tile_seconds": 16000.400000000001,
+          "tile_count": 6,
+          "calendar_origin_sample": 2669,
+          "payload_fine_cells_per_tile": 64,
+          "dwell_seconds": 0.4,
+          "quiet_seconds": 0,
+          "ramp_seconds": 0.02,
+          "margin_seconds": 0.005,
+          "fine_rate_hz": 0.005999999999999999,
+          "carrier_spacing_hz": 0.007499999999999999,
+          "occupied_bandwidth_hz": 0.022499999999999996
+        },
+        "channel_model": {
+          "spread_delay_ms": 0.05,
+          "spread_doppler_hz": 0.005,
+          "perturbation_slow_depth": 0.65,
+          "perturbation_fast_depth": 0.65,
+          "nominal_conversion_if_hz": 1500,
+          "signal_gain": 1,
+          "rf_hz": 8270,
+          "flicker_tau_seconds": [
+            0.1,
+            86400
+          ],
+          "flicker_bands": 12,
+          "sample_clock_reference": "independent TX/RX endpoint errors; truth_clock_ppm reports their exact ratio",
+          "physical_rf_retuning": false,
+          "spread_inputs": {
+            "selected_preset": "sub9-best",
+            "fallback_channel": "none",
+            "delay_ms_override_nominal": 0.05,
+            "doppler_hz_override_nominal": 0.005,
+            "resolved_nominal_delay_ms": 0.05,
+            "resolved_nominal_doppler_hz": 0.005,
+            "applied_margin": 1,
+            "effective_delay_ms": 0.05,
+            "effective_doppler_hz": 0.005,
+            "semantics": "selected preset supplies nominal dimensions; explicit physical overrides replace their own nominal dimension before one margin multiplication; without preset, legacy channel values supply the base, and remain already effective when no override is supplied; receiver tap basis is independent"
+          },
+          "path_evolution": {
+            "active": true,
+            "ray_coherence_seconds": 0,
+            "gaussian_doppler_width_hz": 0.01,
+            "gaussian_doppler_standard_deviation_hz": 0.005,
+            "gaussian_capture_total_allowance_hz": 0.06,
+            "gaussian_target_correlation": "exp(-0.5*(pi*B*tau)^2); B=2*sigma of each ray Gaussian Doppler PSD; existing ray-center separation is independent",
+            "gaussian_teacher": "stationary proper-complex white Gaussian innovations convolved with a discrete L2-normalized Gaussian FIR; finite truncation and sampling approximate the target covariance; actual FIR shape is reported separately",
+            "diurnal_phase_amplitude_radians": 0,
+            "diurnal_period_seconds": 86400,
+            "maximum_diurnal_instantaneous_frequency_hz": 0,
+            "outage_start_seconds": -1,
+            "outage_end_seconds": -1,
+            "outage_gain": 0,
+            "outage_ramp_seconds": 60,
+            "time_coordinate": "physical RX time n/(Fs*rx_clock_scale)-capture_lead_seconds",
+            "ray_model": "independent stationary proper-complex Gaussian-spectrum FIR gains: zero mean, unit mean power; existing equal-power two-ray delay and Doppler centers retained",
+            "outage_model": "signal-only attenuation on [start,end), with cosine descent/ascent inside the interval; thermal noise and path/filter state continue",
+            "scope": "declared physical-path stress, not field calibration; OU is point sampled and has an unbounded analog spectrum; the Gaussian FIR target also has unbounded spectral tails and its six-sigma-per-edge capture allowance is not strict support, so finite deterministic capture bounds are not a bandwidth guarantee and sampling-rate refinement is required"
+          }
+        },
+        "oscillator_model": {
+          "relative_phase_diffusion_rad_sqrt_s": 0.00012341341494884352,
+          "relative_white_fm_hz_sqrt_s": 0,
+          "relative_random_walk_fm_hz_sqrt_s": 0,
+          "relative_flicker_fm_rms_hz": 0,
+          "flicker_tau_seconds": [
+            0.1,
+            86400
+          ],
+          "flicker_bands": 12,
+          "relative_white_pm_rms_rad": 0,
+          "truth_fields_simulation_only": true
+        }
+      },
+      "valid_complex_samples": 197348,
+      "valid_sample_seconds": 98674.0,
+      "fully_erased_blocks": 0,
+      "total_signal_energy_samples": 267230.37540272425,
+      "total_signal_energy_over_noise": 531.9316431876373,
+      "full_bank_rank_range": [
+        0,
+        4
+      ],
+      "numerical_roundoff_repairs": 0,
+      "maximum_relative_energy_excess_repaired": 0.0,
+      "status": "completed",
+      "truth_bit_simulation_only": 1,
+      "full_bank_retained_energy_samples": 267228.9416473695,
+      "full_bank_retained_energy_fraction": 0.999994634759044,
+      "best_fixed_true_bit_candidate": {
+        "identity": {
+          "bit": 1,
+          "epoch_offset_seconds": 0,
+          "arrival_seconds": 0.1405,
+          "frequency_hz": 0,
+          "clock_ppm": 0,
+          "frequency_drift_hz_per_second": 0,
+          "tap_count": 2,
+          "taps": [
+            {
+              "delay_seconds": 0,
+              "doppler_hz": 0
+            },
+            {
+              "delay_seconds": 5e-05,
+              "doppler_hz": 0.005
+            }
+          ],
+          "gain_columns": [
+            {
+              "linear_gain": false,
+              "gain_column": 0
+            },
+            {
+              "linear_gain": false,
+              "gain_column": 0
+            }
+          ]
+        },
+        "candidate_indices": [
+          3
+        ],
+        "columns": [
+          1,
+          3
+        ],
+        "retained_energy_samples": 266901.1990763283,
+        "retained_energy_fraction": 0.9987681927030194
+      },
+      "fixed_candidates": [
+        {
+          "identity": {
+            "bit": 0,
+            "epoch_offset_seconds": 0,
+            "arrival_seconds": 0.1405,
+            "frequency_hz": 0,
+            "clock_ppm": 0,
+            "frequency_drift_hz_per_second": 0,
+            "tap_count": 1,
+            "taps": [
+              {
+                "delay_seconds": 0,
+                "doppler_hz": 0
+              }
+            ],
+            "gain_columns": [
+              {
+                "linear_gain": false,
+                "gain_column": 0
+              }
+            ]
+          },
+          "candidate_indices": [
+            0
+          ],
+          "columns": [
+            0
+          ],
+          "retained_energy_samples": 252935.45553052635,
+          "retained_energy_fraction": 0.9465071294733803
+        },
+        {
+          "identity": {
+            "bit": 1,
+            "epoch_offset_seconds": 0,
+            "arrival_seconds": 0.1405,
+            "frequency_hz": 0,
+            "clock_ppm": 0,
+            "frequency_drift_hz_per_second": 0,
+            "tap_count": 1,
+            "taps": [
+              {
+                "delay_seconds": 0,
+                "doppler_hz": 0
+              }
+            ],
+            "gain_columns": [
+              {
+                "linear_gain": false,
+                "gain_column": 0
+              }
+            ]
+          },
+          "candidate_indices": [
+            1
+          ],
+          "columns": [
+            1
+          ],
+          "retained_energy_samples": 262884.4864192003,
+          "retained_energy_fraction": 0.9837372941718375
+        },
+        {
+          "identity": {
+            "bit": 0,
+            "epoch_offset_seconds": 0,
+            "arrival_seconds": 0.1405,
+            "frequency_hz": 0,
+            "clock_ppm": 0,
+            "frequency_drift_hz_per_second": 0,
+            "tap_count": 2,
+            "taps": [
+              {
+                "delay_seconds": 0,
+                "doppler_hz": 0
+              },
+              {
+                "delay_seconds": 5e-05,
+                "doppler_hz": 0.005
+              }
+            ],
+            "gain_columns": [
+              {
+                "linear_gain": false,
+                "gain_column": 0
+              },
+              {
+                "linear_gain": false,
+                "gain_column": 0
+              }
+            ]
+          },
+          "candidate_indices": [
+            2
+          ],
+          "columns": [
+            0,
+            2
+          ],
+          "retained_energy_samples": 265171.97600510553,
+          "retained_energy_fraction": 0.9922972850877575
+        },
+        {
+          "identity": {
+            "bit": 1,
+            "epoch_offset_seconds": 0,
+            "arrival_seconds": 0.1405,
+            "frequency_hz": 0,
+            "clock_ppm": 0,
+            "frequency_drift_hz_per_second": 0,
+            "tap_count": 2,
+            "taps": [
+              {
+                "delay_seconds": 0,
+                "doppler_hz": 0
+              },
+              {
+                "delay_seconds": 5e-05,
+                "doppler_hz": 0.005
+              }
+            ],
+            "gain_columns": [
+              {
+                "linear_gain": false,
+                "gain_column": 0
+              },
+              {
+                "linear_gain": false,
+                "gain_column": 0
+              }
+            ]
+          },
+          "candidate_indices": [
+            3
+          ],
+          "columns": [
+            1,
+            3
+          ],
+          "retained_energy_samples": 266901.1990763283,
+          "retained_energy_fraction": 0.9987681927030194
+        }
+      ],
+      "scope": "optimistic per-block free complex channel fits; fixed candidate selected only after summing its full-window energy; full bank includes wrong-bit columns; not a receiver or sensitivity result",
+      "key_seed_simulation_only": 10203673983702435043,
+      "random_seed_roots_simulation_only": {
+        "channel": 16761093312288267946,
+        "oscillator": 3662717762294863558,
+        "noise": 4423033266181104791,
+        "frontend": 2694760242599238907,
+        "path": 7375803049915852388,
+        "oscillator_explicit": true,
+        "noise_explicit": true,
+        "frontend_explicit": true,
+        "path_explicit": true,
+        "fallback": "unset oscillator/noise/frontend/path roots inherit the resolved channel seed",
+        "channel_root_scope": "static timing/CFO/clock/drift truth, spread ray, and frequency-selective perturbation",
+        "oscillator_root_scope": "TX/RX oscillator spectra and FHSS phase resets",
+        "noise_root_scope": "thermal noise only",
+        "frontend_root_scope": "DAC/ADC conversion, impulse process, and tone phase",
+        "path_root_scope": "independent stationary OU or Gaussian-FIR ray gains and initial diurnal path phase"
+      },
+      "known_variance_expected_lr_diagnostic": {
+        "variance_simulation_truth_only": 502.3772863019159,
+        "mean_quadratic_by_bit": [
+          49.68690493908173,
+          94.31201386368559
+        ],
+        "expected_noise_quadratic_by_bit": [
+          301.01364350286866,
+          300.80345253169395
+        ],
+        "log_determinant_by_bit": [
+          334.86394496131516,
+          334.72290790924455
+        ],
+        "expected_log_lr_conditioned_on_fixed_noiseless_waveform_by_bit": [
+          15.836603480635233,
+          60.39255848613499
+        ],
+        "standard_deviation_over_thermal_noise_by_bit": [
+          8.787956101925193,
+          10.098437448274096
+        ],
+        "expected_noise_only_log_lr_by_bit": [
+          -33.850301458446495,
+          -33.919455377550605
+        ],
+        "scope": "analytic expectation over fresh white Gaussian thermal noise for this fixed actual noiseless waveform and receiver alternative; uses noise truth only as diagnostic; not observed UCB score, admission probability, physical channel average or new gate"
+      },
+      "public_bit_covariance_geometry": {
+        "trace_covariance_squared_bit0": 25223738.828876313,
+        "trace_covariance_squared_bit1": 25286286.76217809,
+        "trace_covariance_cross": 12279160.058276877,
+        "normalized_covariance_hilbert_schmidt_overlap": 0.48620721646302006,
+        "scope": "between exported receive-key bit covariance alternatives, not cross-key covariance; higher overlap is not itself a reception/error probability"
+      },
+      "fine_symbol_seconds_over_gaussian_efold_seconds": 3.7024024484653055,
+      "memory_scope": "one small fullD=4 capture statistics cache plus bounded128-dimensional window factors; no raw sampled waveform history"
+    },
+    {
+      "input": "local-evidence/triad-selective/key-diagnostic/followup/g01slowrate-each-65-cn0m24-wrong-key/batch00/path-90001",
+      "input_hashes": {
+        "manifest.json": "d473db5b0f61871a23acb30936a279a3d309af393664ab0bcf8aa7fcef9a3bf3",
+        "gram.c128": "14cf836ec74af1fe2a94ebf8e4e9d9b0aac05cfa417da15ff2f0794c4c33fb04",
+        "mean.c128": "75b1b9f99cd3042c61bb477111e38e1a1964b477eba350ef531b6925ee5f7a93",
+        "signal_energy.f64": "813a05ea6ad67c725a000000d03c98d110805f81414bb5c4819014d19fd64670",
+        "intervals.u64": "b362a0151cc9bf90415120a3bd520dc08659810f80385423567d7fe87771a5db",
+        "valid_rows.u64": "e159203a3f7f136f2bbb3a58300fa3ec4e31da0ef85c4cb35ee06dfe9a4bc491",
+        "observation.c128": "4eed992d8441d23b5dbf187df745c1eb154d4cb0d7519c874208183e6a16343e",
+        "received_energy.f64": "3894dbd75c6d73a55ea56e4ba22c67b0c6b92dadd2e10f550f2756076afa2656"
+      },
+      "diagnostic_only_simulation_truth": true,
+      "sample_rate_hz": 2.0,
+      "sample_count": 197348,
+      "sampled_observation_seconds": 98674.0,
+      "block_count": 12335,
+      "full_bank_columns": 4,
+      "signal_control": "wrong-key",
+      "energy_reference_simulation_truth_only": {
+        "noise_variance_per_complex_sample": 502.3772863019159,
+        "declared_cn0_db_hz": -24,
+        "source_samples": 197343,
+        "requested_active_seconds": 86400,
+        "actual_elapsed_seconds": 96002.40000000001,
+        "source_format": {
+          "version": 3,
+          "inner_rate_hz": 0.036,
+          "added_symbols": 1,
+          "added_interleave": true,
+          "encrypted": true,
+          "symbol_ordinal": 0,
+          "minimum_inner_coefficients": 64,
+          "tile_seconds": 16000.400000000001,
+          "tile_count": 6,
+          "calendar_origin_sample": 2669,
+          "payload_fine_cells_per_tile": 64,
+          "dwell_seconds": 0.4,
+          "quiet_seconds": 0,
+          "ramp_seconds": 0.02,
+          "margin_seconds": 0.005,
+          "fine_rate_hz": 0.005999999999999999,
+          "carrier_spacing_hz": 0.007499999999999999,
+          "occupied_bandwidth_hz": 0.022499999999999996
+        },
+        "channel_model": {
+          "spread_delay_ms": 0.05,
+          "spread_doppler_hz": 0.005,
+          "perturbation_slow_depth": 0.65,
+          "perturbation_fast_depth": 0.65,
+          "nominal_conversion_if_hz": 1500,
+          "signal_gain": 1,
+          "rf_hz": 8270,
+          "flicker_tau_seconds": [
+            0.1,
+            86400
+          ],
+          "flicker_bands": 12,
+          "sample_clock_reference": "independent TX/RX endpoint errors; truth_clock_ppm reports their exact ratio",
+          "physical_rf_retuning": false,
+          "spread_inputs": {
+            "selected_preset": "sub9-best",
+            "fallback_channel": "none",
+            "delay_ms_override_nominal": 0.05,
+            "doppler_hz_override_nominal": 0.005,
+            "resolved_nominal_delay_ms": 0.05,
+            "resolved_nominal_doppler_hz": 0.005,
+            "applied_margin": 1,
+            "effective_delay_ms": 0.05,
+            "effective_doppler_hz": 0.005,
+            "semantics": "selected preset supplies nominal dimensions; explicit physical overrides replace their own nominal dimension before one margin multiplication; without preset, legacy channel values supply the base, and remain already effective when no override is supplied; receiver tap basis is independent"
+          },
+          "path_evolution": {
+            "active": true,
+            "ray_coherence_seconds": 0,
+            "gaussian_doppler_width_hz": 0.01,
+            "gaussian_doppler_standard_deviation_hz": 0.005,
+            "gaussian_capture_total_allowance_hz": 0.06,
+            "gaussian_target_correlation": "exp(-0.5*(pi*B*tau)^2); B=2*sigma of each ray Gaussian Doppler PSD; existing ray-center separation is independent",
+            "gaussian_teacher": "stationary proper-complex white Gaussian innovations convolved with a discrete L2-normalized Gaussian FIR; finite truncation and sampling approximate the target covariance; actual FIR shape is reported separately",
+            "diurnal_phase_amplitude_radians": 0,
+            "diurnal_period_seconds": 86400,
+            "maximum_diurnal_instantaneous_frequency_hz": 0,
+            "outage_start_seconds": -1,
+            "outage_end_seconds": -1,
+            "outage_gain": 0,
+            "outage_ramp_seconds": 60,
+            "time_coordinate": "physical RX time n/(Fs*rx_clock_scale)-capture_lead_seconds",
+            "ray_model": "independent stationary proper-complex Gaussian-spectrum FIR gains: zero mean, unit mean power; existing equal-power two-ray delay and Doppler centers retained",
+            "outage_model": "signal-only attenuation on [start,end), with cosine descent/ascent inside the interval; thermal noise and path/filter state continue",
+            "scope": "declared physical-path stress, not field calibration; OU is point sampled and has an unbounded analog spectrum; the Gaussian FIR target also has unbounded spectral tails and its six-sigma-per-edge capture allowance is not strict support, so finite deterministic capture bounds are not a bandwidth guarantee and sampling-rate refinement is required"
+          }
+        },
+        "oscillator_model": {
+          "relative_phase_diffusion_rad_sqrt_s": 0.00012341341494884352,
+          "relative_white_fm_hz_sqrt_s": 0,
+          "relative_random_walk_fm_hz_sqrt_s": 0,
+          "relative_flicker_fm_rms_hz": 0,
+          "flicker_tau_seconds": [
+            0.1,
+            86400
+          ],
+          "flicker_bands": 12,
+          "relative_white_pm_rms_rad": 0,
+          "truth_fields_simulation_only": true
+        }
+      },
+      "valid_complex_samples": 197348,
+      "valid_sample_seconds": 98674.0,
+      "fully_erased_blocks": 0,
+      "total_signal_energy_samples": 267230.37540272425,
+      "total_signal_energy_over_noise": 531.9316431876373,
+      "full_bank_rank_range": [
+        0,
+        4
+      ],
+      "numerical_roundoff_repairs": 0,
+      "maximum_relative_energy_excess_repaired": 0.0,
+      "status": "completed",
+      "truth_bit_simulation_only": 1,
+      "full_bank_retained_energy_samples": 267205.42341647006,
+      "full_bank_retained_energy_fraction": 0.9999066274325418,
+      "best_fixed_true_bit_candidate": {
+        "identity": {
+          "bit": 1,
+          "epoch_offset_seconds": 0,
+          "arrival_seconds": 0.1405,
+          "frequency_hz": 0,
+          "clock_ppm": 0,
+          "frequency_drift_hz_per_second": 0,
+          "tap_count": 2,
+          "taps": [
+            {
+              "delay_seconds": 0,
+              "doppler_hz": 0
+            },
+            {
+              "delay_seconds": 5e-05,
+              "doppler_hz": 0.005
+            }
+          ],
+          "gain_columns": [
+            {
+              "linear_gain": false,
+              "gain_column": 0
+            },
+            {
+              "linear_gain": false,
+              "gain_column": 0
+            }
+          ]
+        },
+        "candidate_indices": [
+          3
+        ],
+        "columns": [
+          1,
+          3
+        ],
+        "retained_energy_samples": 265157.6989156595,
+        "retained_energy_fraction": 0.9922438589402827
+      },
+      "fixed_candidates": [
+        {
+          "identity": {
+            "bit": 0,
+            "epoch_offset_seconds": 0,
+            "arrival_seconds": 0.1405,
+            "frequency_hz": 0,
+            "clock_ppm": 0,
+            "frequency_drift_hz_per_second": 0,
+            "tap_count": 1,
+            "taps": [
+              {
+                "delay_seconds": 0,
+                "doppler_hz": 0
+              }
+            ],
+            "gain_columns": [
+              {
+                "linear_gain": false,
+                "gain_column": 0
+              }
+            ]
+          },
+          "candidate_indices": [
+            0
+          ],
+          "columns": [
+            0
+          ],
+          "retained_energy_samples": 252559.770042443,
+          "retained_energy_fraction": 0.9451012807276411
+        },
+        {
+          "identity": {
+            "bit": 1,
+            "epoch_offset_seconds": 0,
+            "arrival_seconds": 0.1405,
+            "frequency_hz": 0,
+            "clock_ppm": 0,
+            "frequency_drift_hz_per_second": 0,
+            "tap_count": 1,
+            "taps": [
+              {
+                "delay_seconds": 0,
+                "doppler_hz": 0
+              }
+            ],
+            "gain_columns": [
+              {
+                "linear_gain": false,
+                "gain_column": 0
+              }
+            ]
+          },
+          "candidate_indices": [
+            1
+          ],
+          "columns": [
+            1
+          ],
+          "retained_energy_samples": 253378.54211678446,
+          "retained_energy_fraction": 0.9481651991654592
+        },
+        {
+          "identity": {
+            "bit": 0,
+            "epoch_offset_seconds": 0,
+            "arrival_seconds": 0.1405,
+            "frequency_hz": 0,
+            "clock_ppm": 0,
+            "frequency_drift_hz_per_second": 0,
+            "tap_count": 2,
+            "taps": [
+              {
+                "delay_seconds": 0,
+                "doppler_hz": 0
+              },
+              {
+                "delay_seconds": 5e-05,
+                "doppler_hz": 0.005
+              }
+            ],
+            "gain_columns": [
+              {
+                "linear_gain": false,
+                "gain_column": 0
+              },
+              {
+                "linear_gain": false,
+                "gain_column": 0
+              }
+            ]
+          },
+          "candidate_indices": [
+            2
+          ],
+          "columns": [
+            0,
+            2
+          ],
+          "retained_energy_samples": 265065.3985298279,
+          "retained_energy_fraction": 0.9918984626293561
+        },
+        {
+          "identity": {
+            "bit": 1,
+            "epoch_offset_seconds": 0,
+            "arrival_seconds": 0.1405,
+            "frequency_hz": 0,
+            "clock_ppm": 0,
+            "frequency_drift_hz_per_second": 0,
+            "tap_count": 2,
+            "taps": [
+              {
+                "delay_seconds": 0,
+                "doppler_hz": 0
+              },
+              {
+                "delay_seconds": 5e-05,
+                "doppler_hz": 0.005
+              }
+            ],
+            "gain_columns": [
+              {
+                "linear_gain": false,
+                "gain_column": 0
+              },
+              {
+                "linear_gain": false,
+                "gain_column": 0
+              }
+            ]
+          },
+          "candidate_indices": [
+            3
+          ],
+          "columns": [
+            1,
+            3
+          ],
+          "retained_energy_samples": 265157.6989156595,
+          "retained_energy_fraction": 0.9922438589402827
+        }
+      ],
+      "scope": "optimistic per-block free complex channel fits; fixed candidate selected only after summing its full-window energy; full bank includes wrong-bit columns; not a receiver or sensitivity result",
+      "key_seed_simulation_only": 10203673983702435043,
+      "random_seed_roots_simulation_only": {
+        "channel": 16761093312288267946,
+        "oscillator": 3662717762294863558,
+        "noise": 4423033266181104791,
+        "frontend": 2694760242599238907,
+        "path": 7375803049915852388,
+        "oscillator_explicit": true,
+        "noise_explicit": true,
+        "frontend_explicit": true,
+        "path_explicit": true,
+        "fallback": "unset oscillator/noise/frontend/path roots inherit the resolved channel seed",
+        "channel_root_scope": "static timing/CFO/clock/drift truth, spread ray, and frequency-selective perturbation",
+        "oscillator_root_scope": "TX/RX oscillator spectra and FHSS phase resets",
+        "noise_root_scope": "thermal noise only",
+        "frontend_root_scope": "DAC/ADC conversion, impulse process, and tone phase",
+        "path_root_scope": "independent stationary OU or Gaussian-FIR ray gains and initial diurnal path phase"
+      },
+      "known_variance_expected_lr_diagnostic": {
+        "variance_simulation_truth_only": 502.3772863019159,
+        "mean_quadratic_by_bit": [
+          48.33348495052792,
+          49.70851590794638
+        ],
+        "expected_noise_quadratic_by_bit": [
+          301.0163818051025,
+          300.36202137575305
+        ],
+        "log_determinant_by_bit": [
+          334.8633752381688,
+          334.4552523850128
+        ],
+        "expected_log_lr_conditioned_on_fixed_noiseless_waveform_by_bit": [
+          14.486491517461616,
+          15.615284898686639
+        ],
+        "standard_deviation_over_thermal_noise_by_bit": [
+          8.729249253131334,
+          8.765361354099923
+        ],
+        "expected_noise_only_log_lr_by_bit": [
+          -33.8469934330663,
+          -34.09323100925974
+        ],
+        "scope": "analytic expectation over fresh white Gaussian thermal noise for this fixed actual noiseless waveform and receiver alternative; uses noise truth only as diagnostic; not observed UCB score, admission probability, physical channel average or new gate"
+      },
+      "public_bit_covariance_geometry": {
+        "trace_covariance_squared_bit0": 25191725.663292337,
+        "trace_covariance_squared_bit1": 25549040.794457782,
+        "trace_covariance_cross": 12455956.124982443,
+        "normalized_covariance_hilbert_schmidt_overlap": 0.49097661890765215,
+        "scope": "between exported receive-key bit covariance alternatives, not cross-key covariance; higher overlap is not itself a reception/error probability"
+      },
+      "fine_symbol_seconds_over_gaussian_efold_seconds": 3.7024024484653055,
+      "memory_scope": "one small fullD=4 capture statistics cache plus bounded128-dimensional window factors; no raw sampled waveform history"
+    },
+    {
+      "input": "local-evidence/triad-selective/key-diagnostic/followup/g1slowrate-each-65-cn0m14-signal/batch00/path-90001",
+      "input_hashes": {
+        "manifest.json": "a205ecaefa55ba64926ac9ecfe1b5d7eea2d7279bea76ba5c86c57005906f220",
+        "gram.c128": "e69a9e8dd8cca02ee0d293897a4430b9038358afc0824303e2db3bfd5b73e31e",
+        "mean.c128": "33e954c25b824c92ee9c2d4107e8183914d6ffa02bf2ba68dfa9cb1726574e15",
+        "signal_energy.f64": "6aecf6d6ba5f93f81435d47fa13a908069e484ce5971925d14ef5421fcece82a",
+        "intervals.u64": "fab996fe7bca619f253af123e204a1367cd5cb0e62af1e377d5b255665900b8b",
+        "valid_rows.u64": "940a8bc77874e3171e90c70e84b8d85d6cc53429f33221896c18111c250bdcfc",
+        "observation.c128": "5c99be03fa0bfa9aaaaeedb5737c3198dfc6b3eea0ac5d72728b41744a92d6bc",
+        "received_energy.f64": "1b2fb588947d6add54b907120158e155bf9af3c23035df51e5647bcb22b93948"
+      },
+      "diagnostic_only_simulation_truth": true,
+      "sample_rate_hz": 16.0,
+      "sample_count": 157947,
+      "sampled_observation_seconds": 9871.6875,
+      "block_count": 9872,
+      "full_bank_columns": 4,
+      "signal_control": "signal",
+      "energy_reference_simulation_truth_only": {
+        "noise_variance_per_complex_sample": 401.9018290415327,
+        "declared_cn0_db_hz": -14,
+        "source_samples": 157911,
+        "requested_active_seconds": 8640,
+        "actual_elapsed_seconds": 9602.400000000001,
+        "source_format": {
+          "version": 3,
+          "inner_rate_hz": 0.36,
+          "added_symbols": 1,
+          "added_interleave": true,
+          "encrypted": true,
+          "symbol_ordinal": 0,
+          "minimum_inner_coefficients": 64,
+          "tile_seconds": 1600.4,
+          "tile_count": 6,
+          "calendar_origin_sample": 2136,
+          "payload_fine_cells_per_tile": 64,
+          "dwell_seconds": 0.4,
+          "quiet_seconds": 0,
+          "ramp_seconds": 0.02,
+          "margin_seconds": 0.005,
+          "fine_rate_hz": 0.06,
+          "carrier_spacing_hz": 0.075,
+          "occupied_bandwidth_hz": 0.22499999999999998
+        },
+        "channel_model": {
+          "spread_delay_ms": 0.5,
+          "spread_doppler_hz": 0.1,
+          "perturbation_slow_depth": 0.65,
+          "perturbation_fast_depth": 0.65,
+          "nominal_conversion_if_hz": 1500,
+          "signal_gain": 1,
+          "rf_hz": 8270,
+          "flicker_tau_seconds": [
+            0.1,
+            86400
+          ],
+          "flicker_bands": 12,
+          "sample_clock_reference": "independent TX/RX endpoint errors; truth_clock_ppm reports their exact ratio",
+          "physical_rf_retuning": false,
+          "spread_inputs": {
+            "selected_preset": "sub9-best",
+            "fallback_channel": "none",
+            "delay_ms_override_nominal": 0.5,
+            "doppler_hz_override_nominal": 0.1,
+            "resolved_nominal_delay_ms": 0.5,
+            "resolved_nominal_doppler_hz": 0.1,
+            "applied_margin": 1,
+            "effective_delay_ms": 0.5,
+            "effective_doppler_hz": 0.1,
+            "semantics": "selected preset supplies nominal dimensions; explicit physical overrides replace their own nominal dimension before one margin multiplication; without preset, legacy channel values supply the base, and remain already effective when no override is supplied; receiver tap basis is independent"
+          },
+          "path_evolution": {
+            "active": true,
+            "ray_coherence_seconds": 0,
+            "gaussian_doppler_width_hz": 0.1,
+            "gaussian_doppler_standard_deviation_hz": 0.05,
+            "gaussian_capture_total_allowance_hz": 0.6000000000000001,
+            "gaussian_target_correlation": "exp(-0.5*(pi*B*tau)^2); B=2*sigma of each ray Gaussian Doppler PSD; existing ray-center separation is independent",
+            "gaussian_teacher": "stationary proper-complex white Gaussian innovations convolved with a discrete L2-normalized Gaussian FIR; finite truncation and sampling approximate the target covariance; actual FIR shape is reported separately",
+            "diurnal_phase_amplitude_radians": 0,
+            "diurnal_period_seconds": 86400,
+            "maximum_diurnal_instantaneous_frequency_hz": 0,
+            "outage_start_seconds": -1,
+            "outage_end_seconds": -1,
+            "outage_gain": 0,
+            "outage_ramp_seconds": 60,
+            "time_coordinate": "physical RX time n/(Fs*rx_clock_scale)-capture_lead_seconds",
+            "ray_model": "independent stationary proper-complex Gaussian-spectrum FIR gains: zero mean, unit mean power; existing equal-power two-ray delay and Doppler centers retained",
+            "outage_model": "signal-only attenuation on [start,end), with cosine descent/ascent inside the interval; thermal noise and path/filter state continue",
+            "scope": "declared physical-path stress, not field calibration; OU is point sampled and has an unbounded analog spectrum; the Gaussian FIR target also has unbounded spectral tails and its six-sigma-per-edge capture allowance is not strict support, so finite deterministic capture bounds are not a bandwidth guarantee and sampling-rate refinement is required"
+          }
+        },
+        "oscillator_model": {
+          "relative_phase_diffusion_rad_sqrt_s": 0.00012341341494884352,
+          "relative_white_fm_hz_sqrt_s": 0,
+          "relative_random_walk_fm_hz_sqrt_s": 0,
+          "relative_flicker_fm_rms_hz": 0,
+          "flicker_tau_seconds": [
+            0.1,
+            86400
+          ],
+          "flicker_bands": 12,
+          "relative_white_pm_rms_rad": 0,
+          "truth_fields_simulation_only": true
+        }
+      },
+      "valid_complex_samples": 157947,
+      "valid_sample_seconds": 9871.6875,
+      "fully_erased_blocks": 0,
+      "total_signal_energy_samples": 215510.93377642852,
+      "total_signal_energy_over_noise": 536.2278004317257,
+      "full_bank_rank_range": [
+        0,
+        4
+      ],
+      "numerical_roundoff_repairs": 0,
+      "maximum_relative_energy_excess_repaired": 0.0,
+      "status": "completed",
+      "truth_bit_simulation_only": 1,
+      "full_bank_retained_energy_samples": 215498.98102361712,
+      "full_bank_retained_energy_fraction": 0.9999445376037218,
+      "best_fixed_true_bit_candidate": {
+        "identity": {
+          "bit": 1,
+          "epoch_offset_seconds": 0,
+          "arrival_seconds": 0.1405,
+          "frequency_hz": 0,
+          "clock_ppm": 0,
+          "frequency_drift_hz_per_second": 0,
+          "tap_count": 2,
+          "taps": [
+            {
+              "delay_seconds": 0,
+              "doppler_hz": 0
+            },
+            {
+              "delay_seconds": 0.0005,
+              "doppler_hz": 0.1
+            }
+          ],
+          "gain_columns": [
+            {
+              "linear_gain": false,
+              "gain_column": 0
+            },
+            {
+              "linear_gain": false,
+              "gain_column": 0
+            }
+          ]
+        },
+        "candidate_indices": [
+          3
+        ],
+        "columns": [
+          1,
+          3
+        ],
+        "retained_energy_samples": 214851.2431806397,
+        "retained_energy_fraction": 0.9969389460468248
+      },
+      "fixed_candidates": [
+        {
+          "identity": {
+            "bit": 0,
+            "epoch_offset_seconds": 0,
+            "arrival_seconds": 0.1405,
+            "frequency_hz": 0,
+            "clock_ppm": 0,
+            "frequency_drift_hz_per_second": 0,
+            "tap_count": 1,
+            "taps": [
+              {
+                "delay_seconds": 0,
+                "doppler_hz": 0
+              }
+            ],
+            "gain_columns": [
+              {
+                "linear_gain": false,
+                "gain_column": 0
+              }
+            ]
+          },
+          "candidate_indices": [
+            0
+          ],
+          "columns": [
+            0
+          ],
+          "retained_energy_samples": 195961.27751768663,
+          "retained_energy_fraction": 0.9092869400351504
+        },
+        {
+          "identity": {
+            "bit": 1,
+            "epoch_offset_seconds": 0,
+            "arrival_seconds": 0.1405,
+            "frequency_hz": 0,
+            "clock_ppm": 0,
+            "frequency_drift_hz_per_second": 0,
+            "tap_count": 1,
+            "taps": [
+              {
+                "delay_seconds": 0,
+                "doppler_hz": 0
+              }
+            ],
+            "gain_columns": [
+              {
+                "linear_gain": false,
+                "gain_column": 0
+              }
+            ]
+          },
+          "candidate_indices": [
+            1
+          ],
+          "columns": [
+            1
+          ],
+          "retained_energy_samples": 205715.46126981336,
+          "retained_energy_fraction": 0.9545476773035702
+        },
+        {
+          "identity": {
+            "bit": 0,
+            "epoch_offset_seconds": 0,
+            "arrival_seconds": 0.1405,
+            "frequency_hz": 0,
+            "clock_ppm": 0,
+            "frequency_drift_hz_per_second": 0,
+            "tap_count": 2,
+            "taps": [
+              {
+                "delay_seconds": 0,
+                "doppler_hz": 0
+              },
+              {
+                "delay_seconds": 0.0005,
+                "doppler_hz": 0.1
+              }
+            ],
+            "gain_columns": [
+              {
+                "linear_gain": false,
+                "gain_column": 0
+              },
+              {
+                "linear_gain": false,
+                "gain_column": 0
+              }
+            ]
+          },
+          "candidate_indices": [
+            2
+          ],
+          "columns": [
+            0,
+            2
+          ],
+          "retained_energy_samples": 212610.44884307045,
+          "retained_energy_fraction": 0.986541356011352
+        },
+        {
+          "identity": {
+            "bit": 1,
+            "epoch_offset_seconds": 0,
+            "arrival_seconds": 0.1405,
+            "frequency_hz": 0,
+            "clock_ppm": 0,
+            "frequency_drift_hz_per_second": 0,
+            "tap_count": 2,
+            "taps": [
+              {
+                "delay_seconds": 0,
+                "doppler_hz": 0
+              },
+              {
+                "delay_seconds": 0.0005,
+                "doppler_hz": 0.1
+              }
+            ],
+            "gain_columns": [
+              {
+                "linear_gain": false,
+                "gain_column": 0
+              },
+              {
+                "linear_gain": false,
+                "gain_column": 0
+              }
+            ]
+          },
+          "candidate_indices": [
+            3
+          ],
+          "columns": [
+            1,
+            3
+          ],
+          "retained_energy_samples": 214851.2431806397,
+          "retained_energy_fraction": 0.9969389460468248
+        }
+      ],
+      "scope": "optimistic per-block free complex channel fits; fixed candidate selected only after summing its full-window energy; full bank includes wrong-bit columns; not a receiver or sensitivity result",
+      "key_seed_simulation_only": 12767887092369759335,
+      "random_seed_roots_simulation_only": {
+        "channel": 2904240896191828011,
+        "oscillator": 9122573023209074736,
+        "noise": 14818185416770099242,
+        "frontend": 10320228806682533651,
+        "path": 10840467984562745167,
+        "oscillator_explicit": true,
+        "noise_explicit": true,
+        "frontend_explicit": true,
+        "path_explicit": true,
+        "fallback": "unset oscillator/noise/frontend/path roots inherit the resolved channel seed",
+        "channel_root_scope": "static timing/CFO/clock/drift truth, spread ray, and frequency-selective perturbation",
+        "oscillator_root_scope": "TX/RX oscillator spectra and FHSS phase resets",
+        "noise_root_scope": "thermal noise only",
+        "frontend_root_scope": "DAC/ADC conversion, impulse process, and tone phase",
+        "path_root_scope": "independent stationary OU or Gaussian-FIR ray gains and initial diurnal path phase"
+      },
+      "known_variance_expected_lr_diagnostic": {
+        "variance_simulation_truth_only": 401.9018290415327,
+        "mean_quadratic_by_bit": [
+          45.135574800937306,
+          77.94458143593181
+        ],
+        "expected_noise_quadratic_by_bit": [
+          312.24356993839046,
+          312.26376979575366
+        ],
+        "log_determinant_by_bit": [
+          341.4924849086435,
+          341.5182903750905
+        ],
+        "expected_log_lr_conditioned_on_fixed_noiseless_waveform_by_bit": [
+          15.886659830684266,
+          48.69006085659498
+        ],
+        "standard_deviation_over_thermal_noise_by_bit": [
+          8.105985115465952,
+          9.078749161279372
+        ],
+        "expected_noise_only_log_lr_by_bit": [
+          -29.248914970253054,
+          -29.254520579336827
+        ],
+        "scope": "analytic expectation over fresh white Gaussian thermal noise for this fixed actual noiseless waveform and receiver alternative; uses noise truth only as diagnostic; not observed UCB score, admission probability, physical channel average or new gate"
+      },
+      "public_bit_covariance_geometry": {
+        "trace_covariance_squared_bit0": 13144299.731313398,
+        "trace_covariance_squared_bit1": 13131752.632467264,
+        "trace_covariance_cross": 6973419.544263499,
+        "normalized_covariance_hilbert_schmidt_overlap": 0.530781431148577,
+        "scope": "between exported receive-key bit covariance alternatives, not cross-key covariance; higher overlap is not itself a reception/error probability"
+      },
+      "fine_symbol_seconds_over_gaussian_efold_seconds": 3.7024024484653046,
+      "memory_scope": "one small fullD=4 capture statistics cache plus bounded128-dimensional window factors; no raw sampled waveform history"
+    },
+    {
+      "input": "local-evidence/triad-selective/key-diagnostic/followup/g1slowrate-each-65-cn0m14-wrong-key/batch00/path-90001",
+      "input_hashes": {
+        "manifest.json": "395bc8afe7183997522ae79909683aa60984db86082c06c077c44538717f76a8",
+        "gram.c128": "646311539ab12dc1d9f1d483e785a75df948b666f942e3e0c9813bf778a95d1c",
+        "mean.c128": "354efca6413b0d73c3b65ad02a3036eb8e193e1b6249047f62824bee127e43f3",
+        "signal_energy.f64": "6aecf6d6ba5f93f81435d47fa13a908069e484ce5971925d14ef5421fcece82a",
+        "intervals.u64": "fab996fe7bca619f253af123e204a1367cd5cb0e62af1e377d5b255665900b8b",
+        "valid_rows.u64": "940a8bc77874e3171e90c70e84b8d85d6cc53429f33221896c18111c250bdcfc",
+        "observation.c128": "f537b1462463bcb52265199bc6ad03fe124abdf8dc66ce62d315fc1aec56a9bc",
+        "received_energy.f64": "1b2fb588947d6add54b907120158e155bf9af3c23035df51e5647bcb22b93948"
+      },
+      "diagnostic_only_simulation_truth": true,
+      "sample_rate_hz": 16.0,
+      "sample_count": 157947,
+      "sampled_observation_seconds": 9871.6875,
+      "block_count": 9872,
+      "full_bank_columns": 4,
+      "signal_control": "wrong-key",
+      "energy_reference_simulation_truth_only": {
+        "noise_variance_per_complex_sample": 401.9018290415327,
+        "declared_cn0_db_hz": -14,
+        "source_samples": 157911,
+        "requested_active_seconds": 8640,
+        "actual_elapsed_seconds": 9602.400000000001,
+        "source_format": {
+          "version": 3,
+          "inner_rate_hz": 0.36,
+          "added_symbols": 1,
+          "added_interleave": true,
+          "encrypted": true,
+          "symbol_ordinal": 0,
+          "minimum_inner_coefficients": 64,
+          "tile_seconds": 1600.4,
+          "tile_count": 6,
+          "calendar_origin_sample": 2136,
+          "payload_fine_cells_per_tile": 64,
+          "dwell_seconds": 0.4,
+          "quiet_seconds": 0,
+          "ramp_seconds": 0.02,
+          "margin_seconds": 0.005,
+          "fine_rate_hz": 0.06,
+          "carrier_spacing_hz": 0.075,
+          "occupied_bandwidth_hz": 0.22499999999999998
+        },
+        "channel_model": {
+          "spread_delay_ms": 0.5,
+          "spread_doppler_hz": 0.1,
+          "perturbation_slow_depth": 0.65,
+          "perturbation_fast_depth": 0.65,
+          "nominal_conversion_if_hz": 1500,
+          "signal_gain": 1,
+          "rf_hz": 8270,
+          "flicker_tau_seconds": [
+            0.1,
+            86400
+          ],
+          "flicker_bands": 12,
+          "sample_clock_reference": "independent TX/RX endpoint errors; truth_clock_ppm reports their exact ratio",
+          "physical_rf_retuning": false,
+          "spread_inputs": {
+            "selected_preset": "sub9-best",
+            "fallback_channel": "none",
+            "delay_ms_override_nominal": 0.5,
+            "doppler_hz_override_nominal": 0.1,
+            "resolved_nominal_delay_ms": 0.5,
+            "resolved_nominal_doppler_hz": 0.1,
+            "applied_margin": 1,
+            "effective_delay_ms": 0.5,
+            "effective_doppler_hz": 0.1,
+            "semantics": "selected preset supplies nominal dimensions; explicit physical overrides replace their own nominal dimension before one margin multiplication; without preset, legacy channel values supply the base, and remain already effective when no override is supplied; receiver tap basis is independent"
+          },
+          "path_evolution": {
+            "active": true,
+            "ray_coherence_seconds": 0,
+            "gaussian_doppler_width_hz": 0.1,
+            "gaussian_doppler_standard_deviation_hz": 0.05,
+            "gaussian_capture_total_allowance_hz": 0.6000000000000001,
+            "gaussian_target_correlation": "exp(-0.5*(pi*B*tau)^2); B=2*sigma of each ray Gaussian Doppler PSD; existing ray-center separation is independent",
+            "gaussian_teacher": "stationary proper-complex white Gaussian innovations convolved with a discrete L2-normalized Gaussian FIR; finite truncation and sampling approximate the target covariance; actual FIR shape is reported separately",
+            "diurnal_phase_amplitude_radians": 0,
+            "diurnal_period_seconds": 86400,
+            "maximum_diurnal_instantaneous_frequency_hz": 0,
+            "outage_start_seconds": -1,
+            "outage_end_seconds": -1,
+            "outage_gain": 0,
+            "outage_ramp_seconds": 60,
+            "time_coordinate": "physical RX time n/(Fs*rx_clock_scale)-capture_lead_seconds",
+            "ray_model": "independent stationary proper-complex Gaussian-spectrum FIR gains: zero mean, unit mean power; existing equal-power two-ray delay and Doppler centers retained",
+            "outage_model": "signal-only attenuation on [start,end), with cosine descent/ascent inside the interval; thermal noise and path/filter state continue",
+            "scope": "declared physical-path stress, not field calibration; OU is point sampled and has an unbounded analog spectrum; the Gaussian FIR target also has unbounded spectral tails and its six-sigma-per-edge capture allowance is not strict support, so finite deterministic capture bounds are not a bandwidth guarantee and sampling-rate refinement is required"
+          }
+        },
+        "oscillator_model": {
+          "relative_phase_diffusion_rad_sqrt_s": 0.00012341341494884352,
+          "relative_white_fm_hz_sqrt_s": 0,
+          "relative_random_walk_fm_hz_sqrt_s": 0,
+          "relative_flicker_fm_rms_hz": 0,
+          "flicker_tau_seconds": [
+            0.1,
+            86400
+          ],
+          "flicker_bands": 12,
+          "relative_white_pm_rms_rad": 0,
+          "truth_fields_simulation_only": true
+        }
+      },
+      "valid_complex_samples": 157947,
+      "valid_sample_seconds": 9871.6875,
+      "fully_erased_blocks": 0,
+      "total_signal_energy_samples": 215510.93377642852,
+      "total_signal_energy_over_noise": 536.2278004317257,
+      "full_bank_rank_range": [
+        0,
+        4
+      ],
+      "numerical_roundoff_repairs": 0,
+      "maximum_relative_energy_excess_repaired": 0.0,
+      "status": "completed",
+      "truth_bit_simulation_only": 1,
+      "full_bank_retained_energy_samples": 215474.0934386367,
+      "full_bank_retained_energy_fraction": 0.9998290558295755,
+      "best_fixed_true_bit_candidate": {
+        "identity": {
+          "bit": 1,
+          "epoch_offset_seconds": 0,
+          "arrival_seconds": 0.1405,
+          "frequency_hz": 0,
+          "clock_ppm": 0,
+          "frequency_drift_hz_per_second": 0,
+          "tap_count": 2,
+          "taps": [
+            {
+              "delay_seconds": 0,
+              "doppler_hz": 0
+            },
+            {
+              "delay_seconds": 0.0005,
+              "doppler_hz": 0.1
+            }
+          ],
+          "gain_columns": [
+            {
+              "linear_gain": false,
+              "gain_column": 0
+            },
+            {
+              "linear_gain": false,
+              "gain_column": 0
+            }
+          ]
+        },
+        "candidate_indices": [
+          3
+        ],
+        "columns": [
+          1,
+          3
+        ],
+        "retained_energy_samples": 212340.10300175464,
+        "retained_energy_fraction": 0.9852869145935617
+      },
+      "fixed_candidates": [
+        {
+          "identity": {
+            "bit": 0,
+            "epoch_offset_seconds": 0,
+            "arrival_seconds": 0.1405,
+            "frequency_hz": 0,
+            "clock_ppm": 0,
+            "frequency_drift_hz_per_second": 0,
+            "tap_count": 1,
+            "taps": [
+              {
+                "delay_seconds": 0,
+                "doppler_hz": 0
+              }
+            ],
+            "gain_columns": [
+              {
+                "linear_gain": false,
+                "gain_column": 0
+              }
+            ]
+          },
+          "candidate_indices": [
+            0
+          ],
+          "columns": [
+            0
+          ],
+          "retained_energy_samples": 195998.4423369523,
+          "retained_energy_fraction": 0.9094593898436796
+        },
+        {
+          "identity": {
+            "bit": 1,
+            "epoch_offset_seconds": 0,
+            "arrival_seconds": 0.1405,
+            "frequency_hz": 0,
+            "clock_ppm": 0,
+            "frequency_drift_hz_per_second": 0,
+            "tap_count": 1,
+            "taps": [
+              {
+                "delay_seconds": 0,
+                "doppler_hz": 0
+              }
+            ],
+            "gain_columns": [
+              {
+                "linear_gain": false,
+                "gain_column": 0
+              }
+            ]
+          },
+          "candidate_indices": [
+            1
+          ],
+          "columns": [
+            1
+          ],
+          "retained_energy_samples": 195078.45373234196,
+          "retained_energy_fraction": 0.9051905177800248
+        },
+        {
+          "identity": {
+            "bit": 0,
+            "epoch_offset_seconds": 0,
+            "arrival_seconds": 0.1405,
+            "frequency_hz": 0,
+            "clock_ppm": 0,
+            "frequency_drift_hz_per_second": 0,
+            "tap_count": 2,
+            "taps": [
+              {
+                "delay_seconds": 0,
+                "doppler_hz": 0
+              },
+              {
+                "delay_seconds": 0.0005,
+                "doppler_hz": 0.1
+              }
+            ],
+            "gain_columns": [
+              {
+                "linear_gain": false,
+                "gain_column": 0
+              },
+              {
+                "linear_gain": false,
+                "gain_column": 0
+              }
+            ]
+          },
+          "candidate_indices": [
+            2
+          ],
+          "columns": [
+            0,
+            2
+          ],
+          "retained_energy_samples": 212839.72615412,
+          "retained_energy_fraction": 0.9876052338714303
+        },
+        {
+          "identity": {
+            "bit": 1,
+            "epoch_offset_seconds": 0,
+            "arrival_seconds": 0.1405,
+            "frequency_hz": 0,
+            "clock_ppm": 0,
+            "frequency_drift_hz_per_second": 0,
+            "tap_count": 2,
+            "taps": [
+              {
+                "delay_seconds": 0,
+                "doppler_hz": 0
+              },
+              {
+                "delay_seconds": 0.0005,
+                "doppler_hz": 0.1
+              }
+            ],
+            "gain_columns": [
+              {
+                "linear_gain": false,
+                "gain_column": 0
+              },
+              {
+                "linear_gain": false,
+                "gain_column": 0
+              }
+            ]
+          },
+          "candidate_indices": [
+            3
+          ],
+          "columns": [
+            1,
+            3
+          ],
+          "retained_energy_samples": 212340.10300175464,
+          "retained_energy_fraction": 0.9852869145935617
+        }
+      ],
+      "scope": "optimistic per-block free complex channel fits; fixed candidate selected only after summing its full-window energy; full bank includes wrong-bit columns; not a receiver or sensitivity result",
+      "key_seed_simulation_only": 12767887092369759335,
+      "random_seed_roots_simulation_only": {
+        "channel": 2904240896191828011,
+        "oscillator": 9122573023209074736,
+        "noise": 14818185416770099242,
+        "frontend": 10320228806682533651,
+        "path": 10840467984562745167,
+        "oscillator_explicit": true,
+        "noise_explicit": true,
+        "frontend_explicit": true,
+        "path_explicit": true,
+        "fallback": "unset oscillator/noise/frontend/path roots inherit the resolved channel seed",
+        "channel_root_scope": "static timing/CFO/clock/drift truth, spread ray, and frequency-selective perturbation",
+        "oscillator_root_scope": "TX/RX oscillator spectra and FHSS phase resets",
+        "noise_root_scope": "thermal noise only",
+        "frontend_root_scope": "DAC/ADC conversion, impulse process, and tone phase",
+        "path_root_scope": "independent stationary OU or Gaussian-FIR ray gains and initial diurnal path phase"
+      },
+      "known_variance_expected_lr_diagnostic": {
+        "variance_simulation_truth_only": 401.9018290415327,
+        "mean_quadratic_by_bit": [
+          44.4114673924984,
+          45.372856365072856
+        ],
+        "expected_noise_quadratic_by_bit": [
+          311.9355396701191,
+          311.3250463022501
+        ],
+        "log_determinant_by_bit": [
+          341.30684150681657,
+          340.938112869078
+        ],
+        "expected_log_lr_conditioned_on_fixed_noiseless_waveform_by_bit": [
+          15.040165555800968,
+          15.759789798244924
+        ],
+        "standard_deviation_over_thermal_noise_by_bit": [
+          8.098656425574783,
+          8.171946184561826
+        ],
+        "expected_noise_only_log_lr_by_bit": [
+          -29.371301836697455,
+          -29.61306656682791
+        ],
+        "scope": "analytic expectation over fresh white Gaussian thermal noise for this fixed actual noiseless waveform and receiver alternative; uses noise truth only as diagnostic; not observed UCB score, admission probability, physical channel average or new gate"
+      },
+      "public_bit_covariance_geometry": {
+        "trace_covariance_squared_bit0": 13226794.131719027,
+        "trace_covariance_squared_bit1": 13380733.459638111,
+        "trace_covariance_cross": 6969106.916045828,
+        "normalized_covariance_hilbert_schmidt_overlap": 0.5238535247059282,
+        "scope": "between exported receive-key bit covariance alternatives, not cross-key covariance; higher overlap is not itself a reception/error probability"
+      },
+      "fine_symbol_seconds_over_gaussian_efold_seconds": 3.7024024484653046,
+      "memory_scope": "one small fullD=4 capture statistics cache plus bounded128-dimensional window factors; no raw sampled waveform history"
+    },
+    {
+      "input": "local-evidence/triad-selective/key-diagnostic/holdout/g01-each-65-cn0m22-wrong-key/batch00/path-60001",
+      "input_hashes": {
+        "manifest.json": "6925c55da29050abd797d7715e553adffa8bf391c8e1b2c924b3a678375f4e96",
+        "gram.c128": "e258e446bd9a76b8ca69f2543f8180c86f8bd5e082babf0e5f8b7dc70c7a1d1e",
+        "mean.c128": "f7d537cb352ae89a3ac24d79b7337e5b058592e7d5f7426352fe06b12a81d8b7",
+        "signal_energy.f64": "0b467beb0d338ad81437447b03fc74867d43a4ce07408376f10cd02697f840be",
+        "intervals.u64": "b1a152d8ce99ee8624ce41d20e1025b67dd5b2ee44dbd962c6739fb3775b9e35",
+        "valid_rows.u64": "ff1998094ac29d7851569cdcdbe444abfe9db8e65de7c53421ad9914124be829",
+        "observation.c128": "4b10f991deaaf109332ba63984ae59b219dd326661c7ecd95ca2a3c63f4dca27",
+        "received_energy.f64": "8832ba7535509da4aa4ef77a0b1ba212488821f6f4b5cc5d695bcfa28dcc6019"
+      },
+      "diagnostic_only_simulation_truth": true,
+      "sample_rate_hz": 2.0,
+      "sample_count": 173387,
+      "sampled_observation_seconds": 86693.5,
+      "block_count": 10837,
+      "full_bank_columns": 4,
+      "signal_control": "wrong-key",
+      "energy_reference_simulation_truth_only": {
+        "noise_variance_per_complex_sample": 316.9786384922228,
+        "declared_cn0_db_hz": -22,
+        "source_samples": 173382,
+        "requested_active_seconds": 86400,
+        "actual_elapsed_seconds": 86421.6,
+        "source_format": {
+          "version": 3,
+          "inner_rate_hz": 0.36,
+          "added_symbols": 1,
+          "added_interleave": true,
+          "encrypted": true,
+          "symbol_ordinal": 0,
+          "minimum_inner_coefficients": 64,
+          "tile_seconds": 1600.4,
+          "tile_count": 54,
+          "calendar_origin_sample": 269,
+          "payload_fine_cells_per_tile": 64,
+          "dwell_seconds": 0.4,
+          "quiet_seconds": 0,
+          "ramp_seconds": 0.02,
+          "margin_seconds": 0.005,
+          "fine_rate_hz": 0.06,
+          "carrier_spacing_hz": 0.075,
+          "occupied_bandwidth_hz": 0.22499999999999998
+        },
+        "channel_model": {
+          "spread_delay_ms": 0.05,
+          "spread_doppler_hz": 0.005,
+          "perturbation_slow_depth": 0.65,
+          "perturbation_fast_depth": 0.65,
+          "nominal_conversion_if_hz": 1500,
+          "signal_gain": 1,
+          "rf_hz": 8270,
+          "flicker_tau_seconds": [
+            0.1,
+            86400
+          ],
+          "flicker_bands": 12,
+          "sample_clock_reference": "independent TX/RX endpoint errors; truth_clock_ppm reports their exact ratio",
+          "physical_rf_retuning": false,
+          "spread_inputs": {
+            "selected_preset": "sub9-best",
+            "fallback_channel": "none",
+            "delay_ms_override_nominal": 0.05,
+            "doppler_hz_override_nominal": 0.005,
+            "resolved_nominal_delay_ms": 0.05,
+            "resolved_nominal_doppler_hz": 0.005,
+            "applied_margin": 1,
+            "effective_delay_ms": 0.05,
+            "effective_doppler_hz": 0.005,
+            "semantics": "selected preset supplies nominal dimensions; explicit physical overrides replace their own nominal dimension before one margin multiplication; without preset, legacy channel values supply the base, and remain already effective when no override is supplied; receiver tap basis is independent"
+          },
+          "path_evolution": {
+            "active": true,
+            "ray_coherence_seconds": 0,
+            "gaussian_doppler_width_hz": 0.01,
+            "gaussian_doppler_standard_deviation_hz": 0.005,
+            "gaussian_capture_total_allowance_hz": 0.06,
+            "gaussian_target_correlation": "exp(-0.5*(pi*B*tau)^2); B=2*sigma of each ray Gaussian Doppler PSD; existing ray-center separation is independent",
+            "gaussian_teacher": "stationary proper-complex white Gaussian innovations convolved with a discrete L2-normalized Gaussian FIR; finite truncation and sampling approximate the target covariance; actual FIR shape is reported separately",
+            "diurnal_phase_amplitude_radians": 0,
+            "diurnal_period_seconds": 86400,
+            "maximum_diurnal_instantaneous_frequency_hz": 0,
+            "outage_start_seconds": -1,
+            "outage_end_seconds": -1,
+            "outage_gain": 0,
+            "outage_ramp_seconds": 60,
+            "time_coordinate": "physical RX time n/(Fs*rx_clock_scale)-capture_lead_seconds",
+            "ray_model": "independent stationary proper-complex Gaussian-spectrum FIR gains: zero mean, unit mean power; existing equal-power two-ray delay and Doppler centers retained",
+            "outage_model": "signal-only attenuation on [start,end), with cosine descent/ascent inside the interval; thermal noise and path/filter state continue",
+            "scope": "declared physical-path stress, not field calibration; OU is point sampled and has an unbounded analog spectrum; the Gaussian FIR target also has unbounded spectral tails and its six-sigma-per-edge capture allowance is not strict support, so finite deterministic capture bounds are not a bandwidth guarantee and sampling-rate refinement is required"
+          }
+        },
+        "oscillator_model": {
+          "relative_phase_diffusion_rad_sqrt_s": 0.00012341341494884352,
+          "relative_white_fm_hz_sqrt_s": 0,
+          "relative_random_walk_fm_hz_sqrt_s": 0,
+          "relative_flicker_fm_rms_hz": 0,
+          "flicker_tau_seconds": [
+            0.1,
+            86400
+          ],
+          "flicker_bands": 12,
+          "relative_white_pm_rms_rad": 0,
+          "truth_fields_simulation_only": true
+        }
+      },
+      "valid_complex_samples": 173387,
+      "valid_sample_seconds": 86693.5,
+      "fully_erased_blocks": 0,
+      "total_signal_energy_samples": 247975.8947030942,
+      "total_signal_energy_over_noise": 782.3110600848215,
+      "full_bank_rank_range": [
+        0,
+        4
+      ],
+      "numerical_roundoff_repairs": 0,
+      "maximum_relative_energy_excess_repaired": 0.0,
+      "status": "completed",
+      "truth_bit_simulation_only": 1,
+      "full_bank_retained_energy_samples": 245156.81484091582,
+      "full_bank_retained_energy_fraction": 0.988631637500275,
+      "best_fixed_true_bit_candidate": {
+        "identity": {
+          "bit": 1,
+          "epoch_offset_seconds": 0,
+          "arrival_seconds": 0.1405,
+          "frequency_hz": 0,
+          "clock_ppm": 0,
+          "frequency_drift_hz_per_second": 0,
+          "tap_count": 2,
+          "taps": [
+            {
+              "delay_seconds": 0,
+              "doppler_hz": 0
+            },
+            {
+              "delay_seconds": 5e-05,
+              "doppler_hz": 0.005
+            }
+          ],
+          "gain_columns": [
+            {
+              "linear_gain": false,
+              "gain_column": 0
+            },
+            {
+              "linear_gain": false,
+              "gain_column": 0
+            }
+          ]
+        },
+        "candidate_indices": [
+          3
+        ],
+        "columns": [
+          1,
+          3
+        ],
+        "retained_energy_samples": 162941.83756351357,
+        "retained_energy_fraction": 0.6570874066554196
+      },
+      "fixed_candidates": [
+        {
+          "identity": {
+            "bit": 0,
+            "epoch_offset_seconds": 0,
+            "arrival_seconds": 0.1405,
+            "frequency_hz": 0,
+            "clock_ppm": 0,
+            "frequency_drift_hz_per_second": 0,
+            "tap_count": 1,
+            "taps": [
+              {
+                "delay_seconds": 0,
+                "doppler_hz": 0
+              }
+            ],
+            "gain_columns": [
+              {
+                "linear_gain": false,
+                "gain_column": 0
+              }
+            ]
+          },
+          "candidate_indices": [
+            0
+          ],
+          "columns": [
+            0
+          ],
+          "retained_energy_samples": 104790.23799043027,
+          "retained_energy_fraction": 0.42258235670808814
+        },
+        {
+          "identity": {
+            "bit": 1,
+            "epoch_offset_seconds": 0,
+            "arrival_seconds": 0.1405,
+            "frequency_hz": 0,
+            "clock_ppm": 0,
+            "frequency_drift_hz_per_second": 0,
+            "tap_count": 1,
+            "taps": [
+              {
+                "delay_seconds": 0,
+                "doppler_hz": 0
+              }
+            ],
+            "gain_columns": [
+              {
+                "linear_gain": false,
+                "gain_column": 0
+              }
+            ]
+          },
+          "candidate_indices": [
+            1
+          ],
+          "columns": [
+            1
+          ],
+          "retained_energy_samples": 105929.3697040448,
+          "retained_energy_fraction": 0.42717607625078174
+        },
+        {
+          "identity": {
+            "bit": 0,
+            "epoch_offset_seconds": 0,
+            "arrival_seconds": 0.1405,
+            "frequency_hz": 0,
+            "clock_ppm": 0,
+            "frequency_drift_hz_per_second": 0,
+            "tap_count": 2,
+            "taps": [
+              {
+                "delay_seconds": 0,
+                "doppler_hz": 0
+              },
+              {
+                "delay_seconds": 5e-05,
+                "doppler_hz": 0.005
+              }
+            ],
+            "gain_columns": [
+              {
+                "linear_gain": false,
+                "gain_column": 0
+              },
+              {
+                "linear_gain": false,
+                "gain_column": 0
+              }
+            ]
+          },
+          "candidate_indices": [
+            2
+          ],
+          "columns": [
+            0,
+            2
+          ],
+          "retained_energy_samples": 163069.56865760274,
+          "retained_energy_fraction": 0.6576025014562352
+        },
+        {
+          "identity": {
+            "bit": 1,
+            "epoch_offset_seconds": 0,
+            "arrival_seconds": 0.1405,
+            "frequency_hz": 0,
+            "clock_ppm": 0,
+            "frequency_drift_hz_per_second": 0,
+            "tap_count": 2,
+            "taps": [
+              {
+                "delay_seconds": 0,
+                "doppler_hz": 0
+              },
+              {
+                "delay_seconds": 5e-05,
+                "doppler_hz": 0.005
+              }
+            ],
+            "gain_columns": [
+              {
+                "linear_gain": false,
+                "gain_column": 0
+              },
+              {
+                "linear_gain": false,
+                "gain_column": 0
+              }
+            ]
+          },
+          "candidate_indices": [
+            3
+          ],
+          "columns": [
+            1,
+            3
+          ],
+          "retained_energy_samples": 162941.83756351357,
+          "retained_energy_fraction": 0.6570874066554196
+        }
+      ],
+      "scope": "optimistic per-block free complex channel fits; fixed candidate selected only after summing its full-window energy; full bank includes wrong-bit columns; not a receiver or sensitivity result",
+      "key_seed_simulation_only": 7958264885596391229,
+      "random_seed_roots_simulation_only": {
+        "channel": 14167561292111266404,
+        "oscillator": 9000350804961589000,
+        "noise": 7416311951502234038,
+        "frontend": 7983699817463769280,
+        "path": 16459670824144436012,
+        "oscillator_explicit": true,
+        "noise_explicit": true,
+        "frontend_explicit": true,
+        "path_explicit": true,
+        "fallback": "unset oscillator/noise/frontend/path roots inherit the resolved channel seed",
+        "channel_root_scope": "static timing/CFO/clock/drift truth, spread ray, and frequency-selective perturbation",
+        "oscillator_root_scope": "TX/RX oscillator spectra and FHSS phase resets",
+        "noise_root_scope": "thermal noise only",
+        "frontend_root_scope": "DAC/ADC conversion, impulse process, and tone phase",
+        "path_root_scope": "independent stationary OU or Gaussian-FIR ray gains and initial diurnal path phase"
+      },
+      "known_variance_expected_lr_diagnostic": {
+        "variance_simulation_truth_only": 316.9786384922228,
+        "mean_quadratic_by_bit": [
+          19.59064775080207,
+          19.473427411249382
+        ],
+        "expected_noise_quadratic_by_bit": [
+          420.3782795153473,
+          420.42941268352126
+        ],
+        "log_determinant_by_bit": [
+          476.19027151320756,
+          476.2385920230201
+        ],
+        "expected_log_lr_conditioned_on_fixed_noiseless_waveform_by_bit": [
+          -36.2213442470582,
+          -36.335751928249465
+        ],
+        "standard_deviation_over_thermal_noise_by_bit": [
+          10.04819086632144,
+          10.045871842253487
+        ],
+        "expected_noise_only_log_lr_by_bit": [
+          -55.811991997860275,
+          -55.809179339498826
+        ],
+        "scope": "analytic expectation over fresh white Gaussian thermal noise for this fixed actual noiseless waveform and receiver alternative; uses noise truth only as diagnostic; not observed UCB score, admission probability, physical channel average or new gate"
+      },
+      "public_bit_covariance_geometry": {
+        "trace_covariance_squared_bit0": 16792238.228066586,
+        "trace_covariance_squared_bit1": 16789499.082898367,
+        "trace_covariance_cross": 1602908.5952596124,
+        "normalized_covariance_hilbert_schmidt_overlap": 0.09546311352202677,
+        "scope": "between exported receive-key bit covariance alternatives, not cross-key covariance; higher overlap is not itself a reception/error probability"
+      },
+      "fine_symbol_seconds_over_gaussian_efold_seconds": 0.3702402448465305,
+      "memory_scope": "one small fullD=4 capture statistics cache plus bounded128-dimensional window factors; no raw sampled waveform history"
+    },
+    {
+      "input": "local-evidence/triad-selective/key-diagnostic/holdout/g1-each-65-cn0m10-wrong-key/batch00/path-60001",
+      "input_hashes": {
+        "manifest.json": "7338f3b6330e6619c7edc9f5a53ce15885857b285e429c4756fac449c4e414d7",
+        "gram.c128": "56255b590a4be0a8a90946aff7d28b313957b819881aede6aed44edf03dae299",
+        "mean.c128": "fc3620763f57e22cc2d40b75d6cfadbe9ce9a927623e0cf441a0ec87c3ed2472",
+        "signal_energy.f64": "f9680d40c5e60c52f8cb57e6a49f7dffb11baf0875b04e56bf11fa4e4770ced0",
+        "intervals.u64": "229936e4b99d0072dfdadf643c9235ad5dd0b50cac74c8a1b99973b5d440d5d0",
+        "valid_rows.u64": "9c1631d9a0a9894d12d5ebe0fbee29f56b72f6eb8dad1efb4a0c02889739dd02",
+        "observation.c128": "ba1426b188b191c6f1b33a75b82f9ed1adc8a3aa13eac564092ad698615acc10",
+        "received_energy.f64": "51834e374671dc56fe2f372a4ffcbffd4ffcd37d770f86dc2adb5a04f48d0481"
+      },
+      "diagnostic_only_simulation_truth": true,
+      "sample_rate_hz": 16.0,
+      "sample_count": 139054,
+      "sampled_observation_seconds": 8690.875,
+      "block_count": 8691,
+      "full_bank_columns": 4,
+      "signal_control": "wrong-key",
+      "energy_reference_simulation_truth_only": {
+        "noise_variance_per_complex_sample": 160.0,
+        "declared_cn0_db_hz": -10,
+        "source_samples": 139018,
+        "requested_active_seconds": 8640,
+        "actual_elapsed_seconds": 8661.6,
+        "source_format": {
+          "version": 3,
+          "inner_rate_hz": 3.6,
+          "added_symbols": 1,
+          "added_interleave": true,
+          "encrypted": true,
+          "symbol_ordinal": 0,
+          "minimum_inner_coefficients": 64,
+          "tile_seconds": 160.4,
+          "tile_count": 54,
+          "calendar_origin_sample": 216,
+          "payload_fine_cells_per_tile": 64,
+          "dwell_seconds": 0.4,
+          "quiet_seconds": 0,
+          "ramp_seconds": 0.02,
+          "margin_seconds": 0.005,
+          "fine_rate_hz": 0.6,
+          "carrier_spacing_hz": 0.75,
+          "occupied_bandwidth_hz": 2.25
+        },
+        "channel_model": {
+          "spread_delay_ms": 0.5,
+          "spread_doppler_hz": 0.1,
+          "perturbation_slow_depth": 0.65,
+          "perturbation_fast_depth": 0.65,
+          "nominal_conversion_if_hz": 1500,
+          "signal_gain": 1,
+          "rf_hz": 8270,
+          "flicker_tau_seconds": [
+            0.1,
+            86400
+          ],
+          "flicker_bands": 12,
+          "sample_clock_reference": "independent TX/RX endpoint errors; truth_clock_ppm reports their exact ratio",
+          "physical_rf_retuning": false,
+          "spread_inputs": {
+            "selected_preset": "sub9-best",
+            "fallback_channel": "none",
+            "delay_ms_override_nominal": 0.5,
+            "doppler_hz_override_nominal": 0.1,
+            "resolved_nominal_delay_ms": 0.5,
+            "resolved_nominal_doppler_hz": 0.1,
+            "applied_margin": 1,
+            "effective_delay_ms": 0.5,
+            "effective_doppler_hz": 0.1,
+            "semantics": "selected preset supplies nominal dimensions; explicit physical overrides replace their own nominal dimension before one margin multiplication; without preset, legacy channel values supply the base, and remain already effective when no override is supplied; receiver tap basis is independent"
+          },
+          "path_evolution": {
+            "active": true,
+            "ray_coherence_seconds": 0,
+            "gaussian_doppler_width_hz": 0.1,
+            "gaussian_doppler_standard_deviation_hz": 0.05,
+            "gaussian_capture_total_allowance_hz": 0.6000000000000001,
+            "gaussian_target_correlation": "exp(-0.5*(pi*B*tau)^2); B=2*sigma of each ray Gaussian Doppler PSD; existing ray-center separation is independent",
+            "gaussian_teacher": "stationary proper-complex white Gaussian innovations convolved with a discrete L2-normalized Gaussian FIR; finite truncation and sampling approximate the target covariance; actual FIR shape is reported separately",
+            "diurnal_phase_amplitude_radians": 0,
+            "diurnal_period_seconds": 86400,
+            "maximum_diurnal_instantaneous_frequency_hz": 0,
+            "outage_start_seconds": -1,
+            "outage_end_seconds": -1,
+            "outage_gain": 0,
+            "outage_ramp_seconds": 60,
+            "time_coordinate": "physical RX time n/(Fs*rx_clock_scale)-capture_lead_seconds",
+            "ray_model": "independent stationary proper-complex Gaussian-spectrum FIR gains: zero mean, unit mean power; existing equal-power two-ray delay and Doppler centers retained",
+            "outage_model": "signal-only attenuation on [start,end), with cosine descent/ascent inside the interval; thermal noise and path/filter state continue",
+            "scope": "declared physical-path stress, not field calibration; OU is point sampled and has an unbounded analog spectrum; the Gaussian FIR target also has unbounded spectral tails and its six-sigma-per-edge capture allowance is not strict support, so finite deterministic capture bounds are not a bandwidth guarantee and sampling-rate refinement is required"
+          }
+        },
+        "oscillator_model": {
+          "relative_phase_diffusion_rad_sqrt_s": 0.00012341341494884352,
+          "relative_white_fm_hz_sqrt_s": 0,
+          "relative_random_walk_fm_hz_sqrt_s": 0,
+          "relative_flicker_fm_rms_hz": 0,
+          "flicker_tau_seconds": [
+            0.1,
+            86400
+          ],
+          "flicker_bands": 12,
+          "relative_white_pm_rms_rad": 0,
+          "truth_fields_simulation_only": true
+        }
+      },
+      "valid_complex_samples": 139054,
+      "valid_sample_seconds": 8690.875,
+      "fully_erased_blocks": 0,
+      "total_signal_energy_samples": 196350.8339510504,
+      "total_signal_energy_over_noise": 1227.1927121940648,
+      "full_bank_rank_range": [
+        0,
+        4
+      ],
+      "numerical_roundoff_repairs": 0,
+      "maximum_relative_energy_excess_repaired": 0.0,
+      "status": "completed",
+      "truth_bit_simulation_only": 1,
+      "full_bank_retained_energy_samples": 188328.43744658382,
+      "full_bank_retained_energy_fraction": 0.9591425391833756,
+      "best_fixed_true_bit_candidate": {
+        "identity": {
+          "bit": 1,
+          "epoch_offset_seconds": 0,
+          "arrival_seconds": 0.1405,
+          "frequency_hz": 0,
+          "clock_ppm": 0,
+          "frequency_drift_hz_per_second": 0,
+          "tap_count": 2,
+          "taps": [
+            {
+              "delay_seconds": 0,
+              "doppler_hz": 0
+            },
+            {
+              "delay_seconds": 0.0005,
+              "doppler_hz": 0.1
+            }
+          ],
+          "gain_columns": [
+            {
+              "linear_gain": false,
+              "gain_column": 0
+            },
+            {
+              "linear_gain": false,
+              "gain_column": 0
+            }
+          ]
+        },
+        "candidate_indices": [
+          3
+        ],
+        "columns": [
+          1,
+          3
+        ],
+        "retained_energy_samples": 111879.6639901845,
+        "retained_energy_fraction": 0.5697946972716995
+      },
+      "fixed_candidates": [
+        {
+          "identity": {
+            "bit": 0,
+            "epoch_offset_seconds": 0,
+            "arrival_seconds": 0.1405,
+            "frequency_hz": 0,
+            "clock_ppm": 0,
+            "frequency_drift_hz_per_second": 0,
+            "tap_count": 1,
+            "taps": [
+              {
+                "delay_seconds": 0,
+                "doppler_hz": 0
+              }
+            ],
+            "gain_columns": [
+              {
+                "linear_gain": false,
+                "gain_column": 0
+              }
+            ]
+          },
+          "candidate_indices": [
+            0
+          ],
+          "columns": [
+            0
+          ],
+          "retained_energy_samples": 69757.9755066739,
+          "retained_energy_fraction": 0.35527211218295274
+        },
+        {
+          "identity": {
+            "bit": 1,
+            "epoch_offset_seconds": 0,
+            "arrival_seconds": 0.1405,
+            "frequency_hz": 0,
+            "clock_ppm": 0,
+            "frequency_drift_hz_per_second": 0,
+            "tap_count": 1,
+            "taps": [
+              {
+                "delay_seconds": 0,
+                "doppler_hz": 0
+              }
+            ],
+            "gain_columns": [
+              {
+                "linear_gain": false,
+                "gain_column": 0
+              }
+            ]
+          },
+          "candidate_indices": [
+            1
+          ],
+          "columns": [
+            1
+          ],
+          "retained_energy_samples": 69285.70724919473,
+          "retained_energy_fraction": 0.3528668855385021
+        },
+        {
+          "identity": {
+            "bit": 0,
+            "epoch_offset_seconds": 0,
+            "arrival_seconds": 0.1405,
+            "frequency_hz": 0,
+            "clock_ppm": 0,
+            "frequency_drift_hz_per_second": 0,
+            "tap_count": 2,
+            "taps": [
+              {
+                "delay_seconds": 0,
+                "doppler_hz": 0
+              },
+              {
+                "delay_seconds": 0.0005,
+                "doppler_hz": 0.1
+              }
+            ],
+            "gain_columns": [
+              {
+                "linear_gain": false,
+                "gain_column": 0
+              },
+              {
+                "linear_gain": false,
+                "gain_column": 0
+              }
+            ]
+          },
+          "candidate_indices": [
+            2
+          ],
+          "columns": [
+            0,
+            2
+          ],
+          "retained_energy_samples": 112372.3266786946,
+          "retained_energy_fraction": 0.5723037912164338
+        },
+        {
+          "identity": {
+            "bit": 1,
+            "epoch_offset_seconds": 0,
+            "arrival_seconds": 0.1405,
+            "frequency_hz": 0,
+            "clock_ppm": 0,
+            "frequency_drift_hz_per_second": 0,
+            "tap_count": 2,
+            "taps": [
+              {
+                "delay_seconds": 0,
+                "doppler_hz": 0
+              },
+              {
+                "delay_seconds": 0.0005,
+                "doppler_hz": 0.1
+              }
+            ],
+            "gain_columns": [
+              {
+                "linear_gain": false,
+                "gain_column": 0
+              },
+              {
+                "linear_gain": false,
+                "gain_column": 0
+              }
+            ]
+          },
+          "candidate_indices": [
+            3
+          ],
+          "columns": [
+            1,
+            3
+          ],
+          "retained_energy_samples": 111879.6639901845,
+          "retained_energy_fraction": 0.5697946972716995
+        }
+      ],
+      "scope": "optimistic per-block free complex channel fits; fixed candidate selected only after summing its full-window energy; full bank includes wrong-bit columns; not a receiver or sensitivity result",
+      "key_seed_simulation_only": 13137858755224203223,
+      "random_seed_roots_simulation_only": {
+        "channel": 2720934079902881860,
+        "oscillator": 2518730878620204663,
+        "noise": 10029326691812014292,
+        "frontend": 14311662424571204088,
+        "path": 11886833506744971030,
+        "oscillator_explicit": true,
+        "noise_explicit": true,
+        "frontend_explicit": true,
+        "path_explicit": true,
+        "fallback": "unset oscillator/noise/frontend/path roots inherit the resolved channel seed",
+        "channel_root_scope": "static timing/CFO/clock/drift truth, spread ray, and frequency-selective perturbation",
+        "oscillator_root_scope": "TX/RX oscillator spectra and FHSS phase resets",
+        "noise_root_scope": "thermal noise only",
+        "frontend_root_scope": "DAC/ADC conversion, impulse process, and tone phase",
+        "path_root_scope": "independent stationary OU or Gaussian-FIR ray gains and initial diurnal path phase"
+      },
+      "known_variance_expected_lr_diagnostic": {
+        "variance_simulation_truth_only": 160.0,
+        "mean_quadratic_by_bit": [
+          43.26513070186287,
+          43.74752547113541
+        ],
+        "expected_noise_quadratic_by_bit": [
+          633.7801413033517,
+          633.7650998949791
+        ],
+        "log_determinant_by_bit": [
+          735.9412267834172,
+          735.9426164191252
+        ],
+        "expected_log_lr_conditioned_on_fixed_noiseless_waveform_by_bit": [
+          -58.89595477820262,
+          -58.42999105301067
+        ],
+        "standard_deviation_over_thermal_noise_by_bit": [
+          13.657247322136044,
+          13.667103146696688
+        ],
+        "expected_noise_only_log_lr_by_bit": [
+          -102.16108548006548,
+          -102.17751652414609
+        ],
+        "scope": "analytic expectation over fresh white Gaussian thermal noise for this fixed actual noiseless waveform and receiver alternative; uses noise truth only as diagnostic; not observed UCB score, admission probability, physical channel average or new gate"
+      },
+      "public_bit_covariance_geometry": {
+        "trace_covariance_squared_bit0": 8361485.279674828,
+        "trace_covariance_squared_bit1": 8363316.783425743,
+        "trace_covariance_cross": 985556.9788758551,
+        "normalized_covariance_hilbert_schmidt_overlap": 0.1178557427546108,
+        "scope": "between exported receive-key bit covariance alternatives, not cross-key covariance; higher overlap is not itself a reception/error probability"
+      },
+      "fine_symbol_seconds_over_gaussian_efold_seconds": 0.3702402448465305,
+      "memory_scope": "one small fullD=4 capture statistics cache plus bounded128-dimensional window factors; no raw sampled waveform history"
+    }
+  ],
+  "paired_control_integrity": [
+    {
+      "profile": "g01slowrate",
+      "checks": {
+        "signal_energy.f64": true,
+        "received_energy.f64": true,
+        "intervals.u64": true,
+        "valid_rows.u64": true,
+        "key_seed": true,
+        "seed_roots": true,
+        "receive_basis_changed": true
+      },
+      "scope": "identical source/noise seed declarations and signal/received energy/calendars, changed receive basis; these energy hashes alone do not prove sample-by-sample raw waveform identity"
+    },
+    {
+      "profile": "g1slowrate",
+      "checks": {
+        "signal_energy.f64": true,
+        "received_energy.f64": true,
+        "intervals.u64": true,
+        "valid_rows.u64": true,
+        "key_seed": true,
+        "seed_roots": true,
+        "receive_basis_changed": true
+      },
+      "scope": "identical source/noise seed declarations and signal/received energy/calendars, changed receive basis; these energy hashes alone do not prove sample-by-sample raw waveform identity"
+    }
+  ],
+  "limitations": [
+    "Retained-energy fits allow free complex coefficients per block and are optimistic ceilings, not achievable gains.",
+    "The six raw examples are selected diagnostics, not an independent performance sample.",
+    "Original-rate raw examples have different seeds/C/N0 than slower examples; comparisons do not isolate rate causally.",
+    "A score-margin requirement is an extra rejection rule; its post-hoc tradeoff is not a wrong-key false-admission guarantee.",
+    "A wider physical signal null or validated minimum distinguishable pattern rate/complexity is needed before claiming generic key identification at these slower rates."
+  ]
+}

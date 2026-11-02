@@ -35,6 +35,9 @@ conditions; the record separates these from ideal presence-detection bounds.
 The [spread-boundary study](validation-data/triad-v3/2026-11-02-spread/README.md)
 separates deterministic ray-center changes from stochastic Doppler width and
 tests the receiver's block/window approximations under explicit duration limits.
+The [selective-modulation study](validation-data/triad-v3/2026-11-02-selective/README.md)
+adds paired modulation-depth/rate comparisons, sampled noisy boundary trials,
+receiver-prior alternatives and explicit pre/post modulation energy accounting.
 
 Before changing arithmetic or relating these experiments to a precision
 dropdown, read the [precision-control experiment guide](gpu-precision-controls.md).
@@ -273,6 +276,31 @@ simulation inputs over a long observation, not measured device behavior.
 NIST describes methods for evaluating actual GPSDO frequency/time uncertainty
 ([Lombardi, 2016](https://www.nist.gov/publications/evaluating-frequency-and-time-uncertainty-gps-disciplined-oscillators-and-clocks));
 a preset name alone does not supply that evaluation for a month-long link.
+
+The campaign wrapper accepts every shared selective preset: Off and Slow, Fast
+or Each at 1, 5, 10, 25 and 65 percent. These are additive amplitude excursions,
+without received-energy normalization; Each65 can reverse an individual band's
+polarity. The temporal rates are 0.1 and 1 times the effective ray-center
+separation, independently of Gaussian width B. A zero separation bypasses this
+stage. These periodic excursions retain a coherent mean; their rate is not a
+substitute for random phase coherence time.
+
+Active stream reports expose `path_truth_simulation_only.selective_perturbation`:
+physical RX sample rate, depths/rates, band geometry, six seeded initial phases,
+tail length, processed rows, and pre/post selective signal-energy sums. Phase
+origin is capture row zero before its first update. Energy sums include processed
+tails and precede receiver oscillator, thermal noise, frontend and erasures;
+divide by physical RX sample rate for time-integrated energy. They are diagnostic
+truth, never practical receiver inputs. Inactive reports contain only
+`{"enabled":false}`. This instrumentation does not normalize samples or consume
+additional random numbers.
+
+The selective study found wrong-key admissions when fine-pattern changes were
+slow relative to Gaussian ray evolution, despite high correct-key reception.
+The calibrated Gaussian-noise admission bound does not cover such signals.
+Treat those slower-rate operating points as failed identification controls;
+longer transmission or a favorable noise-only test does not establish key or
+pattern distinguishability under the fitted channel model.
 
 ### Optional sampled converters and interference
 

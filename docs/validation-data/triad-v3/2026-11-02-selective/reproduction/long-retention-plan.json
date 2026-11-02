@@ -1,0 +1,33 @@
+{
+  "schema": "triad-selective-retention-plan-v1",
+  "jobs": [
+    {
+      "name": "stable850-off-m60-retention",
+      "timeout_seconds": 600,
+      "argv": [
+        "/workspace/triad-env/bin/python",
+        "/workspace/triad/docs/validation-data/triad-v3/2026-11-02-selective/reproduction/retention.py",
+        "/workspace/triad/local-evidence/selective/long/stable850-off-m60/path-80000",
+        "/workspace/triad/local-evidence/selective/long/stable850-off-m60/path-80001",
+        "/workspace/triad/local-evidence/selective/long/stable850-off-m60/path-80002",
+        "/workspace/triad/local-evidence/selective/long/stable850-off-m60/path-80003",
+        "--output",
+        "/workspace/triad/local-evidence/selective/long-retention/stable850-off-m60.json"
+      ]
+    },
+    {
+      "name": "stable850-each-65-m60-retention",
+      "timeout_seconds": 600,
+      "argv": [
+        "/workspace/triad-env/bin/python",
+        "/workspace/triad/docs/validation-data/triad-v3/2026-11-02-selective/reproduction/retention.py",
+        "/workspace/triad/local-evidence/selective/long/stable850-each-65-m60/path-80000",
+        "/workspace/triad/local-evidence/selective/long/stable850-each-65-m60/path-80001",
+        "/workspace/triad/local-evidence/selective/long/stable850-each-65-m60/path-80002",
+        "/workspace/triad/local-evidence/selective/long/stable850-each-65-m60/path-80003",
+        "--output",
+        "/workspace/triad/local-evidence/selective/long-retention/stable850-each-65-m60.json"
+      ]
+    }
+  ]
+}

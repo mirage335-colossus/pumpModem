@@ -32,6 +32,8 @@ SEED_DOMAINS = ("key", "channel", "oscillator", "noise", "frontend", "path")
 # nominal physical overrides below, never receiver tap-basis parameters.
 SPREAD_PRESETS = ("none", "sub9-best", "sub9-moderate", "sub9-worst", "hf-best",
                   "hf-moderate", "hf-worst", "aurora-best", "aurora-worst", "eme-focused")
+SELECTIVE_PERTURBATIONS = ("off",) + tuple(
+    f"{mode}-{depth}" for depth in (1, 5, 10, 25, 65) for mode in ("slow", "fast", "each"))
 EXPORT_FILES = ("gram.c128", "mean.c128", "intervals.u64", "valid_rows.u64",
                 "signal_energy.f64", "observation.c128", "received_energy.f64")
 
@@ -81,7 +83,7 @@ def parser():
     p.add_argument("--outage-seconds", type=finite, nargs=2, default=(-1., -1.), metavar=("START", "END"))
     p.add_argument("--outage-gain", type=finite, default=0)
     p.add_argument("--outage-ramp-seconds", type=finite, default=60)
-    p.add_argument("--selective-perturbation", choices=("off", "slow-1", "fast-1", "each-1", "slow-5", "fast-5", "each-5"), default="off")
+    p.add_argument("--selective-perturbation", choices=SELECTIVE_PERTURBATIONS, default="off")
     p.add_argument("--start", type=finite, nargs=3, default=(0., 0., 1.), metavar=("MIN", "MAX", "STEP"), help="public timing bank; default single nominal branch is not known alignment")
     p.add_argument("--epoch-offsets", default="0", help="comma-separated public integer epoch offsets, e.g. use --epoch-offsets=-1,0,1")
     return p
@@ -92,6 +94,8 @@ def validate(args):
         raise ValueError("unsupported sampled control")
     if args.spread_preset not in SPREAD_PRESETS:
         raise ValueError("unsupported physical spread preset")
+    if args.selective_perturbation not in SELECTIVE_PERTURBATIONS:
+        raise ValueError("unsupported frequency-selective perturbation")
     if not math.isfinite(args.rf_hz) or not 0 < args.rf_hz <= 10e9:
         raise ValueError("RF frequency must be finite and in (0,10e9] Hz")
     for name in ("spread_delay_ms", "spread_doppler_hz"):

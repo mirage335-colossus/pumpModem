@@ -275,6 +275,15 @@ The [spread study](validation-data/triad-v3/2026-11-02-spread/README.md) keeps
 stable ray separation, stochastic width, delay mismatch and receiver compression
 as distinct experimental dimensions.
 
+The isolated stream's optional selective report records pre/post perturbation
+signal energy, the actual physical RX clock, component depths/rates, band
+geometry, six initial phases and complete processed-row count. It appears only
+under `path_truth_simulation_only`; receiver likelihoods must not consume it.
+The sums precede receiver oscillator, thermal noise, frontend and erasures and
+include processed tails. Active amplitude modulation is not power normalized.
+The [selective study](validation-data/triad-v3/2026-11-02-selective/README.md)
+separates these energy changes from receiver projection loss and admission.
+
 ## Focused evidence and limits
 
 Use the focused selectors that match the changed path:

@@ -868,7 +868,29 @@ void json_frontend_report(std::ostream& out,const StreamChannelReport& r) {
     for(std::size_t i=0;i<r.path_gaussian_fir_coefficients.size();++i){if(i)out<<',';out<<r.path_gaussian_fir_coefficients[i];}
     out<<"],\"covariance_formula\":\"R[m]=sum(k=0..L-1-m,h[k]*h[k+m]) for 0<=m<L, otherwise 0; lag_seconds=m*sample_interval_seconds; proper-complex variance R[0]=1 when active\""
        <<",\"scope\":\"actual finite sampled teacher covariance; empty coefficients and zero sample interval when disabled; evaluation/oracle diagnostics only, distinct from ideal Gaussian target\"}"
-       <<",\"scope\":\"seeded physical truth; never a practical receiver search input\"}";
+       <<",\"selective_perturbation\":{\"enabled\":"<<(r.selective_perturbation?"true":"false");
+    if(r.selective_perturbation) {
+        const auto& p=*r.selective_perturbation;
+        out<<",\"sample_rate_hz\":"<<p.sample_rate_hz<<",\"seed\":"<<p.seed
+           <<",\"component_order\":[\"slow\",\"fast\"],\"band_order\":[\"low\",\"middle\",\"high\"]"
+           <<",\"component_depths\":["<<p.component_depths[0]<<','<<p.component_depths[1]<<']'
+           <<",\"component_rates_hz\":["<<p.component_rates_hz[0]<<','<<p.component_rates_hz[1]<<']'
+           <<",\"band_centers_hz\":["<<p.band_centers_hz[0]<<','<<p.band_centers_hz[1]<<','<<p.band_centers_hz[2]<<']'
+           <<",\"band_width_hz\":"<<p.band_width_hz<<",\"decay_tail_samples\":"<<p.decay_tail_samples
+           <<",\"processed_rows\":"<<p.processed_rows
+           <<",\"pre_selective_energy_samples\":"<<p.pre_selective_energy_samples
+           <<",\"post_selective_energy_samples\":"<<p.post_selective_energy_samples
+           <<",\"initial_phases_radians\":[";
+        for(std::size_t band=0;band<p.initial_phases_radians.size();++band) {
+            if(band)out<<',';
+            out<<'['<<p.initial_phases_radians[band][0]<<','<<p.initial_phases_radians[band][1]<<']';
+        }
+        out<<"],\"phase_origin\":\"first physical RX capture row (index 0), before the first phase step; not calendar time zero\""
+           <<",\"gain_law\":\"1 + slow_depth*sin(slow_phase) + fast_depth*sin(fast_phase); no power normalization\""
+           <<",\"energy_scope\":\"sum of squared complex signal magnitudes over all processed capture rows, including captured tails; immediately before/after selective processing, before RX oscillator, thermal noise, frontend and observed erasures; divide by sample_rate_hz for physical-time energy\""
+           <<",\"decay_scope\":\"zero-input relative pole-state decay by 1e6; not an absolute silence threshold\"";
+    }
+    out<<"},\"scope\":\"seeded physical truth; never a practical receiver search input\"}";
     out<<",\"frontend_report\":{\"dac_clipped_components\":"<<r.dac_clipped_components
        <<",\"adc_clipped_components\":"<<r.adc_clipped_components<<",\"impulse_events\":"<<r.impulse_events
        <<",\"overload_samples\":"<<r.overload_samples<<",\"maximum_adc_input_component\":"<<r.maximum_adc_input_component

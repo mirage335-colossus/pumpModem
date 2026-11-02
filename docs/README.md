@@ -27,6 +27,9 @@ CFO batch receiver. The subsequent [−60 dB-Hz study](validation-data/triad-v3/
 records 850–3,000-day sampled holdouts, lower-rate rounding costs, joint
 ray-frequency inference, measured GPU acceleration and remaining coherence limits.
 Its qualifications apply only to the declared models and acquisition conditions.
+The [selective-modulation follow-up](validation-data/triad-v3/2026-11-02-selective/README.md)
+examines stronger selective amplitude variation with Doppler spread, including
+energy accounting, receiver alternatives and independent sampled boundary tests.
 
 ## Topic map
 

@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import importlib.util
+import contextlib
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -157,6 +159,29 @@ class LowRateCampaignTests(unittest.TestCase):
                 self.assertEqual(identity["control"], control)
                 for domain in campaign.SEED_DOMAINS:
                     self.assertEqual(campaign.seed_for(base, 4, domain), campaign.seed_for(args, 4, domain))
+
+    def test_all_selective_depths_forward_with_paired_seeds_and_invalids_rejected(self):
+        baseline = self.args()
+        choices = ["off"] + [f"{mode}-{depth}" for depth in (1, 5, 10, 25, 65)
+                              for mode in ("slow", "fast", "each")]
+        self.assertEqual(list(campaign.SELECTIVE_PERTURBATIONS), choices)
+        for choice in choices:
+            with self.subTest(choice=choice):
+                args = self.args("--selective-perturbation", choice)
+                campaign.validate(args)
+                command, _ = campaign.make_command(args, 0, self.root / "path")
+                self.assertEqual(command[command.index("--selective-perturbation")+1], choice)
+                for domain in campaign.SEED_DOMAINS:
+                    self.assertEqual(campaign.seed_for(baseline, 0, domain), campaign.seed_for(args, 0, domain))
+        for choice in ("slow-0", "fast-2", "each-100", "each-65%", "unknown"):
+            with self.subTest(choice=choice):
+                with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                    self.args("--selective-perturbation", choice)
+                invalid = self.args()
+                invalid.selective_perturbation = choice
+                with self.assertRaises(ValueError):
+                    campaign.validate(invalid)
+        self.assertFalse((self.root / "result").exists())
 
     def test_seed_partition_pairing_and_independence(self):
         a, b = self.args(), self.args("--block-seconds", "256", "--ray-coherence-seconds", "1000")

@@ -482,10 +482,22 @@ struct StreamingChannel::Impl {
         if (spread_enabled) spread = std::make_unique<SpreadRay>(
             effects.sample_rate * rx_scale, effects.spread_doppler_hz,
             effects.seed ^ 0x325449415443484eULL);
-        if (perturb_enabled) perturbation = std::make_unique<FrequencySelectivePerturbation>(
-            effects.sample_rate * rx_scale, 0, effects.occupied_bandwidth_hz,
-            effects.spread_doppler_hz, effects.perturbation_slow_depth,
-            effects.perturbation_fast_depth, effects.seed ^ 0x3254494154504552ULL);
+        if (perturb_enabled) {
+            const auto seed = effects.seed ^ 0x3254494154504552ULL;
+            perturbation = std::make_unique<FrequencySelectivePerturbation>(
+                effects.sample_rate * rx_scale, 0, effects.occupied_bandwidth_hz,
+                effects.spread_doppler_hz, effects.perturbation_slow_depth,
+                effects.perturbation_fast_depth, seed);
+            auto& diagnostic = stats.selective_perturbation.emplace();
+            diagnostic.sample_rate_hz = effects.sample_rate * rx_scale;
+            diagnostic.band_width_hz = perturbation->band_width_hz;
+            diagnostic.component_depths = {effects.perturbation_slow_depth, effects.perturbation_fast_depth};
+            diagnostic.component_rates_hz = perturbation->rates_hz;
+            diagnostic.band_centers_hz = perturbation->band_centers_hz;
+            diagnostic.initial_phases_radians = perturbation->initial_phases;
+            diagnostic.seed = seed;
+            diagnostic.decay_tail_samples = perturb_tail;
+        }
         initialize_spectrum(tx_osc, config.tx_spectrum, tx_spectrum_rng);
         initialize_spectrum(rx_osc, config.rx_spectrum, rx_spectrum_rng);
         if (config.path_evolution.ray_coherence_seconds > 0) {
@@ -620,7 +632,13 @@ struct StreamingChannel::Impl {
             propagated *= std::polar(1., angle);
         }
         if (path.outage_start_seconds >= 0) propagated *= outage_gain(path, physical_time);
-        if (perturbation) propagated = perturbation->process(propagated);
+        if (perturbation) {
+            auto& diagnostic = *stats.selective_perturbation;
+            diagnostic.pre_selective_energy_samples += std::norm(propagated);
+            propagated = perturbation->process(propagated);
+            diagnostic.post_selective_energy_samples += std::norm(propagated);
+            ++diagnostic.processed_rows;
+        }
 
         const auto rx_dwell = dwell_index(receive_calendar, effects.dwell_seconds);
         if (effects.fhss && rx_dwell != previous_rx_dwell) {

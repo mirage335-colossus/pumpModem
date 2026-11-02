@@ -284,6 +284,78 @@ def main():
         near(teacher["sample_interval_seconds"], 1/(64*rx_scale), "actual Gaussian teacher physical timestep")
         near(gm["channel_model"]["path_evolution"]["gaussian_doppler_width_hz"], .5,
              "export lost Gaussian width input")
+        # Selective modulation rates follow effective ray separation, not the
+        # independently chosen Gaussian width. These fields are oracle-only.
+        selective_outputs = []
+        for mode, depths in (("slow-65", (.65, 0)), ("fast-65", (0, .65)), ("each-65", (.65, .65))):
+            destination = root/("selective-"+mode)
+            invoke("--mode", "export-stats", *COMMON, "--selective-perturbation", mode,
+                   "--spread-doppler-hz", ".2", "--margin", "3", "--ray-gaussian-width-hz", ".5",
+                   "--block-seconds", "4", "--output", str(destination))
+            manifest = json.loads((destination/"manifest.json").read_text())
+            selective = manifest["path_truth_simulation_only"]["selective_perturbation"]
+            check(selective["enabled"], "selected selective teacher was not reported active")
+            check(selective["component_order"] == ["slow", "fast"] and
+                  selective["band_order"] == ["low", "middle", "high"], "selective array ordering lost")
+            check(selective["component_depths"] == list(depths), "selective depths incorrectly margin-scaled")
+            near(selective["component_rates_hz"][0], .06, "selective slow rate is not effective Doppler/10")
+            near(selective["component_rates_hz"][1], .6, "selective fast rate is not effective Doppler")
+            physical_fs = 64*(1+manifest["endpoint_truth"]["rx_audio_ppm"]*1e-6)
+            near(selective["sample_rate_hz"], physical_fs, "selective report lost actual RX sample clock")
+            width = manifest["source_format"]["occupied_bandwidth_hz"]/3
+            near(selective["band_width_hz"], width, "selective nominal band width")
+            for actual, expected in zip(selective["band_centers_hz"], (-width, 0, width)):
+                near(actual, expected, "selective band center")
+            check(selective["seed"] == manifest["random_seed_roots"]["channel"] ^ 0x3254494154504552,
+                  "selective derived seed is not the actual constructor seed")
+            phases = selective["initial_phases_radians"]
+            check(len(phases) == 3 and all(len(row) == 2 and all(0 <= p < 2*math.pi for p in row)
+                                          for row in phases), "selective phase shape/range")
+            cutoff = min(width/2, physical_fs*.24)
+            k = math.tan(math.pi*cutoff/physical_fs)
+            pole = abs((k-1)/(k+1))
+            expected_tail = math.ceil(math.log(1e-6)/math.log(pole)) if pole else 0
+            check(selective["decay_tail_samples"] == expected_tail, "selective IIR decay extent")
+            check(selective["processed_rows"] == manifest["channel_samples"],
+                  "selective energy rows do not cover the processed capture")
+            check(selective["pre_selective_energy_samples"] > 0 and selective["post_selective_energy_samples"] > 0,
+                  "active selective stage omitted accumulated signal energy")
+            near(selective["post_selective_energy_samples"], manifest["channel_signal_energy_samples"],
+                 "post-selective energy differs from the later unit-modulus RX phase stage")
+            check("index 0" in selective["phase_origin"] and "not calendar time zero" in selective["phase_origin"],
+                  "selective phases have an ambiguous time origin")
+            selective_outputs.append((destination, manifest, selective))
+        check(all(entry[2]["initial_phases_radians"] == selective_outputs[0][2]["initial_phases_radians"]
+                  for entry in selective_outputs[1:]), "changing active depth changed seeded initial phases")
+        check(all((entry[0]/"gram.c128").read_bytes() == (selective_outputs[0][0]/"gram.c128").read_bytes()
+                  for entry in selective_outputs[1:]), "hidden selective realization changed public receiver templates")
+        # A fresh noisy pass and different read chunks reproduce the same
+        # signal-only instrumentation and the same noiseless projections.
+        chunk_output = root/"selective-each-65-noisy-chunk"
+        invoke("--mode", "export-stats", *COMMON, "--selective-perturbation", "each-65",
+               "--spread-doppler-hz", ".2", "--margin", "3", "--ray-gaussian-width-hz", ".5",
+               "--block-seconds", "4", "--stats-noisy", "--chunk", "17", "--output", str(chunk_output))
+        chunk_manifest = json.loads((chunk_output/"manifest.json").read_text())
+        check(chunk_manifest["path_truth_simulation_only"]["selective_perturbation"] == selective_outputs[-1][2],
+              "selective instrumentation changed with read chunks or the fresh noisy pass")
+        for filename in ("gram.c128", "mean.c128", "signal_energy.f64"):
+            check((chunk_output/filename).read_bytes() == (selective_outputs[-1][0]/filename).read_bytes(),
+                  "selective signal changed with read chunks/noisy second pass: "+filename)
+        # Selected depths with D=0 and Off share the exact inactive sample path,
+        # including independently generated thermal noise and no filter tail.
+        bypass_outputs = []
+        for mode in ("off", "each-65"):
+            destination = root/("selective-bypass-"+mode)
+            invoke("--mode", "export-stats", *COMMON, "--selective-perturbation", mode,
+                   "--spread-doppler-hz", "0", "--stats-noisy", "--block-seconds", "4",
+                   "--output", str(destination))
+            manifest = json.loads((destination/"manifest.json").read_text())
+            check(manifest["path_truth_simulation_only"]["selective_perturbation"] == {"enabled": False},
+                  "inactive selective stage retained realization metadata")
+            bypass_outputs.append(destination)
+        for filename in ("gram.c128", "mean.c128", "signal_energy.f64", "observation.c128", "received_energy.f64"):
+            check((bypass_outputs[0]/filename).read_bytes() == (bypass_outputs[1]/filename).read_bytes(),
+                  "zero-Doppler selective bypass changed actual sampled/noisy values: "+filename)
         # CLI path seeds change the actual propagated samples while public
         # templates and independent endpoint draws stay fixed.
         path_outputs = []

@@ -164,6 +164,19 @@ struct StreamChannelConfig {
     std::optional<std::uint64_t> frontend_seed;
     std::optional<std::uint64_t> path_seed;
 };
+struct SelectivePerturbationReport {
+    // Fixed-size seeded-model diagnostics, never receiver channel estimates.
+    // Initial phases apply to capture row zero, before its first phase step.
+    double sample_rate_hz = 0, band_width_hz = 0;
+    std::array<double, 2> component_depths{}, component_rates_hz{};
+    std::array<double, 3> band_centers_hz{};
+    std::array<std::array<double, 2>, 3> initial_phases_radians{};
+    std::uint64_t seed = 0, decay_tail_samples = 0;
+    // Accumulated signal energy over all processed rows, including captured
+    // tails, before RX oscillator/noise/frontend/observed erasure processing.
+    std::uint64_t processed_rows = 0;
+    double pre_selective_energy_samples = 0, post_selective_energy_samples = 0;
+};
 struct StreamChannelReport {
     std::uint64_t samples = 0, source_samples = 0, tail_samples = 0;
     std::uint64_t erased_samples = 0, out_of_passband_samples = 0;
@@ -177,6 +190,8 @@ struct StreamChannelReport {
     // Simulation-model diagnostics, not receiver channel realizations. Exact
     // finite-teacher covariance at lag m is sum_k h[k]h[k+m]; empty when off.
     std::vector<double> path_gaussian_fir_coefficients;
+    // Absent for the exact Off/zero-spread-Doppler bypass.
+    std::optional<SelectivePerturbationReport> selective_perturbation;
     bool gaussian_projection_supported = true;
     std::size_t working_bytes = 0;
 };

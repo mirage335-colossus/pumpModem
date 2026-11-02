@@ -1,0 +1,125 @@
+{
+  "schema": "triad-selective-retention-plan-v1",
+  "jobs": [
+    {
+      "name": "g10-aligned-off",
+      "timeout_seconds": 600,
+      "argv": [
+        "/workspace/triad-env/bin/python",
+        "/workspace/triad/docs/validation-data/triad-v3/2026-11-02-selective/reproduction/retention.py",
+        "/workspace/triad/local-evidence/selective/highspread/g10-aligned-off/path-50000",
+        "/workspace/triad/local-evidence/selective/highspread/g10-aligned-off/path-50001",
+        "--output",
+        "/workspace/triad/local-evidence/selective/highspread-retention/g10-aligned-off.json"
+      ]
+    },
+    {
+      "name": "g10-aligned-each-25",
+      "timeout_seconds": 600,
+      "argv": [
+        "/workspace/triad-env/bin/python",
+        "/workspace/triad/docs/validation-data/triad-v3/2026-11-02-selective/reproduction/retention.py",
+        "/workspace/triad/local-evidence/selective/highspread/g10-aligned-each-25/path-50000",
+        "/workspace/triad/local-evidence/selective/highspread/g10-aligned-each-25/path-50001",
+        "--output",
+        "/workspace/triad/local-evidence/selective/highspread-retention/g10-aligned-each-25.json"
+      ]
+    },
+    {
+      "name": "g10-aligned-each-65",
+      "timeout_seconds": 600,
+      "argv": [
+        "/workspace/triad-env/bin/python",
+        "/workspace/triad/docs/validation-data/triad-v3/2026-11-02-selective/reproduction/retention.py",
+        "/workspace/triad/local-evidence/selective/highspread/g10-aligned-each-65/path-50000",
+        "/workspace/triad/local-evidence/selective/highspread/g10-aligned-each-65/path-50001",
+        "--output",
+        "/workspace/triad/local-evidence/selective/highspread-retention/g10-aligned-each-65.json"
+      ]
+    },
+    {
+      "name": "g10-aligned-slow-65",
+      "timeout_seconds": 600,
+      "argv": [
+        "/workspace/triad-env/bin/python",
+        "/workspace/triad/docs/validation-data/triad-v3/2026-11-02-selective/reproduction/retention.py",
+        "/workspace/triad/local-evidence/selective/highspread/g10-aligned-slow-65/path-50000",
+        "/workspace/triad/local-evidence/selective/highspread/g10-aligned-slow-65/path-50001",
+        "--output",
+        "/workspace/triad/local-evidence/selective/highspread-retention/g10-aligned-slow-65.json"
+      ]
+    },
+    {
+      "name": "g10-aligned-fast-65",
+      "timeout_seconds": 600,
+      "argv": [
+        "/workspace/triad-env/bin/python",
+        "/workspace/triad/docs/validation-data/triad-v3/2026-11-02-selective/reproduction/retention.py",
+        "/workspace/triad/local-evidence/selective/highspread/g10-aligned-fast-65/path-50000",
+        "/workspace/triad/local-evidence/selective/highspread/g10-aligned-fast-65/path-50001",
+        "--output",
+        "/workspace/triad/local-evidence/selective/highspread-retention/g10-aligned-fast-65.json"
+      ]
+    },
+    {
+      "name": "g30-aligned-off",
+      "timeout_seconds": 600,
+      "argv": [
+        "/workspace/triad-env/bin/python",
+        "/workspace/triad/docs/validation-data/triad-v3/2026-11-02-selective/reproduction/retention.py",
+        "/workspace/triad/local-evidence/selective/highspread/g30-aligned-off/path-50000",
+        "/workspace/triad/local-evidence/selective/highspread/g30-aligned-off/path-50001",
+        "--output",
+        "/workspace/triad/local-evidence/selective/highspread-retention/g30-aligned-off.json"
+      ]
+    },
+    {
+      "name": "g30-aligned-each-25",
+      "timeout_seconds": 600,
+      "argv": [
+        "/workspace/triad-env/bin/python",
+        "/workspace/triad/docs/validation-data/triad-v3/2026-11-02-selective/reproduction/retention.py",
+        "/workspace/triad/local-evidence/selective/highspread/g30-aligned-each-25/path-50000",
+        "/workspace/triad/local-evidence/selective/highspread/g30-aligned-each-25/path-50001",
+        "--output",
+        "/workspace/triad/local-evidence/selective/highspread-retention/g30-aligned-each-25.json"
+      ]
+    },
+    {
+      "name": "g30-aligned-each-65",
+      "timeout_seconds": 600,
+      "argv": [
+        "/workspace/triad-env/bin/python",
+        "/workspace/triad/docs/validation-data/triad-v3/2026-11-02-selective/reproduction/retention.py",
+        "/workspace/triad/local-evidence/selective/highspread/g30-aligned-each-65/path-50000",
+        "/workspace/triad/local-evidence/selective/highspread/g30-aligned-each-65/path-50001",
+        "--output",
+        "/workspace/triad/local-evidence/selective/highspread-retention/g30-aligned-each-65.json"
+      ]
+    },
+    {
+      "name": "g30-aligned-slow-65",
+      "timeout_seconds": 600,
+      "argv": [
+        "/workspace/triad-env/bin/python",
+        "/workspace/triad/docs/validation-data/triad-v3/2026-11-02-selective/reproduction/retention.py",
+        "/workspace/triad/local-evidence/selective/highspread/g30-aligned-slow-65/path-50000",
+        "/workspace/triad/local-evidence/selective/highspread/g30-aligned-slow-65/path-50001",
+        "--output",
+        "/workspace/triad/local-evidence/selective/highspread-retention/g30-aligned-slow-65.json"
+      ]
+    },
+    {
+      "name": "g30-aligned-fast-65",
+      "timeout_seconds": 600,
+      "argv": [
+        "/workspace/triad-env/bin/python",
+        "/workspace/triad/docs/validation-data/triad-v3/2026-11-02-selective/reproduction/retention.py",
+        "/workspace/triad/local-evidence/selective/highspread/g30-aligned-fast-65/path-50000",
+        "/workspace/triad/local-evidence/selective/highspread/g30-aligned-fast-65/path-50001",
+        "--output",
+        "/workspace/triad/local-evidence/selective/highspread-retention/g30-aligned-fast-65.json"
+      ]
+    }
+  ]
+}

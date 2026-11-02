@@ -1,0 +1,1982 @@
+{
+  "accepted_auditor_sha256": "54b716dbc84ad25ab5f2d5c1dcb0c1f57a63003ead28ee3bce15199b277c0d96",
+  "admitted_control_paths": [
+    {
+      "cell": "g01slowrate-each-65-cn0m24-wrong-key",
+      "control": "wrong-key",
+      "index": 90001,
+      "input": "/workspace/triad/local-evidence/selective/followup/g01slowrate-each-65-cn0m24-wrong-key/batch00/path-90001",
+      "manifest_sha256": "d473db5b0f61871a23acb30936a279a3d309af393664ab0bcf8aa7fcef9a3bf3",
+      "receive_key_seed_by_exporter_branch": 16686783344851439082,
+      "relaxed_admitted": true,
+      "score": 30.364536506570523,
+      "scores": [
+        30.364536506570523,
+        14.887898852882177
+      ],
+      "strict_admitted": true,
+      "transmit_key_seed": 10203673983702435043,
+      "winner": 0
+    },
+    {
+      "cell": "g01slowrate-each-65-cn0m24-wrong-key",
+      "control": "wrong-key",
+      "index": 90004,
+      "input": "/workspace/triad/local-evidence/selective/followup/g01slowrate-each-65-cn0m24-wrong-key/batch00/path-90004",
+      "manifest_sha256": "2a34b8308eca25b2c4fdc01d3fecffa881428ef14444193a0e47f23df0d54bfb",
+      "receive_key_seed_by_exporter_branch": 16132392831577159961,
+      "relaxed_admitted": true,
+      "score": 25.788649831571043,
+      "scores": [
+        25.788649831571043,
+        13.888053807305653
+      ],
+      "strict_admitted": true,
+      "transmit_key_seed": 13107765925636616208,
+      "winner": 0
+    },
+    {
+      "cell": "g01slowrate-each-65-cn0m24-wrong-key",
+      "control": "wrong-key",
+      "index": 90008,
+      "input": "/workspace/triad/local-evidence/selective/followup/g01slowrate-each-65-cn0m24-wrong-key/batch00/path-90008",
+      "manifest_sha256": "5229e68078ebb15d1e2e265ab9e51d751f744431ac71b15488a7468b017c4085",
+      "receive_key_seed_by_exporter_branch": 711727657145686568,
+      "relaxed_admitted": true,
+      "score": 20.015523938187794,
+      "scores": [
+        20.015523938187794,
+        10.521926505317131
+      ],
+      "strict_admitted": false,
+      "transmit_key_seed": 7199416250198496033,
+      "winner": 0
+    },
+    {
+      "cell": "g01slowrate-each-65-cn0m24-wrong-key",
+      "control": "wrong-key",
+      "index": 90009,
+      "input": "/workspace/triad/local-evidence/selective/followup/g01slowrate-each-65-cn0m24-wrong-key/batch00/path-90009",
+      "manifest_sha256": "29e654e8b1a2a6e909dce927641cab1e5097778d458201d0042643cb64c74214",
+      "receive_key_seed_by_exporter_branch": 7343251786154740641,
+      "relaxed_admitted": true,
+      "score": 28.023123793885286,
+      "scores": [
+        24.508703579634105,
+        28.023123793885286
+      ],
+      "strict_admitted": true,
+      "transmit_key_seed": 1144370534255772328,
+      "winner": 1
+    },
+    {
+      "cell": "g01slowrate-each-65-cn0m24-wrong-key",
+      "control": "wrong-key",
+      "index": 90013,
+      "input": "/workspace/triad/local-evidence/selective/followup/g01slowrate-each-65-cn0m24-wrong-key/batch00/path-90013",
+      "manifest_sha256": "7a4376c0cce7dfa90178508de9d70171187c531e48335c0cf8f21bd5db256ad3",
+      "receive_key_seed_by_exporter_branch": 18145109214276933241,
+      "relaxed_admitted": true,
+      "score": 22.50411780724964,
+      "scores": [
+        22.50411780724964,
+        22.19129404673585
+      ],
+      "strict_admitted": false,
+      "transmit_key_seed": 10509579461074624368,
+      "winner": 0
+    },
+    {
+      "cell": "g01slowrate-each-65-cn0m24-wrong-key",
+      "control": "wrong-key",
+      "index": 90018,
+      "input": "/workspace/triad/local-evidence/selective/followup/g01slowrate-each-65-cn0m24-wrong-key/batch00/path-90018",
+      "manifest_sha256": "47546cca7f82d1265c3baca0dca11e9c30d447755f901975faf594fd06dd035e",
+      "receive_key_seed_by_exporter_branch": 14488797431219531732,
+      "relaxed_admitted": true,
+      "score": 17.8041101426306,
+      "scores": [
+        17.8041101426306,
+        5.948679415799101
+      ],
+      "strict_admitted": false,
+      "transmit_key_seed": 11753104305439270621,
+      "winner": 0
+    },
+    {
+      "cell": "g01slowrate-each-65-cn0m24-wrong-key",
+      "control": "wrong-key",
+      "index": 90019,
+      "input": "/workspace/triad/local-evidence/selective/followup/g01slowrate-each-65-cn0m24-wrong-key/batch00/path-90019",
+      "manifest_sha256": "7628f693e9a838db8d4d37f1355785142fe56e612dce3d24b729692a406ed125",
+      "receive_key_seed_by_exporter_branch": 5456961730140947118,
+      "relaxed_admitted": true,
+      "score": 26.388993951584457,
+      "scores": [
+        21.353806469943528,
+        26.388993951584457
+      ],
+      "strict_admitted": true,
+      "transmit_key_seed": 2428253493997276071,
+      "winner": 1
+    },
+    {
+      "cell": "g01slowrate-each-65-cn0m24-wrong-key",
+      "control": "wrong-key",
+      "index": 90022,
+      "input": "/workspace/triad/local-evidence/selective/followup/g01slowrate-each-65-cn0m24-wrong-key/batch00/path-90022",
+      "manifest_sha256": "f757b1660e4228e29b859a86e7723878b68c94d1cfe8e0efd04ad47412b49650",
+      "receive_key_seed_by_exporter_branch": 3689285964210944844,
+      "relaxed_admitted": true,
+      "score": 24.00718742690329,
+      "scores": [
+        14.975759528812478,
+        24.00718742690329
+      ],
+      "strict_admitted": true,
+      "transmit_key_seed": 6429764153251754565,
+      "winner": 1
+    },
+    {
+      "cell": "g01slowrate-each-65-cn0m24-wrong-key",
+      "control": "wrong-key",
+      "index": 90025,
+      "input": "/workspace/triad/local-evidence/selective/followup/g01slowrate-each-65-cn0m24-wrong-key/batch00/path-90025",
+      "manifest_sha256": "c9b9aa2dce8bef5f0b091118fa6bd89295d7d7cfcf65b38cc795c38ca83d9b8c",
+      "receive_key_seed_by_exporter_branch": 3479249157787746809,
+      "relaxed_admitted": true,
+      "score": 26.06718558459239,
+      "scores": [
+        14.76470963305293,
+        26.06718558459239
+      ],
+      "strict_admitted": true,
+      "transmit_key_seed": 6503515393766246640,
+      "winner": 1
+    },
+    {
+      "cell": "g01slowrate-each-65-cn0m24-wrong-key",
+      "control": "wrong-key",
+      "index": 90026,
+      "input": "/workspace/triad/local-evidence/selective/followup/g01slowrate-each-65-cn0m24-wrong-key/batch00/path-90026",
+      "manifest_sha256": "6937c926ede692e40a1c2468eee98d4a99ca8565729ee551f167466b49f9aafd",
+      "receive_key_seed_by_exporter_branch": 18278119655028382590,
+      "relaxed_admitted": true,
+      "score": 17.834415476880988,
+      "scores": [
+        17.834415476880988,
+        2.7117748165671203
+      ],
+      "strict_admitted": false,
+      "transmit_key_seed": 10926025835633807991,
+      "winner": 0
+    },
+    {
+      "cell": "g1slowrate-each-65-cn0m14-wrong-key",
+      "control": "wrong-key",
+      "index": 90001,
+      "input": "/workspace/triad/local-evidence/selective/followup/g1slowrate-each-65-cn0m14-wrong-key/batch00/path-90001",
+      "manifest_sha256": "395bc8afe7183997522ae79909683aa60984db86082c06c077c44538717f76a8",
+      "receive_key_seed_by_exporter_branch": 15796731720612599150,
+      "relaxed_admitted": true,
+      "score": 24.761056021837504,
+      "scores": [
+        19.31282781089828,
+        24.761056021837504
+      ],
+      "strict_admitted": true,
+      "transmit_key_seed": 12767887092369759335,
+      "winner": 1
+    },
+    {
+      "cell": "g1slowrate-each-65-cn0m14-wrong-key",
+      "control": "wrong-key",
+      "index": 90004,
+      "input": "/workspace/triad/local-evidence/selective/followup/g1slowrate-each-65-cn0m14-wrong-key/batch00/path-90004",
+      "manifest_sha256": "4c0e6f630020517128d349fac291b2c1820bf5e86aac7286cb7093b66cb778f4",
+      "receive_key_seed_by_exporter_branch": 17144322754172329276,
+      "relaxed_admitted": true,
+      "score": 26.85473854429513,
+      "scores": [
+        19.341934016665746,
+        26.85473854429513
+      ],
+      "strict_admitted": true,
+      "transmit_key_seed": 9792295440164213813,
+      "winner": 1
+    },
+    {
+      "cell": "g1slowrate-each-65-cn0m14-wrong-key",
+      "control": "wrong-key",
+      "index": 90005,
+      "input": "/workspace/triad/local-evidence/selective/followup/g1slowrate-each-65-cn0m14-wrong-key/batch00/path-90005",
+      "manifest_sha256": "375fa88803402109e220c2c729af75e57ce45b6de25ed62fb62200f0b839f190",
+      "receive_key_seed_by_exporter_branch": 10987702103563894046,
+      "relaxed_admitted": true,
+      "score": 22.83835647354067,
+      "scores": [
+        22.83835647354067,
+        5.2600202934057
+      ],
+      "strict_admitted": true,
+      "transmit_key_seed": 17471097649171018775,
+      "winner": 0
+    },
+    {
+      "cell": "g1slowrate-each-65-cn0m14-wrong-key",
+      "control": "wrong-key",
+      "index": 90012,
+      "input": "/workspace/triad/local-evidence/selective/followup/g1slowrate-each-65-cn0m14-wrong-key/batch00/path-90012",
+      "manifest_sha256": "6d4d7a29a8f4609774da12d0b7448dcbdbe40cbf5aac125b2177f2e458f9e688",
+      "receive_key_seed_by_exporter_branch": 16078712574384325837,
+      "relaxed_admitted": true,
+      "score": 20.61129320145789,
+      "scores": [
+        6.100238782110837,
+        20.61129320145789
+      ],
+      "strict_admitted": false,
+      "transmit_key_seed": 13054503215019855300,
+      "winner": 1
+    },
+    {
+      "cell": "g1slowrate-each-65-cn0m14-wrong-key",
+      "control": "wrong-key",
+      "index": 90015,
+      "input": "/workspace/triad/local-evidence/selective/followup/g1slowrate-each-65-cn0m14-wrong-key/batch00/path-90015",
+      "manifest_sha256": "17ccf34637e069ef26871a366d4963244929ac0bddd3f60461b0082aca38d1a8",
+      "receive_key_seed_by_exporter_branch": 10014872439891672748,
+      "relaxed_admitted": true,
+      "score": 22.68157386967782,
+      "scores": [
+        22.68157386967782,
+        1.0360249192338031
+      ],
+      "strict_admitted": false,
+      "transmit_key_seed": 16209052144071571365,
+      "winner": 0
+    },
+    {
+      "cell": "g1slowrate-each-65-cn0m14-wrong-key",
+      "control": "wrong-key",
+      "index": 90017,
+      "input": "/workspace/triad/local-evidence/selective/followup/g1slowrate-each-65-cn0m14-wrong-key/batch00/path-90017",
+      "manifest_sha256": "66d0f546775ade6bae9df8af2de393c9a21f1a8ababa290999a02baca62415af",
+      "receive_key_seed_by_exporter_branch": 15546430047397027950,
+      "relaxed_admitted": true,
+      "score": 31.359163232488015,
+      "scores": [
+        21.68767794502701,
+        31.359163232488015
+      ],
+      "strict_admitted": true,
+      "transmit_key_seed": 13675714242587912551,
+      "winner": 1
+    },
+    {
+      "cell": "g1slowrate-each-65-cn0m14-wrong-key",
+      "control": "wrong-key",
+      "index": 90019,
+      "input": "/workspace/triad/local-evidence/selective/followup/g1slowrate-each-65-cn0m14-wrong-key/batch00/path-90019",
+      "manifest_sha256": "6a8fbf969ded9596dde87c86e894d1e29cb753e4a682458a8e2eed1c793d694d",
+      "receive_key_seed_by_exporter_branch": 3397189320486988211,
+      "relaxed_admitted": true,
+      "score": 25.562235698504278,
+      "scores": [
+        17.898566198638346,
+        25.562235698504278
+      ],
+      "strict_admitted": true,
+      "transmit_key_seed": 4984600607980282042,
+      "winner": 1
+    },
+    {
+      "cell": "g1slowrate-each-65-cn0m14-wrong-key",
+      "control": "wrong-key",
+      "index": 90020,
+      "input": "/workspace/triad/local-evidence/selective/followup/g1slowrate-each-65-cn0m14-wrong-key/batch00/path-90020",
+      "manifest_sha256": "da2c471b1ea4ed44493007bc73e10cee2d1eff39bcf7e6f731c1e5dd7c0e8373",
+      "receive_key_seed_by_exporter_branch": 372143173913109340,
+      "relaxed_admitted": true,
+      "score": 20.82998492590009,
+      "scores": [
+        20.82998492590009,
+        12.40688296938782
+      ],
+      "strict_admitted": false,
+      "transmit_key_seed": 8008517624689437269,
+      "winner": 0
+    },
+    {
+      "cell": "g1slowrate-each-65-cn0m14-wrong-key",
+      "control": "wrong-key",
+      "index": 90023,
+      "input": "/workspace/triad/local-evidence/selective/followup/g1slowrate-each-65-cn0m14-wrong-key/batch00/path-90023",
+      "manifest_sha256": "0ba47018153af22a5f44e3e2c244a19962a5d15baf17811d88217d9845e9ef19",
+      "receive_key_seed_by_exporter_branch": 7922527688325671144,
+      "relaxed_admitted": true,
+      "score": 21.26356324888488,
+      "scores": [
+        21.26356324888488,
+        21.139544569910644
+      ],
+      "strict_admitted": false,
+      "transmit_key_seed": 575227731523264993,
+      "winner": 0
+    },
+    {
+      "cell": "g1slowrate-each-65-cn0m14-wrong-key",
+      "control": "wrong-key",
+      "index": 90024,
+      "input": "/workspace/triad/local-evidence/selective/followup/g1slowrate-each-65-cn0m14-wrong-key/batch00/path-90024",
+      "manifest_sha256": "2ef64e7d5c0d20b9e3ee1a772167974930bb56c4cecd91bace9a04cea06b74b5",
+      "receive_key_seed_by_exporter_branch": 14877287601031078459,
+      "relaxed_admitted": true,
+      "score": 19.248762077745923,
+      "scores": [
+        16.575028404115997,
+        19.248762077745923
+      ],
+      "strict_admitted": false,
+      "transmit_key_seed": 11853289879435422514,
+      "winner": 1
+    },
+    {
+      "cell": "g1slowrate-each-65-cn0m14-wrong-key",
+      "control": "wrong-key",
+      "index": 90025,
+      "input": "/workspace/triad/local-evidence/selective/followup/g1slowrate-each-65-cn0m14-wrong-key/batch00/path-90025",
+      "manifest_sha256": "9961ddad024bb55ce750f8e28abdb92e35f0e509753034f63e32e16726222358",
+      "receive_key_seed_by_exporter_branch": 14932953958485430021,
+      "relaxed_admitted": true,
+      "score": 23.238939640026366,
+      "scores": [
+        23.238939640026366,
+        23.03449145319796
+      ],
+      "strict_admitted": true,
+      "transmit_key_seed": 11904532130060125708,
+      "winner": 0
+    },
+    {
+      "cell": "g1slowrate-each-65-cn0m14-wrong-key",
+      "control": "wrong-key",
+      "index": 90027,
+      "input": "/workspace/triad/local-evidence/selective/followup/g1slowrate-each-65-cn0m14-wrong-key/batch00/path-90027",
+      "manifest_sha256": "2b31c3e2e902836921bc9251b654a18ff4cf601c753e1536867a51097dee4f46",
+      "receive_key_seed_by_exporter_branch": 1434546266245454413,
+      "relaxed_admitted": true,
+      "score": 18.432643460298358,
+      "scores": [
+        4.83590193795774,
+        18.432643460298358
+      ],
+      "strict_admitted": false,
+      "transmit_key_seed": 8782422096053572420,
+      "winner": 1
+    },
+    {
+      "cell": "g1slowrate-each-65-cn0m14-wrong-key",
+      "control": "wrong-key",
+      "index": 90031,
+      "input": "/workspace/triad/local-evidence/selective/followup/g1slowrate-each-65-cn0m14-wrong-key/batch00/path-90031",
+      "manifest_sha256": "2199583114348453983845dc3f45f5c897dc5581d38ca1d726499fc2fa120608",
+      "receive_key_seed_by_exporter_branch": 11371468514898500616,
+      "relaxed_admitted": true,
+      "score": 27.23663166856183,
+      "scores": [
+        27.23663166856183,
+        12.402648236224659
+      ],
+      "strict_admitted": true,
+      "transmit_key_seed": 17854085567070639361,
+      "winner": 0
+    }
+  ],
+  "cells": [
+    {
+      "cell": {
+        "batch_jobs": [
+          "g001edge-each-65-cn0m28-signal-batch00",
+          "g001edge-each-65-cn0m28-signal-batch01",
+          "g001edge-each-65-cn0m28-signal-batch02",
+          "g001edge-each-65-cn0m28-signal-batch03",
+          "g001edge-each-65-cn0m28-signal-batch04",
+          "g001edge-each-65-cn0m28-signal-batch05"
+        ],
+        "block_seconds": 64,
+        "carrier_spacing_hz": 0.0075,
+        "control": "signal",
+        "excess_delay_ms": 0.005,
+        "fine_symbol_rate_per_carrier_hz": 0.005999999999999999,
+        "gui_rate_hz": 0.036,
+        "ideal_triplet_bandwidth_hz": 0.022499999999999996,
+        "name": "g001edge-each-65-cn0m28-signal",
+        "path_count": 300,
+        "path_index_first": 90000,
+        "path_index_last": 90299,
+        "profile": "g001edge",
+        "ray_center_separation_hz": 0.001,
+        "ray_gaussian_twice_rms_width_hz": 0.001,
+        "receiver_coherence_seconds": 450.1581580785531,
+        "requested_active_seconds": 86400,
+        "sample_rate_denominator": 4,
+        "sample_rate_hz": 0.25,
+        "sample_rate_numerator": 1,
+        "sampled_cn0_db_hz": -28,
+        "samples_per_block": 16.0,
+        "selective_fast_rate_hz": 0.001,
+        "selective_perturbation": "each-65",
+        "selective_slow_rate_hz": 0.0001,
+        "source_bit_counts": {
+          "0": 150,
+          "1": 150
+        }
+      },
+      "gates": {
+        "relaxed": {
+          "balanced_population_event": "correct_accepted",
+          "balanced_probability_pointwise_bounds": {
+            "fraction": 0.9566666666666667,
+            "lower_method": "average per-bit 97.5% one-sided CP lower bounds; Bonferroni",
+            "lower_one_sided_95": 0.9111453016544426,
+            "per_bit": {
+              "0": {
+                "fraction": 0.94,
+                "lower_one_sided_95": 0.8976359158157361,
+                "successes": 141,
+                "trials": 150,
+                "upper_one_sided_95": 0.9683453525601804
+              },
+              "1": {
+                "fraction": 0.9733333333333334,
+                "lower_one_sided_95": 0.940018959698507,
+                "successes": 146,
+                "trials": 150,
+                "upper_one_sided_95": 0.9908410715268886
+              }
+            },
+            "upper_method": "average per-bit 97.5% one-sided CP upper bounds; Bonferroni",
+            "upper_one_sided_95": 0.9824437379037678
+          },
+          "correct_reception_target_assessment": {
+            "0.9": "pointwise_lower_establishes_target",
+            "0.99": "pointwise_upper_below_target"
+          },
+          "counts": {
+            "correct_accepted": 287,
+            "missed": 13,
+            "raw_correct": 300,
+            "trials": 300,
+            "wrong_accepted": 0
+          },
+          "per_bit_counts": {
+            "0": {
+              "correct_accepted": 141,
+              "missed": 9,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            },
+            "1": {
+              "correct_accepted": 146,
+              "missed": 4,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          },
+          "scope": "Correct accepted bit probability"
+        },
+        "strict": {
+          "balanced_population_event": "correct_accepted",
+          "balanced_probability_pointwise_bounds": {
+            "fraction": 0.8733333333333333,
+            "lower_method": "average per-bit 97.5% one-sided CP lower bounds; Bonferroni",
+            "lower_one_sided_95": 0.8093703360989568,
+            "per_bit": {
+              "0": {
+                "fraction": 0.86,
+                "lower_one_sided_95": 0.804689776734505,
+                "successes": 129,
+                "trials": 150,
+                "upper_one_sided_95": 0.904232224649703
+              },
+              "1": {
+                "fraction": 0.8866666666666667,
+                "lower_one_sided_95": 0.8348601714999311,
+                "successes": 133,
+                "trials": 150,
+                "upper_one_sided_95": 0.926486757032522
+              }
+            },
+            "upper_method": "average per-bit 97.5% one-sided CP upper bounds; Bonferroni",
+            "upper_one_sided_95": 0.9218888140478028
+          },
+          "correct_reception_target_assessment": {
+            "0.9": "target_not_resolved_by_pointwise_bounds",
+            "0.99": "pointwise_upper_below_target"
+          },
+          "counts": {
+            "correct_accepted": 262,
+            "missed": 38,
+            "raw_correct": 300,
+            "trials": 300,
+            "wrong_accepted": 0
+          },
+          "per_bit_counts": {
+            "0": {
+              "correct_accepted": 129,
+              "missed": 21,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            },
+            "1": {
+              "correct_accepted": 133,
+              "missed": 17,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          },
+          "scope": "Correct accepted bit probability"
+        }
+      }
+    },
+    {
+      "cell": {
+        "batch_jobs": [
+          "g01edge-each-65-cn0m24-signal-batch00",
+          "g01edge-each-65-cn0m24-signal-batch01",
+          "g01edge-each-65-cn0m24-signal-batch02",
+          "g01edge-each-65-cn0m24-signal-batch03",
+          "g01edge-each-65-cn0m24-signal-batch04",
+          "g01edge-each-65-cn0m24-signal-batch05"
+        ],
+        "block_seconds": 8,
+        "carrier_spacing_hz": 0.075,
+        "control": "signal",
+        "excess_delay_ms": 0.05,
+        "fine_symbol_rate_per_carrier_hz": 0.06,
+        "gui_rate_hz": 0.36,
+        "ideal_triplet_bandwidth_hz": 0.22499999999999998,
+        "name": "g01edge-each-65-cn0m24-signal",
+        "path_count": 300,
+        "path_index_first": 90000,
+        "path_index_last": 90299,
+        "profile": "g01edge",
+        "ray_center_separation_hz": 0.005,
+        "ray_gaussian_twice_rms_width_hz": 0.01,
+        "receiver_coherence_seconds": 45.015815807855304,
+        "requested_active_seconds": 86400,
+        "sample_rate_denominator": 1,
+        "sample_rate_hz": 2.0,
+        "sample_rate_numerator": 2,
+        "sampled_cn0_db_hz": -24,
+        "samples_per_block": 16.0,
+        "selective_fast_rate_hz": 0.005,
+        "selective_perturbation": "each-65",
+        "selective_slow_rate_hz": 0.0005,
+        "source_bit_counts": {
+          "0": 150,
+          "1": 150
+        }
+      },
+      "gates": {
+        "relaxed": {
+          "balanced_population_event": "correct_accepted",
+          "balanced_probability_pointwise_bounds": {
+            "fraction": 0.9633333333333334,
+            "lower_method": "average per-bit 97.5% one-sided CP lower bounds; Bonferroni",
+            "lower_one_sided_95": 0.9201419408442352,
+            "per_bit": {
+              "0": {
+                "fraction": 0.98,
+                "lower_one_sided_95": 0.949122932021476,
+                "successes": 147,
+                "trials": 150,
+                "upper_one_sided_95": 0.9945270700447405
+              },
+              "1": {
+                "fraction": 0.9466666666666667,
+                "lower_one_sided_95": 0.9058285177078044,
+                "successes": 142,
+                "trials": 150,
+                "upper_one_sided_95": 0.9731883423012925
+              }
+            },
+            "upper_method": "average per-bit 97.5% one-sided CP upper bounds; Bonferroni",
+            "upper_one_sided_95": 0.9862762822611547
+          },
+          "correct_reception_target_assessment": {
+            "0.9": "pointwise_lower_establishes_target",
+            "0.99": "pointwise_upper_below_target"
+          },
+          "counts": {
+            "correct_accepted": 289,
+            "missed": 11,
+            "raw_correct": 300,
+            "trials": 300,
+            "wrong_accepted": 0
+          },
+          "per_bit_counts": {
+            "0": {
+              "correct_accepted": 147,
+              "missed": 3,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            },
+            "1": {
+              "correct_accepted": 142,
+              "missed": 8,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          },
+          "scope": "Correct accepted bit probability"
+        },
+        "strict": {
+          "balanced_population_event": "correct_accepted",
+          "balanced_probability_pointwise_bounds": {
+            "fraction": 0.8833333333333333,
+            "lower_method": "average per-bit 97.5% one-sided CP lower bounds; Bonferroni",
+            "lower_one_sided_95": 0.8208712421548507,
+            "per_bit": {
+              "0": {
+                "fraction": 0.8866666666666667,
+                "lower_one_sided_95": 0.8348601714999311,
+                "successes": 133,
+                "trials": 150,
+                "upper_one_sided_95": 0.926486757032522
+              },
+              "1": {
+                "fraction": 0.88,
+                "lower_one_sided_95": 0.8272587269676106,
+                "successes": 132,
+                "trials": 150,
+                "upper_one_sided_95": 0.9209859257458725
+              }
+            },
+            "upper_method": "average per-bit 97.5% one-sided CP upper bounds; Bonferroni",
+            "upper_one_sided_95": 0.9299411968276634
+          },
+          "correct_reception_target_assessment": {
+            "0.9": "target_not_resolved_by_pointwise_bounds",
+            "0.99": "pointwise_upper_below_target"
+          },
+          "counts": {
+            "correct_accepted": 265,
+            "missed": 35,
+            "raw_correct": 300,
+            "trials": 300,
+            "wrong_accepted": 0
+          },
+          "per_bit_counts": {
+            "0": {
+              "correct_accepted": 133,
+              "missed": 17,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            },
+            "1": {
+              "correct_accepted": 132,
+              "missed": 18,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          },
+          "scope": "Correct accepted bit probability"
+        }
+      }
+    },
+    {
+      "cell": {
+        "batch_jobs": [
+          "g1edge-each-65-cn0m13-signal-batch00",
+          "g1edge-each-65-cn0m13-signal-batch01",
+          "g1edge-each-65-cn0m13-signal-batch02",
+          "g1edge-each-65-cn0m13-signal-batch03",
+          "g1edge-each-65-cn0m13-signal-batch04",
+          "g1edge-each-65-cn0m13-signal-batch05"
+        ],
+        "block_seconds": 1,
+        "carrier_spacing_hz": 0.75,
+        "control": "signal",
+        "excess_delay_ms": 0.5,
+        "fine_symbol_rate_per_carrier_hz": 0.6,
+        "gui_rate_hz": 3.6,
+        "ideal_triplet_bandwidth_hz": 2.25,
+        "name": "g1edge-each-65-cn0m13-signal",
+        "path_count": 300,
+        "path_index_first": 90000,
+        "path_index_last": 90299,
+        "profile": "g1edge",
+        "ray_center_separation_hz": 0.1,
+        "ray_gaussian_twice_rms_width_hz": 0.1,
+        "receiver_coherence_seconds": 4.501581580785531,
+        "requested_active_seconds": 8640,
+        "sample_rate_denominator": 1,
+        "sample_rate_hz": 16.0,
+        "sample_rate_numerator": 16,
+        "sampled_cn0_db_hz": -13,
+        "samples_per_block": 16.0,
+        "selective_fast_rate_hz": 0.1,
+        "selective_perturbation": "each-65",
+        "selective_slow_rate_hz": 0.010000000000000002,
+        "source_bit_counts": {
+          "0": 150,
+          "1": 150
+        }
+      },
+      "gates": {
+        "relaxed": {
+          "balanced_population_event": "correct_accepted",
+          "balanced_probability_pointwise_bounds": {
+            "fraction": 0.9833333333333333,
+            "lower_method": "average per-bit 97.5% one-sided CP lower bounds; Bonferroni",
+            "lower_one_sided_95": 0.9482744777909652,
+            "per_bit": {
+              "0": {
+                "fraction": 0.9733333333333334,
+                "lower_one_sided_95": 0.940018959698507,
+                "successes": 146,
+                "trials": 150,
+                "upper_one_sided_95": 0.9908410715268886
+              },
+              "1": {
+                "fraction": 0.9933333333333333,
+                "lower_one_sided_95": 0.9687661830790572,
+                "successes": 149,
+                "trials": 150,
+                "upper_one_sided_95": 0.9996581031641314
+              }
+            },
+            "upper_method": "average per-bit 97.5% one-sided CP upper bounds; Bonferroni",
+            "upper_one_sided_95": 0.9962593412294409
+          },
+          "correct_reception_target_assessment": {
+            "0.9": "pointwise_lower_establishes_target",
+            "0.99": "target_not_resolved_by_pointwise_bounds"
+          },
+          "counts": {
+            "correct_accepted": 295,
+            "missed": 5,
+            "raw_correct": 300,
+            "trials": 300,
+            "wrong_accepted": 0
+          },
+          "per_bit_counts": {
+            "0": {
+              "correct_accepted": 146,
+              "missed": 4,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            },
+            "1": {
+              "correct_accepted": 149,
+              "missed": 1,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          },
+          "scope": "Correct accepted bit probability"
+        },
+        "strict": {
+          "balanced_population_event": "correct_accepted",
+          "balanced_probability_pointwise_bounds": {
+            "fraction": 0.9433333333333334,
+            "lower_method": "average per-bit 97.5% one-sided CP lower bounds; Bonferroni",
+            "lower_one_sided_95": 0.8935150789726388,
+            "per_bit": {
+              "0": {
+                "fraction": 0.9333333333333333,
+                "lower_one_sided_95": 0.8895424681557611,
+                "successes": 140,
+                "trials": 150,
+                "upper_one_sided_95": 0.9633881676311332
+              },
+              "1": {
+                "fraction": 0.9533333333333334,
+                "lower_one_sided_95": 0.9141366204609094,
+                "successes": 143,
+                "trials": 150,
+                "upper_one_sided_95": 0.9778959501637695
+              }
+            },
+            "upper_method": "average per-bit 97.5% one-sided CP upper bounds; Bonferroni",
+            "upper_one_sided_95": 0.974302351103373
+          },
+          "correct_reception_target_assessment": {
+            "0.9": "target_not_resolved_by_pointwise_bounds",
+            "0.99": "pointwise_upper_below_target"
+          },
+          "counts": {
+            "correct_accepted": 283,
+            "missed": 17,
+            "raw_correct": 300,
+            "trials": 300,
+            "wrong_accepted": 0
+          },
+          "per_bit_counts": {
+            "0": {
+              "correct_accepted": 140,
+              "missed": 10,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            },
+            "1": {
+              "correct_accepted": 143,
+              "missed": 7,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          },
+          "scope": "Correct accepted bit probability"
+        }
+      }
+    },
+    {
+      "cell": {
+        "batch_jobs": [
+          "g01slowrate-each-65-cn0m24-signal-batch00",
+          "g01slowrate-each-65-cn0m24-signal-batch01",
+          "g01slowrate-each-65-cn0m24-signal-batch02",
+          "g01slowrate-each-65-cn0m24-signal-batch03",
+          "g01slowrate-each-65-cn0m24-signal-batch04",
+          "g01slowrate-each-65-cn0m24-signal-batch05"
+        ],
+        "block_seconds": 8,
+        "carrier_spacing_hz": 0.0075,
+        "control": "signal",
+        "excess_delay_ms": 0.05,
+        "fine_symbol_rate_per_carrier_hz": 0.005999999999999999,
+        "gui_rate_hz": 0.036,
+        "ideal_triplet_bandwidth_hz": 0.022499999999999996,
+        "name": "g01slowrate-each-65-cn0m24-signal",
+        "path_count": 300,
+        "path_index_first": 90000,
+        "path_index_last": 90299,
+        "profile": "g01slowrate",
+        "ray_center_separation_hz": 0.005,
+        "ray_gaussian_twice_rms_width_hz": 0.01,
+        "receiver_coherence_seconds": 45.015815807855304,
+        "requested_active_seconds": 86400,
+        "sample_rate_denominator": 1,
+        "sample_rate_hz": 2.0,
+        "sample_rate_numerator": 2,
+        "sampled_cn0_db_hz": -24,
+        "samples_per_block": 16.0,
+        "selective_fast_rate_hz": 0.005,
+        "selective_perturbation": "each-65",
+        "selective_slow_rate_hz": 0.0005,
+        "source_bit_counts": {
+          "0": 150,
+          "1": 150
+        }
+      },
+      "gates": {
+        "relaxed": {
+          "balanced_population_event": "correct_accepted",
+          "balanced_probability_pointwise_bounds": {
+            "fraction": 1.0,
+            "lower_method": "equal-stratum all-success AM-GM",
+            "lower_one_sided_95": 0.9900639180555423,
+            "per_bit": {
+              "0": {
+                "fraction": 1.0,
+                "lower_one_sided_95": 0.9802265618354915,
+                "successes": 150,
+                "trials": 150,
+                "upper_one_sided_95": 1.0
+              },
+              "1": {
+                "fraction": 1.0,
+                "lower_one_sided_95": 0.9802265618354915,
+                "successes": 150,
+                "trials": 150,
+                "upper_one_sided_95": 1.0
+              }
+            },
+            "upper_method": "average per-bit 97.5% one-sided CP upper bounds; Bonferroni",
+            "upper_one_sided_95": 1.0
+          },
+          "correct_reception_target_assessment": {
+            "0.9": "pointwise_lower_establishes_target",
+            "0.99": "pointwise_lower_establishes_target"
+          },
+          "counts": {
+            "correct_accepted": 300,
+            "missed": 0,
+            "raw_correct": 300,
+            "trials": 300,
+            "wrong_accepted": 0
+          },
+          "per_bit_counts": {
+            "0": {
+              "correct_accepted": 150,
+              "missed": 0,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            },
+            "1": {
+              "correct_accepted": 150,
+              "missed": 0,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          },
+          "scope": "Correct accepted bit probability"
+        },
+        "strict": {
+          "balanced_population_event": "correct_accepted",
+          "balanced_probability_pointwise_bounds": {
+            "fraction": 1.0,
+            "lower_method": "equal-stratum all-success AM-GM",
+            "lower_one_sided_95": 0.9900639180555423,
+            "per_bit": {
+              "0": {
+                "fraction": 1.0,
+                "lower_one_sided_95": 0.9802265618354915,
+                "successes": 150,
+                "trials": 150,
+                "upper_one_sided_95": 1.0
+              },
+              "1": {
+                "fraction": 1.0,
+                "lower_one_sided_95": 0.9802265618354915,
+                "successes": 150,
+                "trials": 150,
+                "upper_one_sided_95": 1.0
+              }
+            },
+            "upper_method": "average per-bit 97.5% one-sided CP upper bounds; Bonferroni",
+            "upper_one_sided_95": 1.0
+          },
+          "correct_reception_target_assessment": {
+            "0.9": "pointwise_lower_establishes_target",
+            "0.99": "pointwise_lower_establishes_target"
+          },
+          "counts": {
+            "correct_accepted": 300,
+            "missed": 0,
+            "raw_correct": 300,
+            "trials": 300,
+            "wrong_accepted": 0
+          },
+          "per_bit_counts": {
+            "0": {
+              "correct_accepted": 150,
+              "missed": 0,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            },
+            "1": {
+              "correct_accepted": 150,
+              "missed": 0,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          },
+          "scope": "Correct accepted bit probability"
+        }
+      }
+    },
+    {
+      "cell": {
+        "batch_jobs": [
+          "g01slowrate-each-65-cn0m24-null-batch00"
+        ],
+        "block_seconds": 8,
+        "carrier_spacing_hz": 0.0075,
+        "control": "null",
+        "excess_delay_ms": 0.05,
+        "fine_symbol_rate_per_carrier_hz": 0.005999999999999999,
+        "gui_rate_hz": 0.036,
+        "ideal_triplet_bandwidth_hz": 0.022499999999999996,
+        "name": "g01slowrate-each-65-cn0m24-null",
+        "path_count": 32,
+        "path_index_first": 90000,
+        "path_index_last": 90031,
+        "profile": "g01slowrate",
+        "ray_center_separation_hz": 0.005,
+        "ray_gaussian_twice_rms_width_hz": 0.01,
+        "receiver_coherence_seconds": 45.015815807855304,
+        "requested_active_seconds": 86400,
+        "sample_rate_denominator": 1,
+        "sample_rate_hz": 2.0,
+        "sample_rate_numerator": 2,
+        "sampled_cn0_db_hz": -24,
+        "samples_per_block": 16.0,
+        "selective_fast_rate_hz": 0.005,
+        "selective_perturbation": "each-65",
+        "selective_slow_rate_hz": 0.0005,
+        "source_bit_counts": {
+          "0": 16,
+          "1": 16
+        }
+      },
+      "gates": {
+        "relaxed": {
+          "balanced_population_event": "false_admitted",
+          "balanced_probability_pointwise_bounds": {
+            "fraction": 0.0,
+            "lower_method": "average per-bit 97.5% one-sided CP lower bounds; Bonferroni",
+            "lower_one_sided_95": 0.0,
+            "per_bit": {
+              "0": {
+                "fraction": 0.0,
+                "lower_one_sided_95": 0.0,
+                "successes": 0,
+                "trials": 16,
+                "upper_one_sided_95": 0.1707497229824809
+              },
+              "1": {
+                "fraction": 0.0,
+                "lower_one_sided_95": 0.0,
+                "successes": 0,
+                "trials": 16,
+                "upper_one_sided_95": 0.1707497229824809
+              }
+            },
+            "upper_method": "equal-stratum all-failure AM-GM (complement)",
+            "upper_one_sided_95": 0.0893681989862648
+          },
+          "correct_reception_target_assessment": null,
+          "counts": {
+            "false_admitted": 0,
+            "not_admitted": 32,
+            "trials": 32
+          },
+          "per_bit_counts": {
+            "0": {
+              "false_admitted": 0,
+              "not_admitted": 16,
+              "trials": 16
+            },
+            "1": {
+              "false_admitted": 0,
+              "not_admitted": 16,
+              "trials": 16
+            }
+          },
+          "scope": "Noise-only admission probability"
+        },
+        "strict": {
+          "balanced_population_event": "false_admitted",
+          "balanced_probability_pointwise_bounds": {
+            "fraction": 0.0,
+            "lower_method": "average per-bit 97.5% one-sided CP lower bounds; Bonferroni",
+            "lower_one_sided_95": 0.0,
+            "per_bit": {
+              "0": {
+                "fraction": 0.0,
+                "lower_one_sided_95": 0.0,
+                "successes": 0,
+                "trials": 16,
+                "upper_one_sided_95": 0.1707497229824809
+              },
+              "1": {
+                "fraction": 0.0,
+                "lower_one_sided_95": 0.0,
+                "successes": 0,
+                "trials": 16,
+                "upper_one_sided_95": 0.1707497229824809
+              }
+            },
+            "upper_method": "equal-stratum all-failure AM-GM (complement)",
+            "upper_one_sided_95": 0.0893681989862648
+          },
+          "correct_reception_target_assessment": null,
+          "counts": {
+            "false_admitted": 0,
+            "not_admitted": 32,
+            "trials": 32
+          },
+          "per_bit_counts": {
+            "0": {
+              "false_admitted": 0,
+              "not_admitted": 16,
+              "trials": 16
+            },
+            "1": {
+              "false_admitted": 0,
+              "not_admitted": 16,
+              "trials": 16
+            }
+          },
+          "scope": "Noise-only admission probability"
+        }
+      }
+    },
+    {
+      "cell": {
+        "batch_jobs": [
+          "g01slowrate-each-65-cn0m24-wrong-key-batch00"
+        ],
+        "block_seconds": 8,
+        "carrier_spacing_hz": 0.0075,
+        "control": "wrong-key",
+        "excess_delay_ms": 0.05,
+        "fine_symbol_rate_per_carrier_hz": 0.005999999999999999,
+        "gui_rate_hz": 0.036,
+        "ideal_triplet_bandwidth_hz": 0.022499999999999996,
+        "name": "g01slowrate-each-65-cn0m24-wrong-key",
+        "path_count": 32,
+        "path_index_first": 90000,
+        "path_index_last": 90031,
+        "profile": "g01slowrate",
+        "ray_center_separation_hz": 0.005,
+        "ray_gaussian_twice_rms_width_hz": 0.01,
+        "receiver_coherence_seconds": 45.015815807855304,
+        "requested_active_seconds": 86400,
+        "sample_rate_denominator": 1,
+        "sample_rate_hz": 2.0,
+        "sample_rate_numerator": 2,
+        "sampled_cn0_db_hz": -24,
+        "samples_per_block": 16.0,
+        "selective_fast_rate_hz": 0.005,
+        "selective_perturbation": "each-65",
+        "selective_slow_rate_hz": 0.0005,
+        "source_bit_counts": {
+          "0": 16,
+          "1": 16
+        }
+      },
+      "gates": {
+        "relaxed": {
+          "balanced_population_event": "false_admitted",
+          "balanced_probability_pointwise_bounds": {
+            "fraction": 0.3125,
+            "lower_method": "average per-bit 97.5% one-sided CP lower bounds; Bonferroni",
+            "lower_one_sided_95": 0.11016995471711757,
+            "per_bit": {
+              "0": {
+                "fraction": 0.3125,
+                "lower_one_sided_95": 0.13211096575490608,
+                "successes": 5,
+                "trials": 16,
+                "upper_one_sided_95": 0.5483470808487474
+              },
+              "1": {
+                "fraction": 0.3125,
+                "lower_one_sided_95": 0.13211096575490608,
+                "successes": 5,
+                "trials": 16,
+                "upper_one_sided_95": 0.5483470808487474
+              }
+            },
+            "upper_method": "average per-bit 97.5% one-sided CP upper bounds; Bonferroni",
+            "upper_one_sided_95": 0.5866206364513586
+          },
+          "correct_reception_target_assessment": null,
+          "counts": {
+            "false_admitted": 10,
+            "not_admitted": 22,
+            "trials": 32
+          },
+          "per_bit_counts": {
+            "0": {
+              "false_admitted": 5,
+              "not_admitted": 11,
+              "trials": 16
+            },
+            "1": {
+              "false_admitted": 5,
+              "not_admitted": 11,
+              "trials": 16
+            }
+          },
+          "scope": "Mismatched-key signal admission probability; not noise-only FAP"
+        },
+        "strict": {
+          "balanced_population_event": "false_admitted",
+          "balanced_probability_pointwise_bounds": {
+            "fraction": 0.1875,
+            "lower_method": "average per-bit 97.5% one-sided CP lower bounds; Bonferroni",
+            "lower_one_sided_95": 0.044087821034148024,
+            "per_bit": {
+              "0": {
+                "fraction": 0.125,
+                "lower_one_sided_95": 0.022678782722445716,
+                "successes": 2,
+                "trials": 16,
+                "upper_one_sided_95": 0.34382519922958943
+              },
+              "1": {
+                "fraction": 0.25,
+                "lower_one_sided_95": 0.09025243303042745,
+                "successes": 4,
+                "trials": 16,
+                "upper_one_sided_95": 0.4843964210936691
+              }
+            },
+            "upper_method": "average per-bit 97.5% one-sided CP upper bounds; Bonferroni",
+            "upper_one_sided_95": 0.4536235283726954
+          },
+          "correct_reception_target_assessment": null,
+          "counts": {
+            "false_admitted": 6,
+            "not_admitted": 26,
+            "trials": 32
+          },
+          "per_bit_counts": {
+            "0": {
+              "false_admitted": 2,
+              "not_admitted": 14,
+              "trials": 16
+            },
+            "1": {
+              "false_admitted": 4,
+              "not_admitted": 12,
+              "trials": 16
+            }
+          },
+          "scope": "Mismatched-key signal admission probability; not noise-only FAP"
+        }
+      }
+    },
+    {
+      "cell": {
+        "batch_jobs": [
+          "g1slowrate-each-65-cn0m14-signal-batch00",
+          "g1slowrate-each-65-cn0m14-signal-batch01",
+          "g1slowrate-each-65-cn0m14-signal-batch02",
+          "g1slowrate-each-65-cn0m14-signal-batch03",
+          "g1slowrate-each-65-cn0m14-signal-batch04",
+          "g1slowrate-each-65-cn0m14-signal-batch05"
+        ],
+        "block_seconds": 1,
+        "carrier_spacing_hz": 0.075,
+        "control": "signal",
+        "excess_delay_ms": 0.5,
+        "fine_symbol_rate_per_carrier_hz": 0.06,
+        "gui_rate_hz": 0.36,
+        "ideal_triplet_bandwidth_hz": 0.22499999999999998,
+        "name": "g1slowrate-each-65-cn0m14-signal",
+        "path_count": 300,
+        "path_index_first": 90000,
+        "path_index_last": 90299,
+        "profile": "g1slowrate",
+        "ray_center_separation_hz": 0.1,
+        "ray_gaussian_twice_rms_width_hz": 0.1,
+        "receiver_coherence_seconds": 4.501581580785531,
+        "requested_active_seconds": 8640,
+        "sample_rate_denominator": 1,
+        "sample_rate_hz": 16.0,
+        "sample_rate_numerator": 16,
+        "sampled_cn0_db_hz": -14,
+        "samples_per_block": 16.0,
+        "selective_fast_rate_hz": 0.1,
+        "selective_perturbation": "each-65",
+        "selective_slow_rate_hz": 0.010000000000000002,
+        "source_bit_counts": {
+          "0": 150,
+          "1": 150
+        }
+      },
+      "gates": {
+        "relaxed": {
+          "balanced_population_event": "correct_accepted",
+          "balanced_probability_pointwise_bounds": {
+            "fraction": 0.9966666666666667,
+            "lower_method": "average per-bit 97.5% one-sided CP lower bounds; Bonferroni",
+            "lower_one_sided_95": 0.9695621175466556,
+            "per_bit": {
+              "0": {
+                "fraction": 0.9933333333333333,
+                "lower_one_sided_95": 0.9687661830790572,
+                "successes": 149,
+                "trials": 150,
+                "upper_one_sided_95": 0.9996581031641314
+              },
+              "1": {
+                "fraction": 1.0,
+                "lower_one_sided_95": 0.9802265618354915,
+                "successes": 150,
+                "trials": 150,
+                "upper_one_sided_95": 1.0
+              }
+            },
+            "upper_method": "average per-bit 97.5% one-sided CP upper bounds; Bonferroni",
+            "upper_one_sided_95": 0.999915614428445
+          },
+          "correct_reception_target_assessment": {
+            "0.9": "pointwise_lower_establishes_target",
+            "0.99": "target_not_resolved_by_pointwise_bounds"
+          },
+          "counts": {
+            "correct_accepted": 299,
+            "missed": 1,
+            "raw_correct": 300,
+            "trials": 300,
+            "wrong_accepted": 0
+          },
+          "per_bit_counts": {
+            "0": {
+              "correct_accepted": 149,
+              "missed": 1,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            },
+            "1": {
+              "correct_accepted": 150,
+              "missed": 0,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          },
+          "scope": "Correct accepted bit probability"
+        },
+        "strict": {
+          "balanced_population_event": "correct_accepted",
+          "balanced_probability_pointwise_bounds": {
+            "fraction": 0.99,
+            "lower_method": "average per-bit 97.5% one-sided CP lower bounds; Bonferroni",
+            "lower_one_sided_95": 0.9591865902728428,
+            "per_bit": {
+              "0": {
+                "fraction": 0.98,
+                "lower_one_sided_95": 0.949122932021476,
+                "successes": 147,
+                "trials": 150,
+                "upper_one_sided_95": 0.9945270700447405
+              },
+              "1": {
+                "fraction": 1.0,
+                "lower_one_sided_95": 0.9802265618354915,
+                "successes": 150,
+                "trials": 150,
+                "upper_one_sided_95": 1.0
+              }
+            },
+            "upper_method": "average per-bit 97.5% one-sided CP upper bounds; Bonferroni",
+            "upper_one_sided_95": 0.9979281873593897
+          },
+          "correct_reception_target_assessment": {
+            "0.9": "pointwise_lower_establishes_target",
+            "0.99": "target_not_resolved_by_pointwise_bounds"
+          },
+          "counts": {
+            "correct_accepted": 297,
+            "missed": 3,
+            "raw_correct": 300,
+            "trials": 300,
+            "wrong_accepted": 0
+          },
+          "per_bit_counts": {
+            "0": {
+              "correct_accepted": 147,
+              "missed": 3,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            },
+            "1": {
+              "correct_accepted": 150,
+              "missed": 0,
+              "raw_correct": 150,
+              "trials": 150,
+              "wrong_accepted": 0
+            }
+          },
+          "scope": "Correct accepted bit probability"
+        }
+      }
+    },
+    {
+      "cell": {
+        "batch_jobs": [
+          "g1slowrate-each-65-cn0m14-null-batch00"
+        ],
+        "block_seconds": 1,
+        "carrier_spacing_hz": 0.075,
+        "control": "null",
+        "excess_delay_ms": 0.5,
+        "fine_symbol_rate_per_carrier_hz": 0.06,
+        "gui_rate_hz": 0.36,
+        "ideal_triplet_bandwidth_hz": 0.22499999999999998,
+        "name": "g1slowrate-each-65-cn0m14-null",
+        "path_count": 32,
+        "path_index_first": 90000,
+        "path_index_last": 90031,
+        "profile": "g1slowrate",
+        "ray_center_separation_hz": 0.1,
+        "ray_gaussian_twice_rms_width_hz": 0.1,
+        "receiver_coherence_seconds": 4.501581580785531,
+        "requested_active_seconds": 8640,
+        "sample_rate_denominator": 1,
+        "sample_rate_hz": 16.0,
+        "sample_rate_numerator": 16,
+        "sampled_cn0_db_hz": -14,
+        "samples_per_block": 16.0,
+        "selective_fast_rate_hz": 0.1,
+        "selective_perturbation": "each-65",
+        "selective_slow_rate_hz": 0.010000000000000002,
+        "source_bit_counts": {
+          "0": 16,
+          "1": 16
+        }
+      },
+      "gates": {
+        "relaxed": {
+          "balanced_population_event": "false_admitted",
+          "balanced_probability_pointwise_bounds": {
+            "fraction": 0.0,
+            "lower_method": "average per-bit 97.5% one-sided CP lower bounds; Bonferroni",
+            "lower_one_sided_95": 0.0,
+            "per_bit": {
+              "0": {
+                "fraction": 0.0,
+                "lower_one_sided_95": 0.0,
+                "successes": 0,
+                "trials": 16,
+                "upper_one_sided_95": 0.1707497229824809
+              },
+              "1": {
+                "fraction": 0.0,
+                "lower_one_sided_95": 0.0,
+                "successes": 0,
+                "trials": 16,
+                "upper_one_sided_95": 0.1707497229824809
+              }
+            },
+            "upper_method": "equal-stratum all-failure AM-GM (complement)",
+            "upper_one_sided_95": 0.0893681989862648
+          },
+          "correct_reception_target_assessment": null,
+          "counts": {
+            "false_admitted": 0,
+            "not_admitted": 32,
+            "trials": 32
+          },
+          "per_bit_counts": {
+            "0": {
+              "false_admitted": 0,
+              "not_admitted": 16,
+              "trials": 16
+            },
+            "1": {
+              "false_admitted": 0,
+              "not_admitted": 16,
+              "trials": 16
+            }
+          },
+          "scope": "Noise-only admission probability"
+        },
+        "strict": {
+          "balanced_population_event": "false_admitted",
+          "balanced_probability_pointwise_bounds": {
+            "fraction": 0.0,
+            "lower_method": "average per-bit 97.5% one-sided CP lower bounds; Bonferroni",
+            "lower_one_sided_95": 0.0,
+            "per_bit": {
+              "0": {
+                "fraction": 0.0,
+                "lower_one_sided_95": 0.0,
+                "successes": 0,
+                "trials": 16,
+                "upper_one_sided_95": 0.1707497229824809
+              },
+              "1": {
+                "fraction": 0.0,
+                "lower_one_sided_95": 0.0,
+                "successes": 0,
+                "trials": 16,
+                "upper_one_sided_95": 0.1707497229824809
+              }
+            },
+            "upper_method": "equal-stratum all-failure AM-GM (complement)",
+            "upper_one_sided_95": 0.0893681989862648
+          },
+          "correct_reception_target_assessment": null,
+          "counts": {
+            "false_admitted": 0,
+            "not_admitted": 32,
+            "trials": 32
+          },
+          "per_bit_counts": {
+            "0": {
+              "false_admitted": 0,
+              "not_admitted": 16,
+              "trials": 16
+            },
+            "1": {
+              "false_admitted": 0,
+              "not_admitted": 16,
+              "trials": 16
+            }
+          },
+          "scope": "Noise-only admission probability"
+        }
+      }
+    },
+    {
+      "cell": {
+        "batch_jobs": [
+          "g1slowrate-each-65-cn0m14-wrong-key-batch00"
+        ],
+        "block_seconds": 1,
+        "carrier_spacing_hz": 0.075,
+        "control": "wrong-key",
+        "excess_delay_ms": 0.5,
+        "fine_symbol_rate_per_carrier_hz": 0.06,
+        "gui_rate_hz": 0.36,
+        "ideal_triplet_bandwidth_hz": 0.22499999999999998,
+        "name": "g1slowrate-each-65-cn0m14-wrong-key",
+        "path_count": 32,
+        "path_index_first": 90000,
+        "path_index_last": 90031,
+        "profile": "g1slowrate",
+        "ray_center_separation_hz": 0.1,
+        "ray_gaussian_twice_rms_width_hz": 0.1,
+        "receiver_coherence_seconds": 4.501581580785531,
+        "requested_active_seconds": 8640,
+        "sample_rate_denominator": 1,
+        "sample_rate_hz": 16.0,
+        "sample_rate_numerator": 16,
+        "sampled_cn0_db_hz": -14,
+        "samples_per_block": 16.0,
+        "selective_fast_rate_hz": 0.1,
+        "selective_perturbation": "each-65",
+        "selective_slow_rate_hz": 0.010000000000000002,
+        "source_bit_counts": {
+          "0": 16,
+          "1": 16
+        }
+      },
+      "gates": {
+        "relaxed": {
+          "balanced_population_event": "false_admitted",
+          "balanced_probability_pointwise_bounds": {
+            "fraction": 0.40625,
+            "lower_method": "average per-bit 97.5% one-sided CP lower bounds; Bonferroni",
+            "lower_one_sided_95": 0.18571946866802996,
+            "per_bit": {
+              "0": {
+                "fraction": 0.25,
+                "lower_one_sided_95": 0.09025243303042745,
+                "successes": 4,
+                "trials": 16,
+                "upper_one_sided_95": 0.4843964210936691
+              },
+              "1": {
+                "fraction": 0.5625,
+                "lower_one_sided_95": 0.3333741715249244,
+                "successes": 9,
+                "trials": 16,
+                "upper_one_sided_95": 0.7733084315337126
+              }
+            },
+            "upper_method": "average per-bit 97.5% one-sided CP upper bounds; Bonferroni",
+            "upper_one_sided_95": 0.6631183396817297
+          },
+          "correct_reception_target_assessment": null,
+          "counts": {
+            "false_admitted": 13,
+            "not_admitted": 19,
+            "trials": 32
+          },
+          "per_bit_counts": {
+            "0": {
+              "false_admitted": 4,
+              "not_admitted": 12,
+              "trials": 16
+            },
+            "1": {
+              "false_admitted": 9,
+              "not_admitted": 7,
+              "trials": 16
+            }
+          },
+          "scope": "Mismatched-key signal admission probability; not noise-only FAP"
+        },
+        "strict": {
+          "balanced_population_event": "false_admitted",
+          "balanced_probability_pointwise_bounds": {
+            "fraction": 0.21875,
+            "lower_method": "average per-bit 97.5% one-sided CP lower bounds; Bonferroni",
+            "lower_one_sided_95": 0.07678239340194398,
+            "per_bit": {
+              "0": {
+                "fraction": 0.0625,
+                "lower_one_sided_95": 0.0032006977101884967,
+                "successes": 1,
+                "trials": 16,
+                "upper_one_sided_95": 0.2639573972885685
+              },
+              "1": {
+                "fraction": 0.375,
+                "lower_one_sided_95": 0.17776585168758843,
+                "successes": 6,
+                "trials": 16,
+                "upper_one_sided_95": 0.6089884169792585
+              }
+            },
+            "upper_method": "average per-bit 97.5% one-sided CP upper bounds; Bonferroni",
+            "upper_one_sided_95": 0.47398732206622685
+          },
+          "correct_reception_target_assessment": null,
+          "counts": {
+            "false_admitted": 7,
+            "not_admitted": 25,
+            "trials": 32
+          },
+          "per_bit_counts": {
+            "0": {
+              "false_admitted": 1,
+              "not_admitted": 15,
+              "trials": 16
+            },
+            "1": {
+              "false_admitted": 6,
+              "not_admitted": 10,
+              "trials": 16
+            }
+          },
+          "scope": "Mismatched-key signal admission probability; not noise-only FAP"
+        }
+      }
+    }
+  ],
+  "frozen_plan_sha256": {
+    "export": "c2788afca0961aa8c26d5132bc639f8f5f4e41fcaf8b582ea6bd3e1a6e59563a",
+    "score": "7d644c0c38cf615eb4fa215dbe4be1053cb2acb4a6a8b89a164297242e8659c2"
+  },
+  "generation_driver_sha256": "5ab3dcc1f3c2b2e926f10e2a35315f2970507a308dd6631c895cf3de39807eb9",
+  "independent_checks": {
+    "actual_manifest_hash_bindings": 1628,
+    "exact_manifest_embedded_receipt_and_exporter_argv_and_six_seeds": 1628,
+    "reports_and_npz_hashes": 34,
+    "score_rows": 1628,
+    "strict_relaxed_counts_and_per_bit_counts_match_accepted_audit": true
+  },
+  "key_control_implementation": {
+    "scope": "Source-inspected branch plus exact command/control/seed receipts; not a fresh RF or raw I/Q replay.",
+    "source": "tools/triad-long.cpp",
+    "source_sha256": "9f2ad5dae400e04038737727ac88ddd3e2fbfe0ebf1acf7471153da551138b40",
+    "wrong_key_law": "txkey=key_for(key_seed,0); rxkey=key_for(key_seed XOR 0x6a09e667f3bcc909,0)"
+  },
+  "limitations": [
+    "Every lower and upper endpoint is separately pointwise one-sided 95%; together they are not a joint 95% confidence interval. No simultaneous guarantee across cells, gates, targets or adaptive development selections.",
+    "Bounds describe the equal-bit-population mean with independent iid Bernoulli outcomes within each bit stratum; p0 may differ from p1. Distinct pseudorandom roots support the simulation design, not real-world or PRNG independence proof.",
+    "All-success equal-stratum lower and all-failure upper endpoints use AM-GM; other endpoints average per-bit one-sided 97.5% Clopper-Pearson bounds (Bonferroni). No pooled common-p binomial assumption is made.",
+    "Followup points were selected prospectively using earlier results, and these new indices are disjoint. This does not make a comparison to differently seeded rate/CN0 populations a paired intervention.",
+    "Wrong-key signal admissions are material key-discrimination failures despite zero null admissions. They do not by themselves contradict the Gaussian noise-only analytical gate, and prevent a generic successful reception/rejection claim for these slower-rate settings.",
+    "Null/wrong-key controls share the first32 source/root cases with their signal cell. They are distinct control distributions, not additional independent signal paths, independent exposure duration or empirical daily false-admission proof.",
+    "Metadata-only raw verification status remains explicit; archive collector/full raw-array integrity audit is separate."
+  ],
+  "manifest_identity_digest_sha256": "bc0f18dff519fdaf747d56bab3ad5eddc1b6eb2f0158159b229a06f75ec54e86",
+  "receiver_dependencies": {
+    "triad-cfo-batch-study.py": "5c7fb6f8b0ad8cadeaae8591d9fb0e3d489fb5eb4c14962faf800ad46a661665",
+    "triad-noise-study.py": "960040dc2a9a00910185a5b79f8af8c84410ffd3b8b7327256399543f396a621",
+    "triad-rbpf-study.py": "34a9797ed7119dcf6545b6be759b8f506cbdaf6ac9ece886b82fa699cd5d085f",
+    "triad-static-frequency-study.py": "f56aef3067e956cc9ddc649d39bae0c598b93f25a4f0916b82d6fb1e7b020868",
+    "triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba",
+    "triad_gaussian_window.py": "dd5d8083999a97f66f74673264f80117b06557c45b3f4646a88e9668a29d03ee",
+    "triad_noise_likelihood.py": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110",
+    "triad_rbpf.py": "d4b64c3a830acd3bd15433421da0e003ba1aa9810bf1dd904c57082d94c3bd54",
+    "triad_state_workspace.py": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923"
+  },
+  "receiver_source_sha256": "67ab97612bf2e74ada2b0f7b399651748935d8fcbea9bacc40d76e2bd055f67b",
+  "reports": [
+    {
+      "job": "g001edge-each-65-cn0m28-signal-batch00",
+      "physical_cases": 50,
+      "report": "local-evidence/triad-selective/followup-complete/followup-scores/g001edge-each-65-cn0m28-signal-batch00.json",
+      "report_sha256": "9ebf140f654b32c0224159e381313c00dfb430da522d91a5e4ce591a43d5aeb8",
+      "score_npz_sha256": "c8640159ae28470760a759ef3cca68fa37b06e5d9148ffd7eed73aafe3e3c422"
+    },
+    {
+      "job": "g001edge-each-65-cn0m28-signal-batch01",
+      "physical_cases": 50,
+      "report": "local-evidence/triad-selective/followup-complete/followup-scores/g001edge-each-65-cn0m28-signal-batch01.json",
+      "report_sha256": "45ada97fb6bb863cc06c2ffb4dea765c51817caaa861cfe00dd66bdcb6863b63",
+      "score_npz_sha256": "e6208a9617c88f1c96b2c956482317d65633a9e25fefb0a33d94cd630fa773a7"
+    },
+    {
+      "job": "g001edge-each-65-cn0m28-signal-batch02",
+      "physical_cases": 50,
+      "report": "local-evidence/triad-selective/followup-complete/followup-scores/g001edge-each-65-cn0m28-signal-batch02.json",
+      "report_sha256": "0823115d25aca18f645b1c627c9ea0d96292d955c3dabd3677a7f81877401436",
+      "score_npz_sha256": "c6bcdbe3d27e76fe900f18dbbd630f71e07efb0debd990df4b26923b66386260"
+    },
+    {
+      "job": "g001edge-each-65-cn0m28-signal-batch03",
+      "physical_cases": 50,
+      "report": "local-evidence/triad-selective/followup-complete/followup-scores/g001edge-each-65-cn0m28-signal-batch03.json",
+      "report_sha256": "6acf2c8059016f0b65fb882f89216759d7cec8b93e33b0805a7e75a50fb0b458",
+      "score_npz_sha256": "08948a96ad1355cba1eac55172cb76b3f6ddf5a8698ad1f48e83e134c8055378"
+    },
+    {
+      "job": "g001edge-each-65-cn0m28-signal-batch04",
+      "physical_cases": 50,
+      "report": "local-evidence/triad-selective/followup-complete/followup-scores/g001edge-each-65-cn0m28-signal-batch04.json",
+      "report_sha256": "84484534ef30790d96902826d47344d4c2274593d7acb981a6469e1f22719b59",
+      "score_npz_sha256": "d609ad9af75ba537186084670548896f9d14c5763cf20c2152c995dd68711378"
+    },
+    {
+      "job": "g001edge-each-65-cn0m28-signal-batch05",
+      "physical_cases": 50,
+      "report": "local-evidence/triad-selective/followup-complete/followup-scores/g001edge-each-65-cn0m28-signal-batch05.json",
+      "report_sha256": "67f6427e6add73164e9160ee6c7f7c0a222ac9e04de9590e93423f4c7d1c1b07",
+      "score_npz_sha256": "5ad47748c37dfce2d92168f1abf6a07e1a30beaa218956add62c5837a5001697"
+    },
+    {
+      "job": "g01edge-each-65-cn0m24-signal-batch00",
+      "physical_cases": 50,
+      "report": "local-evidence/triad-selective/followup-complete/followup-scores/g01edge-each-65-cn0m24-signal-batch00.json",
+      "report_sha256": "2af460ae07b2d0f4a393931a77d6986cdcc7764be559c78a20d83ea5f39415ea",
+      "score_npz_sha256": "0b3c001a1908b33a9e9025a9904a4457fa11a52abb8058ce9abd84c6074a7107"
+    },
+    {
+      "job": "g01edge-each-65-cn0m24-signal-batch01",
+      "physical_cases": 50,
+      "report": "local-evidence/triad-selective/followup-complete/followup-scores/g01edge-each-65-cn0m24-signal-batch01.json",
+      "report_sha256": "7284416e872dfb0ddca87c35219a91566a5b54a560d52fe32ced738649ffb6dd",
+      "score_npz_sha256": "4781d926acb264f9760c30c9b8609ce18a33b4ba507f7145d8abf37706de3238"
+    },
+    {
+      "job": "g01edge-each-65-cn0m24-signal-batch02",
+      "physical_cases": 50,
+      "report": "local-evidence/triad-selective/followup-complete/followup-scores/g01edge-each-65-cn0m24-signal-batch02.json",
+      "report_sha256": "35e02713d1e240a0d5932e86734bddb3754721c5f8fa1d85fb3f1bddea34cb00",
+      "score_npz_sha256": "21c1cae5c98e3c2be7b6a99adc0a225c6fb9c42e9c3336549c7c90f89a9e0068"
+    },
+    {
+      "job": "g01edge-each-65-cn0m24-signal-batch03",
+      "physical_cases": 50,
+      "report": "local-evidence/triad-selective/followup-complete/followup-scores/g01edge-each-65-cn0m24-signal-batch03.json",
+      "report_sha256": "5c5834a6e870cf32b6f9861d8beb2dea85208ccd3439c3ff14da91e685dd2289",
+      "score_npz_sha256": "225dfedca4e16eb9e54252414e607fe537cf13420cc79f8fab1736c02d213116"
+    },
+    {
+      "job": "g01edge-each-65-cn0m24-signal-batch04",
+      "physical_cases": 50,
+      "report": "local-evidence/triad-selective/followup-complete/followup-scores/g01edge-each-65-cn0m24-signal-batch04.json",
+      "report_sha256": "9a5c50a768a25c503a555b96e597edda4ee1b43f34195f16a43653ad1918e040",
+      "score_npz_sha256": "27e4734b54c1112f4d1a008eb157f1568b3054a30aedeca5b52e68e75826fce4"
+    },
+    {
+      "job": "g01edge-each-65-cn0m24-signal-batch05",
+      "physical_cases": 50,
+      "report": "local-evidence/triad-selective/followup-complete/followup-scores/g01edge-each-65-cn0m24-signal-batch05.json",
+      "report_sha256": "c3f24a830b92c35d2793f31fecf1627757972144265d67419f1b4a4c71a99291",
+      "score_npz_sha256": "029a01da3c1180fd1edfb48770de3767ce405ce04434966074bd62f220ad000d"
+    },
+    {
+      "job": "g1edge-each-65-cn0m13-signal-batch00",
+      "physical_cases": 50,
+      "report": "local-evidence/triad-selective/followup-complete/followup-scores/g1edge-each-65-cn0m13-signal-batch00.json",
+      "report_sha256": "dd6831d1b45db04f4a1113d5f7a1df4331a39d2ce035583292bc0ec0ae0e75b1",
+      "score_npz_sha256": "b26225733f83f7564b7eabff6ec480d5b4418b28f308217e987307a1574f86c0"
+    },
+    {
+      "job": "g1edge-each-65-cn0m13-signal-batch01",
+      "physical_cases": 50,
+      "report": "local-evidence/triad-selective/followup-complete/followup-scores/g1edge-each-65-cn0m13-signal-batch01.json",
+      "report_sha256": "fd2602c409e29b3881938036f6963b813b237305e5128eb6eb4a1cfe430431a3",
+      "score_npz_sha256": "8d79977328f93098f846d2e2d1e607f5ebe32a02a3d10ff532e2aa60878d6ac9"
+    },
+    {
+      "job": "g1edge-each-65-cn0m13-signal-batch02",
+      "physical_cases": 50,
+      "report": "local-evidence/triad-selective/followup-complete/followup-scores/g1edge-each-65-cn0m13-signal-batch02.json",
+      "report_sha256": "c9885bbeafdaf183527b65043c9e0dfa0e35febd36237f44c441e35c4d911173",
+      "score_npz_sha256": "c1a70eafbc4bcb3c7b5198914753cc9d8a7a379d81910cfa5a993573e0fc44cf"
+    },
+    {
+      "job": "g1edge-each-65-cn0m13-signal-batch03",
+      "physical_cases": 50,
+      "report": "local-evidence/triad-selective/followup-complete/followup-scores/g1edge-each-65-cn0m13-signal-batch03.json",
+      "report_sha256": "2e2e76943fa004b9def4884adc095cff7f92350c7741a17c531aa5e91cdc3c5c",
+      "score_npz_sha256": "0669f4a579fee8f4339153bdc90de2e41cce6bf920eeb517013eef8580b7001d"
+    },
+    {
+      "job": "g1edge-each-65-cn0m13-signal-batch04",
+      "physical_cases": 50,
+      "report": "local-evidence/triad-selective/followup-complete/followup-scores/g1edge-each-65-cn0m13-signal-batch04.json",
+      "report_sha256": "e9897179625ac9f7403f48f4dadb6c15253a8a92349b97ee34a4b4618d99c2c8",
+      "score_npz_sha256": "4104a0103a524c1f3b13b696ad5cd052b586783e7a24e97c93bc3d3b55e0b8fb"
+    },
+    {
+      "job": "g1edge-each-65-cn0m13-signal-batch05",
+      "physical_cases": 50,
+      "report": "local-evidence/triad-selective/followup-complete/followup-scores/g1edge-each-65-cn0m13-signal-batch05.json",
+      "report_sha256": "991d1c0c33807dc50553ba2fd8c0f1eda47e922ee081c6c25a5c4705f95ec5b2",
+      "score_npz_sha256": "da546afc3729a45f1e2ab9fc630dbbabb23548f5e7c4ec17f14904454b9133f0"
+    },
+    {
+      "job": "g01slowrate-each-65-cn0m24-signal-batch00",
+      "physical_cases": 50,
+      "report": "local-evidence/triad-selective/followup-complete/followup-scores/g01slowrate-each-65-cn0m24-signal-batch00.json",
+      "report_sha256": "49db3e6403df1fd53c3db7c8840a1c21a162493c6e7cf1f7359b4d764703b5dd",
+      "score_npz_sha256": "35e7fc489d665b20eb47f05f1a75f5ebb5d2f826c7f2799e0bc957ceacd7b4a7"
+    },
+    {
+      "job": "g01slowrate-each-65-cn0m24-signal-batch01",
+      "physical_cases": 50,
+      "report": "local-evidence/triad-selective/followup-complete/followup-scores/g01slowrate-each-65-cn0m24-signal-batch01.json",
+      "report_sha256": "857beb87e18262c727a3b09f24ea9096b9bee2efc0b1c24c7c4bae9c4c7bac0c",
+      "score_npz_sha256": "c2f2c82f4dc9b694ac672af36f27ad3822bb9c0d5c4c1f8f3937f3efdd97f8b4"
+    },
+    {
+      "job": "g01slowrate-each-65-cn0m24-signal-batch02",
+      "physical_cases": 50,
+      "report": "local-evidence/triad-selective/followup-complete/followup-scores/g01slowrate-each-65-cn0m24-signal-batch02.json",
+      "report_sha256": "c1d6101e883b63e8cb029a0302d51403ca68a53b2cb058e630f6d385834036f6",
+      "score_npz_sha256": "6358f160d6f5d64a2ef1bc2e99bd2b4deab9d746bc4098cc99d0854118252652"
+    },
+    {
+      "job": "g01slowrate-each-65-cn0m24-signal-batch03",
+      "physical_cases": 50,
+      "report": "local-evidence/triad-selective/followup-complete/followup-scores/g01slowrate-each-65-cn0m24-signal-batch03.json",
+      "report_sha256": "0238bfe59df442b2c6cfd00eeab7da71a6d20893786de00a55121d8090364fdc",
+      "score_npz_sha256": "ed0c1401bb305124de215cec806f15c4e2bc285fa2b92395ef43b5c7a0167b64"
+    },
+    {
+      "job": "g01slowrate-each-65-cn0m24-signal-batch04",
+      "physical_cases": 50,
+      "report": "local-evidence/triad-selective/followup-complete/followup-scores/g01slowrate-each-65-cn0m24-signal-batch04.json",
+      "report_sha256": "bd36b8870b1842ffb9dfa088520efac038d4a18065f536bb1df9937a295f2383",
+      "score_npz_sha256": "bc269a8f4eb573a2169b78cbca0bcb7d7e81645ff799789acc4d90f5354ee9ce"
+    },
+    {
+      "job": "g01slowrate-each-65-cn0m24-signal-batch05",
+      "physical_cases": 50,
+      "report": "local-evidence/triad-selective/followup-complete/followup-scores/g01slowrate-each-65-cn0m24-signal-batch05.json",
+      "report_sha256": "09f34beb898fc3b677de832d726e99a6deb4ceee08be38afb9905086dc571259",
+      "score_npz_sha256": "2d29c8f7eac9777f7b2e1a2b3d84004391a39184660b215327be7547ecab16c5"
+    },
+    {
+      "job": "g01slowrate-each-65-cn0m24-null-batch00",
+      "physical_cases": 32,
+      "report": "local-evidence/triad-selective/followup-complete/followup-scores/g01slowrate-each-65-cn0m24-null-batch00.json",
+      "report_sha256": "07e0721b258f2197cc907908f1e6f25c63dcf6674b5a18dbbe61f2a9c2d8f130",
+      "score_npz_sha256": "eb9b5cb86c3d45397329ce84d38dd1222cea073ec277a12ab4486d5c97ef7e1a"
+    },
+    {
+      "job": "g01slowrate-each-65-cn0m24-wrong-key-batch00",
+      "physical_cases": 32,
+      "report": "local-evidence/triad-selective/followup-complete/followup-scores/g01slowrate-each-65-cn0m24-wrong-key-batch00.json",
+      "report_sha256": "7324e8c9332ed51f9dd4abef7b0a0177ad80b5ca3d9a29aceaa5f63fd4711bdf",
+      "score_npz_sha256": "95c5611e21ecaf08fae95fde5b4fee87c23a95a7da6807173b344c6c3700ebc0"
+    },
+    {
+      "job": "g1slowrate-each-65-cn0m14-signal-batch00",
+      "physical_cases": 50,
+      "report": "local-evidence/triad-selective/followup-complete/followup-scores/g1slowrate-each-65-cn0m14-signal-batch00.json",
+      "report_sha256": "5d3ed8b5461d43b1f5c67ac81b71d1ea32940a17eb19259daed2d0bd096576b4",
+      "score_npz_sha256": "929eee680247b39a4a6d1456c18b19ea7d4380b12c3177c5319cbf8bd067589b"
+    },
+    {
+      "job": "g1slowrate-each-65-cn0m14-signal-batch01",
+      "physical_cases": 50,
+      "report": "local-evidence/triad-selective/followup-complete/followup-scores/g1slowrate-each-65-cn0m14-signal-batch01.json",
+      "report_sha256": "3b768dfbc4e3276eee052857ff5932d44d2aa935e99e5a2c504191e00602c881",
+      "score_npz_sha256": "59661bac578519b5555c809a44acbd00299cd140cdc1640a92120384cef0e878"
+    },
+    {
+      "job": "g1slowrate-each-65-cn0m14-signal-batch02",
+      "physical_cases": 50,
+      "report": "local-evidence/triad-selective/followup-complete/followup-scores/g1slowrate-each-65-cn0m14-signal-batch02.json",
+      "report_sha256": "f07ebe8cfc9607f1f4bf1bb4eb2635aabd8601b1e59ab3c3409f3de3fcde7866",
+      "score_npz_sha256": "5bd0064a57919d0b1c8de724bed4c13750fbfe8c093375b63899cc03187bdbf4"
+    },
+    {
+      "job": "g1slowrate-each-65-cn0m14-signal-batch03",
+      "physical_cases": 50,
+      "report": "local-evidence/triad-selective/followup-complete/followup-scores/g1slowrate-each-65-cn0m14-signal-batch03.json",
+      "report_sha256": "bc1c2cb5fef990cde911ba61726e9a5979923b06ba7333d21316ba383290b7ee",
+      "score_npz_sha256": "136966d30f3f3659bdadd97effb6cff693bd8effee7da2e391a48142880d37ee"
+    },
+    {
+      "job": "g1slowrate-each-65-cn0m14-signal-batch04",
+      "physical_cases": 50,
+      "report": "local-evidence/triad-selective/followup-complete/followup-scores/g1slowrate-each-65-cn0m14-signal-batch04.json",
+      "report_sha256": "7dc75e722e9d123df4d5ca20cdb254d727e5d59b8a30345a7dd0dbd50838d85d",
+      "score_npz_sha256": "b9f299a7ed5fb8890c6e9856cfe0308614b0559390c0a6c15c39a494b0c470f5"
+    },
+    {
+      "job": "g1slowrate-each-65-cn0m14-signal-batch05",
+      "physical_cases": 50,
+      "report": "local-evidence/triad-selective/followup-complete/followup-scores/g1slowrate-each-65-cn0m14-signal-batch05.json",
+      "report_sha256": "81c9ad064ecda5516196fed5a17fab8b76e22bdb10ce66935f0533aec0b80473",
+      "score_npz_sha256": "e3ca507f88e8f4042d5f02d3cc1eae8656a1896ce63961801f8451ed324fe374"
+    },
+    {
+      "job": "g1slowrate-each-65-cn0m14-null-batch00",
+      "physical_cases": 32,
+      "report": "local-evidence/triad-selective/followup-complete/followup-scores/g1slowrate-each-65-cn0m14-null-batch00.json",
+      "report_sha256": "a77d0f8d4dd400fc9c59c7bdc228490b00ec427e73bbf63684c46e7145c04ddd",
+      "score_npz_sha256": "f861e4efbd8d761b41ead0333be614f1ffcdb0a0b1d67df2af39277497c89199"
+    },
+    {
+      "job": "g1slowrate-each-65-cn0m14-wrong-key-batch00",
+      "physical_cases": 32,
+      "report": "local-evidence/triad-selective/followup-complete/followup-scores/g1slowrate-each-65-cn0m14-wrong-key-batch00.json",
+      "report_sha256": "753bab4f36f402024b378f3c746ce8ea4a06c67841bf80f439a1348e7cb606d5",
+      "score_npz_sha256": "105c909cb32254b8b120190ad203c7827730823958fa328769d4bcaad2f9f588"
+    }
+  ],
+  "reproducer": {
+    "command": "PYTHONDONTWRITEBYTECODE=1 OMP_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2 MKL_NUM_THREADS=2 /tmp/triad-weak-env/bin/python docs/validation-data/triad-v3/2026-11-02-selective/reproduction/followup_confidence.py",
+    "path": "docs/validation-data/triad-v3/2026-11-02-selective/reproduction/followup_confidence.py",
+    "sha256": "4483e0b3289319a048d5cb1c67eea74846f75cc333a09b464f041b81cd331e98"
+  },
+  "runtime": "/tmp/triad-weak-env/bin/python",
+  "runtime_binding_audit": {
+    "integrity_complete": true,
+    "path": "local-evidence/triad-selective/followup-audit-preview.json",
+    "raw_array_bytes_rehashed": false,
+    "scope": "Accepted full runtime/source/manifest/score binding audit; this reviewer additionally checked all saved score arrays and 1628 actual manifest hash/seed/embedded command bindings. Omitted raw arrays were not independently rehashed here.",
+    "sha256": "545fe9c54d06edf8afb32f2ab0114cec9fcc617ccf52c9d0a9c82d8275619190"
+  },
+  "schema": "triad-selective-followup-confidence-v1",
+  "scientific_qualification": false,
+  "state": "independent_recount_passed",
+  "wrong_key_pair_identity_checks": [
+    {
+      "identical_input_receipt_hash_count": {
+        "gram.c128": 0,
+        "intervals.u64": 32,
+        "observation.c128": 0,
+        "received_energy.f64": 32,
+        "valid_rows.u64": 32
+      },
+      "interpretation": "Same source/channel/noise roots and observed total energies/calendar, changed public basis/projections. Hash equality of energies alone does not prove full raw I/Q identity.",
+      "paired_signal_cell": "g01slowrate-each-65-cn0m24-signal",
+      "pairs": 32,
+      "same_six_root_vectors": 32,
+      "wrong_key_cell": "g01slowrate-each-65-cn0m24-wrong-key"
+    },
+    {
+      "identical_input_receipt_hash_count": {
+        "gram.c128": 0,
+        "intervals.u64": 32,
+        "observation.c128": 0,
+        "received_energy.f64": 32,
+        "valid_rows.u64": 32
+      },
+      "interpretation": "Same source/channel/noise roots and observed total energies/calendar, changed public basis/projections. Hash equality of energies alone does not prove full raw I/Q identity.",
+      "paired_signal_cell": "g1slowrate-each-65-cn0m14-signal",
+      "pairs": 32,
+      "same_six_root_vectors": 32,
+      "wrong_key_cell": "g1slowrate-each-65-cn0m14-wrong-key"
+    }
+  ]
+}
