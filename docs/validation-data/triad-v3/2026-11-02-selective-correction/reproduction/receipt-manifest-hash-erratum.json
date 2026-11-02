@@ -1,0 +1,19 @@
+{
+  "schema": "triad-compute-receipt-manifest-hash-erratum-v1",
+  "original_receipt_path": "local-evidence/triad-selective-correction/gpu-results/compute-build-receipt.json",
+  "original_receipt_sha256": "7d34ee055aee21a1f974bfae38b4e444b673b7ea58c5c82aebbee61bb1b66c8b",
+  "original_receipt_preserved": true,
+  "diagnosis": {
+    "hash_4850e98e66b819a519742fe6c9df2f85b575078577e4b36fa30ce0db082383d5": {
+      "file": "/tmp/triad-selective-correction-cloud/source-current.manifest.json",
+      "meaning": "SHA256 of the full local source bundle manifest, including archive/bootstrap metadata and excluded-scope notes."
+    },
+    "hash_0820d8c4a07f08dadbb3858d5d3de2e036360f94835c95e1af14feb3e79b4ec4": {
+      "file": "local-evidence/triad-selective-correction/analysis/source-file-manifest.json",
+      "meaning": "SHA256 of the sanitized source-only manifest referenced by the receipt evidence_paths.source_manifest. Its copy inside the GPU science archive has the same hash."
+    },
+    "inventory_comparison": "Both manifests bind source archive SHA256 6675cba4b22055f066e6fd53c691f7562bd5852280e61f130fbf10141e5af7a6, contain 1,759 source-file entries, and have exactly identical path/SHA256/size entries."
+  },
+  "correction_for_future_public_copy": "Label 4850e98e… as full source bundle manifest SHA256 and 0820d8c4… as sanitized source-file-manifest SHA256; preserve both because they hash different JSON documents with the same file inventory.",
+  "no_source_or_frozen_evidence_mutated": true
+}

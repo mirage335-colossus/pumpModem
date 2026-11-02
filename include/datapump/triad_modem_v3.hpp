@@ -144,6 +144,20 @@ struct PathEvolutionConfig {
     double outage_start_seconds = -1, outage_end_seconds = -1;
     double outage_gain = 0, outage_ramp_seconds = 60;
 };
+// The ordinary sampled/physical channels retain the legacy operator. This
+// versioned selection belongs to the isolated triad study only.
+enum class SelectiveModel { LegacyAllpass, DispersiveDft };
+struct SelectiveModelConfig {
+    SelectiveModel model = SelectiveModel::DispersiveDft;
+    // DispersiveDft only; LegacyAllpass retains its historical geometry and
+    // ignores both geometry fields. Zero uses the public transmitted carrier spacing. Positive values fix
+    // the selectivity scale in Hz independently of waveform rate. This is a
+    // synthetic dispersive stress law, not the millisecond ray excess delay.
+    double correlation_spacing_hz = 0;
+    // Channel center in the nominal pre-RX-oscillator baseband frame. Actual
+    // TX offsets move through this fixed response; no hidden-truth recentering.
+    double center_hz = 0;
+};
 struct StreamChannelConfig {
     SimulationConfig effects{};
     // With physical effects.fhss, RF hops and dropout windows use the public
@@ -152,6 +166,14 @@ struct StreamChannelConfig {
     OscillatorSpectrum tx_spectrum{}, rx_spectrum{};
     SampledFrontendConfig frontend{};
     PathEvolutionConfig path_evolution{};
+    SelectiveModelConfig selective_model{};
+    // Public observation-calendar padding for paired model comparisons. Never
+    // truncates a selected filter: max(actual selective tail, ceil(Fs*T)).
+    // Other source/interpolation/ray/frontend tails remain additional.
+    double selective_tail_floor_seconds = 0;
+    // Optional public fixed observation calendar. Extends zero-input draining
+    // after the natural complete channel endpoint; never truncates any tail.
+    std::uint64_t minimum_capture_samples = 0;
     double signal_gain = 1;
     // Absolute variance E|n|² of final complex sample noise. effects.snr_db
     // is unused: a stream is never normalized using its future whole power.
@@ -168,6 +190,12 @@ struct SelectivePerturbationReport {
     // Fixed-size seeded-model diagnostics, never receiver channel estimates.
     // Initial phases apply to capture row zero, before its first phase step.
     double sample_rate_hz = 0, band_width_hz = 0;
+    SelectiveModel model = SelectiveModel::LegacyAllpass;
+    // response_period_hz is the ideal continuous-delay law's period; cubic
+    // sampled delays perturb it. Actual sampled transfer has period Fs.
+    double correlation_spacing_hz = 0, center_hz = 0, response_period_hz = 0;
+    std::array<double, 3> branch_delays_seconds{};
+    std::uint64_t memory_samples = 0;
     std::array<double, 2> component_depths{}, component_rates_hz{};
     std::array<double, 3> band_centers_hz{};
     std::array<std::array<double, 2>, 3> initial_phases_radians{};
@@ -179,6 +207,7 @@ struct SelectivePerturbationReport {
 };
 struct StreamChannelReport {
     std::uint64_t samples = 0, source_samples = 0, tail_samples = 0;
+    std::uint64_t natural_complete_samples = 0, observation_padding_samples = 0;
     std::uint64_t erased_samples = 0, out_of_passband_samples = 0;
     double signal_energy = 0, observed_energy = 0;
     double complex_noise_variance = 0;

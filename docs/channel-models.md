@@ -284,6 +284,96 @@ include processed tails. Active amplitude modulation is not power normalized.
 The [selective study](validation-data/triad-v3/2026-11-02-selective/README.md)
 separates these energy changes from receiver projection loss and admission.
 
+### Versioned three-carrier selective modulation
+
+The isolated v3 study now defaults to `dispersive-dft-v1`; the shared ordinary
+Robust sampled and hardware channel paths continue to use the historical
+`FrequencySelectivePerturbation` operator. `triad_long` can select the old
+operator explicitly with `--selective-model legacy-allpass` to reproduce prior
+v3 captures. The corrected operator is not wired into ordinary Robust.
+
+The legacy operator's three crossover filters are centered on the nominal
+occupied band and split that band into low, middle, and high branches. It is
+linear and continuous-state, but its crossovers do not track a 0.05-Hz displaced
+ray when the occupied band is only 0.00225 Hz wide. At 0.00075-Hz carrier
+spacing, our direct tone probe measured Each65 adjacent complex-gain difference
+RMS falling from 0.8501 at zero offset to 0.0001798 at +0.05 Hz, while the
+individual tone's magnitude modulation remained about 0.61 RMS. This is
+unintended *common* modulation caused by the narrow legacy bank. It is not
+evidence that a real 5-ms HF delay produces differential fading across
+millihertz-spaced carriers: that delay creates only 2.36e-5 radians of phase
+difference at 0.00075 Hz. See the
+[correction record](validation-data/triad-v3/2026-11-02-selective-correction/README.md)
+for probe method and the physical/model distinction.
+
+`dispersive-dft-v1` applies a single broadband, overlapping three-branch FIR
+operator to the summed propagated complex signal. It does not classify samples
+by carrier label, so Doppler-shifted components and overlapping modulation
+sidebands stay in the same linear time-varying signal. For spacing scale `s`,
+its ideal branch delays are `0`, `1/(3s)`, and `2/(3s)` seconds. A three-point
+DFT across those delays makes complementary branches with ideal response
+period `3s`; seeded complex sinusoidal gains modulate each branch. The unity
+path is explicit, all complex response and sidebands are retained, and no
+received-energy normalization is applied. The sampling implementation uses
+four-point causal cubic fractional-delay filters; the reported response period
+is ideal, because interpolation perturbs exact periodicity. It rejects sample
+rates unable to represent the requested delay bank and caps its history at
+4,194,240 complex samples (64 MiB of complex-double history).
+
+The default `--selective-scale-hz 0` resolves `s` to the public waveform's
+carrier spacing, making this a **spacing-scaled synthetic dispersive stress
+law**. With spacing 0.00075 Hz, ideal delays reach 888.889 seconds and the
+0.25-Hz sample-rate example uses 896 seconds of history/tail. This is separate
+from the independently selected 5-ms geometric excess delay and 0.05-Hz ray
+center separation. A fixed positive `--selective-scale-hz` sets a repeatable
+channel selectivity scale in Hz across rate changes; it still defines this
+synthetic filter law, not a calibrated propagation profile. For physically
+motivated propagation, specify measured or justified per-ray dispersion/delay
+responses separately and apply each response to its physical ray before its
+delay/Doppler and summation. Millihertz carrier separation alone does not
+justify hundreds-of-seconds physical delay spread.
+
+The filter center is the declared public pre-RX-oscillator baseband frame
+selected by `--selective-center-hz`. TX oscillator offsets and path Doppler move
+the signal through that fixed response; the RX oscillator follows the selective
+stage and therefore does not. The receiver truth is never used to recenter the
+filter. A change of baseband coordinate convention must transform the
+channel-frame definition consistently. Because modulation sidebands can
+overlap neighboring carriers (at the concrete case, 0.05-Hz spread spans 66.7
+carrier spacings), per-carrier scalar gain is only a diagnostic for isolated
+injected tones; it cannot summarize or demix a simultaneous waveform. Preserve
+and score the full complex sampled output.
+
+The isolated `triad_long` channel currently applies its selective bank after
+nominal hop de-rotation. Its `--fhss` control shapes the source envelope; it
+does not retune the simulated RF path (`physical_rf_retuning=false`). Thus
+`dispersive-dft-v1` with FHSS represents a de-hopped baseband stress case. It
+does not model a fixed RF dispersive response retaining filter memory and
+echoes through actual retuning, hop settling and capture. Current correction
+campaign and response tests use FHSS Off. Treat FHSS behavior under this new
+operator as unvalidated until RF-frame conversion is carried consistently
+through the filter state, physical hop schedule, and post-propagation capture.
+
+The stage has finite causal memory, advances continuously across reads/hops,
+and the stream drains its full selected filter tail. `--selective-tail-floor-seconds`
+sets a shared minimum tail for paired legacy/corrected exports; it never clips a
+longer selected filter. The channel report includes model version, requested
+and resolved spacing, frequency frame, ideal period, branch delays, memory and
+tail samples, actual seed/phases, and pre/post modulation energy. None/Off and
+zero Doppler retain exact bypass behavior.
+
+Do not transfer the old three-branch energy or KL constants to the corrected
+operator without deriving them for its actual finite FIRs and observation
+projection. For ideal unitary delay branches and six independent uniform AM
+phases, the expected full-span energy factor is `1 + q`, where
+`q=(slow_depth^2+fast_depth^2)/2`: 1.0625 for Each25 and 1.4225 for Each65.
+For adjacent carrier centers, the ideal expected complex modulation-contrast
+RMS is `sqrt(2q)` (0.3536 and 0.9192); this is not an amplitude-only or decoder
+sensitivity guarantee. Finite cubic FIR error, finite tails, out-of-capture
+sidebands and channel projection require measured operator/energy checks.
+The correction study keeps prior legacy results as historical controls and
+records the outcomes still needing reruns.
+
 ## Focused evidence and limits
 
 Use the focused selectors that match the changed path:

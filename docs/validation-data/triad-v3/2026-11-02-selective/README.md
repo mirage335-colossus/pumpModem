@@ -1,5 +1,26 @@
 # Selective amplitude modulation in the isolated three-carrier modem
 
+> **Model and capture correction.** Every receiver result in this record used
+> the historical `legacy-allpass-v1` selective operator. That operator remains
+> a valid reproducibility target for these runs, but the measured 0.00075-Hz /
+> 0.05-Hz response collapses its added modulation to nearly common mode at
+> displaced offsets. This study therefore does **not** establish useful strong
+> differential AM reception for that case. The isolated v3 default is now
+> `dispersive-dft-v1`; ordinary Robust simulation and hardware channels remain
+> unchanged on the legacy operator. See the [model correction record](../2026-11-02-selective-correction/README.md)
+> and its accepted [corrected-tone response probe](../2026-11-02-selective-correction/response-v2/README.md).
+>
+> There is a separate observation-calendar issue in the retained 850-day
+> Each65/Off exports. Their manifest reports `source_samples = 18,366,718` and
+> `sample_count = 18,366,719`; the natural full-tail calendar is 18,368,197
+> rows: 1,478 rows or 5,912
+> seconds at 0.25 samples/s were omitted. The report's larger channel-output
+> count does not show those rows were captured or scored. The lost-tail energy
+> and its sensitivity impact were not measured. The 16/16 admission results
+> remain results for the legacy sampled support only; reproduce them with the
+> legacy operator and original calendar. A corrected comparison must extend
+> both models to a common calendar covering the longer tail.
+
 **The sampled campaigns completed, including a consequential slower-rate
 failure.** Seven of nine primary strict-gate signal cells achieved 300/300
 correct accepted observations; the other two achieved 297/300 and 299/300.

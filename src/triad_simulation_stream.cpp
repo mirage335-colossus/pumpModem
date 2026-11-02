@@ -18,6 +18,7 @@
 namespace datapump::triad::v3 {
 namespace {
 using modem::detail::FrequencySelectivePerturbation;
+using modem::detail::DispersiveSelectivePerturbation;
 using modem::detail::SpreadRay;
 using Complex = std::complex<double>;
 constexpr double tau = 2 * std::numbers::pi;
@@ -309,6 +310,12 @@ StreamChannelConfig checked_config(const StreamChannelConfig& cfg, const Format&
     validate_spectrum(cfg.rx_spectrum);
     validate_frontend(cfg.frontend, cfg.effects.sample_rate*(1+cfg.effects.rx.audio_ppm*1e-6));
     validate_path_evolution(cfg.path_evolution);
+    require((cfg.selective_model.model == SelectiveModel::LegacyAllpass ||
+             cfg.selective_model.model == SelectiveModel::DispersiveDft) &&
+            finite_nonnegative(cfg.selective_model.correlation_spacing_hz) &&
+            std::isfinite(cfg.selective_model.center_hz) &&
+            finite_nonnegative(cfg.selective_tail_floor_seconds),
+            "invalid versioned selective modulation model");
     if (effective_sample_rate(format) < 64) {
         const auto fast_spectrum = [](const OscillatorSpectrum& s) {
             return s.white_fm_hz_sqrt_seconds != 0 || s.random_walk_fm_hz_per_sqrt_second != 0 ||
@@ -344,6 +351,7 @@ struct StreamingChannel::Impl {
     std::unique_ptr<detail::GaussianRayFading> gaussian_path;
     std::unique_ptr<SpreadRay> spread;
     std::unique_ptr<FrequencySelectivePerturbation> perturbation;
+    std::unique_ptr<DispersiveSelectivePerturbation> dispersive_perturbation;
     std::vector<long double> hop_prefix;
     std::int64_t previous_tx_dwell = INT64_MIN, previous_rx_dwell = INT64_MIN;
     double agc_power = 1, agc_alpha = 0;
@@ -397,8 +405,20 @@ struct StreamingChannel::Impl {
         const bool spread_enabled = effects.spread_delay_ms > 0 || effects.spread_doppler_hz > 0;
         const bool perturb_enabled = effects.spread_doppler_hz > 0 &&
             (effects.perturbation_slow_depth > 0 || effects.perturbation_fast_depth > 0);
-        const auto perturb_tail = perturb_enabled ? FrequencySelectivePerturbation::decay_samples(
-            effects.sample_rate * rx_scale, effects.occupied_bandwidth_hz) : 0;
+        const bool dispersive = config.selective_model.model == SelectiveModel::DispersiveDft;
+        const double selective_spacing = config.selective_model.correlation_spacing_hz > 0 ?
+            config.selective_model.correlation_spacing_hz : geometry.carrier_spacing_hz;
+        const auto actual_perturb_tail = perturb_enabled ? (dispersive ?
+            DispersiveSelectivePerturbation::tail_samples(effects.sample_rate * rx_scale, selective_spacing) :
+            FrequencySelectivePerturbation::decay_samples(effects.sample_rate * rx_scale,
+                                                        effects.occupied_bandwidth_hz)) : 0;
+        const long double selective_floor_real = std::ceil(
+            static_cast<long double>(config.selective_tail_floor_seconds) * effects.sample_rate * rx_scale);
+        require(std::isfinite(selective_floor_real) && selective_floor_real >= 0 &&
+                selective_floor_real < UINT64_MAX,
+                "selective observation tail floor overflows sample coordinates");
+        const auto perturb_tail = std::max(actual_perturb_tail,
+            static_cast<std::uint64_t>(selective_floor_real));
         const long double delay_tail_real = effects.spread_delay_ms * .001L *
             effects.sample_rate * rx_scale;
         require(perturb_tail <= UINT64_MAX - tx_interpolation_tail &&
@@ -430,7 +450,10 @@ struct StreamingChannel::Impl {
             effects.sample_rate * rx_scale);
         require(std::isfinite(total_real) && total_real >= 0 && total_real < UINT64_MAX,
                 "stream channel observation extent overflows sample coordinates");
-        total = static_cast<std::uint64_t>(total_real);
+        const auto natural_total = static_cast<std::uint64_t>(total_real);
+        total = std::max(natural_total, config.minimum_capture_samples);
+        stats.natural_complete_samples = natural_total;
+        stats.observation_padding_samples = total - natural_total;
         const double maximum_hop = effects.fhss ? std::max(
             std::abs(*std::min_element(effects.hop_offsets_hz.begin(), effects.hop_offsets_hz.end())),
             std::abs(*std::max_element(effects.hop_offsets_hz.begin(), effects.hop_offsets_hz.end()))) : 0;
@@ -474,7 +497,10 @@ struct StreamingChannel::Impl {
             (gaussian_path ? gaussian_path->working_bytes() : 0) +
             stats.path_gaussian_fir_coefficients.capacity()*sizeof(double) +
             (spread_enabled ? sizeof(SpreadRay) : 0) +
-            (perturb_enabled ? sizeof(FrequencySelectivePerturbation) : 0);
+            (perturb_enabled ? (dispersive ? sizeof(DispersiveSelectivePerturbation) +
+                DispersiveSelectivePerturbation::memory_samples(effects.sample_rate * rx_scale,
+                                                               selective_spacing)*sizeof(Complex) :
+                sizeof(FrequencySelectivePerturbation)) : 0);
         require(stats.working_bytes <= kHistoryLimitBytes + 1024 * 1024,
                 "stream channel workspace exceeds its fixed bound");
         tx_history.resize(history_count);
@@ -484,19 +510,39 @@ struct StreamingChannel::Impl {
             effects.seed ^ 0x325449415443484eULL);
         if (perturb_enabled) {
             const auto seed = effects.seed ^ 0x3254494154504552ULL;
-            perturbation = std::make_unique<FrequencySelectivePerturbation>(
-                effects.sample_rate * rx_scale, 0, effects.occupied_bandwidth_hz,
-                effects.spread_doppler_hz, effects.perturbation_slow_depth,
-                effects.perturbation_fast_depth, seed);
             auto& diagnostic = stats.selective_perturbation.emplace();
+            diagnostic.model = config.selective_model.model;
             diagnostic.sample_rate_hz = effects.sample_rate * rx_scale;
-            diagnostic.band_width_hz = perturbation->band_width_hz;
             diagnostic.component_depths = {effects.perturbation_slow_depth, effects.perturbation_fast_depth};
-            diagnostic.component_rates_hz = perturbation->rates_hz;
-            diagnostic.band_centers_hz = perturbation->band_centers_hz;
-            diagnostic.initial_phases_radians = perturbation->initial_phases;
+            if (dispersive) {
+                dispersive_perturbation = std::make_unique<DispersiveSelectivePerturbation>(
+                    effects.sample_rate * rx_scale, config.selective_model.center_hz, selective_spacing,
+                    effects.spread_doppler_hz, effects.perturbation_slow_depth,
+                    effects.perturbation_fast_depth, seed);
+                diagnostic.correlation_spacing_hz = selective_spacing;
+                diagnostic.center_hz = config.selective_model.center_hz;
+                diagnostic.response_period_hz = dispersive_perturbation->response_period_hz;
+                diagnostic.branch_delays_seconds = dispersive_perturbation->branch_delays_seconds;
+                diagnostic.memory_samples = DispersiveSelectivePerturbation::memory_samples(
+                    effects.sample_rate * rx_scale, selective_spacing);
+                diagnostic.band_width_hz = dispersive_perturbation->band_width_hz;
+                diagnostic.component_rates_hz = dispersive_perturbation->rates_hz;
+                diagnostic.band_centers_hz = dispersive_perturbation->band_centers_hz;
+                diagnostic.initial_phases_radians = dispersive_perturbation->initial_phases;
+            } else {
+                // Exact historical operator, including zero-centered geometry,
+                // initial phases and RNG domains. No ordinary path changes.
+                perturbation = std::make_unique<FrequencySelectivePerturbation>(
+                    effects.sample_rate * rx_scale, 0, effects.occupied_bandwidth_hz,
+                    effects.spread_doppler_hz, effects.perturbation_slow_depth,
+                    effects.perturbation_fast_depth, seed);
+                diagnostic.band_width_hz = perturbation->band_width_hz;
+                diagnostic.component_rates_hz = perturbation->rates_hz;
+                diagnostic.band_centers_hz = perturbation->band_centers_hz;
+                diagnostic.initial_phases_radians = perturbation->initial_phases;
+            }
             diagnostic.seed = seed;
-            diagnostic.decay_tail_samples = perturb_tail;
+            diagnostic.decay_tail_samples = actual_perturb_tail;
         }
         initialize_spectrum(tx_osc, config.tx_spectrum, tx_spectrum_rng);
         initialize_spectrum(rx_osc, config.rx_spectrum, rx_spectrum_rng);
@@ -632,10 +678,11 @@ struct StreamingChannel::Impl {
             propagated *= std::polar(1., angle);
         }
         if (path.outage_start_seconds >= 0) propagated *= outage_gain(path, physical_time);
-        if (perturbation) {
+        if (perturbation || dispersive_perturbation) {
             auto& diagnostic = *stats.selective_perturbation;
             diagnostic.pre_selective_energy_samples += std::norm(propagated);
-            propagated = perturbation->process(propagated);
+            propagated = dispersive_perturbation ? dispersive_perturbation->process(propagated) :
+                perturbation->process(propagated);
             diagnostic.post_selective_energy_samples += std::norm(propagated);
             ++diagnostic.processed_rows;
         }

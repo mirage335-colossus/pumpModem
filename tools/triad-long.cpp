@@ -3,6 +3,7 @@
 #include "datapump/tuning.hpp"
 #include "datapump/clock_sync.hpp"
 #include "datapump/pattern_pulse.hpp"
+#include "../src/channel_perturbation.hpp"
 
 #include <algorithm>
 #include <array>
@@ -76,12 +77,16 @@ struct Options {
     bool stats_noisy = false;
     std::string basis = "flat";
     double tap_delay_ms = 1.5, tap_doppler_hz = .3;
+    // Common lower bound on total model-tail support for paired channel runs.
+    double selective_tail_floor_seconds = 0;
     std::vector<double> clocks_ppm{0}, frequency_drifts{0};
     std::vector<std::int64_t> epoch_offsets{0};
     std::vector<std::string> command_argv;
     SampledFrontendConfig frontend{};
     PathEvolutionConfig path_evolution{};
     std::optional<std::string> base_oscillator,shift_oscillator,clock_sync_text,spread_preset,selective_perturbation;
+    std::string selective_model = "dispersive-dft";
+    double selective_scale_hz = 0, selective_center_hz = 0;
     std::optional<double> spread_delay_ms,spread_doppler_hz;
     double audio_error_seconds=clock_sync::default_audio_error_seconds,margin=1,nominal_if_hz=1500;
     bool audio_error_explicit=false,margin_explicit=false,phase_diffusion_explicit=false;
@@ -230,6 +235,14 @@ Options parse(int argc, char** argv) {
   --clock-sync GPS_10ms-1ms_region-0ms_offset | default
   --audio-error-ms MS --margin X --nominal-if-hz HZ
   --spread-preset ID --selective-perturbation off|slow-N|fast-N|each-N
+  --selective-model legacy-allpass|dispersive-dft
+  --selective-scale-hz HZ --selective-center-hz HZ
+                              Dispersive DFT is an explicit dispersive stress model:
+                              scale defaults to carrier spacing; center is a fixed channel frame,
+                              never recentered from hidden oscillator truth. At .00075-Hz scale,
+                              branch memory extends about 889 seconds; this is not millisecond ray delay.
+  --selective-tail-floor-seconds S
+                              Common minimum total selective-model tail for paired runs.
   --spread-delay-ms MS --spread-doppler-hz HZ
                               Optional physical nominal overrides; preset base, then margin once.
                               Receiver --tap-* basis remains independently selected.
@@ -311,6 +324,10 @@ Examples:
         else if (key == "--spread-delay-ms") o.spread_delay_ms=number(need(),"physical spread delay");
         else if (key == "--spread-doppler-hz") o.spread_doppler_hz=number(need(),"physical spread Doppler");
         else if (key == "--selective-perturbation") o.selective_perturbation=std::string(need());
+        else if (key == "--selective-model") o.selective_model=std::string(need());
+        else if (key == "--selective-scale-hz") o.selective_scale_hz=number(need(),"selective correlation scale");
+        else if (key == "--selective-center-hz") o.selective_center_hz=number(need(),"selective frequency frame");
+        else if (key == "--selective-tail-floor-seconds") o.selective_tail_floor_seconds=number(need(),"minimum selective model tail");
         else if (key == "--symbol-burst") o.symbol_burst_wait=parse_whole_bit_burst(need());
         else if (key == "--truth-epoch-offset") o.truth_epoch_offset=signed_integer(need(),"truth epoch offset");
         else if (key == "--truth-frequency-hz") o.truth_frequency_hz=number(need(),"independent truth frequency");
@@ -401,6 +418,12 @@ Examples:
     if(o.mode=="resolve")o.mode="configure";
     if (o.mode != "configure" && o.mode != "plan" && o.mode != "run" && o.mode != "export" && o.mode != "export-sampled" && o.mode != "export-stats") throw std::invalid_argument("mode must be configure, plan, run, export, export-sampled, or export-stats");
     if (o.channel != "none" && o.channel != "hf") throw std::invalid_argument("channel must be none or hf");
+    if (o.selective_model != "legacy-allpass" && o.selective_model != "dispersive-dft")
+        throw std::invalid_argument("selective model must be legacy-allpass or dispersive-dft");
+    if (!std::isfinite(o.selective_scale_hz) || o.selective_scale_hz < 0 ||
+        !std::isfinite(o.selective_center_hz) || o.selective_tail_floor_seconds < 0 ||
+        !std::isfinite(o.selective_tail_floor_seconds))
+        throw std::invalid_argument("selective scale/center and tail floor must be finite; scale and tail must be nonnegative");
     if (o.basis!="flat" && o.basis!="two-ray" && o.basis!="per-carrier")
         throw std::invalid_argument("basis must be flat, two-ray, or per-carrier");
     if (o.basis=="per-carrier")
@@ -716,7 +739,17 @@ void json_configuration(std::ostream& out,const Options& o,const Format& f,const
        <<",\"margin\":"<<o.margin<<",\"oscillator_truth_margin_applied\":false,\"spread_margin_applied_once\":"
        <<((o.spread_preset||o.spread_delay_ms||o.spread_doppler_hz)?"true":"false")
        <<",\"spread_preset\":";json_string(out,r.spread_id);out<<",\"selective_perturbation\":";json_string(out,r.perturbation_id);
-    out<<",\"spread_delay_ms\":"<<r.spread_delay_ms<<",\"spread_doppler_hz\":"<<r.spread_doppler_hz
+    const auto selective_scale=o.selective_scale_hz>0?o.selective_scale_hz:g.carrier_spacing_hz;
+    out<<",\"selective_channel\":{\"model\":";
+    json_string(out,o.selective_model=="legacy-allpass"?"legacy-allpass-v1":"dispersive-dft-v1");
+    out<<",\"requested_correlation_scale_hz\":"<<o.selective_scale_hz
+       <<",\"resolved_correlation_scale_hz\":"<<selective_scale
+       <<",\"center_hz\":"<<o.selective_center_hz
+       <<",\"geometry_applied\":"<<(o.selective_model=="dispersive-dft"?"true":"false")
+       <<",\"frequency_frame\":\"fixed public channel frame; never recentered from hidden oscillator truth\""
+       <<",\"selective_tail_floor_seconds\":"<<o.selective_tail_floor_seconds
+       <<",\"interpretation\":\"dispersive-dft-v1 is a spacing-scaled stress law when the scale is auto; selected ray delay and Doppler remain separate physical dimensions\"}"
+       <<",\"spread_delay_ms\":"<<r.spread_delay_ms<<",\"spread_doppler_hz\":"<<r.spread_doppler_hz
        <<",\"perturbation_slow_depth\":"<<r.slow_depth<<",\"perturbation_fast_depth\":"<<r.fast_depth
        <<",\"spread_inputs\":";json_spread_inputs(out,o,r);
     out<<",\"path_evolution\":";json_path_evolution(out,o);
@@ -823,7 +856,16 @@ void json_provenance(std::ostream& out,const Options& o,const Format& f,const Ge
        <<",\"ramp_seconds\":"<<f.ramp_seconds<<",\"margin_seconds\":"<<f.margin_seconds
        <<",\"fine_rate_hz\":"<<g.fine_chip_rate_hz<<",\"carrier_spacing_hz\":"<<g.carrier_spacing_hz
        <<",\"occupied_bandwidth_hz\":"<<g.occupied_bandwidth_hz<<"}"
-       <<",\"channel_model\":{\"spread_delay_ms\":"<<resolve_configuration(o).spread_delay_ms
+       <<",\"channel_model\":{\"selective_model\":";
+    json_string(out,o.selective_model=="legacy-allpass"?"legacy-allpass-v1":"dispersive-dft-v1");
+    out<<",\"selective_scale_requested_hz\":"<<o.selective_scale_hz
+       <<",\"selective_scale_resolved_hz\":"<<(o.selective_scale_hz>0?o.selective_scale_hz:g.carrier_spacing_hz)
+       <<",\"selective_center_hz\":"<<o.selective_center_hz
+       <<",\"selective_geometry_applied\":"<<(o.selective_model=="dispersive-dft"?"true":"false")
+       <<",\"selective_frequency_frame\":\"fixed public channel frame; hidden oscillator truth is never used to recenter\""
+       <<",\"selective_tail_floor_seconds\":"<<o.selective_tail_floor_seconds
+       <<",\"selective_law_note\":\"dispersive-dft-v1 with auto scale is a spacing-scaled stress law; it does not represent the separately configured ray delay or Doppler\""
+       <<",\"spread_delay_ms\":"<<resolve_configuration(o).spread_delay_ms
        <<",\"spread_doppler_hz\":"<<resolve_configuration(o).spread_doppler_hz
        <<",\"perturbation_slow_depth\":"<<resolve_configuration(o).slow_depth
        <<",\"perturbation_fast_depth\":"<<resolve_configuration(o).fast_depth
@@ -871,12 +913,34 @@ void json_frontend_report(std::ostream& out,const StreamChannelReport& r) {
        <<",\"selective_perturbation\":{\"enabled\":"<<(r.selective_perturbation?"true":"false");
     if(r.selective_perturbation) {
         const auto& p=*r.selective_perturbation;
+        out<<",\"model\":";
+        json_string(out,p.model==SelectiveModel::LegacyAllpass?"legacy-allpass-v1":"dispersive-dft-v1");
         out<<",\"sample_rate_hz\":"<<p.sample_rate_hz<<",\"seed\":"<<p.seed
-           <<",\"component_order\":[\"slow\",\"fast\"],\"band_order\":[\"low\",\"middle\",\"high\"]"
+           <<",\"correlation_spacing_hz\":"<<p.correlation_spacing_hz
+           <<",\"center_hz\":"<<p.center_hz
+           <<",\"response_period_hz\":"<<p.response_period_hz
+           <<",\"response_period_scope\":";
+        json_string(out,p.model==SelectiveModel::DispersiveDft?
+            "ideal continuous-delay law; sampled cubic FIR perturbs this periodicity and has exact digital period Fs":
+            "not applicable to the legacy all-pass bank");
+        out
+           <<",\"branch_delays_seconds\":["<<p.branch_delays_seconds[0]<<','<<p.branch_delays_seconds[1]<<','<<p.branch_delays_seconds[2]<<']'
+           <<",\"memory_samples\":"<<p.memory_samples
+           <<",\"component_order\":[\"slow\",\"fast\"],\"band_order\":";
+        out<<(p.model==SelectiveModel::DispersiveDft?
+            "[\"negative_scale_peak\",\"center_peak\",\"positive_scale_peak\"]":
+            "[\"low\",\"middle\",\"high\"]");
+        out
            <<",\"component_depths\":["<<p.component_depths[0]<<','<<p.component_depths[1]<<']'
            <<",\"component_rates_hz\":["<<p.component_rates_hz[0]<<','<<p.component_rates_hz[1]<<']'
            <<",\"band_centers_hz\":["<<p.band_centers_hz[0]<<','<<p.band_centers_hz[1]<<','<<p.band_centers_hz[2]<<']'
            <<",\"band_width_hz\":"<<p.band_width_hz<<",\"decay_tail_samples\":"<<p.decay_tail_samples
+           <<",\"branch_interpolation\":";
+        json_string(out,p.model==SelectiveModel::DispersiveDft
+            ?"causal cubic Lagrange fractional delay; four taps at floor(delay_samples)+{-1,0,1,2}; exact integer-delay shortcut"
+            :"rotated first-order all-pass crossovers");
+        out<<",\"channel_tail_samples\":"<<r.tail_samples
+           <<",\"total_channel_samples\":"<<r.samples
            <<",\"processed_rows\":"<<p.processed_rows
            <<",\"pre_selective_energy_samples\":"<<p.pre_selective_energy_samples
            <<",\"post_selective_energy_samples\":"<<p.post_selective_energy_samples
@@ -888,10 +952,17 @@ void json_frontend_report(std::ostream& out,const StreamChannelReport& r) {
         out<<"],\"phase_origin\":\"first physical RX capture row (index 0), before the first phase step; not calendar time zero\""
            <<",\"gain_law\":\"1 + slow_depth*sin(slow_phase) + fast_depth*sin(fast_phase); no power normalization\""
            <<",\"energy_scope\":\"sum of squared complex signal magnitudes over all processed capture rows, including captured tails; immediately before/after selective processing, before RX oscillator, thermal noise, frontend and observed erasures; divide by sample_rate_hz for physical-time energy\""
-           <<",\"decay_scope\":\"zero-input relative pole-state decay by 1e6; not an absolute silence threshold\"";
+           <<",\"tail_scope\":";
+        json_string(out,p.model==SelectiveModel::DispersiveDft
+            ?"finite causal delay-filter memory plus the configured total-tail floor; no selected stage is truncated"
+            :"zero-input IIR pole-state decay by 1e6 plus the configured total-tail floor; not an absolute silence threshold");
     }
     out<<"},\"scope\":\"seeded physical truth; never a practical receiver search input\"}";
-    out<<",\"frontend_report\":{\"dac_clipped_components\":"<<r.dac_clipped_components
+    out<<",\"observation_endpoint_report\":{\"processed_samples\":"<<r.samples
+       <<",\"natural_complete_samples\":"<<r.natural_complete_samples
+       <<",\"public_calendar_padding_samples\":"<<r.observation_padding_samples
+       <<",\"scope\":\"natural endpoint includes all source/interpolation/ray/selective/frontend tails; public fixed calendar may append zero-input observation rows\"}"
+       <<",\"frontend_report\":{\"dac_clipped_components\":"<<r.dac_clipped_components
        <<",\"adc_clipped_components\":"<<r.adc_clipped_components<<",\"impulse_events\":"<<r.impulse_events
        <<",\"overload_samples\":"<<r.overload_samples<<",\"maximum_adc_input_component\":"<<r.maximum_adc_input_component
        <<",\"gaussian_projection_supported\":"<<(r.gaussian_projection_supported?"true":"false")<<'}';
@@ -1042,8 +1113,16 @@ std::size_t block_samples(const Options& o,const Format& f) {
 }
 
 StreamChannelConfig channel_config(const Options& o,const Format& base,const Geometry& nominal,
-                                   std::uint64_t seed,double noise,double pad,double trail) {
+                                   std::uint64_t seed,double noise,double pad,double trail,
+                                   std::uint64_t observation_samples) {
     StreamChannelConfig channel_cfg; channel_cfg.frontend=o.frontend; channel_cfg.path_evolution=o.path_evolution;
+    channel_cfg.selective_model.model=o.selective_model=="legacy-allpass"
+        ?SelectiveModel::LegacyAllpass:SelectiveModel::DispersiveDft;
+    channel_cfg.selective_model.correlation_spacing_hz=o.selective_scale_hz>0
+        ?o.selective_scale_hz:nominal.carrier_spacing_hz;
+    channel_cfg.selective_model.center_hz=o.selective_center_hz;
+    channel_cfg.selective_tail_floor_seconds=o.selective_tail_floor_seconds;
+    channel_cfg.minimum_capture_samples=observation_samples;
     channel_cfg.effects.sample_rate=effective_sample_rate(base);
     channel_cfg.effects.occupied_bandwidth_hz=nominal.occupied_bandwidth_hz;
     channel_cfg.effects.rf_hz=o.rf_hz; channel_cfg.effects.nominal_conversion_if_hz=o.nominal_if_hz;
@@ -1152,28 +1231,77 @@ double truth_frequency(const StreamChannelConfig& c) {
         c.effects.nominal_conversion_if_hz*(tx-rx)-drift*(c.effects.capture_lead_seconds+c.effects.timing_offset_seconds))/rx;
 }
 
-struct ObservationCalendar {double pad=0,trail=0;std::uint64_t samples=0;};
+struct ObservationCalendar {
+    double pad=0,trail=0;
+    std::uint64_t samples=0;
+    // Conservative channel allocation before constructing any sampled path.
+    std::size_t channel_working_bytes=0;
+};
 ObservationCalendar observation_calendar(const Options& o,const Format& f,const Geometry& g) {
     const auto resolved=resolve_configuration(o);
     const auto [lo,hi]=std::minmax_element(o.clocks_ppm.begin(),o.clocks_ppm.end());
-    const auto lower_clock=resolved.active?std::min(*lo,-resolved.clock_bound_ppm):*lo;
-    const auto upper_clock=resolved.active?std::max(*hi,resolved.clock_bound_ppm):*hi;
-    const long double slow=1+lower_clock*1e-6,fast=1+upper_clock*1e-6;
+    (void)hi;
+    const long double tx_min=resolved.oscillators?1-resolved.base_ppm*.5e-6L:
+        (resolved.active?1.L:1+*lo*1e-6L);
+    const long double tx_max=resolved.oscillators?1+resolved.base_ppm*.5e-6L:
+        (resolved.active?1.L:1+*std::max_element(o.clocks_ppm.begin(),o.clocks_ppm.end())*1e-6L);
+    const long double rx_max=resolved.oscillators?1+resolved.base_ppm*.5e-6L:1.L;
+    if(!(tx_min>0&&tx_max>0&&rx_max>0))throw std::invalid_argument("public endpoint clock bound is nonpositive");
+    const auto fs=effective_sample_rate(f);
+    const double physical_fs_max=static_cast<double>(fs*rx_max);
     const long double source_seconds=static_cast<long double>(g.source_samples)/effective_sample_rate(f);
     const auto delay=std::max(resolved.spread_delay_ms*.001,o.basis=="two-ray"?o.tap_delay_ms*.001:0.);
     const auto start_low=resolved.active?std::min(o.start_low,resolved.arrival_center-resolved.arrival_half):o.start_low;
     const auto start_high=resolved.active?std::max(o.start_high,resolved.arrival_center+resolved.arrival_half):o.start_high;
     ObservationCalendar c;c.pad=std::max(0.,-start_low)+.05;
-    const double frontend_tail=o.frontend.lowpass_hz>0?std::log(1e6)/(2*std::numbers::pi*o.frontend.lowpass_hz):0;
-    c.trail=std::max(0.,start_high)-start_low+static_cast<double>(source_seconds*(1/slow-1/fast))+delay+2+frontend_tail;
-    const auto rx_max=resolved.oscillators?1+resolved.base_ppm*.5e-6:1.;
-    const long double end=resolved.active?
-        (c.pad+std::max(0.,start_high)+delay+2+frontend_tail)*rx_max+source_seconds/slow:
-        c.pad+std::max(0.,o.start_high)+source_seconds/slow+delay+2+frontend_tail;
+    long double selective_tail=std::ceil(o.selective_tail_floor_seconds*physical_fs_max);
+    long double selective_memory=0;
+    if(resolved.spread_doppler_hz>0&&(resolved.slow_depth>0||resolved.fast_depth>0)) {
+        if(o.selective_model=="legacy-allpass") {
+            selective_tail=std::max(selective_tail,static_cast<long double>(
+                modem::detail::FrequencySelectivePerturbation::decay_samples(
+                    physical_fs_max,g.occupied_bandwidth_hz))+1);
+            selective_memory=sizeof(modem::detail::FrequencySelectivePerturbation);
+        } else {
+            const auto spacing=o.selective_scale_hz>0?o.selective_scale_hz:g.carrier_spacing_hz;
+            // Validate the bounded helper before any large allocation. A
+            // fractional endpoint arbitrarily near an integer may use two
+            // extra taps, hence this monotone conservative support bound.
+            (void)modem::detail::DispersiveSelectivePerturbation::memory_samples(physical_fs_max,spacing);
+            const long double support=std::ceil(2.L*physical_fs_max/(3.L*spacing))+2;
+            selective_tail=std::max(selective_tail,support);
+            selective_memory=sizeof(modem::detail::DispersiveSelectivePerturbation)+(support+1)*sizeof(Complex);
+        }
+    }
+    const long double interpolation_tail=std::ceil(8*rx_max/tx_min)+2;
+    const long double frontend_tail=o.frontend.lowpass_hz>0?
+        std::ceil(std::log(1e6L)*physical_fs_max/(2*std::numbers::pi*o.frontend.lowpass_hz)):0;
+    const long double complete_tail=std::ceil(delay*physical_fs_max)+selective_tail+
+        interpolation_tail+frontend_tail;
+    // No second copy of these tails is passed as capture_trail_seconds.
+    // The channel receives this public fixed floor, then must fit completely
+    // inside it for every seed; hidden physical realizations cannot pick rows.
+    c.trail=0;
+    const long double end_rows=fs*rx_max*(c.pad+std::max(0.,start_high)+source_seconds/tx_min)+
+        complete_tail+2;
+    long double gaussian_bytes=0;
+    if(o.path_evolution.gaussian_doppler_width_hz>0) {
+        const auto radius=std::ceil(5.L*physical_fs_max/(std::numbers::pi*o.path_evolution.gaussian_doppler_width_hz));
+        if(2*radius+1>8193)throw std::invalid_argument("Gaussian ray history exceeds its 8193-tap bound");
+        gaussian_bytes=(2*radius+1)*(2*sizeof(Complex)+2*sizeof(double))+16384;
+    }
+    const long double history_samples=std::ceil(resolved.spread_delay_ms*.001L*fs*tx_max)+64;
+    const long double channel_bytes=65536+history_samples*sizeof(Complex)+selective_memory+
+        gaussian_bytes+static_cast<long double>(o.flicker_bands)*4*sizeof(double);
+    if(!std::isfinite(channel_bytes)||channel_bytes>std::numeric_limits<std::size_t>::max())
+        throw std::invalid_argument("public channel workspace bound overflows");
+    c.channel_working_bytes=static_cast<std::size_t>(std::ceil(channel_bytes));
+    if(c.channel_working_bytes>o.memory_bytes)
+        throw std::invalid_argument("public channel workspace exceeds --memory-mib before channel allocation");
     // The requested active span is capped separately. Complete private tiles,
     // source pulse support and channel/capture tails can extend that span.
-    if(!std::isfinite(end)||end*effective_sample_rate(f)>UINT64_MAX)throw std::invalid_argument("public capture exceeds the coordinate study guard");
-    c.samples=static_cast<std::uint64_t>(std::ceil(end*effective_sample_rate(f)));return c;
+    if(!std::isfinite(end_rows)||end_rows>=UINT64_MAX)throw std::invalid_argument("public capture exceeds the coordinate study guard");
+    c.samples=static_cast<std::uint64_t>(std::ceil(end_rows));return c;
 }
 
 void run(const Options& o) {
@@ -1188,14 +1316,14 @@ void run(const Options& o) {
         const auto seed=o.seed+trial,key_seed=o.key_seed.value_or(o.seed)+trial,channel_seed=o.channel_seed.value_or(o.seed)+trial; auto txkey=key_for(key_seed,0); auto rxkey=o.control=="wrong-key"?key_for(key_seed^0x6a09e667f3bcc909ULL,0):key_for(key_seed,0);
         auto txf=transmitter_format(o,base); txf.symbol_ordinal=0;
         PatternSource source(txf,txkey,o.signal_bit);
-        auto channel_cfg=channel_config(o,base,nominal,channel_seed,noise,pad,trail);
+        auto channel_cfg=channel_config(o,base,nominal,channel_seed,noise,pad,trail,calendar.samples);
         const auto true_clock=truth_clock(channel_cfg),true_drift=truth_drift(channel_cfg);
         StreamingChannel channel(source,channel_cfg);
         auto candidate_bank=candidates_for(o,base,rxkey);
         for (auto& candidate : candidate_bank) candidate.arrival_seconds += pad;
         ReceiverConfig rc; rc.format=base; rc.candidates=std::move(candidate_bank);
         rc.observation_first_sample=0; rc.observation_samples=calendar.samples;
-        if(channel.total_samples()<calendar.samples)throw std::runtime_error("sampled channel does not cover public observation calendar");
+        if(channel.total_samples()!=calendar.samples)throw std::runtime_error("natural sampled channel endpoint exceeds public observation calendar");
         rc.block_samples=block_samples(o,base); rc.maximum_chunk_samples=o.chunk; rc.threads=o.threads;
         const long double caller_bytes=source.working_bytes()+static_cast<long double>(channel.report().working_bytes)+
             o.chunk*(sizeof(Complex)+sizeof(std::uint8_t))+65536;
@@ -1304,11 +1432,11 @@ void export_basis(const Options& o) {
     const auto pad=calendar.pad,trail=calendar.trail;
     const auto noise=static_cast<double>(effective_sample_rate(f))/std::pow(10.,o.cn0/10.);
     if(!std::isfinite(noise)||noise<=0)throw std::invalid_argument("C/N0 is outside numeric range");
-    auto config=channel_config(o,f,g,channel_seed,noise,pad,trail);config.effects.noise_enabled=false;
+    auto config=channel_config(o,f,g,channel_seed,noise,pad,trail,calendar.samples);config.effects.noise_enabled=false;
     PatternSource truth(transmitter_format(o,f),txkey,o.signal_bit);StreamingChannel channel(truth,config);
     for(auto& c:candidates)c.arrival_seconds+=pad;
     const auto rows=calendar.samples;
-    if(channel.total_samples()<rows)throw std::runtime_error("channel does not cover public export calendar");
+    if(channel.total_samples()!=rows)throw std::runtime_error("natural channel endpoint exceeds public export calendar");
     if(rows>o.export_max_samples)throw std::invalid_argument("export exceeds --export-max-samples (at most128000000)");
     std::size_t columns=0;
     for(const auto& c:candidates)columns=std::max(columns,c.channel.taps.size()*(c.channel.linear_gain?2:1));
@@ -1432,12 +1560,12 @@ void export_sampled(const Options& o) {
     const auto calendar=observation_calendar(o,f,g);const auto pad=calendar.pad,trail=calendar.trail;
     const auto noise=static_cast<double>(effective_sample_rate(f))/std::pow(10.,o.cn0/10.);
     if(!std::isfinite(noise)||noise<=0)throw std::invalid_argument("C/N0 is outside numeric range");
-    auto config=channel_config(o,f,g,channel_seed,noise,pad,trail);
+    auto config=channel_config(o,f,g,channel_seed,noise,pad,trail,calendar.samples);
     config.effects.noise_enabled=true;
     PatternSource truth(transmitter_format(o,f),txkey,o.signal_bit);StreamingChannel channel(truth,config);
     for(auto& c:candidates)c.arrival_seconds+=pad;
     const auto rows=calendar.samples;
-    if(channel.total_samples()<rows)throw std::runtime_error("channel does not cover public sampled-export calendar");
+    if(channel.total_samples()!=rows)throw std::runtime_error("natural channel endpoint exceeds public sampled-export calendar");
     if(rows>o.export_max_samples)throw std::invalid_argument("export-sampled exceeds --export-max-samples (at most128000000)");
     std::size_t columns=0,max_local=0;
     for(const auto& c:candidates){
@@ -1564,7 +1692,8 @@ void export_stats(const Options& o) {
     long double sources_bytes=0;
     for(const auto& c:candidates){(void)c;sources_bytes+=g.source_workspace_bytes;}
     const long double channel_bytes=static_cast<long double>(g.source_workspace_bytes)+
-        static_cast<long double>(rows?std::min<std::uint64_t>(rows,o.chunk):0)*sizeof(Complex)*3+65536;
+        static_cast<long double>(rows?std::min<std::uint64_t>(rows,o.chunk):0)*sizeof(Complex)*3+
+        calendar.channel_working_bytes;
     if(scratch+sources_bytes+channel_bytes>o.memory_bytes)throw std::invalid_argument("export-stats bounded scratch/source estimate exceeds --memory-mib");
     std::filesystem::create_directories(o.output);const auto directory=std::filesystem::path(o.output);
     std::vector<std::string> names{"gram.c128","mean.c128","intervals.u64","valid_rows.u64","signal_energy.f64","manifest.json"};
@@ -1589,10 +1718,10 @@ void export_stats(const Options& o) {
     StreamChannelReport frontend_report{};
     auto pass=[&](bool noisy_pass){
         PatternSource truth(transmitter_format(o,f),txkey,o.signal_bit);
-        auto config=channel_config(o,f,g,channel_seed,noise,pad,trail);
+        auto config=channel_config(o,f,g,channel_seed,noise,pad,trail,calendar.samples);
         config.effects.noise_enabled=noisy_pass;
         StreamingChannel channel(truth,config);
-        if(channel.total_samples()<rows)throw std::runtime_error("channel does not cover public export-stats calendar");
+        if(channel.total_samples()!=rows)throw std::runtime_error("natural channel endpoint exceeds public export-stats calendar");
         if(!noisy_pass){
             std::ofstream mask;
             if(o.stats_noisy){mask.open(directory/"validity-mask.tmp",std::ios::binary);if(!mask)throw std::runtime_error("cannot create temporary validity mask");}
@@ -1707,7 +1836,7 @@ void export_stats(const Options& o) {
     manifest<<",\"receiver_metadata_warning\":\"Do not read hidden means or energies as receiver metadata\",\"stats_noisy\":"<<(o.stats_noisy?"true":"false");
     if(o.stats_noisy)manifest<<",\"observation_file\":\"observation.c128\",\"observation_shape\":["<<blocks<<','<<d<<"],\"observation_semantics\":\"A^H W y from a second actual channel pass; simulation evaluation only\",\"received_energy_file\":\"received_energy.f64\",\"received_energy_shape\":["<<blocks<<"],\"received_energy_semantics\":\"per-block sum |y|^2 of actual noisy samples over valid rows from the same second channel pass; simulation evaluation only\"";
     manifest<<",\"file_sizes\":{\"gram.c128\":"<<size_of("gram.c128")<<",\"mean.c128\":"<<size_of("mean.c128")<<",\"intervals.u64\":"<<size_of("intervals.u64")<<",\"valid_rows.u64\":"<<size_of("valid_rows.u64")<<",\"signal_energy.f64\":"<<size_of("signal_energy.f64");if(o.stats_noisy)manifest<<",\"observation.c128\":"<<size_of("observation.c128")<<",\"received_energy.f64\":"<<size_of("received_energy.f64");manifest<<'}';
-    json_provenance(manifest,o,f,g);json_endpoint_truth(manifest,channel_config(o,f,g,channel_seed,noise,pad,trail));json_frontend_report(manifest,frontend_report);manifest<<"}\n";manifest.close();if(!manifest)throw std::runtime_error("failed writing export-stats manifest");
+    json_provenance(manifest,o,f,g);json_endpoint_truth(manifest,channel_config(o,f,g,channel_seed,noise,pad,trail,calendar.samples));json_frontend_report(manifest,frontend_report);manifest<<"}\n";manifest.close();if(!manifest)throw std::runtime_error("failed writing export-stats manifest");
     for(const auto& n:names)if(n!="manifest.json")std::filesystem::rename(directory/(n+".partial"),directory/n);
     std::filesystem::rename(directory/"manifest.json.partial",directory/"manifest.json");
 }

@@ -1,0 +1,3265 @@
+{
+  "all_sampled_two_bit_winners_and_strict_relaxed_admissions_unchanged": true,
+  "archive_sha256": "59f65eeba016aeb1bc39cf72207668b2ecce2003990fbd8025f4dfc56c98a62b",
+  "descriptive_timing_ratios": [
+    {
+      "cpu_reference": "cpu-fp64",
+      "profile": "g1",
+      "single_run_descriptive_ratios_cpu_over_target": {
+        "bounded_child_elapsed": 1.0704568836669244,
+        "gaussian_excluding_named_covariance_prep": 1.1231802343394062,
+        "gaussian_method_total": 1.0627497102402221,
+        "scorer_wall": 1.076212900852234,
+        "static_method_total": 4.068490437885784
+      },
+      "target": "cuda-fp64"
+    },
+    {
+      "cpu_reference": "cpu-fp64",
+      "profile": "g1",
+      "single_run_descriptive_ratios_cpu_over_target": {
+        "bounded_child_elapsed": 1.0689115968518825,
+        "gaussian_excluding_named_covariance_prep": 1.4708145054332833,
+        "gaussian_method_total": 1.2073757093042607,
+        "scorer_wall": 1.073917135091533,
+        "static_method_total": 3.9070302438782485
+      },
+      "target": "cuda-fp32-min"
+    },
+    {
+      "cpu_reference": "cpu-fp64",
+      "profile": "high10",
+      "single_run_descriptive_ratios_cpu_over_target": {
+        "bounded_child_elapsed": 0.9905319986374683,
+        "gaussian_excluding_named_covariance_prep": 1.0957803587531993,
+        "gaussian_method_total": 1.0404390620959145,
+        "scorer_wall": 1.00934036626049,
+        "static_method_total": 2.4883166066842515
+      },
+      "target": "cuda-fp64"
+    },
+    {
+      "cpu_reference": "cpu-fp64",
+      "profile": "high10",
+      "single_run_descriptive_ratios_cpu_over_target": {
+        "bounded_child_elapsed": 1.0132680756548855,
+        "gaussian_excluding_named_covariance_prep": 1.4424597130032826,
+        "gaussian_method_total": 1.1816442008746073,
+        "scorer_wall": 1.0172749949735502,
+        "static_method_total": 2.469257547755618
+      },
+      "target": "cuda-fp32-min"
+    }
+  ],
+  "gates": {
+    "relaxed": 17.4227460230377,
+    "strict": 22.721063389585737
+  },
+  "jobs": [
+    {
+      "device": "cpu",
+      "name": "g1-arithmetic-cpu-fp64",
+      "npz_sha256": "ed8644c8c82ba1239faf77b31f82dd549bb41720f401c9cab0b53dc1c02d014c",
+      "precision": "fp64",
+      "profile": "g1",
+      "report": "local-evidence/triad-selective-correction/gpu-results/benchmark/local-evidence/triad-selective-correction/gpu-boundary/benchmark/g1-cpu-fp64.json",
+      "report_sha256": "e9d1db718804312fc96a4dcd104f7a29717d588caaf2522d6aaffaf49eacd444",
+      "runner_status_sha256": "3be619928f153fe3f72d4b4dc8a5b196658c5b55ad8016f7d1c1a1544cec5925",
+      "timing": {
+        "bounded_child_elapsed_seconds": 108.24464022705797,
+        "conditional_noise_simulation_and_ucb_seconds": 92.11661327129696,
+        "cuda_memory": null,
+        "gaussian_cpu_covariance_preparation_seconds": 2.148659134050831,
+        "gaussian_receiver_excluding_named_covariance_preparation_seconds": 2.46491417218931,
+        "launcher_elapsed_seconds": 108.27978233201429,
+        "receiver_seconds_by_method": {
+          "gaussian-window-ucb": 4.613573306240141,
+          "static-fft-ucb": 10.12526275170967
+        },
+        "scorer_wall_seconds": 106.89834744296968,
+        "scorer_wall_unassigned_seconds": 0.03238356183283031,
+        "source_load_seconds": 0.010514551890082657
+      }
+    },
+    {
+      "device": "cuda:0",
+      "name": "g1-arithmetic-cuda-fp64",
+      "npz_sha256": "59dcc5299e174d44e1f4ff38e55e58e2d9e52727d310a3512eb5aea93d48427d",
+      "precision": "fp64",
+      "profile": "g1",
+      "report": "local-evidence/triad-selective-correction/gpu-results/benchmark/local-evidence/triad-selective-correction/gpu-boundary/benchmark/g1-cuda-fp64.json",
+      "report_sha256": "094e42e858a19e28126745f511bfcc882bf7b8d1b92b74a9e74f701cd11d70d1",
+      "runner_status_sha256": "9ed3d0b6f314260dddf3cad174f06b30b22e89b4bb00732bbaf6d893c31acdb1",
+      "timing": {
+        "bounded_child_elapsed_seconds": 101.1200375079643,
+        "conditional_noise_simulation_and_ucb_seconds": 92.45114852429833,
+        "cuda_memory": {
+          "maximum_allocated_bytes": 849444864,
+          "maximum_reserved_bytes": 1113587712
+        },
+        "gaussian_cpu_covariance_preparation_seconds": 2.146581661188975,
+        "gaussian_receiver_excluding_named_covariance_preparation_seconds": 2.194584712968208,
+        "launcher_elapsed_seconds": 101.16988697694615,
+        "receiver_seconds_by_method": {
+          "gaussian-window-ucb": 4.341166374157183,
+          "static-fft-ucb": 2.4887026051292196
+        },
+        "scorer_wall_seconds": 99.32825313496869,
+        "scorer_wall_unassigned_seconds": 0.03565176750998944,
+        "source_load_seconds": 0.011583863873966038
+      }
+    },
+    {
+      "device": "cuda:0",
+      "name": "g1-arithmetic-cuda-fp32-min",
+      "npz_sha256": "6869fd15dbb1d767b343d7da3aaf0d2c2264017ac2ce93cac31b5d27c1d256a9",
+      "precision": "fp32",
+      "profile": "g1",
+      "report": "local-evidence/triad-selective-correction/gpu-results/benchmark/local-evidence/triad-selective-correction/gpu-boundary/benchmark/g1-cuda-fp32-min.json",
+      "report_sha256": "c73bb97db1521504c0c92f842e98a560c5af7aa7330f65cff28a9fa183365b2c",
+      "runner_status_sha256": "49cc4d355eee2cf8eb1f33df78218e23b9443761acd53681942ff200e95183be",
+      "timing": {
+        "bounded_child_elapsed_seconds": 101.26622308697551,
+        "conditional_noise_simulation_and_ucb_seconds": 93.07950143329799,
+        "cuda_memory": {
+          "maximum_allocated_bytes": 428982272,
+          "maximum_reserved_bytes": 557842432
+        },
+        "gaussian_cpu_covariance_preparation_seconds": 2.145274183829315,
+        "gaussian_receiver_excluding_named_covariance_preparation_seconds": 1.6758837794186547,
+        "launcher_elapsed_seconds": 101.3060219680192,
+        "receiver_seconds_by_method": {
+          "gaussian-window-ucb": 3.8211579632479697,
+          "static-fft-ucb": 2.591549622011371
+        },
+        "scorer_wall_seconds": 99.54059205309022,
+        "scorer_wall_unassigned_seconds": 0.03683912754058838,
+        "source_load_seconds": 0.011543906992301345
+      }
+    },
+    {
+      "device": "cpu",
+      "name": "high10-arithmetic-cpu-fp64",
+      "npz_sha256": "5d6516792c78937662d59b54ceeff745314ca82904a066683bc0965cc2318881",
+      "precision": "fp64",
+      "profile": "high10",
+      "report": "local-evidence/triad-selective-correction/gpu-results/benchmark/local-evidence/triad-selective-correction/gpu-boundary/benchmark/high10-cpu-fp64.json",
+      "report_sha256": "966786b8ecb74cfc0fa2ff7d3787a07db5d828029a5feb687f67d58310730346",
+      "runner_status_sha256": "8f63b5e10712470f1dc5ed59c78e34197c61bbc277f5aa03a8c1e7925395d330",
+      "timing": {
+        "bounded_child_elapsed_seconds": 94.93347814294975,
+        "conditional_noise_simulation_and_ucb_seconds": 83.21545728505589,
+        "cuda_memory": null,
+        "gaussian_cpu_covariance_preparation_seconds": 2.309355372097343,
+        "gaussian_receiver_excluding_named_covariance_preparation_seconds": 2.285481690778397,
+        "launcher_elapsed_seconds": 94.99855035799555,
+        "receiver_seconds_by_method": {
+          "gaussian-window-ucb": 4.59483706287574,
+          "static-fft-ucb": 5.626478027435951
+        },
+        "scorer_wall_seconds": 93.49172352300957,
+        "scorer_wall_unassigned_seconds": 0.04359168861992657,
+        "source_load_seconds": 0.011359459022060037
+      }
+    },
+    {
+      "device": "cuda:0",
+      "name": "high10-arithmetic-cuda-fp64",
+      "npz_sha256": "abd8aa6a1ef2a3ae3351e152bbf8e092e82545f4ce90ff86cbe9d9d612bf3049",
+      "precision": "fp64",
+      "profile": "high10",
+      "report": "local-evidence/triad-selective-correction/gpu-results/benchmark/local-evidence/triad-selective-correction/gpu-boundary/benchmark/high10-cuda-fp64.json",
+      "report_sha256": "46774acaa20b41bc45f2f2ea84d59c17e4f8910f280bb3da05117bd5e91903d2",
+      "runner_status_sha256": "b92f3a04bacc21a17d8e9171c6e1c1e99aec9711bbf63390f0d95449de88d1a0",
+      "timing": {
+        "bounded_child_elapsed_seconds": 95.84089991392102,
+        "conditional_noise_simulation_and_ucb_seconds": 85.90064071095549,
+        "cuda_memory": {
+          "maximum_allocated_bytes": 443621376,
+          "maximum_reserved_bytes": 574619648
+        },
+        "gaussian_cpu_covariance_preparation_seconds": 2.3305366350105032,
+        "gaussian_receiver_excluding_named_covariance_preparation_seconds": 2.0857114954851568,
+        "launcher_elapsed_seconds": 95.9061567960307,
+        "receiver_seconds_by_method": {
+          "gaussian-window-ucb": 4.41624813049566,
+          "static-fft-ucb": 2.2611584122059867
+        },
+        "scorer_wall_seconds": 92.6265575500438,
+        "scorer_wall_unassigned_seconds": 0.03677441435866058,
+        "source_load_seconds": 0.011735882028006017
+      }
+    },
+    {
+      "device": "cuda:0",
+      "name": "high10-arithmetic-cuda-fp32-min",
+      "npz_sha256": "126aac834470c717e14e7c7c499d3d5a1150eafc42be8d9310c2a2a7cdac72fb",
+      "precision": "fp32",
+      "profile": "high10",
+      "report": "local-evidence/triad-selective-correction/gpu-results/benchmark/local-evidence/triad-selective-correction/gpu-boundary/benchmark/high10-cuda-fp32-min.json",
+      "report_sha256": "db7c5fc15fc30d5b89135b68cadd743abb027aebcc965ef2b17752366a7644b1",
+      "runner_status_sha256": "d4027afd50d86491ffe8cba3331e178544d558d81dcb584f15bc704cd3899c04",
+      "timing": {
+        "bounded_child_elapsed_seconds": 93.69038700009696,
+        "conditional_noise_simulation_and_ucb_seconds": 85.69499252282549,
+        "cuda_memory": {
+          "maximum_allocated_bytes": 226070528,
+          "maximum_reserved_bytes": 287309824
+        },
+        "gaussian_cpu_covariance_preparation_seconds": 2.304077861015685,
+        "gaussian_receiver_excluding_named_covariance_preparation_seconds": 1.5844336380250752,
+        "launcher_elapsed_seconds": 93.7322640150087,
+        "receiver_seconds_by_method": {
+          "gaussian-window-ucb": 3.88851149904076,
+          "static-fft-ucb": 2.2786112499888986
+        },
+        "scorer_wall_seconds": 91.90408098592889,
+        "scorer_wall_unassigned_seconds": 0.030392409185878932,
+        "source_load_seconds": 0.011573304887861013
+      }
+    }
+  ],
+  "package_members_verified": 29,
+  "pairwise_comparisons": [
+    {
+      "comparison": "g1-arithmetic-cuda-fp64",
+      "methods": {
+        "gaussian-window-ucb": {
+          "bit_winner_disagreements": 0,
+          "max_abs_difference_over_max_1_abs_reference": 1.0007352711573238e-14,
+          "max_absolute_score_difference": 1.7053025658242404e-13,
+          "max_relative_difference_nonzero_reference": 5.951381217285684e-14,
+          "minimum_reference_bit_score_gap": 0.017249306146009502,
+          "minimum_reference_gate_distance": {
+            "relaxed": 0.011824715389391116,
+            "strict": 0.06407091821456135
+          },
+          "paired_scalar_scores": 4096,
+          "paired_trial_vectors": 2048,
+          "relaxed_admission_disagreements": 0,
+          "strict_admission_disagreements": 0
+        },
+        "static-fft-ucb": {
+          "bit_winner_disagreements": 0,
+          "max_abs_difference_over_max_1_abs_reference": 5.10702591327572e-15,
+          "max_absolute_score_difference": 7.993605777301127e-15,
+          "max_relative_difference_nonzero_reference": 1.2289657914808614e-14,
+          "minimum_reference_bit_score_gap": 0.002806417572184472,
+          "minimum_reference_gate_distance": {
+            "relaxed": 17.699142165229638,
+            "strict": 22.99745953177767
+          },
+          "paired_scalar_scores": 4096,
+          "paired_trial_vectors": 2048,
+          "relaxed_admission_disagreements": 0,
+          "strict_admission_disagreements": 0
+        }
+      },
+      "profile": "g1",
+      "reference": "g1-arithmetic-cpu-fp64"
+    },
+    {
+      "comparison": "g1-arithmetic-cuda-fp32-min",
+      "methods": {
+        "gaussian-window-ucb": {
+          "bit_winner_disagreements": 0,
+          "max_abs_difference_over_max_1_abs_reference": 4.669192375073017e-06,
+          "max_absolute_score_difference": 2.455554715652397e-05,
+          "max_relative_difference_nonzero_reference": 3.370756560085397e-05,
+          "minimum_reference_bit_score_gap": 0.017249306146009502,
+          "minimum_reference_gate_distance": {
+            "relaxed": 0.011824715389391116,
+            "strict": 0.06407091821456135
+          },
+          "paired_scalar_scores": 4096,
+          "paired_trial_vectors": 2048,
+          "relaxed_admission_disagreements": 0,
+          "strict_admission_disagreements": 0
+        },
+        "static-fft-ucb": {
+          "bit_winner_disagreements": 0,
+          "max_abs_difference_over_max_1_abs_reference": 1.8248550905930472e-06,
+          "max_absolute_score_difference": 2.885335481650486e-06,
+          "max_relative_difference_nonzero_reference": 4.391370866003837e-06,
+          "minimum_reference_bit_score_gap": 0.002806417572184472,
+          "minimum_reference_gate_distance": {
+            "relaxed": 17.699142165229638,
+            "strict": 22.99745953177767
+          },
+          "paired_scalar_scores": 4096,
+          "paired_trial_vectors": 2048,
+          "relaxed_admission_disagreements": 0,
+          "strict_admission_disagreements": 0
+        }
+      },
+      "profile": "g1",
+      "reference": "g1-arithmetic-cpu-fp64"
+    },
+    {
+      "comparison": "g1-arithmetic-cuda-fp32-min",
+      "methods": {
+        "gaussian-window-ucb": {
+          "bit_winner_disagreements": 0,
+          "max_abs_difference_over_max_1_abs_reference": 4.6691923716313255e-06,
+          "max_absolute_score_difference": 2.4555547199156535e-05,
+          "max_relative_difference_nonzero_reference": 3.3707565541342165e-05,
+          "minimum_reference_bit_score_gap": 0.01724930614602016,
+          "minimum_reference_gate_distance": {
+            "relaxed": 0.011824715389398222,
+            "strict": 0.06407091821456135
+          },
+          "paired_scalar_scores": 4096,
+          "paired_trial_vectors": 2048,
+          "relaxed_admission_disagreements": 0,
+          "strict_admission_disagreements": 0
+        },
+        "static-fft-ucb": {
+          "bit_winner_disagreements": 0,
+          "max_abs_difference_over_max_1_abs_reference": 1.824855095700073e-06,
+          "max_absolute_score_difference": 2.8853354807623077e-06,
+          "max_relative_difference_nonzero_reference": 4.391370878293548e-06,
+          "minimum_reference_bit_score_gap": 0.002806417572184472,
+          "minimum_reference_gate_distance": {
+            "relaxed": 17.699142165229638,
+            "strict": 22.997459531777675
+          },
+          "paired_scalar_scores": 4096,
+          "paired_trial_vectors": 2048,
+          "relaxed_admission_disagreements": 0,
+          "strict_admission_disagreements": 0
+        }
+      },
+      "profile": "g1",
+      "reference": "g1-arithmetic-cuda-fp64"
+    },
+    {
+      "comparison": "high10-arithmetic-cuda-fp64",
+      "methods": {
+        "gaussian-window-ucb": {
+          "bit_winner_disagreements": 0,
+          "max_abs_difference_over_max_1_abs_reference": 6.750155989720952e-14,
+          "max_absolute_score_difference": 7.958078640513122e-13,
+          "max_relative_difference_nonzero_reference": 8.194352999570221e-13,
+          "minimum_reference_bit_score_gap": 0.03335177207949869,
+          "minimum_reference_gate_distance": {
+            "relaxed": 14.110221785570685,
+            "strict": 12.022348414586475
+          },
+          "paired_scalar_scores": 4096,
+          "paired_trial_vectors": 2048,
+          "relaxed_admission_disagreements": 0,
+          "strict_admission_disagreements": 0
+        },
+        "static-fft-ucb": {
+          "bit_winner_disagreements": 0,
+          "max_abs_difference_over_max_1_abs_reference": 1.9844256327893966e-15,
+          "max_absolute_score_difference": 9.769962616701378e-15,
+          "max_relative_difference_nonzero_reference": 1.9844256327893966e-15,
+          "minimum_reference_bit_score_gap": 0.0006213151199379041,
+          "minimum_reference_gate_distance": {
+            "relaxed": 20.4038120318801,
+            "strict": 25.702129398428134
+          },
+          "paired_scalar_scores": 4096,
+          "paired_trial_vectors": 2048,
+          "relaxed_admission_disagreements": 0,
+          "strict_admission_disagreements": 0
+        }
+      },
+      "profile": "high10",
+      "reference": "high10-arithmetic-cpu-fp64"
+    },
+    {
+      "comparison": "high10-arithmetic-cuda-fp32-min",
+      "methods": {
+        "gaussian-window-ucb": {
+          "bit_winner_disagreements": 0,
+          "max_abs_difference_over_max_1_abs_reference": 7.629635799588641e-06,
+          "max_absolute_score_difference": 7.719835002717446e-05,
+          "max_relative_difference_nonzero_reference": 9.261997662749134e-05,
+          "minimum_reference_bit_score_gap": 0.03335177207949869,
+          "minimum_reference_gate_distance": {
+            "relaxed": 14.110221785570685,
+            "strict": 12.022348414586475
+          },
+          "paired_scalar_scores": 4096,
+          "paired_trial_vectors": 2048,
+          "relaxed_admission_disagreements": 0,
+          "strict_admission_disagreements": 0
+        },
+        "static-fft-ucb": {
+          "bit_winner_disagreements": 0,
+          "max_abs_difference_over_max_1_abs_reference": 9.949590018959352e-07,
+          "max_absolute_score_difference": 4.397423316149229e-06,
+          "max_relative_difference_nonzero_reference": 9.949590018959352e-07,
+          "minimum_reference_bit_score_gap": 0.0006213151199379041,
+          "minimum_reference_gate_distance": {
+            "relaxed": 20.4038120318801,
+            "strict": 25.702129398428134
+          },
+          "paired_scalar_scores": 4096,
+          "paired_trial_vectors": 2048,
+          "relaxed_admission_disagreements": 0,
+          "strict_admission_disagreements": 0
+        }
+      },
+      "profile": "high10",
+      "reference": "high10-arithmetic-cpu-fp64"
+    },
+    {
+      "comparison": "high10-arithmetic-cuda-fp32-min",
+      "methods": {
+        "gaussian-window-ucb": {
+          "bit_winner_disagreements": 0,
+          "max_abs_difference_over_max_1_abs_reference": 7.629635867090201e-06,
+          "max_absolute_score_difference": 7.71983501408613e-05,
+          "max_relative_difference_nonzero_reference": 9.261997744700253e-05,
+          "minimum_reference_bit_score_gap": 0.033351772079441844,
+          "minimum_reference_gate_distance": {
+            "relaxed": 14.110221785570655,
+            "strict": 12.022348414586432
+          },
+          "paired_scalar_scores": 4096,
+          "paired_trial_vectors": 2048,
+          "relaxed_admission_disagreements": 0,
+          "strict_admission_disagreements": 0
+        },
+        "static-fft-ucb": {
+          "bit_winner_disagreements": 0,
+          "max_abs_difference_over_max_1_abs_reference": 9.949590018959352e-07,
+          "max_absolute_score_difference": 4.397423316149229e-06,
+          "max_relative_difference_nonzero_reference": 9.949590018959352e-07,
+          "minimum_reference_bit_score_gap": 0.0006213151199396805,
+          "minimum_reference_gate_distance": {
+            "relaxed": 20.403812031880094,
+            "strict": 25.702129398428134
+          },
+          "paired_scalar_scores": 4096,
+          "paired_trial_vectors": 2048,
+          "relaxed_admission_disagreements": 0,
+          "strict_admission_disagreements": 0
+        }
+      },
+      "profile": "high10",
+      "reference": "high10-arithmetic-cuda-fp64"
+    }
+  ],
+  "physical_input_receipts": {
+    "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/development/g1/dispersive-dft/each-65/signal/path-120000": {
+      "input_sha256": {
+        "gram.c128": "99784e81813dc87037320ae180c67e805a67a181c7465aae6c5eeea49afa87f4",
+        "intervals.u64": "39b554de0edee627d6631a84c99d799a34bcfd4b2ca3335428594d66e10bed18",
+        "manifest.json": "7ee79b0acfe58de8dbf087fbc4c728877867def0ede8ad83df9ed2bb616f5266",
+        "mean.c128": "27a3264fd6214dfc5e446d19bedf04bf1c7af11ddffc0ae8d9a67ceab4a00c97",
+        "signal_energy.f64": "ec4bcc4bdef85fe66b8e75301eb4e6c83490cbee5fde6ea6309a1057ddc56cc9",
+        "valid_rows.u64": "8e8154f44aa4a62c15434e8c00f6d3caa24ee359fe6dd229a959d0512196e450"
+      },
+      "key_seed": 17059286402320387059,
+      "physical_seed_roots": {
+        "channel": 10090529847051295699,
+        "channel_root_scope": "static timing/CFO/clock/drift truth, spread ray, and frequency-selective perturbation",
+        "fallback": "unset oscillator/noise/frontend/path roots inherit the resolved channel seed",
+        "frontend": 9637526829545733263,
+        "frontend_explicit": true,
+        "frontend_root_scope": "DAC/ADC conversion, impulse process, and tone phase",
+        "noise": 13094845578468145063,
+        "noise_explicit": true,
+        "noise_root_scope": "thermal noise only",
+        "oscillator": 16704546379832164808,
+        "oscillator_explicit": true,
+        "oscillator_root_scope": "TX/RX oscillator spectra and FHSS phase resets",
+        "path": 18025373805325720464,
+        "path_explicit": true,
+        "path_root_scope": "independent stationary OU or Gaussian-FIR ray gains and initial diurnal path phase"
+      },
+      "selective_model": "dispersive-dft-v1"
+    },
+    "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/development/g1/dispersive-dft/each-65/signal/path-120001": {
+      "input_sha256": {
+        "gram.c128": "3ee41fb89172d83c3939858f1f5c103b89510002a36504ce1e54def839a2341e",
+        "intervals.u64": "39b554de0edee627d6631a84c99d799a34bcfd4b2ca3335428594d66e10bed18",
+        "manifest.json": "82ef23d46c4ba6c25f24feb6b91d7fff2d5f13f449341e5d924c1139b6164617",
+        "mean.c128": "ecd7f7baf60cc8355802e55f2052a38d7bfab66cdfe7570aa9d0eb9f21e8c6ee",
+        "signal_energy.f64": "287bf1c67b7f8f604455b1bfe5909f05c944f9b09ac41271baadaa554ec3a32e",
+        "valid_rows.u64": "8e8154f44aa4a62c15434e8c00f6d3caa24ee359fe6dd229a959d0512196e450"
+      },
+      "key_seed": 9731765229715279769,
+      "physical_seed_roots": {
+        "channel": 17107845873333776319,
+        "channel_root_scope": "static timing/CFO/clock/drift truth, spread ray, and frequency-selective perturbation",
+        "fallback": "unset oscillator/noise/frontend/path roots inherit the resolved channel seed",
+        "frontend": 17258994612864618046,
+        "frontend_explicit": true,
+        "frontend_root_scope": "DAC/ADC conversion, impulse process, and tone phase",
+        "noise": 6930720224571279819,
+        "noise_explicit": true,
+        "noise_root_scope": "thermal noise only",
+        "oscillator": 8337514597380550634,
+        "oscillator_explicit": true,
+        "oscillator_root_scope": "TX/RX oscillator spectra and FHSS phase resets",
+        "path": 11197953336146356720,
+        "path_explicit": true,
+        "path_root_scope": "independent stationary OU or Gaussian-FIR ray gains and initial diurnal path phase"
+      },
+      "selective_model": "dispersive-dft-v1"
+    },
+    "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/development/g1/dispersive-dft/each-65/signal/path-120002": {
+      "input_sha256": {
+        "gram.c128": "3b60a87edf2919cf364d19cbd15f48a2d395daedcf2909a515b89116b4545d5b",
+        "intervals.u64": "39b554de0edee627d6631a84c99d799a34bcfd4b2ca3335428594d66e10bed18",
+        "manifest.json": "14a68b9bbe372d17733e424b1699db00df4a607293341b25901749d74b8f458e",
+        "mean.c128": "c8afb181cad4949aac8c3d287504c828e5597f55fecf9857dd9114709b8c94ba",
+        "signal_energy.f64": "dc67741d16fef900deacabbae9d75ff0eff9b9bc9eaa555f95c623d16698772b",
+        "valid_rows.u64": "8e8154f44aa4a62c15434e8c00f6d3caa24ee359fe6dd229a959d0512196e450"
+      },
+      "key_seed": 4930228838526221353,
+      "physical_seed_roots": {
+        "channel": 5327548605017047277,
+        "channel_root_scope": "static timing/CFO/clock/drift truth, spread ray, and frequency-selective perturbation",
+        "fallback": "unset oscillator/noise/frontend/path roots inherit the resolved channel seed",
+        "frontend": 7125116553374920940,
+        "frontend_explicit": true,
+        "frontend_root_scope": "DAC/ADC conversion, impulse process, and tone phase",
+        "noise": 1915848929709990724,
+        "noise_explicit": true,
+        "noise_root_scope": "thermal noise only",
+        "oscillator": 14518269666557982273,
+        "oscillator_explicit": true,
+        "oscillator_root_scope": "TX/RX oscillator spectra and FHSS phase resets",
+        "path": 9817861969777926761,
+        "path_explicit": true,
+        "path_root_scope": "independent stationary OU or Gaussian-FIR ray gains and initial diurnal path phase"
+      },
+      "selective_model": "dispersive-dft-v1"
+    },
+    "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/development/g1/dispersive-dft/each-65/signal/path-120003": {
+      "input_sha256": {
+        "gram.c128": "dd1fb17fafc7594b0a6222bec080617a0412a537cadefe88d5ec73172cdd75ab",
+        "intervals.u64": "39b554de0edee627d6631a84c99d799a34bcfd4b2ca3335428594d66e10bed18",
+        "manifest.json": "63a780d1b487242678bdb49e7f8b4d386316a52106e51acfc4ab18f2e806bfdb",
+        "mean.c128": "1cb1680aa08a42137201fe5256a3d49f8e20442ef6f2ca7f1b80b944af37eea6",
+        "signal_energy.f64": "b247cbaaf8604114622099eba0a25b58f0e7cc7b477f98a37dde4448a4f61422",
+        "valid_rows.u64": "8e8154f44aa4a62c15434e8c00f6d3caa24ee359fe6dd229a959d0512196e450"
+      },
+      "key_seed": 7048389636579381555,
+      "physical_seed_roots": {
+        "channel": 16569843721359819841,
+        "channel_root_scope": "static timing/CFO/clock/drift truth, spread ray, and frequency-selective perturbation",
+        "fallback": "unset oscillator/noise/frontend/path roots inherit the resolved channel seed",
+        "frontend": 16187767804853788955,
+        "frontend_explicit": true,
+        "frontend_root_scope": "DAC/ADC conversion, impulse process, and tone phase",
+        "noise": 12916025110008016814,
+        "noise_explicit": true,
+        "noise_root_scope": "thermal noise only",
+        "oscillator": 641865264692041405,
+        "oscillator_explicit": true,
+        "oscillator_root_scope": "TX/RX oscillator spectra and FHSS phase resets",
+        "path": 2910549537016914820,
+        "path_explicit": true,
+        "path_root_scope": "independent stationary OU or Gaussian-FIR ray gains and initial diurnal path phase"
+      },
+      "selective_model": "dispersive-dft-v1"
+    },
+    "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/development/high10/dispersive-dft/each-65/signal/path-120000": {
+      "input_sha256": {
+        "gram.c128": "62efaf2dbe9c8c03595ee864f65fcc09e62467bf4eff4da1f93a15728e8fe793",
+        "intervals.u64": "78363b9a15586ae0ac21e157972b5507c75f60b8822f21b32362d55fc82f4d56",
+        "manifest.json": "3c701bd38f0f5e8d967fba83f1507dbc591e5ba58f87bf1047c8972c1aeafff5",
+        "mean.c128": "a4211e8afe8102140cbdf7a83ac6b147fed180e6455843c442a4ddea83487a9a",
+        "signal_energy.f64": "cef64a9b21fa1d7205e5d31e335c34e4123c25d400685aad24b62df2f47dd2c7",
+        "valid_rows.u64": "bc372bb62682a90635d534cf404694be9d43d11a15aae3eac5fb02fc1830578f"
+      },
+      "key_seed": 14848038014037737641,
+      "physical_seed_roots": {
+        "channel": 6658757382631717144,
+        "channel_root_scope": "static timing/CFO/clock/drift truth, spread ray, and frequency-selective perturbation",
+        "fallback": "unset oscillator/noise/frontend/path roots inherit the resolved channel seed",
+        "frontend": 16914234924207692982,
+        "frontend_explicit": true,
+        "frontend_root_scope": "DAC/ADC conversion, impulse process, and tone phase",
+        "noise": 648507329578193473,
+        "noise_explicit": true,
+        "noise_root_scope": "thermal noise only",
+        "oscillator": 4822390557641281457,
+        "oscillator_explicit": true,
+        "oscillator_root_scope": "TX/RX oscillator spectra and FHSS phase resets",
+        "path": 17257382083562735499,
+        "path_explicit": true,
+        "path_root_scope": "independent stationary OU or Gaussian-FIR ray gains and initial diurnal path phase"
+      },
+      "selective_model": "dispersive-dft-v1"
+    },
+    "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/development/high10/dispersive-dft/each-65/signal/path-120001": {
+      "input_sha256": {
+        "gram.c128": "69a7c0b2856d749b3e6721ccffd19257078b6f25835a0156ba9d966e13c6b529",
+        "intervals.u64": "78363b9a15586ae0ac21e157972b5507c75f60b8822f21b32362d55fc82f4d56",
+        "manifest.json": "83149fe3af17710256f7a3e7d01c8cd4ff5e43ff8430bdb73ebf2b8664f73aec",
+        "mean.c128": "3a8f6342d3b9486e463c4f0ce038580cf289a461152c63b88addb01fec7cc254",
+        "signal_energy.f64": "b0c4ebfdfa9eca05df78f8c2500e98cde7994a312eb663d8af98f693c28358a3",
+        "valid_rows.u64": "bc372bb62682a90635d534cf404694be9d43d11a15aae3eac5fb02fc1830578f"
+      },
+      "key_seed": 4277849797982899563,
+      "physical_seed_roots": {
+        "channel": 10221148762170610469,
+        "channel_root_scope": "static timing/CFO/clock/drift truth, spread ray, and frequency-selective perturbation",
+        "fallback": "unset oscillator/noise/frontend/path roots inherit the resolved channel seed",
+        "frontend": 8309262326160877906,
+        "frontend_explicit": true,
+        "frontend_root_scope": "DAC/ADC conversion, impulse process, and tone phase",
+        "noise": 5330536588437092085,
+        "noise_explicit": true,
+        "noise_root_scope": "thermal noise only",
+        "oscillator": 14180120207138518370,
+        "oscillator_explicit": true,
+        "oscillator_root_scope": "TX/RX oscillator spectra and FHSS phase resets",
+        "path": 7847074263616881312,
+        "path_explicit": true,
+        "path_root_scope": "independent stationary OU or Gaussian-FIR ray gains and initial diurnal path phase"
+      },
+      "selective_model": "dispersive-dft-v1"
+    },
+    "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/development/high10/dispersive-dft/each-65/signal/path-120002": {
+      "input_sha256": {
+        "gram.c128": "315fbc9228865234cb7b40be233a23047af2123ffc17e66fc4d709fd5e930e7f",
+        "intervals.u64": "78363b9a15586ae0ac21e157972b5507c75f60b8822f21b32362d55fc82f4d56",
+        "manifest.json": "0320a5f1a7f93f2c1fe1fd54736f51d727fb6f7beedafe9110955f59d4cd2cec",
+        "mean.c128": "1a99cb7a9910fac5dd1d10552f839b8e382eb71246bee8556dbd16d4847ed9b5",
+        "signal_energy.f64": "83fe77f7c936788111b57e0d71149d8837862d5947f9212a7d55747579c8a61a",
+        "valid_rows.u64": "bc372bb62682a90635d534cf404694be9d43d11a15aae3eac5fb02fc1830578f"
+      },
+      "key_seed": 7716151648242988951,
+      "physical_seed_roots": {
+        "channel": 4556692910667047181,
+        "channel_root_scope": "static timing/CFO/clock/drift truth, spread ray, and frequency-selective perturbation",
+        "fallback": "unset oscillator/noise/frontend/path roots inherit the resolved channel seed",
+        "frontend": 6814463898255296086,
+        "frontend_explicit": true,
+        "frontend_root_scope": "DAC/ADC conversion, impulse process, and tone phase",
+        "noise": 1382672426746686104,
+        "noise_explicit": true,
+        "noise_root_scope": "thermal noise only",
+        "oscillator": 1049087086365378519,
+        "oscillator_explicit": true,
+        "oscillator_root_scope": "TX/RX oscillator spectra and FHSS phase resets",
+        "path": 4714574152365316199,
+        "path_explicit": true,
+        "path_root_scope": "independent stationary OU or Gaussian-FIR ray gains and initial diurnal path phase"
+      },
+      "selective_model": "dispersive-dft-v1"
+    },
+    "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/development/high10/dispersive-dft/each-65/signal/path-120003": {
+      "input_sha256": {
+        "gram.c128": "8833acc38a6306fa97a643af96a6d04fb9c47738b64b9c04745d94a46309b27f",
+        "intervals.u64": "78363b9a15586ae0ac21e157972b5507c75f60b8822f21b32362d55fc82f4d56",
+        "manifest.json": "428a91c71b48f6bbe518794d81230948037b93cb48dd85455aec9770d212bd7e",
+        "mean.c128": "b3e73371aa897503a497d5ec01a535d22d8038f0df0249078ec3501b4d8c6762",
+        "signal_energy.f64": "123d4199bec6702bdbe0938d96c448f68a4de1477bc07ad0bb81ee8130a51252",
+        "valid_rows.u64": "bc372bb62682a90635d534cf404694be9d43d11a15aae3eac5fb02fc1830578f"
+      },
+      "key_seed": 14783077380063756244,
+      "physical_seed_roots": {
+        "channel": 15729482166362368190,
+        "channel_root_scope": "static timing/CFO/clock/drift truth, spread ray, and frequency-selective perturbation",
+        "fallback": "unset oscillator/noise/frontend/path roots inherit the resolved channel seed",
+        "frontend": 15932370999610149428,
+        "frontend_explicit": true,
+        "frontend_root_scope": "DAC/ADC conversion, impulse process, and tone phase",
+        "noise": 17132598492605392284,
+        "noise_explicit": true,
+        "noise_root_scope": "thermal noise only",
+        "oscillator": 5691387022105723273,
+        "oscillator_explicit": true,
+        "oscillator_root_scope": "TX/RX oscillator spectra and FHSS phase resets",
+        "path": 12531603711862793784,
+        "path_explicit": true,
+        "path_root_scope": "independent stationary OU or Gaussian-FIR ray gains and initial diurnal path phase"
+      },
+      "selective_model": "dispersive-dft-v1"
+    }
+  },
+  "plan_sha256": "84e03abf933ecc1fd5886131f10d0eb11b63d409c68983c574fccd898b431a9e",
+  "reproducer": {
+    "path": "/tmp/triad-correction-benchmark-review.py",
+    "sha256": "a1f505dec355391e62e0341a7e1b1c1c00ec60f6179bf2d4c6fa99dc2cae67d1"
+  },
+  "runtime": {
+    "benchmark_jobs_expected": 6,
+    "benchmark_output_root": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/gpu-boundary/benchmark",
+    "benchmark_plan_sha256": "84e03abf933ecc1fd5886131f10d0eb11b63d409c68983c574fccd898b431a9e",
+    "benchmark_runner_root": "/workspace/triad/local-evidence/triad-selective-correction/remote-long-final/gpu-boundary-benchmark-runner",
+    "benchmark_runner_workers": 1,
+    "benchmark_timeout_seconds_per_job": 1800,
+    "cpu_limits": {
+      "cgroup_cpu_max": "2720000 100000",
+      "cpuset_cpus_effective": "0-255",
+      "nominal_allocated_vcpu_reported_by_parent": 32,
+      "note": "Nominal allocation and observed cgroup quota differ; use observed quota for workload interpretation.",
+      "quota_cpu_equivalents": 27.2,
+      "visible_logical_cpu_count": 256
+    },
+    "cpu_model": "AMD EPYC 9575F 64-Core Processor",
+    "cuda_available": true,
+    "environment": {
+      "MKL_NUM_THREADS": "1",
+      "NUMEXPR_NUM_THREADS": "1",
+      "OMP_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1"
+    },
+    "gpu": {
+      "compute_capability": [
+        12,
+        0
+      ],
+      "name": "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+      "total_memory_bytes": 101975851008
+    },
+    "note": "Benchmark jobs run sequentially with one worker after the 30-job science plan drained.",
+    "numpy": "2.5.2",
+    "pre_benchmark_quiescence": {
+      "active_python_processes": 0,
+      "completed_exit_zero": 30,
+      "evidence": "Remote query after 30/30 statuses and all planned JSON/NPZ outputs verified; process list empty; nvidia-smi reported 0 MiB/0%.",
+      "gpu_memory_used_mib": 0,
+      "gpu_utilization_percent": 0,
+      "missing_outputs": 0,
+      "science_score_jobs": 30,
+      "timestamp_utc": "2026-11-02T18:47:09Z"
+    },
+    "python": "3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]",
+    "schema": "triad-benchmark-runtime-environment-v1",
+    "threadpool_info": {
+      "unavailable": "ModuleNotFoundError: No module named 'threadpoolctl'"
+    },
+    "timestamp_utc": "2026-11-02T18:47:09.710308+00:00",
+    "torch": "2.8.0+cu128",
+    "torch_cuda": "12.8",
+    "torch_num_threads": 1,
+    "visible_cpu_count": 256
+  },
+  "runtime_receipt_sha256": "68a0b707e42bec73dd8d9d74fdf249ddaf3a651570fef1067079ce8316a272a8",
+  "schema": "triad-corrected-benchmark-independent-review-v1",
+  "scientific_qualification": false,
+  "scope": [
+    "The same four physical paths per profile and common conditional noise draws are reused across backends, methods, C/N0 and controls. Conditional replica counts are arithmetic checks, not additional independent physical trials or tail qualification.",
+    "FP32-min covers complex64 FFT/GEMM; rank/UCB/physical simulation/static whitening/Gaussian covariance preparation remain CPU FP64. Gaussian/static score reductions use FP64 on the selected device. TF32 is disabled and highest matmul policy enforced; no lower/tensor arithmetic or native-instruction claim is made.",
+    "Only exported two-bit likelihood argmax is compared. Unexported per-frequency or internal covariance-mode rankings are not directly checked.",
+    "scorer wall begins after CUDA initialization; bounded child elapsed includes process startup. Conditional sampler+UCB includes simulation, not just reception. Method times include transfers, CPU work and finishing; Gaussian first-call covariance preparation is separately identified. No isolated GPU kernel or transfer-only timing is available.",
+    "Six jobs ran sequentially once in fixed order after a recorded idle precheck. Ratios are descriptive measurements for this shape, not randomized repeated benchmarks, universal acceleration, sensitivity qualification or an extrapolation to broad acquisition.",
+    "Runtime records one requested torch thread and OMP/BLAS environment1; threadpoolctl was unavailable, so independent BLAS thread-pool inventory is not recorded. Nominal32 vCPU differs from observed27.2 cgroup quota and256 visible logical CPUs.",
+    "Reported peak allocated/reserved CUDA bytes are framework counters, not total process RSS or whole-system peak memory.",
+    "The original remote temporary benchmark archive became0bytes for an unexplained reason. Scientific files were intact and repackaged under a new name; the verified local replacement archive is the one bound here. No benchmark jobs were rerun according to collection provenance."
+  ],
+  "scorer_dependencies": {
+    "triad-cfo-batch-study.py": "5c7fb6f8b0ad8cadeaae8591d9fb0e3d489fb5eb4c14962faf800ad46a661665",
+    "triad-noise-study.py": "960040dc2a9a00910185a5b79f8af8c84410ffd3b8b7327256399543f396a621",
+    "triad-rbpf-study.py": "34a9797ed7119dcf6545b6be759b8f506cbdaf6ac9ece886b82fa699cd5d085f",
+    "triad-static-frequency-study.py": "f56aef3067e956cc9ddc649d39bae0c598b93f25a4f0916b82d6fb1e7b020868",
+    "triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba",
+    "triad_gaussian_window.py": "dd5d8083999a97f66f74673264f80117b06557c45b3f4646a88e9668a29d03ee",
+    "triad_noise_likelihood.py": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110",
+    "triad_rbpf.py": "d4b64c3a830acd3bd15433421da0e003ba1aa9810bf1dd904c57082d94c3bd54",
+    "triad_state_workspace.py": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923"
+  },
+  "scorer_source_sha256": "67ab97612bf2e74ada2b0f7b399651748935d8fcbea9bacc40d76e2bd055f67b",
+  "source_manifest_sha256": "0820d8c4a07f08dadbb3858d5d3de2e036360f94835c95e1af14feb3e79b4ec4",
+  "status": "paired-numeric-decision-and-timing-review-complete",
+  "strict_relaxed_counts_by_job_method_cn0_control": [
+    {
+      "cn0_db_hz": -15.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 0,
+        "missed": 256,
+        "raw_correct": 150,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "strict",
+      "job": "g1-arithmetic-cpu-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": -15.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 0,
+        "missed": 256,
+        "raw_correct": 150,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "relaxed",
+      "job": "g1-arithmetic-cpu-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": -15.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 16,
+        "missed": 240,
+        "raw_correct": 256,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "strict",
+      "job": "g1-arithmetic-cpu-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": -15.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 69,
+        "missed": 187,
+        "raw_correct": 256,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "relaxed",
+      "job": "g1-arithmetic-cpu-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": -15.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "strict",
+      "job": "g1-arithmetic-cpu-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": -15.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "relaxed",
+      "job": "g1-arithmetic-cpu-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": -15.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "strict",
+      "job": "g1-arithmetic-cpu-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": -15.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "relaxed",
+      "job": "g1-arithmetic-cpu-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": -13.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 0,
+        "missed": 256,
+        "raw_correct": 158,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "strict",
+      "job": "g1-arithmetic-cpu-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": -13.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 0,
+        "missed": 256,
+        "raw_correct": 158,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "relaxed",
+      "job": "g1-arithmetic-cpu-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": -13.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 234,
+        "missed": 22,
+        "raw_correct": 256,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "strict",
+      "job": "g1-arithmetic-cpu-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": -13.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 250,
+        "missed": 6,
+        "raw_correct": 256,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "relaxed",
+      "job": "g1-arithmetic-cpu-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": -13.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "strict",
+      "job": "g1-arithmetic-cpu-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": -13.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "relaxed",
+      "job": "g1-arithmetic-cpu-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": -13.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "strict",
+      "job": "g1-arithmetic-cpu-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": -13.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "relaxed",
+      "job": "g1-arithmetic-cpu-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": -12.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 0,
+        "missed": 256,
+        "raw_correct": 162,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "strict",
+      "job": "g1-arithmetic-cpu-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": -12.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 0,
+        "missed": 256,
+        "raw_correct": 162,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "relaxed",
+      "job": "g1-arithmetic-cpu-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": -12.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 256,
+        "missed": 0,
+        "raw_correct": 256,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "strict",
+      "job": "g1-arithmetic-cpu-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": -12.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 256,
+        "missed": 0,
+        "raw_correct": 256,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "relaxed",
+      "job": "g1-arithmetic-cpu-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": -12.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "strict",
+      "job": "g1-arithmetic-cpu-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": -12.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "relaxed",
+      "job": "g1-arithmetic-cpu-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": -12.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "strict",
+      "job": "g1-arithmetic-cpu-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": -12.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "relaxed",
+      "job": "g1-arithmetic-cpu-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": -11.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 0,
+        "missed": 256,
+        "raw_correct": 167,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "strict",
+      "job": "g1-arithmetic-cpu-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": -11.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 0,
+        "missed": 256,
+        "raw_correct": 167,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "relaxed",
+      "job": "g1-arithmetic-cpu-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": -11.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 256,
+        "missed": 0,
+        "raw_correct": 256,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "strict",
+      "job": "g1-arithmetic-cpu-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": -11.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 256,
+        "missed": 0,
+        "raw_correct": 256,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "relaxed",
+      "job": "g1-arithmetic-cpu-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": -11.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "strict",
+      "job": "g1-arithmetic-cpu-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": -11.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "relaxed",
+      "job": "g1-arithmetic-cpu-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": -11.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "strict",
+      "job": "g1-arithmetic-cpu-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": -11.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "relaxed",
+      "job": "g1-arithmetic-cpu-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": -15.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 0,
+        "missed": 256,
+        "raw_correct": 150,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "strict",
+      "job": "g1-arithmetic-cuda-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": -15.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 0,
+        "missed": 256,
+        "raw_correct": 150,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "relaxed",
+      "job": "g1-arithmetic-cuda-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": -15.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 16,
+        "missed": 240,
+        "raw_correct": 256,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "strict",
+      "job": "g1-arithmetic-cuda-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": -15.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 69,
+        "missed": 187,
+        "raw_correct": 256,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "relaxed",
+      "job": "g1-arithmetic-cuda-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": -15.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "strict",
+      "job": "g1-arithmetic-cuda-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": -15.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "relaxed",
+      "job": "g1-arithmetic-cuda-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": -15.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "strict",
+      "job": "g1-arithmetic-cuda-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": -15.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "relaxed",
+      "job": "g1-arithmetic-cuda-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": -13.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 0,
+        "missed": 256,
+        "raw_correct": 158,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "strict",
+      "job": "g1-arithmetic-cuda-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": -13.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 0,
+        "missed": 256,
+        "raw_correct": 158,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "relaxed",
+      "job": "g1-arithmetic-cuda-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": -13.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 234,
+        "missed": 22,
+        "raw_correct": 256,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "strict",
+      "job": "g1-arithmetic-cuda-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": -13.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 250,
+        "missed": 6,
+        "raw_correct": 256,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "relaxed",
+      "job": "g1-arithmetic-cuda-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": -13.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "strict",
+      "job": "g1-arithmetic-cuda-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": -13.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "relaxed",
+      "job": "g1-arithmetic-cuda-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": -13.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "strict",
+      "job": "g1-arithmetic-cuda-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": -13.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "relaxed",
+      "job": "g1-arithmetic-cuda-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": -12.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 0,
+        "missed": 256,
+        "raw_correct": 162,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "strict",
+      "job": "g1-arithmetic-cuda-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": -12.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 0,
+        "missed": 256,
+        "raw_correct": 162,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "relaxed",
+      "job": "g1-arithmetic-cuda-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": -12.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 256,
+        "missed": 0,
+        "raw_correct": 256,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "strict",
+      "job": "g1-arithmetic-cuda-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": -12.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 256,
+        "missed": 0,
+        "raw_correct": 256,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "relaxed",
+      "job": "g1-arithmetic-cuda-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": -12.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "strict",
+      "job": "g1-arithmetic-cuda-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": -12.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "relaxed",
+      "job": "g1-arithmetic-cuda-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": -12.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "strict",
+      "job": "g1-arithmetic-cuda-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": -12.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "relaxed",
+      "job": "g1-arithmetic-cuda-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": -11.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 0,
+        "missed": 256,
+        "raw_correct": 167,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "strict",
+      "job": "g1-arithmetic-cuda-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": -11.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 0,
+        "missed": 256,
+        "raw_correct": 167,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "relaxed",
+      "job": "g1-arithmetic-cuda-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": -11.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 256,
+        "missed": 0,
+        "raw_correct": 256,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "strict",
+      "job": "g1-arithmetic-cuda-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": -11.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 256,
+        "missed": 0,
+        "raw_correct": 256,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "relaxed",
+      "job": "g1-arithmetic-cuda-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": -11.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "strict",
+      "job": "g1-arithmetic-cuda-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": -11.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "relaxed",
+      "job": "g1-arithmetic-cuda-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": -11.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "strict",
+      "job": "g1-arithmetic-cuda-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": -11.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "relaxed",
+      "job": "g1-arithmetic-cuda-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": -15.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 0,
+        "missed": 256,
+        "raw_correct": 150,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "strict",
+      "job": "g1-arithmetic-cuda-fp32-min",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": -15.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 0,
+        "missed": 256,
+        "raw_correct": 150,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "relaxed",
+      "job": "g1-arithmetic-cuda-fp32-min",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": -15.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 16,
+        "missed": 240,
+        "raw_correct": 256,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "strict",
+      "job": "g1-arithmetic-cuda-fp32-min",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": -15.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 69,
+        "missed": 187,
+        "raw_correct": 256,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "relaxed",
+      "job": "g1-arithmetic-cuda-fp32-min",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": -15.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "strict",
+      "job": "g1-arithmetic-cuda-fp32-min",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": -15.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "relaxed",
+      "job": "g1-arithmetic-cuda-fp32-min",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": -15.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "strict",
+      "job": "g1-arithmetic-cuda-fp32-min",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": -15.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "relaxed",
+      "job": "g1-arithmetic-cuda-fp32-min",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": -13.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 0,
+        "missed": 256,
+        "raw_correct": 158,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "strict",
+      "job": "g1-arithmetic-cuda-fp32-min",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": -13.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 0,
+        "missed": 256,
+        "raw_correct": 158,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "relaxed",
+      "job": "g1-arithmetic-cuda-fp32-min",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": -13.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 234,
+        "missed": 22,
+        "raw_correct": 256,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "strict",
+      "job": "g1-arithmetic-cuda-fp32-min",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": -13.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 250,
+        "missed": 6,
+        "raw_correct": 256,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "relaxed",
+      "job": "g1-arithmetic-cuda-fp32-min",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": -13.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "strict",
+      "job": "g1-arithmetic-cuda-fp32-min",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": -13.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "relaxed",
+      "job": "g1-arithmetic-cuda-fp32-min",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": -13.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "strict",
+      "job": "g1-arithmetic-cuda-fp32-min",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": -13.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "relaxed",
+      "job": "g1-arithmetic-cuda-fp32-min",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": -12.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 0,
+        "missed": 256,
+        "raw_correct": 162,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "strict",
+      "job": "g1-arithmetic-cuda-fp32-min",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": -12.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 0,
+        "missed": 256,
+        "raw_correct": 162,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "relaxed",
+      "job": "g1-arithmetic-cuda-fp32-min",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": -12.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 256,
+        "missed": 0,
+        "raw_correct": 256,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "strict",
+      "job": "g1-arithmetic-cuda-fp32-min",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": -12.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 256,
+        "missed": 0,
+        "raw_correct": 256,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "relaxed",
+      "job": "g1-arithmetic-cuda-fp32-min",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": -12.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "strict",
+      "job": "g1-arithmetic-cuda-fp32-min",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": -12.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "relaxed",
+      "job": "g1-arithmetic-cuda-fp32-min",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": -12.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "strict",
+      "job": "g1-arithmetic-cuda-fp32-min",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": -12.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "relaxed",
+      "job": "g1-arithmetic-cuda-fp32-min",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": -11.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 0,
+        "missed": 256,
+        "raw_correct": 167,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "strict",
+      "job": "g1-arithmetic-cuda-fp32-min",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": -11.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 0,
+        "missed": 256,
+        "raw_correct": 167,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "relaxed",
+      "job": "g1-arithmetic-cuda-fp32-min",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": -11.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 256,
+        "missed": 0,
+        "raw_correct": 256,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "strict",
+      "job": "g1-arithmetic-cuda-fp32-min",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": -11.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 256,
+        "missed": 0,
+        "raw_correct": 256,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "relaxed",
+      "job": "g1-arithmetic-cuda-fp32-min",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": -11.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "strict",
+      "job": "g1-arithmetic-cuda-fp32-min",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": -11.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "relaxed",
+      "job": "g1-arithmetic-cuda-fp32-min",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": -11.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "strict",
+      "job": "g1-arithmetic-cuda-fp32-min",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": -11.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "relaxed",
+      "job": "g1-arithmetic-cuda-fp32-min",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": 8.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 0,
+        "missed": 256,
+        "raw_correct": 120,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "strict",
+      "job": "high10-arithmetic-cpu-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": 8.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 0,
+        "missed": 256,
+        "raw_correct": 120,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "relaxed",
+      "job": "high10-arithmetic-cpu-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": 8.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 64,
+        "missed": 192,
+        "raw_correct": 198,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "strict",
+      "job": "high10-arithmetic-cpu-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": 8.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 64,
+        "missed": 192,
+        "raw_correct": 198,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "relaxed",
+      "job": "high10-arithmetic-cpu-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": 8.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "strict",
+      "job": "high10-arithmetic-cpu-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": 8.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "relaxed",
+      "job": "high10-arithmetic-cpu-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": 8.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "strict",
+      "job": "high10-arithmetic-cpu-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": 8.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "relaxed",
+      "job": "high10-arithmetic-cpu-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": 10.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 0,
+        "missed": 256,
+        "raw_correct": 122,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "strict",
+      "job": "high10-arithmetic-cpu-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": 10.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 0,
+        "missed": 256,
+        "raw_correct": 122,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "relaxed",
+      "job": "high10-arithmetic-cpu-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": 10.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 64,
+        "missed": 192,
+        "raw_correct": 211,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "strict",
+      "job": "high10-arithmetic-cpu-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": 10.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 64,
+        "missed": 192,
+        "raw_correct": 211,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "relaxed",
+      "job": "high10-arithmetic-cpu-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": 10.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "strict",
+      "job": "high10-arithmetic-cpu-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": 10.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "relaxed",
+      "job": "high10-arithmetic-cpu-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": 10.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "strict",
+      "job": "high10-arithmetic-cpu-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": 10.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "relaxed",
+      "job": "high10-arithmetic-cpu-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": 12.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 0,
+        "missed": 256,
+        "raw_correct": 126,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "strict",
+      "job": "high10-arithmetic-cpu-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": 12.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 0,
+        "missed": 256,
+        "raw_correct": 126,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "relaxed",
+      "job": "high10-arithmetic-cpu-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": 12.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 64,
+        "missed": 192,
+        "raw_correct": 220,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "strict",
+      "job": "high10-arithmetic-cpu-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": 12.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 64,
+        "missed": 192,
+        "raw_correct": 220,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "relaxed",
+      "job": "high10-arithmetic-cpu-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": 12.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "strict",
+      "job": "high10-arithmetic-cpu-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": 12.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "relaxed",
+      "job": "high10-arithmetic-cpu-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": 12.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "strict",
+      "job": "high10-arithmetic-cpu-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": 12.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "relaxed",
+      "job": "high10-arithmetic-cpu-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": 14.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 0,
+        "missed": 256,
+        "raw_correct": 128,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "strict",
+      "job": "high10-arithmetic-cpu-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": 14.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 0,
+        "missed": 256,
+        "raw_correct": 128,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "relaxed",
+      "job": "high10-arithmetic-cpu-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": 14.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 64,
+        "missed": 192,
+        "raw_correct": 226,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "strict",
+      "job": "high10-arithmetic-cpu-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": 14.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 64,
+        "missed": 192,
+        "raw_correct": 226,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "relaxed",
+      "job": "high10-arithmetic-cpu-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": 14.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "strict",
+      "job": "high10-arithmetic-cpu-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": 14.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "relaxed",
+      "job": "high10-arithmetic-cpu-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": 14.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "strict",
+      "job": "high10-arithmetic-cpu-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": 14.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "relaxed",
+      "job": "high10-arithmetic-cpu-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": 8.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 0,
+        "missed": 256,
+        "raw_correct": 120,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "strict",
+      "job": "high10-arithmetic-cuda-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": 8.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 0,
+        "missed": 256,
+        "raw_correct": 120,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "relaxed",
+      "job": "high10-arithmetic-cuda-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": 8.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 64,
+        "missed": 192,
+        "raw_correct": 198,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "strict",
+      "job": "high10-arithmetic-cuda-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": 8.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 64,
+        "missed": 192,
+        "raw_correct": 198,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "relaxed",
+      "job": "high10-arithmetic-cuda-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": 8.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "strict",
+      "job": "high10-arithmetic-cuda-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": 8.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "relaxed",
+      "job": "high10-arithmetic-cuda-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": 8.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "strict",
+      "job": "high10-arithmetic-cuda-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": 8.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "relaxed",
+      "job": "high10-arithmetic-cuda-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": 10.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 0,
+        "missed": 256,
+        "raw_correct": 122,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "strict",
+      "job": "high10-arithmetic-cuda-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": 10.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 0,
+        "missed": 256,
+        "raw_correct": 122,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "relaxed",
+      "job": "high10-arithmetic-cuda-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": 10.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 64,
+        "missed": 192,
+        "raw_correct": 211,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "strict",
+      "job": "high10-arithmetic-cuda-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": 10.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 64,
+        "missed": 192,
+        "raw_correct": 211,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "relaxed",
+      "job": "high10-arithmetic-cuda-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": 10.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "strict",
+      "job": "high10-arithmetic-cuda-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": 10.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "relaxed",
+      "job": "high10-arithmetic-cuda-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": 10.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "strict",
+      "job": "high10-arithmetic-cuda-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": 10.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "relaxed",
+      "job": "high10-arithmetic-cuda-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": 12.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 0,
+        "missed": 256,
+        "raw_correct": 126,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "strict",
+      "job": "high10-arithmetic-cuda-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": 12.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 0,
+        "missed": 256,
+        "raw_correct": 126,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "relaxed",
+      "job": "high10-arithmetic-cuda-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": 12.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 64,
+        "missed": 192,
+        "raw_correct": 220,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "strict",
+      "job": "high10-arithmetic-cuda-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": 12.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 64,
+        "missed": 192,
+        "raw_correct": 220,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "relaxed",
+      "job": "high10-arithmetic-cuda-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": 12.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "strict",
+      "job": "high10-arithmetic-cuda-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": 12.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "relaxed",
+      "job": "high10-arithmetic-cuda-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": 12.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "strict",
+      "job": "high10-arithmetic-cuda-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": 12.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "relaxed",
+      "job": "high10-arithmetic-cuda-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": 14.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 0,
+        "missed": 256,
+        "raw_correct": 128,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "strict",
+      "job": "high10-arithmetic-cuda-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": 14.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 0,
+        "missed": 256,
+        "raw_correct": 128,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "relaxed",
+      "job": "high10-arithmetic-cuda-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": 14.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 64,
+        "missed": 192,
+        "raw_correct": 226,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "strict",
+      "job": "high10-arithmetic-cuda-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": 14.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 64,
+        "missed": 192,
+        "raw_correct": 226,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "relaxed",
+      "job": "high10-arithmetic-cuda-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": 14.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "strict",
+      "job": "high10-arithmetic-cuda-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": 14.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "relaxed",
+      "job": "high10-arithmetic-cuda-fp64",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": 14.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "strict",
+      "job": "high10-arithmetic-cuda-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": 14.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "relaxed",
+      "job": "high10-arithmetic-cuda-fp64",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": 8.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 0,
+        "missed": 256,
+        "raw_correct": 120,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "strict",
+      "job": "high10-arithmetic-cuda-fp32-min",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": 8.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 0,
+        "missed": 256,
+        "raw_correct": 120,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "relaxed",
+      "job": "high10-arithmetic-cuda-fp32-min",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": 8.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 64,
+        "missed": 192,
+        "raw_correct": 198,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "strict",
+      "job": "high10-arithmetic-cuda-fp32-min",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": 8.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 64,
+        "missed": 192,
+        "raw_correct": 198,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "relaxed",
+      "job": "high10-arithmetic-cuda-fp32-min",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": 8.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "strict",
+      "job": "high10-arithmetic-cuda-fp32-min",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": 8.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "relaxed",
+      "job": "high10-arithmetic-cuda-fp32-min",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": 8.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "strict",
+      "job": "high10-arithmetic-cuda-fp32-min",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": 8.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "relaxed",
+      "job": "high10-arithmetic-cuda-fp32-min",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": 10.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 0,
+        "missed": 256,
+        "raw_correct": 122,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "strict",
+      "job": "high10-arithmetic-cuda-fp32-min",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": 10.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 0,
+        "missed": 256,
+        "raw_correct": 122,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "relaxed",
+      "job": "high10-arithmetic-cuda-fp32-min",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": 10.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 64,
+        "missed": 192,
+        "raw_correct": 211,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "strict",
+      "job": "high10-arithmetic-cuda-fp32-min",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": 10.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 64,
+        "missed": 192,
+        "raw_correct": 211,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "relaxed",
+      "job": "high10-arithmetic-cuda-fp32-min",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": 10.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "strict",
+      "job": "high10-arithmetic-cuda-fp32-min",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": 10.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "relaxed",
+      "job": "high10-arithmetic-cuda-fp32-min",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": 10.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "strict",
+      "job": "high10-arithmetic-cuda-fp32-min",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": 10.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "relaxed",
+      "job": "high10-arithmetic-cuda-fp32-min",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": 12.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 0,
+        "missed": 256,
+        "raw_correct": 126,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "strict",
+      "job": "high10-arithmetic-cuda-fp32-min",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": 12.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 0,
+        "missed": 256,
+        "raw_correct": 126,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "relaxed",
+      "job": "high10-arithmetic-cuda-fp32-min",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": 12.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 64,
+        "missed": 192,
+        "raw_correct": 220,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "strict",
+      "job": "high10-arithmetic-cuda-fp32-min",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": 12.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 64,
+        "missed": 192,
+        "raw_correct": 220,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "relaxed",
+      "job": "high10-arithmetic-cuda-fp32-min",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": 12.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "strict",
+      "job": "high10-arithmetic-cuda-fp32-min",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": 12.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "relaxed",
+      "job": "high10-arithmetic-cuda-fp32-min",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": 12.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "strict",
+      "job": "high10-arithmetic-cuda-fp32-min",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": 12.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "relaxed",
+      "job": "high10-arithmetic-cuda-fp32-min",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": 14.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 0,
+        "missed": 256,
+        "raw_correct": 128,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "strict",
+      "job": "high10-arithmetic-cuda-fp32-min",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": 14.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 0,
+        "missed": 256,
+        "raw_correct": 128,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "relaxed",
+      "job": "high10-arithmetic-cuda-fp32-min",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": 14.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 64,
+        "missed": 192,
+        "raw_correct": 226,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "strict",
+      "job": "high10-arithmetic-cuda-fp32-min",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": 14.0,
+      "control": "signal",
+      "counts": {
+        "correct_accepted": 64,
+        "missed": 192,
+        "raw_correct": 226,
+        "trials": 256,
+        "wrong_accepted": 0
+      },
+      "gate": "relaxed",
+      "job": "high10-arithmetic-cuda-fp32-min",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": 14.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "strict",
+      "job": "high10-arithmetic-cuda-fp32-min",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": 14.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "relaxed",
+      "job": "high10-arithmetic-cuda-fp32-min",
+      "method": "static-fft-ucb"
+    },
+    {
+      "cn0_db_hz": 14.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "strict",
+      "job": "high10-arithmetic-cuda-fp32-min",
+      "method": "gaussian-window-ucb"
+    },
+    {
+      "cn0_db_hz": 14.0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 256,
+        "trials": 256
+      },
+      "gate": "relaxed",
+      "job": "high10-arithmetic-cuda-fp32-min",
+      "method": "gaussian-window-ucb"
+    }
+  ]
+}

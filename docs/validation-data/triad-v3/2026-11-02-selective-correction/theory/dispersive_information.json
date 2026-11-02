@@ -1,0 +1,1319 @@
+{
+  "schema": "triad-dispersive-information-v1",
+  "source_sha256": {
+    "docs/validation-data/triad-v3/2026-11-02-selective-correction/theory/dispersive_information.py": "6e890ec4073e0d85770d2611ff197085f04d5854ce0539f9e10c517b911bba94",
+    "docs/validation-data/triad-v3/2026-11-02-selective-correction/theory/dispersive_probe.cpp": "2da7b94562b7c6ac8885e84919b401349d0f96aa7e084f2f0466279d5bad93b8",
+    "docs/validation-data/triad-v3/2026-11-02-selective/theory/selective_information.py": "cb8410621d6a7d99348162a119590da67ce170fdd92b0662a6c06e685dba4818",
+    "docs/validation-data/triad-v3/2026-11-02-spread/theory/transmitter_bound.json": "5f3c25e8ec5c46be83f551f9244f5758989b44dbb1f78bf2c4bb266e98b194df",
+    "src/channel_perturbation.hpp": "fae3b1b345e3dc19c8b85a5010e4434530bd0a34d595dd4de8cd55349d8d879a",
+    "src/triad_gaussian_fading.hpp": "97f26b082d7d68123952bde7ccb9f97148c5977cf741cf6c15c76e77fcc20944",
+    "src/triad_simulation_stream.cpp": "f42910b4650d36212beff8684d821cd1b0246b10f8f6e9e2338af2b35c5516e4",
+    "src/triad_modem_v3.cpp": "cb6cac016e57edcd4f6ebc70f09c68cc47380e3b772cdbe047d7a3b93e9b434c",
+    "include/datapump/pattern_pulse.hpp": "f3053ed41fa5cbca182ae4dcf5ff4796b030a3cb15527f617d7a765e7f989312"
+  },
+  "source_peak_power_upper": 9.03500774607482,
+  "actual_helper_check": {
+    "input_samples": 24,
+    "output_samples": 29,
+    "maximum_absolute_error": 6.280369834735101e-16,
+    "passed": true,
+    "scope": "Independent full-output cubic/DFT matrix versus actual C++ corrected helper; no modem reception claimed."
+  },
+  "phase_moment_checks": [
+    {
+      "phase_nodes": 15625,
+      "slow_depth": 0.25,
+      "fast_depth": 0.25,
+      "input_stack_norm": 0.9757918393258209,
+      "output_stack_norm": 0.6146593484009011,
+      "eu_star_u_max_eigenvalue": 0.060986989957864335,
+      "eu_u_star_max_eigenvalue": 0.03835812876799583,
+      "q": 0.0625,
+      "mean_energy": 1.2505234423500493,
+      "energy_upper": 1.2730081112301403,
+      "mean_trace_square": 1.0790686760782977,
+      "trace_square_upper": 1.3130446614005713,
+      "scope": "Finite full-tail noncommuting covariance diagnostic; degree-four phase quadrature, not exact KL integration or rare-event calibration."
+    },
+    {
+      "phase_nodes": 15625,
+      "slow_depth": 0.65,
+      "fast_depth": 0.65,
+      "input_stack_norm": 0.9757918393258209,
+      "output_stack_norm": 0.6146593484009011,
+      "eu_star_u_max_eigenvalue": 0.41227205211516155,
+      "eu_u_star_max_eigenvalue": 0.25930095047165136,
+      "q": 0.42250000000000004,
+      "mean_energy": 1.5523368508175255,
+      "energy_upper": 1.704333212446941,
+      "mean_trace_square": 2.0707958492860716,
+      "trace_square_upper": 5.242551575293643,
+      "scope": "Finite full-tail noncommuting covariance diagnostic; degree-four phase quadrature, not exact KL integration or rare-event calibration."
+    }
+  ],
+  "controls": [
+    {
+      "id": "off",
+      "slow_depth": 0,
+      "fast_depth": 0,
+      "d": 0,
+      "q": 0.0,
+      "stage_l2_norm_upper": 1.0,
+      "ensemble_energy_factor_lower": 1.0,
+      "ensemble_energy_factor_upper": 1.0,
+      "quadratic_bound_norm": 1.0,
+      "quadratic_bound_symmetric_moments": 1.0,
+      "quadratic_KL_multiplier_upper": 1.0,
+      "legacy_quadratic_multiplier_upper": 1.0
+    },
+    {
+      "id": "each-25",
+      "slow_depth": 0.25,
+      "fast_depth": 0.25,
+      "d": 0.5,
+      "q": 0.0625,
+      "stage_l2_norm_upper": 1.8660254037844386,
+      "ensemble_energy_factor_lower": 1.0208333333333333,
+      "ensemble_energy_factor_upper": 1.0625,
+      "quadratic_bound_norm": 3.699678983041932,
+      "quadratic_bound_symmetric_moments": 1.421875,
+      "quadratic_KL_multiplier_upper": 1.421875,
+      "legacy_quadratic_multiplier_upper": 2.546875
+    },
+    {
+      "id": "each-65",
+      "slow_depth": 0.65,
+      "fast_depth": 0.65,
+      "d": 1.3,
+      "q": 0.42250000000000004,
+      "stage_l2_norm_upper": 3.25166604983954,
+      "ensemble_energy_factor_lower": 1.1408333333333334,
+      "ensemble_energy_factor_upper": 1.4225,
+      "quadratic_bound_norm": 15.040564911793492,
+      "quadratic_bound_symmetric_moments": 5.677075,
+      "quadratic_KL_multiplier_upper": 5.677075,
+      "legacy_quadratic_multiplier_upper": 27.883675000000004
+    }
+  ],
+  "targets": [
+    {
+      "name": "strict",
+      "pd": 0.99,
+      "alpha": 0.0001,
+      "required_binary_KL_nats": 9.062236433951577
+    },
+    {
+      "name": "relaxed",
+      "pd": 0.9,
+      "alpha": 0.01,
+      "required_binary_KL_nats": 3.8205752275831846
+    }
+  ],
+  "minus60_bounds": [
+    {
+      "control": "off",
+      "B_2sigma_hz": 0.1,
+      "sample_rate_hz": 16,
+      "excess_delay_seconds": 5e-06,
+      "cn0_db_hz": -60,
+      "full_preselective_span_seconds": 73440000,
+      "oracle_mixture_KL_upper_nats": 0.0169293903400066,
+      "input_bound": {
+        "sample_count": 1175040000,
+        "full_preselective_span_seconds": 73440000.0,
+        "interpolated_peak_power_upper": 9.039757833709208,
+        "noise_normalized_trace_per_CN0": 663879815.9714841,
+        "half_trace_square_per_CN0_squared": 16929390340.0066,
+        "FIR_taps": 511,
+        "FIR_coefficient_sha256": "aaf5f08ab8eeb4fb51a866e3cd1f66d4e23f7a856e2e9930ae9df915180c9c15",
+        "FIR_covariance_zero": 1.0
+      },
+      "targets": {
+        "strict": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.005568288732859652,
+          "necessary_preselective_span_lower_seconds_at_minus60": 39312143798.4375,
+          "necessary_cn0_db_hz_at_this_span": -46.35702964932497
+        },
+        "relaxed": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.033213540832229105,
+          "necessary_preselective_span_lower_seconds_at_minus60": 16573723698.6875,
+          "necessary_cn0_db_hz_at_this_span": -48.232562815974795
+        }
+      }
+    },
+    {
+      "control": "each-25",
+      "B_2sigma_hz": 0.1,
+      "sample_rate_hz": 16,
+      "excess_delay_seconds": 5e-06,
+      "cn0_db_hz": -60,
+      "full_preselective_span_seconds": 73440000,
+      "oracle_mixture_KL_upper_nats": 0.024071476889696884,
+      "input_bound": {
+        "sample_count": 1175040000,
+        "full_preselective_span_seconds": 73440000.0,
+        "interpolated_peak_power_upper": 9.039757833709208,
+        "noise_normalized_trace_per_CN0": 663879815.9714841,
+        "half_trace_square_per_CN0_squared": 16929390340.0066,
+        "FIR_taps": 511,
+        "FIR_coefficient_sha256": "aaf5f08ab8eeb4fb51a866e3cd1f66d4e23f7a856e2e9930ae9df915180c9c15",
+        "FIR_covariance_zero": 1.0
+      },
+      "targets": {
+        "strict": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.007282575965704193,
+          "necessary_preselective_span_lower_seconds_at_minus60": 27648101133.5,
+          "necessary_cn0_db_hz_at_this_span": -47.121336741011
+        },
+        "relaxed": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.03868585380721595,
+          "necessary_preselective_span_lower_seconds_at_minus60": 11656245239.1875,
+          "necessary_cn0_db_hz_at_this_span": -48.99686990766082
+        }
+      }
+    },
+    {
+      "control": "each-65",
+      "B_2sigma_hz": 0.1,
+      "sample_rate_hz": 16,
+      "excess_delay_seconds": 5e-06,
+      "cn0_db_hz": -60,
+      "full_preselective_span_seconds": 73440000,
+      "oracle_mixture_KL_upper_nats": 0.09610941866449296,
+      "input_bound": {
+        "sample_count": 1175040000,
+        "full_preselective_span_seconds": 73440000.0,
+        "interpolated_peak_power_upper": 9.039757833709208,
+        "noise_normalized_trace_per_CN0": 663879815.9714841,
+        "half_trace_square_per_CN0_squared": 16929390340.0066,
+        "FIR_taps": 511,
+        "FIR_coefficient_sha256": "aaf5f08ab8eeb4fb51a866e3cd1f66d4e23f7a856e2e9930ae9df915180c9c15",
+        "FIR_covariance_zero": 1.0
+      },
+      "targets": {
+        "strict": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.021835181516166372,
+          "necessary_preselective_span_lower_seconds_at_minus60": 6924718064.625,
+          "necessary_cn0_db_hz_at_this_span": -50.12765280802556
+        },
+        "relaxed": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.07870277892662342,
+          "necessary_preselective_span_lower_seconds_at_minus60": 2919412498.0,
+          "necessary_cn0_db_hz_at_this_span": -52.00318597467539
+        }
+      }
+    },
+    {
+      "control": "off",
+      "B_2sigma_hz": 0.1,
+      "sample_rate_hz": 16,
+      "excess_delay_seconds": 0.007,
+      "cn0_db_hz": -60,
+      "full_preselective_span_seconds": 73440000,
+      "oracle_mixture_KL_upper_nats": 0.054944364493887496,
+      "input_bound": {
+        "sample_count": 1175040000,
+        "full_preselective_span_seconds": 73440000.0,
+        "interpolated_peak_power_upper": 16.285373156854227,
+        "noise_normalized_trace_per_CN0": 1195997805.8353724,
+        "half_trace_square_per_CN0_squared": 54944364493.8875,
+        "FIR_taps": 511,
+        "FIR_coefficient_sha256": "aaf5f08ab8eeb4fb51a866e3cd1f66d4e23f7a856e2e9930ae9df915180c9c15",
+        "FIR_covariance_zero": 1.0
+      },
+      "targets": {
+        "strict": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.013912024335715418,
+          "necessary_preselective_span_lower_seconds_at_minus60": 12112809633.25,
+          "necessary_cn0_db_hz_at_this_span": -48.913438829003454
+        },
+        "relaxed": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.05789244443609282,
+          "necessary_preselective_span_lower_seconds_at_minus60": 5106675462.25,
+          "necessary_cn0_db_hz_at_this_span": -50.78897199565327
+        }
+      }
+    },
+    {
+      "control": "each-25",
+      "B_2sigma_hz": 0.1,
+      "sample_rate_hz": 16,
+      "excess_delay_seconds": 0.007,
+      "cn0_db_hz": -60,
+      "full_preselective_span_seconds": 73440000,
+      "oracle_mixture_KL_upper_nats": 0.07812401826474628,
+      "input_bound": {
+        "sample_count": 1175040000,
+        "full_preselective_span_seconds": 73440000.0,
+        "interpolated_peak_power_upper": 16.285373156854227,
+        "noise_normalized_trace_per_CN0": 1195997805.8353724,
+        "half_trace_square_per_CN0_squared": 54944364493.8875,
+        "FIR_taps": 511,
+        "FIR_coefficient_sha256": "aaf5f08ab8eeb4fb51a866e3cd1f66d4e23f7a856e2e9930ae9df915180c9c15",
+        "FIR_covariance_zero": 1.0
+      },
+      "targets": {
+        "strict": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.018457441786882613,
+          "necessary_preselective_span_lower_seconds_at_minus60": 8518899083.25,
+          "necessary_cn0_db_hz_at_this_span": -49.67774592068949
+        },
+        "relaxed": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.07002700328618608,
+          "necessary_preselective_span_lower_seconds_at_minus60": 3591508017.9375,
+          "necessary_cn0_db_hz_at_this_span": -51.553279087339305
+        }
+      }
+    },
+    {
+      "control": "each-65",
+      "B_2sigma_hz": 0.1,
+      "sample_rate_hz": 16,
+      "excess_delay_seconds": 0.007,
+      "cn0_db_hz": -60,
+      "full_preselective_span_seconds": 73440000,
+      "oracle_mixture_KL_upper_nats": 0.31192327805913633,
+      "input_bound": {
+        "sample_count": 1175040000,
+        "full_preselective_span_seconds": 73440000.0,
+        "interpolated_peak_power_upper": 16.285373156854227,
+        "noise_normalized_trace_per_CN0": 1195997805.8353724,
+        "half_trace_square_per_CN0_squared": 54944364493.8875,
+        "FIR_taps": 511,
+        "FIR_coefficient_sha256": "aaf5f08ab8eeb4fb51a866e3cd1f66d4e23f7a856e2e9930ae9df915180c9c15",
+        "FIR_covariance_zero": 1.0
+      },
+      "targets": {
+        "strict": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.0578532933438372,
+          "necessary_preselective_span_lower_seconds_at_minus60": 2133635655.9375,
+          "necessary_cn0_db_hz_at_this_span": -52.684061987704055
+        },
+        "relaxed": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.16214735619550805,
+          "necessary_preselective_span_lower_seconds_at_minus60": 899525806.9375,
+          "necessary_cn0_db_hz_at_this_span": -54.55959515435387
+        }
+      }
+    },
+    {
+      "control": "off",
+      "B_2sigma_hz": 1,
+      "sample_rate_hz": 16,
+      "excess_delay_seconds": 5e-06,
+      "cn0_db_hz": -60,
+      "full_preselective_span_seconds": 73440000,
+      "oracle_mixture_KL_upper_nats": 0.0016929390712832905,
+      "input_bound": {
+        "sample_count": 1175040000,
+        "full_preselective_span_seconds": 73440000.0,
+        "interpolated_peak_power_upper": 9.039757833709208,
+        "noise_normalized_trace_per_CN0": 663879815.9714841,
+        "half_trace_square_per_CN0_squared": 1692939071.2832906,
+        "FIR_taps": 53,
+        "FIR_coefficient_sha256": "2c784972f1c632ecfbc20827675ee587ac4b67e0f899bd6916a7bb10113d123e",
+        "FIR_covariance_zero": 1.0
+      },
+      "targets": {
+        "strict": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.0011227273762478708,
+          "necessary_preselective_span_lower_seconds_at_minus60": 393121437966.5625,
+          "necessary_cn0_db_hz_at_this_span": -41.35702969714607
+        },
+        "relaxed": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.01631815575233256,
+          "necessary_preselective_span_lower_seconds_at_minus60": 165737236969.5625,
+          "necessary_cn0_db_hz_at_this_span": -43.232562863795884
+        }
+      }
+    },
+    {
+      "control": "each-25",
+      "B_2sigma_hz": 1,
+      "sample_rate_hz": 16,
+      "excess_delay_seconds": 5e-06,
+      "cn0_db_hz": -60,
+      "full_preselective_span_seconds": 73440000,
+      "oracle_mixture_KL_upper_nats": 0.002407147741980929,
+      "input_bound": {
+        "sample_count": 1175040000,
+        "full_preselective_span_seconds": 73440000.0,
+        "interpolated_peak_power_upper": 9.039757833709208,
+        "noise_normalized_trace_per_CN0": 663879815.9714841,
+        "half_trace_square_per_CN0_squared": 1692939071.2832906,
+        "FIR_taps": 53,
+        "FIR_coefficient_sha256": "2c784972f1c632ecfbc20827675ee587ac4b67e0f899bd6916a7bb10113d123e",
+        "FIR_covariance_zero": 1.0
+      },
+      "targets": {
+        "strict": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.0014043990680181776,
+          "necessary_preselective_span_lower_seconds_at_minus60": 276481011317.1875,
+          "necessary_cn0_db_hz_at_this_span": -42.121336788832096
+        },
+        "relaxed": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.017649400601154892,
+          "necessary_preselective_span_lower_seconds_at_minus60": 116562452374.25,
+          "necessary_cn0_db_hz_at_this_span": -43.99686995548193
+        }
+      }
+    },
+    {
+      "control": "each-65",
+      "B_2sigma_hz": 1,
+      "sample_rate_hz": 16,
+      "excess_delay_seconds": 5e-06,
+      "cn0_db_hz": -60,
+      "full_preselective_span_seconds": 73440000,
+      "oracle_mixture_KL_upper_nats": 0.009610942078105587,
+      "input_bound": {
+        "sample_count": 1175040000,
+        "full_preselective_span_seconds": 73440000.0,
+        "interpolated_peak_power_upper": 9.039757833709208,
+        "noise_normalized_trace_per_CN0": 663879815.9714841,
+        "half_trace_square_per_CN0_squared": 1692939071.2832906,
+        "FIR_taps": 53,
+        "FIR_coefficient_sha256": "2c784972f1c632ecfbc20827675ee587ac4b67e0f899bd6916a7bb10113d123e",
+        "FIR_covariance_zero": 1.0
+      },
+      "targets": {
+        "strict": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.0036567863196342114,
+          "necessary_preselective_span_lower_seconds_at_minus60": 69247180628.625,
+          "necessary_cn0_db_hz_at_this_span": -45.12765285584666
+        },
+        "relaxed": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.026647694360683514,
+          "necessary_preselective_span_lower_seconds_at_minus60": 29194124962.25,
+          "necessary_cn0_db_hz_at_this_span": -47.00318602249648
+        }
+      }
+    },
+    {
+      "control": "off",
+      "B_2sigma_hz": 1,
+      "sample_rate_hz": 16,
+      "excess_delay_seconds": 0.007,
+      "cn0_db_hz": -60,
+      "full_preselective_span_seconds": 73440000,
+      "oracle_mixture_KL_upper_nats": 0.00549443657038959,
+      "input_bound": {
+        "sample_count": 1175040000,
+        "full_preselective_span_seconds": 73440000.0,
+        "interpolated_peak_power_upper": 16.285373156854227,
+        "noise_normalized_trace_per_CN0": 1195997805.8353724,
+        "half_trace_square_per_CN0_squared": 5494436570.38959,
+        "FIR_taps": 53,
+        "FIR_coefficient_sha256": "2c784972f1c632ecfbc20827675ee587ac4b67e0f899bd6916a7bb10113d123e",
+        "FIR_covariance_zero": 1.0
+      },
+      "targets": {
+        "strict": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.002451538024450277,
+          "necessary_preselective_span_lower_seconds_at_minus60": 121128096314.6875,
+          "necessary_cn0_db_hz_at_this_span": -43.91343887682454
+        },
+        "relaxed": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.022093857554749973,
+          "necessary_preselective_span_lower_seconds_at_minus60": 51066754605.0,
+          "necessary_cn0_db_hz_at_this_span": -45.788972043474374
+        }
+      }
+    },
+    {
+      "control": "each-25",
+      "B_2sigma_hz": 1,
+      "sample_rate_hz": 16,
+      "excess_delay_seconds": 0.007,
+      "cn0_db_hz": -60,
+      "full_preselective_span_seconds": 73440000,
+      "oracle_mixture_KL_upper_nats": 0.007812401998522699,
+      "input_bound": {
+        "sample_count": 1175040000,
+        "full_preselective_span_seconds": 73440000.0,
+        "interpolated_peak_power_upper": 16.285373156854227,
+        "noise_normalized_trace_per_CN0": 1195997805.8353724,
+        "half_trace_square_per_CN0_squared": 5494436570.38959,
+        "FIR_taps": 53,
+        "FIR_coefficient_sha256": "2c784972f1c632ecfbc20827675ee587ac4b67e0f899bd6916a7bb10113d123e",
+        "FIR_covariance_zero": 1.0
+      },
+      "targets": {
+        "strict": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.0031471861093239455,
+          "necessary_preselective_span_lower_seconds_at_minus60": 85188990814.8125,
+          "necessary_cn0_db_hz_at_this_span": -44.67774596851058
+        },
+        "relaxed": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.02477443413238978,
+          "necessary_preselective_span_lower_seconds_at_minus60": 35915080161.8125,
+          "necessary_cn0_db_hz_at_this_span": -46.5532791351604
+        }
+      }
+    },
+    {
+      "control": "each-65",
+      "B_2sigma_hz": 1,
+      "sample_rate_hz": 16,
+      "excess_delay_seconds": 0.007,
+      "cn0_db_hz": -60,
+      "full_preselective_span_seconds": 73440000,
+      "oracle_mixture_KL_upper_nats": 0.031192328492844486,
+      "input_bound": {
+        "sample_count": 1175040000,
+        "full_preselective_span_seconds": 73440000.0,
+        "interpolated_peak_power_upper": 16.285373156854227,
+        "noise_normalized_trace_per_CN0": 1195997805.8353724,
+        "half_trace_square_per_CN0_squared": 5494436570.38959,
+        "FIR_taps": 53,
+        "FIR_coefficient_sha256": "2c784972f1c632ecfbc20827675ee587ac4b67e0f899bd6916a7bb10113d123e",
+        "FIR_covariance_zero": 1.0
+      },
+      "targets": {
+        "strict": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.008901028746800484,
+          "necessary_preselective_span_lower_seconds_at_minus60": 21336356541.9375,
+          "necessary_cn0_db_hz_at_this_span": -47.684062035525145
+        },
+        "relaxed": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.043610485309853474,
+          "necessary_preselective_span_lower_seconds_at_minus60": 8995258052.0,
+          "necessary_cn0_db_hz_at_this_span": -49.55959520217497
+        }
+      }
+    },
+    {
+      "control": "off",
+      "B_2sigma_hz": 10,
+      "sample_rate_hz": 128,
+      "excess_delay_seconds": 5e-06,
+      "cn0_db_hz": -60,
+      "full_preselective_span_seconds": 73440000,
+      "oracle_mixture_KL_upper_nats": 0.0001705425048467871,
+      "input_bound": {
+        "sample_count": 9400320000,
+        "full_preselective_span_seconds": 73440000.0,
+        "interpolated_peak_power_upper": 9.07303216373892,
+        "noise_normalized_trace_per_CN0": 666323482.7713103,
+        "half_trace_square_per_CN0_squared": 170542504.8467871,
+        "FIR_taps": 43,
+        "FIR_coefficient_sha256": "b1a3788f8bb4beb9aa23f5feb39033d04d5627bfcc2c95bc9d4893a33da77b73",
+        "FIR_covariance_zero": 1.0000000000000007
+      },
+      "targets": {
+        "strict": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.0003354241688774555,
+          "necessary_preselective_span_lower_seconds_at_minus60": 3902432675925.6094,
+          "necessary_cn0_db_hz_at_this_span": -36.37298624330065
+        },
+        "relaxed": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.011892445304129848,
+          "necessary_preselective_span_lower_seconds_at_minus60": 1645238205559.7422,
+          "necessary_cn0_db_hz_at_this_span": -38.24851940995047
+        }
+      }
+    },
+    {
+      "control": "each-25",
+      "B_2sigma_hz": 10,
+      "sample_rate_hz": 128,
+      "excess_delay_seconds": 5e-06,
+      "cn0_db_hz": -60,
+      "full_preselective_span_seconds": 73440000,
+      "oracle_mixture_KL_upper_nats": 0.0002424901240790254,
+      "input_bound": {
+        "sample_count": 9400320000,
+        "full_preselective_span_seconds": 73440000.0,
+        "interpolated_peak_power_upper": 9.07303216373892,
+        "noise_normalized_trace_per_CN0": 666323482.7713103,
+        "half_trace_square_per_CN0_squared": 170542504.8467871,
+        "FIR_taps": 43,
+        "FIR_coefficient_sha256": "b1a3788f8bb4beb9aa23f5feb39033d04d5627bfcc2c95bc9d4893a33da77b73",
+        "FIR_covariance_zero": 1.0000000000000007
+      },
+      "targets": {
+        "strict": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.00039122334055647517,
+          "necessary_preselective_span_lower_seconds_at_minus60": 2744568035815.8203,
+          "necessary_cn0_db_hz_at_this_span": -37.13729333498668
+        },
+        "relaxed": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.012268961365069561,
+          "necessary_preselective_span_lower_seconds_at_minus60": 1157090606107.9531,
+          "necessary_cn0_db_hz_at_this_span": -39.0128265016365
+        }
+      }
+    },
+    {
+      "control": "each-65",
+      "B_2sigma_hz": 10,
+      "sample_rate_hz": 128,
+      "excess_delay_seconds": 5e-06,
+      "cn0_db_hz": -60,
+      "full_preselective_span_seconds": 73440000,
+      "oracle_mixture_KL_upper_nats": 0.0009681825907030739,
+      "input_bound": {
+        "sample_count": 9400320000,
+        "full_preselective_span_seconds": 73440000.0,
+        "interpolated_peak_power_upper": 9.07303216373892,
+        "noise_normalized_trace_per_CN0": 666323482.7713103,
+        "half_trace_square_per_CN0_squared": 170542504.8467871,
+        "FIR_taps": 43,
+        "FIR_coefficient_sha256": "b1a3788f8bb4beb9aa23f5feb39033d04d5627bfcc2c95bc9d4893a33da77b73",
+        "FIR_covariance_zero": 1.0000000000000007
+      },
+      "targets": {
+        "strict": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.0008021063481389853,
+          "necessary_preselective_span_lower_seconds_at_minus60": 687401994147.6328,
+          "necessary_cn0_db_hz_at_this_span": -40.14360940200124
+        },
+        "relaxed": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.014683697959034589,
+          "necessary_preselective_span_lower_seconds_at_minus60": 289803852434.53906,
+          "necessary_cn0_db_hz_at_this_span": -42.01914256865106
+        }
+      }
+    },
+    {
+      "control": "off",
+      "B_2sigma_hz": 10,
+      "sample_rate_hz": 128,
+      "excess_delay_seconds": 0.007,
+      "cn0_db_hz": -60,
+      "full_preselective_span_seconds": 73440000,
+      "oracle_mixture_KL_upper_nats": 0.000513453089744881,
+      "input_bound": {
+        "sample_count": 9400320000,
+        "full_preselective_span_seconds": 73440000.0,
+        "interpolated_peak_power_upper": 15.742964551413696,
+        "noise_normalized_trace_per_CN0": 1156163317.811986,
+        "half_trace_square_per_CN0_squared": 513453089.74488103,
+        "FIR_taps": 43,
+        "FIR_coefficient_sha256": "b1a3788f8bb4beb9aa23f5feb39033d04d5627bfcc2c95bc9d4893a33da77b73",
+        "FIR_covariance_zero": 1.0000000000000007
+      },
+      "targets": {
+        "strict": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.0005649766563278272,
+          "necessary_preselective_span_lower_seconds_at_minus60": 1296185877231.7266,
+          "necessary_cn0_db_hz_at_this_span": -38.766326914296656
+        },
+        "relaxed": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.01335186739283142,
+          "necessary_preselective_span_lower_seconds_at_minus60": 546462861456.75,
+          "necessary_cn0_db_hz_at_this_span": -40.64186008094647
+        }
+      }
+    },
+    {
+      "control": "each-25",
+      "B_2sigma_hz": 10,
+      "sample_rate_hz": 128,
+      "excess_delay_seconds": 0.007,
+      "cn0_db_hz": -60,
+      "full_preselective_span_seconds": 73440000,
+      "oracle_mixture_KL_upper_nats": 0.0007300661119810026,
+      "input_bound": {
+        "sample_count": 9400320000,
+        "full_preselective_span_seconds": 73440000.0,
+        "interpolated_peak_power_upper": 15.742964551413696,
+        "noise_normalized_trace_per_CN0": 1156163317.811986,
+        "half_trace_square_per_CN0_squared": 513453089.74488103,
+        "FIR_taps": 43,
+        "FIR_coefficient_sha256": "b1a3788f8bb4beb9aa23f5feb39033d04d5627bfcc2c95bc9d4893a33da77b73",
+        "FIR_covariance_zero": 1.0000000000000007
+      },
+      "targets": {
+        "strict": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.0006833284685747103,
+          "necessary_preselective_span_lower_seconds_at_minus60": 911603254316.8203,
+          "necessary_cn0_db_hz_at_this_span": -39.530634005982684
+        },
+        "relaxed": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.014033252200743926,
+          "necessary_preselective_span_lower_seconds_at_minus60": 384325528936.6172,
+          "necessary_cn0_db_hz_at_this_span": -41.40616717263251
+        }
+      }
+    },
+    {
+      "control": "each-65",
+      "B_2sigma_hz": 10,
+      "sample_rate_hz": 128,
+      "excess_delay_seconds": 0.007,
+      "cn0_db_hz": -60,
+      "full_preselective_span_seconds": 73440000,
+      "oracle_mixture_KL_upper_nats": 0.002914911699463421,
+      "input_bound": {
+        "sample_count": 9400320000,
+        "full_preselective_span_seconds": 73440000.0,
+        "interpolated_peak_power_upper": 15.742964551413696,
+        "noise_normalized_trace_per_CN0": 1156163317.811986,
+        "half_trace_square_per_CN0_squared": 513453089.74488103,
+        "FIR_taps": 43,
+        "FIR_coefficient_sha256": "b1a3788f8bb4beb9aa23f5feb39033d04d5627bfcc2c95bc9d4893a33da77b73",
+        "FIR_covariance_zero": 1.0000000000000007
+      },
+      "targets": {
+        "strict": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.0015919338122386256,
+          "necessary_preselective_span_lower_seconds_at_minus60": 228319315357.2578,
+          "necessary_cn0_db_hz_at_this_span": -42.53695007299725
+        },
+        "relaxed": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.018495803375044688,
+          "necessary_preselective_span_lower_seconds_at_minus60": 96257819644.23438,
+          "necessary_cn0_db_hz_at_this_span": -44.412483239647074
+        }
+      }
+    },
+    {
+      "control": "off",
+      "B_2sigma_hz": 0.1,
+      "sample_rate_hz": 16,
+      "excess_delay_seconds": 5e-06,
+      "cn0_db_hz": -60,
+      "full_preselective_span_seconds": 315576000.0,
+      "oracle_mixture_KL_upper_nats": 0.07274658750234177,
+      "input_bound": {
+        "sample_count": 5049216000,
+        "full_preselective_span_seconds": 315576000.0,
+        "interpolated_peak_power_upper": 9.039757833709208,
+        "noise_normalized_trace_per_CN0": 2852730620.983348,
+        "half_trace_square_per_CN0_squared": 72746587502.34177,
+        "FIR_taps": 511,
+        "FIR_coefficient_sha256": "aaf5f08ab8eeb4fb51a866e3cd1f66d4e23f7a856e2e9930ae9df915180c9c15",
+        "FIR_covariance_zero": 1.0
+      },
+      "targets": {
+        "strict": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.01742481917193552,
+          "necessary_preselective_span_lower_seconds_at_minus60": 39312143798.4375,
+          "necessary_cn0_db_hz_at_this_span": -49.52288618452549
+        },
+        "relaxed": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.06732181772393625,
+          "necessary_preselective_span_lower_seconds_at_minus60": 16573723698.6875,
+          "necessary_cn0_db_hz_at_this_span": -51.398419351175306
+        }
+      }
+    },
+    {
+      "control": "each-25",
+      "B_2sigma_hz": 0.1,
+      "sample_rate_hz": 16,
+      "excess_delay_seconds": 5e-06,
+      "cn0_db_hz": -60,
+      "full_preselective_span_seconds": 315576000.0,
+      "oracle_mixture_KL_upper_nats": 0.10343655410489219,
+      "input_bound": {
+        "sample_count": 5049216000,
+        "full_preselective_span_seconds": 315576000.0,
+        "interpolated_peak_power_upper": 9.039757833709208,
+        "noise_normalized_trace_per_CN0": 2852730620.983348,
+        "half_trace_square_per_CN0_squared": 72746587502.34177,
+        "FIR_taps": 511,
+        "FIR_coefficient_sha256": "aaf5f08ab8eeb4fb51a866e3cd1f66d4e23f7a856e2e9930ae9df915180c9c15",
+        "FIR_covariance_zero": 1.0
+      },
+      "targets": {
+        "strict": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.02318232752911052,
+          "necessary_preselective_span_lower_seconds_at_minus60": 27648101133.5,
+          "necessary_cn0_db_hz_at_this_span": -50.287193276211525
+        },
+        "relaxed": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.08209791655073881,
+          "necessary_preselective_span_lower_seconds_at_minus60": 11656245239.1875,
+          "necessary_cn0_db_hz_at_this_span": -52.16272644286134
+        }
+      }
+    },
+    {
+      "control": "each-65",
+      "B_2sigma_hz": 0.1,
+      "sample_rate_hz": 16,
+      "excess_delay_seconds": 5e-06,
+      "cn0_db_hz": -60,
+      "full_preselective_span_seconds": 315576000.0,
+      "oracle_mixture_KL_upper_nats": 0.41298783324485694,
+      "input_bound": {
+        "sample_count": 5049216000,
+        "full_preselective_span_seconds": 315576000.0,
+        "interpolated_peak_power_upper": 9.039757833709208,
+        "noise_normalized_trace_per_CN0": 2852730620.983348,
+        "half_trace_square_per_CN0_squared": 72746587502.34177,
+        "FIR_taps": 511,
+        "FIR_coefficient_sha256": "aaf5f08ab8eeb4fb51a866e3cd1f66d4e23f7a856e2e9930ae9df915180c9c15",
+        "FIR_covariance_zero": 1.0
+      },
+      "targets": {
+        "strict": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.07328048530975712,
+          "necessary_preselective_span_lower_seconds_at_minus60": 6924718064.625,
+          "necessary_cn0_db_hz_at_this_span": -53.293509343226084
+        },
+        "relaxed": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.1950885769027353,
+          "necessary_preselective_span_lower_seconds_at_minus60": 2919412498.0,
+          "necessary_cn0_db_hz_at_this_span": -55.1690425098759
+        }
+      }
+    },
+    {
+      "control": "off",
+      "B_2sigma_hz": 0.1,
+      "sample_rate_hz": 16,
+      "excess_delay_seconds": 0.007,
+      "cn0_db_hz": -60,
+      "full_preselective_span_seconds": 315576000.0,
+      "oracle_mixture_KL_upper_nats": 0.23609917068127503,
+      "input_bound": {
+        "sample_count": 5049216000,
+        "full_preselective_span_seconds": 315576000.0,
+        "interpolated_peak_power_upper": 16.285373156854227,
+        "noise_normalized_trace_per_CN0": 5139272924.486703,
+        "half_trace_square_per_CN0_squared": 236099170681.27502,
+        "FIR_taps": 511,
+        "FIR_coefficient_sha256": "aaf5f08ab8eeb4fb51a866e3cd1f66d4e23f7a856e2e9930ae9df915180c9c15",
+        "FIR_covariance_zero": 1.0
+      },
+      "targets": {
+        "strict": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.045820720851967124,
+          "necessary_preselective_span_lower_seconds_at_minus60": 12112809633.25,
+          "necessary_cn0_db_hz_at_this_span": -52.07929536420397
+        },
+        "relaxed": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.13554373013423826,
+          "necessary_preselective_span_lower_seconds_at_minus60": 5106675462.25,
+          "necessary_cn0_db_hz_at_this_span": -53.954828530853796
+        }
+      }
+    },
+    {
+      "control": "each-25",
+      "B_2sigma_hz": 0.1,
+      "sample_rate_hz": 16,
+      "excess_delay_seconds": 0.007,
+      "cn0_db_hz": -60,
+      "full_preselective_span_seconds": 315576000.0,
+      "oracle_mixture_KL_upper_nats": 0.33570350831243795,
+      "input_bound": {
+        "sample_count": 5049216000,
+        "full_preselective_span_seconds": 315576000.0,
+        "interpolated_peak_power_upper": 16.285373156854227,
+        "noise_normalized_trace_per_CN0": 5139272924.486703,
+        "half_trace_square_per_CN0_squared": 236099170681.27502,
+        "FIR_taps": 511,
+        "FIR_coefficient_sha256": "aaf5f08ab8eeb4fb51a866e3cd1f66d4e23f7a856e2e9930ae9df915180c9c15",
+        "FIR_covariance_zero": 1.0
+      },
+      "targets": {
+        "strict": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.06153835629218428,
+          "necessary_preselective_span_lower_seconds_at_minus60": 8518899083.25,
+          "necessary_cn0_db_hz_at_this_span": -52.84360245589
+        },
+        "relaxed": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.17012259798021115,
+          "necessary_preselective_span_lower_seconds_at_minus60": 3591508017.9375,
+          "necessary_cn0_db_hz_at_this_span": -54.719135622539824
+        }
+      }
+    },
+    {
+      "control": "each-65",
+      "B_2sigma_hz": 0.1,
+      "sample_rate_hz": 16,
+      "excess_delay_seconds": 0.007,
+      "cn0_db_hz": -60,
+      "full_preselective_span_seconds": 315576000.0,
+      "oracle_mixture_KL_upper_nats": 1.3403526993953994,
+      "input_bound": {
+        "sample_count": 5049216000,
+        "full_preselective_span_seconds": 315576000.0,
+        "interpolated_peak_power_upper": 16.285373156854227,
+        "noise_normalized_trace_per_CN0": 5139272924.486703,
+        "half_trace_square_per_CN0_squared": 236099170681.27502,
+        "FIR_taps": 511,
+        "FIR_coefficient_sha256": "aaf5f08ab8eeb4fb51a866e3cd1f66d4e23f7a856e2e9930ae9df915180c9c15",
+        "FIR_covariance_zero": 1.0
+      },
+      "targets": {
+        "strict": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.19982194987613722,
+          "necessary_preselective_span_lower_seconds_at_minus60": 2133635655.9375,
+          "necessary_cn0_db_hz_at_this_span": -55.84991852290457
+        },
+        "relaxed": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.4387083116287282,
+          "necessary_preselective_span_lower_seconds_at_minus60": 899525806.9375,
+          "necessary_cn0_db_hz_at_this_span": -57.72545168955439
+        }
+      }
+    },
+    {
+      "control": "off",
+      "B_2sigma_hz": 1,
+      "sample_rate_hz": 16,
+      "excess_delay_seconds": 5e-06,
+      "cn0_db_hz": -60,
+      "full_preselective_span_seconds": 315576000.0,
+      "oracle_mixture_KL_upper_nats": 0.007274658787516811,
+      "input_bound": {
+        "sample_count": 5049216000,
+        "full_preselective_span_seconds": 315576000.0,
+        "interpolated_peak_power_upper": 9.039757833709208,
+        "noise_normalized_trace_per_CN0": 2852730620.983348,
+        "half_trace_square_per_CN0_squared": 7274658787.516811,
+        "FIR_taps": 53,
+        "FIR_coefficient_sha256": "2c784972f1c632ecfbc20827675ee587ac4b67e0f899bd6916a7bb10113d123e",
+        "FIR_covariance_zero": 1.0
+      },
+      "targets": {
+        "strict": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.0029902591845603755,
+          "necessary_preselective_span_lower_seconds_at_minus60": 393121437966.5625,
+          "necessary_cn0_db_hz_at_this_span": -44.52288619565429
+        },
+        "relaxed": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.024183466891491954,
+          "necessary_preselective_span_lower_seconds_at_minus60": 165737236969.5625,
+          "necessary_cn0_db_hz_at_this_span": -46.398419362304104
+        }
+      }
+    },
+    {
+      "control": "each-25",
+      "B_2sigma_hz": 1,
+      "sample_rate_hz": 16,
+      "excess_delay_seconds": 5e-06,
+      "cn0_db_hz": -60,
+      "full_preselective_span_seconds": 315576000.0,
+      "oracle_mixture_KL_upper_nats": 0.010343655463500466,
+      "input_bound": {
+        "sample_count": 5049216000,
+        "full_preselective_span_seconds": 315576000.0,
+        "interpolated_peak_power_upper": 9.039757833709208,
+        "noise_normalized_trace_per_CN0": 2852730620.983348,
+        "half_trace_square_per_CN0_squared": 7274658787.516811,
+        "FIR_taps": 53,
+        "FIR_coefficient_sha256": "2c784972f1c632ecfbc20827675ee587ac4b67e0f899bd6916a7bb10113d123e",
+        "FIR_covariance_zero": 1.0
+      },
+      "targets": {
+        "strict": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.0038586390695469416,
+          "necessary_preselective_span_lower_seconds_at_minus60": 276481011317.1875,
+          "necessary_cn0_db_hz_at_this_span": -45.287193287340315
+        },
+        "relaxed": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.027372488139075515,
+          "necessary_preselective_span_lower_seconds_at_minus60": 116562452374.25,
+          "necessary_cn0_db_hz_at_this_span": -47.16272645399013
+        }
+      }
+    },
+    {
+      "control": "each-65",
+      "B_2sigma_hz": 1,
+      "sample_rate_hz": 16,
+      "excess_delay_seconds": 5e-06,
+      "cn0_db_hz": -60,
+      "full_preselective_span_seconds": 315576000.0,
+      "oracle_mixture_KL_upper_nats": 0.041298783536142004,
+      "input_bound": {
+        "sample_count": 5049216000,
+        "full_preselective_span_seconds": 315576000.0,
+        "interpolated_peak_power_upper": 9.039757833709208,
+        "noise_normalized_trace_per_CN0": 2852730620.983348,
+        "half_trace_square_per_CN0_squared": 7274658787.516811,
+        "FIR_taps": 53,
+        "FIR_coefficient_sha256": "2c784972f1c632ecfbc20827675ee587ac4b67e0f899bd6916a7bb10113d123e",
+        "FIR_covariance_zero": 1.0
+      },
+      "targets": {
+        "strict": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.011092006560830295,
+          "necessary_preselective_span_lower_seconds_at_minus60": 69247180628.625,
+          "necessary_cn0_db_hz_at_this_span": -48.29350935435488
+        },
+        "relaxed": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.050004663707524384,
+          "necessary_preselective_span_lower_seconds_at_minus60": 29194124962.25,
+          "necessary_cn0_db_hz_at_this_span": -50.1690425210047
+        }
+      }
+    },
+    {
+      "control": "off",
+      "B_2sigma_hz": 1,
+      "sample_rate_hz": 16,
+      "excess_delay_seconds": 0.007,
+      "cn0_db_hz": -60,
+      "full_preselective_span_seconds": 315576000.0,
+      "oracle_mixture_KL_upper_nats": 0.023609917189128356,
+      "input_bound": {
+        "sample_count": 5049216000,
+        "full_preselective_span_seconds": 315576000.0,
+        "interpolated_peak_power_upper": 16.285373156854227,
+        "noise_normalized_trace_per_CN0": 5139272924.486703,
+        "half_trace_square_per_CN0_squared": 23609917189.128357,
+        "FIR_taps": 53,
+        "FIR_coefficient_sha256": "2c784972f1c632ecfbc20827675ee587ac4b67e0f899bd6916a7bb10113d123e",
+        "FIR_covariance_zero": 1.0
+      },
+      "targets": {
+        "strict": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.007174931025853944,
+          "necessary_preselective_span_lower_seconds_at_minus60": 121128096314.6875,
+          "necessary_cn0_db_hz_at_this_span": -47.07929537533276
+        },
+        "relaxed": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.03835085037399251,
+          "necessary_preselective_span_lower_seconds_at_minus60": 51066754605.0,
+          "necessary_cn0_db_hz_at_this_span": -48.95482854198259
+        }
+      }
+    },
+    {
+      "control": "each-25",
+      "B_2sigma_hz": 1,
+      "sample_rate_hz": 16,
+      "excess_delay_seconds": 0.007,
+      "cn0_db_hz": -60,
+      "full_preselective_span_seconds": 315576000.0,
+      "oracle_mixture_KL_upper_nats": 0.03357035100329188,
+      "input_bound": {
+        "sample_count": 5049216000,
+        "full_preselective_span_seconds": 315576000.0,
+        "interpolated_peak_power_upper": 16.285373156854227,
+        "noise_normalized_trace_per_CN0": 5139272924.486703,
+        "half_trace_square_per_CN0_squared": 23609917189.128357,
+        "FIR_taps": 53,
+        "FIR_coefficient_sha256": "2c784972f1c632ecfbc20827675ee587ac4b67e0f899bd6916a7bb10113d123e",
+        "FIR_covariance_zero": 1.0
+      },
+      "targets": {
+        "strict": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.00942634927964259,
+          "necessary_preselective_span_lower_seconds_at_minus60": 85188990814.8125,
+          "necessary_cn0_db_hz_at_this_span": -47.8436024670188
+        },
+        "relaxed": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.04516910024342898,
+          "necessary_preselective_span_lower_seconds_at_minus60": 35915080161.8125,
+          "necessary_cn0_db_hz_at_this_span": -49.71913563366862
+        }
+      }
+    },
+    {
+      "control": "each-65",
+      "B_2sigma_hz": 1,
+      "sample_rate_hz": 16,
+      "excess_delay_seconds": 0.007,
+      "cn0_db_hz": -60,
+      "full_preselective_span_seconds": 315576000.0,
+      "oracle_mixture_KL_upper_nats": 0.13403527062647086,
+      "input_bound": {
+        "sample_count": 5049216000,
+        "full_preselective_span_seconds": 315576000.0,
+        "interpolated_peak_power_upper": 16.285373156854227,
+        "noise_normalized_trace_per_CN0": 5139272924.486703,
+        "half_trace_square_per_CN0_squared": 23609917189.128357,
+        "FIR_taps": 53,
+        "FIR_coefficient_sha256": "2c784972f1c632ecfbc20827675ee587ac4b67e0f899bd6916a7bb10113d123e",
+        "FIR_covariance_zero": 1.0
+      },
+      "targets": {
+        "strict": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.028663985314955173,
+          "necessary_preselective_span_lower_seconds_at_minus60": 21336356541.9375,
+          "necessary_cn0_db_hz_at_this_span": -50.849918534033364
+        },
+        "relaxed": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.09559900872175767,
+          "necessary_preselective_span_lower_seconds_at_minus60": 8995258052.0,
+          "necessary_cn0_db_hz_at_this_span": -52.72545170068319
+        }
+      }
+    },
+    {
+      "control": "off",
+      "B_2sigma_hz": 10,
+      "sample_rate_hz": 128,
+      "excess_delay_seconds": 5e-06,
+      "cn0_db_hz": -60,
+      "full_preselective_span_seconds": 315576000.0,
+      "oracle_mixture_KL_upper_nats": 0.0007328311753748048,
+      "input_bound": {
+        "sample_count": 40393728000,
+        "full_preselective_span_seconds": 315576000.0,
+        "interpolated_peak_power_upper": 9.07303216373892,
+        "noise_normalized_trace_per_CN0": 2863231200.967307,
+        "half_trace_square_per_CN0_squared": 732831175.3748049,
+        "FIR_taps": 43,
+        "FIR_coefficient_sha256": "b1a3788f8bb4beb9aa23f5feb39033d04d5627bfcc2c95bc9d4893a33da77b73",
+        "FIR_covariance_zero": 1.0000000000000007
+      },
+      "targets": {
+        "strict": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.000684766029456131,
+          "necessary_preselective_span_lower_seconds_at_minus60": 3902432675925.6094,
+          "necessary_cn0_db_hz_at_this_span": -39.53884273816417
+        },
+        "relaxed": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.014041308490565535,
+          "necessary_preselective_span_lower_seconds_at_minus60": 1645238205559.7422,
+          "necessary_cn0_db_hz_at_this_span": -41.41437590481399
+        }
+      }
+    },
+    {
+      "control": "each-25",
+      "B_2sigma_hz": 10,
+      "sample_rate_hz": 128,
+      "excess_delay_seconds": 5e-06,
+      "cn0_db_hz": -60,
+      "full_preselective_span_seconds": 315576000.0,
+      "oracle_mixture_KL_upper_nats": 0.0010419943274860505,
+      "input_bound": {
+        "sample_count": 40393728000,
+        "full_preselective_span_seconds": 315576000.0,
+        "interpolated_peak_power_upper": 9.07303216373892,
+        "noise_normalized_trace_per_CN0": 2863231200.967307,
+        "half_trace_square_per_CN0_squared": 732831175.3748049,
+        "FIR_taps": 43,
+        "FIR_coefficient_sha256": "b1a3788f8bb4beb9aa23f5feb39033d04d5627bfcc2c95bc9d4893a33da77b73",
+        "FIR_covariance_zero": 1.0000000000000007
+      },
+      "targets": {
+        "strict": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.0008371822383944016,
+          "necessary_preselective_span_lower_seconds_at_minus60": 2744568035815.8203,
+          "necessary_cn0_db_hz_at_this_span": -40.3031498298502
+        },
+        "relaxed": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.014870411445784597,
+          "necessary_preselective_span_lower_seconds_at_minus60": 1157090606107.9531,
+          "necessary_cn0_db_hz_at_this_span": -42.178682996500015
+        }
+      }
+    },
+    {
+      "control": "each-65",
+      "B_2sigma_hz": 10,
+      "sample_rate_hz": 128,
+      "excess_delay_seconds": 5e-06,
+      "cn0_db_hz": -60,
+      "full_preselective_span_seconds": 315576000.0,
+      "oracle_mixture_KL_upper_nats": 0.004160337544940921,
+      "input_bound": {
+        "sample_count": 40393728000,
+        "full_preselective_span_seconds": 315576000.0,
+        "interpolated_peak_power_upper": 9.07303216373892,
+        "noise_normalized_trace_per_CN0": 2863231200.967307,
+        "half_trace_square_per_CN0_squared": 732831175.3748049,
+        "FIR_taps": 43,
+        "FIR_coefficient_sha256": "b1a3788f8bb4beb9aa23f5feb39033d04d5627bfcc2c95bc9d4893a33da77b73",
+        "FIR_covariance_zero": 1.0000000000000007
+      },
+      "targets": {
+        "strict": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.002022331679720343,
+          "necessary_preselective_span_lower_seconds_at_minus60": 687401994147.6328,
+          "necessary_cn0_db_hz_at_this_span": -43.309465896864765
+        },
+        "relaxed": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.020346470921473073,
+          "necessary_preselective_span_lower_seconds_at_minus60": 289803852434.53906,
+          "necessary_cn0_db_hz_at_this_span": -45.18499906351458
+        }
+      }
+    },
+    {
+      "control": "off",
+      "B_2sigma_hz": 10,
+      "sample_rate_hz": 128,
+      "excess_delay_seconds": 0.007,
+      "cn0_db_hz": -60,
+      "full_preselective_span_seconds": 315576000.0,
+      "oracle_mixture_KL_upper_nats": 0.0022063381301664696,
+      "input_bound": {
+        "sample_count": 40393728000,
+        "full_preselective_span_seconds": 315576000.0,
+        "interpolated_peak_power_upper": 15.742964551413696,
+        "noise_normalized_trace_per_CN0": 4968101786.245034,
+        "half_trace_square_per_CN0_squared": 2206338130.1664696,
+        "FIR_taps": 43,
+        "FIR_coefficient_sha256": "b1a3788f8bb4beb9aa23f5feb39033d04d5627bfcc2c95bc9d4893a33da77b73",
+        "FIR_covariance_zero": 1.0000000000000007
+      },
+      "targets": {
+        "strict": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.0013276257211192754,
+          "necessary_preselective_span_lower_seconds_at_minus60": 1296185877231.7266,
+          "necessary_cn0_db_hz_at_this_span": -41.93218340916018
+        },
+        "relaxed": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.017294340970524315,
+          "necessary_preselective_span_lower_seconds_at_minus60": 546462861456.75,
+          "necessary_cn0_db_hz_at_this_span": -43.80771657581
+        }
+      }
+    },
+    {
+      "control": "each-25",
+      "B_2sigma_hz": 10,
+      "sample_rate_hz": 128,
+      "excess_delay_seconds": 0.007,
+      "cn0_db_hz": -60,
+      "full_preselective_span_seconds": 315576000.0,
+      "oracle_mixture_KL_upper_nats": 0.0031371370288304492,
+      "input_bound": {
+        "sample_count": 40393728000,
+        "full_preselective_span_seconds": 315576000.0,
+        "interpolated_peak_power_upper": 15.742964551413696,
+        "noise_normalized_trace_per_CN0": 4968101786.245034,
+        "half_trace_square_per_CN0_squared": 2206338130.1664696,
+        "FIR_taps": 43,
+        "FIR_coefficient_sha256": "b1a3788f8bb4beb9aa23f5feb39033d04d5627bfcc2c95bc9d4893a33da77b73",
+        "FIR_covariance_zero": 1.0000000000000007
+      },
+      "targets": {
+        "strict": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.0016714805185670252,
+          "necessary_preselective_span_lower_seconds_at_minus60": 911603254316.8203,
+          "necessary_cn0_db_hz_at_this_span": -42.69649050084621
+        },
+        "relaxed": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.01884676796854636,
+          "necessary_preselective_span_lower_seconds_at_minus60": 384325528936.6172,
+          "necessary_cn0_db_hz_at_this_span": -44.572023667496026
+        }
+      }
+    },
+    {
+      "control": "each-65",
+      "B_2sigma_hz": 10,
+      "sample_rate_hz": 128,
+      "excess_delay_seconds": 0.007,
+      "cn0_db_hz": -60,
+      "full_preselective_span_seconds": 315576000.0,
+      "oracle_mixture_KL_upper_nats": 0.012525547040314812,
+      "input_bound": {
+        "sample_count": 40393728000,
+        "full_preselective_span_seconds": 315576000.0,
+        "interpolated_peak_power_upper": 15.742964551413696,
+        "noise_normalized_trace_per_CN0": 4968101786.245034,
+        "half_trace_square_per_CN0_squared": 2206338130.1664696,
+        "FIR_taps": 43,
+        "FIR_coefficient_sha256": "b1a3788f8bb4beb9aa23f5feb39033d04d5627bfcc2c95bc9d4893a33da77b73",
+        "FIR_covariance_zero": 1.0000000000000007
+      },
+      "targets": {
+        "strict": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.004443720737163402,
+          "necessary_preselective_span_lower_seconds_at_minus60": 228319315357.2578,
+          "necessary_cn0_db_hz_at_this_span": -45.702806567860776
+        },
+        "relaxed": {
+          "excluded_at_minus60": true,
+          "one_completion_detection_probability_upper": 0.02942636900644668,
+          "necessary_preselective_span_lower_seconds_at_minus60": 96257819644.23438,
+          "necessary_cn0_db_hz_at_this_span": -47.57833973451059
+        }
+      }
+    }
+  ],
+  "assumptions": [
+    "Whitened independent proper-complex Gaussian noise after the selective stage, known noise density for the oracle bound.",
+    "Conditional on deterministic source/oscillator/initial-ray phase, the pre-selective signal is zero-mean proper-complex Gaussian with two independent stationary finite-FIR Gaussian ray gains.",
+    "Six independently uniform ideal modulation phases, independent of Gaussian rays; identical component rates across the three branches. Not a proof about a finite seeded PRNG.",
+    "Causal cubic fractional delays are L2 contractions; zero-extended finite input and all FIR output are included. No per-realization energy normalization or physical-playback gain.",
+    "The reused pre-selective covariance envelope assumes integer-aligned direct arrival, zero audio-clock error and fixed delayed-ray 16-tap interpolation phase at each stated sample clock.",
+    "Input spans are full pre-selective source/ray/interpolation support, not requested active payload time; all additional selective output is permitted.",
+    "Positive AM reference rate; Doppler reference zero uses the Off bypass, irrespective of selected depth. Ray-center separation and deterministic phase do not affect the absolute covariance envelope."
+  ],
+  "limits": [
+    "A covariance-matched Gaussian is a lower KL proxy for a covariance mixture. Only the revealed-AM conditional-Gaussian oracle and explicit operator inequalities are used as upper bounds.",
+    "Presence exclusion for one completion using its entire declared false-admission budget is necessary for correct-bit admission, but does not model timing/epoch acquisition, repeated daily attempts, key rejection or an achievable duration planner.",
+    "The 850-day stable fixed-ray B=0 experiment has a coherent component and is outside the zero-mean renewing-Gaussian premise. These exclusions do not apply to it.",
+    "Necessary span inversion holds the same stationary finite Gaussian teacher and peak envelope indefinitely. Large inferred spans are mathematical necessary conditions, not credible physical-duration predictions or achievable plans.",
+    "Nonzero-clock, arbitrary fractional direct arrival, other sampling rates/teachers and measured physical propagation require separate covariance-envelope validation.",
+    "No long waveform, actual reception, GPU speedup or physical-device measurement is claimed. Numeric padding is engineering margin, not formally certified interval arithmetic."
+  ]
+}

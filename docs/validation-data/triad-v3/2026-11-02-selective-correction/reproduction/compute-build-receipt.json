@@ -1,0 +1,141 @@
+{
+  "schema": "triad-selective-correction-public-compute-build-receipt-v1",
+  "generated_utc": "2026-11-02",
+  "scope": "Isolated triad selective-correction experiment build, exports, scoring, GPU boundary tests, and sequential CPU/GPU precision benchmark.",
+  "source": {
+    "base_revision": "acba36fce865876adc8772bba7cbb5c0c8ed4208",
+    "source_archive_sha256": "6675cba4b22055f066e6fd53c691f7562bd5852280e61f130fbf10141e5af7a6",
+    "source_archive_bytes": 9995721,
+    "source_file_manifest_sha256": "4850e98e66b819a519742fe6c9df2f85b575078577e4b36fa30ce0db082383d5",
+    "source_files_verified": 1759,
+    "source_file_bytes": 42541119,
+    "remote_tree_hash_mismatches": 0,
+    "planned_source_bundle_sha256": "9a04f9c702452ed2e81ec58b54a06f093bf9908d9f9902327707162fc1f13e42",
+    "plan_source_files_verified": 9,
+    "plan_source_hash_mismatches": 0,
+    "gpu_scorer_source_files_verified": 8,
+    "gpu_scorer_source_hash_mismatches": 0
+  },
+  "binaries": {
+    "remote_binary_role": "RunPod CLI build used for physical exports; GPU/CPU scoring used the verified source tree Python scorer.",
+    "local_and_remote_binary_hashes_differ": true,
+    "remote_triad_long_sha256": "8e9df3c502dc0f30c38c1fc8aba2ed92dd562ff1d26f418588dea38f3dfbcacc",
+    "frozen_parent_local_triad_long_sha256": "d45cc4efc4e30b4e05434783a68befa02aea59891d0047cc2b1328e4ff8c28ae"
+  },
+  "build": {
+    "command": "./build.sh test triad --cli --jobs 2 --build-jobs 16",
+    "result": "passed",
+    "triad_ctest_cases": "14/14 passed",
+    "focused_python_command": "/workspace/triad-env/bin/python -m unittest discover -s tests -p test_triad_conditional_sweep.py -v",
+    "focused_python_tests": "14/14 passed",
+    "compiler": "g++ 13.3.0",
+    "cmake": "3.28.3",
+    "ninja": "1.11.1",
+    "resolved_binary": "build/dev-cli/triad_long",
+    "resolved_binary_sha256": "8e9df3c502dc0f30c38c1fc8aba2ed92dd562ff1d26f418588dea38f3dfbcacc",
+    "original_setup_failures": [
+      {
+        "issue": "The first source archive omitted CMakePresets.json; build.sh exited 2 before compilation.",
+        "resolution": "Added CMakePresets.json to the source archive."
+      },
+      {
+        "issue": "The second bootstrap completed build and tests, then exited 1 because its checksum step looked under build/dev instead of build/dev-cli.",
+        "resolution": "Verified the actual build/dev-cli/triad_long hash and corrected the local bootstrap path; build/tests were not rerun for that path-only receipt fix."
+      }
+    ]
+  },
+  "compute": {
+    "cpu_model": "AMD EPYC 9575F 64-Core Processor",
+    "gpu_model": "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+    "gpu_count": 1,
+    "gpu_memory_mib": 97887,
+    "gpu_driver": "595.91.07",
+    "visible_cpu_count": 256,
+    "cpuset_cpus_effective": "0-255",
+    "nominal_vcpu_allocation_reported_by_coordinator": 32,
+    "observed_cgroup_cpu_max": "2720000 100000",
+    "observed_cgroup_cpu_equivalents": 27.2,
+    "ram_reported": "1.5 TiB",
+    "python": "3.12.3",
+    "numpy": "2.5.2",
+    "scipy": "1.18.1",
+    "mpmath": "1.3.0",
+    "torch": "2.8.0+cu128",
+    "torch_cuda": "12.8",
+    "cuda_available": true
+  },
+  "transfers": {
+    "source_archive_bytes": 9995721,
+    "development_cache_archive_bytes": 213386044,
+    "development_cache_uncompressed_bytes": 334814050,
+    "development_cache_files_verified": 1030,
+    "development_cache_hash_mismatches": 0,
+    "transfer_duration_seconds": null,
+    "transfer_duration_note": "Transfer-duration telemetry was not present in the retained receipts; no duration is inferred from file timestamps."
+  },
+  "experiments": {
+    "long_and_refinement_exports": {
+      "jobs": 10,
+      "completed_exit_zero": 10,
+      "timeouts": 0,
+      "signal_export_elapsed_seconds_range": [
+        150.7808,
+        153.3055
+      ],
+      "refinement_export_elapsed_seconds": [
+        302.8043,
+        304.6606
+      ]
+    },
+    "long_and_control_scores": {
+      "jobs": 6,
+      "completed_exit_zero": 6
+    },
+    "gpu_boundary_science": {
+      "jobs": 30,
+      "completed_exit_zero": 30,
+      "timeouts": 0,
+      "archive_sha256": "14bca9394b98f0f51104caf14573c1cff534b52b834b9157ec540e4a01cc838c"
+    },
+    "sequential_benchmarks": {
+      "plan_sha256": "84e03abf933ecc1fd5886131f10d0eb11b63d409c68983c574fccd898b431a9e",
+      "jobs": 6,
+      "workers": 1,
+      "environment": {
+        "OMP_NUM_THREADS": "1",
+        "OPENBLAS_NUM_THREADS": "1",
+        "MKL_NUM_THREADS": "1",
+        "NUMEXPR_NUM_THREADS": "1"
+      },
+      "torch_num_threads": 1,
+      "threadpoolctl": "not installed",
+      "completed_exit_zero": 6,
+      "elapsed_seconds": {
+        "g1_cpu_fp64": 108.279782,
+        "g1_cuda_fp64": 101.169887,
+        "g1_cuda_fp32_min": 101.306021,
+        "high10_cpu_fp64": 94.998551,
+        "high10_cuda_fp64": 95.906156,
+        "high10_cuda_fp32_min": 93.732264
+      },
+      "archive_sha256": "59f65eeba016aeb1bc39cf72207668b2ecce2003990fbd8025f4dfc56c98a62b",
+      "independent_review_sha256": "acb0a1f9abff8768ce1a13ed0543eb1adfbdef656168f992f89496bafa963f9a",
+      "interpretation": "One-run conditional timing comparison, not a general GPU acceleration claim. Independent reviewer verified paired inputs, draws, arrays, winners and strict/relaxed admissions."
+    },
+    "archive_repack_anomaly": {
+      "first_temporary_archive_sha256_at_creation": "01ce110894b142be322c234c7ac8ee2d8615b4f0ae231d268ac8594932cb0fbc",
+      "first_temporary_archive_size_at_creation": 755308,
+      "same_remote_path_later_observed_size": 0,
+      "cause": "unknown",
+      "recovery": "Repacked unchanged source result files and runner receipts under a new temporary filename; no benchmark jobs were rerun.",
+      "recovered_archive_sha256": "59f65eeba016aeb1bc39cf72207668b2ecce2003990fbd8025f4dfc56c98a62b"
+    }
+  },
+  "evidence_paths": {
+    "source_manifest": "local-evidence/triad-selective-correction/analysis/source-file-manifest.json",
+    "gpu_science": "local-evidence/triad-selective-correction/gpu-results/",
+    "gpu_benchmark": "local-evidence/triad-selective-correction/gpu-results/benchmark/",
+    "benchmark_review": "local-evidence/triad-selective-correction/analysis/benchmark-review/review.json"
+  },
+  "privacy": "This receipt omits service endpoints, account/resource identifiers, SSH/key material, and billing details."
+}

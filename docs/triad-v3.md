@@ -43,6 +43,14 @@ tests the receiver's block/window approximations under explicit duration limits.
 The [selective-modulation study](validation-data/triad-v3/2026-11-02-selective/README.md)
 adds paired modulation-depth/rate comparisons, sampled noisy boundary trials,
 receiver-prior alternatives and explicit pre/post modulation energy accounting.
+The [selective-model correction study](validation-data/triad-v3/2026-11-02-selective-correction/README.md)
+audits actual carrier responses and versions the narrow legacy bank against a
+broadband overlapping dispersive stress operator. The previous sensitivity
+tables remain evidence for the legacy operator. The correction study now
+includes paired complete-tail captures, independent sampled holdouts, genuine
+850-day streaming observations and CPU/GPU comparisons. It distinguishes
+finite-sample feasibility from reliability, blind acquisition and minimum
+duration, which remain unresolved.
 
 Before changing arithmetic or relating these experiments to a precision
 dropdown, read the [precision-control experiment guide](gpu-precision-controls.md).
@@ -236,8 +244,8 @@ exhaustive only over the finite bank supplied by the caller, not continuous
 timing/frequency or arbitrary channel paths.
 
 The sampled channel starts from the shaped transmit waveform and preserves
-state through reads. It supports the shared two-ray `SpreadRay` and
-frequency-selective perturbation implementations, oscillator phase/frequency
+state through reads. It supports the shared two-ray `SpreadRay` and the
+versioned selective perturbation implementations, oscillator phase/frequency
 impairments, clock scales, noise, and explicit erasures. The CLI `--channel hf`
 selects a synthetic 1.5-ms / 0.3-Hz two-ray channel with 5% slow and 5% fast
 frequency-selective modulation. These are model inputs, not calibrated HF
@@ -284,11 +292,18 @@ a preset name alone does not supply that evaluation for a month-long link.
 
 The campaign wrapper accepts every shared selective preset: Off and Slow, Fast
 or Each at 1, 5, 10, 25 and 65 percent. These are additive amplitude excursions,
-without received-energy normalization; Each65 can reverse an individual band's
-polarity. The temporal rates are 0.1 and 1 times the effective ray-center
-separation, independently of Gaussian width B. A zero separation bypasses this
-stage. These periodic excursions retain a coherent mean; their rate is not a
-substitute for random phase coherence time.
+without received-energy normalization; Each65 can reverse a branch's polarity.
+The temporal rates are 0.1 and 1 times the effective ray-center separation,
+independently of Gaussian width B. A zero separation bypasses this stage.
+These periodic excursions retain a coherent mean; their rate is not a
+substitute for random phase coherence time. The isolated stream defaults to
+`dispersive-dft-v1` and preserves the previous operator as the explicit
+`legacy-allpass-v1` option. The shared ordinary Robust channels remain on the
+legacy operator. Model scale, fixed baseband frame, long dispersive memory,
+overlapping sidebands, finite tails and diagnostic report fields are specified
+in the [channel-model contract](channel-models.md#versioned-three-carrier-selective-modulation).
+The correction study records the historical response collapse, corrected-model
+paired results and the remaining limits on legacy sensitivity claims.
 
 Active stream reports expose `path_truth_simulation_only.selective_perturbation`:
 physical RX sample rate, depths/rates, band geometry, six seeded initial phases,
@@ -300,12 +315,14 @@ truth, never practical receiver inputs. Inactive reports contain only
 `{"enabled":false}`. This instrumentation does not normalize samples or consume
 additional random numbers.
 
-The selective study found wrong-key admissions when fine-pattern changes were
-slow relative to Gaussian ray evolution, despite high correct-key reception.
+The legacy selective study found wrong-key admissions when fine-pattern changes
+were slow relative to Gaussian ray evolution, despite high correct-key reception.
 The calibrated Gaussian-noise admission bound does not cover such signals.
 Treat those slower-rate operating points as failed identification controls;
 longer transmission or a favorable noise-only test does not establish key or
-pattern distinguishability under the fitted channel model.
+pattern distinguishability under the fitted channel model. Re-evaluate these
+specific admissions under the corrected selective operator before generalizing
+them to the new default.
 
 ### Optional sampled converters and interference
 

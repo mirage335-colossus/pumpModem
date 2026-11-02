@@ -10,6 +10,26 @@ reception contracts are in the [v3 study](triad-v3.md); this page describes how
 to make the next bounded development decision without replaying old campaigns
 by default.
 
+**Selective-model version warning:** the detailed 2026-11-02 selective
+campaign used `legacy-allpass-v1`. Its receiver results remain valid for that
+simulated operator, but do not establish strong differential added-modulation
+performance at 0.00075-Hz carrier spacing with 0.05-Hz Doppler. The isolated
+v3 stream now defaults to `dispersive-dft-v1`; ordinary Robust channel paths
+remain on the legacy implementation. Read the
+[corrected model and receiver study](validation-data/triad-v3/2026-11-02-selective-correction/README.md)
+before reusing depth-specific sensitivity or duration conclusions. The
+earlier legacy 850-day selective captures omitted 1,478 rows (5,912 seconds at 0.25
+samples/s) from the natural full-tail calendar; the missing-tail energy impact
+remains unmeasured. Those earlier captures must not be described as fully tail-complete.
+The old admissions are incomplete-support measurements, not proof that the
+recorded detections were false. The correction record now includes separate
+full-tail legacy/corrected 850-day replays; keep their identities distinct.
+Use the common selective-tail floor for matched v3 exports and verify equal
+row calendars and indexed noise before scoring. The record also contains accepted `B>0` renewed-Gaussian
+information exclusions for both reception targets. These bounds do not cover
+the prior stable-ray `B=0` 850-day case or every channel law; keep their
+assumptions visible.
+
 Start with the [development contract](development.md), the
 [shared channel-model contract](channel-models.md), and, for arithmetic or GPU
 work, the [precision-control guide](gpu-precision-controls.md) and
@@ -88,26 +108,38 @@ as universal receiver thresholds or an approved architecture:
   FIR path. Window length and assumed width matter; the measured benefit of
   longer windows was modest, and width mismatch reduced reception. Preserve
   residual calibration degrees of freedom when changing block/window geometry.
-- The selective-modulation study shows why pre/post-stage energy and actual
-  noisy checks matter. Its seven receiver configurations are configurations,
-  not seven distinct algorithms. It found useful conditional differences, but
-  the slower-rate actual-noisy holdout also admitted wrong keys (6/32 and 7/32
-  at the strict gate). A selected Added Symbols ×10 probe removed those
-  admissions in 8-path samples while reducing some correct strict accepts;
-  it is an unqualified geometry/allocation tradeoff, not a fix. See the
-  [selective study](validation-data/triad-v3/2026-11-02-selective/README.md).
-- The [spread study](validation-data/triad-v3/2026-11-02-spread/README.md)
-  measured near parity (1.04× CPU/GPU complete-process ratio) for Gaussian
-  window J32 and 8.72× for a separate 128-point midpoint-CFO/OU workload on
-  that host. These are distinct workloads; the CFO result is not a GPU gain
-  for the window method, and neither ratio transfers to another shape or
-  device. The [selective study](validation-data/triad-v3/2026-11-02-selective/README.md)
-  separately reports 26.56–28.06-second CPU/GPU scoring runs under shared
-  contention; these do not establish GPU acceleration or isolated throughput.
-  The [−60 dB-Hz study](validation-data/triad-v3/2026-11-02-minus60/README.md)
-  shows the value of prepared/reused and resident scoring, while also showing
-  that preparation and full process time matter. Measure the current path
-  before selecting work from historical timings.
+- The [corrected selective study](validation-data/triad-v3/2026-11-02-selective-correction/README.md)
+  includes 1,024 actual-noisy holdout exports. At rate 3.6 and −11 dB-Hz,
+  the Gaussian-window receiver accepted 64/64 correct bits for Each25 and
+  Each65 at both gates. The pointwise equal-bit 95% lower bound is 95.43%,
+  establishing 90% for those cases, not 99%. Slower settings retained misses;
+  zero null/wrong-key admissions in 16- or 32-path cells do not qualify an
+  operational false-admission rate. Earlier legacy wrong-key failures remain
+  documented in the [legacy selective study](validation-data/triad-v3/2026-11-02-selective/README.md).
+- Full-tail corrected 850-day sampled captures at −60 dB-Hz produced 4/4
+  correct static-frequency admissions per Each25/Each65 signal cell, in the
+  local replay and separate remote set. This is finite seeded feasibility for
+  fixed-gain rays with `B=0`, 0.05-Hz separation and 5-ms delay. It establishes
+  neither 90/99% long-span reliability, real-world channel stability, rare
+  false admissions nor a minimum sufficient duration. The correction record's
+  [information-bound analysis](validation-data/triad-v3/2026-11-02-selective-correction/theory/README.md)
+  excludes specified `B>0` zero-mean renewing-Gaussian −60 dB-Hz cases, but
+  does not apply to the stable `B=0` path or establish a decoder duration.
+- High-spread nominal banks can fail despite increasing signal power. In the
+  corrected high30 Each65 conditional screen at 20 dB-Hz, Gaussian-window
+  scoring accepted 165 correct and 91 wrong bits out of four paths ×64 noise
+  draws. Separate exact-timing oracle comparisons recovered substantial lost evidence,
+  but are diagnostic truth, not acquisition. Resolve timing, block compression
+  and final-channel mismatch before calling this a Doppler sensitivity limit.
+- The newest [paired arithmetic benchmark](validation-data/triad-v3/2026-11-02-selective-correction/reproduction/benchmark-review.json)
+  measured CPU/CUDA FP64 ratios of 2.49–4.07× for static scoring, 1.04–1.06×
+  for Gaussian-window method time, and 0.99–1.07× for bounded complete-process
+  time on its two workloads. Sampled winners and admissions matched the CPU
+  reference for both CUDA FP64 and FP32-min. These single-run measurements
+  establish no universal GPU gain; preparation and simulation dominated the
+  complete jobs. Historical [spread](validation-data/triad-v3/2026-11-02-spread/README.md)
+  and [−60 dB-Hz](validation-data/triad-v3/2026-11-02-minus60/README.md)
+  timings remain specific to their workloads and reuse state.
 - If a long-span fixed-ray case suggests residual frequency mismatch, the
   joint ray-frequency search is a bounded candidate: it adds a constant
   relative-ray-frequency correction and its cross-Gram, without claiming to
@@ -116,10 +148,10 @@ as universal receiver thresholds or an approved architecture:
   not a receiver qualification. Phase-particle scoring is another explicit
   trajectory-prior option; check particle convergence and preparation/memory
   cost before enlarging it.
-- Slower fine-rate/R:B choices and more elaborate channel models are candidate
-  hypotheses only. The slower-rate wrong-key overlap is a concrete failure to
-  resolve. A receiver that distinguishes signal from noise but admits a
-  structured wrong key has not solved correct-bit reception.
+- Slower fine-rate/R:B choices and more elaborate channel models remain
+  hypotheses to test. Zero wrong-key admissions in the new selected controls
+  do not resolve every earlier overlap case. Keep structured wrong-key
+  rejection separate from signal/noise discrimination.
 
 These results are conditional on their sampled models and finite banks. A
 pointwise confidence bound is not a bound on a whole receiver family. Keep
@@ -131,6 +163,7 @@ specified by the [channel contract](channel-models.md).
 
 Detailed result tables, assumptions, failures, and audit limits live in the
 [selective](validation-data/triad-v3/2026-11-02-selective/README.md),
+[selective correction](validation-data/triad-v3/2026-11-02-selective-correction/README.md),
 [spread](validation-data/triad-v3/2026-11-02-spread/README.md), and
 [−60 dB-Hz](validation-data/triad-v3/2026-11-02-minus60/README.md) records.
 The maintained [v3 study page](triad-v3.md) describes the implementation and
@@ -147,6 +180,10 @@ execution path.
    identity matches. Invalidate on changed key, epoch, waveform, coordinates,
    search, model, variance, or dimensions; never reuse observation-dependent
    packed data or a prior posterior across changed inputs.
+   Use the bounded batched retention audit for saved statistics: its measured
+   48.7× scalar-analysis speedup preserved the complete report on one high10
+   workspace. This improves evidence processing, not receiver sensitivity;
+   reusing it avoids repeating an unchanged physical campaign.
 3. Check the memory plan before increasing batch, duration, block count, or
    hypothesis count. Bound CPU jobs and GPU batches to available memory and
    avoid overlapping timing-sensitive work on a shared device. Record OOM,
@@ -225,6 +262,7 @@ acquisition or long-span evidence.
 | --- | --- | --- |
 | Conditional noise or actual-noisy likelihood comparisons | [`triad-conditional-sweep.py`](../tools/triad-conditional-sweep.py), [`triad_gaussian_window.py`](../tools/triad_gaussian_window.py) | Reuses matching exported statistics; the conditional mode is model-conditional and does not add independent paths. |
 | Static-frequency or phase/OU scoring | [`triad-static-frequency-study.py`](../tools/triad-static-frequency-study.py), [`triad-rbpf-study.py`](../tools/triad-rbpf-study.py) | Actual-noisy modes score saved noisy observations; candidate banks, controls and calibration remain explicit. |
+| Validate and summarize selective correction evidence | [`analyze.py`](validation-data/triad-v3/2026-11-02-selective-correction/reproduction/analyze.py) | Uses bounded `retention_batch.py` by default. It preserves every exported block and row, verifies hashes/ranks/calendars, and separates noiseless projection from receiver admission. Source-bound development, holdout and long-span audits are recorded in the [reproduction guide](validation-data/triad-v3/2026-11-02-selective-correction/reproduction/README.md); analysis speed is not receiver sensitivity evidence. |
 | Reusable design and resident scoring state | [`triad_state_workspace.py`](../tools/triad_state_workspace.py), [`triad_prepared_observation.py`](../tools/triad_prepared_observation.py), [`triad_gaussian_prepared.py`](../tools/triad_gaussian_prepared.py), [`triad_scan_workspace.py`](../tools/triad_scan_workspace.py), [`triad-scan-workspace.py` (CLI)](../tools/triad-scan-workspace.py) | Cache only public design or identical-input work covered by the cache identity. Reuse does not make inputs independent or validate a changed basis. |
 | Performance screening | [`triad-profile.py`](../tools/triad-profile.py), [`triad-optimization-study.py`](../tools/triad-optimization-study.py), [`triad-resident-campaign.py`](../tools/triad-resident-campaign.py), [`triad-consumer-profile.py`](../tools/triad-consumer-profile.py) | Defaults can be large: profile uses CUDA/512 phase states, optimization can scan the whole export, resident campaign defaults to 8×8 batches and a 12-GiB limit, and consumer sustain repeats 4,000 times. Set explicit small dimensions: optimization uses `--max-blocks` (`0` means the whole export); profile uses `--blocks`. A diagnostic prefix cannot qualify whole-span behavior. |
 | Bounded local process groups | [`triad_bounded_run.py`](../tools/triad_bounded_run.py) | Keeps a timeout and process-group watchdog for a single local job. |

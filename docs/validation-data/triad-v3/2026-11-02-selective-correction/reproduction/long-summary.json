@@ -1,0 +1,4176 @@
+{
+  "schema": "triad-selective-corrected-long-summary-v1",
+  "state": "accepted_audit_summary_with_two_noiseless_refinement_diagnostics",
+  "reproducer_sha256": "abeda32b839f6e4d06db4da307dd5781592cc2649b56494ed1169259e59f6d06",
+  "audits": {
+    "long-replay": {
+      "accepted_audit": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/analysis/long-replay-analysis.json",
+      "accepted_audit_sha256": "7856b2695bc1e1b3c25bedefcd06715d54f134a0049b488bf25f25274e98e245",
+      "analyzer_sha256": "45f4960da40c216c07be8a632182756679a315c5d6ad645506fe102b17b7477e",
+      "retention_source_bindings": {
+        "batch_module_sha256": "5ca0cd5fe9d84bf629999a1621cf5c9799d3fd4e6629e5fc8e84a128676989f9",
+        "scalar_reference_sha256": "d5563ed8106589de0d48d0e7277ca1f003b647e25797d6fdff7bb91731707111",
+        "scalar_reference_path": "/home/user/___quick/p/_cur/dataPump/pumpModem/docs/validation-data/triad-v3/2026-11-02-selective/reproduction/retention.py",
+        "arithmetic": "NumPy complex128/float64 batched eigh and einsum; left-to-right FP64 block-energy accumulation",
+        "scope": "All blocks, fixed candidate over full observation; identical nominal Gram eigenvalue, nullspace, energy and rank policies; floating-point operation ordering can differ."
+      },
+      "workspace_count": 20,
+      "paired_path_count": 8,
+      "cells": [
+        {
+          "model": "legacy-allpass",
+          "modulation": "each-25",
+          "source_count": 4,
+          "paths": [
+            {
+              "source": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/long-replay/stable850-m60/legacy-allpass/each-25/signal/path-80000",
+              "geometry": {
+                "manifest_sha256": "5a42e86022b37b7f7904a8f5dca1a293942288dcbb3fd7a540369be14570f439",
+                "sample_rate_hz": 0.25,
+                "sample_count": 18368201,
+                "capture_seconds": 73472804.0,
+                "requested_active_seconds": 73440000,
+                "actual_source_elapsed_seconds": 73440183.60000001,
+                "source_samples": 18366718,
+                "source_support_seconds": 73466872.0,
+                "channel_tail_samples": 1480,
+                "natural_complete_samples": 18368199,
+                "public_calendar_padding_samples": 2
+              },
+              "post_over_pre_signal_energy_ratio": 0.9872991762607286,
+              "sampled_signal_energy_samples": 18122699.936516393,
+              "sampled_signal_energy_seconds": 72490799.74606557,
+              "correct_projection_fraction": 0.9486794673187501,
+              "wrong_projection_fraction": 0.054113359844182383,
+              "correct_projection_over_pre_selective_energy": 0.9366304566191562,
+              "wrong_projection_over_pre_selective_energy": 0.05342607559885523
+            },
+            {
+              "source": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/long-replay/stable850-m60/legacy-allpass/each-25/signal/path-80001",
+              "geometry": {
+                "manifest_sha256": "2a4b20dad07d9bac81a615ffd893c2f5b82ecf6da63b81221451d060f3534425",
+                "sample_rate_hz": 0.25,
+                "sample_count": 18368201,
+                "capture_seconds": 73472804.0,
+                "requested_active_seconds": 73440000,
+                "actual_source_elapsed_seconds": 73440183.60000001,
+                "source_samples": 18366718,
+                "source_support_seconds": 73466872.0,
+                "channel_tail_samples": 1479,
+                "natural_complete_samples": 18368198,
+                "public_calendar_padding_samples": 3
+              },
+              "post_over_pre_signal_energy_ratio": 1.0915677015292526,
+              "sampled_signal_energy_samples": 20036892.27060919,
+              "sampled_signal_energy_seconds": 80147569.08243676,
+              "correct_projection_fraction": 0.9510754891028299,
+              "wrong_projection_fraction": 0.05415396183371483,
+              "correct_projection_over_pre_selective_energy": 1.0381632856208045,
+              "wrong_projection_over_pre_selective_energy": 0.059112715647532024
+            },
+            {
+              "source": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/long-replay-resume/stable850-m60/legacy-allpass/each-25/signal/path-80002",
+              "geometry": {
+                "manifest_sha256": "8322a52cc0b6ce28e3d64949ab59f37bc9a0a307718b9432dc3f646f91cc3efa",
+                "sample_rate_hz": 0.25,
+                "sample_count": 18368201,
+                "capture_seconds": 73472804.0,
+                "requested_active_seconds": 73440000,
+                "actual_source_elapsed_seconds": 73440183.60000001,
+                "source_samples": 18366718,
+                "source_support_seconds": 73466872.0,
+                "channel_tail_samples": 1480,
+                "natural_complete_samples": 18368199,
+                "public_calendar_padding_samples": 2
+              },
+              "post_over_pre_signal_energy_ratio": 1.0382363398183405,
+              "sampled_signal_energy_samples": 19057582.39360041,
+              "sampled_signal_energy_seconds": 76230329.57440165,
+              "correct_projection_fraction": 0.9488867435250659,
+              "wrong_projection_fraction": 0.05408758907963667,
+              "correct_projection_over_pre_selective_energy": 0.985168699499356,
+              "wrong_projection_over_pre_selective_energy": 0.05615570051562601
+            },
+            {
+              "source": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/long-replay-resume/stable850-m60/legacy-allpass/each-25/signal/path-80003",
+              "geometry": {
+                "manifest_sha256": "5855641b3940ff54afeecb19185b1ae8cbb4742590cac8dd5724731953d94c01",
+                "sample_rate_hz": 0.25,
+                "sample_count": 18368201,
+                "capture_seconds": 73472804.0,
+                "requested_active_seconds": 73440000,
+                "actual_source_elapsed_seconds": 73440183.60000001,
+                "source_samples": 18366718,
+                "source_support_seconds": 73466872.0,
+                "channel_tail_samples": 1480,
+                "natural_complete_samples": 18368199,
+                "public_calendar_padding_samples": 2
+              },
+              "post_over_pre_signal_energy_ratio": 0.8630082103265587,
+              "sampled_signal_energy_samples": 15841323.036878195,
+              "sampled_signal_energy_seconds": 63365292.14751278,
+              "correct_projection_fraction": 0.9477299916330402,
+              "wrong_projection_fraction": 0.0533861516646982,
+              "correct_projection_over_pre_selective_energy": 0.8178987639520836,
+              "wrong_projection_over_pre_selective_energy": 0.0460726872043762
+            }
+          ],
+          "energy_projection_ranges": {
+            "post_over_pre_signal_energy_ratio": [
+              0.8630082103265587,
+              1.0915677015292526
+            ],
+            "correct_projection_fraction": [
+              0.9477299916330402,
+              0.9510754891028299
+            ],
+            "wrong_projection_fraction": [
+              0.0533861516646982,
+              0.05415396183371483
+            ],
+            "correct_projection_over_pre_selective_energy": [
+              0.8178987639520836,
+              1.0381632856208045
+            ],
+            "wrong_projection_over_pre_selective_energy": [
+              0.0460726872043762,
+              0.059112715647532024
+            ]
+          }
+        },
+        {
+          "model": "legacy-allpass",
+          "modulation": "each-65",
+          "source_count": 4,
+          "paths": [
+            {
+              "source": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/long-replay-resume/stable850-m60/legacy-allpass/each-65/signal/path-80000",
+              "geometry": {
+                "manifest_sha256": "ea5816051aa6b47a46190176f2ac068c6e77ed9116fe270c08f48ee56955a236",
+                "sample_rate_hz": 0.25,
+                "sample_count": 18368201,
+                "capture_seconds": 73472804.0,
+                "requested_active_seconds": 73440000,
+                "actual_source_elapsed_seconds": 73440183.60000001,
+                "source_samples": 18366718,
+                "source_support_seconds": 73466872.0,
+                "channel_tail_samples": 1480,
+                "natural_complete_samples": 18368199,
+                "public_calendar_padding_samples": 2
+              },
+              "post_over_pre_signal_energy_ratio": 1.222782172156194,
+              "sampled_signal_energy_samples": 22445186.754472483,
+              "sampled_signal_energy_seconds": 89780747.01788993,
+              "correct_projection_fraction": 0.720047533487462,
+              "wrong_projection_fraction": 0.042188249683246,
+              "correct_projection_over_pre_selective_energy": 0.8804612870534213,
+              "wrong_projection_over_pre_selective_energy": 0.05158703958714228
+            },
+            {
+              "source": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/long-replay-resume/stable850-m60/legacy-allpass/each-65/signal/path-80001",
+              "geometry": {
+                "manifest_sha256": "7720f2306fc5b69cc9114a6ae9e607382f1acfbe1eecc781bf4e8c3a0ad13f54",
+                "sample_rate_hz": 0.25,
+                "sample_count": 18368201,
+                "capture_seconds": 73472804.0,
+                "requested_active_seconds": 73440000,
+                "actual_source_elapsed_seconds": 73440183.60000001,
+                "source_samples": 18366718,
+                "source_support_seconds": 73466872.0,
+                "channel_tail_samples": 1479,
+                "natural_complete_samples": 18368198,
+                "public_calendar_padding_samples": 3
+              },
+              "post_over_pre_signal_energy_ratio": 1.497264340629475,
+              "sampled_signal_energy_samples": 27483887.853948127,
+              "sampled_signal_energy_seconds": 109935551.41579251,
+              "correct_projection_fraction": 0.7590307861264318,
+              "wrong_projection_fraction": 0.04448490357806454,
+              "correct_projection_over_pre_selective_energy": 1.1364697295072514,
+              "wrong_projection_over_pre_selective_energy": 0.06660565982378756
+            },
+            {
+              "source": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/long-replay-resume/stable850-m60/legacy-allpass/each-65/signal/path-80002",
+              "geometry": {
+                "manifest_sha256": "8eab09d70f623c29d500e08e0ac60559a1722ee6751b3a84b6dd994c1ede09df",
+                "sample_rate_hz": 0.25,
+                "sample_count": 18368201,
+                "capture_seconds": 73472804.0,
+                "requested_active_seconds": 73440000,
+                "actual_source_elapsed_seconds": 73440183.60000001,
+                "source_samples": 18366718,
+                "source_support_seconds": 73466872.0,
+                "channel_tail_samples": 1480,
+                "natural_complete_samples": 18368199,
+                "public_calendar_padding_samples": 2
+              },
+              "post_over_pre_signal_energy_ratio": 1.3570007552208605,
+              "sampled_signal_energy_samples": 24908734.850616667,
+              "sampled_signal_energy_seconds": 99634939.40246665,
+              "correct_projection_fraction": 0.7357836486450324,
+              "wrong_projection_fraction": 0.0436018918933105,
+              "correct_projection_over_pre_selective_energy": 0.998458966890609,
+              "wrong_projection_over_pre_selective_energy": 0.05916780022828894
+            },
+            {
+              "source": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/long-replay-resume/stable850-m60/legacy-allpass/each-65/signal/path-80003",
+              "geometry": {
+                "manifest_sha256": "de5010aeb9f122c0a700b972eefe7beeed1f74ed0f92613711733ef8ad503c8d",
+                "sample_rate_hz": 0.25,
+                "sample_count": 18368201,
+                "capture_seconds": 73472804.0,
+                "requested_active_seconds": 73440000,
+                "actual_source_elapsed_seconds": 73440183.60000001,
+                "source_samples": 18366718,
+                "source_support_seconds": 73466872.0,
+                "channel_tail_samples": 1480,
+                "natural_complete_samples": 18368199,
+                "public_calendar_padding_samples": 2
+              },
+              "post_over_pre_signal_energy_ratio": 0.9037372600717437,
+              "sampled_signal_energy_samples": 16588942.846604442,
+              "sampled_signal_energy_seconds": 66355771.38641777,
+              "correct_projection_fraction": 0.662683692088315,
+              "wrong_projection_fraction": 0.03793123180071221,
+              "correct_projection_over_pre_selective_energy": 0.598891944182072,
+              "wrong_projection_over_pre_selective_energy": 0.03427986749871905
+            }
+          ],
+          "energy_projection_ranges": {
+            "post_over_pre_signal_energy_ratio": [
+              0.9037372600717437,
+              1.497264340629475
+            ],
+            "correct_projection_fraction": [
+              0.662683692088315,
+              0.7590307861264318
+            ],
+            "wrong_projection_fraction": [
+              0.03793123180071221,
+              0.04448490357806454
+            ],
+            "correct_projection_over_pre_selective_energy": [
+              0.598891944182072,
+              1.1364697295072514
+            ],
+            "wrong_projection_over_pre_selective_energy": [
+              0.03427986749871905,
+              0.06660565982378756
+            ]
+          }
+        },
+        {
+          "model": "dispersive-dft",
+          "modulation": "each-25",
+          "source_count": 4,
+          "paths": [
+            {
+              "source": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/long-replay-resume/stable850-m60/dispersive-dft/each-25/signal/path-80000",
+              "geometry": {
+                "manifest_sha256": "8894224adce3f8a238ed6f84e2d1341c0eb4793a8ef56b9a17bc5c33ce36b9b3",
+                "sample_rate_hz": 0.25,
+                "sample_count": 18368201,
+                "capture_seconds": 73472804.0,
+                "requested_active_seconds": 73440000,
+                "actual_source_elapsed_seconds": 73440183.60000001,
+                "source_samples": 18366718,
+                "source_support_seconds": 73466872.0,
+                "channel_tail_samples": 1480,
+                "natural_complete_samples": 18368199,
+                "public_calendar_padding_samples": 2
+              },
+              "post_over_pre_signal_energy_ratio": 0.9311403381015966,
+              "sampled_signal_energy_samples": 17091857.617179994,
+              "sampled_signal_energy_seconds": 68367430.46871997,
+              "correct_projection_fraction": 0.9392821459605113,
+              "wrong_projection_fraction": 0.05391432579031712,
+              "correct_projection_over_pre_selective_energy": 0.8746034949626597,
+              "wrong_projection_over_pre_selective_energy": 0.05020180354492677
+            },
+            {
+              "source": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/long-replay-resume/stable850-m60/dispersive-dft/each-25/signal/path-80001",
+              "geometry": {
+                "manifest_sha256": "0547ca2a7a099afe489c5cd6ecb29e80583b290b59bd0a405d2b94c67dad55ec",
+                "sample_rate_hz": 0.25,
+                "sample_count": 18368201,
+                "capture_seconds": 73472804.0,
+                "requested_active_seconds": 73440000,
+                "actual_source_elapsed_seconds": 73440183.60000001,
+                "source_samples": 18366718,
+                "source_support_seconds": 73466872.0,
+                "channel_tail_samples": 1479,
+                "natural_complete_samples": 18368198,
+                "public_calendar_padding_samples": 3
+              },
+              "post_over_pre_signal_energy_ratio": 1.0973673405881725,
+              "sampled_signal_energy_samples": 20143350.846531592,
+              "sampled_signal_energy_seconds": 80573403.38612635,
+              "correct_projection_fraction": 0.9461031427979256,
+              "wrong_projection_fraction": 0.054198137533783504,
+              "correct_projection_over_pre_selective_energy": 1.0382226897340874,
+              "wrong_projection_over_pre_selective_energy": 0.059475266050269454
+            },
+            {
+              "source": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/long-replay-resume/stable850-m60/dispersive-dft/each-25/signal/path-80002",
+              "geometry": {
+                "manifest_sha256": "694a964f8bf5204e330bb75cf28eca1f9d7c247086090b5ce121c333950fd488",
+                "sample_rate_hz": 0.25,
+                "sample_count": 18368201,
+                "capture_seconds": 73472804.0,
+                "requested_active_seconds": 73440000,
+                "actual_source_elapsed_seconds": 73440183.60000001,
+                "source_samples": 18366718,
+                "source_support_seconds": 73466872.0,
+                "channel_tail_samples": 1480,
+                "natural_complete_samples": 18368199,
+                "public_calendar_padding_samples": 2
+              },
+              "post_over_pre_signal_energy_ratio": 1.0511157362276864,
+              "sampled_signal_energy_samples": 19293993.07279128,
+              "sampled_signal_energy_seconds": 77175972.29116511,
+              "correct_projection_fraction": 0.9427509636552712,
+              "wrong_projection_fraction": 0.054077749597605654,
+              "correct_projection_over_pre_selective_energy": 0.9909403732419209,
+              "wrong_projection_over_pre_selective_energy": 0.056841973581826584
+            },
+            {
+              "source": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/long-replay-resume/stable850-m60/dispersive-dft/each-25/signal/path-80003",
+              "geometry": {
+                "manifest_sha256": "f1165af38278e9b8a05c4630106e2fdb62025efffe000869b8696b3c49743d44",
+                "sample_rate_hz": 0.25,
+                "sample_count": 18368201,
+                "capture_seconds": 73472804.0,
+                "requested_active_seconds": 73440000,
+                "actual_source_elapsed_seconds": 73440183.60000001,
+                "source_samples": 18366718,
+                "source_support_seconds": 73466872.0,
+                "channel_tail_samples": 1480,
+                "natural_complete_samples": 18368199,
+                "public_calendar_padding_samples": 2
+              },
+              "post_over_pre_signal_energy_ratio": 0.9053414377947417,
+              "sampled_signal_energy_samples": 16618389.029405735,
+              "sampled_signal_energy_seconds": 66473556.11762294,
+              "correct_projection_fraction": 0.9442070356198924,
+              "wrong_projection_fraction": 0.053307898512336215,
+              "correct_projection_over_pre_selective_energy": 0.8548297552040572,
+              "wrong_projection_over_pre_selective_energy": 0.048261849484976506
+            }
+          ],
+          "energy_projection_ranges": {
+            "post_over_pre_signal_energy_ratio": [
+              0.9053414377947417,
+              1.0973673405881725
+            ],
+            "correct_projection_fraction": [
+              0.9392821459605113,
+              0.9461031427979256
+            ],
+            "wrong_projection_fraction": [
+              0.053307898512336215,
+              0.054198137533783504
+            ],
+            "correct_projection_over_pre_selective_energy": [
+              0.8548297552040572,
+              1.0382226897340874
+            ],
+            "wrong_projection_over_pre_selective_energy": [
+              0.048261849484976506,
+              0.059475266050269454
+            ]
+          }
+        },
+        {
+          "model": "dispersive-dft",
+          "modulation": "each-65",
+          "source_count": 4,
+          "paths": [
+            {
+              "source": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/long-replay-resume/stable850-m60/dispersive-dft/each-65/signal/path-80000",
+              "geometry": {
+                "manifest_sha256": "ffb33ed400f626c338aaafc691edc25e5917fa3bc5ef2fad31c949f3a871666d",
+                "sample_rate_hz": 0.25,
+                "sample_count": 18368201,
+                "capture_seconds": 73472804.0,
+                "requested_active_seconds": 73440000,
+                "actual_source_elapsed_seconds": 73440183.60000001,
+                "source_samples": 18366718,
+                "source_support_seconds": 73466872.0,
+                "channel_tail_samples": 1480,
+                "natural_complete_samples": 18368199,
+                "public_calendar_padding_samples": 2
+              },
+              "post_over_pre_signal_energy_ratio": 1.0759207622074984,
+              "sampled_signal_energy_samples": 19749423.07032303,
+              "sampled_signal_energy_seconds": 78997692.28129213,
+              "correct_projection_fraction": 0.6449508323132129,
+              "wrong_projection_fraction": 0.040210605962526076,
+              "correct_projection_over_pre_selective_energy": 0.6939159910887113,
+              "wrong_projection_over_pre_selective_energy": 0.04326342581602136
+            },
+            {
+              "source": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/long-replay-resume/stable850-m60/dispersive-dft/each-65/signal/path-80001",
+              "geometry": {
+                "manifest_sha256": "3f4091764795ffcc3e9c5f79fe58fbfdf73eb5b94d7cb3447fdc10096965c0cc",
+                "sample_rate_hz": 0.25,
+                "sample_count": 18368201,
+                "capture_seconds": 73472804.0,
+                "requested_active_seconds": 73440000,
+                "actual_source_elapsed_seconds": 73440183.60000001,
+                "source_samples": 18366718,
+                "source_support_seconds": 73466872.0,
+                "channel_tail_samples": 1479,
+                "natural_complete_samples": 18368198,
+                "public_calendar_padding_samples": 3
+              },
+              "post_over_pre_signal_energy_ratio": 1.507081907169161,
+              "sampled_signal_energy_samples": 27664099.78476604,
+              "sampled_signal_energy_seconds": 110656399.13906416,
+              "correct_projection_fraction": 0.7348322773558141,
+              "wrong_projection_fraction": 0.044711506354277245,
+              "correct_projection_over_pre_selective_energy": 1.1074524300068869,
+              "wrong_projection_over_pre_selective_energy": 0.06738390226881195
+            },
+            {
+              "source": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/long-replay-resume/stable850-m60/dispersive-dft/each-65/signal/path-80002",
+              "geometry": {
+                "manifest_sha256": "325675dab66fbde133d61d743de9a42a1ade36d5894a10cab435f533d9033eb4",
+                "sample_rate_hz": 0.25,
+                "sample_count": 18368201,
+                "capture_seconds": 73472804.0,
+                "requested_active_seconds": 73440000,
+                "actual_source_elapsed_seconds": 73440183.60000001,
+                "source_samples": 18366718,
+                "source_support_seconds": 73466872.0,
+                "channel_tail_samples": 1480,
+                "natural_complete_samples": 18368199,
+                "public_calendar_padding_samples": 2
+              },
+              "post_over_pre_signal_energy_ratio": 1.3887829739003157,
+              "sampled_signal_energy_samples": 25492120.56724307,
+              "sampled_signal_energy_seconds": 101968482.26897228,
+              "correct_projection_fraction": 0.7072455934578737,
+              "wrong_projection_fraction": 0.04374000063939042,
+              "correct_projection_over_pre_selective_energy": 0.9822106385603497,
+              "wrong_projection_over_pre_selective_energy": 0.060745368166376205
+            },
+            {
+              "source": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/long-replay-resume/stable850-m60/dispersive-dft/each-65/signal/path-80003",
+              "geometry": {
+                "manifest_sha256": "5ee22bda9f3380798aca1a8f7d7f5ab0ddc8cccd25955e296e20d0f2afecb43d",
+                "sample_rate_hz": 0.25,
+                "sample_count": 18368201,
+                "capture_seconds": 73472804.0,
+                "requested_active_seconds": 73440000,
+                "actual_source_elapsed_seconds": 73440183.60000001,
+                "source_samples": 18366718,
+                "source_support_seconds": 73466872.0,
+                "channel_tail_samples": 1480,
+                "natural_complete_samples": 18368199,
+                "public_calendar_padding_samples": 2
+              },
+              "post_over_pre_signal_energy_ratio": 1.0128169558460358,
+              "sampled_signal_energy_samples": 18591202.705601063,
+              "sampled_signal_energy_seconds": 74364810.82240424,
+              "correct_projection_fraction": 0.662960875221936,
+              "wrong_projection_fraction": 0.038647447996590464,
+              "correct_projection_over_pre_selective_energy": 0.6714580154871106,
+              "wrong_projection_over_pre_selective_energy": 0.03914279063111341
+            }
+          ],
+          "energy_projection_ranges": {
+            "post_over_pre_signal_energy_ratio": [
+              1.0128169558460358,
+              1.507081907169161
+            ],
+            "correct_projection_fraction": [
+              0.6449508323132129,
+              0.7348322773558141
+            ],
+            "wrong_projection_fraction": [
+              0.038647447996590464,
+              0.044711506354277245
+            ],
+            "correct_projection_over_pre_selective_energy": [
+              0.6714580154871106,
+              1.1074524300068869
+            ],
+            "wrong_projection_over_pre_selective_energy": [
+              0.03914279063111341,
+              0.06738390226881195
+            ]
+          }
+        },
+        {
+          "model": "shared-off-bypass",
+          "modulation": "off",
+          "source_count": 4,
+          "paths": [
+            {
+              "source": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/long-replay-resume/stable850-m60/legacy-allpass/off/signal/path-80000",
+              "geometry": {
+                "manifest_sha256": "9f535ec49369df8132dce194ac5720ab03e41788f2257bea7fb7fed6b8a20c35",
+                "sample_rate_hz": 0.25,
+                "sample_count": 18368201,
+                "capture_seconds": 73472804.0,
+                "requested_active_seconds": 73440000,
+                "actual_source_elapsed_seconds": 73440183.60000001,
+                "source_samples": 18366718,
+                "source_support_seconds": 73466872.0,
+                "channel_tail_samples": 1480,
+                "natural_complete_samples": 18368199,
+                "public_calendar_padding_samples": 2
+              },
+              "post_over_pre_signal_energy_ratio": null,
+              "sampled_signal_energy_samples": 18355834.150651753,
+              "sampled_signal_energy_seconds": 73423336.60260701,
+              "correct_projection_fraction": 0.9999663840454406,
+              "wrong_projection_fraction": 0.05675576610980847,
+              "correct_projection_over_pre_selective_energy": null,
+              "wrong_projection_over_pre_selective_energy": null
+            },
+            {
+              "source": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/long-replay-resume/stable850-m60/legacy-allpass/off/signal/path-80001",
+              "geometry": {
+                "manifest_sha256": "ae7912976f9483f74923c1daf607c4c786a250c02b8969d40103ff15e7618e6e",
+                "sample_rate_hz": 0.25,
+                "sample_count": 18368201,
+                "capture_seconds": 73472804.0,
+                "requested_active_seconds": 73440000,
+                "actual_source_elapsed_seconds": 73440183.60000001,
+                "source_samples": 18366718,
+                "source_support_seconds": 73466872.0,
+                "channel_tail_samples": 1479,
+                "natural_complete_samples": 18368198,
+                "public_calendar_padding_samples": 3
+              },
+              "post_over_pre_signal_energy_ratio": null,
+              "sampled_signal_energy_samples": 18356069.20444547,
+              "sampled_signal_energy_seconds": 73424276.81778188,
+              "correct_projection_fraction": 0.9999703045680964,
+              "wrong_projection_fraction": 0.05668456812368262,
+              "correct_projection_over_pre_selective_energy": null,
+              "wrong_projection_over_pre_selective_energy": null
+            },
+            {
+              "source": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/long-replay-resume/stable850-m60/legacy-allpass/off/signal/path-80002",
+              "geometry": {
+                "manifest_sha256": "836f0da585b4ac090e66b85f1ed455649a45988f5d1f3b77112fd21afdf5a921",
+                "sample_rate_hz": 0.25,
+                "sample_count": 18368201,
+                "capture_seconds": 73472804.0,
+                "requested_active_seconds": 73440000,
+                "actual_source_elapsed_seconds": 73440183.60000001,
+                "source_samples": 18366718,
+                "source_support_seconds": 73466872.0,
+                "channel_tail_samples": 1480,
+                "natural_complete_samples": 18368199,
+                "public_calendar_padding_samples": 2
+              },
+              "post_over_pre_signal_energy_ratio": null,
+              "sampled_signal_energy_samples": 18355726.59394559,
+              "sampled_signal_energy_seconds": 73422906.37578236,
+              "correct_projection_fraction": 0.9999669121882393,
+              "wrong_projection_fraction": 0.05658434183396537,
+              "correct_projection_over_pre_selective_energy": null,
+              "wrong_projection_over_pre_selective_energy": null
+            },
+            {
+              "source": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/long-replay-resume/stable850-m60/legacy-allpass/off/signal/path-80003",
+              "geometry": {
+                "manifest_sha256": "1be472ef6a72cac0047aa80509bc600a5d32d4a24fc16408ca5905cf10a60d39",
+                "sample_rate_hz": 0.25,
+                "sample_count": 18368201,
+                "capture_seconds": 73472804.0,
+                "requested_active_seconds": 73440000,
+                "actual_source_elapsed_seconds": 73440183.60000001,
+                "source_samples": 18366718,
+                "source_support_seconds": 73466872.0,
+                "channel_tail_samples": 1480,
+                "natural_complete_samples": 18368199,
+                "public_calendar_padding_samples": 2
+              },
+              "post_over_pre_signal_energy_ratio": null,
+              "sampled_signal_energy_samples": 18355935.4909062,
+              "sampled_signal_energy_seconds": 73423741.9636248,
+              "correct_projection_fraction": 0.9999795457458818,
+              "wrong_projection_fraction": 0.05621884288414621,
+              "correct_projection_over_pre_selective_energy": null,
+              "wrong_projection_over_pre_selective_energy": null
+            }
+          ],
+          "energy_projection_ranges": {
+            "correct_projection_fraction": [
+              0.9999663840454406,
+              0.9999795457458818
+            ],
+            "wrong_projection_fraction": [
+              0.05621884288414621,
+              0.05675576610980847
+            ]
+          }
+        }
+      ],
+      "receiver_counts": [
+        {
+          "name": "stable850-m60-cn0-60-signal-legacy-allpass-each-25",
+          "model": "legacy-allpass",
+          "modulation": "each-25",
+          "report_sha256": "5b6e2e972f12d69f433342297d338eb2dd4b923c17b21d1b345128754859e03d",
+          "score_npz_sha256": "512168f94de03bf3d8234cd8b087698dea703dd7e99734d016b8254b66559ba9",
+          "method": "static-fft-ucb",
+          "strict_threshold_nats": [
+            22.72106338958574
+          ],
+          "counts": [
+            {
+              "gate": "relaxed",
+              "control": "signal",
+              "cn0_db_hz": -60,
+              "counts": {
+                "trials": 4,
+                "correct_accepted": 4,
+                "wrong_accepted": 0,
+                "missed": 0,
+                "raw_correct": 4,
+                "interval_suppressed_due_to_failed_control_paths": false
+              },
+              "equal_bit_population_event_bounds": {
+                "event": "correct_accepted",
+                "estimate": 1.0,
+                "lower_one_sided_95": 0.4728708045015879,
+                "upper_one_sided_95": 1.0,
+                "lower_method": "equal-stratum all-success AM-GM",
+                "upper_method": "Bonferroni per-bit CP",
+                "per_bit": {
+                  "0": {
+                    "successes": 2,
+                    "trials": 2,
+                    "fraction": 1.0,
+                    "lower_one_sided_95": 0.22360679774997896,
+                    "upper_one_sided_95": 1.0
+                  },
+                  "1": {
+                    "successes": 2,
+                    "trials": 2,
+                    "fraction": 1.0,
+                    "lower_one_sided_95": 0.22360679774997896,
+                    "upper_one_sided_95": 1.0
+                  }
+                }
+              },
+              "equal_bit_population_outcome_bounds": {
+                "correct_accepted": {
+                  "event": "correct_accepted",
+                  "estimate": 1.0,
+                  "lower_one_sided_95": 0.4728708045015879,
+                  "upper_one_sided_95": 1.0,
+                  "lower_method": "equal-stratum all-success AM-GM",
+                  "upper_method": "Bonferroni per-bit CP",
+                  "per_bit": {
+                    "0": {
+                      "successes": 2,
+                      "trials": 2,
+                      "fraction": 1.0,
+                      "lower_one_sided_95": 0.22360679774997896,
+                      "upper_one_sided_95": 1.0
+                    },
+                    "1": {
+                      "successes": 2,
+                      "trials": 2,
+                      "fraction": 1.0,
+                      "lower_one_sided_95": 0.22360679774997896,
+                      "upper_one_sided_95": 1.0
+                    }
+                  }
+                },
+                "wrong_accepted": {
+                  "event": "wrong_accepted",
+                  "estimate": 0.0,
+                  "lower_one_sided_95": 0.0,
+                  "upper_one_sided_95": 0.5271291954984121,
+                  "lower_method": "Bonferroni per-bit CP",
+                  "upper_method": "equal-stratum all-failure AM-GM complement",
+                  "per_bit": {
+                    "0": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    },
+                    "1": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    }
+                  }
+                },
+                "missed": {
+                  "event": "missed",
+                  "estimate": 0.0,
+                  "lower_one_sided_95": 0.0,
+                  "upper_one_sided_95": 0.5271291954984121,
+                  "lower_method": "Bonferroni per-bit CP",
+                  "upper_method": "equal-stratum all-failure AM-GM complement",
+                  "per_bit": {
+                    "0": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    },
+                    "1": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "gate": "strict",
+              "control": "signal",
+              "cn0_db_hz": -60,
+              "counts": {
+                "trials": 4,
+                "correct_accepted": 4,
+                "wrong_accepted": 0,
+                "missed": 0,
+                "raw_correct": 4,
+                "interval_suppressed_due_to_failed_control_paths": false
+              },
+              "equal_bit_population_event_bounds": {
+                "event": "correct_accepted",
+                "estimate": 1.0,
+                "lower_one_sided_95": 0.4728708045015879,
+                "upper_one_sided_95": 1.0,
+                "lower_method": "equal-stratum all-success AM-GM",
+                "upper_method": "Bonferroni per-bit CP",
+                "per_bit": {
+                  "0": {
+                    "successes": 2,
+                    "trials": 2,
+                    "fraction": 1.0,
+                    "lower_one_sided_95": 0.22360679774997896,
+                    "upper_one_sided_95": 1.0
+                  },
+                  "1": {
+                    "successes": 2,
+                    "trials": 2,
+                    "fraction": 1.0,
+                    "lower_one_sided_95": 0.22360679774997896,
+                    "upper_one_sided_95": 1.0
+                  }
+                }
+              },
+              "equal_bit_population_outcome_bounds": {
+                "correct_accepted": {
+                  "event": "correct_accepted",
+                  "estimate": 1.0,
+                  "lower_one_sided_95": 0.4728708045015879,
+                  "upper_one_sided_95": 1.0,
+                  "lower_method": "equal-stratum all-success AM-GM",
+                  "upper_method": "Bonferroni per-bit CP",
+                  "per_bit": {
+                    "0": {
+                      "successes": 2,
+                      "trials": 2,
+                      "fraction": 1.0,
+                      "lower_one_sided_95": 0.22360679774997896,
+                      "upper_one_sided_95": 1.0
+                    },
+                    "1": {
+                      "successes": 2,
+                      "trials": 2,
+                      "fraction": 1.0,
+                      "lower_one_sided_95": 0.22360679774997896,
+                      "upper_one_sided_95": 1.0
+                    }
+                  }
+                },
+                "wrong_accepted": {
+                  "event": "wrong_accepted",
+                  "estimate": 0.0,
+                  "lower_one_sided_95": 0.0,
+                  "upper_one_sided_95": 0.5271291954984121,
+                  "lower_method": "Bonferroni per-bit CP",
+                  "upper_method": "equal-stratum all-failure AM-GM complement",
+                  "per_bit": {
+                    "0": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    },
+                    "1": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    }
+                  }
+                },
+                "missed": {
+                  "event": "missed",
+                  "estimate": 0.0,
+                  "lower_one_sided_95": 0.0,
+                  "upper_one_sided_95": 0.5271291954984121,
+                  "lower_method": "Bonferroni per-bit CP",
+                  "upper_method": "equal-stratum all-failure AM-GM complement",
+                  "per_bit": {
+                    "0": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    },
+                    "1": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "actual_score_pairs": [
+            {
+              "input": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/long-replay/stable850-m60/legacy-allpass/each-25/signal/path-80000",
+              "truth_bit": 0,
+              "scores": [
+                44.24448037123704,
+                -2.027437234079396
+              ],
+              "strict_best_score_margin_nats": 21.523416981651298
+            },
+            {
+              "input": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/long-replay/stable850-m60/legacy-allpass/each-25/signal/path-80001",
+              "truth_bit": 1,
+              "scores": [
+                -4.052009036003774,
+                72.65201820800723
+              ],
+              "strict_best_score_margin_nats": 49.9309548184215
+            },
+            {
+              "input": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/long-replay-resume/stable850-m60/legacy-allpass/each-25/signal/path-80002",
+              "truth_bit": 0,
+              "scores": [
+                44.90552408394218,
+                -3.6096997582924093
+              ],
+              "strict_best_score_margin_nats": 22.184460694356442
+            },
+            {
+              "input": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/long-replay-resume/stable850-m60/legacy-allpass/each-25/signal/path-80003",
+              "truth_bit": 1,
+              "scores": [
+                -4.3605892457517665,
+                48.157743328561025
+              ],
+              "strict_best_score_margin_nats": 25.436679938975285
+            }
+          ]
+        },
+        {
+          "name": "stable850-m60-cn0-60-signal-legacy-allpass-each-65",
+          "model": "legacy-allpass",
+          "modulation": "each-65",
+          "report_sha256": "2abb4a593948f2341a4e5610e3f94cef4b5ce6e0ab733ea543556a9736dfec38",
+          "score_npz_sha256": "014600f9db07756f06497f06befd03a2de81cabc861484c475504e277dec4562",
+          "method": "static-fft-ucb",
+          "strict_threshold_nats": [
+            22.72106338958574
+          ],
+          "counts": [
+            {
+              "gate": "relaxed",
+              "control": "signal",
+              "cn0_db_hz": -60,
+              "counts": {
+                "trials": 4,
+                "correct_accepted": 4,
+                "wrong_accepted": 0,
+                "missed": 0,
+                "raw_correct": 4,
+                "interval_suppressed_due_to_failed_control_paths": false
+              },
+              "equal_bit_population_event_bounds": {
+                "event": "correct_accepted",
+                "estimate": 1.0,
+                "lower_one_sided_95": 0.4728708045015879,
+                "upper_one_sided_95": 1.0,
+                "lower_method": "equal-stratum all-success AM-GM",
+                "upper_method": "Bonferroni per-bit CP",
+                "per_bit": {
+                  "0": {
+                    "successes": 2,
+                    "trials": 2,
+                    "fraction": 1.0,
+                    "lower_one_sided_95": 0.22360679774997896,
+                    "upper_one_sided_95": 1.0
+                  },
+                  "1": {
+                    "successes": 2,
+                    "trials": 2,
+                    "fraction": 1.0,
+                    "lower_one_sided_95": 0.22360679774997896,
+                    "upper_one_sided_95": 1.0
+                  }
+                }
+              },
+              "equal_bit_population_outcome_bounds": {
+                "correct_accepted": {
+                  "event": "correct_accepted",
+                  "estimate": 1.0,
+                  "lower_one_sided_95": 0.4728708045015879,
+                  "upper_one_sided_95": 1.0,
+                  "lower_method": "equal-stratum all-success AM-GM",
+                  "upper_method": "Bonferroni per-bit CP",
+                  "per_bit": {
+                    "0": {
+                      "successes": 2,
+                      "trials": 2,
+                      "fraction": 1.0,
+                      "lower_one_sided_95": 0.22360679774997896,
+                      "upper_one_sided_95": 1.0
+                    },
+                    "1": {
+                      "successes": 2,
+                      "trials": 2,
+                      "fraction": 1.0,
+                      "lower_one_sided_95": 0.22360679774997896,
+                      "upper_one_sided_95": 1.0
+                    }
+                  }
+                },
+                "wrong_accepted": {
+                  "event": "wrong_accepted",
+                  "estimate": 0.0,
+                  "lower_one_sided_95": 0.0,
+                  "upper_one_sided_95": 0.5271291954984121,
+                  "lower_method": "Bonferroni per-bit CP",
+                  "upper_method": "equal-stratum all-failure AM-GM complement",
+                  "per_bit": {
+                    "0": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    },
+                    "1": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    }
+                  }
+                },
+                "missed": {
+                  "event": "missed",
+                  "estimate": 0.0,
+                  "lower_one_sided_95": 0.0,
+                  "upper_one_sided_95": 0.5271291954984121,
+                  "lower_method": "Bonferroni per-bit CP",
+                  "upper_method": "equal-stratum all-failure AM-GM complement",
+                  "per_bit": {
+                    "0": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    },
+                    "1": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "gate": "strict",
+              "control": "signal",
+              "cn0_db_hz": -60,
+              "counts": {
+                "trials": 4,
+                "correct_accepted": 4,
+                "wrong_accepted": 0,
+                "missed": 0,
+                "raw_correct": 4,
+                "interval_suppressed_due_to_failed_control_paths": false
+              },
+              "equal_bit_population_event_bounds": {
+                "event": "correct_accepted",
+                "estimate": 1.0,
+                "lower_one_sided_95": 0.4728708045015879,
+                "upper_one_sided_95": 1.0,
+                "lower_method": "equal-stratum all-success AM-GM",
+                "upper_method": "Bonferroni per-bit CP",
+                "per_bit": {
+                  "0": {
+                    "successes": 2,
+                    "trials": 2,
+                    "fraction": 1.0,
+                    "lower_one_sided_95": 0.22360679774997896,
+                    "upper_one_sided_95": 1.0
+                  },
+                  "1": {
+                    "successes": 2,
+                    "trials": 2,
+                    "fraction": 1.0,
+                    "lower_one_sided_95": 0.22360679774997896,
+                    "upper_one_sided_95": 1.0
+                  }
+                }
+              },
+              "equal_bit_population_outcome_bounds": {
+                "correct_accepted": {
+                  "event": "correct_accepted",
+                  "estimate": 1.0,
+                  "lower_one_sided_95": 0.4728708045015879,
+                  "upper_one_sided_95": 1.0,
+                  "lower_method": "equal-stratum all-success AM-GM",
+                  "upper_method": "Bonferroni per-bit CP",
+                  "per_bit": {
+                    "0": {
+                      "successes": 2,
+                      "trials": 2,
+                      "fraction": 1.0,
+                      "lower_one_sided_95": 0.22360679774997896,
+                      "upper_one_sided_95": 1.0
+                    },
+                    "1": {
+                      "successes": 2,
+                      "trials": 2,
+                      "fraction": 1.0,
+                      "lower_one_sided_95": 0.22360679774997896,
+                      "upper_one_sided_95": 1.0
+                    }
+                  }
+                },
+                "wrong_accepted": {
+                  "event": "wrong_accepted",
+                  "estimate": 0.0,
+                  "lower_one_sided_95": 0.0,
+                  "upper_one_sided_95": 0.5271291954984121,
+                  "lower_method": "Bonferroni per-bit CP",
+                  "upper_method": "equal-stratum all-failure AM-GM complement",
+                  "per_bit": {
+                    "0": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    },
+                    "1": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    }
+                  }
+                },
+                "missed": {
+                  "event": "missed",
+                  "estimate": 0.0,
+                  "lower_one_sided_95": 0.0,
+                  "upper_one_sided_95": 0.5271291954984121,
+                  "lower_method": "Bonferroni per-bit CP",
+                  "upper_method": "equal-stratum all-failure AM-GM complement",
+                  "per_bit": {
+                    "0": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    },
+                    "1": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "actual_score_pairs": [
+            {
+              "input": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/long-replay-resume/stable850-m60/legacy-allpass/each-65/signal/path-80000",
+              "truth_bit": 0,
+              "scores": [
+                43.19169215334837,
+                -2.0140595412858735
+              ],
+              "strict_best_score_margin_nats": 20.47062876376263
+            },
+            {
+              "input": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/long-replay-resume/stable850-m60/legacy-allpass/each-65/signal/path-80001",
+              "truth_bit": 1,
+              "scores": [
+                -4.051735701476457,
+                78.44428365817367
+              ],
+              "strict_best_score_margin_nats": 55.72322026858794
+            },
+            {
+              "input": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/long-replay-resume/stable850-m60/legacy-allpass/each-65/signal/path-80002",
+              "truth_bit": 0,
+              "scores": [
+                44.925196333944356,
+                -3.608054336285551
+              ],
+              "strict_best_score_margin_nats": 22.204132944358616
+            },
+            {
+              "input": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/long-replay-resume/stable850-m60/legacy-allpass/each-65/signal/path-80003",
+              "truth_bit": 1,
+              "scores": [
+                -4.360000983670737,
+                33.46314991594078
+              ],
+              "strict_best_score_margin_nats": 10.742086526355042
+            }
+          ]
+        },
+        {
+          "name": "stable850-m60-cn0-60-signal-dispersive-dft-each-25",
+          "model": "dispersive-dft",
+          "modulation": "each-25",
+          "report_sha256": "856bde5ab4bcc5b7d8b0c65716b9c2807d526891249b901042ff29acf356dea0",
+          "score_npz_sha256": "2a6592a68011746769fe70dc9b32bfb72a419b0f568c0689c5cda01749ef3286",
+          "method": "static-fft-ucb",
+          "strict_threshold_nats": [
+            22.72106338958574
+          ],
+          "counts": [
+            {
+              "gate": "relaxed",
+              "control": "signal",
+              "cn0_db_hz": -60,
+              "counts": {
+                "trials": 4,
+                "correct_accepted": 4,
+                "wrong_accepted": 0,
+                "missed": 0,
+                "raw_correct": 4,
+                "interval_suppressed_due_to_failed_control_paths": false
+              },
+              "equal_bit_population_event_bounds": {
+                "event": "correct_accepted",
+                "estimate": 1.0,
+                "lower_one_sided_95": 0.4728708045015879,
+                "upper_one_sided_95": 1.0,
+                "lower_method": "equal-stratum all-success AM-GM",
+                "upper_method": "Bonferroni per-bit CP",
+                "per_bit": {
+                  "0": {
+                    "successes": 2,
+                    "trials": 2,
+                    "fraction": 1.0,
+                    "lower_one_sided_95": 0.22360679774997896,
+                    "upper_one_sided_95": 1.0
+                  },
+                  "1": {
+                    "successes": 2,
+                    "trials": 2,
+                    "fraction": 1.0,
+                    "lower_one_sided_95": 0.22360679774997896,
+                    "upper_one_sided_95": 1.0
+                  }
+                }
+              },
+              "equal_bit_population_outcome_bounds": {
+                "correct_accepted": {
+                  "event": "correct_accepted",
+                  "estimate": 1.0,
+                  "lower_one_sided_95": 0.4728708045015879,
+                  "upper_one_sided_95": 1.0,
+                  "lower_method": "equal-stratum all-success AM-GM",
+                  "upper_method": "Bonferroni per-bit CP",
+                  "per_bit": {
+                    "0": {
+                      "successes": 2,
+                      "trials": 2,
+                      "fraction": 1.0,
+                      "lower_one_sided_95": 0.22360679774997896,
+                      "upper_one_sided_95": 1.0
+                    },
+                    "1": {
+                      "successes": 2,
+                      "trials": 2,
+                      "fraction": 1.0,
+                      "lower_one_sided_95": 0.22360679774997896,
+                      "upper_one_sided_95": 1.0
+                    }
+                  }
+                },
+                "wrong_accepted": {
+                  "event": "wrong_accepted",
+                  "estimate": 0.0,
+                  "lower_one_sided_95": 0.0,
+                  "upper_one_sided_95": 0.5271291954984121,
+                  "lower_method": "Bonferroni per-bit CP",
+                  "upper_method": "equal-stratum all-failure AM-GM complement",
+                  "per_bit": {
+                    "0": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    },
+                    "1": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    }
+                  }
+                },
+                "missed": {
+                  "event": "missed",
+                  "estimate": 0.0,
+                  "lower_one_sided_95": 0.0,
+                  "upper_one_sided_95": 0.5271291954984121,
+                  "lower_method": "Bonferroni per-bit CP",
+                  "upper_method": "equal-stratum all-failure AM-GM complement",
+                  "per_bit": {
+                    "0": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    },
+                    "1": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "gate": "strict",
+              "control": "signal",
+              "cn0_db_hz": -60,
+              "counts": {
+                "trials": 4,
+                "correct_accepted": 4,
+                "wrong_accepted": 0,
+                "missed": 0,
+                "raw_correct": 4,
+                "interval_suppressed_due_to_failed_control_paths": false
+              },
+              "equal_bit_population_event_bounds": {
+                "event": "correct_accepted",
+                "estimate": 1.0,
+                "lower_one_sided_95": 0.4728708045015879,
+                "upper_one_sided_95": 1.0,
+                "lower_method": "equal-stratum all-success AM-GM",
+                "upper_method": "Bonferroni per-bit CP",
+                "per_bit": {
+                  "0": {
+                    "successes": 2,
+                    "trials": 2,
+                    "fraction": 1.0,
+                    "lower_one_sided_95": 0.22360679774997896,
+                    "upper_one_sided_95": 1.0
+                  },
+                  "1": {
+                    "successes": 2,
+                    "trials": 2,
+                    "fraction": 1.0,
+                    "lower_one_sided_95": 0.22360679774997896,
+                    "upper_one_sided_95": 1.0
+                  }
+                }
+              },
+              "equal_bit_population_outcome_bounds": {
+                "correct_accepted": {
+                  "event": "correct_accepted",
+                  "estimate": 1.0,
+                  "lower_one_sided_95": 0.4728708045015879,
+                  "upper_one_sided_95": 1.0,
+                  "lower_method": "equal-stratum all-success AM-GM",
+                  "upper_method": "Bonferroni per-bit CP",
+                  "per_bit": {
+                    "0": {
+                      "successes": 2,
+                      "trials": 2,
+                      "fraction": 1.0,
+                      "lower_one_sided_95": 0.22360679774997896,
+                      "upper_one_sided_95": 1.0
+                    },
+                    "1": {
+                      "successes": 2,
+                      "trials": 2,
+                      "fraction": 1.0,
+                      "lower_one_sided_95": 0.22360679774997896,
+                      "upper_one_sided_95": 1.0
+                    }
+                  }
+                },
+                "wrong_accepted": {
+                  "event": "wrong_accepted",
+                  "estimate": 0.0,
+                  "lower_one_sided_95": 0.0,
+                  "upper_one_sided_95": 0.5271291954984121,
+                  "lower_method": "Bonferroni per-bit CP",
+                  "upper_method": "equal-stratum all-failure AM-GM complement",
+                  "per_bit": {
+                    "0": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    },
+                    "1": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    }
+                  }
+                },
+                "missed": {
+                  "event": "missed",
+                  "estimate": 0.0,
+                  "lower_one_sided_95": 0.0,
+                  "upper_one_sided_95": 0.5271291954984121,
+                  "lower_method": "Bonferroni per-bit CP",
+                  "upper_method": "equal-stratum all-failure AM-GM complement",
+                  "per_bit": {
+                    "0": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    },
+                    "1": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "actual_score_pairs": [
+            {
+              "input": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/long-replay-resume/stable850-m60/dispersive-dft/each-25/signal/path-80000",
+              "truth_bit": 0,
+              "scores": [
+                38.696583005191265,
+                -2.0233906723417103
+              ],
+              "strict_best_score_margin_nats": 15.975519615605524
+            },
+            {
+              "input": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/long-replay-resume/stable850-m60/dispersive-dft/each-25/signal/path-80001",
+              "truth_bit": 1,
+              "scores": [
+                -4.052341153153211,
+                72.73725440948127
+              ],
+              "strict_best_score_margin_nats": 50.01619101989553
+            },
+            {
+              "input": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/long-replay-resume/stable850-m60/dispersive-dft/each-25/signal/path-80002",
+              "truth_bit": 0,
+              "scores": [
+                45.5574386187251,
+                -3.610072140952807
+              ],
+              "strict_best_score_margin_nats": 22.83637522913936
+            },
+            {
+              "input": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/long-replay-resume/stable850-m60/dispersive-dft/each-25/signal/path-80003",
+              "truth_bit": 1,
+              "scores": [
+                -4.361564624499119,
+                50.680050954125264
+              ],
+              "strict_best_score_margin_nats": 27.958987564539523
+            }
+          ]
+        },
+        {
+          "name": "stable850-m60-cn0-60-signal-dispersive-dft-each-65",
+          "model": "dispersive-dft",
+          "modulation": "each-65",
+          "report_sha256": "bff33130e1f4931cb02536bcc6981468248f5b6d87bd15f23618a60bc716b248",
+          "score_npz_sha256": "9407ebc3b3b8877b4e3174f2bf3018e3a145362f5f7734ad8240394ce844a495",
+          "method": "static-fft-ucb",
+          "strict_threshold_nats": [
+            22.72106338958574
+          ],
+          "counts": [
+            {
+              "gate": "relaxed",
+              "control": "signal",
+              "cn0_db_hz": -60,
+              "counts": {
+                "trials": 4,
+                "correct_accepted": 4,
+                "wrong_accepted": 0,
+                "missed": 0,
+                "raw_correct": 4,
+                "interval_suppressed_due_to_failed_control_paths": false
+              },
+              "equal_bit_population_event_bounds": {
+                "event": "correct_accepted",
+                "estimate": 1.0,
+                "lower_one_sided_95": 0.4728708045015879,
+                "upper_one_sided_95": 1.0,
+                "lower_method": "equal-stratum all-success AM-GM",
+                "upper_method": "Bonferroni per-bit CP",
+                "per_bit": {
+                  "0": {
+                    "successes": 2,
+                    "trials": 2,
+                    "fraction": 1.0,
+                    "lower_one_sided_95": 0.22360679774997896,
+                    "upper_one_sided_95": 1.0
+                  },
+                  "1": {
+                    "successes": 2,
+                    "trials": 2,
+                    "fraction": 1.0,
+                    "lower_one_sided_95": 0.22360679774997896,
+                    "upper_one_sided_95": 1.0
+                  }
+                }
+              },
+              "equal_bit_population_outcome_bounds": {
+                "correct_accepted": {
+                  "event": "correct_accepted",
+                  "estimate": 1.0,
+                  "lower_one_sided_95": 0.4728708045015879,
+                  "upper_one_sided_95": 1.0,
+                  "lower_method": "equal-stratum all-success AM-GM",
+                  "upper_method": "Bonferroni per-bit CP",
+                  "per_bit": {
+                    "0": {
+                      "successes": 2,
+                      "trials": 2,
+                      "fraction": 1.0,
+                      "lower_one_sided_95": 0.22360679774997896,
+                      "upper_one_sided_95": 1.0
+                    },
+                    "1": {
+                      "successes": 2,
+                      "trials": 2,
+                      "fraction": 1.0,
+                      "lower_one_sided_95": 0.22360679774997896,
+                      "upper_one_sided_95": 1.0
+                    }
+                  }
+                },
+                "wrong_accepted": {
+                  "event": "wrong_accepted",
+                  "estimate": 0.0,
+                  "lower_one_sided_95": 0.0,
+                  "upper_one_sided_95": 0.5271291954984121,
+                  "lower_method": "Bonferroni per-bit CP",
+                  "upper_method": "equal-stratum all-failure AM-GM complement",
+                  "per_bit": {
+                    "0": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    },
+                    "1": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    }
+                  }
+                },
+                "missed": {
+                  "event": "missed",
+                  "estimate": 0.0,
+                  "lower_one_sided_95": 0.0,
+                  "upper_one_sided_95": 0.5271291954984121,
+                  "lower_method": "Bonferroni per-bit CP",
+                  "upper_method": "equal-stratum all-failure AM-GM complement",
+                  "per_bit": {
+                    "0": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    },
+                    "1": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "gate": "strict",
+              "control": "signal",
+              "cn0_db_hz": -60,
+              "counts": {
+                "trials": 4,
+                "correct_accepted": 4,
+                "wrong_accepted": 0,
+                "missed": 0,
+                "raw_correct": 4,
+                "interval_suppressed_due_to_failed_control_paths": false
+              },
+              "equal_bit_population_event_bounds": {
+                "event": "correct_accepted",
+                "estimate": 1.0,
+                "lower_one_sided_95": 0.4728708045015879,
+                "upper_one_sided_95": 1.0,
+                "lower_method": "equal-stratum all-success AM-GM",
+                "upper_method": "Bonferroni per-bit CP",
+                "per_bit": {
+                  "0": {
+                    "successes": 2,
+                    "trials": 2,
+                    "fraction": 1.0,
+                    "lower_one_sided_95": 0.22360679774997896,
+                    "upper_one_sided_95": 1.0
+                  },
+                  "1": {
+                    "successes": 2,
+                    "trials": 2,
+                    "fraction": 1.0,
+                    "lower_one_sided_95": 0.22360679774997896,
+                    "upper_one_sided_95": 1.0
+                  }
+                }
+              },
+              "equal_bit_population_outcome_bounds": {
+                "correct_accepted": {
+                  "event": "correct_accepted",
+                  "estimate": 1.0,
+                  "lower_one_sided_95": 0.4728708045015879,
+                  "upper_one_sided_95": 1.0,
+                  "lower_method": "equal-stratum all-success AM-GM",
+                  "upper_method": "Bonferroni per-bit CP",
+                  "per_bit": {
+                    "0": {
+                      "successes": 2,
+                      "trials": 2,
+                      "fraction": 1.0,
+                      "lower_one_sided_95": 0.22360679774997896,
+                      "upper_one_sided_95": 1.0
+                    },
+                    "1": {
+                      "successes": 2,
+                      "trials": 2,
+                      "fraction": 1.0,
+                      "lower_one_sided_95": 0.22360679774997896,
+                      "upper_one_sided_95": 1.0
+                    }
+                  }
+                },
+                "wrong_accepted": {
+                  "event": "wrong_accepted",
+                  "estimate": 0.0,
+                  "lower_one_sided_95": 0.0,
+                  "upper_one_sided_95": 0.5271291954984121,
+                  "lower_method": "Bonferroni per-bit CP",
+                  "upper_method": "equal-stratum all-failure AM-GM complement",
+                  "per_bit": {
+                    "0": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    },
+                    "1": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    }
+                  }
+                },
+                "missed": {
+                  "event": "missed",
+                  "estimate": 0.0,
+                  "lower_one_sided_95": 0.0,
+                  "upper_one_sided_95": 0.5271291954984121,
+                  "lower_method": "Bonferroni per-bit CP",
+                  "upper_method": "equal-stratum all-failure AM-GM complement",
+                  "per_bit": {
+                    "0": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    },
+                    "1": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "actual_score_pairs": [
+            {
+              "input": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/long-replay-resume/stable850-m60/dispersive-dft/each-65/signal/path-80000",
+              "truth_bit": 0,
+              "scores": [
+                27.074620242136,
+                -2.003502873772498
+              ],
+              "strict_best_score_margin_nats": 4.353556852550259
+            },
+            {
+              "input": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/long-replay-resume/stable850-m60/dispersive-dft/each-65/signal/path-80001",
+              "truth_bit": 1,
+              "scores": [
+                -4.052609584367898,
+                76.6565480414124
+              ],
+              "strict_best_score_margin_nats": 53.93548465182667
+            },
+            {
+              "input": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/long-replay-resume/stable850-m60/dispersive-dft/each-65/signal/path-80002",
+              "truth_bit": 0,
+              "scores": [
+                44.5866181913046,
+                -3.6090926504816365
+              ],
+              "strict_best_score_margin_nats": 21.86555480171886
+            },
+            {
+              "input": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/long-replay-resume/stable850-m60/dispersive-dft/each-65/signal/path-80003",
+              "truth_bit": 1,
+              "scores": [
+                -4.36250501571188,
+                38.56002479853251
+              ],
+              "strict_best_score_margin_nats": 15.83896140894677
+            }
+          ]
+        },
+        {
+          "name": "stable850-m60-cn0-60-signal-off",
+          "model": "shared-off-bypass",
+          "modulation": "off",
+          "report_sha256": "6ced3231e35123c63f41ec68c2e6e9a4e4118adc445412b41b00bb8df1643afc",
+          "score_npz_sha256": "55283538b9a59b423a4e40ca9e731acc206464db3129407719d054745c2ccd1a",
+          "method": "static-fft-ucb",
+          "strict_threshold_nats": [
+            22.72106338958574
+          ],
+          "counts": [
+            {
+              "gate": "relaxed",
+              "control": "signal",
+              "cn0_db_hz": -60,
+              "counts": {
+                "trials": 4,
+                "correct_accepted": 4,
+                "wrong_accepted": 0,
+                "missed": 0,
+                "raw_correct": 4,
+                "interval_suppressed_due_to_failed_control_paths": false
+              },
+              "equal_bit_population_event_bounds": {
+                "event": "correct_accepted",
+                "estimate": 1.0,
+                "lower_one_sided_95": 0.4728708045015879,
+                "upper_one_sided_95": 1.0,
+                "lower_method": "equal-stratum all-success AM-GM",
+                "upper_method": "Bonferroni per-bit CP",
+                "per_bit": {
+                  "0": {
+                    "successes": 2,
+                    "trials": 2,
+                    "fraction": 1.0,
+                    "lower_one_sided_95": 0.22360679774997896,
+                    "upper_one_sided_95": 1.0
+                  },
+                  "1": {
+                    "successes": 2,
+                    "trials": 2,
+                    "fraction": 1.0,
+                    "lower_one_sided_95": 0.22360679774997896,
+                    "upper_one_sided_95": 1.0
+                  }
+                }
+              },
+              "equal_bit_population_outcome_bounds": {
+                "correct_accepted": {
+                  "event": "correct_accepted",
+                  "estimate": 1.0,
+                  "lower_one_sided_95": 0.4728708045015879,
+                  "upper_one_sided_95": 1.0,
+                  "lower_method": "equal-stratum all-success AM-GM",
+                  "upper_method": "Bonferroni per-bit CP",
+                  "per_bit": {
+                    "0": {
+                      "successes": 2,
+                      "trials": 2,
+                      "fraction": 1.0,
+                      "lower_one_sided_95": 0.22360679774997896,
+                      "upper_one_sided_95": 1.0
+                    },
+                    "1": {
+                      "successes": 2,
+                      "trials": 2,
+                      "fraction": 1.0,
+                      "lower_one_sided_95": 0.22360679774997896,
+                      "upper_one_sided_95": 1.0
+                    }
+                  }
+                },
+                "wrong_accepted": {
+                  "event": "wrong_accepted",
+                  "estimate": 0.0,
+                  "lower_one_sided_95": 0.0,
+                  "upper_one_sided_95": 0.5271291954984121,
+                  "lower_method": "Bonferroni per-bit CP",
+                  "upper_method": "equal-stratum all-failure AM-GM complement",
+                  "per_bit": {
+                    "0": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    },
+                    "1": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    }
+                  }
+                },
+                "missed": {
+                  "event": "missed",
+                  "estimate": 0.0,
+                  "lower_one_sided_95": 0.0,
+                  "upper_one_sided_95": 0.5271291954984121,
+                  "lower_method": "Bonferroni per-bit CP",
+                  "upper_method": "equal-stratum all-failure AM-GM complement",
+                  "per_bit": {
+                    "0": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    },
+                    "1": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "gate": "strict",
+              "control": "signal",
+              "cn0_db_hz": -60,
+              "counts": {
+                "trials": 4,
+                "correct_accepted": 4,
+                "wrong_accepted": 0,
+                "missed": 0,
+                "raw_correct": 4,
+                "interval_suppressed_due_to_failed_control_paths": false
+              },
+              "equal_bit_population_event_bounds": {
+                "event": "correct_accepted",
+                "estimate": 1.0,
+                "lower_one_sided_95": 0.4728708045015879,
+                "upper_one_sided_95": 1.0,
+                "lower_method": "equal-stratum all-success AM-GM",
+                "upper_method": "Bonferroni per-bit CP",
+                "per_bit": {
+                  "0": {
+                    "successes": 2,
+                    "trials": 2,
+                    "fraction": 1.0,
+                    "lower_one_sided_95": 0.22360679774997896,
+                    "upper_one_sided_95": 1.0
+                  },
+                  "1": {
+                    "successes": 2,
+                    "trials": 2,
+                    "fraction": 1.0,
+                    "lower_one_sided_95": 0.22360679774997896,
+                    "upper_one_sided_95": 1.0
+                  }
+                }
+              },
+              "equal_bit_population_outcome_bounds": {
+                "correct_accepted": {
+                  "event": "correct_accepted",
+                  "estimate": 1.0,
+                  "lower_one_sided_95": 0.4728708045015879,
+                  "upper_one_sided_95": 1.0,
+                  "lower_method": "equal-stratum all-success AM-GM",
+                  "upper_method": "Bonferroni per-bit CP",
+                  "per_bit": {
+                    "0": {
+                      "successes": 2,
+                      "trials": 2,
+                      "fraction": 1.0,
+                      "lower_one_sided_95": 0.22360679774997896,
+                      "upper_one_sided_95": 1.0
+                    },
+                    "1": {
+                      "successes": 2,
+                      "trials": 2,
+                      "fraction": 1.0,
+                      "lower_one_sided_95": 0.22360679774997896,
+                      "upper_one_sided_95": 1.0
+                    }
+                  }
+                },
+                "wrong_accepted": {
+                  "event": "wrong_accepted",
+                  "estimate": 0.0,
+                  "lower_one_sided_95": 0.0,
+                  "upper_one_sided_95": 0.5271291954984121,
+                  "lower_method": "Bonferroni per-bit CP",
+                  "upper_method": "equal-stratum all-failure AM-GM complement",
+                  "per_bit": {
+                    "0": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    },
+                    "1": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    }
+                  }
+                },
+                "missed": {
+                  "event": "missed",
+                  "estimate": 0.0,
+                  "lower_one_sided_95": 0.0,
+                  "upper_one_sided_95": 0.5271291954984121,
+                  "lower_method": "Bonferroni per-bit CP",
+                  "upper_method": "equal-stratum all-failure AM-GM complement",
+                  "per_bit": {
+                    "0": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    },
+                    "1": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "actual_score_pairs": [
+            {
+              "input": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/long-replay-resume/stable850-m60/legacy-allpass/off/signal/path-80000",
+              "truth_bit": 0,
+              "scores": [
+                46.72233795831385,
+                -2.035740992569276
+              ],
+              "strict_best_score_margin_nats": 24.00127456872811
+            },
+            {
+              "input": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/long-replay-resume/stable850-m60/legacy-allpass/off/signal/path-80001",
+              "truth_bit": 1,
+              "scores": [
+                -4.052141604209745,
+                70.5268722307179
+              ],
+              "strict_best_score_margin_nats": 47.80580884113216
+            },
+            {
+              "input": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/long-replay-resume/stable850-m60/legacy-allpass/off/signal/path-80002",
+              "truth_bit": 0,
+              "scores": [
+                46.30355226448151,
+                -3.6106505310646075
+              ],
+              "strict_best_score_margin_nats": 23.58248887489577
+            },
+            {
+              "input": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/long-replay-resume/stable850-m60/legacy-allpass/off/signal/path-80003",
+              "truth_bit": 1,
+              "scores": [
+                -4.360910038543917,
+                60.111084564345575
+              ],
+              "strict_best_score_margin_nats": 37.39002117475984
+            }
+          ]
+        }
+      ]
+    },
+    "remote-long": {
+      "accepted_audit": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/analysis/remote-long-analysis.json",
+      "accepted_audit_sha256": "bb85f5c2585f9b47bf21e3fa1aa780fdd34811ef9d798db5b4a93b3ee7d0b500",
+      "analyzer_sha256": "45f4960da40c216c07be8a632182756679a315c5d6ad645506fe102b17b7477e",
+      "retention_source_bindings": {
+        "batch_module_sha256": "5ca0cd5fe9d84bf629999a1621cf5c9799d3fd4e6629e5fc8e84a128676989f9",
+        "scalar_reference_sha256": "d5563ed8106589de0d48d0e7277ca1f003b647e25797d6fdff7bb91731707111",
+        "scalar_reference_path": "/home/user/___quick/p/_cur/dataPump/pumpModem/docs/validation-data/triad-v3/2026-11-02-selective/reproduction/retention.py",
+        "arithmetic": "NumPy complex128/float64 batched eigh and einsum; left-to-right FP64 block-energy accumulation",
+        "scope": "All blocks, fixed candidate over full observation; identical nominal Gram eigenvalue, nullspace, energy and rank policies; floating-point operation ordering can differ."
+      },
+      "workspace_count": 8,
+      "paired_path_count": 0,
+      "cells": [
+        {
+          "model": "dispersive-dft",
+          "modulation": "each-25",
+          "source_count": 4,
+          "paths": [
+            {
+              "source": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/remote-analysis-root/local-evidence/triad-selective-correction/independent-corrected-long/stable850-m60/dispersive-dft/each-25/signal/path-140000",
+              "geometry": {
+                "manifest_sha256": "9a6647d975d7267d85808f9ec40b78af80b60b1be098a70c1053f7d5dff715db",
+                "sample_rate_hz": 0.25,
+                "sample_count": 18368201,
+                "capture_seconds": 73472804.0,
+                "requested_active_seconds": 73440000,
+                "actual_source_elapsed_seconds": 73440183.60000001,
+                "source_samples": 18366718,
+                "source_support_seconds": 73466872.0,
+                "channel_tail_samples": 1479,
+                "natural_complete_samples": 18368198,
+                "public_calendar_padding_samples": 3
+              },
+              "post_over_pre_signal_energy_ratio": 1.129408696063812,
+              "sampled_signal_energy_samples": 20731180.481515843,
+              "sampled_signal_energy_seconds": 82924721.92606337,
+              "correct_projection_fraction": 0.9477586801336907,
+              "wrong_projection_fraction": 0.054665041668748804,
+              "correct_projection_over_pre_selective_energy": 1.0704068951129377,
+              "wrong_projection_over_pre_selective_energy": 0.06173917343137477
+            },
+            {
+              "source": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/remote-analysis-root/local-evidence/triad-selective-correction/independent-corrected-long/stable850-m60/dispersive-dft/each-25/signal/path-140001",
+              "geometry": {
+                "manifest_sha256": "20e41d6d41b95460ed2e8ef5f369a8fcebda1afa6bd282b25cffbecbd6324f0b",
+                "sample_rate_hz": 0.25,
+                "sample_count": 18368201,
+                "capture_seconds": 73472804.0,
+                "requested_active_seconds": 73440000,
+                "actual_source_elapsed_seconds": 73440183.60000001,
+                "source_samples": 18366718,
+                "source_support_seconds": 73466872.0,
+                "channel_tail_samples": 1479,
+                "natural_complete_samples": 18368198,
+                "public_calendar_padding_samples": 3
+              },
+              "post_over_pre_signal_energy_ratio": 1.267979914552667,
+              "sampled_signal_energy_samples": 23275099.59066309,
+              "sampled_signal_energy_seconds": 93100398.36265236,
+              "correct_projection_fraction": 0.9604212182125573,
+              "wrong_projection_fraction": 0.05326349698117629,
+              "correct_projection_over_pre_selective_energy": 1.2177948142035855,
+              "wrong_projection_over_pre_selective_energy": 0.06753704435096032
+            },
+            {
+              "source": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/remote-analysis-root/local-evidence/triad-selective-correction/independent-corrected-long/stable850-m60/dispersive-dft/each-25/signal/path-140002",
+              "geometry": {
+                "manifest_sha256": "720999ee9355b588633599ed6159f0d117b217a15024fc6e49fb2c9403c5cfcf",
+                "sample_rate_hz": 0.25,
+                "sample_count": 18368201,
+                "capture_seconds": 73472804.0,
+                "requested_active_seconds": 73440000,
+                "actual_source_elapsed_seconds": 73440183.60000001,
+                "source_samples": 18366718,
+                "source_support_seconds": 73466872.0,
+                "channel_tail_samples": 1479,
+                "natural_complete_samples": 18368198,
+                "public_calendar_padding_samples": 3
+              },
+              "post_over_pre_signal_energy_ratio": 1.0965489448501093,
+              "sampled_signal_energy_samples": 20128430.87698861,
+              "sampled_signal_energy_seconds": 80513723.50795443,
+              "correct_projection_fraction": 0.9460664790674084,
+              "wrong_projection_fraction": 0.05289273416008814,
+              "correct_projection_over_pre_selective_energy": 1.037408199379503,
+              "wrong_projection_over_pre_selective_energy": 0.05799947183348637
+            },
+            {
+              "source": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/remote-analysis-root/local-evidence/triad-selective-correction/independent-corrected-long/stable850-m60/dispersive-dft/each-25/signal/path-140003",
+              "geometry": {
+                "manifest_sha256": "065526a96f2e678c37e7a7529a81a1a3849a308533d0c0a05a1a3cee68b5f791",
+                "sample_rate_hz": 0.25,
+                "sample_count": 18368201,
+                "capture_seconds": 73472804.0,
+                "requested_active_seconds": 73440000,
+                "actual_source_elapsed_seconds": 73440183.60000001,
+                "source_samples": 18366718,
+                "source_support_seconds": 73466872.0,
+                "channel_tail_samples": 1479,
+                "natural_complete_samples": 18368198,
+                "public_calendar_padding_samples": 3
+              },
+              "post_over_pre_signal_energy_ratio": 0.8955911948200068,
+              "sampled_signal_energy_samples": 16439197.140358271,
+              "sampled_signal_energy_seconds": 65756788.561433084,
+              "correct_projection_fraction": 0.9403658009153172,
+              "wrong_projection_fraction": 0.05443448477285087,
+              "correct_projection_over_pre_selective_energy": 0.8421833312096086,
+              "wrong_projection_over_pre_selective_energy": 0.04875104525712823
+            }
+          ],
+          "energy_projection_ranges": {
+            "post_over_pre_signal_energy_ratio": [
+              0.8955911948200068,
+              1.267979914552667
+            ],
+            "correct_projection_fraction": [
+              0.9403658009153172,
+              0.9604212182125573
+            ],
+            "wrong_projection_fraction": [
+              0.05289273416008814,
+              0.054665041668748804
+            ],
+            "correct_projection_over_pre_selective_energy": [
+              0.8421833312096086,
+              1.2177948142035855
+            ],
+            "wrong_projection_over_pre_selective_energy": [
+              0.04875104525712823,
+              0.06753704435096032
+            ]
+          }
+        },
+        {
+          "model": "dispersive-dft",
+          "modulation": "each-65",
+          "source_count": 4,
+          "paths": [
+            {
+              "source": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/remote-analysis-root/local-evidence/triad-selective-correction/independent-corrected-long/stable850-m60/dispersive-dft/each-65/signal/path-140000",
+              "geometry": {
+                "manifest_sha256": "dff3d768df85af3a5c99668d70d56a650f898cfa2a0cbbb109e86b9ffa8b7663",
+                "sample_rate_hz": 0.25,
+                "sample_count": 18368201,
+                "capture_seconds": 73472804.0,
+                "requested_active_seconds": 73440000,
+                "actual_source_elapsed_seconds": 73440183.60000001,
+                "source_samples": 18366718,
+                "source_support_seconds": 73466872.0,
+                "channel_tail_samples": 1479,
+                "natural_complete_samples": 18368198,
+                "public_calendar_padding_samples": 3
+              },
+              "post_over_pre_signal_energy_ratio": 1.5911861816765873,
+              "sampled_signal_energy_samples": 29207467.612917013,
+              "sampled_signal_energy_seconds": 116829870.45166805,
+              "correct_projection_fraction": 0.7498774665404899,
+              "wrong_projection_fraction": 0.04579409759689213,
+              "correct_projection_over_pre_selective_energy": 1.1931946627098327,
+              "wrong_projection_over_pre_selective_energy": 0.07286693529852119
+            },
+            {
+              "source": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/remote-analysis-root/local-evidence/triad-selective-correction/independent-corrected-long/stable850-m60/dispersive-dft/each-65/signal/path-140001",
+              "geometry": {
+                "manifest_sha256": "9457dacd13d8c063cf61e53e91af6e785517e83a492aee97af7121c29310ffa9",
+                "sample_rate_hz": 0.25,
+                "sample_count": 18368201,
+                "capture_seconds": 73472804.0,
+                "requested_active_seconds": 73440000,
+                "actual_source_elapsed_seconds": 73440183.60000001,
+                "source_samples": 18366718,
+                "source_support_seconds": 73466872.0,
+                "channel_tail_samples": 1479,
+                "natural_complete_samples": 18368198,
+                "public_calendar_padding_samples": 3
+              },
+              "post_over_pre_signal_energy_ratio": 1.9534787955137312,
+              "sampled_signal_energy_samples": 35858149.63786252,
+              "sampled_signal_energy_seconds": 143432598.55145007,
+              "correct_projection_fraction": 0.8266290846075951,
+              "wrong_projection_fraction": 0.04639357042763925,
+              "correct_projection_over_pre_selective_energy": 1.614802388535782,
+              "wrong_projection_over_pre_selective_energy": 0.09062885607856162
+            },
+            {
+              "source": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/remote-analysis-root/local-evidence/triad-selective-correction/independent-corrected-long/stable850-m60/dispersive-dft/each-65/signal/path-140002",
+              "geometry": {
+                "manifest_sha256": "39b148ef5a5bf77dbf9c4be029664a147b788bedb0bca3b64361f1712c0e2373",
+                "sample_rate_hz": 0.25,
+                "sample_count": 18368201,
+                "capture_seconds": 73472804.0,
+                "requested_active_seconds": 73440000,
+                "actual_source_elapsed_seconds": 73440183.60000001,
+                "source_samples": 18366718,
+                "source_support_seconds": 73466872.0,
+                "channel_tail_samples": 1479,
+                "natural_complete_samples": 18368198,
+                "public_calendar_padding_samples": 3
+              },
+              "post_over_pre_signal_energy_ratio": 1.5057849739307498,
+              "sampled_signal_energy_samples": 27640434.023227043,
+              "sampled_signal_energy_seconds": 110561736.09290817,
+              "correct_projection_fraction": 0.7346970008275943,
+              "wrong_projection_fraction": 0.043813585005363025,
+              "correct_projection_over_pre_selective_energy": 1.1062957042380979,
+              "wrong_projection_over_pre_selective_energy": 0.0659738379551084
+            },
+            {
+              "source": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/remote-analysis-root/local-evidence/triad-selective-correction/independent-corrected-long/stable850-m60/dispersive-dft/each-65/signal/path-140003",
+              "geometry": {
+                "manifest_sha256": "8938b3f1114311fd841747bca2078b46dc6fe67e22ed9d4476c1c741466b8689",
+                "sample_rate_hz": 0.25,
+                "sample_count": 18368201,
+                "capture_seconds": 73472804.0,
+                "requested_active_seconds": 73440000,
+                "actual_source_elapsed_seconds": 73440183.60000001,
+                "source_samples": 18366718,
+                "source_support_seconds": 73466872.0,
+                "channel_tail_samples": 1479,
+                "natural_complete_samples": 18368198,
+                "public_calendar_padding_samples": 3
+              },
+              "post_over_pre_signal_energy_ratio": 0.9845860584302214,
+              "sampled_signal_energy_samples": 18072759.546767194,
+              "sampled_signal_energy_seconds": 72291038.18706878,
+              "correct_projection_fraction": 0.6336337150193657,
+              "wrong_projection_fraction": 0.03910623030799766,
+              "correct_projection_over_pre_selective_energy": 0.6238669219594521,
+              "wrong_projection_over_pre_selective_energy": 0.03850344915901814
+            }
+          ],
+          "energy_projection_ranges": {
+            "post_over_pre_signal_energy_ratio": [
+              0.9845860584302214,
+              1.9534787955137312
+            ],
+            "correct_projection_fraction": [
+              0.6336337150193657,
+              0.8266290846075951
+            ],
+            "wrong_projection_fraction": [
+              0.03910623030799766,
+              0.04639357042763925
+            ],
+            "correct_projection_over_pre_selective_energy": [
+              0.6238669219594521,
+              1.614802388535782
+            ],
+            "wrong_projection_over_pre_selective_energy": [
+              0.03850344915901814,
+              0.09062885607856162
+            ]
+          }
+        }
+      ],
+      "receiver_counts": [
+        {
+          "name": "each-25",
+          "model": "dispersive-dft",
+          "modulation": "each-25",
+          "report_sha256": "7ae0b0d528683b69225809a866add4bfa255983743ba2f17e642352237f25500",
+          "score_npz_sha256": "3fe3863dcf4a8bd49bfd58be8e46c9c5c35322a0b861c55046733c01c18e9ff3",
+          "method": "static-fft-ucb",
+          "strict_threshold_nats": [
+            22.72106338958574
+          ],
+          "counts": [
+            {
+              "gate": "relaxed",
+              "control": "signal",
+              "cn0_db_hz": -60,
+              "counts": {
+                "trials": 4,
+                "correct_accepted": 4,
+                "wrong_accepted": 0,
+                "missed": 0,
+                "raw_correct": 4,
+                "interval_suppressed_due_to_failed_control_paths": false
+              },
+              "equal_bit_population_event_bounds": {
+                "event": "correct_accepted",
+                "estimate": 1.0,
+                "lower_one_sided_95": 0.4728708045015879,
+                "upper_one_sided_95": 1.0,
+                "lower_method": "equal-stratum all-success AM-GM",
+                "upper_method": "Bonferroni per-bit CP",
+                "per_bit": {
+                  "0": {
+                    "successes": 2,
+                    "trials": 2,
+                    "fraction": 1.0,
+                    "lower_one_sided_95": 0.22360679774997896,
+                    "upper_one_sided_95": 1.0
+                  },
+                  "1": {
+                    "successes": 2,
+                    "trials": 2,
+                    "fraction": 1.0,
+                    "lower_one_sided_95": 0.22360679774997896,
+                    "upper_one_sided_95": 1.0
+                  }
+                }
+              },
+              "equal_bit_population_outcome_bounds": {
+                "correct_accepted": {
+                  "event": "correct_accepted",
+                  "estimate": 1.0,
+                  "lower_one_sided_95": 0.4728708045015879,
+                  "upper_one_sided_95": 1.0,
+                  "lower_method": "equal-stratum all-success AM-GM",
+                  "upper_method": "Bonferroni per-bit CP",
+                  "per_bit": {
+                    "0": {
+                      "successes": 2,
+                      "trials": 2,
+                      "fraction": 1.0,
+                      "lower_one_sided_95": 0.22360679774997896,
+                      "upper_one_sided_95": 1.0
+                    },
+                    "1": {
+                      "successes": 2,
+                      "trials": 2,
+                      "fraction": 1.0,
+                      "lower_one_sided_95": 0.22360679774997896,
+                      "upper_one_sided_95": 1.0
+                    }
+                  }
+                },
+                "wrong_accepted": {
+                  "event": "wrong_accepted",
+                  "estimate": 0.0,
+                  "lower_one_sided_95": 0.0,
+                  "upper_one_sided_95": 0.5271291954984121,
+                  "lower_method": "Bonferroni per-bit CP",
+                  "upper_method": "equal-stratum all-failure AM-GM complement",
+                  "per_bit": {
+                    "0": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    },
+                    "1": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    }
+                  }
+                },
+                "missed": {
+                  "event": "missed",
+                  "estimate": 0.0,
+                  "lower_one_sided_95": 0.0,
+                  "upper_one_sided_95": 0.5271291954984121,
+                  "lower_method": "Bonferroni per-bit CP",
+                  "upper_method": "equal-stratum all-failure AM-GM complement",
+                  "per_bit": {
+                    "0": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    },
+                    "1": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "gate": "strict",
+              "control": "signal",
+              "cn0_db_hz": -60,
+              "counts": {
+                "trials": 4,
+                "correct_accepted": 4,
+                "wrong_accepted": 0,
+                "missed": 0,
+                "raw_correct": 4,
+                "interval_suppressed_due_to_failed_control_paths": false
+              },
+              "equal_bit_population_event_bounds": {
+                "event": "correct_accepted",
+                "estimate": 1.0,
+                "lower_one_sided_95": 0.4728708045015879,
+                "upper_one_sided_95": 1.0,
+                "lower_method": "equal-stratum all-success AM-GM",
+                "upper_method": "Bonferroni per-bit CP",
+                "per_bit": {
+                  "0": {
+                    "successes": 2,
+                    "trials": 2,
+                    "fraction": 1.0,
+                    "lower_one_sided_95": 0.22360679774997896,
+                    "upper_one_sided_95": 1.0
+                  },
+                  "1": {
+                    "successes": 2,
+                    "trials": 2,
+                    "fraction": 1.0,
+                    "lower_one_sided_95": 0.22360679774997896,
+                    "upper_one_sided_95": 1.0
+                  }
+                }
+              },
+              "equal_bit_population_outcome_bounds": {
+                "correct_accepted": {
+                  "event": "correct_accepted",
+                  "estimate": 1.0,
+                  "lower_one_sided_95": 0.4728708045015879,
+                  "upper_one_sided_95": 1.0,
+                  "lower_method": "equal-stratum all-success AM-GM",
+                  "upper_method": "Bonferroni per-bit CP",
+                  "per_bit": {
+                    "0": {
+                      "successes": 2,
+                      "trials": 2,
+                      "fraction": 1.0,
+                      "lower_one_sided_95": 0.22360679774997896,
+                      "upper_one_sided_95": 1.0
+                    },
+                    "1": {
+                      "successes": 2,
+                      "trials": 2,
+                      "fraction": 1.0,
+                      "lower_one_sided_95": 0.22360679774997896,
+                      "upper_one_sided_95": 1.0
+                    }
+                  }
+                },
+                "wrong_accepted": {
+                  "event": "wrong_accepted",
+                  "estimate": 0.0,
+                  "lower_one_sided_95": 0.0,
+                  "upper_one_sided_95": 0.5271291954984121,
+                  "lower_method": "Bonferroni per-bit CP",
+                  "upper_method": "equal-stratum all-failure AM-GM complement",
+                  "per_bit": {
+                    "0": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    },
+                    "1": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    }
+                  }
+                },
+                "missed": {
+                  "event": "missed",
+                  "estimate": 0.0,
+                  "lower_one_sided_95": 0.0,
+                  "upper_one_sided_95": 0.5271291954984121,
+                  "lower_method": "Bonferroni per-bit CP",
+                  "upper_method": "equal-stratum all-failure AM-GM complement",
+                  "per_bit": {
+                    "0": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    },
+                    "1": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "actual_score_pairs": [
+            {
+              "input": "/workspace/triad/local-evidence/triad-selective-correction/independent-corrected-long/stable850-m60/dispersive-dft/each-25/signal/path-140000",
+              "truth_bit": 0,
+              "scores": [
+                75.95750285579184,
+                -2.924149877473762
+              ],
+              "strict_best_score_margin_nats": 53.23643946620611
+            },
+            {
+              "input": "/workspace/triad/local-evidence/triad-selective-correction/independent-corrected-long/stable850-m60/dispersive-dft/each-25/signal/path-140001",
+              "truth_bit": 1,
+              "scores": [
+                -3.9532015461759586,
+                66.98506451603515
+              ],
+              "strict_best_score_margin_nats": 44.264001126449415
+            },
+            {
+              "input": "/workspace/triad/local-evidence/triad-selective-correction/independent-corrected-long/stable850-m60/dispersive-dft/each-25/signal/path-140002",
+              "truth_bit": 0,
+              "scores": [
+                52.43225315868066,
+                -3.622598232631581
+              ],
+              "strict_best_score_margin_nats": 29.71118976909492
+            },
+            {
+              "input": "/workspace/triad/local-evidence/triad-selective-correction/independent-corrected-long/stable850-m60/dispersive-dft/each-25/signal/path-140003",
+              "truth_bit": 1,
+              "scores": [
+                -3.0860605738003914,
+                46.978176574526785
+              ],
+              "strict_best_score_margin_nats": 24.257113184941044
+            }
+          ]
+        },
+        {
+          "name": "each-65",
+          "model": "dispersive-dft",
+          "modulation": "each-65",
+          "report_sha256": "27d0053965b732a834b35831ac6bd5490b7b128e895975e80e0340e87c8f94cb",
+          "score_npz_sha256": "06a658d36206db1fc697cf1ea8708031ea703e9b23d970b5b3107d3238b99d8f",
+          "method": "static-fft-ucb",
+          "strict_threshold_nats": [
+            22.72106338958574
+          ],
+          "counts": [
+            {
+              "gate": "relaxed",
+              "control": "signal",
+              "cn0_db_hz": -60,
+              "counts": {
+                "trials": 4,
+                "correct_accepted": 4,
+                "wrong_accepted": 0,
+                "missed": 0,
+                "raw_correct": 4,
+                "interval_suppressed_due_to_failed_control_paths": false
+              },
+              "equal_bit_population_event_bounds": {
+                "event": "correct_accepted",
+                "estimate": 1.0,
+                "lower_one_sided_95": 0.4728708045015879,
+                "upper_one_sided_95": 1.0,
+                "lower_method": "equal-stratum all-success AM-GM",
+                "upper_method": "Bonferroni per-bit CP",
+                "per_bit": {
+                  "0": {
+                    "successes": 2,
+                    "trials": 2,
+                    "fraction": 1.0,
+                    "lower_one_sided_95": 0.22360679774997896,
+                    "upper_one_sided_95": 1.0
+                  },
+                  "1": {
+                    "successes": 2,
+                    "trials": 2,
+                    "fraction": 1.0,
+                    "lower_one_sided_95": 0.22360679774997896,
+                    "upper_one_sided_95": 1.0
+                  }
+                }
+              },
+              "equal_bit_population_outcome_bounds": {
+                "correct_accepted": {
+                  "event": "correct_accepted",
+                  "estimate": 1.0,
+                  "lower_one_sided_95": 0.4728708045015879,
+                  "upper_one_sided_95": 1.0,
+                  "lower_method": "equal-stratum all-success AM-GM",
+                  "upper_method": "Bonferroni per-bit CP",
+                  "per_bit": {
+                    "0": {
+                      "successes": 2,
+                      "trials": 2,
+                      "fraction": 1.0,
+                      "lower_one_sided_95": 0.22360679774997896,
+                      "upper_one_sided_95": 1.0
+                    },
+                    "1": {
+                      "successes": 2,
+                      "trials": 2,
+                      "fraction": 1.0,
+                      "lower_one_sided_95": 0.22360679774997896,
+                      "upper_one_sided_95": 1.0
+                    }
+                  }
+                },
+                "wrong_accepted": {
+                  "event": "wrong_accepted",
+                  "estimate": 0.0,
+                  "lower_one_sided_95": 0.0,
+                  "upper_one_sided_95": 0.5271291954984121,
+                  "lower_method": "Bonferroni per-bit CP",
+                  "upper_method": "equal-stratum all-failure AM-GM complement",
+                  "per_bit": {
+                    "0": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    },
+                    "1": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    }
+                  }
+                },
+                "missed": {
+                  "event": "missed",
+                  "estimate": 0.0,
+                  "lower_one_sided_95": 0.0,
+                  "upper_one_sided_95": 0.5271291954984121,
+                  "lower_method": "Bonferroni per-bit CP",
+                  "upper_method": "equal-stratum all-failure AM-GM complement",
+                  "per_bit": {
+                    "0": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    },
+                    "1": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "gate": "strict",
+              "control": "signal",
+              "cn0_db_hz": -60,
+              "counts": {
+                "trials": 4,
+                "correct_accepted": 4,
+                "wrong_accepted": 0,
+                "missed": 0,
+                "raw_correct": 4,
+                "interval_suppressed_due_to_failed_control_paths": false
+              },
+              "equal_bit_population_event_bounds": {
+                "event": "correct_accepted",
+                "estimate": 1.0,
+                "lower_one_sided_95": 0.4728708045015879,
+                "upper_one_sided_95": 1.0,
+                "lower_method": "equal-stratum all-success AM-GM",
+                "upper_method": "Bonferroni per-bit CP",
+                "per_bit": {
+                  "0": {
+                    "successes": 2,
+                    "trials": 2,
+                    "fraction": 1.0,
+                    "lower_one_sided_95": 0.22360679774997896,
+                    "upper_one_sided_95": 1.0
+                  },
+                  "1": {
+                    "successes": 2,
+                    "trials": 2,
+                    "fraction": 1.0,
+                    "lower_one_sided_95": 0.22360679774997896,
+                    "upper_one_sided_95": 1.0
+                  }
+                }
+              },
+              "equal_bit_population_outcome_bounds": {
+                "correct_accepted": {
+                  "event": "correct_accepted",
+                  "estimate": 1.0,
+                  "lower_one_sided_95": 0.4728708045015879,
+                  "upper_one_sided_95": 1.0,
+                  "lower_method": "equal-stratum all-success AM-GM",
+                  "upper_method": "Bonferroni per-bit CP",
+                  "per_bit": {
+                    "0": {
+                      "successes": 2,
+                      "trials": 2,
+                      "fraction": 1.0,
+                      "lower_one_sided_95": 0.22360679774997896,
+                      "upper_one_sided_95": 1.0
+                    },
+                    "1": {
+                      "successes": 2,
+                      "trials": 2,
+                      "fraction": 1.0,
+                      "lower_one_sided_95": 0.22360679774997896,
+                      "upper_one_sided_95": 1.0
+                    }
+                  }
+                },
+                "wrong_accepted": {
+                  "event": "wrong_accepted",
+                  "estimate": 0.0,
+                  "lower_one_sided_95": 0.0,
+                  "upper_one_sided_95": 0.5271291954984121,
+                  "lower_method": "Bonferroni per-bit CP",
+                  "upper_method": "equal-stratum all-failure AM-GM complement",
+                  "per_bit": {
+                    "0": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    },
+                    "1": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    }
+                  }
+                },
+                "missed": {
+                  "event": "missed",
+                  "estimate": 0.0,
+                  "lower_one_sided_95": 0.0,
+                  "upper_one_sided_95": 0.5271291954984121,
+                  "lower_method": "Bonferroni per-bit CP",
+                  "upper_method": "equal-stratum all-failure AM-GM complement",
+                  "per_bit": {
+                    "0": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    },
+                    "1": {
+                      "successes": 0,
+                      "trials": 2,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.776393202250021
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "actual_score_pairs": [
+            {
+              "input": "/workspace/triad/local-evidence/triad-selective-correction/independent-corrected-long/stable850-m60/dispersive-dft/each-65/signal/path-140000",
+              "truth_bit": 0,
+              "scores": [
+                84.50520628076377,
+                -2.933208364069232
+              ],
+              "strict_best_score_margin_nats": 61.784142891178035
+            },
+            {
+              "input": "/workspace/triad/local-evidence/triad-selective-correction/independent-corrected-long/stable850-m60/dispersive-dft/each-65/signal/path-140001",
+              "truth_bit": 1,
+              "scores": [
+                -3.9536687248536517,
+                93.10004356425524
+              ],
+              "strict_best_score_margin_nats": 70.37898017466951
+            },
+            {
+              "input": "/workspace/triad/local-evidence/triad-selective-correction/independent-corrected-long/stable850-m60/dispersive-dft/each-65/signal/path-140002",
+              "truth_bit": 0,
+              "scores": [
+                56.6242556237226,
+                -3.621826054621251
+              ],
+              "strict_best_score_margin_nats": 33.90319223413685
+            },
+            {
+              "input": "/workspace/triad/local-evidence/triad-selective-correction/independent-corrected-long/stable850-m60/dispersive-dft/each-65/signal/path-140003",
+              "truth_bit": 1,
+              "scores": [
+                -3.0849523426448977,
+                31.695110085826094
+              ],
+              "strict_best_score_margin_nats": 8.974046696240354
+            }
+          ]
+        }
+      ]
+    },
+    "remote-controls": {
+      "accepted_audit": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/analysis/remote-controls-analysis.json",
+      "accepted_audit_sha256": "37bd77153321da25c921f83109ac29b4adb6db13d155d3328c6b19ba29521983",
+      "analyzer_sha256": "45f4960da40c216c07be8a632182756679a315c5d6ad645506fe102b17b7477e",
+      "retention_source_bindings": {
+        "batch_module_sha256": "5ca0cd5fe9d84bf629999a1621cf5c9799d3fd4e6629e5fc8e84a128676989f9",
+        "scalar_reference_sha256": "d5563ed8106589de0d48d0e7277ca1f003b647e25797d6fdff7bb91731707111",
+        "scalar_reference_path": "/home/user/___quick/p/_cur/dataPump/pumpModem/docs/validation-data/triad-v3/2026-11-02-selective/reproduction/retention.py",
+        "arithmetic": "NumPy complex128/float64 batched eigh and einsum; left-to-right FP64 block-energy accumulation",
+        "scope": "All blocks, fixed candidate over full observation; identical nominal Gram eigenvalue, nullspace, energy and rank policies; floating-point operation ordering can differ."
+      },
+      "workspace_count": 8,
+      "paired_path_count": 0,
+      "cells": [
+        {
+          "model": "dispersive-dft",
+          "modulation": "each-25",
+          "source_count": 2,
+          "paths": [
+            {
+              "source": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/remote-analysis-root/local-evidence/triad-selective-correction/independent-corrected-long/stable850-m60/dispersive-dft/each-25/null/path-140000",
+              "geometry": {
+                "manifest_sha256": "3b9ae0d5206af5fca9ef9b371eed627897bcda0d1c076801e323adee014aedaa",
+                "sample_rate_hz": 0.25,
+                "sample_count": 18368201,
+                "capture_seconds": 73472804.0,
+                "requested_active_seconds": 73440000,
+                "actual_source_elapsed_seconds": 73440183.60000001,
+                "source_samples": 18366718,
+                "source_support_seconds": 73466872.0,
+                "channel_tail_samples": 1479,
+                "natural_complete_samples": 18368198,
+                "public_calendar_padding_samples": 3
+              },
+              "post_over_pre_signal_energy_ratio": null,
+              "sampled_signal_energy_samples": 0.0,
+              "sampled_signal_energy_seconds": 0.0,
+              "correct_projection_fraction": null,
+              "wrong_projection_fraction": null,
+              "correct_projection_over_pre_selective_energy": null,
+              "wrong_projection_over_pre_selective_energy": null
+            },
+            {
+              "source": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/remote-analysis-root/local-evidence/triad-selective-correction/independent-corrected-long/stable850-m60/dispersive-dft/each-25/null/path-140001",
+              "geometry": {
+                "manifest_sha256": "55ec495a7b647a761c926333d6d73e70bae33e3bf5037c2ca66e96ea8768c539",
+                "sample_rate_hz": 0.25,
+                "sample_count": 18368201,
+                "capture_seconds": 73472804.0,
+                "requested_active_seconds": 73440000,
+                "actual_source_elapsed_seconds": 73440183.60000001,
+                "source_samples": 18366718,
+                "source_support_seconds": 73466872.0,
+                "channel_tail_samples": 1479,
+                "natural_complete_samples": 18368198,
+                "public_calendar_padding_samples": 3
+              },
+              "post_over_pre_signal_energy_ratio": null,
+              "sampled_signal_energy_samples": 0.0,
+              "sampled_signal_energy_seconds": 0.0,
+              "correct_projection_fraction": null,
+              "wrong_projection_fraction": null,
+              "correct_projection_over_pre_selective_energy": null,
+              "wrong_projection_over_pre_selective_energy": null
+            }
+          ],
+          "energy_projection_ranges": {}
+        },
+        {
+          "model": "dispersive-dft",
+          "modulation": "each-25",
+          "source_count": 2,
+          "paths": [
+            {
+              "source": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/remote-analysis-root/local-evidence/triad-selective-correction/independent-corrected-long/stable850-m60/dispersive-dft/each-25/wrong-key/path-140000",
+              "geometry": {
+                "manifest_sha256": "d63aa28728f5e1601621104065f241a6cd51933e7b26976fd594c2870fb0e85f",
+                "sample_rate_hz": 0.25,
+                "sample_count": 18368201,
+                "capture_seconds": 73472804.0,
+                "requested_active_seconds": 73440000,
+                "actual_source_elapsed_seconds": 73440183.60000001,
+                "source_samples": 18366718,
+                "source_support_seconds": 73466872.0,
+                "channel_tail_samples": 1479,
+                "natural_complete_samples": 18368198,
+                "public_calendar_padding_samples": 3
+              },
+              "post_over_pre_signal_energy_ratio": 1.129408696063812,
+              "sampled_signal_energy_samples": 20731180.481515843,
+              "sampled_signal_energy_seconds": 82924721.92606337,
+              "correct_projection_fraction": 0.060862452693574494,
+              "wrong_projection_fraction": 0.060507702375278825,
+              "correct_projection_over_pre_selective_energy": 0.06873858333589457,
+              "wrong_projection_over_pre_selective_energy": 0.06833792524148004
+            },
+            {
+              "source": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/remote-analysis-root/local-evidence/triad-selective-correction/independent-corrected-long/stable850-m60/dispersive-dft/each-25/wrong-key/path-140001",
+              "geometry": {
+                "manifest_sha256": "930c26b39aa789cf4e5b6b5f663836199566dec88a4e8be96c4ba618f64998b9",
+                "sample_rate_hz": 0.25,
+                "sample_count": 18368201,
+                "capture_seconds": 73472804.0,
+                "requested_active_seconds": 73440000,
+                "actual_source_elapsed_seconds": 73440183.60000001,
+                "source_samples": 18366718,
+                "source_support_seconds": 73466872.0,
+                "channel_tail_samples": 1479,
+                "natural_complete_samples": 18368198,
+                "public_calendar_padding_samples": 3
+              },
+              "post_over_pre_signal_energy_ratio": 1.267979914552667,
+              "sampled_signal_energy_samples": 23275099.59066309,
+              "sampled_signal_energy_seconds": 93100398.36265236,
+              "correct_projection_fraction": 0.06153448086286129,
+              "wrong_projection_fraction": 0.06014174134134936,
+              "correct_projection_over_pre_selective_energy": 0.07802448578652453,
+              "wrong_projection_over_pre_selective_energy": 0.0762585200470439
+            }
+          ],
+          "energy_projection_ranges": {
+            "post_over_pre_signal_energy_ratio": [
+              1.129408696063812,
+              1.267979914552667
+            ],
+            "correct_projection_fraction": [
+              0.060862452693574494,
+              0.06153448086286129
+            ],
+            "wrong_projection_fraction": [
+              0.06014174134134936,
+              0.060507702375278825
+            ],
+            "correct_projection_over_pre_selective_energy": [
+              0.06873858333589457,
+              0.07802448578652453
+            ],
+            "wrong_projection_over_pre_selective_energy": [
+              0.06833792524148004,
+              0.0762585200470439
+            ]
+          }
+        },
+        {
+          "model": "dispersive-dft",
+          "modulation": "each-65",
+          "source_count": 2,
+          "paths": [
+            {
+              "source": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/remote-analysis-root/local-evidence/triad-selective-correction/independent-corrected-long/stable850-m60/dispersive-dft/each-65/null/path-140000",
+              "geometry": {
+                "manifest_sha256": "51e3a63493fc9ae0d341ee4004a5f09b3dbf17544f9b5b9535b6574b03f0f659",
+                "sample_rate_hz": 0.25,
+                "sample_count": 18368201,
+                "capture_seconds": 73472804.0,
+                "requested_active_seconds": 73440000,
+                "actual_source_elapsed_seconds": 73440183.60000001,
+                "source_samples": 18366718,
+                "source_support_seconds": 73466872.0,
+                "channel_tail_samples": 1479,
+                "natural_complete_samples": 18368198,
+                "public_calendar_padding_samples": 3
+              },
+              "post_over_pre_signal_energy_ratio": null,
+              "sampled_signal_energy_samples": 0.0,
+              "sampled_signal_energy_seconds": 0.0,
+              "correct_projection_fraction": null,
+              "wrong_projection_fraction": null,
+              "correct_projection_over_pre_selective_energy": null,
+              "wrong_projection_over_pre_selective_energy": null
+            },
+            {
+              "source": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/remote-analysis-root/local-evidence/triad-selective-correction/independent-corrected-long/stable850-m60/dispersive-dft/each-65/null/path-140001",
+              "geometry": {
+                "manifest_sha256": "afb314e08ac12ca684b119c54646416d3e339f163bdc1bfc1760814b048cca10",
+                "sample_rate_hz": 0.25,
+                "sample_count": 18368201,
+                "capture_seconds": 73472804.0,
+                "requested_active_seconds": 73440000,
+                "actual_source_elapsed_seconds": 73440183.60000001,
+                "source_samples": 18366718,
+                "source_support_seconds": 73466872.0,
+                "channel_tail_samples": 1479,
+                "natural_complete_samples": 18368198,
+                "public_calendar_padding_samples": 3
+              },
+              "post_over_pre_signal_energy_ratio": null,
+              "sampled_signal_energy_samples": 0.0,
+              "sampled_signal_energy_seconds": 0.0,
+              "correct_projection_fraction": null,
+              "wrong_projection_fraction": null,
+              "correct_projection_over_pre_selective_energy": null,
+              "wrong_projection_over_pre_selective_energy": null
+            }
+          ],
+          "energy_projection_ranges": {}
+        },
+        {
+          "model": "dispersive-dft",
+          "modulation": "each-65",
+          "source_count": 2,
+          "paths": [
+            {
+              "source": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/remote-analysis-root/local-evidence/triad-selective-correction/independent-corrected-long/stable850-m60/dispersive-dft/each-65/wrong-key/path-140000",
+              "geometry": {
+                "manifest_sha256": "f22054f9ac975fd0dea72a0fde6c52a4789a61b346a4be8b3f52901bde0479dc",
+                "sample_rate_hz": 0.25,
+                "sample_count": 18368201,
+                "capture_seconds": 73472804.0,
+                "requested_active_seconds": 73440000,
+                "actual_source_elapsed_seconds": 73440183.60000001,
+                "source_samples": 18366718,
+                "source_support_seconds": 73466872.0,
+                "channel_tail_samples": 1479,
+                "natural_complete_samples": 18368198,
+                "public_calendar_padding_samples": 3
+              },
+              "post_over_pre_signal_energy_ratio": 1.5911861816765873,
+              "sampled_signal_energy_samples": 29207467.612917013,
+              "sampled_signal_energy_seconds": 116829870.45166805,
+              "correct_projection_fraction": 0.050928010716830306,
+              "wrong_projection_fraction": 0.050485381632623616,
+              "correct_projection_over_pre_selective_energy": 0.08103594691289465,
+              "wrong_projection_over_pre_selective_energy": 0.08033164163049683
+            },
+            {
+              "source": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/remote-analysis-root/local-evidence/triad-selective-correction/independent-corrected-long/stable850-m60/dispersive-dft/each-65/wrong-key/path-140001",
+              "geometry": {
+                "manifest_sha256": "6e6ce8f1afe4351d4fc735cf682fc7bd884c7b4ba3a95fce841c5de080dc082f",
+                "sample_rate_hz": 0.25,
+                "sample_count": 18368201,
+                "capture_seconds": 73472804.0,
+                "requested_active_seconds": 73440000,
+                "actual_source_elapsed_seconds": 73440183.60000001,
+                "source_samples": 18366718,
+                "source_support_seconds": 73466872.0,
+                "channel_tail_samples": 1479,
+                "natural_complete_samples": 18368198,
+                "public_calendar_padding_samples": 3
+              },
+              "post_over_pre_signal_energy_ratio": 1.9534787955137312,
+              "sampled_signal_energy_samples": 35858149.63786252,
+              "sampled_signal_energy_seconds": 143432598.55145007,
+              "correct_projection_fraction": 0.053620377127793606,
+              "wrong_projection_fraction": 0.0524185930357712,
+              "correct_projection_over_pre_selective_energy": 0.10474626972658901,
+              "wrong_projection_over_pre_selective_energy": 0.10239860998603764
+            }
+          ],
+          "energy_projection_ranges": {
+            "post_over_pre_signal_energy_ratio": [
+              1.5911861816765873,
+              1.9534787955137312
+            ],
+            "correct_projection_fraction": [
+              0.050928010716830306,
+              0.053620377127793606
+            ],
+            "wrong_projection_fraction": [
+              0.050485381632623616,
+              0.0524185930357712
+            ],
+            "correct_projection_over_pre_selective_energy": [
+              0.08103594691289465,
+              0.10474626972658901
+            ],
+            "wrong_projection_over_pre_selective_energy": [
+              0.08033164163049683,
+              0.10239860998603764
+            ]
+          }
+        }
+      ],
+      "receiver_counts": [
+        {
+          "name": "long-controls-each-25-null",
+          "model": "dispersive-dft",
+          "modulation": "each-25",
+          "report_sha256": "5e4c9bfca0d8f36241f816013d06c216757cb72e87b27e2af58aa3da2ba32602",
+          "score_npz_sha256": "2fc1d47326939188030dcc1b8daa9b587828a65e0e0484eadcfec4b91902519f",
+          "method": "static-fft-ucb",
+          "strict_threshold_nats": [
+            22.72106338958574
+          ],
+          "counts": [
+            {
+              "gate": "relaxed",
+              "control": "null",
+              "cn0_db_hz": -60,
+              "counts": {
+                "trials": 2,
+                "false_admitted": 0,
+                "not_admitted": 2,
+                "interval_suppressed_due_to_failed_control_paths": false
+              },
+              "equal_bit_population_event_bounds": {
+                "event": "false_admitted",
+                "estimate": 0.0,
+                "lower_one_sided_95": 0.0,
+                "upper_one_sided_95": 0.7763932022500211,
+                "lower_method": "Bonferroni per-bit CP",
+                "upper_method": "equal-stratum all-failure AM-GM complement",
+                "per_bit": {
+                  "0": {
+                    "successes": 0,
+                    "trials": 1,
+                    "fraction": 0.0,
+                    "lower_one_sided_95": 0.0,
+                    "upper_one_sided_95": 0.95
+                  },
+                  "1": {
+                    "successes": 0,
+                    "trials": 1,
+                    "fraction": 0.0,
+                    "lower_one_sided_95": 0.0,
+                    "upper_one_sided_95": 0.95
+                  }
+                }
+              },
+              "equal_bit_population_outcome_bounds": {
+                "false_admitted": {
+                  "event": "false_admitted",
+                  "estimate": 0.0,
+                  "lower_one_sided_95": 0.0,
+                  "upper_one_sided_95": 0.7763932022500211,
+                  "lower_method": "Bonferroni per-bit CP",
+                  "upper_method": "equal-stratum all-failure AM-GM complement",
+                  "per_bit": {
+                    "0": {
+                      "successes": 0,
+                      "trials": 1,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.95
+                    },
+                    "1": {
+                      "successes": 0,
+                      "trials": 1,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.95
+                    }
+                  }
+                },
+                "not_admitted": {
+                  "event": "not_admitted",
+                  "estimate": 1.0,
+                  "lower_one_sided_95": 0.22360679774997896,
+                  "upper_one_sided_95": 1.0,
+                  "lower_method": "equal-stratum all-success AM-GM",
+                  "upper_method": "Bonferroni per-bit CP",
+                  "per_bit": {
+                    "0": {
+                      "successes": 1,
+                      "trials": 1,
+                      "fraction": 1.0,
+                      "lower_one_sided_95": 0.05,
+                      "upper_one_sided_95": 1.0
+                    },
+                    "1": {
+                      "successes": 1,
+                      "trials": 1,
+                      "fraction": 1.0,
+                      "lower_one_sided_95": 0.05,
+                      "upper_one_sided_95": 1.0
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "gate": "strict",
+              "control": "null",
+              "cn0_db_hz": -60,
+              "counts": {
+                "trials": 2,
+                "false_admitted": 0,
+                "not_admitted": 2,
+                "interval_suppressed_due_to_failed_control_paths": false
+              },
+              "equal_bit_population_event_bounds": {
+                "event": "false_admitted",
+                "estimate": 0.0,
+                "lower_one_sided_95": 0.0,
+                "upper_one_sided_95": 0.7763932022500211,
+                "lower_method": "Bonferroni per-bit CP",
+                "upper_method": "equal-stratum all-failure AM-GM complement",
+                "per_bit": {
+                  "0": {
+                    "successes": 0,
+                    "trials": 1,
+                    "fraction": 0.0,
+                    "lower_one_sided_95": 0.0,
+                    "upper_one_sided_95": 0.95
+                  },
+                  "1": {
+                    "successes": 0,
+                    "trials": 1,
+                    "fraction": 0.0,
+                    "lower_one_sided_95": 0.0,
+                    "upper_one_sided_95": 0.95
+                  }
+                }
+              },
+              "equal_bit_population_outcome_bounds": {
+                "false_admitted": {
+                  "event": "false_admitted",
+                  "estimate": 0.0,
+                  "lower_one_sided_95": 0.0,
+                  "upper_one_sided_95": 0.7763932022500211,
+                  "lower_method": "Bonferroni per-bit CP",
+                  "upper_method": "equal-stratum all-failure AM-GM complement",
+                  "per_bit": {
+                    "0": {
+                      "successes": 0,
+                      "trials": 1,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.95
+                    },
+                    "1": {
+                      "successes": 0,
+                      "trials": 1,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.95
+                    }
+                  }
+                },
+                "not_admitted": {
+                  "event": "not_admitted",
+                  "estimate": 1.0,
+                  "lower_one_sided_95": 0.22360679774997896,
+                  "upper_one_sided_95": 1.0,
+                  "lower_method": "equal-stratum all-success AM-GM",
+                  "upper_method": "Bonferroni per-bit CP",
+                  "per_bit": {
+                    "0": {
+                      "successes": 1,
+                      "trials": 1,
+                      "fraction": 1.0,
+                      "lower_one_sided_95": 0.05,
+                      "upper_one_sided_95": 1.0
+                    },
+                    "1": {
+                      "successes": 1,
+                      "trials": 1,
+                      "fraction": 1.0,
+                      "lower_one_sided_95": 0.05,
+                      "upper_one_sided_95": 1.0
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "actual_score_pairs": [
+            {
+              "input": "/workspace/triad/local-evidence/triad-selective-correction/independent-corrected-long/stable850-m60/dispersive-dft/each-25/null/path-140000",
+              "truth_bit": null,
+              "scores": [
+                -4.132932339885327,
+                -2.952862035682399
+              ],
+              "strict_best_score_margin_nats": -25.673925425268138
+            },
+            {
+              "input": "/workspace/triad/local-evidence/triad-selective-correction/independent-corrected-long/stable850-m60/dispersive-dft/each-25/null/path-140001",
+              "truth_bit": null,
+              "scores": [
+                -3.9473065667001768,
+                -3.5089020539237974
+              ],
+              "strict_best_score_margin_nats": -26.22996544350954
+            }
+          ]
+        },
+        {
+          "name": "long-controls-each-25-wrong-key",
+          "model": "dispersive-dft",
+          "modulation": "each-25",
+          "report_sha256": "a995b250ce1c131415f2d96a2b9d62abc616bb51328dc30b492ae2dd194ddd71",
+          "score_npz_sha256": "0ea21dba6dfa628869c128b3e542d1289137e956d7e9268ba4e73d892972e2bf",
+          "method": "static-fft-ucb",
+          "strict_threshold_nats": [
+            22.72106338958574
+          ],
+          "counts": [
+            {
+              "gate": "relaxed",
+              "control": "wrong-key",
+              "cn0_db_hz": -60,
+              "counts": {
+                "trials": 2,
+                "false_admitted": 0,
+                "not_admitted": 2,
+                "interval_suppressed_due_to_failed_control_paths": false
+              },
+              "equal_bit_population_event_bounds": {
+                "event": "false_admitted",
+                "estimate": 0.0,
+                "lower_one_sided_95": 0.0,
+                "upper_one_sided_95": 0.7763932022500211,
+                "lower_method": "Bonferroni per-bit CP",
+                "upper_method": "equal-stratum all-failure AM-GM complement",
+                "per_bit": {
+                  "0": {
+                    "successes": 0,
+                    "trials": 1,
+                    "fraction": 0.0,
+                    "lower_one_sided_95": 0.0,
+                    "upper_one_sided_95": 0.95
+                  },
+                  "1": {
+                    "successes": 0,
+                    "trials": 1,
+                    "fraction": 0.0,
+                    "lower_one_sided_95": 0.0,
+                    "upper_one_sided_95": 0.95
+                  }
+                }
+              },
+              "equal_bit_population_outcome_bounds": {
+                "false_admitted": {
+                  "event": "false_admitted",
+                  "estimate": 0.0,
+                  "lower_one_sided_95": 0.0,
+                  "upper_one_sided_95": 0.7763932022500211,
+                  "lower_method": "Bonferroni per-bit CP",
+                  "upper_method": "equal-stratum all-failure AM-GM complement",
+                  "per_bit": {
+                    "0": {
+                      "successes": 0,
+                      "trials": 1,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.95
+                    },
+                    "1": {
+                      "successes": 0,
+                      "trials": 1,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.95
+                    }
+                  }
+                },
+                "not_admitted": {
+                  "event": "not_admitted",
+                  "estimate": 1.0,
+                  "lower_one_sided_95": 0.22360679774997896,
+                  "upper_one_sided_95": 1.0,
+                  "lower_method": "equal-stratum all-success AM-GM",
+                  "upper_method": "Bonferroni per-bit CP",
+                  "per_bit": {
+                    "0": {
+                      "successes": 1,
+                      "trials": 1,
+                      "fraction": 1.0,
+                      "lower_one_sided_95": 0.05,
+                      "upper_one_sided_95": 1.0
+                    },
+                    "1": {
+                      "successes": 1,
+                      "trials": 1,
+                      "fraction": 1.0,
+                      "lower_one_sided_95": 0.05,
+                      "upper_one_sided_95": 1.0
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "gate": "strict",
+              "control": "wrong-key",
+              "cn0_db_hz": -60,
+              "counts": {
+                "trials": 2,
+                "false_admitted": 0,
+                "not_admitted": 2,
+                "interval_suppressed_due_to_failed_control_paths": false
+              },
+              "equal_bit_population_event_bounds": {
+                "event": "false_admitted",
+                "estimate": 0.0,
+                "lower_one_sided_95": 0.0,
+                "upper_one_sided_95": 0.7763932022500211,
+                "lower_method": "Bonferroni per-bit CP",
+                "upper_method": "equal-stratum all-failure AM-GM complement",
+                "per_bit": {
+                  "0": {
+                    "successes": 0,
+                    "trials": 1,
+                    "fraction": 0.0,
+                    "lower_one_sided_95": 0.0,
+                    "upper_one_sided_95": 0.95
+                  },
+                  "1": {
+                    "successes": 0,
+                    "trials": 1,
+                    "fraction": 0.0,
+                    "lower_one_sided_95": 0.0,
+                    "upper_one_sided_95": 0.95
+                  }
+                }
+              },
+              "equal_bit_population_outcome_bounds": {
+                "false_admitted": {
+                  "event": "false_admitted",
+                  "estimate": 0.0,
+                  "lower_one_sided_95": 0.0,
+                  "upper_one_sided_95": 0.7763932022500211,
+                  "lower_method": "Bonferroni per-bit CP",
+                  "upper_method": "equal-stratum all-failure AM-GM complement",
+                  "per_bit": {
+                    "0": {
+                      "successes": 0,
+                      "trials": 1,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.95
+                    },
+                    "1": {
+                      "successes": 0,
+                      "trials": 1,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.95
+                    }
+                  }
+                },
+                "not_admitted": {
+                  "event": "not_admitted",
+                  "estimate": 1.0,
+                  "lower_one_sided_95": 0.22360679774997896,
+                  "upper_one_sided_95": 1.0,
+                  "lower_method": "equal-stratum all-success AM-GM",
+                  "upper_method": "Bonferroni per-bit CP",
+                  "per_bit": {
+                    "0": {
+                      "successes": 1,
+                      "trials": 1,
+                      "fraction": 1.0,
+                      "lower_one_sided_95": 0.05,
+                      "upper_one_sided_95": 1.0
+                    },
+                    "1": {
+                      "successes": 1,
+                      "trials": 1,
+                      "fraction": 1.0,
+                      "lower_one_sided_95": 0.05,
+                      "upper_one_sided_95": 1.0
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "actual_score_pairs": [
+            {
+              "input": "/workspace/triad/local-evidence/triad-selective-correction/independent-corrected-long/stable850-m60/dispersive-dft/each-25/wrong-key/path-140000",
+              "truth_bit": null,
+              "scores": [
+                -0.28683212140872083,
+                -3.381674502105856
+              ],
+              "strict_best_score_margin_nats": -23.007895510994462
+            },
+            {
+              "input": "/workspace/triad/local-evidence/triad-selective-correction/independent-corrected-long/stable850-m60/dispersive-dft/each-25/wrong-key/path-140001",
+              "truth_bit": null,
+              "scores": [
+                -3.734704207790571,
+                -4.243494297853003
+              ],
+              "strict_best_score_margin_nats": -26.455767597376312
+            }
+          ]
+        },
+        {
+          "name": "long-controls-each-65-null",
+          "model": "dispersive-dft",
+          "modulation": "each-65",
+          "report_sha256": "50604985dd3bd2a9ad9645bf534cb7f8000de50743b1c94fc257a46cb8808ba1",
+          "score_npz_sha256": "2fc1d47326939188030dcc1b8daa9b587828a65e0e0484eadcfec4b91902519f",
+          "method": "static-fft-ucb",
+          "strict_threshold_nats": [
+            22.72106338958574
+          ],
+          "counts": [
+            {
+              "gate": "relaxed",
+              "control": "null",
+              "cn0_db_hz": -60,
+              "counts": {
+                "trials": 2,
+                "false_admitted": 0,
+                "not_admitted": 2,
+                "interval_suppressed_due_to_failed_control_paths": false
+              },
+              "equal_bit_population_event_bounds": {
+                "event": "false_admitted",
+                "estimate": 0.0,
+                "lower_one_sided_95": 0.0,
+                "upper_one_sided_95": 0.7763932022500211,
+                "lower_method": "Bonferroni per-bit CP",
+                "upper_method": "equal-stratum all-failure AM-GM complement",
+                "per_bit": {
+                  "0": {
+                    "successes": 0,
+                    "trials": 1,
+                    "fraction": 0.0,
+                    "lower_one_sided_95": 0.0,
+                    "upper_one_sided_95": 0.95
+                  },
+                  "1": {
+                    "successes": 0,
+                    "trials": 1,
+                    "fraction": 0.0,
+                    "lower_one_sided_95": 0.0,
+                    "upper_one_sided_95": 0.95
+                  }
+                }
+              },
+              "equal_bit_population_outcome_bounds": {
+                "false_admitted": {
+                  "event": "false_admitted",
+                  "estimate": 0.0,
+                  "lower_one_sided_95": 0.0,
+                  "upper_one_sided_95": 0.7763932022500211,
+                  "lower_method": "Bonferroni per-bit CP",
+                  "upper_method": "equal-stratum all-failure AM-GM complement",
+                  "per_bit": {
+                    "0": {
+                      "successes": 0,
+                      "trials": 1,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.95
+                    },
+                    "1": {
+                      "successes": 0,
+                      "trials": 1,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.95
+                    }
+                  }
+                },
+                "not_admitted": {
+                  "event": "not_admitted",
+                  "estimate": 1.0,
+                  "lower_one_sided_95": 0.22360679774997896,
+                  "upper_one_sided_95": 1.0,
+                  "lower_method": "equal-stratum all-success AM-GM",
+                  "upper_method": "Bonferroni per-bit CP",
+                  "per_bit": {
+                    "0": {
+                      "successes": 1,
+                      "trials": 1,
+                      "fraction": 1.0,
+                      "lower_one_sided_95": 0.05,
+                      "upper_one_sided_95": 1.0
+                    },
+                    "1": {
+                      "successes": 1,
+                      "trials": 1,
+                      "fraction": 1.0,
+                      "lower_one_sided_95": 0.05,
+                      "upper_one_sided_95": 1.0
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "gate": "strict",
+              "control": "null",
+              "cn0_db_hz": -60,
+              "counts": {
+                "trials": 2,
+                "false_admitted": 0,
+                "not_admitted": 2,
+                "interval_suppressed_due_to_failed_control_paths": false
+              },
+              "equal_bit_population_event_bounds": {
+                "event": "false_admitted",
+                "estimate": 0.0,
+                "lower_one_sided_95": 0.0,
+                "upper_one_sided_95": 0.7763932022500211,
+                "lower_method": "Bonferroni per-bit CP",
+                "upper_method": "equal-stratum all-failure AM-GM complement",
+                "per_bit": {
+                  "0": {
+                    "successes": 0,
+                    "trials": 1,
+                    "fraction": 0.0,
+                    "lower_one_sided_95": 0.0,
+                    "upper_one_sided_95": 0.95
+                  },
+                  "1": {
+                    "successes": 0,
+                    "trials": 1,
+                    "fraction": 0.0,
+                    "lower_one_sided_95": 0.0,
+                    "upper_one_sided_95": 0.95
+                  }
+                }
+              },
+              "equal_bit_population_outcome_bounds": {
+                "false_admitted": {
+                  "event": "false_admitted",
+                  "estimate": 0.0,
+                  "lower_one_sided_95": 0.0,
+                  "upper_one_sided_95": 0.7763932022500211,
+                  "lower_method": "Bonferroni per-bit CP",
+                  "upper_method": "equal-stratum all-failure AM-GM complement",
+                  "per_bit": {
+                    "0": {
+                      "successes": 0,
+                      "trials": 1,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.95
+                    },
+                    "1": {
+                      "successes": 0,
+                      "trials": 1,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.95
+                    }
+                  }
+                },
+                "not_admitted": {
+                  "event": "not_admitted",
+                  "estimate": 1.0,
+                  "lower_one_sided_95": 0.22360679774997896,
+                  "upper_one_sided_95": 1.0,
+                  "lower_method": "equal-stratum all-success AM-GM",
+                  "upper_method": "Bonferroni per-bit CP",
+                  "per_bit": {
+                    "0": {
+                      "successes": 1,
+                      "trials": 1,
+                      "fraction": 1.0,
+                      "lower_one_sided_95": 0.05,
+                      "upper_one_sided_95": 1.0
+                    },
+                    "1": {
+                      "successes": 1,
+                      "trials": 1,
+                      "fraction": 1.0,
+                      "lower_one_sided_95": 0.05,
+                      "upper_one_sided_95": 1.0
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "actual_score_pairs": [
+            {
+              "input": "/workspace/triad/local-evidence/triad-selective-correction/independent-corrected-long/stable850-m60/dispersive-dft/each-65/null/path-140000",
+              "truth_bit": null,
+              "scores": [
+                -4.132932339885327,
+                -2.952862035682399
+              ],
+              "strict_best_score_margin_nats": -25.673925425268138
+            },
+            {
+              "input": "/workspace/triad/local-evidence/triad-selective-correction/independent-corrected-long/stable850-m60/dispersive-dft/each-65/null/path-140001",
+              "truth_bit": null,
+              "scores": [
+                -3.9473065667001768,
+                -3.5089020539237974
+              ],
+              "strict_best_score_margin_nats": -26.22996544350954
+            }
+          ]
+        },
+        {
+          "name": "long-controls-each-65-wrong-key",
+          "model": "dispersive-dft",
+          "modulation": "each-65",
+          "report_sha256": "8b8299133bf1939cd5ce50019d1ab2ee1cebe499589bed4e5ecb2204fd496528",
+          "score_npz_sha256": "593f8f4f1c662fe2380a89be1b72cb29016b013b454d1e89d0d0cbf8158211cf",
+          "method": "static-fft-ucb",
+          "strict_threshold_nats": [
+            22.72106338958574
+          ],
+          "counts": [
+            {
+              "gate": "relaxed",
+              "control": "wrong-key",
+              "cn0_db_hz": -60,
+              "counts": {
+                "trials": 2,
+                "false_admitted": 0,
+                "not_admitted": 2,
+                "interval_suppressed_due_to_failed_control_paths": false
+              },
+              "equal_bit_population_event_bounds": {
+                "event": "false_admitted",
+                "estimate": 0.0,
+                "lower_one_sided_95": 0.0,
+                "upper_one_sided_95": 0.7763932022500211,
+                "lower_method": "Bonferroni per-bit CP",
+                "upper_method": "equal-stratum all-failure AM-GM complement",
+                "per_bit": {
+                  "0": {
+                    "successes": 0,
+                    "trials": 1,
+                    "fraction": 0.0,
+                    "lower_one_sided_95": 0.0,
+                    "upper_one_sided_95": 0.95
+                  },
+                  "1": {
+                    "successes": 0,
+                    "trials": 1,
+                    "fraction": 0.0,
+                    "lower_one_sided_95": 0.0,
+                    "upper_one_sided_95": 0.95
+                  }
+                }
+              },
+              "equal_bit_population_outcome_bounds": {
+                "false_admitted": {
+                  "event": "false_admitted",
+                  "estimate": 0.0,
+                  "lower_one_sided_95": 0.0,
+                  "upper_one_sided_95": 0.7763932022500211,
+                  "lower_method": "Bonferroni per-bit CP",
+                  "upper_method": "equal-stratum all-failure AM-GM complement",
+                  "per_bit": {
+                    "0": {
+                      "successes": 0,
+                      "trials": 1,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.95
+                    },
+                    "1": {
+                      "successes": 0,
+                      "trials": 1,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.95
+                    }
+                  }
+                },
+                "not_admitted": {
+                  "event": "not_admitted",
+                  "estimate": 1.0,
+                  "lower_one_sided_95": 0.22360679774997896,
+                  "upper_one_sided_95": 1.0,
+                  "lower_method": "equal-stratum all-success AM-GM",
+                  "upper_method": "Bonferroni per-bit CP",
+                  "per_bit": {
+                    "0": {
+                      "successes": 1,
+                      "trials": 1,
+                      "fraction": 1.0,
+                      "lower_one_sided_95": 0.05,
+                      "upper_one_sided_95": 1.0
+                    },
+                    "1": {
+                      "successes": 1,
+                      "trials": 1,
+                      "fraction": 1.0,
+                      "lower_one_sided_95": 0.05,
+                      "upper_one_sided_95": 1.0
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "gate": "strict",
+              "control": "wrong-key",
+              "cn0_db_hz": -60,
+              "counts": {
+                "trials": 2,
+                "false_admitted": 0,
+                "not_admitted": 2,
+                "interval_suppressed_due_to_failed_control_paths": false
+              },
+              "equal_bit_population_event_bounds": {
+                "event": "false_admitted",
+                "estimate": 0.0,
+                "lower_one_sided_95": 0.0,
+                "upper_one_sided_95": 0.7763932022500211,
+                "lower_method": "Bonferroni per-bit CP",
+                "upper_method": "equal-stratum all-failure AM-GM complement",
+                "per_bit": {
+                  "0": {
+                    "successes": 0,
+                    "trials": 1,
+                    "fraction": 0.0,
+                    "lower_one_sided_95": 0.0,
+                    "upper_one_sided_95": 0.95
+                  },
+                  "1": {
+                    "successes": 0,
+                    "trials": 1,
+                    "fraction": 0.0,
+                    "lower_one_sided_95": 0.0,
+                    "upper_one_sided_95": 0.95
+                  }
+                }
+              },
+              "equal_bit_population_outcome_bounds": {
+                "false_admitted": {
+                  "event": "false_admitted",
+                  "estimate": 0.0,
+                  "lower_one_sided_95": 0.0,
+                  "upper_one_sided_95": 0.7763932022500211,
+                  "lower_method": "Bonferroni per-bit CP",
+                  "upper_method": "equal-stratum all-failure AM-GM complement",
+                  "per_bit": {
+                    "0": {
+                      "successes": 0,
+                      "trials": 1,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.95
+                    },
+                    "1": {
+                      "successes": 0,
+                      "trials": 1,
+                      "fraction": 0.0,
+                      "lower_one_sided_95": 0.0,
+                      "upper_one_sided_95": 0.95
+                    }
+                  }
+                },
+                "not_admitted": {
+                  "event": "not_admitted",
+                  "estimate": 1.0,
+                  "lower_one_sided_95": 0.22360679774997896,
+                  "upper_one_sided_95": 1.0,
+                  "lower_method": "equal-stratum all-success AM-GM",
+                  "upper_method": "Bonferroni per-bit CP",
+                  "per_bit": {
+                    "0": {
+                      "successes": 1,
+                      "trials": 1,
+                      "fraction": 1.0,
+                      "lower_one_sided_95": 0.05,
+                      "upper_one_sided_95": 1.0
+                    },
+                    "1": {
+                      "successes": 1,
+                      "trials": 1,
+                      "fraction": 1.0,
+                      "lower_one_sided_95": 0.05,
+                      "upper_one_sided_95": 1.0
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "actual_score_pairs": [
+            {
+              "input": "/workspace/triad/local-evidence/triad-selective-correction/independent-corrected-long/stable850-m60/dispersive-dft/each-65/wrong-key/path-140000",
+              "truth_bit": null,
+              "scores": [
+                -0.2893214160376374,
+                -3.3818558967194297
+              ],
+              "strict_best_score_margin_nats": -23.010384805623378
+            },
+            {
+              "input": "/workspace/triad/local-evidence/triad-selective-correction/independent-corrected-long/stable850-m60/dispersive-dft/each-65/wrong-key/path-140001",
+              "truth_bit": null,
+              "scores": [
+                -3.7240172563405194,
+                -4.24561406181593
+              ],
+              "strict_best_score_margin_nats": -26.44508064592626
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "paired_energy_projection_comparisons": [
+    {
+      "modulation": "each-25",
+      "root_index": "path-80000",
+      "corrected_minus_legacy_retained_fraction": -0.009397321358238786,
+      "corrected_over_legacy_post_energy": 0.9431187227649618,
+      "corrected_over_legacy_correct_projected_energy": 0.9337764843987799,
+      "corrected_over_off_correct_projected_energy": 0.8746328965824419
+    },
+    {
+      "modulation": "each-25",
+      "root_index": "path-80001",
+      "corrected_minus_legacy_retained_fraction": -0.004972346304904285,
+      "corrected_over_legacy_post_energy": 1.0053131281280858,
+      "corrected_over_legacy_correct_projected_energy": 1.0000572203950049,
+      "corrected_over_off_correct_projected_energy": 1.0382535211208426
+    },
+    {
+      "modulation": "each-25",
+      "root_index": "path-80002",
+      "corrected_minus_legacy_retained_fraction": -0.006135779869794633,
+      "corrected_over_legacy_post_energy": 1.012405071866317,
+      "corrected_over_legacy_correct_projected_energy": 1.00585856386373,
+      "corrected_over_off_correct_projected_energy": 0.9909731623754324
+    },
+    {
+      "modulation": "each-25",
+      "root_index": "path-80003",
+      "corrected_minus_legacy_retained_fraction": -0.003522956013147782,
+      "corrected_over_legacy_post_energy": 1.0490530993351093,
+      "corrected_over_legacy_correct_projected_energy": 1.0451534992833627,
+      "corrected_over_off_correct_projected_energy": 0.8548472404667741
+    },
+    {
+      "modulation": "each-65",
+      "root_index": "path-80000",
+      "corrected_minus_legacy_retained_fraction": -0.07509670117424905,
+      "corrected_over_legacy_post_energy": 0.8798956892790261,
+      "corrected_over_legacy_correct_projected_energy": 0.7881277703997547,
+      "corrected_over_off_correct_projected_energy": 0.6939393185213688
+    },
+    {
+      "modulation": "each-65",
+      "root_index": "path-80001",
+      "corrected_minus_legacy_retained_fraction": -0.024198508770617688,
+      "corrected_over_legacy_post_energy": 1.0065570028438326,
+      "corrected_over_legacy_correct_projected_energy": 0.9744671602358069,
+      "corrected_over_off_correct_projected_energy": 1.1074853172617316
+    },
+    {
+      "modulation": "each-65",
+      "root_index": "path-80002",
+      "corrected_minus_legacy_retained_fraction": -0.028538055187158684,
+      "corrected_over_legacy_post_energy": 1.0234209292493217,
+      "corrected_over_legacy_correct_projected_energy": 0.9837265938120027,
+      "corrected_over_off_correct_projected_energy": 0.9822431388364854
+    },
+    {
+      "modulation": "each-65",
+      "root_index": "path-80003",
+      "corrected_minus_legacy_retained_fraction": 0.0002771831336210173,
+      "corrected_over_legacy_post_energy": 1.120698460264239,
+      "corrected_over_legacy_correct_projected_energy": 1.1211672189114925,
+      "corrected_over_off_correct_projected_energy": 0.6714717499409392
+    }
+  ],
+  "fs_refinement": [
+    {
+      "root_index": "path-80000",
+      "same_six_integer_roots": true,
+      "same_static_endpoint_truth": true,
+      "fs025": {
+        "source": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/long-replay-resume/stable850-m60/dispersive-dft/each-65/signal/path-80000",
+        "geometry": {
+          "manifest_sha256": "ffb33ed400f626c338aaafc691edc25e5917fa3bc5ef2fad31c949f3a871666d",
+          "sample_rate_hz": 0.25,
+          "sample_count": 18368201,
+          "capture_seconds": 73472804.0,
+          "requested_active_seconds": 73440000,
+          "actual_source_elapsed_seconds": 73440183.60000001,
+          "source_samples": 18366718,
+          "source_support_seconds": 73466872.0,
+          "channel_tail_samples": 1480,
+          "natural_complete_samples": 18368199,
+          "public_calendar_padding_samples": 2
+        },
+        "post_over_pre_signal_energy_ratio": 1.0759207622074984,
+        "sampled_signal_energy_samples": 19749423.07032303,
+        "sampled_signal_energy_seconds": 78997692.28129213,
+        "correct_projection_fraction": 0.6449508323132129,
+        "wrong_projection_fraction": 0.040210605962526076,
+        "correct_projection_over_pre_selective_energy": 0.6939159910887113,
+        "wrong_projection_over_pre_selective_energy": 0.04326342581602136
+      },
+      "fs050": {
+        "source": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/remote-analysis-root/local-evidence/triad-selective-correction/independent-corrected-refinement/stable850-m60/dispersive-dft/each-65/signal/path-80000",
+        "geometry": {
+          "manifest_sha256": "af75cd8d5517d69a01154cce97f5e7a0f60a0d25a3e5f431bbe449a681ac11f9",
+          "sample_rate_hz": 0.5,
+          "sample_count": 36736379,
+          "capture_seconds": 73472758.0,
+          "requested_active_seconds": 73440000,
+          "actual_source_elapsed_seconds": 73440183.60000001,
+          "source_samples": 36733430,
+          "source_support_seconds": 73466860.0,
+          "channel_tail_samples": 2946,
+          "natural_complete_samples": 36736377,
+          "public_calendar_padding_samples": 2
+        },
+        "post_over_pre_signal_energy_ratio": 1.0828862153859873,
+        "sampled_signal_energy_samples": 39754558.68515016,
+        "sampled_signal_energy_seconds": 79509117.37030032,
+        "correct_projection_fraction": 0.640778760204503,
+        "wrong_projection_fraction": 0.040023541584227655,
+        "correct_projection_over_pre_selective_energy": 0.6938904865376974,
+        "wrong_projection_over_pre_selective_energy": 0.043340941472495335
+      },
+      "refinement_file_inventory": [
+        {
+          "path": "local-evidence/triad-selective-correction/independent-corrected-refinement/stable850-m60/dispersive-dft/each-65/signal/path-80000/gram.c128",
+          "sha256": "409cdf355cad9a5b2cf67a1919f91a2936ab141c45a68f8177f2dda40b504a84",
+          "size": 2296064
+        },
+        {
+          "path": "local-evidence/triad-selective-correction/independent-corrected-refinement/stable850-m60/dispersive-dft/each-65/signal/path-80000/intervals.u64",
+          "sha256": "e35a2366e896bd251bd84cffdd40e374d95d87a5c057d7fc778db602a24b202c",
+          "size": 143504
+        },
+        {
+          "path": "local-evidence/triad-selective-correction/independent-corrected-refinement/stable850-m60/dispersive-dft/each-65/signal/path-80000/manifest.json",
+          "sha256": "af75cd8d5517d69a01154cce97f5e7a0f60a0d25a3e5f431bbe449a681ac11f9",
+          "size": 25169
+        },
+        {
+          "path": "local-evidence/triad-selective-correction/independent-corrected-refinement/stable850-m60/dispersive-dft/each-65/signal/path-80000/mean.c128",
+          "sha256": "0ea8781722f2cc896bd1b49d04029397680aa99c7fa0695f6951e06d794ae4ed",
+          "size": 574016
+        },
+        {
+          "path": "local-evidence/triad-selective-correction/independent-corrected-refinement/stable850-m60/dispersive-dft/each-65/signal/path-80000/observation.c128",
+          "sha256": "2a8683f16c0908faac804a7132fc01126679639668719b83b6a7c1d779d33634",
+          "size": 574016
+        },
+        {
+          "path": "local-evidence/triad-selective-correction/independent-corrected-refinement/stable850-m60/dispersive-dft/each-65/signal/path-80000/received_energy.f64",
+          "sha256": "12fff1b55f18440363ef03703f1547a1bc43363cb1d566ee8d77293c1fa1af91",
+          "size": 71752
+        },
+        {
+          "path": "local-evidence/triad-selective-correction/independent-corrected-refinement/stable850-m60/dispersive-dft/each-65/signal/path-80000/signal_energy.f64",
+          "sha256": "c5be5c7c6acd3400484c101df4e6daad65dbb7efe7bb742dfa337975b51f80a8",
+          "size": 71752
+        },
+        {
+          "path": "local-evidence/triad-selective-correction/independent-corrected-refinement/stable850-m60/dispersive-dft/each-65/signal/path-80000/valid_rows.u64",
+          "sha256": "116275b72256d50eb2583a91dfa165d5a7dad3bcccdae94c86782f7fc241da85",
+          "size": 71752
+        }
+      ],
+      "correct_projection_fraction_difference": -0.004172072108709957,
+      "post_selective_energy_seconds_ratio": 1.006473924417781,
+      "scope": "Descriptive discretization/path comparison only; the stochastic continuous-time path and noise are not coupled across Fs, source support is rounded differently, and separately compiled host binaries differ. Not a numerical convergence proof or reception experiment."
+    },
+    {
+      "root_index": "path-80001",
+      "same_six_integer_roots": true,
+      "same_static_endpoint_truth": true,
+      "fs025": {
+        "source": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/long-replay-resume/stable850-m60/dispersive-dft/each-65/signal/path-80001",
+        "geometry": {
+          "manifest_sha256": "3f4091764795ffcc3e9c5f79fe58fbfdf73eb5b94d7cb3447fdc10096965c0cc",
+          "sample_rate_hz": 0.25,
+          "sample_count": 18368201,
+          "capture_seconds": 73472804.0,
+          "requested_active_seconds": 73440000,
+          "actual_source_elapsed_seconds": 73440183.60000001,
+          "source_samples": 18366718,
+          "source_support_seconds": 73466872.0,
+          "channel_tail_samples": 1479,
+          "natural_complete_samples": 18368198,
+          "public_calendar_padding_samples": 3
+        },
+        "post_over_pre_signal_energy_ratio": 1.507081907169161,
+        "sampled_signal_energy_samples": 27664099.78476604,
+        "sampled_signal_energy_seconds": 110656399.13906416,
+        "correct_projection_fraction": 0.7348322773558141,
+        "wrong_projection_fraction": 0.044711506354277245,
+        "correct_projection_over_pre_selective_energy": 1.1074524300068869,
+        "wrong_projection_over_pre_selective_energy": 0.06738390226881195
+      },
+      "fs050": {
+        "source": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-selective-correction/remote-analysis-root/local-evidence/triad-selective-correction/independent-corrected-refinement/stable850-m60/dispersive-dft/each-65/signal/path-80001",
+        "geometry": {
+          "manifest_sha256": "b60f285eaf07e0709300266d0dd39a3b917b545b41b8e8831acb30bfcd79af16",
+          "sample_rate_hz": 0.5,
+          "sample_count": 36736379,
+          "capture_seconds": 73472758.0,
+          "requested_active_seconds": 73440000,
+          "actual_source_elapsed_seconds": 73440183.60000001,
+          "source_samples": 36733430,
+          "source_support_seconds": 73466860.0,
+          "channel_tail_samples": 2945,
+          "natural_complete_samples": 36736376,
+          "public_calendar_padding_samples": 3
+        },
+        "post_over_pre_signal_energy_ratio": 1.5157122339451639,
+        "sampled_signal_energy_samples": 55645014.637443215,
+        "sampled_signal_energy_seconds": 111290029.27488643,
+        "correct_projection_fraction": 0.7306230787585949,
+        "wrong_projection_fraction": 0.044515085197047194,
+        "correct_projection_over_pre_selective_energy": 1.107414338876988,
+        "wrong_projection_over_pre_selective_energy": 0.06747205922826989
+      },
+      "refinement_file_inventory": [
+        {
+          "path": "local-evidence/triad-selective-correction/independent-corrected-refinement/stable850-m60/dispersive-dft/each-65/signal/path-80001/gram.c128",
+          "sha256": "96e861a4142f6f9e8782039a9f3bd78ca170be0ed24b1975cefbc03aa6586cc9",
+          "size": 2296064
+        },
+        {
+          "path": "local-evidence/triad-selective-correction/independent-corrected-refinement/stable850-m60/dispersive-dft/each-65/signal/path-80001/intervals.u64",
+          "sha256": "e35a2366e896bd251bd84cffdd40e374d95d87a5c057d7fc778db602a24b202c",
+          "size": 143504
+        },
+        {
+          "path": "local-evidence/triad-selective-correction/independent-corrected-refinement/stable850-m60/dispersive-dft/each-65/signal/path-80001/manifest.json",
+          "sha256": "b60f285eaf07e0709300266d0dd39a3b917b545b41b8e8831acb30bfcd79af16",
+          "size": 25169
+        },
+        {
+          "path": "local-evidence/triad-selective-correction/independent-corrected-refinement/stable850-m60/dispersive-dft/each-65/signal/path-80001/mean.c128",
+          "sha256": "1009ce7ebf000d982951cdaa79de9e4f226b7d653b828109b371e1404ceca2f8",
+          "size": 574016
+        },
+        {
+          "path": "local-evidence/triad-selective-correction/independent-corrected-refinement/stable850-m60/dispersive-dft/each-65/signal/path-80001/observation.c128",
+          "sha256": "55e0ff45b90d0436b419bd9f7046bc9b632a1d06eda0382212ccbea839dabea1",
+          "size": 574016
+        },
+        {
+          "path": "local-evidence/triad-selective-correction/independent-corrected-refinement/stable850-m60/dispersive-dft/each-65/signal/path-80001/received_energy.f64",
+          "sha256": "bbdf81142dfe27854defd5bec26c82139233a3dc13ec2f8a8c9e46f1339720c5",
+          "size": 71752
+        },
+        {
+          "path": "local-evidence/triad-selective-correction/independent-corrected-refinement/stable850-m60/dispersive-dft/each-65/signal/path-80001/signal_energy.f64",
+          "sha256": "215d8ecc87a32ff2a1363039869aa6e937d7b5a1c69cba845d388d4e7b3eff55",
+          "size": 71752
+        },
+        {
+          "path": "local-evidence/triad-selective-correction/independent-corrected-refinement/stable850-m60/dispersive-dft/each-65/signal/path-80001/valid_rows.u64",
+          "sha256": "116275b72256d50eb2583a91dfa165d5a7dad3bcccdae94c86782f7fc241da85",
+          "size": 71752
+        }
+      ],
+      "correct_projection_fraction_difference": -0.004209198597219244,
+      "post_selective_energy_seconds_ratio": 1.005726104777962,
+      "scope": "Descriptive discretization/path comparison only; the stochastic continuous-time path and noise are not coupled across Fs, source support is rounded differently, and separately compiled host binaries differ. Not a numerical convergence proof or reception experiment."
+    }
+  ],
+  "refinement_source_bindings": {
+    "batch_module_sha256": "5ca0cd5fe9d84bf629999a1621cf5c9799d3fd4e6629e5fc8e84a128676989f9",
+    "scalar_reference_sha256": "d5563ed8106589de0d48d0e7277ca1f003b647e25797d6fdff7bb91731707111",
+    "scalar_reference_path": "/home/user/___quick/p/_cur/dataPump/pumpModem/docs/validation-data/triad-v3/2026-11-02-selective/reproduction/retention.py",
+    "arithmetic": "NumPy complex128/float64 batched eigh and einsum; left-to-right FP64 block-energy accumulation",
+    "scope": "All blocks, fixed candidate over full observation; identical nominal Gram eigenvalue, nullspace, energy and rank policies; floating-point operation ordering can differ."
+  },
+  "refinement_generation_bindings": {
+    "plan_sha256": "8949c55dec1a3c3b3ca261625cb58eebe579886ea8a4f7aaa8bf2e6fe2dff961",
+    "receipt_view_sha256": "7d4f1e0c8023b66ed95b633a433e89ca393877b780f04c5d5a500abc4610f00b",
+    "stage_report_sha256": "782a3ebfee8362b79a3488a687ecc3bf8045dcc689ba4e8ce40a8043249a51c2",
+    "shared_scientific_source_files_equal": true,
+    "replay_binary_sha256": "d45cc4efc4e30b4e05434783a68befa02aea59891d0047cc2b1328e4ff8c28ae",
+    "refinement_binary_sha256": "8e9df3c502dc0f30c38c1fc8aba2ed92dd562ff1d26f418588dea38f3dfbcacc",
+    "interpretation": "The source inventories have equal shared scientific files; the remote plan also binds its holdout planner. The two host/compiler binary hashes differ."
+  },
+  "confidence_reference_sha256": "4483e0b3289319a048d5cb1c67eea74846f75cc333a09b464f041b81cd331e98",
+  "duration_assessment": {
+    "cn0_db_hz": -60,
+    "requested_active_days": 850,
+    "demonstrated_scope": "Finite seeded sampled-waveform feasibility with fixed unit ray gains, 0.05-Hz two-ray separation, 5-ms excess delay, synthetic spacing-scaled Each25/65 selective modulation, GPSDO-OCXO endpoint spectra and nominal timing/epoch with a bounded static-frequency bank.",
+    "not_demonstrated": [
+      "90% or 99% population correct-reception probability",
+      "operational 1e-4/day or 1%/12h empirical false-admission rate",
+      "minimum sufficient duration",
+      "850-day real-world oscillator/channel accuracy",
+      "renewing high-spread channel feasibility",
+      "full blind acquisition or real FHSS retuning"
+    ],
+    "planner_implication": "Retain 850 days as a tested feasible diagnostic point for this nonrenewing model, not a calibrated duration recommendation. Energy gain and nominal-subspace retention must be modeled separately; the stronger modulation does not establish a sensitivity gain."
+  },
+  "limitations": [
+    "Each probability endpoint is separately pointwise one-sided 95%; no simultaneous coverage across gates, outcomes, models or selected cells.",
+    "Balanced bounds assume independent iid simulation path outcomes within each bit stratum; p0 and p1 may differ. Pseudorandom root distinction is not a proof of physical or PRNG independence.",
+    "Replay roots are paired across models/depths; controls share roots with their corresponding signals. They cannot be pooled as extra independent trials or monitoring exposure.",
+    "Null admissions measure noise-only controls; wrong-key admissions measure a distinct signal-present rejection distribution.",
+    "Nominal noiseless projection includes legitimate public channel nuisance coefficients and is not a decoder success statistic or an achievable sensitivity bound.",
+    "Prior whole-array legacy exports ended before complete tails; the current replay preserves the legacy operator with complete public observation support. It is not claimed to reproduce the old truncated whole array."
+  ]
+}

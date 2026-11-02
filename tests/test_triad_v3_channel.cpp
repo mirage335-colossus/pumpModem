@@ -1,4 +1,5 @@
 #include "datapump/triad_modem_v3.hpp"
+#include "channel_perturbation.hpp"
 #include "channel_spread.hpp"
 #include "triad_gaussian_fading.hpp"
 
@@ -7,6 +8,7 @@
 #include <cstdint>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <numbers>
 #include <stdexcept>
 #include <vector>
@@ -1023,6 +1025,330 @@ void long_extent_prefix_and_tail_checks() {
     }
     check(echo_energy > 0, "delayed FHSS energy was gated from the channel tail");
 }
+
+struct SelectiveToneResponse {
+    double complex_rms = 0;
+    double amplitude_rms = 0;
+    double phase_variation = 0;
+    double slow_sideband = 0;
+    double fast_sideband = 0;
+    std::array<Complex, 3> slow_sideband_by_carrier{}, fast_sideband_by_carrier{};
+};
+
+SelectiveToneResponse selective_tone_response(double sample_rate, double spacing,
+                                                double common_offset, double depth,
+                                                SelectiveModel model, std::uint64_t seed = 0x64a31f92,
+                                                double doppler = .05) {
+    const auto tail = model == SelectiveModel::DispersiveDft
+        ? modem::detail::DispersiveSelectivePerturbation::tail_samples(sample_rate, spacing)
+        : 0;
+    const auto settling_seconds = model == SelectiveModel::LegacyAllpass ? 5'000. : 2'000.;
+    const auto first = std::max<std::size_t>(static_cast<std::size_t>(std::llround(settling_seconds * sample_rate)),
+                                             static_cast<std::size_t>(tail + 64));
+    // Ten thousand measured seconds contain an integer number of both .1D
+    // and D periods for the primary D=.05 Hz case, avoiding Fourier leakage.
+    const auto samples = first + static_cast<std::size_t>(std::llround(10'000 * sample_rate));
+    std::array<long double, 3> pair_power{}, pair_reference{}, pair_amplitude{}, phase_real{}, phase_imag{};
+    std::array<Complex, 3> slow_sideband{}, fast_sideband{};
+    std::array<std::unique_ptr<modem::detail::DispersiveSelectivePerturbation>, 3> dft{};
+    std::array<std::unique_ptr<modem::detail::FrequencySelectivePerturbation>, 3> legacy{};
+    if (model == SelectiveModel::DispersiveDft) {
+        for (unsigned i = 0; i < 3; ++i)
+            dft[i] = std::make_unique<modem::detail::DispersiveSelectivePerturbation>(
+                sample_rate, 0, spacing, doppler, depth, depth, seed);
+    } else {
+        for (unsigned i = 0; i < 3; ++i)
+            legacy[i] = std::make_unique<modem::detail::FrequencySelectivePerturbation>(
+                sample_rate, 0, 3 * spacing, doppler, depth, depth, seed);
+    }
+    for (std::size_t n = 0; n < samples; ++n) {
+        std::array<Complex, 3> z{};
+        for (unsigned i = 0; i < 3; ++i) {
+            const double f = common_offset + i * spacing;
+            const Complex carrier = std::polar(1., 2 * std::numbers::pi * f * n / sample_rate);
+            const auto y = model == SelectiveModel::DispersiveDft
+                ? dft[i]->process(carrier) : legacy[i]->process(carrier);
+            z[i] = y * std::conj(carrier); // measured complex envelope at the actual carrier
+        }
+        if (n < first) continue;
+        for (unsigned i = 0; i < 3; ++i) for (unsigned j = i + 1; j < 3; ++j) {
+            const auto p = static_cast<std::size_t>(i + j - 1);
+            pair_power[p] += std::norm(z[i] - z[j]);
+            pair_reference[p] += .5L * (std::norm(z[i]) + std::norm(z[j]));
+            const double ai = std::abs(z[i]), aj = std::abs(z[j]);
+            pair_amplitude[p] += (ai - aj) * (ai - aj);
+            const auto relative = z[i] * std::conj(z[j]);
+            if (std::abs(relative) > 1e-10) {
+                const auto unit = relative / std::abs(relative);
+                phase_real[p] += unit.real();
+                phase_imag[p] += unit.imag();
+            }
+        }
+        const double time = static_cast<double>(n) / sample_rate;
+        for (unsigned i = 0; i < 3; ++i) {
+            slow_sideband[i] += z[i] * std::polar(1., -2 * std::numbers::pi * .1 * doppler * time);
+            fast_sideband[i] += z[i] * std::polar(1., -2 * std::numbers::pi * doppler * time);
+        }
+    }
+    const auto count = static_cast<long double>(samples - first);
+    SelectiveToneResponse out;
+    // The smallest pairwise response difference is the conservative triplet
+    // summary. This includes both amplitude and phase sidebands.
+    double min_complex = std::numeric_limits<double>::infinity();
+    double min_amplitude = std::numeric_limits<double>::infinity();
+    double min_phase = std::numeric_limits<double>::infinity();
+    for (unsigned i = 0; i < 3; ++i) for (unsigned j = i + 1; j < 3; ++j) {
+        const auto p = static_cast<std::size_t>(i + j - 1);
+        min_complex = std::min(min_complex, std::sqrt(static_cast<double>(pair_power[p] /
+            std::max(pair_reference[p], 1e-30L))));
+        min_amplitude = std::min(min_amplitude, std::sqrt(static_cast<double>(pair_amplitude[p] /
+            std::max(pair_reference[p], 1e-30L))));
+        const double resultant = std::hypot(static_cast<double>(phase_real[p] / count),
+                                           static_cast<double>(phase_imag[p] / count));
+        min_phase = std::min(min_phase, std::sqrt(std::max(0., 1 - resultant * resultant)));
+    }
+    out.complex_rms = min_complex;
+    out.amplitude_rms = min_amplitude;
+    out.phase_variation = min_phase;
+    for (unsigned i = 0; i < 3; ++i) {
+        out.slow_sideband_by_carrier[i] = slow_sideband[i] / static_cast<double>(count);
+        out.fast_sideband_by_carrier[i] = fast_sideband[i] / static_cast<double>(count);
+        out.slow_sideband = std::max(out.slow_sideband, std::abs(out.slow_sideband_by_carrier[i]));
+        out.fast_sideband = std::max(out.fast_sideband, std::abs(out.fast_sideband_by_carrier[i]));
+    }
+    return out;
+}
+
+void selective_response_checks() {
+    constexpr double spacing = .00075, doppler = .05;
+    constexpr std::uint64_t seed = 0x64a31f92;
+    using Dft = modem::detail::DispersiveSelectivePerturbation;
+
+    // Independent frequency-domain reference for the actual sampled cubic
+    // delay taps. The expected +D envelope sideband is formed from the three
+    // branch responses and their seeded phase vectors.
+    auto analytic_fast_sideband = [&](double sample_rate, double center, double scale,
+                                      double tone_hz, double doppler_hz, double slow_depth,
+                                      double fast_depth, std::uint64_t root) {
+        const auto lag = sample_rate / (3 * scale);
+        std::array<Complex, 3> branch{};
+        Dft phase_source(sample_rate, center, scale, doppler_hz, slow_depth, fast_depth, root);
+        for (unsigned b = 0; b < 3; ++b) {
+            branch[b] = Complex{1. / 3, 0};
+            for (unsigned m = 1; m <= 2; ++m) {
+                const double desired = m * lag;
+                const auto floor = static_cast<std::uint64_t>(std::floor(desired));
+                const double fraction = desired - floor;
+                Complex response{};
+                for (int tap = -1; tap <= 2; ++tap) {
+                    const auto actual = tap < 0 ? floor - 1 : floor + static_cast<unsigned>(tap);
+                    double coefficient = 1;
+                    for (int other = -1; other <= 2; ++other) if (other != tap)
+                        coefficient *= (fraction - other) / static_cast<double>(tap - other);
+                    const double angle = 2 * std::numbers::pi * center * actual / sample_rate -
+                                         2 * std::numbers::pi * tone_hz * actual / sample_rate;
+                    response += coefficient * std::polar(1., angle);
+                }
+                const double dft_angle = 2 * std::numbers::pi *
+                    (static_cast<double>(b) - 1) * m / 3;
+                branch[b] += response * std::polar(1. / 3, dft_angle);
+            }
+        }
+        Complex coefficient{};
+        for (unsigned b = 0; b < 3; ++b)
+            coefficient += std::polar(1., phase_source.initial_phases[b][1]) * branch[b];
+        return fast_depth * coefficient / Complex{0, 2};
+    };
+
+    // At this spacing the synthetic dispersive response necessarily stores
+    // roughly 889 seconds of past samples. This is separate from the 5 ms
+    // geometric ray delay and is checked explicitly as a model cost.
+    const auto expected_tail = Dft::tail_samples(1., spacing);
+    check(expected_tail > 880 && expected_tail < 900 &&
+          Dft::memory_samples(1., spacing) == expected_tail + 1,
+          "millihertz selectivity memory does not reflect its declared delay scale");
+
+    // Measure actual outputs of single tones at all three physical carriers.
+    // The common-offset cases move the complete triplet through the fixed
+    // baseband response while keeping its internal spacing unchanged.
+    for (double depth : {.25, .65}) for (const auto seed : {0x64a31f92ULL, 0x91ce5a27ULL}) {
+        const auto legacy_edge = selective_tone_response(1., spacing, .05, depth,
+                                                          SelectiveModel::LegacyAllpass, seed);
+        const auto corrected_edge = selective_tone_response(1., spacing, .05, depth,
+                                                              SelectiveModel::DispersiveDft, seed);
+        check(legacy_edge.complex_rms < .01,
+              "legacy filter-bank collapse at the .05 Hz shifted-ray edge changed unexpectedly");
+        check(corrected_edge.complex_rms > .05 &&
+              corrected_edge.complex_rms > 10 * legacy_edge.complex_rms,
+              "corrected response collapsed to common modulation at 0.00075 Hz spacing / 0.05 Hz shift");
+        check(corrected_edge.amplitude_rms > .02 && corrected_edge.phase_variation > .01,
+              "corrected waveform lost measurable differential amplitude or phase response");
+        check(corrected_edge.slow_sideband > .005 && corrected_edge.fast_sideband > .005,
+              "corrected output lost a selected amplitude-modulation sideband");
+        const auto expected = analytic_fast_sideband(1., 0, spacing, .05, doppler,
+                                                     depth, depth, seed);
+        check(std::abs(corrected_edge.fast_sideband_by_carrier[0] - expected) < .002,
+              "measured +0.05 Hz sideband disagreed with cubic-FIR complex-response reference");
+    }
+    const auto center = selective_tone_response(1., spacing, 0, .65,
+                                                  SelectiveModel::DispersiveDft);
+    const auto legacy_center = selective_tone_response(1., spacing, 0, .65,
+                                                         SelectiveModel::LegacyAllpass);
+    check(center.complex_rms > .05 && legacy_center.complex_rms > .05,
+          "centered tone measurements did not retain actual pairwise complex response");
+
+    // Rate/spacing sweeps and oscillator offsets exercise the actual sampled
+    // operator. A fixed 0.05 Hz shift must not collapse each configured triplet
+    // merely because it moved beyond a nominal all-pass crossover bank.
+    for (double rate_spacing : {.00075, .0075, .075}) {
+        for (double offset : {0., .025, .05}) {
+            const auto response = selective_tone_response(1., rate_spacing, offset, .25,
+                                                            SelectiveModel::DispersiveDft);
+            check(response.complex_rms > .025,
+                  "corrected differential response vanished in rate/offset sweep");
+        }
+    }
+    const auto sampled_fs1 = selective_tone_response(1., spacing, .05, .65,
+        SelectiveModel::DispersiveDft, 0x64a31f92ULL);
+    const auto sampled_fs2 = selective_tone_response(2., spacing, .05, .65,
+        SelectiveModel::DispersiveDft, 0x64a31f92ULL);
+    check(std::abs(sampled_fs1.complex_rms - sampled_fs2.complex_rms) < .02,
+          "dispersive carrier response changed excessively under 2x sampling refinement");
+    for (double sample_rate : {.25, .5}) {
+        const auto sampled = selective_tone_response(sample_rate, spacing, .05, .65,
+            SelectiveModel::DispersiveDft, seed);
+        const auto expected = analytic_fast_sideband(sample_rate, 0, spacing, .05, doppler,
+                                                     .65, .65, seed);
+        check(std::abs(sampled.fast_sideband_by_carrier[0] - expected) < .002,
+              "low-rate sampled sideband disagreed with the dispersive FIR frequency response");
+    }
+    const auto slower_spread = selective_tone_response(1., spacing, .05, .25,
+        SelectiveModel::DispersiveDft, seed, .005);
+    check(slower_spread.complex_rms > .025 && slower_spread.fast_sideband > .005,
+          "reduced Doppler setting removed the modeled frequency-selective response");
+
+    // Time-varying filtering is linear. Compare independently processed tones
+    // against their simultaneous sum, including modulation sidebands that
+    // overlap adjacent carriers at D=0.05 Hz.
+    constexpr std::size_t count = 8192;
+    std::vector<Complex> sum(count), separate_sum(count), shifted_sum(count), shifted_separate(count);
+    Dft joint(1., 0., spacing, doppler, .65, .65, seed);
+    std::array<std::unique_ptr<Dft>, 3> separate;
+    for (unsigned i = 0; i < 3; ++i)
+        separate[i] = std::make_unique<Dft>(1., 0., spacing, doppler, .65, .65, seed);
+    Dft shifted_joint(1., .05, spacing, doppler, .65, .65, seed);
+    std::array<std::unique_ptr<Dft>, 3> shifted_separate_operators;
+    for (unsigned i = 0; i < 3; ++i)
+        shifted_separate_operators[i] = std::make_unique<Dft>(1., .05, spacing, doppler, .65, .65, seed);
+    for (std::size_t n = 0; n < count; ++n) {
+        Complex x{}, shifted{};
+        std::array<Complex, 3> tones{}, shifted_tones{};
+        for (unsigned i = 0; i < 3; ++i) {
+            tones[i] = std::polar(1., 2 * std::numbers::pi * i * spacing * n);
+            shifted_tones[i] = tones[i] * std::polar(1., 2 * std::numbers::pi * .05 * n);
+            x += tones[i]; shifted += shifted_tones[i];
+        }
+        sum[n] = joint.process(x);
+        shifted_sum[n] = shifted_joint.process(shifted);
+        for (unsigned i = 0; i < 3; ++i) {
+            separate_sum[n] += separate[i]->process(tones[i]);
+            shifted_separate[n] += shifted_separate_operators[i]->process(shifted_tones[i]);
+        }
+    }
+    double superposition_error = 0, shifted_superposition_error = 0, covariance_error = 0, signal_scale = 0;
+    for (std::size_t n = 0; n < count; ++n) {
+        superposition_error = std::max(superposition_error, std::abs(sum[n] - separate_sum[n]));
+        shifted_superposition_error = std::max(shifted_superposition_error,
+                                                std::abs(shifted_sum[n] - shifted_separate[n]));
+        const auto translated = sum[n] * std::polar(1., 2 * std::numbers::pi * .05 * n);
+        covariance_error = std::max(covariance_error, std::abs(shifted_sum[n] - translated));
+        signal_scale = std::max(signal_scale, std::abs(sum[n]));
+    }
+    check(superposition_error < 1e-10 * std::max(1., signal_scale),
+          "overlapping tones did not obey sampled linear superposition");
+    check(shifted_superposition_error < 1e-10 * std::max(1., signal_scale),
+          "shifted overlapping tones did not obey sampled linear superposition");
+    check(covariance_error < 1e-10 * std::max(1., signal_scale),
+          "frequency-frame translation changed the sampled channel response");
+
+    // At D=carrier spacing, one AM sideband lands exactly on the adjacent
+    // carrier. Measure the tone sideband directly, then verify that the
+    // simultaneous waveform contains the coherent sum at that frequency.
+    constexpr double collision_rate = .25;
+    constexpr std::size_t collision_first = 500;
+    constexpr std::size_t collision_measure_samples = 3000; // 12,000 s = 9 exact periods
+    Dft collision_tone(collision_rate, 0, spacing, spacing, 0, .65, seed);
+    Dft collision_sum(collision_rate, 0, spacing, spacing, 0, .65, seed);
+    Complex measured_tone_sideband{}, measured_overlap{};
+    for (std::size_t n = 0; n < collision_first + collision_measure_samples; ++n) {
+        const double t = static_cast<double>(n) / collision_rate;
+        const Complex c = std::polar(1., 2 * std::numbers::pi * spacing * t);
+        const auto tone = collision_tone.process(Complex{1, 0});
+        const auto overlap = collision_sum.process(Complex{1, 0} + c);
+        if (n < collision_first) continue;
+        const auto demod = std::polar(1., -2 * std::numbers::pi * spacing * t);
+        measured_tone_sideband += tone * demod;
+        measured_overlap += overlap * demod;
+    }
+    measured_tone_sideband /= static_cast<double>(collision_measure_samples);
+    measured_overlap /= static_cast<double>(collision_measure_samples);
+    const auto expected_collision = analytic_fast_sideband(collision_rate, 0, spacing, 0,
+                                                           spacing, 0, .65, seed);
+    check(std::abs(measured_tone_sideband - expected_collision) < .002,
+          "carrier-spaced AM sideband did not match its complex channel coefficient");
+    check(std::abs(measured_overlap - (Complex{1, 0} + expected_collision)) < .002,
+          "overlapping carrier and Doppler sideband were not summed coherently");
+
+    // The causal FIR produces an exact finite drain. An impulse excites the
+    // complete branch memory and every output after the declared last tap is
+    // exactly zero, so a capture calendar may safely append this many rows.
+    Dft tail_check(1., 0, spacing, doppler, .65, .65, seed);
+    (void)tail_check.process(Complex{1, 0});
+    bool nonzero_tail = false;
+    for (std::uint64_t n = 1; n <= expected_tail + 2; ++n) {
+        const auto y = tail_check.process(Complex{});
+        if (n <= expected_tail && std::norm(y) > 0) nonzero_tail = true;
+        if (n > expected_tail)
+            check(y == Complex{}, "dispersive FIR emitted energy beyond its declared finite tail");
+    }
+    check(nonzero_tail, "impulse response did not exercise the declared dispersive filter tail");
+
+    // Zero modulation depth is an exact unity path, even though the model has
+    // long memory; this also catches accidental latency in the direct branch.
+    Dft unity(1., 0., spacing, doppler, 0, 0, seed);
+    for (std::size_t n = 0; n < 4096; ++n) {
+        const Complex x = std::polar(1., .137 * n);
+        check(unity.process(x) == x, "zero-depth dispersive stage was not exact unity");
+    }
+
+    // ChannelConfig's zero-D rule disables the added modulation stage even
+    // when selected depths remain stored. Compare complete sampled captures,
+    // including the declared source endpoint, against the direct path.
+    auto f = fixture_format();
+    auto direct_cfg = StreamChannelConfig{};
+    direct_cfg.effects.noise_enabled = false;
+    direct_cfg.complex_noise_variance = 0;
+    const auto direct = capture(257, direct_cfg, f);
+    auto zero_d_cfg = direct_cfg;
+    zero_d_cfg.effects.perturbation_slow_depth = .65;
+    zero_d_cfg.effects.perturbation_fast_depth = .65;
+    zero_d_cfg.effects.spread_doppler_hz = 0;
+    zero_d_cfg.selective_model.model = SelectiveModel::DispersiveDft;
+    check(capture(73, zero_d_cfg, f) == direct,
+          "zero-D selected modulation changed exact channel samples or endpoint");
+
+    // The streaming implementation uses the same continuous filter state for
+    // every read size and drains its declared FIR memory after the source.
+    auto spread_cfg = direct_cfg;
+    spread_cfg.effects.spread_doppler_hz = .3;
+    spread_cfg.effects.perturbation_slow_depth = .25;
+    spread_cfg.effects.perturbation_fast_depth = .25;
+    spread_cfg.selective_model.model = SelectiveModel::DispersiveDft;
+    const auto small_reads = capture(73, spread_cfg, f);
+    const auto large_reads = capture(4096, spread_cfg, f);
+    check(small_reads == large_reads,
+          "dispersive selective filter state or tails changed across stream read boundaries");
+}
 } // namespace
 
 int main() {
@@ -1042,6 +1368,7 @@ int main() {
         gaussian_path_kernel_and_statistics_checks();
         gaussian_path_sampled_channel_checks();
         long_extent_prefix_and_tail_checks();
+        selective_response_checks();
         std::cout << "triad v3 streaming channel checks passed\n";
         return 0;
     } catch (const std::exception& e) {

@@ -41,6 +41,33 @@ def check(condition, message):
 
 
 def main():
+    configured_selective = configure()["selective_channel"]
+    check(configured_selective["model"] == "dispersive-dft-v1",
+          "isolated v3 does not default to corrected selective channel model")
+    check(configured_selective["geometry_applied"], "corrected model geometry is not applied")
+    near(configured_selective["resolved_correlation_scale_hz"],
+         rows(invoke("--mode", "configure", *COMMON))[0]["configuration"]["search_estimates"]["timing_model_carrier_spacing_hz"],
+         "automatic selective scale is not carrier spacing")
+    check("never recentered" in configured_selective["frequency_frame"],
+          "selective channel frequency frame may use hidden truth")
+    legacy_selective = configure("--selective-model", "legacy-allpass")["selective_channel"]
+    check(legacy_selective["model"] == "legacy-allpass-v1",
+          "explicit legacy selective model was not retained")
+    check(not legacy_selective["geometry_applied"], "legacy replay misleadingly claims corrected geometry")
+    legacy_geometry = configure("--selective-model", "legacy-allpass", "--selective-scale-hz", ".00075",
+                                "--selective-center-hz", ".025")["selective_channel"]
+    check(not legacy_geometry["geometry_applied"],
+          "explicit replay arguments changed the historical model geometry")
+    custom_selective = configure("--selective-scale-hz", ".00075", "--selective-center-hz", ".025",
+                                 "--selective-tail-floor-seconds", "900")["selective_channel"]
+    near(custom_selective["resolved_correlation_scale_hz"], .00075, "explicit selective scale")
+    near(custom_selective["center_hz"], .025, "explicit selective frame center")
+    near(custom_selective["selective_tail_floor_seconds"], 900, "common selective-tail floor")
+    for invalid in (("--selective-model", "unknown"), ("--selective-scale-hz", "-1"),
+                    ("--selective-scale-hz", "nan"), ("--selective-center-hz", "inf"),
+                    ("--selective-tail-floor-seconds", "-1")):
+        invoke("--mode", "configure", *COMMON, *invalid, ok=False)
+
     low_rate = ("--rate", ".036", "--sample-rate", "1", "--rf-hz", "8270",
                 "--spread-preset", "sub9-best")
     month = configure(*low_rate, "--seconds", "3283200")
@@ -290,10 +317,16 @@ def main():
         for mode, depths in (("slow-65", (.65, 0)), ("fast-65", (0, .65)), ("each-65", (.65, .65))):
             destination = root/("selective-"+mode)
             invoke("--mode", "export-stats", *COMMON, "--selective-perturbation", mode,
+                   "--selective-model", "legacy-allpass",
                    "--spread-doppler-hz", ".2", "--margin", "3", "--ray-gaussian-width-hz", ".5",
                    "--block-seconds", "4", "--output", str(destination))
             manifest = json.loads((destination/"manifest.json").read_text())
             selective = manifest["path_truth_simulation_only"]["selective_perturbation"]
+            endpoint = manifest["observation_endpoint_report"]
+            check(endpoint["processed_samples"] == manifest["sample_count"] == manifest["channel_samples"],
+                  "export did not process the complete public observation calendar")
+            check(endpoint["natural_complete_samples"] + endpoint["public_calendar_padding_samples"] ==
+                  manifest["sample_count"], "public calendar truncated the natural complete channel endpoint")
             check(selective["enabled"], "selected selective teacher was not reported active")
             check(selective["component_order"] == ["slow", "fast"] and
                   selective["band_order"] == ["low", "middle", "high"], "selective array ordering lost")
@@ -333,6 +366,7 @@ def main():
         # signal-only instrumentation and the same noiseless projections.
         chunk_output = root/"selective-each-65-noisy-chunk"
         invoke("--mode", "export-stats", *COMMON, "--selective-perturbation", "each-65",
+               "--selective-model", "legacy-allpass",
                "--spread-doppler-hz", ".2", "--margin", "3", "--ray-gaussian-width-hz", ".5",
                "--block-seconds", "4", "--stats-noisy", "--chunk", "17", "--output", str(chunk_output))
         chunk_manifest = json.loads((chunk_output/"manifest.json").read_text())
@@ -347,6 +381,7 @@ def main():
         for mode in ("off", "each-65"):
             destination = root/("selective-bypass-"+mode)
             invoke("--mode", "export-stats", *COMMON, "--selective-perturbation", mode,
+                   "--selective-model", "legacy-allpass",
                    "--spread-doppler-hz", "0", "--stats-noisy", "--block-seconds", "4",
                    "--output", str(destination))
             manifest = json.loads((destination/"manifest.json").read_text())
@@ -356,6 +391,44 @@ def main():
         for filename in ("gram.c128", "mean.c128", "signal_energy.f64", "observation.c128", "received_energy.f64"):
             check((bypass_outputs[0]/filename).read_bytes() == (bypass_outputs[1]/filename).read_bytes(),
                   "zero-Doppler selective bypass changed actual sampled/noisy values: "+filename)
+        # Equalized tail support creates the same total calendar/noise rows
+        # across historical and corrected model identities. Null captures
+        # isolate the indexed noise stream from model-dependent waveform energy.
+        paired_nulls = []
+        for model in ("legacy-allpass", "dispersive-dft"):
+            destination = root/("paired-tail-"+model)
+            invoke("--mode", "export-stats", *COMMON, "--control", "null",
+                   "--spread-preset", "none", "--spread-doppler-hz", ".2",
+                   "--selective-perturbation", "each-1", "--selective-model", model,
+                   "--selective-scale-hz", ".1", "--selective-tail-floor-seconds", "8",
+                   "--stats-noisy", "--block-seconds", "4", "--output", str(destination))
+            manifest = json.loads((destination/"manifest.json").read_text())
+            selective = manifest["path_truth_simulation_only"]["selective_perturbation"]
+            check(selective["model"] == ("legacy-allpass-v1" if model == "legacy-allpass" else "dispersive-dft-v1"),
+                  "sampled manifest lost the selected selective model")
+            check(selective["channel_tail_samples"] >= selective["decay_tail_samples"],
+                  "common tail floor truncated selected filter response")
+            check(selective["total_channel_samples"] == manifest["channel_samples"],
+                  "selective report and public capture calendar disagree")
+            endpoint = manifest["observation_endpoint_report"]
+            check(endpoint["natural_complete_samples"] + endpoint["public_calendar_padding_samples"] ==
+                  manifest["sample_count"] == endpoint["processed_samples"],
+                  "paired calendar truncated the selected model's natural complete endpoint")
+            paired_nulls.append(destination)
+        manifest_a = json.loads((paired_nulls[0]/"manifest.json").read_text())
+        manifest_b = json.loads((paired_nulls[1]/"manifest.json").read_text())
+        check(manifest_a["channel_samples"] == manifest_b["channel_samples"],
+              "paired selective models do not have equal total sample calendars")
+        check((paired_nulls[0]/"observation.c128").read_bytes() ==
+              (paired_nulls[1]/"observation.c128").read_bytes(),
+              "paired model null captures did not reuse identical indexed noise")
+        too_large = root/"selective-memory-rejected"
+        rejected = invoke("--mode", "export-stats", *COMMON,
+                          "--selective-scale-hz", ".0001", "--memory-mib", "1",
+                          "--output", str(too_large), ok=False)
+        check("public channel workspace exceeds --memory-mib before channel allocation" in rejected.stderr
+              and not too_large.exists(),
+              "dispersive history escaped the memory budget or created partial output before rejection")
         # CLI path seeds change the actual propagated samples while public
         # templates and independent endpoint draws stay fixed.
         path_outputs = []
