@@ -20,6 +20,15 @@ SPEC.loader.exec_module(hardware)
 
 
 class HardwareProfilerContractTests(unittest.TestCase):
+    def test_affinity_identity_distinguishes_equal_size_cpu_masks(self):
+        with mock.patch.object(hardware.os, "sched_getaffinity", return_value={2, 4}, create=True):
+            first = hardware._cpu_limits()
+        with mock.patch.object(hardware.os, "sched_getaffinity", return_value={2, 3}, create=True):
+            second = hardware._cpu_limits()
+        self.assertEqual(first["affinity_cpu_count"], second["affinity_cpu_count"])
+        self.assertNotEqual(first["affinity_cpus"], second["affinity_cpus"])
+        self.assertEqual([row["cpu"] for row in first["affinity_topology"]], [2, 4])
+
     def test_validation_rejects_unbounded_or_ambiguous_inputs(self):
         for kwargs in (
             {"seconds": 0},

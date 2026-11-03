@@ -1,304 +1,452 @@
-# Isolated three-carrier receiver performance regression
+# Isolated three-carrier performance regression
 
-Use [`tools/triad-performance.py`](../tools/triad-performance.py) for short,
-source-bound performance checks of the experimental sampled FFT acquisition
-receiver and Gaussian-window likelihood helper. It compares a fixed source
-reference with the candidate on the same machine. It also records independent
-hardware-health measurements so a slower CPU, operating system or GPU stack
-cannot disappear into a receiver-normalization factor.
+Use [`tools/triad-performance.py`](../tools/triad-performance.py) to measure the
+experimental three-carrier receiver without integrating it into ordinary
+Robust. Its evidence chain now covers complete native CLI simulations,
+full-geometry resident FFT acquisition, sampled execution witnesses for named
+off-line receiver paths, and a smaller Gaussian-window helper measurement.
+The native and FFT duration forecasts have separate identities, timing
+boundaries, anchors, and validation rules. A path witness records execution;
+it is not a timing prediction or exhaustive source-line coverage.
 
-This suite does **not** qualify the ordinary Robust receiver, native v3 receiver
-throughput, radio sensitivity, or every experimental receiver. The native
-`triad_long` executable supplies common physical fixtures; its generation time
-is recorded separately from the measured Python receiver. Follow the
-[development workflow](triad-development-workflow.md) for functional and
-sensitivity tests and the [precision guide](gpu-precision-controls.md) before
-changing arithmetic. Historical multi-day and Monte Carlo campaigns remain
-research evidence, not routine performance-regression prerequisites.
+The suite does not qualify the ordinary Robust receiver, radio sensitivity,
+physical radios, unmeasured receiver families, or every numerical state. The
+Python-path adapters describe their implemented scope in the
+[computational-family manifest](../tools/triad-performance-paths.json); the
+[native scenario manifest](../tools/triad-performance-native-cases.json)
+declares the complete CLI simulation cases. Read the
+[triad development workflow](triad-development-workflow.md) for functional and
+sensitivity checks, and the [GPU precision guide](gpu-precision-controls.md)
+before changing arithmetic. Historical validation is context, not a substitute
+for evidence matching the source, build, workload, hardware, and target timing
+boundary.
 
-## Run the bounded suite
+## Run it
 
-Reuse a compatible native build, or build only the fixture exporter:
+Reuse compatible builds or configure both the candidate and its intended
+reference. The reference binary is needed to make a native performance
+comparison; if omitted, native cases still measure a prediction but explicitly
+warn that implementation comparison is unavailable.
 
 ```sh
 ./build.sh configure --cli --build-dir build/dev-cli -- \
   -DBUILD_TESTING=ON -DDATAPUMP_COMPILER_CACHE=OFF
 cmake --build build/dev-cli --config Release --target triad_long --parallel 2
-python tools/triad-performance.py \
+python3 tools/triad-performance.py \
   --binary build/dev-cli/triad_long \
+  --reference-binary build/previous/triad_long \
   --output local-evidence/triad-performance/run-001.json \
-  --device cpu --threads 2 --stress-seconds 5 --budget-seconds 600
+  --device cpu --threads 2 --native-threads 1 \
+  --precision-target .05 --budget-seconds 1800
 ```
 
-Use a Python environment containing NumPy, SciPy and PyTorch. The
-[CI workflow](../.github/workflows/triad-performance.yml) pins its own numerical
-stack; record local package versions rather than assuming a matching version.
-CUDA tensor probes additionally use the existing Triton backend when the device
-supports the requested format. Unsupported formats are reported explicitly.
+Use Python with NumPy, SciPy and PyTorch. The
+[dedicated CI workflow](../.github/workflows/triad-performance.yml) pins its
+numerical stack and builds reference and candidate binaries from immutable
+source revisions. `--budget-seconds` defaults to 1,800 seconds per backend and
+is capped at 28,800 seconds. The preferred routine budget is five minutes; a
+slow but necessary first qualification can take longer. Native build and Python
+dependency setup are outside the per-backend budget; fixture creation, hardware
+checks, native models, receiver measurements, witnesses and optional sustained
+checks are inside it. A process-group deadline covers blocked descendants.
+Incomplete or timed-out evidence never counts as a performance pass.
 
-Choose a fresh output name: the runner refuses to overwrite previous evidence.
-The report contains per-backend records, source and input hashes, raw paired
-timings, arithmetic qualification, full-workload estimates and gate decisions.
-Sibling backend reports and process logs retain failure details. Fixture caches
-are bound to the exporter binary, relevant sources, configuration and content
-hashes; mismatched captures are regenerated.
-
-The preferred measurement budget is **five minutes per backend**; the hard
-measurement ceiling is **ten minutes**. The default `--budget-seconds 600`
-includes hardware probes, fixture preparation, receiver startup, qualification
-and measurement. Dependency installation and native compilation are separate.
-An external process-group deadline covers work blocked inside native libraries;
-timeout is a failed/incomplete run, never a passing abbreviated result.
-
-| Option | Purpose and limit |
+| Option | Meaning |
 | --- | --- |
-| `--device cpu`, `cuda`, or `auto` | Measure one backend, or CPU plus an available CUDA backend sequentially. The time budget applies to each. |
-| `--profile ci` | Required bounded physical cases plus a multi-block Gaussian helper case. |
-| `--profile quick` | One physical diagnostic plus the helper; explicitly incomplete for normal CI coverage. |
-| `--profile sustain` | Additional configuration coverage and outer repetitions; the same hard deadline remains. |
-| `--hardware-baseline FILE` | Compare raw kernels with a saved, comparable measured profile. An absent or incompatible profile gives `hardware_baseline_unavailable`, not a hardware-health pass. |
-| `--target-profile FILE` | Record a measured target profile for future transfer work. This alone does not establish a cross-architecture runtime interval. |
+| `--profile ci` | Default required native, FFT, Gaussian-helper, and applicable path-witness cases. |
+| `--profile quick` | Small smoke profile; `complete_required_coverage` is false. It cannot pass the full regression suite. |
+| `--profile sustain` | Extended native/FFT scenario set; defaults to one 60-second sustained check when eligible. |
+| `--precision-target .05` | Default maximum relative half-width for the family-adjusted timing intervals. |
+| `--precision-target .01` | Optional tighter timing target. It may require many more independent observations; stop at the declared maximum if that target remains unmet. |
+| `--looks 5,9,17,33` | Predeclared cumulative timing sample counts. All looks are included in multiplicity adjustment. |
+| `--validation-mode auto` | Reuse an applicable historical proof with a fresh full paired endpoint sentinel; otherwise qualify this case. |
+| `--validation-mode qualify` | Force a new frozen forecast and independent full-workload qualification where that adapter has a duration model. |
+| `--validation-mode reuse` | Reuse an applicable historical proof if available; do not silently spend a new qualification campaign. A missing/incompatible anchor leaves the model unqualified. |
+| `--case ID` | Focus qualification on a named case; repeat to select several. Retains the full profile’s confidence multiplicity, skips other timing/fixture work, and cannot claim complete CI coverage. |
+| `--anchor-directory PATH` | Persist and find source/case/environment-bound forecast records. Default is the reusable `triad-performance-anchors` directory beside each output. |
+| `--sustained-seconds N` | Request one predeclared sustained consistency check per eligible native/FFT family; accepts 0–3,600 seconds and defaults to zero, or 60 for `--profile sustain`. It is not a new CI or model qualification. |
+| `--reference-binary FILE` | Binary for the paired comparison. Omitting it reuses the candidate binary and means native results cannot detect a change against a prior native implementation. |
+| `--device cpu`, `cuda`, or `auto` | Measure CPU, CUDA, or available backends. Each backend receives its own budget. |
+| `--hardware-baseline FILE` | Compare raw hardware probes with a compatible saved hardware profile. Missing/incompatible baselines remain unavailable, not passed. |
+| `--target-profile FILE` | Retain a target profile for investigation. It does not authorize an architecture-transfer prediction. |
 
-## What is measured
+Select a new output path for each run; reports are not overwritten. The report
+retains harness/application/binary identities, inputs, timings, selected
+precision, work and geometry counters, predictions, anchors, intervals, and
+unsupported/unresolved cases. Large raw reports belong in ignored
+`local-evidence/`; maintained benchmark contracts and compact results belong in
+`docs/`.
 
-The [case manifest](../tools/triad-performance-cases.json) declares the physical
-fixtures, source plans and bounds. Normal coverage includes tight and broad HF
-arrival priors, HF 30-Hz/7-ms spread with Each 65% modulation and missed FHSS
-dwells, free-running crystal/RF oscillator uncertainty, and a low-rate
-−60-dB-Hz point-sampled observation spanning about 850 source days. The extended
-profile adds a 5.8-GHz case. These long simulated calendars do not require the
-same wall time: the low sample rate is part of that explicit physical model.
-They are not compressed high-rate observations or validation of arbitrary
-long-term propagation.
+## What each timing prediction means
 
-Every FFT measurement retains the complete actual sample array, FFT length,
-integer timing lattice, masks, template/Gram preparation, rank handling and
-edge refinement. Only the number of declared CFO alternatives is abbreviated.
-Frequency subsets include the prescribed center/endpoints; the full target
-bank remains in the report. Reduced-bank scores are **performance-only** and
-must not be interpreted as full-search admissions. Clock-rate, keyed-epoch and
-general evolving-phase acquisition are outside this adapter.
+### Whole native CLI simulation
 
-The second adapter measures the real Gaussian-window helper on deterministic
-algebraic PSD/shared-observation fixtures, including multiple windows and
-numerical qualification controls. These fixtures isolate a different
-preparation/scoring workload; they are not sampled propagation experiments.
+The native adapter launches the actual `triad_long` CLI for each timed sibling.
+Each timed invocation includes process startup, the complete selected transmit
+and sampled-channel path, natural output/filter tails, the full declared
+candidate/basis work, final scoring, and output. It retains internal receiver
+time, generation/setup/other pipeline time, and external startup/output time as
+separate additive stages. The prediction target is external complete-test wall
+time for the frozen `target_seconds`, trial count, seed protocol, complete input
+rows, and fixed bank. This adapter uses the native receiver's current FP64
+implementation regardless of the Python FFT precision policy.
 
-The receiver reference is the immutable commit
-`242ea15fa032ee117b9113a7f3cd07cc6e9f0254`. Reference and candidate modules load
-in separate persistent interpreters, under the same thread limits, inputs and
-harness. Their execution order alternates across outer repetitions. Do not
-automatically replace this reference with a newly passing candidate: a baseline
-change needs a reviewed comparison and retained evidence. Report the harness,
-application source and fixture binary identities separately.
+For duration-model cases, the adapter runs two full-CLI duration siblings,
+checks that they stay in the same measured work regime, fits stage rates against
+actual row/basis counters, and limits extrapolation to at most eight times the
+larger sibling's rows. Each independent timing observation is a block of one or
+more complete CLI invocations; a discarded pilot chooses block size only. The
+forecast is frozen before independent full-target validation. An invalid fit,
+changed geometry, failed required witness, or unresolved prediction blocks a
+supported pass. Cases without duration siblings run the full target directly.
+
+The current profiles include the following representative durations. These
+durations are simulation calendars requested of the modem, not CPU wall time.
+The second duration used for training is a complete
+simulation sibling, not a cropped sample array.
+
+| Case | Training durations | Intermediate holdout | Full target | Main execution witness |
+| --- | ---: | ---: | ---: | --- |
+| `native-flat` | Direct | — | 262.4 s | Encrypted flat-basis simulation, complete stream, sampled white-noise path |
+| `native-fhss-selective-burst` | Direct | — | 140.8 s | Two-ray HF, Each-65% perturbation, actual FHSS erasures, internal silent burst tiles |
+| `native-vlf-low-cn0` | 2,304,001.6 s, 18,432,012.8 s | 36,864,025.6 s | 73,728,051.2 s | −60 dB-Hz, 0.001 Hz, 1/128 Hz point sampling; about 853 source days at target |
+| `native-null` | Direct | — | 32.8 s | Complete no-transmitter/absent-candidate path |
+| `native-wrong-key` | Direct | — | 32.8 s | Wrong-key candidate path |
+| `native-frontend` | Direct | — | 32.8 s | Sampled quantizers, interference, continuous filter, overload recovery |
+| `native-ou-path` | Direct | — | 32.8 s | Evolving OU rays, diurnal phase, outage |
+| `native-gaussian-path` | Direct | — | 32.8 s | Finite Gaussian Doppler FIR path |
+| `native-added-max` | Direct | — | 8 s | Maximal Added Symbols case; complete minimum private tile |
+
+Durations come from the checked-in native manifest, with common CLI settings
+(including epoch, chunk/block, and memory limits) retained in that manifest.
+Small direct cases have no abbreviated prediction; they time their full target
+repetitions directly. The very long VLF rows are low-rate point-sampled
+simulations. Their source calendar does not imply equivalently long CPU
+execution, and does not establish arbitrary multi-day path physics. These named
+cases are broad witnesses, not a Cartesian sweep of all rate, shift, oscillator,
+channel, modulation, burst, and spreading combinations.
+
+Initial native model qualification uses independent full-target CLI executions on new
+seeds. A frozen fit can be accepted only when the corrected equivalence
+interval for mean log prediction error lies within the declared ±5% band for
+reference, candidate, and their paired ratio, with matching full geometry.
+Confirmation accumulates at predeclared counts of 3, 5, 9 and 17 full-target
+executions per source, stopping at a supported decision or resource limit.
+Every look uses a 97.5% two-sided interval and the same frozen forecast.
+The per-execution relative-error check and stage comparisons remain diagnostic;
+qualification concerns the mean log error, not every future execution.
+An inconclusive result does not qualify the forecast. This separate confirmation
+ledger is explained below; it is not the timing-family confidence ledger.
+
+### Resident Python FFT acquisition
+
+The FFT adapter times complete preparation plus the wrapped full scoring call
+on a resident sampled fixture. Every call retains the fixture's full samples,
+FFT length, lag/timing lattice, masks, preparation, templates/Gram data, rank
+handling, and final score construction. It abbreviates only the number of CFO
+alternatives. It predicts that same full-bank resident receiver workload; it
+does **not** predict waveform/channel generation, Python interpreter startup,
+a cold fixture load, the complete native simulation, or radio latency. Its
+persisted geometry includes sample count/rate, FFT size, lag interval and step,
+group tile, precision, and device.
+
+A static work-count rule chooses direct full-bank measurement when training
+plus validation work would consume at least 80% of the full bank. A discarded
+pilot also selects direct measurement when preparation-inclusive abbreviated
+work would cost at least 80% of its estimated full-call cost, or the estimated
+full call is below one second. Otherwise it
+fits a preparation/fixed/per-CFO cost model from short bank counts, with an
+at-most-8× extrapolation bound. A fresh qualification freezes that forecast
+before cumulative confirmation looks at 3, 5, 9 and 17 independent
+full-bank measurements on the same complete fixture. Qualification uses the
+same corrected mean log-error equivalence test as the native duration
+model: the reference mean, candidate mean, and paired-ratio mean must each fit
+the ±5% relative band. Individual holds are recorded, but every hold is not
+required to fall within 5%. Routine reuse instead uses the conditional historical-proof procedure below,
+including one fresh full endpoint pair. A direct full-bank case has no bank-size extrapolation and is tested at the full
+receiver workload.
+
+The retained Gaussian-window helper adapter measures its declared
+preparation/scoring path and precision controls on its algebraic multi-block
+fixture. Its family contributes a timing observation; it is not a whole
+simulation or duration predictor.
+
+### Executed path witnesses
+
+`triad_perf_paths.py` runs separately from timing and emits function/branch
+witnesses for the named computational families in the path manifest: Gaussian
+state, reference/optimized phase-frequency likelihoods, CUDA graph and FP64
+reduction paths, supported tensor phase/frequency paths, RBPF, grouped
+acquisition, static-frequency and ray-frequency studies, and CFO batching.
+The witness exercises declared branches such as empty/partial blocks, masks and
+rank deficiency, tile tails, UCB, advection, reset/resampling and device paths.
+Only branches available on the selected backend are applicable. A successful
+witness means that the required named call ran; it is neither line/branch
+coverage for every numerical state nor a duration/throughput forecast for those
+algorithms. The native CLI adapter separately witnesses end-to-end channel,
+waveform, encryption, erasure, burst and finalization paths in its manifest.
+
+## Timing precision, model accuracy, and the regression gate
+
+Keep four uncertainties distinct: (1) uncertainty in the mean runtime; (2)
+variation in a future runtime; (3) error in the abbreviated-to-full prediction;
+and (4) drift or transfer to another source/build/host. More timing repetitions
+can shrink the first term; they do not erase the other three. Under independent
+normal log timings, mean uncertainty scales as `s / sqrt(n)`, whereas a single
+future observation retains the `s * sqrt(1 + 1/n)` term. The
+[NIST prediction-limit formula](https://www.itl.nist.gov/div898/software/dataplot/refman1/auxillar/predlimi.htm)
+makes this distinction explicit. This motivates separating mean-model error
+from the individual-run scatter used by the sentinel; it does not prove
+stationarity or normality for a particular machine.
+
+The default 5% target means the maximum multiplicative half-width of the
+family-adjusted confidence intervals for the reference runtime, candidate
+runtime, and paired slowdown. The optional 1% target asks for a much tighter
+timing estimate and can be expensive. The predeclared cumulative looks default
+to 5, 9, 17, and 33 samples. At each look the suite stops when all three timing
+intervals reach the target, the confirmed regression boundary is crossed, or
+the final look/resource budget is reached. Reports explicitly say when timing
+precision remains unresolved; they never relabel a missed target as 5% precision.
+
+Times are analyzed on a log scale, so widths and ratios are multiplicative.
+For each case family and each predeclared look, the familywise timing ledger
+splits total α=0.05 across three intervals: reference, candidate and paired
+candidate/reference ratio. The paired ratio interval is reused for the 30%
+slowdown decision; it does not spend a second unstated α. The ledger protects
+the stated families and looks under the sampling assumptions. It does not adjust
+the separate per-case model-equivalence checks, claim distribution-free
+coverage, or guarantee an interval on a different host. The model-equivalence
+check and the family timing ledger answer different questions and must be shown
+separately.
+
+Under the current implementation, outer samples are paired timed observations
+made within persistent Python worker processes for FFT workloads. They estimate
+resident-call timing in that regime; they do not estimate cold-process startup
+variation. Native outer samples launch complete CLI runs. Both rely on
+approximately independent stationary outer log runtimes for their Student-t
+intervals. The current implementation records order, work geometry, and native
+stage/quarter timing; it does not robustly remove arbitrary thermal drift or
+scheduler contamination. If telemetry or the run sequence shows a changing
+power/thermal regime, report the issue and withhold a precision-qualified
+performance result rather than treating many correlated calls as independent
+samples.
+
+A precision goal is not a validity certificate for the extrapolation. The native
+and FFT adapters also retain independent validation residuals and invalidate or
+withhold unvalidated models. Native and FFT model residual qualification use a
+finite-look equivalence test: the confidence intervals for the reference
+mean log error, candidate mean log error, and paired mean log error must each
+lie wholly inside the per-case ±5% relative-equivalence band. At each of the
+four predeclared confirmation looks, the two-sided interval has 97.5%
+confidence: α=0.10/4=0.025. For a truly out-of-band mean, false equivalence
+requires crossing its relevant one-sided boundary, with probability at most
+0.0125 per look under the stated assumptions. The union across four looks
+bounds false qualification at 5% per case. Requiring all three metrics to pass
+is an intersection–union test; this does not claim simultaneous interval
+coverage across all metrics or all cases. Every forecast remains frozen,
+every look is retained, and a resource stop stays unresolved. Individual holds
+are not each required to be within 5%. This is not a future-run interval or proof every
+residual lies within ±5%. Observed maximum residuals are useful scenarios, not
+future coverage bounds.
+
+The 30% regression threshold is an engineering decision boundary. A
+**supported pass** requires valid model qualification, direct full timing, or
+an explicitly conditional historical model with its widened error allowance, and
+a multiplicity-adjusted upper paired slowdown bound no larger than 1.30. A
+**regression** is supported when the lower bound exceeds 1.30. If the interval
+crosses the threshold, the result is **inconclusive**. If the 5% timing target
+is unresolved by the last look, that fact is reported even when the slowdown
+gate itself is separated from its threshold. Missing coverage, numerical
+mismatch, changed geometry, invalid model, or timeout is a failure/unqualified
+result, never a successful performance pass. The suite stops after its maximum
+look instead of spending arbitrarily for a preferred interval. A separate
+**`severe_endpoint_prediction_mismatch`** blocks CI when a failed full endpoint
+underpredicts runtime by more than 30% even after subtracting its frozen
+historical observation allowance and current timing uncertainty in log space.
+This is an engineering **calibration failure**, not proof of a regression in
+mean runtime. Its false-failure rate is unqualified: historical scatter is not
+a proven future tail bound. Smaller violations, overlaps and absent history
+remain visible unresolved warnings. The guard never enlarges an allowance or
+retries the endpoint to obtain a pass.
+
+## Historical proof, current speed, and the routine shortcut
+
+Initial qualification and routine regression answer different questions.
+Qualification validates the abbreviation's cost relationship with independent
+full runs. Routine measurements estimate **current** stage coefficients; they
+never reuse yesterday's processing speed as today's prediction.
+
+Both adapters retain complete historical source/binary, harness and environment
+hashes, frozen forecasts and raw independent full-run observations. Validators
+reconstruct their predictions, errors, look order and decisions. Applicability
+uses a separate explicit measurement contract. It still requires exact native
+binaries or Python receiver module hashes, case/fixture/geometry, arithmetic,
+timing boundary and recorded environment. Reporting-only harness changes can
+reuse evidence under that reviewed contract. The specifically audited CPU002
+v3 hash pairs have an explicit legacy mapping; unknown old protocols are rejected.
+Original records are never rewritten or silently upgraded. Hashes provide
+integrity/provenance, not cryptographic authentication of a trustworthy experiment.
+
+A routine modeled case freezes the following before new full work:
+
+1. Current abbreviated timing samples and the full-target forecast.
+2. Verified historical full-run evidence and its applicability key.
+3. Separate reference, candidate and paired **mean-model** log-error envelopes:
+   the larger of a 10% engineering floor and historical mean-error interval
+   endpoints. Mean-model plus current mean-timing uncertainty above 20% disables
+   conditional support. Individual-run scatter does not become mean-model bias.
+4. A separate **single-observation sentinel** envelope also retains the historical
+   maximum absolute residual. Exactly one independent full-target paired endpoint
+   runs with work and numerical checks. Its discrepancy and training uncertainty
+   must fit this frozen envelope; the envelope cannot expand after seeing it.
+
+The resulting status is **`historically_supported_conditional`**, distinct from
+fresh mean-equivalence qualification. The conditional regression gate widens the
+current paired timing interval once by the historical paired envelope. Absolute
+full-time estimates have corresponding separate engineering intervals. One
+endpoint pair does not establish a new 5% model-bias confidence bound or coverage
+of future runs. These intervals rely on the recorded cost relationship remaining
+applicable; the sentinel is a practical contradiction check. An inconsistent or
+uncertain sentinel withholds a supported pass and requests focused qualification.
+There is no automatic retry until the check passes. A single sentinel cannot
+guarantee detection of every 30% full-size-only slowdown; timing noise can mask
+one observation. Negative controls measure its demonstrated behavior, not
+universal detection power.
+
+This permits cheap repeated checks after reporting/instrumentation changes
+outside the timed receiver. Actual timed-receiver, binary, workload, precision,
+or environment changes still require qualification of affected modeled cases.
+It does **not** establish arbitrary cross-revision or cross-host transfer. Full
+endpoint work is intentionally retained to catch cost changes that appear only
+at the full workload. Cheap cases use direct timing and need no model anchor.
+
+`auto` reuses an applicable proof or performs first-use qualification where
+budget allows. `reuse` abstains when no applicable proof exists. `qualify`
+explicitly runs fresh full holds. Keep the anchor directory across runs; changing
+the output filename does not require new calibration. Use `--validation-mode qualify --case free-crystal` (or another
+reported case ID) for affected-case qualification; a focused run is never a
+complete CI pass. CI restores anchor and
+sampled-fixture caches before measurement, and only trusted default-branch runs
+save reusable caches. All restored records still pass normal identity/raw-proof
+validation. A hosted runner with different hardware/runtime can legitimately
+miss the cache's applicability checks; a cache hit alone never authorizes reuse.
+
+The `--sustained-seconds` consistency run uses one qualified or conditionally supported forecast
+per eligible family, selected by a predeclared rule: the eligible native case
+with the longest full source duration and the eligible FFT case with the
+largest full CFO bank. It
+commits to the expected work, identity, seed, and complete geometry before the
+single run. For native, it repeats complete full-target CLI trials until the
+predicted native-pipeline work reaches the requested minimum; for FFT, it
+repeats complete resident prepare/full-bank-score calls. It measures the actual
+receiver/pipeline span and start/end block behavior. This check has no new
+confidence interval and creates no qualification anchor; it is a sustained
+consistency observation. It is disabled in normal CI (`0`), defaults to 60
+seconds in the `sustain` profile, and runs only for an eligible exact forecast.
+If its observed span misses the planned minimum or is much slower than predicted,
+the retained outcome flags the mismatch for review. It does not trigger an
+automatic retry or update the anchor.
 
 ## Hardware and arithmetic qualification
 
-The hardware layer gives each warmed kernel a nominal five-second measurement
-window and records first-use/setup costs separately. CPU families cover FP32
-and FP64 GEMM, complex64/complex128 FFT, memory copying, phase products and
-reductions, and small batched SVD. CPU FP16/BF16 dispatch probes are separate:
-a tensor dtype is not proof that specialized tensor instructions executed.
-CUDA ordinary arithmetic and explicit tensor-format probes are also separate;
-the latter report backend instruction evidence, packing/scaling and wider
-arithmetic exceptions. They do not make the FFT receiver tensor-capable.
+The hardware layer gives each warmed kernel a five-second target and records
+first-use costs separately. CPU families include FP32/FP64 GEMM,
+complex64/complex128 FFT, copying, phase products/reductions, small batched SVD,
+and separate FP16/BF16 dispatch probes. CUDA arithmetic and explicit tensor
+formats are measured separately; dtype alone does not prove specialized
+instructions ran. The receiver chooses only between implemented FP32 and FP64
+after comparison with a fixed FP64 reference. Strict FP32 does not silently
+enable TF32, and no tensor FFT reception claim follows from hardware tensor
+probes or off-line path witnesses.
 
-Use completed CUDA work, not just asynchronous host dispatch time. Retain
-process CPU time, wall time, device event time, array sizes and throughput.
-CPU process time per wall second is a utilization clue, not an instruction-set
-efficiency measurement. Kernel throughput is meaningful for the measured
-shape/cache regime; a small cached product or copy does not establish peak
-tensor occupancy or DRAM bandwidth. Missing hardware counters stay missing.
-One five-second block is not a collection of independent statistical trials.
-The optional `nvidia-smi` sampler records device-busy and memory-busy percentages,
-clocks, power and temperature during the measured windows. These are device-wide
-driver telemetry, not measured SM occupancy, tensor occupancy or per-process
-utilization; the driver's averaging windows can overlap the requested window.
+Record completed CUDA work, not just asynchronous host dispatch time. Retain
+CPU process time, wall time, device event time, shape, array bytes and
+throughput. CPU process time per wall second is a utilization clue rather than
+an instruction-set efficiency measure. A kernel result describes its measured
+shape/cache regime; it is not a peak tensor/DRAM utilization guarantee. Missing
+hardware counters stay missing. The optional `nvidia-smi` sampler provides
+system-wide device/memory busy, clock, power and temperature observations; it is
+not SM occupancy or per-process utilization.
 
-The current Torch 2.8/Triton stack on the tested RTX PRO 6000 Blackwell Server
-emitted FP16 tensor instructions for strict requested FP8 probes. The instruction
-check therefore reports those probes as **unsupported**, with no fallback
-throughput attributed to FP8. Device capability or an FP8 input dtype alone does
-not establish native FP8 execution. Preserve this explicit result when comparing
-profiles from another compiler, driver or GPU.
+CI additionally restores an immutable first-observed trusted hardware profile.
+Its cache key identifies physical resource allocation and requested dispatch,
+but deliberately excludes kernel, numerical-library and receiver-source versions.
+This lets the raw hardware screen reveal environmental slowdowns shared by both
+receiver implementations. A current comparison cannot automatically replace that
+reference. Different CPU allocations abstain. A five-second block is a useful
+throughput/utilization screen, not an independently replicated confidence bound
+or certification that the original host represented ideal performance.
 
-The receiver chooses between its **implemented FP32 and FP64 policies**, after
-comparison with the fixed FP64 reference. Qualification checks numerical
-results and discrete decisions before selecting the faster eligible policy;
-the choice is frozen before held-out timing measurements. Sensitive
-preparation/reductions may remain FP64 and must be reported. Strict FP32 does
-not silently enable TF32. Failed numerical agreement is a correctness failure,
-not a performance tradeoff. Lower/tensor arithmetic needs a receiver adapter
-and its own qualification before it can become eligible here. FP32/FP64
-selection is qualified on the declared numerical corpus and a small CFO bank;
-all measured larger banks also compare candidate and reference at the selected
-precision. This is not universal FP32 equivalence to FP64 for every unmeasured
-alignment or receiver. No arithmetic choice is justified by speed alone.
+On the tested RTX PRO 6000 Blackwell Server with Torch 2.8/Triton, requested
+strict FP8 probes emitted FP16 tensor instructions and are reported as
+unsupported, without fallback-format throughput. This is a tested
+compiler/runtime result, not a claim that the GPU lacks FP8 capability.
 
-## Full-workload estimates and regression decisions
+The dedicated hosted CPU workflow requests AVX2 fallback dispatch in ATen,
+OpenBLAS, MKL, oneDNN, and NumPy; it verifies physical AVX2/FMA capability and
+observed ATen/NumPy dispatch. This is fallback-dispatch coverage, not complete
+ISA isolation, cache/clock emulation, or binary portability certification.
+The local AVX2 preflight was checked; hosted Actions results remain a separate
+actual run. Library controls have build/version-specific limits: [ATen dispatch](https://github.com/pytorch/pytorch/blob/v2.8.0/aten/src/ATen/native/DispatchStub.cpp),
+[OpenBLAS runtime selection](https://www.openmathlib.org/OpenBLAS/docs/runtime_variables/),
+[oneDNN ISA control](https://uxlfoundation.github.io/oneDNN/v3.7/dev_guide_cpu_dispatcher_control.html),
+and [NumPy dispatch inspection](https://numpy.org/doc/2.3/reference/generated/numpy.lib.introspect.opt_func_info.html).
 
-The cost model is deliberately narrow:
+## Routine CI, qualification, and transfer
 
-\[
-T_{\mathrm{full}} = T_{\mathrm{prepare}} + T_{\mathrm{fixed\ score}}
-                    + F_{\mathrm{full}} T_{\mathrm{per\ CFO}}.
-\]
+Normal CI runs the dedicated performance job unless `devfast` is explicitly
+selected; the job is separate from sanitizer/matrix repetitions. New direct
+release builds depend on the exact-source performance job. A noisy or
+unresolved warning is visible and may be nonblocking; green CI alone does not
+mean every model is validated or every requested interval is narrow. Existing
+ordinary-release certification remains separate. Source-release and existing
+APT repackaging routes that reuse older verified binaries have not measured the
+current triad study and report it as unevaluated.
 
-All terms describe the original full sample/timing geometry. The model is fit
-to actual wrapped receiver calls, including result construction, rather than
-an internal timer that omits finishing work. The full-time prediction covers
-receiver preparation and scoring for a loaded observation. Interpreter startup,
-fixture generation/loading and provenance hashing are recorded separately;
-they count against the suite budget but are not included in that resident
-receiver prediction. Do not present it as cold end-to-end radio latency.
+The suite's routine role is to execute the declared code-path witnesses,
+qualify current numerical precision/score behavior, test duration/FFT work
+models against applicable historical proof and current full endpoint sentinels, measure all named performance families
+to an explicit precision or budget ceiling, and sample a longer sustained span
+when requested. The initial qualification campaign has a different purpose:
+run expensive complete-duration and full-bank anchors on relevant host classes,
+freeze forecasts before validation, and retain independent full-workload
+residuals that establish how much the abbreviation misses. Historical full tests
+can serve as anchors only if they preserve source/binary and harness hashes,
+configuration/seed, workload counters/geometry, timing boundary, selected
+precision and sufficiently comparable hardware. If that metadata is missing,
+label the run historical/contextual evidence; do not calibrate with it silently.
 
-Before timing, a work-count guard compares declared training plus validation
-CFO evaluations with direct full-bank work. At 80% or more, it selects direct
-measurement. The 33-CFO tight and broad HF cases therefore run directly: their
-earlier estimation plans required 117 and 103 evaluations respectively,
-against 99 for three direct repetitions. The 992-CFO free-crystal case retains
-abbreviation: three repetitions of 1/124 training and 249 validation CFOs use
-37.7% of direct CFO work. This is a work-count saving, not a promised wall-time
-speedup. The extrapolation limit is eight times the largest training bank.
-Larger withheld banks test scaling; reports retain actual bank counts and
-complete-target measurement counts. Small banks are measured directly.
+No unmeasured architecture has a qualified runtime forecast. The current suite
+explicitly marks cross-architecture transfer unqualified; a GPU GEMM rate or
+hardware profile alone cannot predict the whole pipeline. Qualification on a
+new host requires matched stage/work shapes, independent full-workload
+validation, and a declared extrapolation envelope while retaining transfer,
+serial, setup, memory/cache, and startup costs.
 
-Each case has at most two attempts, with the original result retained. Invalid
-scaling requires a direct full-target retry. A valid but inconclusive large
-case receives one fresh attempt under the same work-count guard. If both
-sources' initial full-runtime estimates
-are below one second, the retry instead uses seven direct full-target
-repetitions. A supported regression is never retried in search of a passing
-result. Neither the retry nor precision selection may tune against a holdout
-until it passes.
+## Evidence and reproducible claims
 
-The default model check permits
-`abs(predicted - observed) / observed <= 0.20`. This engineering allowance is
-not a statistical coverage claim. Inverting that convention gives actual-time
-factors `[1/1.20, 1/0.80]` around the prediction. It must not be replaced by
-`[0.80, 1.20]`, which would exclude some accepted errors.
+The previous [2026-11-03 study archive](validation-data/triad-v3/2026-11-03-performance/README.md)
+records the pre-native-duration suite, its measurements, rejected scaling model,
+source snapshots and cleanup. Its 10-minute/20% policy, FFT/Gaussian adapters,
+and measured host wall times are historical v1 evidence; they do not qualify the
+current duration-model, adaptive-look or sustained-test implementation. Current
+profile results must be retained separately with fresh source/binary hashes,
+case identities, frozen prediction and full holdout checks. The separate
+[traceability study](validation-data/triad-v3/2026-11-03-performance-trace/README.md)
+records complete-simulation forecasts, independent confirmations, sustained
+observations, failed precision targets and subsequent protocol changes.
+Implementation tests alone do not establish predictive accuracy.
 
-Uncertainty uses outer repetitions of the **predicted full times**, not the
-thousands of inner hardware iterations. The Student-t component on log times
-describes the geometric mean under the declared stationarity/independence
-model; a future individual execution needs a separate predictive-variation
-term. Neither the model allowance nor a few holdouts proves distribution-free
-95% coverage. The paired comparison uses log candidate/reference full-time
-ratios, allocates `0.05 / (2 × case-family count)` error budget to each possible
-attempt, and retains a
-nonshrinking model allowance plus observed paired holdout errors. The paired
-ratio allowance is a **separate conditional engineering assumption**, checked
-on paired holdouts; two individual 20% error bounds do not imply a 20% ratio
-bound. Both source
-predictions must validate before that comparison can support a performance
-pass. This familywise error statement concerns the gate decisions across the
-predeclared families and at most two attempts; it is not simultaneous coverage
-for every descriptive mean/prediction interval in the report. Absolute reported
-differences are in full-workload seconds.
+The suite uses paired randomized/interleaved executions because environmental
+variation can dominate small timing differences. The statistical treatment
+follows the benchmark hierarchy discussed by [Kalibera and Jones, *Quantifying
+Performance Changes with Effect Size Confidence Intervals*](https://www.cs.kent.ac.uk/pubs/2012/3233/content.pdf)
+and their [*Rigorous Benchmarking in Reasonable Time*](https://kar.kent.ac.uk/33611/): distinguish repeated measurements within a process from independent execution/process effects and allocate replication where variance and cost justify it. [Lan and DeMets' alpha-spending method](https://doi.org/10.1093/biomet/70.3.659) is a principled alternative when a variable schedule of repeated looks is needed; this implementation instead uses a fixed look schedule with conservative multiplicity adjustment. [Howard et al.'s confidence sequences](https://doi.org/10.1214/20-AOS1991) provide anytime-valid alternatives under their stated sub-Gaussian, Bernstein, self-normalized or other conditions; the suite does not claim those assumptions for arbitrary machine timing.
 
-| Result | Meaning |
-| --- | --- |
-| Supported performance pass | The expanded slowdown interval's upper endpoint is at most 1.30. Required coverage and numerical checks also completed. |
-| Performance regression | The expanded interval's lower endpoint exceeds 1.30. |
-| Inconclusive warning | The interval crosses 1.30 after the bounded retry. It is distinct from a supported pass and does not fail CI solely because timing is noisy. |
-| Hard failure | Numerical disagreement, invalid scaling without a valid fallback, missing required cases, setup failure, timeout or incomplete cleanup. |
-
-A slowdown point estimate alone is insufficient to declare a regression. Keep
-hardware-health warnings separate from implementation comparisons: current
-slow hardware kernels must not be used to normalize a slow receiver back to
-an apparent pass. A previously unmeasured hosted runner can support a paired
-implementation comparison while lacking evidence for its historical hardware
-health.
-
-## Measured runtime evidence and its limits
-
-The [retained study](validation-data/triad-v3/2026-11-03-performance/README.md)
-includes source snapshots, reports, failed models and numerical checks.
-All three hosts completed required coverage with no numerical failures. Each
-retained inconclusive timing comparisons as warnings. These are comparisons
-of unchanged receiver code with the fixed reference, not receiver speedups.
-
-| Host/backend and measured policy | Total suite wall time | Supported / inconclusive case comparisons |
-| --- | ---: | ---: |
-| Ryzen 5 PRO 5650U CPU, final work-count guard | 410.58 s | 3 / 3 |
-| EPYC 9554 CPU, earlier full-retry policy | 258.76 s | 5 / 1 |
-| RTX PRO 6000 Blackwell Server CUDA, bounded retry before work-count guard | 298.99 s | 3 / 3 |
-
-The ten-minute ceiling was met; the five-minute preference was not consistently
-met on the laptop. Earlier laptop policies took 283.87–397.32 seconds, so the
-work-count guard has not demonstrated a total wall-time improvement. Hardware,
-software versions and policy differences preclude attributing all differences
-to architecture. The final guard was not rerun on the GPU. Later source-identity
-and telemetry metadata additions have focused test coverage, not another timing
-campaign. Exact measured harness versions are archived.
-
-The 58 focused tests passed. A real candidate scoring call with an injected
-0.4-second delay retained identical numerical outputs and was correctly
-rejected: its full-runtime ratio interval was [2.155, 2.644], above 1.30.
-An initial scaling model with 31.18% held-out error was also rejected. These
-controls test real failure handling; they do not establish universal interval
-coverage or sensitivity. Native receiver throughput remains unmeasured.
-
-## CI, release scope and architecture transfer
-
-Normal [CI](../.github/workflows/ci.yml) invokes the dedicated performance
-workflow unless `devfast` is explicitly selected. It is a separate job, not a
-CTest added to every sanitizer/matrix leg. New direct-release builds depend on
-the exact-source performance job before producing/uploading binaries. A noisy
-warning is visible and may leave CI green; green alone is not a claim that all
-runtime estimates are resolved. Existing ordinary-release certification remains
-separate.
-
-The hosted CPU job requests AVX2 fallback dispatch for ATen, OpenBLAS, MKL,
-oneDNN and NumPy before loading the numerical libraries. It checks physical
-AVX2/FMA support, ATen's reported selection and NumPy's selected optimized
-functions, and retains `dispatch.json`. The local preflight passed. This tests
-common fallback paths but does **not** emulate an older processor's caches or
-clocks, constrain every vendor/library path, or certify binary portability.
-Hosted GitHub Actions has not been run as part of this local study.
-
-These controls have library-specific limits: [ATen's override](https://github.com/pytorch/pytorch/blob/v2.8.0/aten/src/ATen/native/DispatchStub.cpp)
-does not itself establish physical ISA support; [OpenBLAS's selection](https://www.openmathlib.org/OpenBLAS/docs/runtime_variables/)
-depends on a dynamic-architecture build; and [oneDNN's ceiling](https://uxlfoundation.github.io/oneDNN/v3.7/dev_guide_cpu_dispatcher_control.html)
-depends on its build configuration. Actual
-[NumPy dispatch inspection](https://numpy.org/doc/2.3/reference/generated/numpy.lib.introspect.opt_func_info.html)
-is retained alongside requested controls rather than treating environment
-variables alone as proof.
-
-The `source_release` and direct APT repackaging routes reuse verified existing
-application archives unchanged. They report **triad performance not evaluated**;
-running today's harness against today's source would not qualify those older
-archives. This exemption must be revisited if the experimental triad receiver
-becomes a shipped runtime.
-
-No current result predicts a Ryzen 5500U, i9-13900H or another unmeasured CPU
-from GPU peak specifications with a confidence-qualified interval. The
-statistical helper supports stage-rate transfer calculations, but the runner
-abstains without matched stage shapes and independent target full-workload
-validation. A measured target profile alone is insufficient. Validate transfer
-on held-out workloads, preserve serial/setup/transfer stages, and report
-out-of-domain shapes explicitly before adding it to a regression gate.
-
-## Rationale and evidence discipline
-
-The design uses a small number of representative full-geometry workloads
-rather than multiplying every configuration axis. Add a case when it exercises
-a different implemented cost regime, numerical hazard or scaling boundary.
-Add a larger sustained holdout when changed cache/thermal behavior invalidates
-the short model; do not turn every historical sensitivity study into CI.
-
-[Kalibera and Jones](https://www.cs.kent.ac.uk/pubs/2012/3233/content.pdf)
-explain why performance ratios need uncertainty that reflects the levels of
-execution variability. [Google Benchmark's interleaving guidance](https://github.com/google/benchmark/blob/main/docs/random_interleaving.md)
-motivates distributing comparisons across changing machine conditions. The
-suite's alternating paired order is a bounded implementation choice, not the
-same experimental design or a guarantee of independence.
-[Measured Roofline analysis](https://spiral.ece.cmu.edu/pub-spiral/pubfile/ispass-2013_177.pdf)
-supports separating compute and memory regimes; peak FLOP rates do not predict
-complete acquisition time. [PyTorch's CUDA timing guidance](https://docs.pytorch.org/docs/stable/notes/cuda.html#asynchronous-execution)
-requires synchronization or CUDA events for asynchronous device work.
-
-Keep measured reports and failures source-bound. Unit tests establish the
-harness's contracts; they do not establish prediction accuracy, sustained
-utilization, GPU acceleration or a cross-architecture confidence interval.
-Those claims require the actual held-out measurements and their uncertainty.
+[Google Benchmark interleaving guidance](https://github.com/google/benchmark/blob/main/docs/random_interleaving.md)
+supports spreading paired measurements across changing conditions. The current
+alternating order is a bounded choice; it does not prove statistical independence
+or remove thermal drift. [PyTorch's CUDA timing guidance](https://docs.pytorch.org/docs/stable/notes/cuda.html#asynchronous-execution)
+requires synchronization or device events for asynchronous work. Keep timing
+uncertainty, prediction residuals, future-run variation, hardware health and
+architecture-transfer limits visible in every maintained conclusion.

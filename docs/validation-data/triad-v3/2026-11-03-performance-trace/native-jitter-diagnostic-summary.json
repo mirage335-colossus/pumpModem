@@ -1,0 +1,3848 @@
+{
+  "schema": "triad-performance-evidence-summary-v2",
+  "summary_scope": "recorded evidence only; statistics and source files are not revalidated",
+  "input_evidence_complete": true,
+  "partial_snapshot": false,
+  "completion_scope": "focused invocation finalized; does not imply qualified prediction or full-suite coverage",
+  "recorded_status": "unqualified",
+  "recorded_exit_code": 2,
+  "recorded_elapsed_seconds": 86.7921179299592,
+  "warnings": [
+    "requested full-runtime prediction is invalid or unqualified"
+  ],
+  "failures": [],
+  "followup": {
+    "schema": "triad-native-performance-followup-v1",
+    "status": "unqualified",
+    "exit_code": 2,
+    "scope": "one explicitly selected native performance case; not complete normal-CI coverage",
+    "experiment": {
+      "argv": [
+        "/tmp/triad-weak-env/bin/python",
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/run-native-followup.py",
+        "--case-id",
+        "native-vlf-low-cn0",
+        "--reference-binary",
+        "local-evidence/triad-performance-trace/reference-triad_long-gcc142",
+        "--binary",
+        "build/dev-cli/triad_long",
+        "--output",
+        "local-evidence/triad-performance-trace/native-routine-jitter-diagnostic.json",
+        "--mode",
+        "routine",
+        "--anchor",
+        "local-evidence/triad-performance-trace/anchors-v3/native-vlf-low-cn0.native-anchor.json",
+        "--looks",
+        "5,9,17,33",
+        "--budget-seconds",
+        "300"
+      ],
+      "case_id": "native-vlf-low-cn0",
+      "mode": "routine",
+      "reference_binary": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/reference-triad_long-gcc142",
+      "candidate_binary": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/triad_long",
+      "threads": 1,
+      "budget_seconds": 300.0,
+      "looks": [
+        5,
+        9,
+        17,
+        33
+      ],
+      "family_count": 14,
+      "relative_precision_target": 0.05,
+      "sustained_seconds": 0.0,
+      "anchor_input": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/anchors-v3/native-vlf-low-cn0.native-anchor.json",
+      "anchor_input_sha256": "91ececa517e8393b3a11057fb7fedf79339bd7ea2cd0791fe24d1e066e852c6a",
+      "source_sha256": {
+        "tools/triad_perf_native.py": "d1384ad557dd10987f37e631e1eaf57fdf8b9d2934b0cbc3b01a98643a5e116c",
+        "tools/triad_perf_adaptive.py": "3ad99d54b955e735f0db832bd6ac3afe91b016d993de80909827efd491174106",
+        "tools/triad_perf_conditional.py": "4d468e63189923c35656b0357193937fbc8ec910abdcb212a25d6966b9229753",
+        "tools/triad_perf_sustained.py": "c343626798c491fca1bedba2fac97a840177145e3e9a3f56fd5741cc938b5548",
+        "tools/triad_perf_hardware.py": "74718bc0791dda7ac7ea0b38b8fb79ab7bb1e41c649da9787f2a2645854706b3",
+        "tools/triad-performance-native-cases.json": "f8d46beae40f2a52013279cdfdea811c6267be621a82431b612fb05708304a8f",
+        "driver": "399ffb31962ca4fe5269c337d0bd8753f7d4cff562207a634a7baf11ec32b017"
+      },
+      "source_root": "/home/user/___quick/p/_cur/dataPump/pumpModem",
+      "python": "3.13.5 (main, Aug 10 2026, 12:06:59) [GCC 14.2.0]",
+      "started_unix_seconds": 1793736896.4664776,
+      "requalification_fallback": false,
+      "deadline_scope": "cooperative API deadline and bounded native calls; caller must supply an outer process-group timeout",
+      "case": {
+        "id": "native-vlf-low-cn0",
+        "args": [
+          "--mode",
+          "run",
+          "--phase-diffusion",
+          "0",
+          "--chunk",
+          "1024",
+          "--block",
+          "512",
+          "--memory-mib",
+          "64",
+          "--epoch",
+          "1793404800",
+          "--rate",
+          ".001",
+          "--added",
+          "1",
+          "--sample-rate",
+          "1",
+          "--sample-rate-denominator",
+          "128",
+          "--channel",
+          "none",
+          "--basis",
+          "two-ray",
+          "--spread-doppler-hz",
+          ".001",
+          "--spread-delay-ms",
+          ".005",
+          "--selective-perturbation",
+          "each-65",
+          "--cn0",
+          "-60"
+        ],
+        "training_seconds": [
+          2304001.6,
+          18432012.8
+        ],
+        "holdout_seconds": 36864025.6,
+        "target_seconds": 73728051.2,
+        "batch_trials": 1,
+        "witnesses": [
+          "complete",
+          "encrypted",
+          "two_ray",
+          "selective",
+          "sub_hz",
+          "weak_signal"
+        ],
+        "scope": "Full low-rate point-sampled native observation; -60dB-Hz, 853 active days at target, complete natural tails",
+        "maximum_extrapolation": 8.0,
+        "model_relative_error_limit": 0.05
+      },
+      "case_sha256": "230871e394dadd2e343eda462592cc7e305ff5d4e5524ebfcb0fcce83995f29b",
+      "identities": {
+        "reference": {
+          "binary_sha256": "9cdf82f396d9be9a7d11b66b45b254e5f18b3857f27b08aed58430dce6d8ea47",
+          "environment": {
+            "system": "Linux",
+            "release": "7.2.6+deb13-amd64",
+            "machine": "x86_64",
+            "cpu_model": "AMD Ryzen 5 PRO 5650U with Radeon Graphics",
+            "threads": 1,
+            "affinity_cpu_count": 2,
+            "affinity_cpus": [
+              2,
+              4
+            ],
+            "affinity_topology": [
+              {
+                "cpu": 2,
+                "core_id": "1",
+                "physical_package_id": "0",
+                "thread_siblings_list": "2-3"
+              },
+              {
+                "cpu": 4,
+                "core_id": "2",
+                "physical_package_id": "0",
+                "thread_siblings_list": "4-5"
+              }
+            ],
+            "quota_cores": null,
+            "quota_source": null
+          },
+          "case_sha256": "230871e394dadd2e343eda462592cc7e305ff5d4e5524ebfcb0fcce83995f29b",
+          "adapter_sha256": "d1384ad557dd10987f37e631e1eaf57fdf8b9d2934b0cbc3b01a98643a5e116c",
+          "adaptive_protocol_sha256": "3ad99d54b955e735f0db832bd6ac3afe91b016d993de80909827efd491174106",
+          "protocol": "complete-native-duration-siblings-v4",
+          "arithmetic": "fp64",
+          "measurement_contract": "triad-native-complete-cli-affine-v1",
+          "timing_boundary": "external complete CLI test including startup and output; stages inside native trial separately retained"
+        },
+        "candidate": {
+          "binary_sha256": "862b0431f04a3973ce15e7cff9b9959ed45ca36d626e401352db5cf8630c9c6b",
+          "environment": {
+            "system": "Linux",
+            "release": "7.2.6+deb13-amd64",
+            "machine": "x86_64",
+            "cpu_model": "AMD Ryzen 5 PRO 5650U with Radeon Graphics",
+            "threads": 1,
+            "affinity_cpu_count": 2,
+            "affinity_cpus": [
+              2,
+              4
+            ],
+            "affinity_topology": [
+              {
+                "cpu": 2,
+                "core_id": "1",
+                "physical_package_id": "0",
+                "thread_siblings_list": "2-3"
+              },
+              {
+                "cpu": 4,
+                "core_id": "2",
+                "physical_package_id": "0",
+                "thread_siblings_list": "4-5"
+              }
+            ],
+            "quota_cores": null,
+            "quota_source": null
+          },
+          "case_sha256": "230871e394dadd2e343eda462592cc7e305ff5d4e5524ebfcb0fcce83995f29b",
+          "adapter_sha256": "d1384ad557dd10987f37e631e1eaf57fdf8b9d2934b0cbc3b01a98643a5e116c",
+          "adaptive_protocol_sha256": "3ad99d54b955e735f0db832bd6ac3afe91b016d993de80909827efd491174106",
+          "protocol": "complete-native-duration-siblings-v4",
+          "arithmetic": "fp64",
+          "measurement_contract": "triad-native-complete-cli-affine-v1",
+          "timing_boundary": "external complete CLI test including startup and output; stages inside native trial separately retained"
+        }
+      },
+      "direct_measurement": false
+    },
+    "warnings": [
+      "requested full-runtime prediction is invalid or unqualified"
+    ],
+    "failures": [],
+    "elapsed_seconds": 86.7921179299592,
+    "completed_unix_seconds": 1793736982.7141135,
+    "commitments": [
+      {
+        "kind": "prediction",
+        "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/native-routine-jitter-diagnostic.prediction-000.json",
+        "sha256": "548b1118609056ad899ccec8f65279fa8e5cf05189b4d117989d515b25b9509b",
+        "persisted_before_independent_holds": true
+      }
+    ],
+    "native_result": {
+      "id": "native-vlf-low-cn0",
+      "adapter": "native_complete_simulation",
+      "scope": "Full low-rate point-sampled native observation; -60dB-Hz, 853 active days at target, complete natural tails",
+      "precision": "fp64",
+      "prediction_valid": false,
+      "comparison": {
+        "gate": "unvalidated",
+        "expanded_full_prediction_ratio_interval": [
+          0.8272020897185484,
+          1.1570250766204297
+        ]
+      },
+      "coverage": {
+        "complete": true,
+        "encrypted": true,
+        "two_ray": true,
+        "selective": true,
+        "sub_hz": true,
+        "weak_signal": true
+      },
+      "limits": [
+        "Native receiver currently executes FP64 regardless of Python precision selection",
+        "Named completed execution witnesses are not exhaustive source-line or numerical-state coverage",
+        "Finite independent full holdouts bound only the declared matched regime",
+        "Timing precision does not establish smaller model error"
+      ],
+      "identities": {
+        "reference": {
+          "binary_sha256": "9cdf82f396d9be9a7d11b66b45b254e5f18b3857f27b08aed58430dce6d8ea47",
+          "environment": {
+            "system": "Linux",
+            "release": "7.2.6+deb13-amd64",
+            "machine": "x86_64",
+            "cpu_model": "AMD Ryzen 5 PRO 5650U with Radeon Graphics",
+            "threads": 1,
+            "affinity_cpu_count": 2,
+            "affinity_cpus": [
+              2,
+              4
+            ],
+            "affinity_topology": [
+              {
+                "cpu": 2,
+                "core_id": "1",
+                "physical_package_id": "0",
+                "thread_siblings_list": "2-3"
+              },
+              {
+                "cpu": 4,
+                "core_id": "2",
+                "physical_package_id": "0",
+                "thread_siblings_list": "4-5"
+              }
+            ],
+            "quota_cores": null,
+            "quota_source": null
+          },
+          "case_sha256": "230871e394dadd2e343eda462592cc7e305ff5d4e5524ebfcb0fcce83995f29b",
+          "adapter_sha256": "d1384ad557dd10987f37e631e1eaf57fdf8b9d2934b0cbc3b01a98643a5e116c",
+          "adaptive_protocol_sha256": "3ad99d54b955e735f0db832bd6ac3afe91b016d993de80909827efd491174106",
+          "protocol": "complete-native-duration-siblings-v4",
+          "arithmetic": "fp64",
+          "measurement_contract": "triad-native-complete-cli-affine-v1",
+          "timing_boundary": "external complete CLI test including startup and output; stages inside native trial separately retained"
+        },
+        "candidate": {
+          "binary_sha256": "862b0431f04a3973ce15e7cff9b9959ed45ca36d626e401352db5cf8630c9c6b",
+          "environment": {
+            "system": "Linux",
+            "release": "7.2.6+deb13-amd64",
+            "machine": "x86_64",
+            "cpu_model": "AMD Ryzen 5 PRO 5650U with Radeon Graphics",
+            "threads": 1,
+            "affinity_cpu_count": 2,
+            "affinity_cpus": [
+              2,
+              4
+            ],
+            "affinity_topology": [
+              {
+                "cpu": 2,
+                "core_id": "1",
+                "physical_package_id": "0",
+                "thread_siblings_list": "2-3"
+              },
+              {
+                "cpu": 4,
+                "core_id": "2",
+                "physical_package_id": "0",
+                "thread_siblings_list": "4-5"
+              }
+            ],
+            "quota_cores": null,
+            "quota_source": null
+          },
+          "case_sha256": "230871e394dadd2e343eda462592cc7e305ff5d4e5524ebfcb0fcce83995f29b",
+          "adapter_sha256": "d1384ad557dd10987f37e631e1eaf57fdf8b9d2934b0cbc3b01a98643a5e116c",
+          "adaptive_protocol_sha256": "3ad99d54b955e735f0db832bd6ac3afe91b016d993de80909827efd491174106",
+          "protocol": "complete-native-duration-siblings-v4",
+          "arithmetic": "fp64",
+          "measurement_contract": "triad-native-complete-cli-affine-v1",
+          "timing_boundary": "external complete CLI test including startup and output; stages inside native trial separately retained"
+        }
+      },
+      "adaptive": {
+        "sample_count": 33,
+        "next_look": null,
+        "policy": {
+          "relative_precision_target": 0.05,
+          "predeclared_looks": [
+            5,
+            9,
+            17,
+            33
+          ],
+          "family_count": 14,
+          "alpha": 0.05,
+          "interval_confidence_per_look": 0.999702380952381,
+          "gate_confidence_per_look": 0.999702380952381,
+          "alpha_allocation": {
+            "timing_intervals_per_family_look_metric": 0.00029761904761904765,
+            "three_timing_intervals_total_across_all_looks_and_families": 0.05,
+            "gate_reuses_paired_timing_interval": true
+          },
+          "slowdown_threshold": 1.3,
+          "fixed_model_log_allowance": 0.051293294387550536
+        },
+        "stop_reason": "maximum_samples",
+        "timing_precision_reached": false,
+        "timing_intervals_simultaneously_within_target": false,
+        "model_validation": "unvalidated",
+        "performance_gate": "unvalidated",
+        "gate_performance_pass_eligible": false,
+        "inference": {
+          "method": "predeclared-look Student-t intervals on outer log runtimes; paired log-runtime ratio",
+          "simultaneous_family_scope": "reference, candidate, and paired timing intervals across declared families and predeclared looks; the regression gate reuses the paired interval and adds a separate model-error bound",
+          "conditional_assumptions": [
+            "outer runtimes are independent and stationary within the measured hardware, software, thread, and power regime",
+            "outer log runtimes are approximately normally distributed",
+            "each look is evaluated only at its declared cumulative sample count",
+            "the future-execution interval adds run-to-run spread and independently measured log model-error bounds",
+            "model allowances do not shrink with more timing repetitions"
+          ],
+          "distribution_free_coverage_claim": false,
+          "timing_precision_is_not_model_accuracy": true,
+          "statistical_future_coverage_qualified": false,
+          "model_validation_scope": "qualify_log_residuals tests a fixed-look confidence interval for mean log bias only; it does not validate individual-error tails or future-interval coverage",
+          "future_execution_intervals_are_engineering_scenario_ranges": true,
+          "bounded_model_error_assumption_verified_for_future_runs": false
+        },
+        "reference": {
+          "point_seconds": 4.022553698144659,
+          "timing_mean_confidence_interval_seconds": [
+            3.8470543171994023,
+            4.206059213179175
+          ],
+          "future_execution_prediction_interval_seconds": [
+            2.9461803047404898,
+            5.492175149097856
+          ],
+          "log_standard_error": 0.010993347825805737,
+          "relative_timing_half_width": 0.045619158575597396,
+          "bounded_model_error_scenario_interval_seconds": [
+            2.9461803047404898,
+            5.492175149097856
+          ],
+          "future_execution_interval_scope": "scenario range: timing interval widened by fixed allowance and maximum observed independent residual; future model-error coverage is unverified",
+          "statistical_future_coverage_qualified": false,
+          "independent_model_log_error_bound": 0.051293294387550536,
+          "observed_independent_model_residual_max_log": null,
+          "model_error_bound_is_verified_for_future_runs": false
+        },
+        "candidate": {
+          "point_seconds": 3.9353108921808793,
+          "timing_mean_confidence_interval_seconds": [
+            3.7609729562149847,
+            4.1177301720624815
+          ],
+          "future_execution_prediction_interval_seconds": [
+            2.870491735799498,
+            5.395128515778176
+          ],
+          "log_standard_error": 0.01116659053821525,
+          "relative_timing_half_width": 0.04635447741728704,
+          "bounded_model_error_scenario_interval_seconds": [
+            2.870491735799498,
+            5.395128515778176
+          ],
+          "future_execution_interval_scope": "scenario range: timing interval widened by fixed allowance and maximum observed independent residual; future model-error coverage is unverified",
+          "statistical_future_coverage_qualified": false,
+          "independent_model_log_error_bound": 0.051293294387550536,
+          "observed_independent_model_residual_max_log": null,
+          "model_error_bound_is_verified_for_future_runs": false
+        },
+        "paired_candidate_over_reference": {
+          "point_seconds": 0.9783115869891263,
+          "timing_mean_confidence_interval_seconds": [
+            0.9165674124305245,
+            1.0442151316499377
+          ],
+          "future_execution_prediction_interval_seconds": [
+            0.6689392980305303,
+            1.4307629467352676
+          ],
+          "log_standard_error": 0.01606585167586045,
+          "relative_timing_half_width": 0.06736457539426444,
+          "model_adjusted_gate_interval": [
+            0.8272020897185484,
+            1.1570250766204297
+          ],
+          "paired_model_log_error_bound": 0.10258658877510107,
+          "paired_model_log_error_bound_source": "sum of separate reference and candidate model-error bounds"
+        }
+      },
+      "recorded_sampling_work": {
+        "scope": "timing samples only; excluded pilot and validation calls are separate; native full CLI wall boundary",
+        "sources": {
+          "reference": {
+            "outer_sample_count": 33,
+            "actual_cli_invocation_count": 66,
+            "actual_simulation_trial_count": 66,
+            "actual_capture_rows_processed": 5398734,
+            "sum_measured_cli_wall_seconds": 37.86775538884103
+          },
+          "candidate": {
+            "outer_sample_count": 33,
+            "actual_cli_invocation_count": 66,
+            "actual_simulation_trial_count": 66,
+            "actual_capture_rows_processed": 5398734,
+            "sum_measured_cli_wall_seconds": 36.95022811641684
+          }
+        }
+      },
+      "measurement_plan": {
+        "direct": false,
+        "validation_mode": "routine",
+        "compatible_historical_anchor": true,
+        "timing_block_invocations": 1,
+        "confirmation_plan": {
+          "initial_pair_wall_estimate_seconds": 7.801061314478845,
+          "reserved_full_pairs": 1,
+          "scope": "reserve one independent full endpoint"
+        },
+        "native_case_sha256": "230871e394dadd2e343eda462592cc7e305ff5d4e5524ebfcb0fcce83995f29b",
+        "native_case": {
+          "id": "native-vlf-low-cn0",
+          "training_seconds": [
+            2304001.6,
+            18432012.8
+          ],
+          "holdout_seconds": 36864025.6,
+          "target_seconds": 73728051.2,
+          "batch_trials": 1,
+          "maximum_extrapolation": 8.0,
+          "witnesses": [
+            "complete",
+            "encrypted",
+            "two_ray",
+            "selective",
+            "sub_hz",
+            "weak_signal"
+          ]
+        }
+      },
+      "anchor": {
+        "schema": "triad-performance-native-v3",
+        "validated": true,
+        "identities": {
+          "reference": {
+            "binary_sha256": "9cdf82f396d9be9a7d11b66b45b254e5f18b3857f27b08aed58430dce6d8ea47",
+            "environment": {
+              "system": "Linux",
+              "release": "7.2.6+deb13-amd64",
+              "machine": "x86_64",
+              "cpu_model": "AMD Ryzen 5 PRO 5650U with Radeon Graphics",
+              "threads": 1,
+              "affinity_cpu_count": 2,
+              "affinity_cpus": [
+                2,
+                4
+              ],
+              "affinity_topology": [
+                {
+                  "cpu": 2,
+                  "core_id": "1",
+                  "physical_package_id": "0",
+                  "thread_siblings_list": "2-3"
+                },
+                {
+                  "cpu": 4,
+                  "core_id": "2",
+                  "physical_package_id": "0",
+                  "thread_siblings_list": "4-5"
+                }
+              ],
+              "quota_cores": null,
+              "quota_source": null
+            },
+            "case_sha256": "230871e394dadd2e343eda462592cc7e305ff5d4e5524ebfcb0fcce83995f29b",
+            "adapter_sha256": "538a03c9002d7767c61faac3ecac3ba4ac7ba1ac9600a51ca7760373fc521bbe",
+            "adaptive_protocol_sha256": "3ad99d54b955e735f0db832bd6ac3afe91b016d993de80909827efd491174106",
+            "protocol": "complete-native-duration-siblings-v3",
+            "arithmetic": "fp64",
+            "timing_boundary": "external complete CLI test including startup and output; stages inside native trial separately retained"
+          },
+          "candidate": {
+            "binary_sha256": "862b0431f04a3973ce15e7cff9b9959ed45ca36d626e401352db5cf8630c9c6b",
+            "environment": {
+              "system": "Linux",
+              "release": "7.2.6+deb13-amd64",
+              "machine": "x86_64",
+              "cpu_model": "AMD Ryzen 5 PRO 5650U with Radeon Graphics",
+              "threads": 1,
+              "affinity_cpu_count": 2,
+              "affinity_cpus": [
+                2,
+                4
+              ],
+              "affinity_topology": [
+                {
+                  "cpu": 2,
+                  "core_id": "1",
+                  "physical_package_id": "0",
+                  "thread_siblings_list": "2-3"
+                },
+                {
+                  "cpu": 4,
+                  "core_id": "2",
+                  "physical_package_id": "0",
+                  "thread_siblings_list": "4-5"
+                }
+              ],
+              "quota_cores": null,
+              "quota_source": null
+            },
+            "case_sha256": "230871e394dadd2e343eda462592cc7e305ff5d4e5524ebfcb0fcce83995f29b",
+            "adapter_sha256": "538a03c9002d7767c61faac3ecac3ba4ac7ba1ac9600a51ca7760373fc521bbe",
+            "adaptive_protocol_sha256": "3ad99d54b955e735f0db832bd6ac3afe91b016d993de80909827efd491174106",
+            "protocol": "complete-native-duration-siblings-v3",
+            "arithmetic": "fp64",
+            "timing_boundary": "external complete CLI test including startup and output; stages inside native trial separately retained"
+          }
+        },
+        "case_sha256": "230871e394dadd2e343eda462592cc7e305ff5d4e5524ebfcb0fcce83995f29b",
+        "anchor_sha256": "8a11b31eac202949cd4c4a489b68215e1d7f022979a5c8634676ebef6f290439",
+        "qualification": {
+          "status": "validated",
+          "geometry_matches": true,
+          "log_errors": {
+            "reference": [
+              0.007176334536383016,
+              0.00995916368939455,
+              -0.019241412758979105,
+              0.011869305528565806,
+              0.00425384637510597,
+              -0.027805681686961674,
+              -0.021519655980492564,
+              0.031566421130341304,
+              0.03333601348030076,
+              -0.032306337258484155,
+              0.04121369831650645,
+              0.023580841173115152,
+              -0.035796550517543685,
+              -0.020338418981190647,
+              -0.006481539570183941,
+              -0.018270703277715742,
+              0.012159006161047616
+            ],
+            "candidate": [
+              0.022006599839885392,
+              0.02869960630807714,
+              -0.017737490159748088,
+              -0.016119868905838004,
+              0.166447167113186,
+              -0.026922608187452884,
+              0.03011253937514466,
+              -0.00012376095432178655,
+              -0.01368473300957877,
+              -0.009715999816250681,
+              -0.022082397456698637,
+              -0.0034137098347028763,
+              -0.01121940846732286,
+              -0.01121478888945949,
+              -0.029995887301795542,
+              -0.0054914282278549775,
+              -0.026771981527862455
+            ],
+            "paired": [
+              0.014830265303502376,
+              0.018740442618682587,
+              0.0015039225992310168,
+              -0.02798917443440381,
+              0.16219332073808002,
+              0.0008830734995087901,
+              0.05163219535563722,
+              -0.03169018208466309,
+              -0.04702074648987953,
+              0.022590337442233474,
+              -0.0632960957732051,
+              -0.02699455100781803,
+              0.024577142050220824,
+              0.009123630091731156,
+              -0.023514347731611603,
+              0.012779275049860764,
+              -0.03893098768891007
+            ]
+          },
+          "sample_count_per_source": 17,
+          "intervals": {
+            "reference": {
+              "status": "validated",
+              "mean_log_residual": -0.0003909217435759343,
+              "log_residual_interval": [
+                -0.015034732158338854,
+                0.014252888671186986
+              ],
+              "confidence": 0.975,
+              "relative_mean_error_interval": [
+                -0.0149222748666305,
+                0.014354945380116856
+              ],
+              "allowed_relative_mean_error": [
+                -0.05,
+                0.05
+              ],
+              "sample_count": 17,
+              "scope": "conditional on the frozen forecast and independent stationary normal holdout log times"
+            },
+            "candidate": {
+              "status": "validated",
+              "mean_log_residual": 0.003104226464553302,
+              "log_residual_interval": [
+                -0.024435083530433263,
+                0.030643536459539863
+              ],
+              "confidence": 0.975,
+              "relative_mean_error_interval": [
+                -0.02413896368449426,
+                0.031117882437588326
+              ],
+              "allowed_relative_mean_error": [
+                -0.05,
+                0.05
+              ],
+              "sample_count": 17,
+              "scope": "conditional on the frozen forecast and independent stationary normal holdout log times"
+            },
+            "paired": {
+              "status": "validated",
+              "mean_log_residual": 0.0034951482081292356,
+              "log_residual_interval": [
+                -0.027050830465067812,
+                0.03404112688132628
+              ],
+              "confidence": 0.975,
+              "relative_mean_error_interval": [
+                -0.026688233622815853,
+                0.03462715684143153
+              ],
+              "allowed_relative_mean_error": [
+                -0.05,
+                0.05
+              ],
+              "sample_count": 17,
+              "scope": "conditional on the frozen forecast and independent stationary normal holdout log times"
+            }
+          },
+          "scope": "both source means and paired ratio must establish equivalence at the same confirmation look"
+        },
+        "confirmation_looks": [
+          {
+            "status": "inconclusive",
+            "geometry_matches": true,
+            "log_errors": {
+              "reference": [
+                0.007176334536383016,
+                0.00995916368939455,
+                -0.019241412758979105
+              ],
+              "candidate": [
+                0.022006599839885392,
+                0.02869960630807714,
+                -0.017737490159748088
+              ],
+              "paired": [
+                0.014830265303502376,
+                0.018740442618682587,
+                0.0015039225992310168
+              ]
+            },
+            "sample_count_per_source": 3,
+            "intervals": {
+              "reference": {
+                "status": "inconclusive",
+                "mean_log_residual": -0.0007019715110671796,
+                "log_residual_interval": [
+                  -0.058439402561981685,
+                  0.05703545953984733
+                ],
+                "confidence": 0.975,
+                "relative_mean_error_interval": [
+                  -0.056764603683636956,
+                  0.058693350508967054
+                ],
+                "allowed_relative_mean_error": [
+                  -0.05,
+                  0.05
+                ],
+                "sample_count": 3,
+                "scope": "conditional on the frozen forecast and independent stationary normal holdout log times"
+              },
+              "candidate": {
+                "status": "inconclusive",
+                "mean_log_residual": 0.01098957199607148,
+                "log_residual_interval": [
+                  -0.07894387802619508,
+                  0.10092302201833804
+                ],
+                "confidence": 0.975,
+                "relative_mean_error_interval": [
+                  -0.0759082151552384,
+                  0.10619148609797847
+                ],
+                "allowed_relative_mean_error": [
+                  -0.05,
+                  0.05
+                ],
+                "sample_count": 3,
+                "scope": "conditional on the frozen forecast and independent stationary normal holdout log times"
+              },
+              "paired": {
+                "status": "validated",
+                "mean_log_residual": 0.011691543507138661,
+                "log_residual_interval": [
+                  -0.020684093858603668,
+                  0.044067180872880994
+                ],
+                "confidence": 0.975,
+                "relative_mean_error_interval": [
+                  -0.020471645279309742,
+                  0.04505256007338682
+                ],
+                "allowed_relative_mean_error": [
+                  -0.05,
+                  0.05
+                ],
+                "sample_count": 3,
+                "scope": "conditional on the frozen forecast and independent stationary normal holdout log times"
+              }
+            },
+            "scope": "both source means and paired ratio must establish equivalence at the same confirmation look"
+          },
+          {
+            "status": "inconclusive",
+            "geometry_matches": true,
+            "log_errors": {
+              "reference": [
+                0.007176334536383016,
+                0.00995916368939455,
+                -0.019241412758979105,
+                0.011869305528565806,
+                0.00425384637510597
+              ],
+              "candidate": [
+                0.022006599839885392,
+                0.02869960630807714,
+                -0.017737490159748088,
+                -0.016119868905838004,
+                0.166447167113186
+              ],
+              "paired": [
+                0.014830265303502376,
+                0.018740442618682587,
+                0.0015039225992310168,
+                -0.02798917443440381,
+                0.16219332073808002
+              ]
+            },
+            "sample_count_per_source": 5,
+            "intervals": {
+              "reference": {
+                "status": "validated",
+                "mean_log_residual": 0.002803447474094047,
+                "log_residual_interval": [
+                  -0.016978754732362676,
+                  0.022585649680550768
+                ],
+                "confidence": 0.975,
+                "relative_mean_error_interval": [
+                  -0.016835427992506227,
+                  0.02284263655790875
+                ],
+                "allowed_relative_mean_error": [
+                  -0.05,
+                  0.05
+                ],
+                "sample_count": 5,
+                "scope": "conditional on the frozen forecast and independent stationary normal holdout log times"
+              },
+              "candidate": {
+                "status": "inconclusive",
+                "mean_log_residual": 0.03665920283911249,
+                "log_residual_interval": [
+                  -0.08153411307746612,
+                  0.15485251875569112
+                ],
+                "confidence": 0.975,
+                "relative_mean_error_interval": [
+                  -0.07829873274914205,
+                  0.16748576615416905
+                ],
+                "allowed_relative_mean_error": [
+                  -0.05,
+                  0.05
+                ],
+                "sample_count": 5,
+                "scope": "conditional on the frozen forecast and independent stationary normal holdout log times"
+              },
+              "paired": {
+                "status": "inconclusive",
+                "mean_log_residual": 0.03385575536501843,
+                "log_residual_interval": [
+                  -0.08189552133182895,
+                  0.14960703206186582
+                ],
+                "confidence": 0.975,
+                "relative_mean_error_interval": [
+                  -0.07863178300800172,
+                  0.16137776881714455
+                ],
+                "allowed_relative_mean_error": [
+                  -0.05,
+                  0.05
+                ],
+                "sample_count": 5,
+                "scope": "conditional on the frozen forecast and independent stationary normal holdout log times"
+              }
+            },
+            "scope": "both source means and paired ratio must establish equivalence at the same confirmation look"
+          },
+          {
+            "status": "inconclusive",
+            "geometry_matches": true,
+            "log_errors": {
+              "reference": [
+                0.007176334536383016,
+                0.00995916368939455,
+                -0.019241412758979105,
+                0.011869305528565806,
+                0.00425384637510597,
+                -0.027805681686961674,
+                -0.021519655980492564,
+                0.031566421130341304,
+                0.03333601348030076
+              ],
+              "candidate": [
+                0.022006599839885392,
+                0.02869960630807714,
+                -0.017737490159748088,
+                -0.016119868905838004,
+                0.166447167113186,
+                -0.026922608187452884,
+                0.03011253937514466,
+                -0.00012376095432178655,
+                -0.01368473300957877
+              ],
+              "paired": [
+                0.014830265303502376,
+                0.018740442618682587,
+                0.0015039225992310168,
+                -0.02798917443440381,
+                0.16219332073808002,
+                0.0008830734995087901,
+                0.05163219535563722,
+                -0.03169018208466309,
+                -0.04702074648987953
+              ]
+            },
+            "sample_count_per_source": 9,
+            "intervals": {
+              "reference": {
+                "status": "validated",
+                "mean_log_residual": 0.0032882593681842296,
+                "log_residual_interval": [
+                  -0.017031241788480728,
+                  0.023607760524849183
+                ],
+                "confidence": 0.975,
+                "relative_mean_error_interval": [
+                  -0.016887030052338513,
+                  0.023888629578086535
+                ],
+                "allowed_relative_mean_error": [
+                  -0.05,
+                  0.05
+                ],
+                "sample_count": 9,
+                "scope": "conditional on the frozen forecast and independent stationary normal holdout log times"
+              },
+              "candidate": {
+                "status": "inconclusive",
+                "mean_log_residual": 0.019186383491039294,
+                "log_residual_interval": [
+                  -0.03516434278264569,
+                  0.07353710976472427
+                ],
+                "confidence": 0.975,
+                "relative_mean_error_interval": [
+                  -0.03455326098439216,
+                  0.07630847748516034
+                ],
+                "allowed_relative_mean_error": [
+                  -0.05,
+                  0.05
+                ],
+                "sample_count": 9,
+                "scope": "conditional on the frozen forecast and independent stationary normal holdout log times"
+              },
+              "paired": {
+                "status": "inconclusive",
+                "mean_log_residual": 0.015898124122855063,
+                "log_residual_interval": [
+                  -0.041444173363136924,
+                  0.07324042160884704
+                ],
+                "confidence": 0.975,
+                "relative_mean_error_interval": [
+                  -0.04059710591657043,
+                  0.0759891968735502
+                ],
+                "allowed_relative_mean_error": [
+                  -0.05,
+                  0.05
+                ],
+                "sample_count": 9,
+                "scope": "conditional on the frozen forecast and independent stationary normal holdout log times"
+              }
+            },
+            "scope": "both source means and paired ratio must establish equivalence at the same confirmation look"
+          },
+          {
+            "status": "validated",
+            "geometry_matches": true,
+            "log_errors": {
+              "reference": [
+                0.007176334536383016,
+                0.00995916368939455,
+                -0.019241412758979105,
+                0.011869305528565806,
+                0.00425384637510597,
+                -0.027805681686961674,
+                -0.021519655980492564,
+                0.031566421130341304,
+                0.03333601348030076,
+                -0.032306337258484155,
+                0.04121369831650645,
+                0.023580841173115152,
+                -0.035796550517543685,
+                -0.020338418981190647,
+                -0.006481539570183941,
+                -0.018270703277715742,
+                0.012159006161047616
+              ],
+              "candidate": [
+                0.022006599839885392,
+                0.02869960630807714,
+                -0.017737490159748088,
+                -0.016119868905838004,
+                0.166447167113186,
+                -0.026922608187452884,
+                0.03011253937514466,
+                -0.00012376095432178655,
+                -0.01368473300957877,
+                -0.009715999816250681,
+                -0.022082397456698637,
+                -0.0034137098347028763,
+                -0.01121940846732286,
+                -0.01121478888945949,
+                -0.029995887301795542,
+                -0.0054914282278549775,
+                -0.026771981527862455
+              ],
+              "paired": [
+                0.014830265303502376,
+                0.018740442618682587,
+                0.0015039225992310168,
+                -0.02798917443440381,
+                0.16219332073808002,
+                0.0008830734995087901,
+                0.05163219535563722,
+                -0.03169018208466309,
+                -0.04702074648987953,
+                0.022590337442233474,
+                -0.0632960957732051,
+                -0.02699455100781803,
+                0.024577142050220824,
+                0.009123630091731156,
+                -0.023514347731611603,
+                0.012779275049860764,
+                -0.03893098768891007
+              ]
+            },
+            "sample_count_per_source": 17,
+            "intervals": {
+              "reference": {
+                "status": "validated",
+                "mean_log_residual": -0.0003909217435759343,
+                "log_residual_interval": [
+                  -0.015034732158338854,
+                  0.014252888671186986
+                ],
+                "confidence": 0.975,
+                "relative_mean_error_interval": [
+                  -0.0149222748666305,
+                  0.014354945380116856
+                ],
+                "allowed_relative_mean_error": [
+                  -0.05,
+                  0.05
+                ],
+                "sample_count": 17,
+                "scope": "conditional on the frozen forecast and independent stationary normal holdout log times"
+              },
+              "candidate": {
+                "status": "validated",
+                "mean_log_residual": 0.003104226464553302,
+                "log_residual_interval": [
+                  -0.024435083530433263,
+                  0.030643536459539863
+                ],
+                "confidence": 0.975,
+                "relative_mean_error_interval": [
+                  -0.02413896368449426,
+                  0.031117882437588326
+                ],
+                "allowed_relative_mean_error": [
+                  -0.05,
+                  0.05
+                ],
+                "sample_count": 17,
+                "scope": "conditional on the frozen forecast and independent stationary normal holdout log times"
+              },
+              "paired": {
+                "status": "validated",
+                "mean_log_residual": 0.0034951482081292356,
+                "log_residual_interval": [
+                  -0.027050830465067812,
+                  0.03404112688132628
+                ],
+                "confidence": 0.975,
+                "relative_mean_error_interval": [
+                  -0.026688233622815853,
+                  0.03462715684143153
+                ],
+                "allowed_relative_mean_error": [
+                  -0.05,
+                  0.05
+                ],
+                "sample_count": 17,
+                "scope": "conditional on the frozen forecast and independent stationary normal holdout log times"
+              }
+            },
+            "scope": "both source means and paired ratio must establish equivalence at the same confirmation look"
+          }
+        ],
+        "confirmation_stop_reason": "validated",
+        "scope": "exact binary/environment/case/protocol only; sequential mean equivalence of a frozen forecast",
+        "frozen_prediction": {
+          "index": 32,
+          "identities": {
+            "reference": {
+              "binary_sha256": "9cdf82f396d9be9a7d11b66b45b254e5f18b3857f27b08aed58430dce6d8ea47",
+              "environment": {
+                "system": "Linux",
+                "release": "7.2.6+deb13-amd64",
+                "machine": "x86_64",
+                "cpu_model": "AMD Ryzen 5 PRO 5650U with Radeon Graphics",
+                "threads": 1,
+                "affinity_cpu_count": 2,
+                "affinity_cpus": [
+                  2,
+                  4
+                ],
+                "affinity_topology": [
+                  {
+                    "cpu": 2,
+                    "core_id": "1",
+                    "physical_package_id": "0",
+                    "thread_siblings_list": "2-3"
+                  },
+                  {
+                    "cpu": 4,
+                    "core_id": "2",
+                    "physical_package_id": "0",
+                    "thread_siblings_list": "4-5"
+                  }
+                ],
+                "quota_cores": null,
+                "quota_source": null
+              },
+              "case_sha256": "230871e394dadd2e343eda462592cc7e305ff5d4e5524ebfcb0fcce83995f29b",
+              "adapter_sha256": "538a03c9002d7767c61faac3ecac3ba4ac7ba1ac9600a51ca7760373fc521bbe",
+              "adaptive_protocol_sha256": "3ad99d54b955e735f0db832bd6ac3afe91b016d993de80909827efd491174106",
+              "protocol": "complete-native-duration-siblings-v3",
+              "arithmetic": "fp64",
+              "timing_boundary": "external complete CLI test including startup and output; stages inside native trial separately retained"
+            },
+            "candidate": {
+              "binary_sha256": "862b0431f04a3973ce15e7cff9b9959ed45ca36d626e401352db5cf8630c9c6b",
+              "environment": {
+                "system": "Linux",
+                "release": "7.2.6+deb13-amd64",
+                "machine": "x86_64",
+                "cpu_model": "AMD Ryzen 5 PRO 5650U with Radeon Graphics",
+                "threads": 1,
+                "affinity_cpu_count": 2,
+                "affinity_cpus": [
+                  2,
+                  4
+                ],
+                "affinity_topology": [
+                  {
+                    "cpu": 2,
+                    "core_id": "1",
+                    "physical_package_id": "0",
+                    "thread_siblings_list": "2-3"
+                  },
+                  {
+                    "cpu": 4,
+                    "core_id": "2",
+                    "physical_package_id": "0",
+                    "thread_siblings_list": "4-5"
+                  }
+                ],
+                "quota_cores": null,
+                "quota_source": null
+              },
+              "case_sha256": "230871e394dadd2e343eda462592cc7e305ff5d4e5524ebfcb0fcce83995f29b",
+              "adapter_sha256": "538a03c9002d7767c61faac3ecac3ba4ac7ba1ac9600a51ca7760373fc521bbe",
+              "adaptive_protocol_sha256": "3ad99d54b955e735f0db832bd6ac3afe91b016d993de80909827efd491174106",
+              "protocol": "complete-native-duration-siblings-v3",
+              "arithmetic": "fp64",
+              "timing_boundary": "external complete CLI test including startup and output; stages inside native trial separately retained"
+            }
+          },
+          "case_sha256": "230871e394dadd2e343eda462592cc7e305ff5d4e5524ebfcb0fcce83995f29b",
+          "predictions": {
+            "reference": {
+              "target_total_rows": 576799,
+              "regime_sha256": "8e011969b0d2c2e2506094fe90692c8c21eba15cfe3d10ac9478f4bc36651b61",
+              "full_test_wall_seconds": 3.973207953675098,
+              "stage_seconds": {
+                "receiver": 2.2240705409568546,
+                "generation_setup_other": 1.744552017291264,
+                "process_startup_output": 0.00458539542697896
+              },
+              "outer_training_prediction_sha256": [
+                "9578fdd40c69058d762ab3408e51c5ccd00536ff6b511a920a22690041e3e9cb",
+                "df61f921b66a23f91cd26e3e50bb51440b1ab834053f97d15198ef4a75d2fadc",
+                "d81280977ce787bf48836f927697e347856e18da1672ea9a251508a2038f3a19",
+                "0396696a6c232839c5b0b81ac8a71cc5ccbadd14621bfa739efc3cf40e917400",
+                "633420ab7d71e160fdcac573b90cc84d75acb1a2bd8a251737fa6e88d41bb184",
+                "397e198fdaf594232b3ed429b4ee07e59acba9051afcfcb072ea55d146a2fe2f",
+                "fec59f0207a70ec1c03ed6705b37a19a0eda5f81b9ec6103df059f29d8d5c557",
+                "d74c2b8a61b9890d25cdf7b0d2a4402783cbb6d40771bbc772b7382e791335b1",
+                "ef1b16416ac5164bae7b7cb2b4e9de8d6b521ed7b6c60e6cefd892ca54b59d20",
+                "2c44359908093846c37c336616b7641ba1c1797fa7ac1c2ea090cf44ef00f234",
+                "58a86dc379d3e049678538975fbfb67e857e33c77213525ef743cd9cfb43ac56",
+                "57de2d7023f8485c3ca8daa1d8d9dc3459ae486cf2b6a4fde29866674ba2d30c",
+                "da96462f2f4f59ac539325d5f1094e7b899f7dfb82e75669420d3d40c3e6abe2",
+                "295bffd394f9e128ac5f98fca608320ba8d9d0825fa0ba207dcd7f4013404358",
+                "f2f9729be225d6f4e832fb4767ffd101b46eb8fa880589753e0dfe3169101fa1",
+                "93f339307a80a1da8f00f1eb6d8cd89a67781a1ba12941e742735d0d6e403bfe",
+                "0367c7266e2b1feaadcca76fc950cee96a22cd2bd2bb224658efda4205faa334",
+                "150071a08d739c6b42615fa3b224ab30a7ef46af6a27e415a8c02906dd933fc4",
+                "11fb3ba30f6ceccdb40d5932b200bc2d647b21d7e47795538066780359448d21",
+                "dada28c28fb0ee5594b2a8e0190db56ade3542ec0e5ec228d4f8b1586a61fe0e",
+                "573c4ca0429f040a7b9d5ddacac0e10637eee53079f57f69e389249ee4860029",
+                "1f623a2a752b8b44133e3d91874afd41b1ff41672374c63681319e9998280e08",
+                "c2c7009fd06c820b0015bd2b9636fae19bfd3d85dc760ddd9a6e054a46c98a97",
+                "87cdd26755669d2f9d03e2777a9b8b505ea1cfd35e78c1e0ae43b7edcfdec59f",
+                "b8407e1f2c6f7db71c17d2f49eaf454b82d43c8457e75fecd7dcc9ad351ad812",
+                "e5b00ce2817ea4e44b93906f9d3d11ea819fe591d57a69029a1f49caeea06122",
+                "77bbaf1184f5d779a4d6a7bb7345997ff36573484344b102a250dac9c6b1f4e9",
+                "f9d7d9382d0d6b9e20f522ae6b90f89bcbea65ccc7abcced98c11aac9e5175aa",
+                "460dd1ab50174f1ea1e47bb7617e0074fd8be6945050b059aff597fa9bea7da5",
+                "6a784c7fc07380990d0b615968c7d8660e67b7335df100797f90c54e4713a7cf",
+                "195108db1996f48d85970c8d67d5130f8cf25205dfdd293312173fb9d169afc2",
+                "0ed999660577de8efcff99c498a963db973ae24cbb6afa499bb40f74ace8eb6b",
+                "e382eb24be1d23404962692f7ae0c4b49fa2c9c27b029191cd03d7812cc3f513"
+              ],
+              "outer_training_count": 33,
+              "method": "geometric mean of predeclared outer full-test forecasts; normalized pooled stage shares"
+            },
+            "candidate": {
+              "target_total_rows": 576799,
+              "regime_sha256": "8e011969b0d2c2e2506094fe90692c8c21eba15cfe3d10ac9478f4bc36651b61",
+              "full_test_wall_seconds": 3.8815223471913245,
+              "stage_seconds": {
+                "receiver": 2.234460646949546,
+                "generation_setup_other": 1.6425462674412121,
+                "process_startup_output": 0.004515432800566494
+              },
+              "outer_training_prediction_sha256": [
+                "8c1c954229c0ca3d65f08ddcbc822db35a9d2ade6e0c00e40e26a9e2ca9f9063",
+                "560209256d59280b47ba1ba9ac57394a012ec310e458bfb6255354939d2e0631",
+                "a53fb8120717ed287b558c5f616cbe83c11ed7831b998fcf063c54de761b088d",
+                "a757db7d70d412a396ae657612ae2041c3f1bd096188dfb2229a92238ad88014",
+                "fa3dce69ef148faac994a354bd5933130b03a6c09080a8c7de786242c09540fa",
+                "06ee6a654061c8dce0e50edd22295bc3bfc2c322f03e6a81efdb2a63a881d69a",
+                "6c5832ae1e3238391912554181480c6bd483b55fcf80192f8613feaa2f3d4630",
+                "0f733c689ee6e7a25a2f7f4d9c3386d8ac8f2e1950ba520f8f620e4931463e6c",
+                "11fd4bc9796ee63a23b2b23aa13316f7b3de0467f50a5f6dcd84c6f0feb4d4ee",
+                "cd5e4dcd2eb12587b954447f27cc29a27b1c4d1300ce2f620917e8d5b1fe4b57",
+                "1af02c7194082738b55e225f07788262d3c6a2f7b51bb7f63f7e7c814b0fe82e",
+                "aa9167a07ce641b24e9d0c5d4579d8db8c2b559f8043f955520e6c82d4e69de1",
+                "b3859fa2d7e0abbe7ddc02e88f8278dc7ae55e962db320f528aa060d6b4f257e",
+                "d66eeb5d9398a1ea19abcc2392eb3f210b8b0d7009d44e88308027b691f8d749",
+                "71a0040cf3c5dfaebd219a87712767f5912e3d8edc94794b6bc409bc8d35127a",
+                "315a8d923c5e28f048a5b8ee7e769d3aa3fbdad0f277aa9429bc286a91a0615d",
+                "98f24613560a7ca8ca885ad6cf43c87a65a81f3b509eee39c4ac17853cffb793",
+                "fa2e675e8f5e2e1c68757d6629bae3ba1c08fd6ce589f695c0f9616badf7a049",
+                "3e75ca0beab01eebcaac9683a087652475b503557dbd7ddb5bb546f8bf65f838",
+                "3138e68f02e561ebecea59b1b0d2165f4a0e1dc68179095d1855e5c85da400cf",
+                "44b0b8f136ca0d2a4b49521bff0c2b73ce3bc69a9f05c15c7f88fe864c43948a",
+                "a20695bbe42382c4ec111a41b8da78604a94323fb741b208ee70536fbf5443cd",
+                "f2400e057d5bacb29fcacc2bb0ea443353cb9c997cbf99c8b878f09832d58a16",
+                "47bfba6e98337a1086f25b67780551acdd11d8c8370917b447e3fa6534c78433",
+                "e1404dcf348e0c80db09cb792bff0a15f490286e976524bbb69b4ace9eb1505f",
+                "089cd3f0cf693d58584c20429c36aaa2d842337de6ffa245d6daa9d8bd93f252",
+                "55245fd1e8d58da8f6835e069ee82c6627fed6a98b57ca64ce931fe45e2a6ac9",
+                "f7ed9a40566d03fd43c674139f30dac57e9c15ac0968cfea61b26ad4f4422d41",
+                "cd96e25d538b853a438908ba51a94c0ad46940de646997bd9daccddf1a37ef18",
+                "06a9132bb56803e95bd472ce6a4e2a8475dbe053455bda84c4ec51b24a097660",
+                "6f65c0236f49b9315c93f4ceb241b190b78b9d18fc8410437f6fb50c5e37f369",
+                "2eca96ecd1be37c4fe89ef65e715a8cc6f35d483ef44162f20cf7f18bcad1e47",
+                "9e7d1c3e4fc115901bb943a7a38c93300d67906d07d0162943df9ea56c06b57b"
+              ],
+              "outer_training_count": 33,
+              "method": "geometric mean of predeclared outer full-test forecasts; normalized pooled stage shares"
+            }
+          },
+          "validation_predictions": {
+            "reference": {
+              "target_total_rows": 576799,
+              "regime_sha256": "8e011969b0d2c2e2506094fe90692c8c21eba15cfe3d10ac9478f4bc36651b61",
+              "full_test_wall_seconds": 3.973207953675098,
+              "stage_seconds": {
+                "receiver": 2.2240705409568546,
+                "generation_setup_other": 1.744552017291264,
+                "process_startup_output": 0.00458539542697896
+              },
+              "outer_training_prediction_sha256": [
+                "9578fdd40c69058d762ab3408e51c5ccd00536ff6b511a920a22690041e3e9cb",
+                "df61f921b66a23f91cd26e3e50bb51440b1ab834053f97d15198ef4a75d2fadc",
+                "d81280977ce787bf48836f927697e347856e18da1672ea9a251508a2038f3a19",
+                "0396696a6c232839c5b0b81ac8a71cc5ccbadd14621bfa739efc3cf40e917400",
+                "633420ab7d71e160fdcac573b90cc84d75acb1a2bd8a251737fa6e88d41bb184",
+                "397e198fdaf594232b3ed429b4ee07e59acba9051afcfcb072ea55d146a2fe2f",
+                "fec59f0207a70ec1c03ed6705b37a19a0eda5f81b9ec6103df059f29d8d5c557",
+                "d74c2b8a61b9890d25cdf7b0d2a4402783cbb6d40771bbc772b7382e791335b1",
+                "ef1b16416ac5164bae7b7cb2b4e9de8d6b521ed7b6c60e6cefd892ca54b59d20",
+                "2c44359908093846c37c336616b7641ba1c1797fa7ac1c2ea090cf44ef00f234",
+                "58a86dc379d3e049678538975fbfb67e857e33c77213525ef743cd9cfb43ac56",
+                "57de2d7023f8485c3ca8daa1d8d9dc3459ae486cf2b6a4fde29866674ba2d30c",
+                "da96462f2f4f59ac539325d5f1094e7b899f7dfb82e75669420d3d40c3e6abe2",
+                "295bffd394f9e128ac5f98fca608320ba8d9d0825fa0ba207dcd7f4013404358",
+                "f2f9729be225d6f4e832fb4767ffd101b46eb8fa880589753e0dfe3169101fa1",
+                "93f339307a80a1da8f00f1eb6d8cd89a67781a1ba12941e742735d0d6e403bfe",
+                "0367c7266e2b1feaadcca76fc950cee96a22cd2bd2bb224658efda4205faa334",
+                "150071a08d739c6b42615fa3b224ab30a7ef46af6a27e415a8c02906dd933fc4",
+                "11fb3ba30f6ceccdb40d5932b200bc2d647b21d7e47795538066780359448d21",
+                "dada28c28fb0ee5594b2a8e0190db56ade3542ec0e5ec228d4f8b1586a61fe0e",
+                "573c4ca0429f040a7b9d5ddacac0e10637eee53079f57f69e389249ee4860029",
+                "1f623a2a752b8b44133e3d91874afd41b1ff41672374c63681319e9998280e08",
+                "c2c7009fd06c820b0015bd2b9636fae19bfd3d85dc760ddd9a6e054a46c98a97",
+                "87cdd26755669d2f9d03e2777a9b8b505ea1cfd35e78c1e0ae43b7edcfdec59f",
+                "b8407e1f2c6f7db71c17d2f49eaf454b82d43c8457e75fecd7dcc9ad351ad812",
+                "e5b00ce2817ea4e44b93906f9d3d11ea819fe591d57a69029a1f49caeea06122",
+                "77bbaf1184f5d779a4d6a7bb7345997ff36573484344b102a250dac9c6b1f4e9",
+                "f9d7d9382d0d6b9e20f522ae6b90f89bcbea65ccc7abcced98c11aac9e5175aa",
+                "460dd1ab50174f1ea1e47bb7617e0074fd8be6945050b059aff597fa9bea7da5",
+                "6a784c7fc07380990d0b615968c7d8660e67b7335df100797f90c54e4713a7cf",
+                "195108db1996f48d85970c8d67d5130f8cf25205dfdd293312173fb9d169afc2",
+                "0ed999660577de8efcff99c498a963db973ae24cbb6afa499bb40f74ace8eb6b",
+                "e382eb24be1d23404962692f7ae0c4b49fa2c9c27b029191cd03d7812cc3f513"
+              ],
+              "outer_training_count": 33,
+              "method": "geometric mean of predeclared outer full-test forecasts; normalized pooled stage shares"
+            },
+            "candidate": {
+              "target_total_rows": 576799,
+              "regime_sha256": "8e011969b0d2c2e2506094fe90692c8c21eba15cfe3d10ac9478f4bc36651b61",
+              "full_test_wall_seconds": 3.8815223471913245,
+              "stage_seconds": {
+                "receiver": 2.234460646949546,
+                "generation_setup_other": 1.6425462674412121,
+                "process_startup_output": 0.004515432800566494
+              },
+              "outer_training_prediction_sha256": [
+                "8c1c954229c0ca3d65f08ddcbc822db35a9d2ade6e0c00e40e26a9e2ca9f9063",
+                "560209256d59280b47ba1ba9ac57394a012ec310e458bfb6255354939d2e0631",
+                "a53fb8120717ed287b558c5f616cbe83c11ed7831b998fcf063c54de761b088d",
+                "a757db7d70d412a396ae657612ae2041c3f1bd096188dfb2229a92238ad88014",
+                "fa3dce69ef148faac994a354bd5933130b03a6c09080a8c7de786242c09540fa",
+                "06ee6a654061c8dce0e50edd22295bc3bfc2c322f03e6a81efdb2a63a881d69a",
+                "6c5832ae1e3238391912554181480c6bd483b55fcf80192f8613feaa2f3d4630",
+                "0f733c689ee6e7a25a2f7f4d9c3386d8ac8f2e1950ba520f8f620e4931463e6c",
+                "11fd4bc9796ee63a23b2b23aa13316f7b3de0467f50a5f6dcd84c6f0feb4d4ee",
+                "cd5e4dcd2eb12587b954447f27cc29a27b1c4d1300ce2f620917e8d5b1fe4b57",
+                "1af02c7194082738b55e225f07788262d3c6a2f7b51bb7f63f7e7c814b0fe82e",
+                "aa9167a07ce641b24e9d0c5d4579d8db8c2b559f8043f955520e6c82d4e69de1",
+                "b3859fa2d7e0abbe7ddc02e88f8278dc7ae55e962db320f528aa060d6b4f257e",
+                "d66eeb5d9398a1ea19abcc2392eb3f210b8b0d7009d44e88308027b691f8d749",
+                "71a0040cf3c5dfaebd219a87712767f5912e3d8edc94794b6bc409bc8d35127a",
+                "315a8d923c5e28f048a5b8ee7e769d3aa3fbdad0f277aa9429bc286a91a0615d",
+                "98f24613560a7ca8ca885ad6cf43c87a65a81f3b509eee39c4ac17853cffb793",
+                "fa2e675e8f5e2e1c68757d6629bae3ba1c08fd6ce589f695c0f9616badf7a049",
+                "3e75ca0beab01eebcaac9683a087652475b503557dbd7ddb5bb546f8bf65f838",
+                "3138e68f02e561ebecea59b1b0d2165f4a0e1dc68179095d1855e5c85da400cf",
+                "44b0b8f136ca0d2a4b49521bff0c2b73ce3bc69a9f05c15c7f88fe864c43948a",
+                "a20695bbe42382c4ec111a41b8da78604a94323fb741b208ee70536fbf5443cd",
+                "f2400e057d5bacb29fcacc2bb0ea443353cb9c997cbf99c8b878f09832d58a16",
+                "47bfba6e98337a1086f25b67780551acdd11d8c8370917b447e3fa6534c78433",
+                "e1404dcf348e0c80db09cb792bff0a15f490286e976524bbb69b4ace9eb1505f",
+                "089cd3f0cf693d58584c20429c36aaa2d842337de6ffa245d6daa9d8bd93f252",
+                "55245fd1e8d58da8f6835e069ee82c6627fed6a98b57ca64ce931fe45e2a6ac9",
+                "f7ed9a40566d03fd43c674139f30dac57e9c15ac0968cfea61b26ad4f4422d41",
+                "cd96e25d538b853a438908ba51a94c0ad46940de646997bd9daccddf1a37ef18",
+                "06a9132bb56803e95bd472ce6a4e2a8475dbe053455bda84c4ec51b24a097660",
+                "6f65c0236f49b9315c93f4ceb241b190b78b9d18fc8410437f6fb50c5e37f369",
+                "2eca96ecd1be37c4fe89ef65e715a8cc6f35d483ef44162f20cf7f18bcad1e47",
+                "9e7d1c3e4fc115901bb943a7a38c93300d67906d07d0162943df9ea56c06b57b"
+              ],
+              "outer_training_count": 33,
+              "method": "geometric mean of predeclared outer full-test forecasts; normalized pooled stage shares"
+            }
+          },
+          "validation_duration_seconds": 73728051.2,
+          "model_confirmation_policy": {
+            "looks": [
+              3,
+              5,
+              9,
+              17
+            ],
+            "family_alpha": 0.1,
+            "per_look_two_sided_alpha": 0.025,
+            "confidence": 0.975,
+            "confidence_sidedness": "two-sided",
+            "scope": "Bonferroni family-wise control across the four predeclared looks for one error family; not simultaneous across reference, candidate, paired metrics, or cases",
+            "metric": "mean log(actual full-run time / frozen predicted full-run time)",
+            "cross_metric_or_case_simultaneous_claim": false
+          },
+          "validation_plan": {
+            "initial_pair_wall_estimate_seconds": 7.563117392182821,
+            "scope": "reserve first confirmation look; check measured cost before later looks"
+          },
+          "frozen_at_unix_seconds": 1793733611.4565701,
+          "sha256": "e6ae92fbed309a75c5447ef944da333275f1146972ec684ce83ac667abf249cf"
+        },
+        "full_holdouts": {
+          "record_count": 34,
+          "count_by_source": {
+            "reference": 17,
+            "candidate": 17
+          },
+          "recorded_scalar_observations": [
+            {
+              "source": "reference",
+              "index": 0,
+              "kind": "qualify",
+              "frozen_prediction_sha256": "e6ae92fbed309a75c5447ef944da333275f1146972ec684ce83ac667abf249cf",
+              "actual": {
+                "argv_sha256": "a02ee7b8846f45097c94a7f81ebcbea5aa4a61ca372af44d2671389745228927",
+                "seed": 840000,
+                "requested_seconds": 73728051.2,
+                "batch_trials": 1,
+                "samples_per_trial": 576799,
+                "total_rows": 576799,
+                "stage_seconds": {
+                  "receiver": 2.246679849,
+                  "generation_setup_other": 1.7495962660000002,
+                  "process_startup_output": 0.005547462971663197
+                },
+                "full_test_wall_seconds": 4.001823577971663,
+                "native_pipeline_seconds": 3.996276115,
+                "counter_summary": {
+                  "basis_values": 3460794,
+                  "blocks": 1127,
+                  "missing_samples": 0,
+                  "channel_samples": 576799
+                },
+                "coverage": {
+                  "complete": true,
+                  "encrypted": true,
+                  "two_ray": true,
+                  "selective": true,
+                  "sub_hz": true,
+                  "weak_signal": true
+                }
+              },
+              "validation": {
+                "single_run_within_bound": true,
+                "geometry_matched": true,
+                "absolute_relative_error": 0.007202146132345476,
+                "allowed_relative_error": 0.05,
+                "stage_absolute_relative_errors": {
+                  "receiver": 0.010165733337494856,
+                  "generation_setup_other": 0.0028914292372710197
+                },
+                "log_error": 0.007176334536383016,
+                "prediction_sha256": "717704af8acd05118131b33d3f472a6a4299b6a5b3b0b957b5a4b083a315d3ef",
+                "actual_record_sha256": "2242a496b256476edeab351938c7bcf3fdb097c0c36b3a79fc46acb44de785d0",
+                "predicted_full_seconds": 3.973207953675098,
+                "actual_full_seconds": 4.001823577971663,
+                "stage_validation_scope": "diagnostic only; qualification uses independent log-mean equivalence"
+              }
+            },
+            {
+              "source": "candidate",
+              "index": 0,
+              "kind": "qualify",
+              "frozen_prediction_sha256": "e6ae92fbed309a75c5447ef944da333275f1146972ec684ce83ac667abf249cf",
+              "actual": {
+                "argv_sha256": "84bd3f0ed689dbdce0edf5e3f0389fbc0bb51ddb41dd0f3d525d03e3bbbb46b7",
+                "seed": 840000,
+                "requested_seconds": 73728051.2,
+                "batch_trials": 1,
+                "samples_per_trial": 576799,
+                "total_rows": 576799,
+                "stage_seconds": {
+                  "receiver": 2.280246649,
+                  "generation_setup_other": 1.6827726800000002,
+                  "process_startup_output": 0.004868952040359087
+                },
+                "full_test_wall_seconds": 3.9678882810403593,
+                "native_pipeline_seconds": 3.963019329,
+                "counter_summary": {
+                  "basis_values": 3460794,
+                  "blocks": 1127,
+                  "missing_samples": 0,
+                  "channel_samples": 576799
+                },
+                "coverage": {
+                  "complete": true,
+                  "encrypted": true,
+                  "two_ray": true,
+                  "selective": true,
+                  "sub_hz": true,
+                  "weak_signal": true
+                }
+              },
+              "validation": {
+                "single_run_within_bound": true,
+                "geometry_matched": true,
+                "absolute_relative_error": 0.022250531138002932,
+                "allowed_relative_error": 0.05,
+                "stage_absolute_relative_errors": {
+                  "receiver": 0.020490851836196148,
+                  "generation_setup_other": 0.02449027668575421
+                },
+                "log_error": 0.022006599839885392,
+                "prediction_sha256": "3cc2e31102ce5c0fd5ba92e20613365560cacd6c79ecb8e31308859ef655ab93",
+                "actual_record_sha256": "bf5118993cac5da60d2054660ee0b6e093135533a311cb171f6739c0030609be",
+                "predicted_full_seconds": 3.8815223471913245,
+                "actual_full_seconds": 3.9678882810403593,
+                "stage_validation_scope": "diagnostic only; qualification uses independent log-mean equivalence"
+              }
+            },
+            {
+              "source": "candidate",
+              "index": 1,
+              "kind": "qualify",
+              "frozen_prediction_sha256": "e6ae92fbed309a75c5447ef944da333275f1146972ec684ce83ac667abf249cf",
+              "actual": {
+                "argv_sha256": "bd6a01068fc5af7fb026bd019a2d0383f481a1f3b1d6a13843befaf0da7519fa",
+                "seed": 841000,
+                "requested_seconds": 73728051.2,
+                "batch_trials": 1,
+                "samples_per_trial": 576799,
+                "total_rows": 576799,
+                "stage_seconds": {
+                  "receiver": 2.29347049,
+                  "generation_setup_other": 1.6966050470000003,
+                  "process_startup_output": 0.004458918006942092
+                },
+                "full_test_wall_seconds": 3.994534455006942,
+                "native_pipeline_seconds": 3.990075537,
+                "counter_summary": {
+                  "basis_values": 3460794,
+                  "blocks": 1127,
+                  "missing_samples": 0,
+                  "channel_samples": 576799
+                },
+                "coverage": {
+                  "complete": true,
+                  "encrypted": true,
+                  "two_ray": true,
+                  "selective": true,
+                  "sub_hz": true,
+                  "weak_signal": true
+                }
+              },
+              "validation": {
+                "single_run_within_bound": true,
+                "geometry_matched": true,
+                "absolute_relative_error": 0.029115408261759304,
+                "allowed_relative_error": 0.05,
+                "stage_absolute_relative_errors": {
+                  "receiver": 0.02640898739076626,
+                  "generation_setup_other": 0.03291157188710542
+                },
+                "log_error": 0.02869960630807714,
+                "prediction_sha256": "3cc2e31102ce5c0fd5ba92e20613365560cacd6c79ecb8e31308859ef655ab93",
+                "actual_record_sha256": "04bab11dd872e5acf3292326500ee93df61077219c94bb276d391f599fdb9870",
+                "predicted_full_seconds": 3.8815223471913245,
+                "actual_full_seconds": 3.994534455006942,
+                "stage_validation_scope": "diagnostic only; qualification uses independent log-mean equivalence"
+              }
+            },
+            {
+              "source": "reference",
+              "index": 1,
+              "kind": "qualify",
+              "frozen_prediction_sha256": "e6ae92fbed309a75c5447ef944da333275f1146972ec684ce83ac667abf249cf",
+              "actual": {
+                "argv_sha256": "de96226434b55e5b81151f6a35a50f73568b93613e5329c8385042d71f8c444b",
+                "seed": 841000,
+                "requested_seconds": 73728051.2,
+                "batch_trials": 1,
+                "samples_per_trial": 576799,
+                "total_rows": 576799,
+                "stage_seconds": {
+                  "receiver": 2.254986334,
+                  "generation_setup_other": 1.7529602520000003,
+                  "process_startup_output": 0.0050288930104924745
+                },
+                "full_test_wall_seconds": 4.012975479010493,
+                "native_pipeline_seconds": 4.007946586,
+                "counter_summary": {
+                  "basis_values": 3460794,
+                  "blocks": 1127,
+                  "missing_samples": 0,
+                  "channel_samples": 576799
+                },
+                "coverage": {
+                  "complete": true,
+                  "encrypted": true,
+                  "two_ray": true,
+                  "selective": true,
+                  "sub_hz": true,
+                  "weak_signal": true
+                }
+              },
+              "validation": {
+                "single_run_within_bound": true,
+                "geometry_matched": true,
+                "absolute_relative_error": 0.010008921203988545,
+                "allowed_relative_error": 0.05,
+                "stage_absolute_relative_errors": {
+                  "receiver": 0.013900545182278427,
+                  "generation_setup_other": 0.004819709945818364
+                },
+                "log_error": 0.00995916368939455,
+                "prediction_sha256": "717704af8acd05118131b33d3f472a6a4299b6a5b3b0b957b5a4b083a315d3ef",
+                "actual_record_sha256": "f2dd685d0bb6023ad9c98c30a806ff95b770bad051683400b4ed4b39a1e2eacd",
+                "predicted_full_seconds": 3.973207953675098,
+                "actual_full_seconds": 4.012975479010493,
+                "stage_validation_scope": "diagnostic only; qualification uses independent log-mean equivalence"
+              }
+            },
+            {
+              "source": "reference",
+              "index": 2,
+              "kind": "qualify",
+              "frozen_prediction_sha256": "e6ae92fbed309a75c5447ef944da333275f1146972ec684ce83ac667abf249cf",
+              "actual": {
+                "argv_sha256": "6434fd897042410438a6764e22a0e20ea21ab6d27ecfb3c15477f98c34fbfc54",
+                "seed": 842000,
+                "requested_seconds": 73728051.2,
+                "batch_trials": 1,
+                "samples_per_trial": 576799,
+                "total_rows": 576799,
+                "stage_seconds": {
+                  "receiver": 2.214890929,
+                  "generation_setup_other": 1.677662213,
+                  "process_startup_output": 0.004935486979772197
+                },
+                "full_test_wall_seconds": 3.8974886289797723,
+                "native_pipeline_seconds": 3.892553142,
+                "counter_summary": {
+                  "basis_values": 3460794,
+                  "blocks": 1127,
+                  "missing_samples": 0,
+                  "channel_samples": 576799
+                },
+                "coverage": {
+                  "complete": true,
+                  "encrypted": true,
+                  "two_ray": true,
+                  "selective": true,
+                  "sub_hz": true,
+                  "weak_signal": true
+                }
+              },
+              "validation": {
+                "single_run_within_bound": true,
+                "geometry_matched": true,
+                "absolute_relative_error": 0.01905747838476149,
+                "allowed_relative_error": 0.05,
+                "stage_absolute_relative_errors": {
+                  "receiver": 0.004127392449029633,
+                  "generation_setup_other": 0.03834210939443506
+                },
+                "log_error": -0.019241412758979105,
+                "prediction_sha256": "717704af8acd05118131b33d3f472a6a4299b6a5b3b0b957b5a4b083a315d3ef",
+                "actual_record_sha256": "04874243454817686131a075dd136b518c460daa09adbb3cbd1ea83cac26af25",
+                "predicted_full_seconds": 3.973207953675098,
+                "actual_full_seconds": 3.8974886289797723,
+                "stage_validation_scope": "diagnostic only; qualification uses independent log-mean equivalence"
+              }
+            },
+            {
+              "source": "candidate",
+              "index": 2,
+              "kind": "qualify",
+              "frozen_prediction_sha256": "e6ae92fbed309a75c5447ef944da333275f1146972ec684ce83ac667abf249cf",
+              "actual": {
+                "argv_sha256": "98313046cf67c6705463e9e29e08802134665076ac2884d862110c0a57830f35",
+                "seed": 842000,
+                "requested_seconds": 73728051.2,
+                "batch_trials": 1,
+                "samples_per_trial": 576799,
+                "total_rows": 576799,
+                "stage_seconds": {
+                  "receiver": 2.194628167,
+                  "generation_setup_other": 1.6144132400000002,
+                  "process_startup_output": 0.004239481018198266
+                },
+                "full_test_wall_seconds": 3.8132808880181983,
+                "native_pipeline_seconds": 3.809041407,
+                "counter_summary": {
+                  "basis_values": 3460794,
+                  "blocks": 1127,
+                  "missing_samples": 0,
+                  "channel_samples": 576799
+                },
+                "coverage": {
+                  "complete": true,
+                  "encrypted": true,
+                  "two_ray": true,
+                  "selective": true,
+                  "sub_hz": true,
+                  "weak_signal": true
+                }
+              },
+              "validation": {
+                "single_run_within_bound": true,
+                "geometry_matched": true,
+                "absolute_relative_error": 0.017581106861977957,
+                "allowed_relative_error": 0.05,
+                "stage_absolute_relative_errors": {
+                  "receiver": 0.017826440579262255,
+                  "generation_setup_other": 0.01712769253376227
+                },
+                "log_error": -0.017737490159748088,
+                "prediction_sha256": "3cc2e31102ce5c0fd5ba92e20613365560cacd6c79ecb8e31308859ef655ab93",
+                "actual_record_sha256": "71ce0eb9c518b29399da046d9818d6faef514c82a5b15110068fe23b5f855807",
+                "predicted_full_seconds": 3.8815223471913245,
+                "actual_full_seconds": 3.8132808880181983,
+                "stage_validation_scope": "diagnostic only; qualification uses independent log-mean equivalence"
+              }
+            },
+            {
+              "source": "candidate",
+              "index": 3,
+              "kind": "qualify",
+              "frozen_prediction_sha256": "e6ae92fbed309a75c5447ef944da333275f1146972ec684ce83ac667abf249cf",
+              "actual": {
+                "argv_sha256": "f51f2f43fed8ae53b7b669cc84f1febc480bb74ebdc30c9036a1f398ee332f9c",
+                "seed": 843000,
+                "requested_seconds": 73728051.2,
+                "batch_trials": 1,
+                "samples_per_trial": 576799,
+                "total_rows": 576799,
+                "stage_seconds": {
+                  "receiver": 2.197376151,
+                  "generation_setup_other": 1.61819757,
+                  "process_startup_output": 0.003880603024263962
+                },
+                "full_test_wall_seconds": 3.8194543240242638,
+                "native_pipeline_seconds": 3.815573721,
+                "counter_summary": {
+                  "basis_values": 3460794,
+                  "blocks": 1127,
+                  "missing_samples": 0,
+                  "channel_samples": 576799
+                },
+                "coverage": {
+                  "complete": true,
+                  "encrypted": true,
+                  "two_ray": true,
+                  "selective": true,
+                  "sub_hz": true,
+                  "weak_signal": true
+                }
+              },
+              "validation": {
+                "single_run_within_bound": true,
+                "geometry_matched": true,
+                "absolute_relative_error": 0.01599063913981411,
+                "allowed_relative_error": 0.05,
+                "stage_absolute_relative_errors": {
+                  "receiver": 0.01659662075506822,
+                  "generation_setup_other": 0.014823751345003503
+                },
+                "log_error": -0.016119868905838004,
+                "prediction_sha256": "3cc2e31102ce5c0fd5ba92e20613365560cacd6c79ecb8e31308859ef655ab93",
+                "actual_record_sha256": "c8c7cf64c29212139ecbe0ac152a4537946b9c2168c7e8f4c393930b77bf64df",
+                "predicted_full_seconds": 3.8815223471913245,
+                "actual_full_seconds": 3.8194543240242638,
+                "stage_validation_scope": "diagnostic only; qualification uses independent log-mean equivalence"
+              }
+            },
+            {
+              "source": "reference",
+              "index": 3,
+              "kind": "qualify",
+              "frozen_prediction_sha256": "e6ae92fbed309a75c5447ef944da333275f1146972ec684ce83ac667abf249cf",
+              "actual": {
+                "argv_sha256": "c3c9bec009b9fc1b842cac0caf0fa1f7d20fb4b9f148a3e51e9f6af876b218d8",
+                "seed": 843000,
+                "requested_seconds": 73728051.2,
+                "batch_trials": 1,
+                "samples_per_trial": 576799,
+                "total_rows": 576799,
+                "stage_seconds": {
+                  "receiver": 2.260226927,
+                  "generation_setup_other": 1.7561513510000002,
+                  "process_startup_output": 0.004269878991228104
+                },
+                "full_test_wall_seconds": 4.0206481569912285,
+                "native_pipeline_seconds": 4.016378278,
+                "counter_summary": {
+                  "basis_values": 3460794,
+                  "blocks": 1127,
+                  "missing_samples": 0,
+                  "channel_samples": 576799
+                },
+                "coverage": {
+                  "complete": true,
+                  "encrypted": true,
+                  "two_ray": true,
+                  "selective": true,
+                  "sub_hz": true,
+                  "weak_signal": true
+                }
+              },
+              "validation": {
+                "single_run_within_bound": true,
+                "geometry_matched": true,
+                "absolute_relative_error": 0.011940025256480663,
+                "allowed_relative_error": 0.05,
+                "stage_absolute_relative_errors": {
+                  "receiver": 0.016256852189404966,
+                  "generation_setup_other": 0.006648889568077312
+                },
+                "log_error": 0.011869305528565806,
+                "prediction_sha256": "717704af8acd05118131b33d3f472a6a4299b6a5b3b0b957b5a4b083a315d3ef",
+                "actual_record_sha256": "ca1b3443f3ffc88e1e99c82112f66205d2733745d9af457f4f595f5b1401ada3",
+                "predicted_full_seconds": 3.973207953675098,
+                "actual_full_seconds": 4.0206481569912285,
+                "stage_validation_scope": "diagnostic only; qualification uses independent log-mean equivalence"
+              }
+            },
+            {
+              "source": "reference",
+              "index": 4,
+              "kind": "qualify",
+              "frozen_prediction_sha256": "e6ae92fbed309a75c5447ef944da333275f1146972ec684ce83ac667abf249cf",
+              "actual": {
+                "argv_sha256": "8fe53328b8e09b066d4528ef3ddad296cb6cad6137577923d48135f021be6ff4",
+                "seed": 844000,
+                "requested_seconds": 73728051.2,
+                "batch_trials": 1,
+                "samples_per_trial": 576799,
+                "total_rows": 576799,
+                "stage_seconds": {
+                  "receiver": 2.239053013,
+                  "generation_setup_other": 1.745775991,
+                  "process_startup_output": 0.005316364967205445
+                },
+                "full_test_wall_seconds": 3.9901453689672053,
+                "native_pipeline_seconds": 3.984829004,
+                "counter_summary": {
+                  "basis_values": 3460794,
+                  "blocks": 1127,
+                  "missing_samples": 0,
+                  "channel_samples": 576799
+                },
+                "coverage": {
+                  "complete": true,
+                  "encrypted": true,
+                  "two_ray": true,
+                  "selective": true,
+                  "sub_hz": true,
+                  "weak_signal": true
+                }
+              },
+              "validation": {
+                "single_run_within_bound": true,
+                "geometry_matched": true,
+                "absolute_relative_error": 0.004262906822292236,
+                "allowed_relative_error": 0.05,
+                "stage_absolute_relative_errors": {
+                  "receiver": 0.006736509372000148,
+                  "generation_setup_other": 0.0007015977148312723
+                },
+                "log_error": 0.00425384637510597,
+                "prediction_sha256": "717704af8acd05118131b33d3f472a6a4299b6a5b3b0b957b5a4b083a315d3ef",
+                "actual_record_sha256": "89b1dbb56d8977067ea65f28da401ecb9c3109676e823305d584c2f00ed0ad42",
+                "predicted_full_seconds": 3.973207953675098,
+                "actual_full_seconds": 3.9901453689672053,
+                "stage_validation_scope": "diagnostic only; qualification uses independent log-mean equivalence"
+              }
+            },
+            {
+              "source": "candidate",
+              "index": 4,
+              "kind": "qualify",
+              "frozen_prediction_sha256": "e6ae92fbed309a75c5447ef944da333275f1146972ec684ce83ac667abf249cf",
+              "actual": {
+                "argv_sha256": "15ce0ac4a345eaaa5c52a2d9a302a248a5037648eefe69511347c0f20fe935a0",
+                "seed": 844000,
+                "requested_seconds": 73728051.2,
+                "batch_trials": 1,
+                "samples_per_trial": 576799,
+                "total_rows": 576799,
+                "stage_seconds": {
+                  "receiver": 2.580537408,
+                  "generation_setup_other": 1.9988875099999999,
+                  "process_startup_output": 0.005045524961901471
+                },
+                "full_test_wall_seconds": 4.584470442961901,
+                "native_pipeline_seconds": 4.579424918,
+                "counter_summary": {
+                  "basis_values": 3460794,
+                  "blocks": 1127,
+                  "missing_samples": 0,
+                  "channel_samples": 576799
+                },
+                "coverage": {
+                  "complete": true,
+                  "encrypted": true,
+                  "two_ray": true,
+                  "selective": true,
+                  "sub_hz": true,
+                  "weak_signal": true
+                }
+              },
+              "validation": {
+                "single_run_within_bound": false,
+                "geometry_matched": true,
+                "absolute_relative_error": 0.18110113323944438,
+                "allowed_relative_error": 0.05,
+                "stage_absolute_relative_errors": {
+                  "receiver": 0.1548815646061672,
+                  "generation_setup_other": 0.21694441710546303
+                },
+                "log_error": 0.166447167113186,
+                "prediction_sha256": "3cc2e31102ce5c0fd5ba92e20613365560cacd6c79ecb8e31308859ef655ab93",
+                "actual_record_sha256": "1e26a4e9224ab32f45d543386f38d4f5847672e8b00159544dfcf9415c81d8fb",
+                "predicted_full_seconds": 3.8815223471913245,
+                "actual_full_seconds": 4.584470442961901,
+                "stage_validation_scope": "diagnostic only; qualification uses independent log-mean equivalence"
+              }
+            },
+            {
+              "source": "candidate",
+              "index": 5,
+              "kind": "qualify",
+              "frozen_prediction_sha256": "e6ae92fbed309a75c5447ef944da333275f1146972ec684ce83ac667abf249cf",
+              "actual": {
+                "argv_sha256": "bbafb942dad822fb3348c723026fc5ad3507540522a02d6e6848e7f110bff8de",
+                "seed": 845000,
+                "requested_seconds": 73728051.2,
+                "batch_trials": 1,
+                "samples_per_trial": 576799,
+                "total_rows": 576799,
+                "stage_seconds": {
+                  "receiver": 2.169497005,
+                  "generation_setup_other": 1.6034154249999997,
+                  "process_startup_output": 0.005503388000212439
+                },
+                "full_test_wall_seconds": 3.7784158180002123,
+                "native_pipeline_seconds": 3.77291243,
+                "counter_summary": {
+                  "basis_values": 3460794,
+                  "blocks": 1127,
+                  "missing_samples": 0,
+                  "channel_samples": 576799
+                },
+                "coverage": {
+                  "complete": true,
+                  "encrypted": true,
+                  "two_ray": true,
+                  "selective": true,
+                  "sub_hz": true,
+                  "weak_signal": true
+                }
+              },
+              "validation": {
+                "single_run_within_bound": true,
+                "geometry_matched": true,
+                "absolute_relative_error": 0.0265634253698733,
+                "allowed_relative_error": 0.05,
+                "stage_absolute_relative_errors": {
+                  "receiver": 0.029073522524656264,
+                  "generation_setup_other": 0.02382328170406498
+                },
+                "log_error": -0.026922608187452884,
+                "prediction_sha256": "3cc2e31102ce5c0fd5ba92e20613365560cacd6c79ecb8e31308859ef655ab93",
+                "actual_record_sha256": "b0d65e5294507afea4ed14e35891c2a9aebcf067ae35d013895740c473fe4440",
+                "predicted_full_seconds": 3.8815223471913245,
+                "actual_full_seconds": 3.7784158180002123,
+                "stage_validation_scope": "diagnostic only; qualification uses independent log-mean equivalence"
+              }
+            },
+            {
+              "source": "reference",
+              "index": 5,
+              "kind": "qualify",
+              "frozen_prediction_sha256": "e6ae92fbed309a75c5447ef944da333275f1146972ec684ce83ac667abf249cf",
+              "actual": {
+                "argv_sha256": "26c38340eabcdd35b519d4509c4575c62c26f335116c8d68169f5845a9601638",
+                "seed": 845000,
+                "requested_seconds": 73728051.2,
+                "batch_trials": 1,
+                "samples_per_trial": 576799,
+                "total_rows": 576799,
+                "stage_seconds": {
+                  "receiver": 2.168097538,
+                  "generation_setup_other": 1.6921812699999998,
+                  "process_startup_output": 0.003973207016973124
+                },
+                "full_test_wall_seconds": 3.864252015016973,
+                "native_pipeline_seconds": 3.860278808,
+                "counter_summary": {
+                  "basis_values": 3460794,
+                  "blocks": 1127,
+                  "missing_samples": 0,
+                  "channel_samples": 576799
+                },
+                "coverage": {
+                  "complete": true,
+                  "encrypted": true,
+                  "two_ray": true,
+                  "selective": true,
+                  "sub_hz": true,
+                  "weak_signal": true
+                }
+              },
+              "validation": {
+                "single_run_within_bound": true,
+                "geometry_matched": true,
+                "absolute_relative_error": 0.02742266197200777,
+                "allowed_relative_error": 0.05,
+                "stage_absolute_relative_errors": {
+                  "receiver": 0.025166918911112193,
+                  "generation_setup_other": 0.03001959630448818
+                },
+                "log_error": -0.027805681686961674,
+                "prediction_sha256": "717704af8acd05118131b33d3f472a6a4299b6a5b3b0b957b5a4b083a315d3ef",
+                "actual_record_sha256": "93ea6b165eed29791ce2d6501f81d86e75ea8c1ee35dfb1f9aaca225da75aeef",
+                "predicted_full_seconds": 3.973207953675098,
+                "actual_full_seconds": 3.864252015016973,
+                "stage_validation_scope": "diagnostic only; qualification uses independent log-mean equivalence"
+              }
+            },
+            {
+              "source": "reference",
+              "index": 6,
+              "kind": "qualify",
+              "frozen_prediction_sha256": "e6ae92fbed309a75c5447ef944da333275f1146972ec684ce83ac667abf249cf",
+              "actual": {
+                "argv_sha256": "827eff2bdfd6a4a76cd3a7cd6f943453776e8a98161a1f4ffbdf589f7cbe3927",
+                "seed": 846000,
+                "requested_seconds": 73728051.2,
+                "batch_trials": 1,
+                "samples_per_trial": 576799,
+                "total_rows": 576799,
+                "stage_seconds": {
+                  "receiver": 2.184362342,
+                  "generation_setup_other": 1.7001973970000002,
+                  "process_startup_output": 0.0040595700002050705
+                },
+                "full_test_wall_seconds": 3.8886193090002052,
+                "native_pipeline_seconds": 3.884559739,
+                "counter_summary": {
+                  "basis_values": 3460794,
+                  "blocks": 1127,
+                  "missing_samples": 0,
+                  "channel_samples": 576799
+                },
+                "coverage": {
+                  "complete": true,
+                  "encrypted": true,
+                  "two_ray": true,
+                  "selective": true,
+                  "sub_hz": true,
+                  "weak_signal": true
+                }
+              },
+              "validation": {
+                "single_run_within_bound": true,
+                "geometry_matched": true,
+                "absolute_relative_error": 0.02128976022930054,
+                "allowed_relative_error": 0.05,
+                "stage_absolute_relative_errors": {
+                  "receiver": 0.017853839716689513,
+                  "generation_setup_other": 0.025424647618207778
+                },
+                "log_error": -0.021519655980492564,
+                "prediction_sha256": "717704af8acd05118131b33d3f472a6a4299b6a5b3b0b957b5a4b083a315d3ef",
+                "actual_record_sha256": "f911d80baa1c004ef6fda61eb5c82f714883d3294dddd5d90f3554808b05815d",
+                "predicted_full_seconds": 3.973207953675098,
+                "actual_full_seconds": 3.8886193090002052,
+                "stage_validation_scope": "diagnostic only; qualification uses independent log-mean equivalence"
+              }
+            },
+            {
+              "source": "candidate",
+              "index": 6,
+              "kind": "qualify",
+              "frozen_prediction_sha256": "e6ae92fbed309a75c5447ef944da333275f1146972ec684ce83ac667abf249cf",
+              "actual": {
+                "argv_sha256": "b523b59b9883d6282ec77f0ba661b1ad43035f4a928f58bc4adf12b0c08d6d05",
+                "seed": 846000,
+                "requested_seconds": 73728051.2,
+                "batch_trials": 1,
+                "samples_per_trial": 576799,
+                "total_rows": 576799,
+                "stage_seconds": {
+                  "receiver": 2.292738395,
+                  "generation_setup_other": 1.7026868399999997,
+                  "process_startup_output": 0.004757219008609148
+                },
+                "full_test_wall_seconds": 4.000182454008609,
+                "native_pipeline_seconds": 3.995425235,
+                "counter_summary": {
+                  "basis_values": 3460794,
+                  "blocks": 1127,
+                  "missing_samples": 0,
+                  "channel_samples": 576799
+                },
+                "coverage": {
+                  "complete": true,
+                  "encrypted": true,
+                  "two_ray": true,
+                  "selective": true,
+                  "sub_hz": true,
+                  "weak_signal": true
+                }
+              },
+              "validation": {
+                "single_run_within_bound": true,
+                "geometry_matched": true,
+                "absolute_relative_error": 0.03057050718853833,
+                "allowed_relative_error": 0.05,
+                "stage_absolute_relative_errors": {
+                  "receiver": 0.026081349040545574,
+                  "generation_setup_other": 0.03661423349278047
+                },
+                "log_error": 0.03011253937514466,
+                "prediction_sha256": "3cc2e31102ce5c0fd5ba92e20613365560cacd6c79ecb8e31308859ef655ab93",
+                "actual_record_sha256": "7d0594302d01cad5de782326a2eed8d23d8d6dc5e52cb32c5a0430071919c98a",
+                "predicted_full_seconds": 3.8815223471913245,
+                "actual_full_seconds": 4.000182454008609,
+                "stage_validation_scope": "diagnostic only; qualification uses independent log-mean equivalence"
+              }
+            },
+            {
+              "source": "candidate",
+              "index": 7,
+              "kind": "qualify",
+              "frozen_prediction_sha256": "e6ae92fbed309a75c5447ef944da333275f1146972ec684ce83ac667abf249cf",
+              "actual": {
+                "argv_sha256": "ef35ec5c0c03b4463b5ca8f508bacc7242c3d1d7082defb13d671a2bfc58b2ab",
+                "seed": 847000,
+                "requested_seconds": 73728051.2,
+                "batch_trials": 1,
+                "samples_per_trial": 576799,
+                "total_rows": 576799,
+                "stage_seconds": {
+                  "receiver": 2.227607118,
+                  "generation_setup_other": 1.6494729430000001,
+                  "process_startup_output": 0.003961935006388195
+                },
+                "full_test_wall_seconds": 3.881041996006388,
+                "native_pipeline_seconds": 3.877080061,
+                "counter_summary": {
+                  "basis_values": 3460794,
+                  "blocks": 1127,
+                  "missing_samples": 0,
+                  "channel_samples": 576799
+                },
+                "coverage": {
+                  "complete": true,
+                  "encrypted": true,
+                  "two_ray": true,
+                  "selective": true,
+                  "sub_hz": true,
+                  "weak_signal": true
+                }
+              },
+              "validation": {
+                "single_run_within_bound": true,
+                "geometry_matched": true,
+                "absolute_relative_error": 0.00012375329625085408,
+                "allowed_relative_error": 0.05,
+                "stage_absolute_relative_errors": {
+                  "receiver": 0.003067196085508277,
+                  "generation_setup_other": 0.004217035279973275
+                },
+                "log_error": -0.00012376095432178655,
+                "prediction_sha256": "3cc2e31102ce5c0fd5ba92e20613365560cacd6c79ecb8e31308859ef655ab93",
+                "actual_record_sha256": "914ea41083951288696d30b89d8d9a32852c2f533536bf1b8349511160e0640a",
+                "predicted_full_seconds": 3.8815223471913245,
+                "actual_full_seconds": 3.881041996006388,
+                "stage_validation_scope": "diagnostic only; qualification uses independent log-mean equivalence"
+              }
+            },
+            {
+              "source": "reference",
+              "index": 7,
+              "kind": "qualify",
+              "frozen_prediction_sha256": "e6ae92fbed309a75c5447ef944da333275f1146972ec684ce83ac667abf249cf",
+              "actual": {
+                "argv_sha256": "796587d23241e203720958439821126621430a3495c0ffa9cc2fa364f21c804f",
+                "seed": 847000,
+                "requested_seconds": 73728051.2,
+                "batch_trials": 1,
+                "samples_per_trial": 576799,
+                "total_rows": 576799,
+                "stage_seconds": {
+                  "receiver": 2.313734973,
+                  "generation_setup_other": 1.7823216420000003,
+                  "process_startup_output": 0.004571818050587595
+                },
+                "full_test_wall_seconds": 4.100628433050588,
+                "native_pipeline_seconds": 4.096056615,
+                "counter_summary": {
+                  "basis_values": 3460794,
+                  "blocks": 1127,
+                  "missing_samples": 0,
+                  "channel_samples": 576799
+                },
+                "coverage": {
+                  "complete": true,
+                  "encrypted": true,
+                  "two_ray": true,
+                  "selective": true,
+                  "sub_hz": true,
+                  "weak_signal": true
+                }
+              },
+              "validation": {
+                "single_run_within_bound": true,
+                "geometry_matched": true,
+                "absolute_relative_error": 0.03206992457005169,
+                "allowed_relative_error": 0.05,
+                "stage_absolute_relative_errors": {
+                  "receiver": 0.0403154622984976,
+                  "generation_setup_other": 0.02165004215086718
+                },
+                "log_error": 0.031566421130341304,
+                "prediction_sha256": "717704af8acd05118131b33d3f472a6a4299b6a5b3b0b957b5a4b083a315d3ef",
+                "actual_record_sha256": "7e7f7ba55834993b2ec32e93478ee4280ecabd0c72ecedcf2a8b1caf168118d0",
+                "predicted_full_seconds": 3.973207953675098,
+                "actual_full_seconds": 4.100628433050588,
+                "stage_validation_scope": "diagnostic only; qualification uses independent log-mean equivalence"
+              }
+            },
+            {
+              "source": "reference",
+              "index": 8,
+              "kind": "qualify",
+              "frozen_prediction_sha256": "e6ae92fbed309a75c5447ef944da333275f1146972ec684ce83ac667abf249cf",
+              "actual": {
+                "argv_sha256": "d862e25d6c8d3b2fe9629421e55d5f98c9df929e7f2e0edc53527c6865898ae7",
+                "seed": 848000,
+                "requested_seconds": 73728051.2,
+                "batch_trials": 1,
+                "samples_per_trial": 576799,
+                "total_rows": 576799,
+                "stage_seconds": {
+                  "receiver": 2.318549963,
+                  "generation_setup_other": 1.7842533120000001,
+                  "process_startup_output": 0.005088023015601628
+                },
+                "full_test_wall_seconds": 4.107891298015602,
+                "native_pipeline_seconds": 4.102803275,
+                "counter_summary": {
+                  "basis_values": 3460794,
+                  "blocks": 1127,
+                  "missing_samples": 0,
+                  "channel_samples": 576799
+                },
+                "coverage": {
+                  "complete": true,
+                  "encrypted": true,
+                  "two_ray": true,
+                  "selective": true,
+                  "sub_hz": true,
+                  "weak_signal": true
+                }
+              },
+              "validation": {
+                "single_run_within_bound": true,
+                "geometry_matched": true,
+                "absolute_relative_error": 0.03389788450814057,
+                "allowed_relative_error": 0.05,
+                "stage_absolute_relative_errors": {
+                  "receiver": 0.04248040711986498,
+                  "generation_setup_other": 0.02275730062229935
+                },
+                "log_error": 0.03333601348030076,
+                "prediction_sha256": "717704af8acd05118131b33d3f472a6a4299b6a5b3b0b957b5a4b083a315d3ef",
+                "actual_record_sha256": "82a7895c9fdef597ab1211aa2916e28435c2a46156bf0b48cbe7cbd1f6f3a52a",
+                "predicted_full_seconds": 3.973207953675098,
+                "actual_full_seconds": 4.107891298015602,
+                "stage_validation_scope": "diagnostic only; qualification uses independent log-mean equivalence"
+              }
+            },
+            {
+              "source": "candidate",
+              "index": 8,
+              "kind": "qualify",
+              "frozen_prediction_sha256": "e6ae92fbed309a75c5447ef944da333275f1146972ec684ce83ac667abf249cf",
+              "actual": {
+                "argv_sha256": "64a7af4e1656563e33a45c33f8997083353515e7daf6802aafc3f06a8c6434da",
+                "seed": 848000,
+                "requested_seconds": 73728051.2,
+                "batch_trials": 1,
+                "samples_per_trial": 576799,
+                "total_rows": 576799,
+                "stage_seconds": {
+                  "receiver": 2.201878361,
+                  "generation_setup_other": 1.621973031,
+                  "process_startup_output": 0.004915156016574329
+                },
+                "full_test_wall_seconds": 3.8287665480165742,
+                "native_pipeline_seconds": 3.823851392,
+                "counter_summary": {
+                  "basis_values": 3460794,
+                  "blocks": 1127,
+                  "missing_samples": 0,
+                  "channel_samples": 576799
+                },
+                "coverage": {
+                  "complete": true,
+                  "encrypted": true,
+                  "two_ray": true,
+                  "selective": true,
+                  "sub_hz": true,
+                  "weak_signal": true
+                }
+              },
+              "validation": {
+                "single_run_within_bound": true,
+                "geometry_matched": true,
+                "absolute_relative_error": 0.013591522721213866,
+                "allowed_relative_error": 0.05,
+                "stage_absolute_relative_errors": {
+                  "receiver": 0.01458172288423464,
+                  "generation_setup_other": 0.012525209699731303
+                },
+                "log_error": -0.01368473300957877,
+                "prediction_sha256": "3cc2e31102ce5c0fd5ba92e20613365560cacd6c79ecb8e31308859ef655ab93",
+                "actual_record_sha256": "fde810a58bf06f54e95e0b654cec73b13b9b2ae61013fea1209923f601286b64",
+                "predicted_full_seconds": 3.8815223471913245,
+                "actual_full_seconds": 3.8287665480165742,
+                "stage_validation_scope": "diagnostic only; qualification uses independent log-mean equivalence"
+              }
+            },
+            {
+              "source": "candidate",
+              "index": 9,
+              "kind": "qualify",
+              "frozen_prediction_sha256": "e6ae92fbed309a75c5447ef944da333275f1146972ec684ce83ac667abf249cf",
+              "actual": {
+                "argv_sha256": "9480044c8b564c1b5cd56ba0d45bd824e106e2280a28f3d4b280ce9079d8ed7b",
+                "seed": 849000,
+                "requested_seconds": 73728051.2,
+                "batch_trials": 1,
+                "samples_per_trial": 576799,
+                "total_rows": 576799,
+                "stage_seconds": {
+                  "receiver": 2.20715207,
+                  "generation_setup_other": 1.6321489810000003,
+                  "process_startup_output": 0.004691042985434546
+                },
+                "full_test_wall_seconds": 3.8439920939854346,
+                "native_pipeline_seconds": 3.839301051,
+                "counter_summary": {
+                  "basis_values": 3460794,
+                  "blocks": 1127,
+                  "missing_samples": 0,
+                  "channel_samples": 576799
+                },
+                "coverage": {
+                  "complete": true,
+                  "encrypted": true,
+                  "two_ray": true,
+                  "selective": true,
+                  "sub_hz": true,
+                  "weak_signal": true
+                }
+              },
+              "validation": {
+                "single_run_within_bound": true,
+                "geometry_matched": true,
+                "absolute_relative_error": 0.009668951985564845,
+                "allowed_relative_error": 0.05,
+                "stage_absolute_relative_errors": {
+                  "receiver": 0.012221551982500703,
+                  "generation_setup_other": 0.006329980864045266
+                },
+                "log_error": -0.009715999816250681,
+                "prediction_sha256": "3cc2e31102ce5c0fd5ba92e20613365560cacd6c79ecb8e31308859ef655ab93",
+                "actual_record_sha256": "3b589bfc2e178e794968929198abe56d594b15dbaa80fc8380519a357367a856",
+                "predicted_full_seconds": 3.8815223471913245,
+                "actual_full_seconds": 3.8439920939854346,
+                "stage_validation_scope": "diagnostic only; qualification uses independent log-mean equivalence"
+              }
+            },
+            {
+              "source": "reference",
+              "index": 9,
+              "kind": "qualify",
+              "frozen_prediction_sha256": "e6ae92fbed309a75c5447ef944da333275f1146972ec684ce83ac667abf249cf",
+              "actual": {
+                "argv_sha256": "0f946367763fe998d0e20f4c36319a995e6ed9223257caa44bdfb01e9d3ed305",
+                "seed": 849000,
+                "requested_seconds": 73728051.2,
+                "batch_trials": 1,
+                "samples_per_trial": 576799,
+                "total_rows": 576799,
+                "stage_seconds": {
+                  "receiver": 2.162842424,
+                  "generation_setup_other": 1.6800820930000002,
+                  "process_startup_output": 0.00397490896014574
+                },
+                "full_test_wall_seconds": 3.846899425960146,
+                "native_pipeline_seconds": 3.842924517,
+                "counter_summary": {
+                  "basis_values": 3460794,
+                  "blocks": 1127,
+                  "missing_samples": 0,
+                  "channel_samples": 576799
+                },
+                "coverage": {
+                  "complete": true,
+                  "encrypted": true,
+                  "two_ray": true,
+                  "selective": true,
+                  "sub_hz": true,
+                  "weak_signal": true
+                }
+              },
+              "validation": {
+                "single_run_within_bound": true,
+                "geometry_matched": true,
+                "absolute_relative_error": 0.03179006213307321,
+                "allowed_relative_error": 0.05,
+                "stage_absolute_relative_errors": {
+                  "receiver": 0.027529754937769525,
+                  "generation_setup_other": 0.03695500257502508
+                },
+                "log_error": -0.032306337258484155,
+                "prediction_sha256": "717704af8acd05118131b33d3f472a6a4299b6a5b3b0b957b5a4b083a315d3ef",
+                "actual_record_sha256": "b89a61dd2b0a0baa138cad3bd6ef2fa15ac7be7f403d6c91e653a3092a3d0b2a",
+                "predicted_full_seconds": 3.973207953675098,
+                "actual_full_seconds": 3.846899425960146,
+                "stage_validation_scope": "diagnostic only; qualification uses independent log-mean equivalence"
+              }
+            },
+            {
+              "source": "reference",
+              "index": 10,
+              "kind": "qualify",
+              "frozen_prediction_sha256": "e6ae92fbed309a75c5447ef944da333275f1146972ec684ce83ac667abf249cf",
+              "actual": {
+                "argv_sha256": "4125ead08c1baa566836ef6d6db8fd2bedc426fd1ed4ffd603245af3d9683341",
+                "seed": 850000,
+                "requested_seconds": 73728051.2,
+                "batch_trials": 1,
+                "samples_per_trial": 576799,
+                "total_rows": 576799,
+                "stage_seconds": {
+                  "receiver": 2.170800719,
+                  "generation_setup_other": 1.9636222280000002,
+                  "process_startup_output": 0.005956822960418329
+                },
+                "full_test_wall_seconds": 4.140379769960418,
+                "native_pipeline_seconds": 4.134422947,
+                "counter_summary": {
+                  "basis_values": 3460794,
+                  "blocks": 1127,
+                  "missing_samples": 0,
+                  "channel_samples": 576799
+                },
+                "coverage": {
+                  "complete": true,
+                  "encrypted": true,
+                  "two_ray": true,
+                  "selective": true,
+                  "sub_hz": true,
+                  "weak_signal": true
+                }
+              },
+              "validation": {
+                "single_run_within_bound": true,
+                "geometry_matched": true,
+                "absolute_relative_error": 0.042074771377292625,
+                "allowed_relative_error": 0.05,
+                "stage_absolute_relative_errors": {
+                  "receiver": 0.023951498379155146,
+                  "generation_setup_other": 0.12557390581501987
+                },
+                "log_error": 0.04121369831650645,
+                "prediction_sha256": "717704af8acd05118131b33d3f472a6a4299b6a5b3b0b957b5a4b083a315d3ef",
+                "actual_record_sha256": "53f3793f8c93cc5d5c947685fd3f7b516774d222a50e0f5ca8f1f54bc28bb792",
+                "predicted_full_seconds": 3.973207953675098,
+                "actual_full_seconds": 4.140379769960418,
+                "stage_validation_scope": "diagnostic only; qualification uses independent log-mean equivalence"
+              }
+            },
+            {
+              "source": "candidate",
+              "index": 10,
+              "kind": "qualify",
+              "frozen_prediction_sha256": "e6ae92fbed309a75c5447ef944da333275f1146972ec684ce83ac667abf249cf",
+              "actual": {
+                "argv_sha256": "c5c826ce64c717fddf69ca8e53d64750aa341d8e4d6f523e844d2c55d884f719",
+                "seed": 850000,
+                "requested_seconds": 73728051.2,
+                "batch_trials": 1,
+                "samples_per_trial": 576799,
+                "total_rows": 576799,
+                "stage_seconds": {
+                  "receiver": 2.18538755,
+                  "generation_setup_other": 1.6067538039999998,
+                  "process_startup_output": 0.004607123965593374
+                },
+                "full_test_wall_seconds": 3.7967484779655933,
+                "native_pipeline_seconds": 3.792141354,
+                "counter_summary": {
+                  "basis_values": 3460794,
+                  "blocks": 1127,
+                  "missing_samples": 0,
+                  "channel_samples": 576799
+                },
+                "coverage": {
+                  "complete": true,
+                  "encrypted": true,
+                  "two_ray": true,
+                  "selective": true,
+                  "sub_hz": true,
+                  "weak_signal": true
+                }
+              },
+              "validation": {
+                "single_run_within_bound": true,
+                "geometry_matched": true,
+                "absolute_relative_error": 0.021840366135486417,
+                "allowed_relative_error": 0.05,
+                "stage_absolute_relative_errors": {
+                  "receiver": 0.021961942814495098,
+                  "generation_setup_other": 0.021790840325594286
+                },
+                "log_error": -0.022082397456698637,
+                "prediction_sha256": "3cc2e31102ce5c0fd5ba92e20613365560cacd6c79ecb8e31308859ef655ab93",
+                "actual_record_sha256": "36c5f86a1fef1549a1b90f71b493ae8e0c449114e7889f25b15b223331d64418",
+                "predicted_full_seconds": 3.8815223471913245,
+                "actual_full_seconds": 3.7967484779655933,
+                "stage_validation_scope": "diagnostic only; qualification uses independent log-mean equivalence"
+              }
+            },
+            {
+              "source": "candidate",
+              "index": 11,
+              "kind": "qualify",
+              "frozen_prediction_sha256": "e6ae92fbed309a75c5447ef944da333275f1146972ec684ce83ac667abf249cf",
+              "actual": {
+                "argv_sha256": "0bc33e1f8d74904bd2d379faf546dea749c6e27e7f971dd890e000534d22a8dd",
+                "seed": 851000,
+                "requested_seconds": 73728051.2,
+                "batch_trials": 1,
+                "samples_per_trial": 576799,
+                "total_rows": 576799,
+                "stage_seconds": {
+                  "receiver": 2.225876344,
+                  "generation_setup_other": 1.6376005610000002,
+                  "process_startup_output": 0.004817641962715502
+                },
+                "full_test_wall_seconds": 3.8682945469627157,
+                "native_pipeline_seconds": 3.863476905,
+                "counter_summary": {
+                  "basis_values": 3460794,
+                  "blocks": 1127,
+                  "missing_samples": 0,
+                  "channel_samples": 576799
+                },
+                "coverage": {
+                  "complete": true,
+                  "encrypted": true,
+                  "two_ray": true,
+                  "selective": true,
+                  "sub_hz": true,
+                  "weak_signal": true
+                }
+              },
+              "validation": {
+                "single_run_within_bound": true,
+                "geometry_matched": true,
+                "absolute_relative_error": 0.00340788975185998,
+                "allowed_relative_error": 0.05,
+                "stage_absolute_relative_errors": {
+                  "receiver": 0.0038417785344597535,
+                  "generation_setup_other": 0.0030109997747073875
+                },
+                "log_error": -0.0034137098347028763,
+                "prediction_sha256": "3cc2e31102ce5c0fd5ba92e20613365560cacd6c79ecb8e31308859ef655ab93",
+                "actual_record_sha256": "851fbf763e53f721c6a8318fdcd1e115c5e97c30eb726d882dc61b883e053af1",
+                "predicted_full_seconds": 3.8815223471913245,
+                "actual_full_seconds": 3.8682945469627157,
+                "stage_validation_scope": "diagnostic only; qualification uses independent log-mean equivalence"
+              }
+            },
+            {
+              "source": "reference",
+              "index": 11,
+              "kind": "qualify",
+              "frozen_prediction_sha256": "e6ae92fbed309a75c5447ef944da333275f1146972ec684ce83ac667abf249cf",
+              "actual": {
+                "argv_sha256": "24bfe5870c2e9e26e7d74df0dcc7ba0cea30659cea313a38201aa369bae4ec3c",
+                "seed": 851000,
+                "requested_seconds": 73728051.2,
+                "batch_trials": 1,
+                "samples_per_trial": 576799,
+                "total_rows": 576799,
+                "stage_seconds": {
+                  "receiver": 2.282232604,
+                  "generation_setup_other": 1.7800091399999998,
+                  "process_startup_output": 0.005771192972082062
+                },
+                "full_test_wall_seconds": 4.068012936972082,
+                "native_pipeline_seconds": 4.062241744,
+                "counter_summary": {
+                  "basis_values": 3460794,
+                  "blocks": 1127,
+                  "missing_samples": 0,
+                  "channel_samples": 576799
+                },
+                "coverage": {
+                  "complete": true,
+                  "encrypted": true,
+                  "two_ray": true,
+                  "selective": true,
+                  "sub_hz": true,
+                  "weak_signal": true
+                }
+              },
+              "validation": {
+                "single_run_within_bound": true,
+                "geometry_matched": true,
+                "absolute_relative_error": 0.02386106753090836,
+                "allowed_relative_error": 0.05,
+                "stage_absolute_relative_errors": {
+                  "receiver": 0.02615117729949443,
+                  "generation_setup_other": 0.02032448580340376
+                },
+                "log_error": 0.023580841173115152,
+                "prediction_sha256": "717704af8acd05118131b33d3f472a6a4299b6a5b3b0b957b5a4b083a315d3ef",
+                "actual_record_sha256": "7db8475d89dd4888b5526f42f520d8edd9e3b30c5f484fe5049bc368868d5014",
+                "predicted_full_seconds": 3.973207953675098,
+                "actual_full_seconds": 4.068012936972082,
+                "stage_validation_scope": "diagnostic only; qualification uses independent log-mean equivalence"
+              }
+            },
+            {
+              "source": "reference",
+              "index": 12,
+              "kind": "qualify",
+              "frozen_prediction_sha256": "e6ae92fbed309a75c5447ef944da333275f1146972ec684ce83ac667abf249cf",
+              "actual": {
+                "argv_sha256": "9eda76343e89cd153590ec88a09b5eb4be57994441d1f88a89c39fdd2839483b",
+                "seed": 852000,
+                "requested_seconds": 73728051.2,
+                "batch_trials": 1,
+                "samples_per_trial": 576799,
+                "total_rows": 576799,
+                "stage_seconds": {
+                  "receiver": 2.152979132,
+                  "generation_setup_other": 1.672972695,
+                  "process_startup_output": 0.0075445030148957315
+                },
+                "full_test_wall_seconds": 3.8334963300148956,
+                "native_pipeline_seconds": 3.825951827,
+                "counter_summary": {
+                  "basis_values": 3460794,
+                  "blocks": 1127,
+                  "missing_samples": 0,
+                  "channel_samples": 576799
+                },
+                "coverage": {
+                  "complete": true,
+                  "encrypted": true,
+                  "two_ray": true,
+                  "selective": true,
+                  "sub_hz": true,
+                  "weak_signal": true
+                }
+              },
+              "validation": {
+                "single_run_within_bound": true,
+                "geometry_matched": true,
+                "absolute_relative_error": 0.0351634309830104,
+                "allowed_relative_error": 0.05,
+                "stage_absolute_relative_errors": {
+                  "receiver": 0.031964547728000205,
+                  "generation_setup_other": 0.04103020235670826
+                },
+                "log_error": -0.035796550517543685,
+                "prediction_sha256": "717704af8acd05118131b33d3f472a6a4299b6a5b3b0b957b5a4b083a315d3ef",
+                "actual_record_sha256": "b4e2d5c8a7eeb1237469b8126aedf14389067b2ed159f1f40c0a34a32641154f",
+                "predicted_full_seconds": 3.973207953675098,
+                "actual_full_seconds": 3.8334963300148956,
+                "stage_validation_scope": "diagnostic only; qualification uses independent log-mean equivalence"
+              }
+            },
+            {
+              "source": "candidate",
+              "index": 12,
+              "kind": "qualify",
+              "frozen_prediction_sha256": "e6ae92fbed309a75c5447ef944da333275f1146972ec684ce83ac667abf249cf",
+              "actual": {
+                "argv_sha256": "4feba2509899bf45053b76b684e11fc60162f9d4c8cace841c2e71607d723066",
+                "seed": 852000,
+                "requested_seconds": 73728051.2,
+                "batch_trials": 1,
+                "samples_per_trial": 576799,
+                "total_rows": 576799,
+                "stage_seconds": {
+                  "receiver": 2.205919633,
+                  "generation_setup_other": 1.6282085179999997,
+                  "process_startup_output": 0.004089194008161101
+                },
+                "full_test_wall_seconds": 3.838217345008161,
+                "native_pipeline_seconds": 3.834128151,
+                "counter_summary": {
+                  "basis_values": 3460794,
+                  "blocks": 1127,
+                  "missing_samples": 0,
+                  "channel_samples": 576799
+                },
+                "coverage": {
+                  "complete": true,
+                  "encrypted": true,
+                  "two_ray": true,
+                  "selective": true,
+                  "sub_hz": true,
+                  "weak_signal": true
+                }
+              },
+              "validation": {
+                "single_run_within_bound": true,
+                "geometry_matched": true,
+                "absolute_relative_error": 0.011156705619510125,
+                "allowed_relative_error": 0.05,
+                "stage_absolute_relative_errors": {
+                  "receiver": 0.012773111036217826,
+                  "generation_setup_other": 0.008728977518269893
+                },
+                "log_error": -0.01121940846732286,
+                "prediction_sha256": "3cc2e31102ce5c0fd5ba92e20613365560cacd6c79ecb8e31308859ef655ab93",
+                "actual_record_sha256": "b93db0e8b2c90c53eb97264929f7ba11e417d9826699f12b9dad0a1be01dda3a",
+                "predicted_full_seconds": 3.8815223471913245,
+                "actual_full_seconds": 3.838217345008161,
+                "stage_validation_scope": "diagnostic only; qualification uses independent log-mean equivalence"
+              }
+            },
+            {
+              "source": "candidate",
+              "index": 13,
+              "kind": "qualify",
+              "frozen_prediction_sha256": "e6ae92fbed309a75c5447ef944da333275f1146972ec684ce83ac667abf249cf",
+              "actual": {
+                "argv_sha256": "360c069f399a9a226a1b25b098cc5fc29b749b2afdc52dc209b63f6448fe45bf",
+                "seed": 853000,
+                "requested_seconds": 73728051.2,
+                "batch_trials": 1,
+                "samples_per_trial": 576799,
+                "total_rows": 576799,
+                "stage_seconds": {
+                  "receiver": 2.20700113,
+                  "generation_setup_other": 1.6262634769999997,
+                  "process_startup_output": 0.004970468992997912
+                },
+                "full_test_wall_seconds": 3.8382350759929977,
+                "native_pipeline_seconds": 3.833264607,
+                "counter_summary": {
+                  "basis_values": 3460794,
+                  "blocks": 1127,
+                  "missing_samples": 0,
+                  "channel_samples": 576799
+                },
+                "coverage": {
+                  "complete": true,
+                  "encrypted": true,
+                  "two_ray": true,
+                  "selective": true,
+                  "sub_hz": true,
+                  "weak_signal": true
+                }
+              },
+              "validation": {
+                "single_run_within_bound": true,
+                "geometry_matched": true,
+                "absolute_relative_error": 0.011152137570365785,
+                "allowed_relative_error": 0.05,
+                "stage_absolute_relative_errors": {
+                  "receiver": 0.012289102959603733,
+                  "generation_setup_other": 0.009913139595500109
+                },
+                "log_error": -0.01121478888945949,
+                "prediction_sha256": "3cc2e31102ce5c0fd5ba92e20613365560cacd6c79ecb8e31308859ef655ab93",
+                "actual_record_sha256": "e70a1129866a03a3a9c31ce2b446c5517304e28394adf410ce05b22096a3aa0e",
+                "predicted_full_seconds": 3.8815223471913245,
+                "actual_full_seconds": 3.8382350759929977,
+                "stage_validation_scope": "diagnostic only; qualification uses independent log-mean equivalence"
+              }
+            },
+            {
+              "source": "reference",
+              "index": 13,
+              "kind": "qualify",
+              "frozen_prediction_sha256": "e6ae92fbed309a75c5447ef944da333275f1146972ec684ce83ac667abf249cf",
+              "actual": {
+                "argv_sha256": "277a135519cdf5bb134743793772763258df46f0243a620ec635de426ba2cc9e",
+                "seed": 853000,
+                "requested_seconds": 73728051.2,
+                "batch_trials": 1,
+                "samples_per_trial": 576799,
+                "total_rows": 576799,
+                "stage_seconds": {
+                  "receiver": 2.192149114,
+                  "generation_setup_other": 1.696468925,
+                  "process_startup_output": 0.004597365008515375
+                },
+                "full_test_wall_seconds": 3.893215404008515,
+                "native_pipeline_seconds": 3.888618039,
+                "counter_summary": {
+                  "basis_values": 3460794,
+                  "blocks": 1127,
+                  "missing_samples": 0,
+                  "channel_samples": 576799
+                },
+                "coverage": {
+                  "complete": true,
+                  "encrypted": true,
+                  "two_ray": true,
+                  "selective": true,
+                  "sub_hz": true,
+                  "weak_signal": true
+                }
+              },
+              "validation": {
+                "single_run_within_bound": true,
+                "geometry_matched": true,
+                "absolute_relative_error": 0.020132988406154795,
+                "allowed_relative_error": 0.05,
+                "stage_absolute_relative_errors": {
+                  "receiver": 0.014352704363019617,
+                  "generation_setup_other": 0.02756185646210874
+                },
+                "log_error": -0.020338418981190647,
+                "prediction_sha256": "717704af8acd05118131b33d3f472a6a4299b6a5b3b0b957b5a4b083a315d3ef",
+                "actual_record_sha256": "1af1838fcb0a957025775bca8f4b1b9d7fd9684a210f10fbfddd1eb8bd12e694",
+                "predicted_full_seconds": 3.973207953675098,
+                "actual_full_seconds": 3.893215404008515,
+                "stage_validation_scope": "diagnostic only; qualification uses independent log-mean equivalence"
+              }
+            },
+            {
+              "source": "reference",
+              "index": 14,
+              "kind": "qualify",
+              "frozen_prediction_sha256": "e6ae92fbed309a75c5447ef944da333275f1146972ec684ce83ac667abf249cf",
+              "actual": {
+                "argv_sha256": "e451016c1c3e962076f7fdc0de74e7f273252e7c9e455f03589313a7cd94a1a6",
+                "seed": 854000,
+                "requested_seconds": 73728051.2,
+                "batch_trials": 1,
+                "samples_per_trial": 576799,
+                "total_rows": 576799,
+                "stage_seconds": {
+                  "receiver": 2.21702267,
+                  "generation_setup_other": 1.725733672,
+                  "process_startup_output": 0.0047823850213104535
+                },
+                "full_test_wall_seconds": 3.9475387270213105,
+                "native_pipeline_seconds": 3.942756342,
+                "counter_summary": {
+                  "basis_values": 3460794,
+                  "blocks": 1127,
+                  "missing_samples": 0,
+                  "channel_samples": 576799
+                },
+                "coverage": {
+                  "complete": true,
+                  "encrypted": true,
+                  "two_ray": true,
+                  "selective": true,
+                  "sub_hz": true,
+                  "weak_signal": true
+                }
+              },
+              "validation": {
+                "single_run_within_bound": true,
+                "geometry_matched": true,
+                "absolute_relative_error": 0.006460579701106305,
+                "allowed_relative_error": 0.05,
+                "stage_absolute_relative_errors": {
+                  "receiver": 0.0031689062136592483,
+                  "generation_setup_other": 0.010786921286808603
+                },
+                "log_error": -0.006481539570183941,
+                "prediction_sha256": "717704af8acd05118131b33d3f472a6a4299b6a5b3b0b957b5a4b083a315d3ef",
+                "actual_record_sha256": "cf5811fb12a285619ee92b4bbfe8581e5be21702a7e49bb0a41c590d01576156",
+                "predicted_full_seconds": 3.973207953675098,
+                "actual_full_seconds": 3.9475387270213105,
+                "stage_validation_scope": "diagnostic only; qualification uses independent log-mean equivalence"
+              }
+            },
+            {
+              "source": "candidate",
+              "index": 14,
+              "kind": "qualify",
+              "frozen_prediction_sha256": "e6ae92fbed309a75c5447ef944da333275f1146972ec684ce83ac667abf249cf",
+              "actual": {
+                "argv_sha256": "b4c1e6506b015f49ae0f7313ed0c8dd000cef027aa21ad3f3d629dc1c992389d",
+                "seed": 854000,
+                "requested_seconds": 73728051.2,
+                "batch_trials": 1,
+                "samples_per_trial": 576799,
+                "total_rows": 576799,
+                "stage_seconds": {
+                  "receiver": 2.167883698,
+                  "generation_setup_other": 1.59421619,
+                  "process_startup_output": 0.004721628968775704
+                },
+                "full_test_wall_seconds": 3.7668215169687755,
+                "native_pipeline_seconds": 3.762099888,
+                "counter_summary": {
+                  "basis_values": 3460794,
+                  "blocks": 1127,
+                  "missing_samples": 0,
+                  "channel_samples": 576799
+                },
+                "coverage": {
+                  "complete": true,
+                  "encrypted": true,
+                  "two_ray": true,
+                  "selective": true,
+                  "sub_hz": true,
+                  "weak_signal": true
+                }
+              },
+              "validation": {
+                "single_run_within_bound": true,
+                "geometry_matched": true,
+                "absolute_relative_error": 0.029550475293681266,
+                "allowed_relative_error": 0.05,
+                "stage_absolute_relative_errors": {
+                  "receiver": 0.029795534345362463,
+                  "generation_setup_other": 0.029423875843997718
+                },
+                "log_error": -0.029995887301795542,
+                "prediction_sha256": "3cc2e31102ce5c0fd5ba92e20613365560cacd6c79ecb8e31308859ef655ab93",
+                "actual_record_sha256": "4e8eb41b0231a50726c033b9822429ea65cc436dc8ab15430db675db1bc91993",
+                "predicted_full_seconds": 3.8815223471913245,
+                "actual_full_seconds": 3.7668215169687755,
+                "stage_validation_scope": "diagnostic only; qualification uses independent log-mean equivalence"
+              }
+            },
+            {
+              "source": "candidate",
+              "index": 15,
+              "kind": "qualify",
+              "frozen_prediction_sha256": "e6ae92fbed309a75c5447ef944da333275f1146972ec684ce83ac667abf249cf",
+              "actual": {
+                "argv_sha256": "ea81210a756b971bcf1f12be258aef4b2e8c3a5bfd1447d223a1c8a21a696326",
+                "seed": 855000,
+                "requested_seconds": 73728051.2,
+                "batch_trials": 1,
+                "samples_per_trial": 576799,
+                "total_rows": 576799,
+                "stage_seconds": {
+                  "receiver": 2.227746807,
+                  "generation_setup_other": 1.628151027,
+                  "process_startup_output": 0.004367829999598616
+                },
+                "full_test_wall_seconds": 3.8602656639995985,
+                "native_pipeline_seconds": 3.855897834,
+                "counter_summary": {
+                  "basis_values": 3460794,
+                  "blocks": 1127,
+                  "missing_samples": 0,
+                  "channel_samples": 576799
+                },
+                "coverage": {
+                  "complete": true,
+                  "encrypted": true,
+                  "two_ray": true,
+                  "selective": true,
+                  "sub_hz": true,
+                  "weak_signal": true
+                }
+              },
+              "validation": {
+                "single_run_within_bound": true,
+                "geometry_matched": true,
+                "absolute_relative_error": 0.005476377897735766,
+                "allowed_relative_error": 0.05,
+                "stage_absolute_relative_errors": {
+                  "receiver": 0.0030046803279849773,
+                  "generation_setup_other": 0.008763978663223515
+                },
+                "log_error": -0.0054914282278549775,
+                "prediction_sha256": "3cc2e31102ce5c0fd5ba92e20613365560cacd6c79ecb8e31308859ef655ab93",
+                "actual_record_sha256": "7047e35a166115f48457ed00d66aa80b0062ae7dee8bbf0212357f928496e312",
+                "predicted_full_seconds": 3.8815223471913245,
+                "actual_full_seconds": 3.8602656639995985,
+                "stage_validation_scope": "diagnostic only; qualification uses independent log-mean equivalence"
+              }
+            },
+            {
+              "source": "reference",
+              "index": 15,
+              "kind": "qualify",
+              "frozen_prediction_sha256": "e6ae92fbed309a75c5447ef944da333275f1146972ec684ce83ac667abf249cf",
+              "actual": {
+                "argv_sha256": "bcdd169439ac7ba1ecd115e31c42a9d497dd040d4becba2aceb79b8c16070fe8",
+                "seed": 855000,
+                "requested_seconds": 73728051.2,
+                "batch_trials": 1,
+                "samples_per_trial": 576799,
+                "total_rows": 576799,
+                "stage_seconds": {
+                  "receiver": 2.179753676,
+                  "generation_setup_other": 1.7046961500000002,
+                  "process_startup_output": 0.016823968996086514
+                },
+                "full_test_wall_seconds": 3.9012737949960865,
+                "native_pipeline_seconds": 3.884449826,
+                "counter_summary": {
+                  "basis_values": 3460794,
+                  "blocks": 1127,
+                  "missing_samples": 0,
+                  "channel_samples": 576799
+                },
+                "coverage": {
+                  "complete": true,
+                  "encrypted": true,
+                  "two_ray": true,
+                  "selective": true,
+                  "sub_hz": true,
+                  "weak_signal": true
+                }
+              },
+              "validation": {
+                "single_run_within_bound": true,
+                "geometry_matched": true,
+                "absolute_relative_error": 0.0181048058691402,
+                "allowed_relative_error": 0.05,
+                "stage_absolute_relative_errors": {
+                  "receiver": 0.019926015897763983,
+                  "generation_setup_other": 0.022845903645307985
+                },
+                "log_error": -0.018270703277715742,
+                "prediction_sha256": "717704af8acd05118131b33d3f472a6a4299b6a5b3b0b957b5a4b083a315d3ef",
+                "actual_record_sha256": "58c89d011c3a60dc4ea124ffca8fedfd5ba1236197deedd407296555c54713e5",
+                "predicted_full_seconds": 3.973207953675098,
+                "actual_full_seconds": 3.9012737949960865,
+                "stage_validation_scope": "diagnostic only; qualification uses independent log-mean equivalence"
+              }
+            },
+            {
+              "source": "reference",
+              "index": 16,
+              "kind": "qualify",
+              "frozen_prediction_sha256": "e6ae92fbed309a75c5447ef944da333275f1146972ec684ce83ac667abf249cf",
+              "actual": {
+                "argv_sha256": "79fa5dc4df71961f618248d5d8cac3733ac6f05686c499168f512ff04b68ceb2",
+                "seed": 856000,
+                "requested_seconds": 73728051.2,
+                "batch_trials": 1,
+                "samples_per_trial": 576799,
+                "total_rows": 576799,
+                "stage_seconds": {
+                  "receiver": 2.255362209,
+                  "generation_setup_other": 1.7599145850000002,
+                  "process_startup_output": 0.006536316040966383
+                },
+                "full_test_wall_seconds": 4.021813110040966,
+                "native_pipeline_seconds": 4.015276794,
+                "counter_summary": {
+                  "basis_values": 3460794,
+                  "blocks": 1127,
+                  "missing_samples": 0,
+                  "channel_samples": 576799
+                },
+                "coverage": {
+                  "complete": true,
+                  "encrypted": true,
+                  "two_ray": true,
+                  "selective": true,
+                  "sub_hz": true,
+                  "weak_signal": true
+                }
+              },
+              "validation": {
+                "single_run_within_bound": true,
+                "geometry_matched": true,
+                "absolute_relative_error": 0.012233227390202462,
+                "allowed_relative_error": 0.05,
+                "stage_absolute_relative_errors": {
+                  "receiver": 0.014069548364991469,
+                  "generation_setup_other": 0.008806024444366706
+                },
+                "log_error": 0.012159006161047616,
+                "prediction_sha256": "717704af8acd05118131b33d3f472a6a4299b6a5b3b0b957b5a4b083a315d3ef",
+                "actual_record_sha256": "039445af1e3e6c19a1a266981b5909646864b2717cccd6e92c80e2c2b0ec11bc",
+                "predicted_full_seconds": 3.973207953675098,
+                "actual_full_seconds": 4.021813110040966,
+                "stage_validation_scope": "diagnostic only; qualification uses independent log-mean equivalence"
+              }
+            },
+            {
+              "source": "candidate",
+              "index": 16,
+              "kind": "qualify",
+              "frozen_prediction_sha256": "e6ae92fbed309a75c5447ef944da333275f1146972ec684ce83ac667abf249cf",
+              "actual": {
+                "argv_sha256": "b985605e4da6774578870f89e4aa3481a6919284af64a63dcce0fd9fa72f30c9",
+                "seed": 856000,
+                "requested_seconds": 73728051.2,
+                "batch_trials": 1,
+                "samples_per_trial": 576799,
+                "total_rows": 576799,
+                "stage_seconds": {
+                  "receiver": 2.177162073,
+                  "generation_setup_other": 1.5972726430000002,
+                  "process_startup_output": 0.0045502750186603436
+                },
+                "full_test_wall_seconds": 3.7789849910186604,
+                "native_pipeline_seconds": 3.774434716,
+                "counter_summary": {
+                  "basis_values": 3460794,
+                  "blocks": 1127,
+                  "missing_samples": 0,
+                  "channel_samples": 576799
+                },
+                "coverage": {
+                  "complete": true,
+                  "encrypted": true,
+                  "two_ray": true,
+                  "selective": true,
+                  "sub_hz": true,
+                  "weak_signal": true
+                }
+              },
+              "validation": {
+                "single_run_within_bound": true,
+                "geometry_matched": true,
+                "absolute_relative_error": 0.026416788826904555,
+                "allowed_relative_error": 0.05,
+                "stage_absolute_relative_errors": {
+                  "receiver": 0.025643134072541922,
+                  "generation_setup_other": 0.02756307407507006
+                },
+                "log_error": -0.026771981527862455,
+                "prediction_sha256": "3cc2e31102ce5c0fd5ba92e20613365560cacd6c79ecb8e31308859ef655ab93",
+                "actual_record_sha256": "6d57bc17a056802786cb67ebf3cc99f98683d16bb9e158a4eb4ac63895717f8b",
+                "predicted_full_seconds": 3.8815223471913245,
+                "actual_full_seconds": 3.7789849910186604,
+                "stage_validation_scope": "diagnostic only; qualification uses independent log-mean equivalence"
+              }
+            }
+          ]
+        }
+      },
+      "current_validation": {
+        "confirmation_looks": [],
+        "confirmation_stop_reason": "inconclusive",
+        "conditional_model": {
+          "schema": "triad-performance-conditional-v1",
+          "status": "inconclusive",
+          "conditional_performance_pass_eligible": false,
+          "applicability_key": "101d8bc5d7aec0727e0a7084ad902249663ee83064a3dcfc4987535064e2d967",
+          "sentinel_id": "native-full-sentinel:900000",
+          "plan_sha256": "40dc039e980bf1ddee6c193013ad4d2dcf3595719f5e354ca84518bb839aeb11",
+          "frozen_contract_verified": true,
+          "historical_status": "conditional_contract_ready",
+          "checks": {
+            "reference": {
+              "log_actual_over_predicted": -0.00031704518538797413,
+              "training_timing_log_half_width": 0.04460920620476669,
+              "sentinel_residual_timing_interval": [
+                -0.04492625139015466,
+                0.04429216101937872
+              ],
+              "pre_sentinel_historical_model_log_envelope": 0.09531017980432487,
+              "model_plus_timing_uncertainty_for_sentinel": 0.13991938600909154,
+              "model_plus_timing_uncertainty_exceeds_maximum": false,
+              "classification": "within_frozen_envelope"
+            },
+            "candidate": {
+              "log_actual_over_predicted": -0.029583220540100656,
+              "training_timing_log_half_width": 0.045312196777229787,
+              "sentinel_residual_timing_interval": [
+                -0.07489541731733045,
+                0.01572897623712913
+              ],
+              "pre_sentinel_historical_model_log_envelope": 0.166447167113186,
+              "model_plus_timing_uncertainty_for_sentinel": 0.21175936389041577,
+              "model_plus_timing_uncertainty_exceeds_maximum": true,
+              "classification": "inconclusive_training_uncertainty"
+            },
+            "paired": {
+              "log_actual_over_predicted": -0.029266175354712588,
+              "training_timing_log_half_width": 0.06519259661568357,
+              "sentinel_residual_timing_interval": [
+                -0.09445877197039615,
+                0.03592642126097098
+              ],
+              "pre_sentinel_historical_model_log_envelope": 0.16219332073808002,
+              "model_plus_timing_uncertainty_for_sentinel": 0.22738591735376357,
+              "model_plus_timing_uncertainty_exceeds_maximum": true,
+              "classification": "inconclusive_training_uncertainty"
+            }
+          },
+          "model_log_error_envelopes": {
+            "reference": 0.09531017980432487,
+            "candidate": 0.166447167113186,
+            "paired": 0.16219332073808002
+          },
+          "future_coverage_qualified": false,
+          "sentinel_changes_model_envelope": false,
+          "focused_qualification_required": false,
+          "timing_and_model_uncertainty_separate": true,
+          "scope": "one full paired endpoint conditioned on matching frozen history/signature; not an empirical future-coverage claim"
+        },
+        "conditional_model_log_bounds": null,
+        "qualification": null,
+        "holds": {
+          "record_count": 2,
+          "count_by_source": {
+            "reference": 1,
+            "candidate": 1
+          },
+          "recorded_scalar_observations": [
+            {
+              "source": "reference",
+              "index": 0,
+              "kind": "routine",
+              "frozen_prediction_sha256": "ddc1596c922303a35b08fbb26f0653802f4648c8328530e88ab27d8c6107fc0c",
+              "actual": {
+                "argv_sha256": "8ed7b4e5eb7f56437c47db3919bfe816777619649a30ceee18d2ab546215c6f8",
+                "seed": 900000,
+                "requested_seconds": 73728051.2,
+                "batch_trials": 1,
+                "samples_per_trial": 576799,
+                "total_rows": 576799,
+                "stage_seconds": {
+                  "receiver": 2.258867037,
+                  "generation_setup_other": 1.7573443720000004,
+                  "process_startup_output": 0.0050671600091547475
+                },
+                "full_test_wall_seconds": 4.021278569009155,
+                "native_pipeline_seconds": 4.016211409,
+                "counter_summary": {
+                  "basis_values": 3460794,
+                  "blocks": 1127,
+                  "missing_samples": 0,
+                  "channel_samples": 576799
+                },
+                "coverage": {
+                  "complete": true,
+                  "encrypted": true,
+                  "two_ray": true,
+                  "selective": true,
+                  "sub_hz": true,
+                  "weak_signal": true
+                }
+              },
+              "validation": {
+                "single_run_within_bound": true,
+                "geometry_matched": true,
+                "absolute_relative_error": 0.00031699493187422077,
+                "allowed_relative_error": 0.05,
+                "stage_absolute_relative_errors": {
+                  "receiver": 0.002123293715216638,
+                  "generation_setup_other": 0.001523946981341902
+                },
+                "log_error": -0.00031704518538797413,
+                "prediction_sha256": "97103a4c544795f7fadca3b57e85003e29107f20c27aaf9a199d53b721af50b7",
+                "actual_record_sha256": "f9216d3511f6769c7a124db46a15b1d47bcdf523c8f473537be902240f9ce654",
+                "predicted_full_seconds": 4.022553698144659,
+                "actual_full_seconds": 4.021278569009155,
+                "stage_validation_scope": "diagnostic only; qualification uses independent log-mean equivalence"
+              }
+            },
+            {
+              "source": "candidate",
+              "index": 0,
+              "kind": "routine",
+              "frozen_prediction_sha256": "ddc1596c922303a35b08fbb26f0653802f4648c8328530e88ab27d8c6107fc0c",
+              "actual": {
+                "argv_sha256": "85cc3c41e520ccc243e4ed73ce953d4148e72bb00efdd97c4d77200c13225fcf",
+                "seed": 900000,
+                "requested_seconds": 73728051.2,
+                "batch_trials": 1,
+                "samples_per_trial": 576799,
+                "total_rows": 576799,
+                "stage_seconds": {
+                  "receiver": 2.190067502,
+                  "generation_setup_other": 1.626014326,
+                  "process_startup_output": 0.0045150649687513145
+                },
+                "full_test_wall_seconds": 3.8205968929687515,
+                "native_pipeline_seconds": 3.816081828,
+                "counter_summary": {
+                  "basis_values": 3460794,
+                  "blocks": 1127,
+                  "missing_samples": 0,
+                  "channel_samples": 576799
+                },
+                "coverage": {
+                  "complete": true,
+                  "encrypted": true,
+                  "two_ray": true,
+                  "selective": true,
+                  "sub_hz": true,
+                  "weak_signal": true
+                }
+              },
+              "validation": {
+                "single_run_within_bound": true,
+                "geometry_matched": true,
+                "absolute_relative_error": 0.02914992038876891,
+                "allowed_relative_error": 0.05,
+                "stage_absolute_relative_errors": {
+                  "receiver": 0.03067486511340655,
+                  "generation_setup_other": 0.027406505826754614
+                },
+                "log_error": -0.029583220540100656,
+                "prediction_sha256": "e505654cda5a6eade424cd00ed6342ee9c2309efecaed8a24783b12f557211be",
+                "actual_record_sha256": "fda9404fac514692af025816909767869c5ccb58c68b80cebddfa8ff3e79e48e",
+                "predicted_full_seconds": 3.9353108921808793,
+                "actual_full_seconds": 3.8205968929687515,
+                "stage_validation_scope": "diagnostic only; qualification uses independent log-mean equivalence"
+              }
+            }
+          ]
+        }
+      },
+      "current_frozen_predictions": [
+        {
+          "index": 32,
+          "identities": {
+            "reference": {
+              "binary_sha256": "9cdf82f396d9be9a7d11b66b45b254e5f18b3857f27b08aed58430dce6d8ea47",
+              "environment": {
+                "system": "Linux",
+                "release": "7.2.6+deb13-amd64",
+                "machine": "x86_64",
+                "cpu_model": "AMD Ryzen 5 PRO 5650U with Radeon Graphics",
+                "threads": 1,
+                "affinity_cpu_count": 2,
+                "affinity_cpus": [
+                  2,
+                  4
+                ],
+                "affinity_topology": [
+                  {
+                    "cpu": 2,
+                    "core_id": "1",
+                    "physical_package_id": "0",
+                    "thread_siblings_list": "2-3"
+                  },
+                  {
+                    "cpu": 4,
+                    "core_id": "2",
+                    "physical_package_id": "0",
+                    "thread_siblings_list": "4-5"
+                  }
+                ],
+                "quota_cores": null,
+                "quota_source": null
+              },
+              "case_sha256": "230871e394dadd2e343eda462592cc7e305ff5d4e5524ebfcb0fcce83995f29b",
+              "adapter_sha256": "d1384ad557dd10987f37e631e1eaf57fdf8b9d2934b0cbc3b01a98643a5e116c",
+              "adaptive_protocol_sha256": "3ad99d54b955e735f0db832bd6ac3afe91b016d993de80909827efd491174106",
+              "protocol": "complete-native-duration-siblings-v4",
+              "arithmetic": "fp64",
+              "measurement_contract": "triad-native-complete-cli-affine-v1",
+              "timing_boundary": "external complete CLI test including startup and output; stages inside native trial separately retained"
+            },
+            "candidate": {
+              "binary_sha256": "862b0431f04a3973ce15e7cff9b9959ed45ca36d626e401352db5cf8630c9c6b",
+              "environment": {
+                "system": "Linux",
+                "release": "7.2.6+deb13-amd64",
+                "machine": "x86_64",
+                "cpu_model": "AMD Ryzen 5 PRO 5650U with Radeon Graphics",
+                "threads": 1,
+                "affinity_cpu_count": 2,
+                "affinity_cpus": [
+                  2,
+                  4
+                ],
+                "affinity_topology": [
+                  {
+                    "cpu": 2,
+                    "core_id": "1",
+                    "physical_package_id": "0",
+                    "thread_siblings_list": "2-3"
+                  },
+                  {
+                    "cpu": 4,
+                    "core_id": "2",
+                    "physical_package_id": "0",
+                    "thread_siblings_list": "4-5"
+                  }
+                ],
+                "quota_cores": null,
+                "quota_source": null
+              },
+              "case_sha256": "230871e394dadd2e343eda462592cc7e305ff5d4e5524ebfcb0fcce83995f29b",
+              "adapter_sha256": "d1384ad557dd10987f37e631e1eaf57fdf8b9d2934b0cbc3b01a98643a5e116c",
+              "adaptive_protocol_sha256": "3ad99d54b955e735f0db832bd6ac3afe91b016d993de80909827efd491174106",
+              "protocol": "complete-native-duration-siblings-v4",
+              "arithmetic": "fp64",
+              "measurement_contract": "triad-native-complete-cli-affine-v1",
+              "timing_boundary": "external complete CLI test including startup and output; stages inside native trial separately retained"
+            }
+          },
+          "case_sha256": "230871e394dadd2e343eda462592cc7e305ff5d4e5524ebfcb0fcce83995f29b",
+          "predictions": {
+            "reference": {
+              "target_total_rows": 576799,
+              "regime_sha256": "8e011969b0d2c2e2506094fe90692c8c21eba15cfe3d10ac9478f4bc36651b61",
+              "full_test_wall_seconds": 4.022553698144659,
+              "stage_seconds": {
+                "receiver": 2.2636734806748193,
+                "generation_setup_other": 1.7546703474207983,
+                "process_startup_output": 0.004209870049040549
+              },
+              "outer_training_prediction_sha256": [
+                "b07077eb1606f1e99e02891e12edf8a6bc3c6c2b61cf791c70dd16925e1ff6d3",
+                "e890731d7e41d16e53d3811d4c41e024ab0cd5c443b2e1963a5d8ab877a059ef",
+                "ff0fbe2eae30eb152358260ab27d79c3d9e06987d5882d27c9f81b1279e14796",
+                "1db107a11ade9f774556322bf19e2ac385972ff8e0d611e7367980c473bb1495",
+                "d52cc333ac887c5169b86641553e2fae8ce0eaafd64ebaf030d7fed9e3a7501e",
+                "45990e0703ce319418d95af6d6cc809106ec87aac7d35cfa1f3d3589903ea679",
+                "8856d3b86f5e9209da713894c7a9bc42f2dd579da96336bddb19afc513798ccd",
+                "c815552b8ad03be76ff118d0ca91666d79e2959045f88a938f11165763fff7a6",
+                "7e0af7c80bb248fb783892f0d0cb7fbdb69e84caf9268b89588918d213dad5a8",
+                "348bdc2209e68678c36cca03a34390f8db56261a0c1686c0bca52378e88dbe88",
+                "2f94d541b22a0885d15ab14188151a70a281bd4106ae4966b35542ff01ee1491",
+                "33476aab4f96263e2b4d93cad9a142bea1cdde2c98982843268e7f963253fb7f",
+                "6b9e08151e11010e704501ab83d8d4dc088a7edf0f204205fcd219e2a964f045",
+                "d7bbfcda1f8075d700ac6f381f1690d89dea296c312f6b7ea562f4e0d57f7e6b",
+                "695fee53c5cff132844e48be9aacfcba1e4dbcaccc60792f39a5681db56f183e",
+                "3d66f2f4a7a8913320ddb23face22babbc328f028ad86426baf5e5512972fa85",
+                "3ecce3f096ef2f082769b75f5d9720eeeff4f10fc425a0cb9a88584e4418a6da",
+                "ebf89baa4a6e1f99e82b056afdf6789d09c4961ae4fd0dfc601f915a17365a12",
+                "9bd04ea0af1421d0e7a3937ac4c148582befb937df7c77c86ca9b7947dc975eb",
+                "d552abf6f62f0bc44f14ce07a7c61be036b87f8ea0056e4f81e6844ac886bb5b",
+                "19b43f94e97620070e26f51cd403e3a98da7b387beb588589881c5e711282cab",
+                "3b1f01d21699a61592698428e153bb09a2d09de028ef37b87e837bf0ba7936aa",
+                "d2904158e90ab261613ddb68e2101160020f9877a663172821b9ca117e4fb03d",
+                "fca10edcbff5d4d11b7e296c725bb70cd1d62dcd5516e69dc046e0195b049edc",
+                "c5f2703cb4cbff7e5364744844d98e1930ec31e705db8453c2e26aa27e81be9a",
+                "028b252f8e4f386a6cc0228db62d1a0dcc7d74569284e77c56ead583400b0bc3",
+                "beb0acf6530d1150cc7932b067f724cf399375819dcba039771e65b8aa3a5e8a",
+                "bb50263576fd36cd87f463b3bfccc8713cdb48e7e7b80f0b746fa091985eeaa3",
+                "8bf0db52ddc3b92613dffe7458c2c3f7361ceee82082218c7b28e666aa005c8f",
+                "efd4856c43990fe2da844e51eea0a2f37d9744f4d8c804510e715407d00dcc29",
+                "7cee4585af6415cf3c49ff12460b5a7f44d2956fbbe7a1fbb584b330dd61d28a",
+                "b5a5991a1bc488cad9d7af52f330a18d02e9afc02a1b00e8a745c23470cc4954",
+                "0172d42516b6e0c2981da27012b2c755bca6bf8fb6b5a764ccf74cabb675c5c1"
+              ],
+              "outer_training_count": 33,
+              "method": "geometric mean of predeclared outer full-test forecasts; normalized pooled stage shares"
+            },
+            "candidate": {
+              "target_total_rows": 576799,
+              "regime_sha256": "8e011969b0d2c2e2506094fe90692c8c21eba15cfe3d10ac9478f4bc36651b61",
+              "full_test_wall_seconds": 3.9353108921808793,
+              "stage_seconds": {
+                "receiver": 2.2593734786999287,
+                "generation_setup_other": 1.6718334388841414,
+                "process_startup_output": 0.004103974596809155
+              },
+              "outer_training_prediction_sha256": [
+                "fda26f61382f53ca3ab06702656302536018cb1447fbc3fb2061858beb9fe4cf",
+                "7c19eebd7660283e2e327bfca633fa4a429df5316ac82f3424e06deb4c60e78e",
+                "07077546d106b503b1a3c5a2f31645a66865af3923bab66ca51aae44e78d1e3d",
+                "0c1dff9b447f7d2f922658ecacd3f5dfc730b8cbb10305c7e46591729e28d3f5",
+                "d75fad9a16883eabbe5a840237a3a1a93de110ac77943e01735d9442b2a69fc7",
+                "a7725d3e6480fa25f174036d57932a729857a7df7ecb7c62cb1ce334d1f12787",
+                "92e2c02d8a57185f7fba2d924131806ab8e9e1b2d7c550254a5882f69b271735",
+                "f52ac026c5d7af8eedf9e35e633de13890183240f32bc1217e028cfcc2027486",
+                "4d466341c10fab6f6fa04125dab10deafb947b71dc37afb59b5483dfbff1e7ec",
+                "e31c0b394536ce60526f55f6673e79ad843a5bcb8b98c81859629dba3d14f65d",
+                "e2531f41c20ce9d5a58f28c0c8e0eac68fb3d9b11be8a704d0ee215dc3187867",
+                "9ed5d995449fb167e2346fa03083fca3d3d62c0cc4d25da2a956cb8966edfb83",
+                "8c21d68c06fb860dc0ef67612dc1d4dc07ed6f002851c3283f520dc3b5a70219",
+                "af3aaa5207d8b4a55688775da859db3e9193530c93908630439727488a240802",
+                "1e01730972222b3af88bdded4c4c424b75482a6edbbafc00f9e7a48a19451d72",
+                "4d22bf112d426191292c64385b99bd2e115e0590e07738d601a9987e8fb048cb",
+                "8408b9c683503afa52bff83f1b13bf860ebb0bb9b87211ff0c4e7090f520dff9",
+                "a236e90090c848beab19f80b148402592ccbb8ec725b58374939a786d216c3d6",
+                "239090973ee99588a3ef41f6772c0fc48ca4f964d2e39dba8f2661382f818a6a",
+                "bba5ef2bc8daeac6a61a0786a1c98caad9a19fed3b0e12f194bdecdc8c1bf77b",
+                "a48d73a67bdf1343424c37881ef6e47c1764879829f07edc41a999bccbfe3004",
+                "174ffca90594b57147690726e0c719e72fd083e34e6a5ebbb8cf0f6c1e1c5da1",
+                "2526a7130ad4305867625ba8e30b8b4f8140f3bb23d32ef46c99d5b74abf186b",
+                "6dd4d8269e4cb76397dadf63630b41ecba79798580fdfb07a1e1edcaa7823e46",
+                "46858f19e829ce01382a53193986346cb59766561a2c4ddb3a00f6db5080ec25",
+                "704fdc220caee3932cb1a808c1cc81364d21ede09802fcb1da2218bfc0edc341",
+                "2ab258309517a69c6f489ad71cd9769b156d737e57a9475a9c9749283d65d258",
+                "6cf5a294707bf99edce1be0410d4390c07ebb2fc9687eb951b1055e78f82d696",
+                "2ecd961a84a66d94e6f0b25d5de0321dda23e5df5b6f1e4c8b7055d0e974036b",
+                "8cce088651df5c434e521e460b595bf1194f0fd3376be6a83da0038ce763a2a1",
+                "6ce764cf8a68b61d6d13624dd2791655035d6afd1938e1bddda4f9180e87914d",
+                "98140557da9d3cbae20ad143716d3b37d423713c8823643055d67ae21acefc76",
+                "f673814340aeefd8cafe4ad397adba16fe2202b511b881f26473df60b3d03fd8"
+              ],
+              "outer_training_count": 33,
+              "method": "geometric mean of predeclared outer full-test forecasts; normalized pooled stage shares"
+            }
+          },
+          "validation_predictions": {
+            "reference": {
+              "target_total_rows": 576799,
+              "regime_sha256": "8e011969b0d2c2e2506094fe90692c8c21eba15cfe3d10ac9478f4bc36651b61",
+              "full_test_wall_seconds": 4.022553698144659,
+              "stage_seconds": {
+                "receiver": 2.2636734806748193,
+                "generation_setup_other": 1.7546703474207983,
+                "process_startup_output": 0.004209870049040549
+              },
+              "outer_training_prediction_sha256": [
+                "b07077eb1606f1e99e02891e12edf8a6bc3c6c2b61cf791c70dd16925e1ff6d3",
+                "e890731d7e41d16e53d3811d4c41e024ab0cd5c443b2e1963a5d8ab877a059ef",
+                "ff0fbe2eae30eb152358260ab27d79c3d9e06987d5882d27c9f81b1279e14796",
+                "1db107a11ade9f774556322bf19e2ac385972ff8e0d611e7367980c473bb1495",
+                "d52cc333ac887c5169b86641553e2fae8ce0eaafd64ebaf030d7fed9e3a7501e",
+                "45990e0703ce319418d95af6d6cc809106ec87aac7d35cfa1f3d3589903ea679",
+                "8856d3b86f5e9209da713894c7a9bc42f2dd579da96336bddb19afc513798ccd",
+                "c815552b8ad03be76ff118d0ca91666d79e2959045f88a938f11165763fff7a6",
+                "7e0af7c80bb248fb783892f0d0cb7fbdb69e84caf9268b89588918d213dad5a8",
+                "348bdc2209e68678c36cca03a34390f8db56261a0c1686c0bca52378e88dbe88",
+                "2f94d541b22a0885d15ab14188151a70a281bd4106ae4966b35542ff01ee1491",
+                "33476aab4f96263e2b4d93cad9a142bea1cdde2c98982843268e7f963253fb7f",
+                "6b9e08151e11010e704501ab83d8d4dc088a7edf0f204205fcd219e2a964f045",
+                "d7bbfcda1f8075d700ac6f381f1690d89dea296c312f6b7ea562f4e0d57f7e6b",
+                "695fee53c5cff132844e48be9aacfcba1e4dbcaccc60792f39a5681db56f183e",
+                "3d66f2f4a7a8913320ddb23face22babbc328f028ad86426baf5e5512972fa85",
+                "3ecce3f096ef2f082769b75f5d9720eeeff4f10fc425a0cb9a88584e4418a6da",
+                "ebf89baa4a6e1f99e82b056afdf6789d09c4961ae4fd0dfc601f915a17365a12",
+                "9bd04ea0af1421d0e7a3937ac4c148582befb937df7c77c86ca9b7947dc975eb",
+                "d552abf6f62f0bc44f14ce07a7c61be036b87f8ea0056e4f81e6844ac886bb5b",
+                "19b43f94e97620070e26f51cd403e3a98da7b387beb588589881c5e711282cab",
+                "3b1f01d21699a61592698428e153bb09a2d09de028ef37b87e837bf0ba7936aa",
+                "d2904158e90ab261613ddb68e2101160020f9877a663172821b9ca117e4fb03d",
+                "fca10edcbff5d4d11b7e296c725bb70cd1d62dcd5516e69dc046e0195b049edc",
+                "c5f2703cb4cbff7e5364744844d98e1930ec31e705db8453c2e26aa27e81be9a",
+                "028b252f8e4f386a6cc0228db62d1a0dcc7d74569284e77c56ead583400b0bc3",
+                "beb0acf6530d1150cc7932b067f724cf399375819dcba039771e65b8aa3a5e8a",
+                "bb50263576fd36cd87f463b3bfccc8713cdb48e7e7b80f0b746fa091985eeaa3",
+                "8bf0db52ddc3b92613dffe7458c2c3f7361ceee82082218c7b28e666aa005c8f",
+                "efd4856c43990fe2da844e51eea0a2f37d9744f4d8c804510e715407d00dcc29",
+                "7cee4585af6415cf3c49ff12460b5a7f44d2956fbbe7a1fbb584b330dd61d28a",
+                "b5a5991a1bc488cad9d7af52f330a18d02e9afc02a1b00e8a745c23470cc4954",
+                "0172d42516b6e0c2981da27012b2c755bca6bf8fb6b5a764ccf74cabb675c5c1"
+              ],
+              "outer_training_count": 33,
+              "method": "geometric mean of predeclared outer full-test forecasts; normalized pooled stage shares"
+            },
+            "candidate": {
+              "target_total_rows": 576799,
+              "regime_sha256": "8e011969b0d2c2e2506094fe90692c8c21eba15cfe3d10ac9478f4bc36651b61",
+              "full_test_wall_seconds": 3.9353108921808793,
+              "stage_seconds": {
+                "receiver": 2.2593734786999287,
+                "generation_setup_other": 1.6718334388841414,
+                "process_startup_output": 0.004103974596809155
+              },
+              "outer_training_prediction_sha256": [
+                "fda26f61382f53ca3ab06702656302536018cb1447fbc3fb2061858beb9fe4cf",
+                "7c19eebd7660283e2e327bfca633fa4a429df5316ac82f3424e06deb4c60e78e",
+                "07077546d106b503b1a3c5a2f31645a66865af3923bab66ca51aae44e78d1e3d",
+                "0c1dff9b447f7d2f922658ecacd3f5dfc730b8cbb10305c7e46591729e28d3f5",
+                "d75fad9a16883eabbe5a840237a3a1a93de110ac77943e01735d9442b2a69fc7",
+                "a7725d3e6480fa25f174036d57932a729857a7df7ecb7c62cb1ce334d1f12787",
+                "92e2c02d8a57185f7fba2d924131806ab8e9e1b2d7c550254a5882f69b271735",
+                "f52ac026c5d7af8eedf9e35e633de13890183240f32bc1217e028cfcc2027486",
+                "4d466341c10fab6f6fa04125dab10deafb947b71dc37afb59b5483dfbff1e7ec",
+                "e31c0b394536ce60526f55f6673e79ad843a5bcb8b98c81859629dba3d14f65d",
+                "e2531f41c20ce9d5a58f28c0c8e0eac68fb3d9b11be8a704d0ee215dc3187867",
+                "9ed5d995449fb167e2346fa03083fca3d3d62c0cc4d25da2a956cb8966edfb83",
+                "8c21d68c06fb860dc0ef67612dc1d4dc07ed6f002851c3283f520dc3b5a70219",
+                "af3aaa5207d8b4a55688775da859db3e9193530c93908630439727488a240802",
+                "1e01730972222b3af88bdded4c4c424b75482a6edbbafc00f9e7a48a19451d72",
+                "4d22bf112d426191292c64385b99bd2e115e0590e07738d601a9987e8fb048cb",
+                "8408b9c683503afa52bff83f1b13bf860ebb0bb9b87211ff0c4e7090f520dff9",
+                "a236e90090c848beab19f80b148402592ccbb8ec725b58374939a786d216c3d6",
+                "239090973ee99588a3ef41f6772c0fc48ca4f964d2e39dba8f2661382f818a6a",
+                "bba5ef2bc8daeac6a61a0786a1c98caad9a19fed3b0e12f194bdecdc8c1bf77b",
+                "a48d73a67bdf1343424c37881ef6e47c1764879829f07edc41a999bccbfe3004",
+                "174ffca90594b57147690726e0c719e72fd083e34e6a5ebbb8cf0f6c1e1c5da1",
+                "2526a7130ad4305867625ba8e30b8b4f8140f3bb23d32ef46c99d5b74abf186b",
+                "6dd4d8269e4cb76397dadf63630b41ecba79798580fdfb07a1e1edcaa7823e46",
+                "46858f19e829ce01382a53193986346cb59766561a2c4ddb3a00f6db5080ec25",
+                "704fdc220caee3932cb1a808c1cc81364d21ede09802fcb1da2218bfc0edc341",
+                "2ab258309517a69c6f489ad71cd9769b156d737e57a9475a9c9749283d65d258",
+                "6cf5a294707bf99edce1be0410d4390c07ebb2fc9687eb951b1055e78f82d696",
+                "2ecd961a84a66d94e6f0b25d5de0321dda23e5df5b6f1e4c8b7055d0e974036b",
+                "8cce088651df5c434e521e460b595bf1194f0fd3376be6a83da0038ce763a2a1",
+                "6ce764cf8a68b61d6d13624dd2791655035d6afd1938e1bddda4f9180e87914d",
+                "98140557da9d3cbae20ad143716d3b37d423713c8823643055d67ae21acefc76",
+                "f673814340aeefd8cafe4ad397adba16fe2202b511b881f26473df60b3d03fd8"
+              ],
+              "outer_training_count": 33,
+              "method": "geometric mean of predeclared outer full-test forecasts; normalized pooled stage shares"
+            }
+          },
+          "validation_duration_seconds": 73728051.2,
+          "model_confirmation_policy": null,
+          "validation_plan": {
+            "initial_pair_wall_estimate_seconds": 7.801061314478845,
+            "reserved_full_pairs": 1,
+            "scope": "reserve one independent full endpoint"
+          },
+          "frozen_at_unix_seconds": 1793736974.6726837,
+          "historical_anchor_sha256": "8a11b31eac202949cd4c4a489b68215e1d7f022979a5c8634676ebef6f290439",
+          "conditional_model": {
+            "schema": "triad-performance-conditional-v1",
+            "status": "conditional_contract_ready",
+            "applicability_key": "101d8bc5d7aec0727e0a7084ad902249663ee83064a3dcfc4987535064e2d967",
+            "historical_anchor_ids": [
+              "8a11b31eac202949cd4c4a489b68215e1d7f022979a5c8634676ebef6f290439:840000",
+              "8a11b31eac202949cd4c4a489b68215e1d7f022979a5c8634676ebef6f290439:841000",
+              "8a11b31eac202949cd4c4a489b68215e1d7f022979a5c8634676ebef6f290439:842000",
+              "8a11b31eac202949cd4c4a489b68215e1d7f022979a5c8634676ebef6f290439:843000",
+              "8a11b31eac202949cd4c4a489b68215e1d7f022979a5c8634676ebef6f290439:844000",
+              "8a11b31eac202949cd4c4a489b68215e1d7f022979a5c8634676ebef6f290439:845000",
+              "8a11b31eac202949cd4c4a489b68215e1d7f022979a5c8634676ebef6f290439:846000",
+              "8a11b31eac202949cd4c4a489b68215e1d7f022979a5c8634676ebef6f290439:847000",
+              "8a11b31eac202949cd4c4a489b68215e1d7f022979a5c8634676ebef6f290439:848000",
+              "8a11b31eac202949cd4c4a489b68215e1d7f022979a5c8634676ebef6f290439:849000",
+              "8a11b31eac202949cd4c4a489b68215e1d7f022979a5c8634676ebef6f290439:850000",
+              "8a11b31eac202949cd4c4a489b68215e1d7f022979a5c8634676ebef6f290439:851000",
+              "8a11b31eac202949cd4c4a489b68215e1d7f022979a5c8634676ebef6f290439:852000",
+              "8a11b31eac202949cd4c4a489b68215e1d7f022979a5c8634676ebef6f290439:853000",
+              "8a11b31eac202949cd4c4a489b68215e1d7f022979a5c8634676ebef6f290439:854000",
+              "8a11b31eac202949cd4c4a489b68215e1d7f022979a5c8634676ebef6f290439:855000",
+              "8a11b31eac202949cd4c4a489b68215e1d7f022979a5c8634676ebef6f290439:856000"
+            ],
+            "training_pair_ids": [
+              "native-training:1000000",
+              "native-training:1001000",
+              "native-training:1002000",
+              "native-training:1003000",
+              "native-training:1004000",
+              "native-training:1005000",
+              "native-training:1006000",
+              "native-training:1007000",
+              "native-training:1008000",
+              "native-training:1009000",
+              "native-training:1010000",
+              "native-training:1011000",
+              "native-training:1012000",
+              "native-training:1013000",
+              "native-training:1014000",
+              "native-training:1015000",
+              "native-training:1016000",
+              "native-training:1017000",
+              "native-training:1018000",
+              "native-training:1019000",
+              "native-training:1020000",
+              "native-training:1021000",
+              "native-training:1022000",
+              "native-training:1023000",
+              "native-training:1024000",
+              "native-training:1025000",
+              "native-training:1026000",
+              "native-training:1027000",
+              "native-training:1028000",
+              "native-training:1029000",
+              "native-training:1030000",
+              "native-training:1031000",
+              "native-training:1032000"
+            ],
+            "historical_log_errors": {
+              "reference": [
+                0.007176334536383016,
+                0.00995916368939455,
+                -0.019241412758979105,
+                0.011869305528565806,
+                0.00425384637510597,
+                -0.027805681686961674,
+                -0.021519655980492564,
+                0.031566421130341304,
+                0.03333601348030076,
+                -0.032306337258484155,
+                0.04121369831650645,
+                0.023580841173115152,
+                -0.035796550517543685,
+                -0.020338418981190647,
+                -0.006481539570183941,
+                -0.018270703277715742,
+                0.012159006161047616
+              ],
+              "candidate": [
+                0.022006599839885392,
+                0.02869960630807714,
+                -0.017737490159748088,
+                -0.016119868905838004,
+                0.166447167113186,
+                -0.026922608187452884,
+                0.03011253937514466,
+                -0.00012376095432178655,
+                -0.01368473300957877,
+                -0.009715999816250681,
+                -0.022082397456698637,
+                -0.0034137098347028763,
+                -0.01121940846732286,
+                -0.01121478888945949,
+                -0.029995887301795542,
+                -0.0054914282278549775,
+                -0.026771981527862455
+              ],
+              "paired": [
+                0.014830265303502376,
+                0.018740442618682587,
+                0.0015039225992310168,
+                -0.02798917443440381,
+                0.16219332073808002,
+                0.0008830734995087901,
+                0.05163219535563722,
+                -0.03169018208466309,
+                -0.04702074648987953,
+                0.022590337442233474,
+                -0.0632960957732051,
+                -0.02699455100781803,
+                0.024577142050220824,
+                0.009123630091731156,
+                -0.023514347731611603,
+                0.012779275049860764,
+                -0.03893098768891007
+              ]
+            },
+            "historical_qualification": {
+              "reference": {
+                "status": "validated",
+                "mean_log_residual": -0.0003909217435759343,
+                "log_residual_interval": [
+                  -0.015034732158338854,
+                  0.014252888671186986
+                ],
+                "confidence": 0.975,
+                "relative_mean_error_interval": [
+                  -0.0149222748666305,
+                  0.014354945380116856
+                ],
+                "allowed_relative_mean_error": [
+                  -0.1,
+                  0.1
+                ],
+                "sample_count": 17,
+                "scope": "conditional on the frozen forecast and independent stationary normal holdout log times"
+              },
+              "candidate": {
+                "status": "validated",
+                "mean_log_residual": 0.003104226464553302,
+                "log_residual_interval": [
+                  -0.024435083530433263,
+                  0.030643536459539863
+                ],
+                "confidence": 0.975,
+                "relative_mean_error_interval": [
+                  -0.02413896368449426,
+                  0.031117882437588326
+                ],
+                "allowed_relative_mean_error": [
+                  -0.1,
+                  0.1
+                ],
+                "sample_count": 17,
+                "scope": "conditional on the frozen forecast and independent stationary normal holdout log times"
+              },
+              "paired": {
+                "status": "validated",
+                "mean_log_residual": 0.0034951482081292356,
+                "log_residual_interval": [
+                  -0.027050830465067812,
+                  0.03404112688132628
+                ],
+                "confidence": 0.975,
+                "relative_mean_error_interval": [
+                  -0.026688233622815853,
+                  0.03462715684143153
+                ],
+                "allowed_relative_mean_error": [
+                  -0.1,
+                  0.1
+                ],
+                "sample_count": 17,
+                "scope": "conditional on the frozen forecast and independent stationary normal holdout log times"
+              }
+            },
+            "model_log_error_envelopes": {
+              "reference": 0.09531017980432487,
+              "candidate": 0.166447167113186,
+              "paired": 0.16219332073808002
+            },
+            "paired_model_log_envelope": 0.16219332073808002,
+            "model_relative_error_floor": 0.1,
+            "maximum_model_error_relative": 0.2,
+            "maximum_model_error_log_envelope": 0.18232155679395462,
+            "training_forecasts": {
+              "reference": {
+                "point_seconds": 4.022553698144659,
+                "timing_mean_confidence_interval_seconds": [
+                  3.8470543171994023,
+                  4.206059213179175
+                ],
+                "timing_log_half_width": 0.04460920620476669,
+                "replicate_count": 33,
+                "timing_confidence": 0.999702380952381,
+                "scope": "conditional Student-t confidence interval for the mean of independent training prediction runtimes"
+              },
+              "candidate": {
+                "point_seconds": 3.9353108921808793,
+                "timing_mean_confidence_interval_seconds": [
+                  3.7609729562149847,
+                  4.1177301720624815
+                ],
+                "timing_log_half_width": 0.045312196777229787,
+                "replicate_count": 33,
+                "timing_confidence": 0.999702380952381,
+                "scope": "conditional Student-t confidence interval for the mean of independent training prediction runtimes"
+              },
+              "paired": {
+                "point_seconds": 0.9783115869891263,
+                "timing_mean_confidence_interval_seconds": [
+                  0.9165674124305245,
+                  1.0442151316499377
+                ],
+                "timing_log_half_width": 0.06519259661568357,
+                "replicate_count": 33,
+                "timing_confidence": 0.999702380952381,
+                "scope": "conditional Student-t confidence interval for the mean of independent training prediction runtimes"
+              }
+            },
+            "confirmation_policy": {
+              "looks": [
+                3,
+                5,
+                9,
+                17
+              ],
+              "family_alpha": 0.1,
+              "per_look_two_sided_alpha": 0.025,
+              "confidence": 0.975,
+              "confidence_sidedness": "two-sided",
+              "scope": "Bonferroni family-wise control across the four predeclared looks for one error family; not simultaneous across reference, candidate, paired metrics, or cases",
+              "metric": "mean log(actual full-run time / frozen predicted full-run time)",
+              "cross_metric_or_case_simultaneous_claim": false
+            },
+            "timing_and_model_uncertainty_separate": true,
+            "future_coverage_qualified": false,
+            "engineering_assumptions": [
+              "historical forecast residuals and training timings are independent and applicable to the exact signature",
+              "the maximum observed historical residual and its mean confidence interval define a conditional engineering envelope",
+              "the relative-error floor is fixed before the endpoint sentinel and is not a statistical future-tail bound",
+              "one sentinel checks applicability but cannot establish future residual coverage"
+            ],
+            "plan_sha256": "40dc039e980bf1ddee6c193013ad4d2dcf3595719f5e354ca84518bb839aeb11"
+          },
+          "sha256": "ddc1596c922303a35b08fbb26f0653802f4648c8328530e88ab27d8c6107fc0c"
+        }
+      ],
+      "paired_native_numerical_checks": {
+        "count": 69,
+        "eligible_counts": {
+          "True": 69
+        },
+        "maximum_absolute_error": 0.0
+      }
+    }
+  },
+  "input": {
+    "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/native-routine-jitter-diagnostic.json",
+    "sha256": "b187e3d4bdeb3c407076d62a8ef07cd6d9da73e7037537a1eaa59dedae511904",
+    "bytes": 8529153,
+    "encoding": "json"
+  }
+}

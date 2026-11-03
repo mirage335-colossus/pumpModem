@@ -1,0 +1,339 @@
+{
+  "schema": "triad-native-performance-followup-v1",
+  "status": "regression",
+  "exit_code": 2,
+  "scope": "one explicitly selected native performance case; not complete normal-CI coverage",
+  "experiment": {
+    "argv": [
+      "/tmp/triad-weak-env/bin/python",
+      "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/run-native-followup.py",
+      "--case-id",
+      "native-null",
+      "--reference-binary",
+      "build/dev-cli/triad_long",
+      "--binary",
+      "local-evidence/triad-performance-trace/delayed-triad-long.py",
+      "--output",
+      "local-evidence/triad-performance-trace/external-delay-control-001.json",
+      "--looks",
+      "5,9",
+      "--budget-seconds",
+      "90"
+    ],
+    "case_id": "native-null",
+    "mode": "qualify",
+    "reference_binary": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/triad_long",
+    "candidate_binary": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/delayed-triad-long.py",
+    "threads": 1,
+    "budget_seconds": 90.0,
+    "looks": [
+      5,
+      9
+    ],
+    "family_count": 14,
+    "relative_precision_target": 0.05,
+    "sustained_seconds": 0.0,
+    "anchor_input": null,
+    "anchor_input_sha256": null,
+    "source_sha256": {
+      "tools/triad_perf_native.py": "538a03c9002d7767c61faac3ecac3ba4ac7ba1ac9600a51ca7760373fc521bbe",
+      "tools/triad_perf_adaptive.py": "3ad99d54b955e735f0db832bd6ac3afe91b016d993de80909827efd491174106",
+      "tools/triad_perf_sustained.py": "0f94ad6d0fff9bf788c8f10b40e1e086f932c77f583eaf5299db346953709879",
+      "tools/triad_perf_hardware.py": "74718bc0791dda7ac7ea0b38b8fb79ab7bb1e41c649da9787f2a2645854706b3",
+      "tools/triad-performance-native-cases.json": "f8d46beae40f2a52013279cdfdea811c6267be621a82431b612fb05708304a8f",
+      "driver": "fc1fb138d0504204f078bf224d259dc9dc7d40c7bd03f85d5d7f7a86f133c978"
+    },
+    "source_root": "/home/user/___quick/p/_cur/dataPump/pumpModem",
+    "python": "3.13.5 (main, Aug 10 2026, 12:06:59) [GCC 14.2.0]",
+    "started_unix_seconds": 1793735179.5625844,
+    "requalification_fallback": false,
+    "deadline_scope": "cooperative API deadline and bounded native calls; caller must supply an outer process-group timeout",
+    "case": {
+      "id": "native-null",
+      "args": [
+        "--mode",
+        "run",
+        "--phase-diffusion",
+        "0",
+        "--chunk",
+        "1024",
+        "--block",
+        "512",
+        "--memory-mib",
+        "64",
+        "--epoch",
+        "1793404800",
+        "--rate",
+        "36",
+        "--added",
+        "1",
+        "--sample-rate",
+        "64",
+        "--channel",
+        "none",
+        "--basis",
+        "flat",
+        "--cn0",
+        "40",
+        "--control",
+        "null"
+      ],
+      "target_seconds": 32.8,
+      "batch_trials": 4,
+      "witnesses": [
+        "complete",
+        "null",
+        "no_signal_energy"
+      ],
+      "scope": "Complete no-transmitter simulation and absent candidate result",
+      "maximum_extrapolation": 8.0,
+      "model_relative_error_limit": 0.05
+    },
+    "case_sha256": "b37a998dab5394faa8cf49e30fcf01874505c8ff7159f9cbf9de80b04d2f3101",
+    "identities": {
+      "reference": {
+        "binary_sha256": "862b0431f04a3973ce15e7cff9b9959ed45ca36d626e401352db5cf8630c9c6b",
+        "environment": {
+          "system": "Linux",
+          "release": "7.2.6+deb13-amd64",
+          "machine": "x86_64",
+          "cpu_model": "AMD Ryzen 5 PRO 5650U with Radeon Graphics",
+          "threads": 1,
+          "affinity_cpu_count": 2,
+          "affinity_cpus": [
+            2,
+            4
+          ],
+          "affinity_topology": [
+            {
+              "cpu": 2,
+              "core_id": "1",
+              "physical_package_id": "0",
+              "thread_siblings_list": "2-3"
+            },
+            {
+              "cpu": 4,
+              "core_id": "2",
+              "physical_package_id": "0",
+              "thread_siblings_list": "4-5"
+            }
+          ],
+          "quota_cores": null,
+          "quota_source": null
+        },
+        "case_sha256": "b37a998dab5394faa8cf49e30fcf01874505c8ff7159f9cbf9de80b04d2f3101",
+        "adapter_sha256": "538a03c9002d7767c61faac3ecac3ba4ac7ba1ac9600a51ca7760373fc521bbe",
+        "adaptive_protocol_sha256": "3ad99d54b955e735f0db832bd6ac3afe91b016d993de80909827efd491174106",
+        "protocol": "complete-native-duration-siblings-v3",
+        "arithmetic": "fp64",
+        "timing_boundary": "external complete CLI test including startup and output; stages inside native trial separately retained"
+      },
+      "candidate": {
+        "binary_sha256": "32c4ef94a6b024bd4076b3e834d7fac306b9c4b7e98877434efe3d9431a51b04",
+        "environment": {
+          "system": "Linux",
+          "release": "7.2.6+deb13-amd64",
+          "machine": "x86_64",
+          "cpu_model": "AMD Ryzen 5 PRO 5650U with Radeon Graphics",
+          "threads": 1,
+          "affinity_cpu_count": 2,
+          "affinity_cpus": [
+            2,
+            4
+          ],
+          "affinity_topology": [
+            {
+              "cpu": 2,
+              "core_id": "1",
+              "physical_package_id": "0",
+              "thread_siblings_list": "2-3"
+            },
+            {
+              "cpu": 4,
+              "core_id": "2",
+              "physical_package_id": "0",
+              "thread_siblings_list": "4-5"
+            }
+          ],
+          "quota_cores": null,
+          "quota_source": null
+        },
+        "case_sha256": "b37a998dab5394faa8cf49e30fcf01874505c8ff7159f9cbf9de80b04d2f3101",
+        "adapter_sha256": "538a03c9002d7767c61faac3ecac3ba4ac7ba1ac9600a51ca7760373fc521bbe",
+        "adaptive_protocol_sha256": "3ad99d54b955e735f0db832bd6ac3afe91b016d993de80909827efd491174106",
+        "protocol": "complete-native-duration-siblings-v3",
+        "arithmetic": "fp64",
+        "timing_boundary": "external complete CLI test including startup and output; stages inside native trial separately retained"
+      }
+    },
+    "direct_measurement": true
+  },
+  "elapsed_seconds": 3.1637687790207565,
+  "raw_report_sha256": "d4155a87d478815bd38cf46f9bf3854697ce75cfeccdf9258a3084e5e189370c",
+  "negative_control": "Artificial 200 ms delay after the native subprocess, outside its internal receiver/pipeline clocks; numerical work unchanged",
+  "comparison": {
+    "gate": "performance_regression",
+    "expanded_full_prediction_ratio_interval": [
+      6.495842507340882,
+      8.630645912490726
+    ]
+  },
+  "prediction": {
+    "schema": "triad-performance-adaptive-v1",
+    "sample_count": 5,
+    "next_look": 9,
+    "policy": {
+      "relative_precision_target": 0.05,
+      "predeclared_looks": [
+        5,
+        9
+      ],
+      "family_count": 14,
+      "alpha": 0.05,
+      "interval_confidence_per_look": 0.9994047619047619,
+      "gate_confidence_per_look": 0.9994047619047619,
+      "alpha_allocation": {
+        "timing_intervals_per_family_look_metric": 0.0005952380952380953,
+        "three_timing_intervals_total_across_all_looks_and_families": 0.05,
+        "gate_reuses_paired_timing_interval": true
+      },
+      "slowdown_threshold": 1.3,
+      "fixed_model_log_allowance": 0.0
+    },
+    "reference": {
+      "point_seconds": 0.03494749406496746,
+      "timing_mean_confidence_interval_seconds": [
+        0.029979697552804104,
+        0.040738481076060776
+      ],
+      "future_execution_prediction_interval_seconds": [
+        0.0240053186557201,
+        0.0508773642598538
+      ],
+      "log_standard_error": 0.015561975200454242,
+      "relative_timing_half_width": 0.16570535788139384,
+      "bounded_model_error_scenario_interval_seconds": [
+        0.0240053186557201,
+        0.0508773642598538
+      ],
+      "future_execution_interval_scope": "scenario range: timing interval widened by fixed allowance and maximum observed independent residual; future model-error coverage is unverified",
+      "statistical_future_coverage_qualified": false,
+      "independent_model_log_error_bound": 0.0,
+      "observed_independent_model_residual_max_log": null,
+      "model_error_bound_is_verified_for_future_runs": false
+    },
+    "candidate": {
+      "point_seconds": 0.26167090284358835,
+      "timing_mean_confidence_interval_seconds": [
+        0.24048544947362727,
+        0.2847226788350351
+      ],
+      "future_execution_prediction_interval_seconds": [
+        0.21278494775212733,
+        0.3217880875424568
+      ],
+      "log_standard_error": 0.008569087037869686,
+      "relative_timing_half_width": 0.08809453302198356,
+      "bounded_model_error_scenario_interval_seconds": [
+        0.21278494775212733,
+        0.3217880875424568
+      ],
+      "future_execution_interval_scope": "scenario range: timing interval widened by fixed allowance and maximum observed independent residual; future model-error coverage is unverified",
+      "statistical_future_coverage_qualified": false,
+      "independent_model_log_error_bound": 0.0,
+      "observed_independent_model_residual_max_log": null,
+      "model_error_bound_is_verified_for_future_runs": false
+    },
+    "paired_candidate_over_reference": {
+      "point_seconds": 7.4875440956407795,
+      "timing_mean_confidence_interval_seconds": [
+        6.495842507340882,
+        8.630645912490726
+      ],
+      "future_execution_prediction_interval_seconds": [
+        5.286841710032032,
+        10.604311545356522
+      ],
+      "log_standard_error": 0.014420364462016073,
+      "relative_timing_half_width": 0.1526671231913621,
+      "model_adjusted_gate_interval": [
+        6.495842507340882,
+        8.630645912490726
+      ],
+      "paired_model_log_error_bound": 0.0,
+      "paired_model_log_error_bound_source": "sum of separate reference and candidate model-error bounds"
+    },
+    "timing_precision_reached": false,
+    "timing_intervals_simultaneously_within_target": false,
+    "model_validation": "direct_full",
+    "performance_gate": "performance_regression",
+    "gate_performance_pass_eligible": false,
+    "stop_reason": "performance_regression",
+    "inference": {
+      "method": "predeclared-look Student-t intervals on outer log runtimes; paired log-runtime ratio",
+      "simultaneous_family_scope": "reference, candidate, and paired timing intervals across declared families and predeclared looks; the regression gate reuses the paired interval and adds a separate model-error bound",
+      "conditional_assumptions": [
+        "outer runtimes are independent and stationary within the measured hardware, software, thread, and power regime",
+        "outer log runtimes are approximately normally distributed",
+        "each look is evaluated only at its declared cumulative sample count",
+        "the future-execution interval adds run-to-run spread and independently measured log model-error bounds",
+        "model allowances do not shrink with more timing repetitions"
+      ],
+      "distribution_free_coverage_claim": false,
+      "timing_precision_is_not_model_accuracy": true,
+      "statistical_future_coverage_qualified": false,
+      "model_validation_scope": "qualify_log_residuals tests a fixed-look confidence interval for mean log bias only; it does not validate individual-error tails or future-interval coverage",
+      "future_execution_intervals_are_engineering_scenario_ranges": true,
+      "bounded_model_error_assumption_verified_for_future_runs": false
+    }
+  },
+  "measurement_plan": {
+    "direct": true,
+    "validation_mode": "qualify",
+    "compatible_historical_anchor": false,
+    "case": {
+      "id": "native-null",
+      "args": [
+        "--mode",
+        "run",
+        "--phase-diffusion",
+        "0",
+        "--chunk",
+        "1024",
+        "--block",
+        "512",
+        "--memory-mib",
+        "64",
+        "--epoch",
+        "1793404800",
+        "--rate",
+        "36",
+        "--added",
+        "1",
+        "--sample-rate",
+        "64",
+        "--channel",
+        "none",
+        "--basis",
+        "flat",
+        "--cn0",
+        "40",
+        "--control",
+        "null"
+      ],
+      "target_seconds": 32.8,
+      "batch_trials": 4,
+      "witnesses": [
+        "complete",
+        "null",
+        "no_signal_energy"
+      ],
+      "scope": "Complete no-transmitter simulation and absent candidate result",
+      "maximum_extrapolation": 8.0,
+      "model_relative_error_limit": 0.05
+    },
+    "timing_block_invocations": 1,
+    "discarded_pilot": null,
+    "confirmation_plan": null
+  }
+}

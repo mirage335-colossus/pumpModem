@@ -1,0 +1,194 @@
+{
+  "schema": "triad-performance-paths-v1",
+  "scope": "Executed computational family contracts for maintained isolated v3 offline receiver helpers; not exhaustive branch coverage, sensitivity qualification, or full simulation timing",
+  "families": [
+    {
+      "id": "gaussian-state",
+      "required_witnesses": [
+        "triad_gaussian_state.py:GaussianStateFilter.update",
+        "triad_gaussian_state.py:GaussianStateFilter.finish"
+      ],
+      "branches": [
+        "dynamic prior",
+        "empty block",
+        "FP32/FP64"
+      ],
+      "devices": [
+        "cpu",
+        "cuda"
+      ]
+    },
+    {
+      "id": "phase-reference",
+      "required_witnesses": [
+        "triad_phase_frequency.py:PhaseFrequencyLikelihood.update",
+        "triad_phase_frequency.py:PhaseFrequencyLikelihood.scores"
+      ],
+      "branches": [
+        "nonzero interval",
+        "empty block",
+        "fractional advection",
+        "FP32/FP64"
+      ],
+      "devices": [
+        "cpu",
+        "cuda"
+      ]
+    },
+    {
+      "id": "phase-optimized",
+      "required_witnesses": [
+        "triad_phase_optimized.py:OptimizedPhaseFrequencyLikelihood._predict"
+      ],
+      "branches": [
+        "fused predictor",
+        "fractional advection"
+      ],
+      "devices": [
+        "cpu",
+        "cuda"
+      ]
+    },
+    {
+      "id": "phase-graph",
+      "required_witnesses": [
+        "triad_phase_optimized.py:GraphPhaseFrequencyLikelihood.update",
+        "triad_phase_optimized.py:GraphPhaseFrequencyLikelihood._graph_body"
+      ],
+      "branches": [
+        "CUDA graph capture/replay",
+        "reset"
+      ],
+      "devices": [
+        "cuda"
+      ]
+    },
+    {
+      "id": "phase-reduction",
+      "required_witnesses": [
+        "triad_phase_reduction.py:Fp64ReductionGraphLikelihood._graph_body"
+      ],
+      "branches": [
+        "CUDA FP64 reduction"
+      ],
+      "devices": [
+        "cuda"
+      ]
+    },
+    {
+      "id": "phase-tensor",
+      "required_witnesses": [
+        "triad_phase_tensor.py:TensorPhaseFrequencyLikelihood._predict",
+        "triad_phase_tensor.py:frequency_contract_advected"
+      ],
+      "branches": [
+        "native CUDA tensor",
+        "fused advection",
+        "strict-padded and tf32x3"
+      ],
+      "devices": [
+        "cuda"
+      ]
+    },
+    {
+      "id": "rbpf",
+      "required_witnesses": [
+        "triad_rbpf.py:RBPhaseFilter.update",
+        "triad_rbpf.py:RBPhaseFilter.finish",
+        "triad_rbpf.py:RBPhaseFilter._resample"
+      ],
+      "branches": [
+        "stochastic transition",
+        "systematic resampling",
+        "midpoint CFO mixture"
+      ],
+      "devices": [
+        "cpu",
+        "cuda"
+      ]
+    },
+    {
+      "id": "grouped-acquisition",
+      "required_witnesses": [
+        "triad_group_acquire.py:GroupedWorkspace.read_group_tile",
+        "triad_group_acquire.py:score_workspace",
+        "triad_group_acquire.py:prepare_group_tile"
+      ],
+      "branches": [
+        "reblock",
+        "masked and rank-deficient blocks",
+        "multiple windows",
+        "UCB",
+        "CFO reuse"
+      ],
+      "devices": [
+        "cpu",
+        "cuda"
+      ]
+    },
+    {
+      "id": "static-frequency",
+      "required_witnesses": [
+        "triad-static-frequency-study.py:prepare",
+        "triad-static-frequency-study.py:whiten_channel",
+        "triad-static-frequency-study.py:frequency_correlations",
+        "triad-static-frequency-study.py:scores_from_correlations"
+      ],
+      "branches": [
+        "FFT and direct",
+        "UCB",
+        "partial last block",
+        "rank deficiency"
+      ],
+      "devices": [
+        "cpu",
+        "cuda"
+      ]
+    },
+    {
+      "id": "ray-frequency",
+      "required_witnesses": [
+        "triad-ray-frequency-study.py:prepare",
+        "triad-ray-frequency-study.py:joint_evidence",
+        "triad-ray-frequency-study.py:mix_candidates"
+      ],
+      "branches": [
+        "common/relative bank",
+        "off-diagonal Gram FFT",
+        "UCB",
+        "tile tails"
+      ],
+      "devices": [
+        "cpu",
+        "cuda"
+      ]
+    },
+    {
+      "id": "cfo-batch",
+      "required_witnesses": [
+        "triad-cfo-batch-study.py:prepare_batch",
+        "triad-cfo-batch-study.py:score_batch"
+      ],
+      "branches": [
+        "two independent paths",
+        "projection tile tails",
+        "CFO midpoint mixture",
+        "UCB"
+      ],
+      "devices": [
+        "cpu",
+        "cuda"
+      ]
+    }
+  ],
+  "separately_covered": [
+    "native StreamingReceiver, keyed waveform/channel and full drain: native adapter",
+    "sampled FFT acquisition and Gaussian-window helper: FFT adapter"
+  ],
+  "excluded": [
+    "ordinary Robust receiver",
+    "historical v1/v2 experiment formats",
+    "standalone theoretical bounds and exploratory campaign orchestration"
+  ],
+  "prediction_scope": "These small diagnostic calls have no duration extrapolation or runtime-confidence claim. Full-simulation predictions require separately matched sustained anchors."
+}

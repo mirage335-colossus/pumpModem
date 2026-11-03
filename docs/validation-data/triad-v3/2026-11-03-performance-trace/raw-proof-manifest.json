@@ -1,0 +1,327 @@
+{
+  "schema": "triad-performance-raw-proof-manifest-v1",
+  "scope": "Original immutable focused reports, original historical anchors including unqualified records, frozen commitments, ignored reproduction drivers and build provenance; no binaries or fixtures",
+  "source_base_commit": "38209d0131de2c90ad9db4075025741198ec168d",
+  "receiver_baseline_commit": "242ea15fa032ee117b9113a7f3cd07cc6e9f0254",
+  "archive": {
+    "file": "raw-proof.tar.gz",
+    "bytes": 3769925,
+    "sha256": "69af7621d1848e7efebe1351ef71767d66f44ec9b51b3ca9d968b0e8bc7b95bb",
+    "path_base": "repository root",
+    "compression": "gzip level 6; normalized tar uid/gid/mtime/mode; original member bytes unchanged",
+    "member_count": 56
+  },
+  "members": [
+    {
+      "path": "local-evidence/triad-performance-trace/anchors/cpu/1793731681073346651-6a429625fa008755.anchor.json",
+      "bytes": 31830,
+      "sha256": "58e4c5ed7955b02912efc56b22d96ca76d04d2bdc36fcde847a27604edad7cce"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/anchors/cpu/1793731681073346651-6a429625fa008755.prediction.json",
+      "bytes": 1849,
+      "sha256": "f9c702a8b69dfc8cc565bb50ed3ab3b693985a58cc987dea8a0bd9ec0d4d9ef3"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/anchors/cpu/1793731843176742284-03d32a9ab82a917f.anchor.json",
+      "bytes": 31795,
+      "sha256": "0029fd19ec14a8cdae0399762d80bd7821782e7eeb17d66d25050576b1b2edcf"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/anchors/cpu/1793731843176742284-03d32a9ab82a917f.prediction.json",
+      "bytes": 1837,
+      "sha256": "70d5f838ef51098f965be613580d253403bdfabb99f3561fdbda74a6170ed974"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/anchors/cpu/1793732414137036269-1c2bb904030b4efd.anchor.json",
+      "bytes": 46868,
+      "sha256": "f67233403cdf3bffa6aa6a95a6ad3b83b521bc2adcf98374974375c5db4c7701"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/anchors/cpu/1793732414137036269-1c2bb904030b4efd.prediction.json",
+      "bytes": 1843,
+      "sha256": "6c0f78f0fa305b5def3d120302030af8d6fe3e48c7800851f76d0af0cdd9cd6c"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/anchors/native-vlf-low-cn0.native-anchor.json",
+      "bytes": 1686730,
+      "sha256": "7c33a834190c8beae06e940156c3d952bd43cf9a1e3042e2e747c3b18cc2b426"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/anchors-v3/cpu/1793733773891342651-65211525efe568a7.anchor.json",
+      "bytes": 48533,
+      "sha256": "4c6fe55133ec27230e4fdb08f9c1e12331be21b0a4dd49e55f877771457469ca"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/anchors-v3/cpu/1793733773891342651-65211525efe568a7.prediction.json",
+      "bytes": 2742,
+      "sha256": "df1d100ccc0e25b8685926e38cc543705cb9982c7ca9eeba8e2e8618d811e5d8"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/anchors-v3/cpu/1793733930949112639-8868fa440aed7993.anchor.json",
+      "bytes": 48544,
+      "sha256": "9eb6131d86f52d782c3cfa8a84a4af0bfa99e5d07f922341ef764cc24d884988"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/anchors-v3/cpu/1793733930949112639-8868fa440aed7993.prediction.json",
+      "bytes": 2726,
+      "sha256": "8f5e911ca6d202cad4b018b2593bb535c6a7eca2568292ecde35b65690973c10"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/anchors-v3/cpu/1793734488998787256-38ba83e99ef81717.anchor.json",
+      "bytes": 59167,
+      "sha256": "0adea68473b8c6b40c6e0fd2d328ad3f222ea8d5e5e8297488b82604eea2b8e1"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/anchors-v3/cpu/1793734488998787256-38ba83e99ef81717.prediction.json",
+      "bytes": 2726,
+      "sha256": "4500230c7a6d9b3e02f54444fe83ecf16b22a164d14977c46d5aa3be3e72f609"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/anchors-v3/cpu/1793736320242150987-f64ec44f6551af17.anchor.json",
+      "bytes": 59210,
+      "sha256": "8ad145874cb597174d990ed83ea06eaa2c5e4dad5ca7f4aa71cc8e30dc813a94"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/anchors-v3/cpu/1793736320242150987-f64ec44f6551af17.prediction.json",
+      "bytes": 2729,
+      "sha256": "2787e2e3d36258501acb2447e4ec68591661a15dd6cc4592204eb49a68c4f8cf"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/anchors-v3/cpu/1793737805367802524-21562f421857c6d9.prediction.json",
+      "bytes": 11959,
+      "sha256": "8d1b0948192775d884ec11ba1057cf09abda5d80f58bf390b295f1d5b4fc42fd"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/anchors-v3/cpu/1793737995115567783-f64ec44f6551af17.prediction.json",
+      "bytes": 10590,
+      "sha256": "4dda813f9cf08ec408ea0dbce1d176efca2b9fbcff6100ad88a117fd52ebd4a1"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/anchors-v3/native-vlf-low-cn0.native-anchor.json",
+      "bytes": 1701206,
+      "sha256": "91ececa517e8393b3a11057fb7fedf79339bd7ea2cd0791fe24d1e066e852c6a"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/cpu-routine-003.cpu.work/native-vlf-low-cn0.prediction-32.json",
+      "bytes": 25305,
+      "sha256": "8f50814ea4c11b0560b5e6c2eb3bfcd3eb7751a35212b6801bc4c04eebd93d68"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/cpu-trace-001.cpu.work/fft-sustained-commitment.json",
+      "bytes": 10319,
+      "sha256": "46075b60af3e311c7362aadae742d386e09f0fa0c2c736e6bdb40fb3c24142ba"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/cpu-trace-001.cpu.work/native-fhss-selective-burst.prediction-32.json",
+      "bytes": 15012,
+      "sha256": "f1965902bc4d2800056a85c8b026a8c9a04c78f248c76c6bd87936e390129cd1"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/cpu-trace-001.cpu.work/native-flat.prediction-32.json",
+      "bytes": 15023,
+      "sha256": "ea2493cfbf750d05f0e1aad35b49a06267d86a0c421791b5dafb0d1d148198f5"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/cpu-trace-001.cpu.work/native-sustained-commitment.json",
+      "bytes": 1948,
+      "sha256": "c3a20a4e7e99faebfd0faede8f210f8bba7c84389880fee0e7ee882695303d11"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/cpu-trace-001.cpu.work/native-vlf-low-cn0.prediction-32.json",
+      "bytes": 15015,
+      "sha256": "5a5d9eac865dca8cc49ae0130d23779574167e243f648e953e17c19350755129"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/cpu-trace-002.cpu.work/native-vlf-low-cn0.prediction-32.json",
+      "bytes": 16091,
+      "sha256": "391728aebeb33e097c588a53ccca3eb4ffbbd9256be3251ca816a781b4964340"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/delayed-triad-long.py",
+      "bytes": 478,
+      "sha256": "32c4ef94a6b024bd4076b3e834d7fac306b9c4b7e98877434efe3d9431a51b04"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/external-delay-control-001.json",
+      "bytes": 788323,
+      "sha256": "d4155a87d478815bd38cf46f9bf3854697ce75cfeccdf9258a3084e5e189370c"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/fft-full-only-delay-001.json",
+      "bytes": 618032,
+      "sha256": "d07d64554cf55ee5e1e770055473f328ee0c2087e6701c5a4af40a9eecb33e8a"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/fft-full-only-delay-001.work/anchor-inputs/1793733773891342651-65211525efe568a7.anchor.json",
+      "bytes": 48533,
+      "sha256": "4c6fe55133ec27230e4fdb08f9c1e12331be21b0a4dd49e55f877771457469ca"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/fft-full-only-delay-001.work/anchor-inputs/1793733930949112639-8868fa440aed7993.anchor.json",
+      "bytes": 48544,
+      "sha256": "9eb6131d86f52d782c3cfa8a84a4af0bfa99e5d07f922341ef764cc24d884988"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/fft-full-only-delay-001.work/anchor-inputs/1793734488998787256-38ba83e99ef81717.anchor.json",
+      "bytes": 59167,
+      "sha256": "0adea68473b8c6b40c6e0fd2d328ad3f222ea8d5e5e8297488b82604eea2b8e1"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/fft-full-only-delay-001.work/anchor-inputs/1793736320242150987-f64ec44f6551af17.anchor.json",
+      "bytes": 59210,
+      "sha256": "8ad145874cb597174d990ed83ea06eaa2c5e4dad5ca7f4aa71cc8e30dc813a94"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/fft-full-only-delay-001.work/anchor-inputs/1793738765254696549-21562f421857c6d9.prediction.json",
+      "bytes": 11959,
+      "sha256": "04b045c1ce5e2cf7d98198218ad38793a8d56ce6bb1188084d18f497542cdfe6"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/fft-sustained-003.commitment.json",
+      "bytes": 15595,
+      "sha256": "b70c6f94ac89cb0207e6e4e3ad80b03f8de0b0161a86c56a156fa1079d5efccb"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/fft-sustained-003.json",
+      "bytes": 78817,
+      "sha256": "4f3f7ebd9fd37e90bb517535acb0a0fc3c368bc4fb4cabf2ec6b7ed55952c1d2"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/fft-uniform-delay-001.json",
+      "bytes": 645438,
+      "sha256": "71c86433a022216e6589f1782c3b94bb51cf100dc765bb2ab6dc261c240e7b93"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/fft-uniform-delay-001.work/anchor-inputs/1793733773891342651-65211525efe568a7.anchor.json",
+      "bytes": 48533,
+      "sha256": "4c6fe55133ec27230e4fdb08f9c1e12331be21b0a4dd49e55f877771457469ca"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/fft-uniform-delay-001.work/anchor-inputs/1793733930949112639-8868fa440aed7993.anchor.json",
+      "bytes": 48544,
+      "sha256": "9eb6131d86f52d782c3cfa8a84a4af0bfa99e5d07f922341ef764cc24d884988"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/fft-uniform-delay-001.work/anchor-inputs/1793734488998787256-38ba83e99ef81717.anchor.json",
+      "bytes": 59167,
+      "sha256": "0adea68473b8c6b40c6e0fd2d328ad3f222ea8d5e5e8297488b82604eea2b8e1"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/fft-uniform-delay-001.work/anchor-inputs/1793736320242150987-f64ec44f6551af17.anchor.json",
+      "bytes": 59210,
+      "sha256": "8ad145874cb597174d990ed83ea06eaa2c5e4dad5ca7f4aa71cc8e30dc813a94"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/fft-uniform-delay-001.work/anchor-inputs/1793738490669198661-21562f421857c6d9.prediction.json",
+      "bytes": 11952,
+      "sha256": "12bb14d79e407f6466dac54f14fd90b63ab3173efc46d97b1b013cc0e385933a"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/free-qual-001.json",
+      "bytes": 607104,
+      "sha256": "39b4f7e95e0231080c1bc15d89e99c6caba0feb53b7875cb56b98f880160abb1"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/native-fhss-selective-burst-v2-commitment.json",
+      "bytes": 9403,
+      "sha256": "14a0a70a184b3db848a66171c0ce57dc30ed675c10b5853558c4f4dce149c63d"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/native-flat-v2-commitment.json",
+      "bytes": 9409,
+      "sha256": "f4093042bbf13dd1d73e2f4e2b3e1adcfc42b8133dd66242fb967b011607bd09"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/native-routine-jitter-diagnostic.json",
+      "bytes": 8529153,
+      "sha256": "b187e3d4bdeb3c407076d62a8ef07cd6d9da73e7037537a1eaa59dedae511904"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/native-routine-jitter-diagnostic.prediction-000.json",
+      "bytes": 24981,
+      "sha256": "548b1118609056ad899ccec8f65279fa8e5cf05189b4d117989d515b25b9509b"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/native-routine-sustained-001.json",
+      "bytes": 9031427,
+      "sha256": "b2ba44a4a5eafc538620a4befb7e0288ad8b48c1df89cb06c40153cfa3e5b3d5"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/native-routine-sustained-001.prediction-000.json",
+      "bytes": 25305,
+      "sha256": "f467fe29e1e085b4de2fffe8ad77c2905e2bef6bf371105fb1a78bc3ec56677b"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/native-routine-sustained-001.sustained-commitment.json",
+      "bytes": 2517,
+      "sha256": "bdf6c10aa7d5568414fbd68e8c7a96258865e98e8169044ca686ab142270ce5e"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/native-vlf-low-cn0-v2-commitment.json",
+      "bytes": 9399,
+      "sha256": "80edc9fce906685c2a13fa1e246e7118562b1a281416a72251d3d99bb852e77d"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/reference-build-provenance.json",
+      "bytes": 1220,
+      "sha256": "4f7a1ba47c842f2e765a78406fee232dd14cb9564d8eb142db914225f4c7d22a"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/run-fft-followup.py",
+      "bytes": 19780,
+      "sha256": "6dc1413a1c0122dc4a09c376c05b7a773cc147a434bc03c654279859571e8cda"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/run-fft-sustained-followup.py",
+      "bytes": 14765,
+      "sha256": "61037c73e71fef233da98d9ef17228c5787d92a5bd7cf5b5e48a5ad01fa28402"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/run-native-followup.py",
+      "bytes": 12916,
+      "sha256": "399ffb31962ca4fe5269c337d0bd8753f7d4cff562207a634a7baf11ec32b017"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/summarize_run.py",
+      "bytes": 20885,
+      "sha256": "e1dd7a139310f28ac03c4a549b29ea8e18be2c0b77b4d252a17a070623b2b1b1"
+    },
+    {
+      "path": "local-evidence/triad-performance-trace/triad_perf_native-v2-qualification-source.py",
+      "bytes": 34230,
+      "sha256": "e1e93370538dd886c0e7f2ffad4eb543837911b596b97f1a057c9d8769ddc819"
+    }
+  ],
+  "excluded_cpu_raw_reports": [
+    {
+      "source": "local-evidence/triad-performance-trace/cpu-trace-001.cpu.json",
+      "raw_bytes": 84383148,
+      "gzip_bytes": 8377156,
+      "eligible_under_5MiB": false,
+      "sha256": "31fb3c6680c7165dad3a99f788715532b1e038c11923393ab8cf4cfc7d34fc7f",
+      "exclusion_reason": "gzip level 6 exceeds 5 MiB compact CPU raw-report threshold; summary and historical proof retained separately"
+    },
+    {
+      "source": "local-evidence/triad-performance-trace/cpu-trace-002.cpu.json",
+      "raw_bytes": 48946035,
+      "gzip_bytes": 5818886,
+      "eligible_under_5MiB": false,
+      "sha256": "dde615ad5839087bcfac629288b4e6b134a553facb622f8846c7508214f6b864",
+      "exclusion_reason": "gzip level 6 exceeds 5 MiB compact CPU raw-report threshold; summary and historical proof retained separately"
+    },
+    {
+      "source": "local-evidence/triad-performance-trace/cpu-routine-003.cpu.json",
+      "raw_bytes": 45643715,
+      "gzip_bytes": 5449358,
+      "eligible_under_5MiB": false,
+      "sha256": "8e5715b9d9c441eb29f24d3c3febf87a43b4392ad8987b6e3e9a14d50a3d5b9c",
+      "exclusion_reason": "gzip level 6 exceeds 5 MiB compact CPU raw-report threshold; summary and historical proof retained separately"
+    }
+  ],
+  "verification": {
+    "original_inputs_unchanged_after_archive": true,
+    "promoted_archive_members_all_sha256_verified": true
+  },
+  "reproduction": "Extract into an isolated checkout at source_base_commit, restore the appropriate separately retained harness snapshot, rebuild source-bound fixture/reference binaries, then use experiment.argv in each original focused report with fresh output paths. Original /tmp Python and absolute paths require relocation; timings remain hardware/environment conditional."
+}

@@ -1,0 +1,43 @@
+{
+  "schema": "triad-performance-post-measurement-provenance-v1",
+  "scope": "Source-only release-gate guard and existing immutable controls reclassification; no new receiver timing campaign",
+  "measured_harness": "routine-v2-harness.tar.gz",
+  "post_measurement_harness": "release-gate-harness.tar.gz",
+  "changed_files": [
+    {
+      "path": "tests/test_triad_perf_integration.py",
+      "measured_sha256": "8dddac986ad1901c283cfba6b1dea1405e59eb51c885ac3cb0383547d991496d",
+      "release_gate_sha256": "95255191125d9f9f88e14d7e77244ce7438f047ca04ebc75250c94e1ba58974a"
+    },
+    {
+      "path": "tests/test_triad_performance.py",
+      "measured_sha256": "8f6bfd29ebbf121f9d84d16f94c034af4e18eb8d74c76141e46e38f5c104eca1",
+      "release_gate_sha256": "95aa6298bb5ae03bc7f986c6da0a94d04e2fa68cd33063d6ad90294bd4e9c806"
+    },
+    {
+      "path": "tools/triad-performance.py",
+      "measured_sha256": "49650e4b227adf1e9212caca4b8ee2df75c8196a8187ead549cc914725f1adfd",
+      "release_gate_sha256": "4effb31a1641239deeb933bc5690910e0033ed1a1a47b4418cb70939a4515db3"
+    }
+  ],
+  "unchanged_file_count": 29,
+  "source_base_commit": "38209d0131de2c90ad9db4075025741198ec168d",
+  "timing_claim": "Timings remain bound to each report and its measured harness snapshot; final release-gate sources were not retimed",
+  "endpoint_control_audit": {
+    "file": "endpoint-release-guard-audit.json",
+    "sha256": "7f3bcd1602bc8d3b11b534f701b5495a84b32e90bf408e9746095f360f63f7f6"
+  },
+  "legacy_native_driver": {
+    "archive": "legacy-native-driver.tar.gz",
+    "member": "local-evidence/triad-performance-trace/run-native-followup.py",
+    "member_sha256": "fc1fb138d0504204f078bf224d259dc9dc7d40c7bd03f85d5d7f7a86f133c978",
+    "bytes": 12881,
+    "reconstruction": "Remove exactly the added tools/triad_perf_conditional.py entry from SOURCE_PATHS of the retained current driver; resulting complete bytes match the historical recorded SHA256",
+    "restoration": "Use only for historical external-delay control reproduction in a separate checkout; do not overlay on newer native follow-up runs"
+  },
+  "verification": {
+    "all_final_snapshot_member_hashes_checked": true,
+    "source_files_stable_during_archiving": true,
+    "legacy_source_hash_matches_historical_record": true
+  }
+}

@@ -1,0 +1,339 @@
+{
+  "schema": "triad-performance-reproduction-v1",
+  "source_base_commit": "38209d0131de2c90ad9db4075025741198ec168d",
+  "receiver_baseline_commit": "242ea15fa032ee117b9113a7f3cd07cc6e9f0254",
+  "source_restoration_method": "git checkout source base; overlay the matching harness archive at repository root; extract raw-proof.tar.gz at repository root; source bytes verified from Git objects and retained tar member hashes",
+  "runs": [
+    {
+      "summary": "cpu-003-summary.json",
+      "raw_input": {
+        "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/cpu-routine-003.cpu.json",
+        "sha256": "8e5715b9d9c441eb29f24d3c3febf87a43b4392ad8987b6e3e9a14d50a3d5b9c",
+        "bytes": 45643715,
+        "encoding": "json"
+      },
+      "recorded_status": "warning",
+      "snapshot_matches": [
+        "routine-v2-harness"
+      ],
+      "source_restoration_checks": {
+        "routine-harness": {
+          "matching": false,
+          "mismatched_paths": [
+            "tools/triad-performance.py",
+            "tools/triad_perf_cases.py",
+            "tools/triad_perf_conditional.py"
+          ]
+        },
+        "routine-v2-harness": {
+          "matching": true,
+          "mismatched_paths": []
+        }
+      },
+      "recorded_argv": null,
+      "driver_archive_member": null,
+      "scope": "source-byte restoration audit only; execution and timing were not rerun"
+    },
+    {
+      "summary": "free-qualification-summary.json",
+      "raw_input": {
+        "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/free-qual-001.json",
+        "sha256": "39b4f7e95e0231080c1bc15d89e99c6caba0feb53b7875cb56b98f880160abb1",
+        "bytes": 607104,
+        "encoding": "json"
+      },
+      "recorded_status": "passed",
+      "snapshot_matches": [
+        "routine-harness"
+      ],
+      "source_restoration_checks": {
+        "routine-harness": {
+          "matching": true,
+          "mismatched_paths": []
+        },
+        "routine-v2-harness": {
+          "matching": false,
+          "mismatched_paths": [
+            "tools/triad-performance.py",
+            "tools/triad_perf_cases.py",
+            "tools/triad_perf_conditional.py"
+          ]
+        }
+      },
+      "recorded_argv": [
+        "/tmp/triad-weak-env/bin/python",
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/run-fft-followup.py",
+        "--case-id",
+        "free-crystal",
+        "--mode",
+        "qualify",
+        "--precision",
+        "fp32",
+        "--budget-seconds",
+        "1000",
+        "--looks",
+        "5,9,17,33",
+        "--anchor-directory",
+        "local-evidence/triad-performance-trace/anchors-v3/cpu",
+        "--output",
+        "local-evidence/triad-performance-trace/free-qual-001.json"
+      ],
+      "driver_archive_member": "local-evidence/triad-performance-trace/run-fft-followup.py",
+      "scope": "source-byte restoration audit only; execution and timing were not rerun"
+    },
+    {
+      "summary": "native-jitter-diagnostic-summary.json",
+      "raw_input": {
+        "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/native-routine-jitter-diagnostic.json",
+        "sha256": "b187e3d4bdeb3c407076d62a8ef07cd6d9da73e7037537a1eaa59dedae511904",
+        "bytes": 8529153,
+        "encoding": "json"
+      },
+      "recorded_status": "unqualified",
+      "snapshot_matches": [
+        "routine-harness"
+      ],
+      "source_restoration_checks": {
+        "routine-harness": {
+          "matching": true,
+          "mismatched_paths": []
+        },
+        "routine-v2-harness": {
+          "matching": false,
+          "mismatched_paths": [
+            "tools/triad_perf_conditional.py"
+          ]
+        }
+      },
+      "recorded_argv": [
+        "/tmp/triad-weak-env/bin/python",
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/run-native-followup.py",
+        "--case-id",
+        "native-vlf-low-cn0",
+        "--reference-binary",
+        "local-evidence/triad-performance-trace/reference-triad_long-gcc142",
+        "--binary",
+        "build/dev-cli/triad_long",
+        "--output",
+        "local-evidence/triad-performance-trace/native-routine-jitter-diagnostic.json",
+        "--mode",
+        "routine",
+        "--anchor",
+        "local-evidence/triad-performance-trace/anchors-v3/native-vlf-low-cn0.native-anchor.json",
+        "--looks",
+        "5,9,17,33",
+        "--budget-seconds",
+        "300"
+      ],
+      "driver_archive_member": "local-evidence/triad-performance-trace/run-native-followup.py",
+      "scope": "source-byte restoration audit only; execution and timing were not rerun"
+    },
+    {
+      "summary": "native-routine-sustained-summary.json",
+      "raw_input": {
+        "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/native-routine-sustained-001.json",
+        "sha256": "b2ba44a4a5eafc538620a4befb7e0288ad8b48c1df89cb06c40153cfa3e5b3d5",
+        "bytes": 9031427,
+        "encoding": "json"
+      },
+      "recorded_status": "passed",
+      "snapshot_matches": [
+        "routine-v2-harness"
+      ],
+      "source_restoration_checks": {
+        "routine-harness": {
+          "matching": false,
+          "mismatched_paths": [
+            "tools/triad_perf_conditional.py"
+          ]
+        },
+        "routine-v2-harness": {
+          "matching": true,
+          "mismatched_paths": []
+        }
+      },
+      "recorded_argv": [
+        "/tmp/triad-weak-env/bin/python",
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/run-native-followup.py",
+        "--case-id",
+        "native-vlf-low-cn0",
+        "--reference-binary",
+        "local-evidence/triad-performance-trace/reference-triad_long-gcc142",
+        "--binary",
+        "build/dev-cli/triad_long",
+        "--output",
+        "local-evidence/triad-performance-trace/native-routine-sustained-001.json",
+        "--mode",
+        "routine",
+        "--anchor",
+        "local-evidence/triad-performance-trace/anchors-v3/native-vlf-low-cn0.native-anchor.json",
+        "--looks",
+        "5,9,17,33,65",
+        "--sustained-seconds",
+        "60",
+        "--budget-seconds",
+        "500"
+      ],
+      "driver_archive_member": "local-evidence/triad-performance-trace/run-native-followup.py",
+      "scope": "source-byte restoration audit only; execution and timing were not rerun"
+    },
+    {
+      "summary": "fft-uniform-delay-summary.json",
+      "raw_input": {
+        "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/fft-uniform-delay-001.json",
+        "sha256": "71c86433a022216e6589f1782c3b94bb51cf100dc765bb2ab6dc261c240e7b93",
+        "bytes": 645438,
+        "encoding": "json"
+      },
+      "recorded_status": "regression",
+      "snapshot_matches": [
+        "routine-v2-harness"
+      ],
+      "source_restoration_checks": {
+        "routine-harness": {
+          "matching": false,
+          "mismatched_paths": [
+            "tools/triad-performance.py",
+            "tools/triad_perf_cases.py",
+            "tools/triad_perf_conditional.py"
+          ]
+        },
+        "routine-v2-harness": {
+          "matching": true,
+          "mismatched_paths": []
+        }
+      },
+      "recorded_argv": [
+        "/tmp/triad-weak-env/bin/python",
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/run-fft-followup.py",
+        "--case-id",
+        "broad-hf-timing",
+        "--mode",
+        "reuse",
+        "--precision",
+        "fp32",
+        "--budget-seconds",
+        "500",
+        "--looks",
+        "5,9,17,33",
+        "--anchor-directory",
+        "local-evidence/triad-performance-trace/anchors-v3/cpu",
+        "--output",
+        "local-evidence/triad-performance-trace/fft-uniform-delay-001.json",
+        "--inject",
+        "all-cfo",
+        "--multiplier",
+        "1.6",
+        "--delay-mode",
+        "sleep"
+      ],
+      "driver_archive_member": "local-evidence/triad-performance-trace/run-fft-followup.py",
+      "scope": "source-byte restoration audit only; execution and timing were not rerun"
+    },
+    {
+      "summary": "fft-full-only-delay-summary.json",
+      "raw_input": {
+        "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/fft-full-only-delay-001.json",
+        "sha256": "d07d64554cf55ee5e1e770055473f328ee0c2087e6701c5a4af40a9eecb33e8a",
+        "bytes": 618032,
+        "encoding": "json"
+      },
+      "recorded_status": "unqualified",
+      "snapshot_matches": [
+        "routine-v2-harness"
+      ],
+      "source_restoration_checks": {
+        "routine-harness": {
+          "matching": false,
+          "mismatched_paths": [
+            "tools/triad-performance.py",
+            "tools/triad_perf_cases.py",
+            "tools/triad_perf_conditional.py"
+          ]
+        },
+        "routine-v2-harness": {
+          "matching": true,
+          "mismatched_paths": []
+        }
+      },
+      "recorded_argv": [
+        "/tmp/triad-weak-env/bin/python",
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/run-fft-followup.py",
+        "--case-id",
+        "broad-hf-timing",
+        "--mode",
+        "reuse",
+        "--precision",
+        "fp32",
+        "--budget-seconds",
+        "500",
+        "--looks",
+        "5,9,17,33",
+        "--anchor-directory",
+        "local-evidence/triad-performance-trace/anchors-v3/cpu",
+        "--output",
+        "local-evidence/triad-performance-trace/fft-full-only-delay-001.json",
+        "--inject",
+        "full-cfo",
+        "--multiplier",
+        "1.6",
+        "--delay-mode",
+        "sleep"
+      ],
+      "driver_archive_member": "local-evidence/triad-performance-trace/run-fft-followup.py",
+      "scope": "source-byte restoration audit only; execution and timing were not rerun"
+    },
+    {
+      "summary": "fft-sustained-summary.json",
+      "raw_input": {
+        "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/fft-sustained-003.json",
+        "sha256": "4f3f7ebd9fd37e90bb517535acb0a0fc3c368bc4fb4cabf2ec6b7ed55952c1d2",
+        "bytes": 78817,
+        "encoding": "json"
+      },
+      "recorded_status": "completed",
+      "snapshot_matches": [
+        "routine-v2-harness"
+      ],
+      "source_restoration_checks": {
+        "routine-harness": {
+          "matching": false,
+          "mismatched_paths": [
+            "tools/triad-performance.py",
+            "tools/triad_perf_cases.py",
+            "tools/triad_perf_conditional.py"
+          ]
+        },
+        "routine-v2-harness": {
+          "matching": true,
+          "mismatched_paths": []
+        }
+      },
+      "recorded_argv": [
+        "/tmp/triad-weak-env/bin/python",
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/run-fft-sustained-followup.py",
+        "--report",
+        "local-evidence/triad-performance-trace/cpu-routine-003.cpu.json",
+        "--output",
+        "local-evidence/triad-performance-trace/fft-sustained-003.json",
+        "--threads",
+        "2",
+        "--minimum-seconds",
+        "60",
+        "--budget-seconds",
+        "180"
+      ],
+      "driver_archive_member": "local-evidence/triad-performance-trace/run-fft-sustained-followup.py",
+      "scope": "source-byte restoration audit only; execution and timing were not rerun"
+    }
+  ],
+  "reproduction_limits": [
+    "Use an isolated checkout and fresh output names: drivers refuse overwrite.",
+    "Original absolute workspace and /tmp/triad-weak-env paths require relocation; argv is retained verbatim.",
+    "Do not execute raw-proof archives as commands; inspect each recorded argv and restore only the matching protocol.",
+    "Build binaries with the retained reference-build-provenance.json compiler and flags; original binaries and physical fixture I/Q are omitted.",
+    "Runtime qualification requires the original hardware/environment identity or a fresh explicit qualification; this archive does not assert portable timing.",
+    "CPU003 full raw JSON is omitted by the compact-size policy, but its compact report, frozen endpoint history, original anchors and source identities are retained.",
+    "Source-restoration matching is separate from the recorded source/binary/runtime identity checks and does not revalidate statistical inference."
+  ]
+}

@@ -227,7 +227,8 @@ def _valid_cache(directory: Path, key: str, source_hashes: dict[str, str]) -> di
 
 def prepare_cases(binary: str | os.PathLike[str], output_root: str | os.PathLike[str], *,
                   profile: str = "ci", deadline: float | None = None,
-                  source_root: str | os.PathLike[str] | None = None) -> list[dict[str, Any]]:
+                  source_root: str | os.PathLike[str] | None = None,
+                  case_ids: list[str] | None = None) -> list[dict[str, Any]]:
     """Create/reuse native sampled fixtures for the selected performance profile.
 
     ``deadline`` is an absolute ``time.monotonic()`` timestamp. ``source_root``
@@ -240,6 +241,12 @@ def prepare_cases(binary: str | os.PathLike[str], output_root: str | os.PathLike
     """
     config = _config()
     selected_cases = scenarios(profile)
+    if case_ids is not None:
+        requested = set(case_ids)
+        unknown = requested - {case["id"] for case in selected_cases}
+        if unknown:
+            raise FixtureError("unknown selected fixture cases: " + ", ".join(sorted(unknown)))
+        selected_cases = [case for case in selected_cases if case["id"] in requested]
     native = Path(binary).resolve()
     if not native.is_file() or not os.access(native, os.X_OK):
         raise FixtureError(f"triad_long binary is not executable: {native}")

@@ -467,10 +467,13 @@ The [isolated receiver performance suite](triad-performance.md) runs in a
 separate normal-CI job unless `devfast` is selected. It uses five-second hardware
 probes and paired abbreviated receiver measurements, preserving the full sample
 and timing geometry and validating full-runtime estimates on held-out work.
-Allow up to ten minutes of measurements per backend, with five minutes preferred;
+Five minutes per backend remains preferred. The adaptive suite may exceed ten
+minutes when needed to resolve its declared timing precision or qualify a new
+prediction model; its configurable default hard ceiling is thirty minutes.
+Routine source-matched anchor reuse avoids repeating full qualification;
 dependency setup and the narrow `triad_long` build are separate. This job is not
-repeated in every CTest/sanitizer leg and does not qualify ordinary or native
-Robust receiver throughput. See the guide for warning-versus-failure semantics
+repeated in every CTest/sanitizer leg. It includes the isolated native v3
+simulation and excludes the ordinary Robust receiver. See the guide for warning-versus-failure semantics
 and the unchanged-archive repackaging exemption.
 
 A dated Monte Carlo, GPU or multi-day sensitivity campaign is not automatically

@@ -1,0 +1,250 @@
+{
+  "schema": "triad-endpoint-release-guard-audit-v1",
+  "scope": "post-measurement deterministic classification of immutable evidence; no new timing campaign or revised forecast",
+  "classifier_source_sha256": "4effb31a1641239deeb933bc5690910e0033ed1a1a47b4418cb70939a4515db3",
+  "threshold_ratio": 1.3,
+  "rows": [
+    {
+      "input_name": "fft-full-only-delay-001.json",
+      "input_sha256": "d07d64554cf55ee5e1e770055473f328ee0c2087e6701c5a4af40a9eecb33e8a",
+      "cases": [
+        {
+          "id": "broad-hf-timing",
+          "original_gate": "inconclusive",
+          "calibration_guard": {
+            "status": "severe_endpoint_prediction_mismatch",
+            "blocking": true,
+            "threshold_ratio": 1.3,
+            "triggers": [
+              {
+                "metric": "candidate",
+                "unexplained_log_underprediction": 0.2940301640949517,
+                "underprediction_ratio_after_frozen_allowances": 1.3418243779744785,
+                "training_log_half_width": 0.040984953714985436,
+                "historical_observation_log_envelope": 0.09531017980432487
+              },
+              {
+                "metric": "paired",
+                "unexplained_log_underprediction": 0.3086442166632519,
+                "underprediction_ratio_after_frozen_allowances": 1.361577857604304,
+                "training_log_half_width": 0.04168225117296299,
+                "historical_observation_log_envelope": 0.10507563922306766
+              }
+            ],
+            "scope": "engineering calibration guard; not a confirmed regression in mean runtime",
+            "false_failure_rate_qualified": false,
+            "historical_scatter_is_a_proven_tail_bound": false
+          }
+        }
+      ]
+    },
+    {
+      "input_name": "fft-uniform-delay-001.json",
+      "input_sha256": "71c86433a022216e6589f1782c3b94bb51cf100dc765bb2ab6dc261c240e7b93",
+      "cases": [
+        {
+          "id": "broad-hf-timing",
+          "original_gate": "performance_regression",
+          "calibration_guard": {
+            "status": "not_triggered",
+            "blocking": false,
+            "threshold_ratio": 1.3,
+            "triggers": [],
+            "scope": "engineering calibration guard; not a confirmed regression in mean runtime",
+            "false_failure_rate_qualified": false,
+            "historical_scatter_is_a_proven_tail_bound": false
+          }
+        }
+      ]
+    },
+    {
+      "input_name": "cpu-routine-003.cpu.json",
+      "input_sha256": "8e5715b9d9c441eb29f24d3c3febf87a43b4392ad8987b6e3e9a14d50a3d5b9c",
+      "cases": [
+        {
+          "id": "native-flat",
+          "original_gate": "pass",
+          "calibration_guard": {
+            "status": "not_triggered",
+            "blocking": false,
+            "threshold_ratio": 1.3,
+            "triggers": [],
+            "scope": "engineering calibration guard; not a confirmed regression in mean runtime",
+            "false_failure_rate_qualified": false,
+            "historical_scatter_is_a_proven_tail_bound": false
+          }
+        },
+        {
+          "id": "native-fhss-selective-burst",
+          "original_gate": "pass",
+          "calibration_guard": {
+            "status": "not_triggered",
+            "blocking": false,
+            "threshold_ratio": 1.3,
+            "triggers": [],
+            "scope": "engineering calibration guard; not a confirmed regression in mean runtime",
+            "false_failure_rate_qualified": false,
+            "historical_scatter_is_a_proven_tail_bound": false
+          }
+        },
+        {
+          "id": "native-vlf-low-cn0",
+          "original_gate": "pass",
+          "calibration_guard": {
+            "status": "not_triggered",
+            "blocking": false,
+            "threshold_ratio": 1.3,
+            "triggers": [],
+            "scope": "engineering calibration guard; not a confirmed regression in mean runtime",
+            "false_failure_rate_qualified": false,
+            "historical_scatter_is_a_proven_tail_bound": false
+          }
+        },
+        {
+          "id": "native-null",
+          "original_gate": "pass",
+          "calibration_guard": {
+            "status": "not_triggered",
+            "blocking": false,
+            "threshold_ratio": 1.3,
+            "triggers": [],
+            "scope": "engineering calibration guard; not a confirmed regression in mean runtime",
+            "false_failure_rate_qualified": false,
+            "historical_scatter_is_a_proven_tail_bound": false
+          }
+        },
+        {
+          "id": "native-wrong-key",
+          "original_gate": "pass",
+          "calibration_guard": {
+            "status": "not_triggered",
+            "blocking": false,
+            "threshold_ratio": 1.3,
+            "triggers": [],
+            "scope": "engineering calibration guard; not a confirmed regression in mean runtime",
+            "false_failure_rate_qualified": false,
+            "historical_scatter_is_a_proven_tail_bound": false
+          }
+        },
+        {
+          "id": "native-frontend",
+          "original_gate": "pass",
+          "calibration_guard": {
+            "status": "not_triggered",
+            "blocking": false,
+            "threshold_ratio": 1.3,
+            "triggers": [],
+            "scope": "engineering calibration guard; not a confirmed regression in mean runtime",
+            "false_failure_rate_qualified": false,
+            "historical_scatter_is_a_proven_tail_bound": false
+          }
+        },
+        {
+          "id": "native-ou-path",
+          "original_gate": "pass",
+          "calibration_guard": {
+            "status": "not_triggered",
+            "blocking": false,
+            "threshold_ratio": 1.3,
+            "triggers": [],
+            "scope": "engineering calibration guard; not a confirmed regression in mean runtime",
+            "false_failure_rate_qualified": false,
+            "historical_scatter_is_a_proven_tail_bound": false
+          }
+        },
+        {
+          "id": "native-gaussian-path",
+          "original_gate": "pass",
+          "calibration_guard": {
+            "status": "not_triggered",
+            "blocking": false,
+            "threshold_ratio": 1.3,
+            "triggers": [],
+            "scope": "engineering calibration guard; not a confirmed regression in mean runtime",
+            "false_failure_rate_qualified": false,
+            "historical_scatter_is_a_proven_tail_bound": false
+          }
+        },
+        {
+          "id": "narrow-hf-tight",
+          "original_gate": "pass",
+          "calibration_guard": {
+            "status": "not_triggered",
+            "blocking": false,
+            "threshold_ratio": 1.3,
+            "triggers": [],
+            "scope": "engineering calibration guard; not a confirmed regression in mean runtime",
+            "false_failure_rate_qualified": false,
+            "historical_scatter_is_a_proven_tail_bound": false
+          }
+        },
+        {
+          "id": "broad-hf-timing",
+          "original_gate": "pass",
+          "calibration_guard": {
+            "status": "not_triggered",
+            "blocking": false,
+            "threshold_ratio": 1.3,
+            "triggers": [],
+            "scope": "engineering calibration guard; not a confirmed regression in mean runtime",
+            "false_failure_rate_qualified": false,
+            "historical_scatter_is_a_proven_tail_bound": false
+          }
+        },
+        {
+          "id": "hf30-fhss-missed",
+          "original_gate": "pass",
+          "calibration_guard": {
+            "status": "not_triggered",
+            "blocking": false,
+            "threshold_ratio": 1.3,
+            "triggers": [],
+            "scope": "engineering calibration guard; not a confirmed regression in mean runtime",
+            "false_failure_rate_qualified": false,
+            "historical_scatter_is_a_proven_tail_bound": false
+          }
+        },
+        {
+          "id": "free-crystal",
+          "original_gate": "inconclusive",
+          "calibration_guard": {
+            "status": "not_triggered",
+            "blocking": false,
+            "threshold_ratio": 1.3,
+            "triggers": [],
+            "scope": "engineering calibration guard; not a confirmed regression in mean runtime",
+            "false_failure_rate_qualified": false,
+            "historical_scatter_is_a_proven_tail_bound": false
+          }
+        },
+        {
+          "id": "vlf-850-day",
+          "original_gate": "pass",
+          "calibration_guard": {
+            "status": "not_triggered",
+            "blocking": false,
+            "threshold_ratio": 1.3,
+            "triggers": [],
+            "scope": "engineering calibration guard; not a confirmed regression in mean runtime",
+            "false_failure_rate_qualified": false,
+            "historical_scatter_is_a_proven_tail_bound": false
+          }
+        },
+        {
+          "id": "gaussian-multiblock",
+          "original_gate": "pass",
+          "calibration_guard": {
+            "status": "not_triggered",
+            "blocking": false,
+            "threshold_ratio": 1.3,
+            "triggers": [],
+            "scope": "engineering calibration guard; not a confirmed regression in mean runtime",
+            "false_failure_rate_qualified": false,
+            "historical_scatter_is_a_proven_tail_bound": false
+          }
+        }
+      ]
+    }
+  ],
+  "all_expected_outcomes": true
+}

@@ -1,0 +1,3359 @@
+{
+  "schema": "triad-performance-evidence-summary-v2",
+  "summary_scope": "recorded evidence only; statistics and source files are not revalidated",
+  "input_evidence_complete": true,
+  "partial_snapshot": false,
+  "completion_scope": "focused invocation finalized; does not imply qualified prediction or full-suite coverage",
+  "recorded_status": "passed",
+  "recorded_exit_code": 0,
+  "recorded_elapsed_seconds": 488.08526313403854,
+  "warnings": [],
+  "failures": [],
+  "followup": {
+    "schema": "triad-fft-performance-followup-v1",
+    "status": "passed",
+    "exit_code": 0,
+    "scope": "one resident FFT case, not complete normal-CI or complete physical-simulation timing",
+    "production_performance_claim_eligible": true,
+    "experiment": {
+      "argv": [
+        "/tmp/triad-weak-env/bin/python",
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/run-fft-followup.py",
+        "--case-id",
+        "free-crystal",
+        "--mode",
+        "qualify",
+        "--precision",
+        "fp32",
+        "--budget-seconds",
+        "1000",
+        "--looks",
+        "5,9,17,33",
+        "--anchor-directory",
+        "local-evidence/triad-performance-trace/anchors-v3/cpu",
+        "--output",
+        "local-evidence/triad-performance-trace/free-qual-001.json"
+      ],
+      "case_id": "free-crystal",
+      "mode": "qualify",
+      "baseline_ref": "242ea15fa032ee117b9113a7f3cd07cc6e9f0254",
+      "candidate_root": "/home/user/___quick/p/_cur/dataPump/pumpModem",
+      "source_sha256": {
+        "include/datapump/triad_modem.hpp": "b8b259ec3ed474541f65655a5e124ff7bb9c699387326715112ecde027f6a05c",
+        "include/datapump/triad_modem_v2.hpp": "ead3c3f79eff8c358473b6748ce3f8181481aab2fb022a11e7196c9f4ab3a652",
+        "include/datapump/triad_modem_v3.hpp": "1ddd8e851950036f03e6a903ed7ba4746392ffe8623f49685df04f029c4aff48",
+        "include/datapump/triad_simulation.hpp": "55db1c03f95b6bd9b65bf5e3630a506aba40d1e3dbf473f025218454fbbee34d",
+        "include/datapump/triad_statistics.hpp": "66363bd20b0b613ca5df115265976052957a78052724a00e1017e15220ede6b1",
+        "src/channel_perturbation.hpp": "fae3b1b345e3dc19c8b85a5010e4434530bd0a34d595dd4de8cd55349d8d879a",
+        "src/channel_spread.hpp": "bf98698d574869acb79645fa143af7ae563a2f542868e77c672d89d4fb16bdb0",
+        "src/triad_gaussian_fading.hpp": "97f26b082d7d68123952bde7ccb9f97148c5977cf741cf6c15c76e77fcc20944",
+        "src/triad_modem.cpp": "3eb560ab16ee7d5e615889896457553079ca31c0e6eb3170e391d989f51dd6c2",
+        "src/triad_modem_v2.cpp": "cc5ff38465baf251b252b2be1ba653a6a894730ffed3538f9f3eafc38839f1ad",
+        "src/triad_modem_v3.cpp": "cb6cac016e57edcd4f6ebc70f09c68cc47380e3b772cdbe047d7a3b93e9b434c",
+        "src/triad_receiver_v3.cpp": "ff7409c55f2c62dbb833f1ae24a7b4aab103607aaf2f66945ea585e1e3ba3e2f",
+        "src/triad_simulation.cpp": "3096a14cc68f9ed468e04ed08021b62c5633b83c6024dba3cbf9e36eafde1900",
+        "src/triad_simulation_stream.cpp": "afaa1267c36fcd330151174f6f08b6fb401a7f702c660964071ef24b6e82a70d",
+        "src/triad_statistics.cpp": "18d92c2c51a4057caba6d9de78580305adcd8c038f6e1243ec1a4410f7c00ace",
+        "src/tuning.cpp": "228578b2dc33b72e657d646d956ccb51aefbbabde1af730ef83a15e6785cb01e",
+        "src/tuning_presets.cpp": "31e1ac552bea10b24036f959485241532066e6aa343931c04a46a65e8734b293",
+        "tools/triad-acquisition-compare.py": "d57ebbe2f8eb281ae420be7937281dddbb9ee4009c7fe041e19745a259716a6a",
+        "tools/triad-cfo-batch-study.py": "5c7fb6f8b0ad8cadeaae8591d9fb0e3d489fb5eb4c14962faf800ad46a661665",
+        "tools/triad-conditional-sweep.py": "19d1a733674645dd2d27bb28bce3bad89168c7667679d6f2d79891d37e168073",
+        "tools/triad-consumer-hardware.py": "c2777fffc6838b8e7e07d6a7ad807fe90f17f53737b325587b9db8aa5b181ac0",
+        "tools/triad-consumer-profile.py": "a997c54226176cd6728e1aea5e43398a6eb7a145c6fd9c611e3c19a4deaae29d",
+        "tools/triad-consumer-sustain.py": "b5385c2423d6df5fe67635bd1ea545b1ccf8bd3d4137aaf43a82b208c9bb36fc",
+        "tools/triad-consumer-tiles.py": "1bfe725dba82667a5b838891f959f5cab3ee950e7e3bdac0ca3483f25ba9855f",
+        "tools/triad-coverage.py": "4a7241acab3ba6e4f17bad4e4821e155f7e99064115100313de1bbee438a90e8",
+        "tools/triad-detector-study.py": "647e63e73b4ee6f0d6ab72f1dfd75f403aa377789798b933b2fb9ccfdbc7caac",
+        "tools/triad-diversity-export.py": "bb871b98d436ab45605ad8127513d92fc25fff0461cc66ed26e3c5967e4a9015",
+        "tools/triad-examples-summary.py": "9d76d728b25e1d49d1cc52ecf12a1a126ba701c2127ce7ccd9df1db7df866880",
+        "tools/triad-factor-census.py": "db9b3ded8d318b6e6dc468b2d2d40bcbf814aefe603ed8224d04e9cc7ef026ef",
+        "tools/triad-fft-acquire.py": "a5fd5c4033ef33d3c7a0d16798d2955831de5c91659dee5e829578630c5a51a1",
+        "tools/triad-fp4-campaign.py": "4193c6ed98b381e39e5733f76a7d32779af936d88e927cf1857ae23aafe6a01e",
+        "tools/triad-fp4-sweep.py": "9d43244e2850fae5334d45fa5280c79c5a3eac9f0b34095a73b1b14f576c2d0c",
+        "tools/triad-gpu-study.py": "3c8922b14e4a340e46a4f6eee1a711b85e1fa6faa3d8b6fa8df4ff4bf39ff806",
+        "tools/triad-link-budget.py": "74de2229a69acf7a6462d8f19a113a6f94de40a502b68e8ac9eda30c665cc9c2",
+        "tools/triad-long.cpp": "9b852132edb2c4f53d4c218e73db1314653cd6213a78a49c776869af6dc68877",
+        "tools/triad-lowrate-campaign.py": "5ab3dcc1f3c2b2e926f10e2a35315f2970507a308dd6631c895cf3de39807eb9",
+        "tools/triad-noise-batch-study.py": "5c0e0a0b78a725131854c38b86c215117860c4d4ca17470164ba710de4ff2213",
+        "tools/triad-noise-study.py": "960040dc2a9a00910185a5b79f8af8c84410ffd3b8b7327256399543f396a621",
+        "tools/triad-optimization-study.py": "47ee069647c996df2a1011b048d4cc23b875fb94f73fccb1614128d833186d05",
+        "tools/triad-optimization-summary.py": "fe941d71301007e281a9de369d74640af8482f8e72cde59ed56a37b1eab8d213",
+        "tools/triad-path-study.py": "2c57112f61bd377a521a1e3af85d2a31b4d165e5498411d77a4c759f9934340c",
+        "tools/triad-performance-cases.json": "4fe9dfe1ea4f03ea2f2a276cac022597ebdb61dc1fb71c15056b6c6f79d03664",
+        "tools/triad-performance-native-cases.json": "f8d46beae40f2a52013279cdfdea811c6267be621a82431b612fb05708304a8f",
+        "tools/triad-performance-paths.json": "c67761c6bb61b8d17def9ef4251dc58240b71bf2e57151c52f343dfd874eeba9",
+        "tools/triad-performance.py": "c0a8e7b89c4991fd93641232b9ddef26f4bd3f49f5bcd8447e88cc06384f417e",
+        "tools/triad-phase-study.py": "c548e62067473597ce9fd4dbbed28a35e07e3170b1804247a820eacad9cae1f5",
+        "tools/triad-profile.py": "bd23158caba3c863510679fe76f14b5062e9719eabd633a158f919d2b9964841",
+        "tools/triad-ray-frequency-study.py": "ea3ca2acde8aea75538066e46e3ccae2e36612afac753db6b2d048bd6ff87dd2",
+        "tools/triad-rbpf-benchmark.py": "f78632dc05ab8495cd6dc3ed052ed9040aceeb0a44344938d574ab215689bf0c",
+        "tools/triad-rbpf-convergence.py": "ed60ef2a77fa3ea3604f6db0a2b9f2e2834eebebf68d2b6fd639aedbc271a8a0",
+        "tools/triad-rbpf-study.py": "34a9797ed7119dcf6545b6be759b8f506cbdaf6ac9ece886b82fa699cd5d085f",
+        "tools/triad-reblock.py": "9b717113fac9124c977c07703ca4485d87bf564ae037b49c550ac6ae7765c893",
+        "tools/triad-resident-campaign.py": "410264ac9f779f932031f948de1a5c63939cc66894a03ed1faa6f3fdeb753d0e",
+        "tools/triad-retained-energy.py": "5e7d4e775305d876427091180375082eb27f193f6ff37958f918362c3f9b764b",
+        "tools/triad-sampling-refinement.py": "d3a40c39e0d05cbb49d0b98652513015e731969c484be54d2ef45cbac07cb799",
+        "tools/triad-scan-workspace.py": "c9c2ab61a37233b43887f594e0c871eb96e4f556cec086bce630faeb0fa45136",
+        "tools/triad-state-campaign.py": "922dbdf53b346ce5061029e6e17a82b1cbf4d04d0dfd73db655cc79e672503fa",
+        "tools/triad-state-study.py": "3fa7491ae93031ff6bfadc4c9b792659336999effc0508a71cf734ada9250402",
+        "tools/triad-static-frequency-study.py": "d1b75e9b49de21041558e97ee1daff2ba07a1fd18a123bc8a6cb928f1052e11b",
+        "tools/triad-stream-study.py": "c236f9c6613e80e7786cc604002ad415c609781f8657c7bbb61b1409d4c8f65e",
+        "tools/triad-sufficient-study.py": "d96210f7408d0c02b717c384e2b9483a0c01ba9c04b1aca150e669a071394236",
+        "tools/triad-summary.py": "b29378f1138590bfa7541c063771127f27df46d436b04f45347ad86273213cc9",
+        "tools/triad-tensor-diagnostics.py": "9219b186bd04a9963293201de1c2a4de1bb73955e9601eb74e7b06bbf745e5a6",
+        "tools/triad_adc_bound.py": "74eb4de89a674e325a6cb323d1df95c83d78681b68a71b67467a9bfedc5e5846",
+        "tools/triad_bounded_run.py": "f117d6be27d38d055f5ab65af2f850c038501badd16cb5f524b5388530218cf2",
+        "tools/triad_correlation_fusion.py": "41216fa6282c648a2e1541c2cc1f8e93ccc73abe65fa2d32d140ee15f7251398",
+        "tools/triad_covariance_reference.py": "e6ca43a136d9781b6c0d9883e72d2069302bcf5ef285e7f8c70137b9fe9e31cb",
+        "tools/triad_coverage_bounds.py": "bb4e1cbf161c5f4b5d9af151e995c357ef0444907d31c312a215c19b2b3a0c5b",
+        "tools/triad_exhaustive_correlation.py": "ae02b1f7d85e2d3f8c2c153000f530a411860ff443aeaf674abaa93cf60ab2d4",
+        "tools/triad_factor_native_inputs.py": "f75225cc5c05a717d63ce52074a4e466cec35274cb921f77f53c4d95df808f26",
+        "tools/triad_fft_acquire.py": "d4a3c2cc39e0068e6aa6aab27d7ee8eeff6cc7db72a790868fe166c3f1d65843",
+        "tools/triad_fp4_native.py": "e9a6811182c57b14d70604fc69894aa58e0c6227c10a6de2db5e5d127a567b3c",
+        "tools/triad_fp4_representation.py": "0f5861ffe646b8e892efdd1abcdcb54e4f168763c5feff1cda119f36ec1cc804",
+        "tools/triad_gaussian_bounds.py": "8910b3c64c2ea7072ef43e3e0c5d47ded6f8cbc903ac974162eb5ad285e1de23",
+        "tools/triad_gaussian_prepared.py": "c88afdf459521393958c49d801517d79cd158cbe2291e4a48c3eff6931e42875",
+        "tools/triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba",
+        "tools/triad_gaussian_window.py": "b22fe002864922e44bc7e10000672a163353818f610c4882bae5d62cfe1cf883",
+        "tools/triad_group_acquire.py": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+        "tools/triad_noise_likelihood.py": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110",
+        "tools/triad_perf_adaptive.py": "3ad99d54b955e735f0db832bd6ac3afe91b016d993de80909827efd491174106",
+        "tools/triad_perf_cases.py": "4442a1249fca72deba418d33d72e7a784e26255a9fdaa1dcb5b36938542308e7",
+        "tools/triad_perf_conditional.py": "4d468e63189923c35656b0357193937fbc8ec910abdcb212a25d6966b9229753",
+        "tools/triad_perf_fft_trace.py": "c903dc8909688bb30598e9efb6b85c7ee08c8199310844f2f80fda643060d167",
+        "tools/triad_perf_hardware.py": "74718bc0791dda7ac7ea0b38b8fb79ab7bb1e41c649da9787f2a2645854706b3",
+        "tools/triad_perf_native.py": "d1384ad557dd10987f37e631e1eaf57fdf8b9d2934b0cbc3b01a98643a5e116c",
+        "tools/triad_perf_paths.py": "31e442c1381a2ce3037f6837605d24cad7c2874d6041d487bc5077c23d803699",
+        "tools/triad_perf_receiver.py": "fd2fd7109e9dfcd8fe984fc526995a65b4517335cf6d80428a749f13994fcb34",
+        "tools/triad_perf_statistics.py": "64ce887c8c3af9144f1d94adc712fa784bbca17cfa86dcbfe1099dbb2efed64b",
+        "tools/triad_perf_sustained.py": "c343626798c491fca1bedba2fac97a840177145e3e9a3f56fd5741cc938b5548",
+        "tools/triad_perf_telemetry.py": "3646802429c1762a661620382ff111f7629640f53e2c3ee015e50d56f6e7bc4b",
+        "tools/triad_phase_frequency.py": "48ee569b1d467b2d7b6fd55088764bd28dd11e0bfecb5974622a318fbb408585",
+        "tools/triad_phase_gpu_benchmark.py": "b599e9d7d6d27dc658879f1e636150c6eb0720db6e9ec1ca6d4dbda157f5d45d",
+        "tools/triad_phase_optimized.py": "759b46d536f2daa1d1de2336190ab19153376aca3eeca32847cba5289d2d63ed",
+        "tools/triad_phase_prior_diagnostic.py": "03c65bdb3daf32fe87817ffad457e402180405132d1c5e154374594fb5f533d0",
+        "tools/triad_phase_reduction.py": "b2f762320fbff5a66fa88123711483f9c42721e1765e406b7699c434048ded98",
+        "tools/triad_phase_tensor.py": "3b1a674ac7ace90ddce72c2773c2d1543bcfe8307d7b65ea965ad03a6525ffda",
+        "tools/triad_precision_probe.py": "e53ee73bf511ee5a38c30a6e80d5985f30f0187a4b1604f7c57978d5dca3f801",
+        "tools/triad_prepared_observation.py": "13d37977620519aaeb457d4ed1163c80d68dca96c8319480de914cae8a6aaec8",
+        "tools/triad_rbpf.py": "d4b64c3a830acd3bd15433421da0e003ba1aa9810bf1dd904c57082d94c3bd54",
+        "tools/triad_scan_workspace.py": "bf0ecb596961951992d13f361150119e04cfb885b703497baa188f942f147dd7",
+        "tools/triad_state_workspace.py": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923",
+        "tools/triad_tensor_native.py": "0ed9242733ae564aaadf7548a4391ac833aaffd27097e2a966c9931aab990c5e",
+        "tools/triad_tensor_probe.py": "90f701183d82c442559909076c424a31fb249566ce7c33dbecf7e04aa169eb84",
+        "driver": "6dc1413a1c0122dc4a09c376c05b7a773cc147a434bc03c654279859571e8cda"
+      },
+      "source_guard_scope": "isolated triad Python/native family and shared channel/tuning files; executable hash separately recorded",
+      "fixture_binary": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/triad_long",
+      "fixture_binary_sha256": "862b0431f04a3973ce15e7cff9b9959ed45ca36d626e401352db5cf8630c9c6b",
+      "device": "cpu",
+      "threads": 2,
+      "budget_seconds": 1000.0,
+      "looks": [
+        5,
+        9,
+        17,
+        33
+      ],
+      "family_count": 14,
+      "relative_precision_target": 0.05,
+      "precision_request": "fp32",
+      "anchor_directory": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/anchors-v3/cpu",
+      "fixture_cache_directory": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/triad-performance-fixtures",
+      "started_unix_seconds": 1793736316.8138812,
+      "requalification_fallback": false,
+      "deadline_scope": "maintained worker deadline; caller must supply outer process-group timeout",
+      "injection": {
+        "selection": "none",
+        "multiplier": 1.6,
+        "delay_mode": "sleep",
+        "scope": "synthetic post-real-kernel score-stage pipeline delay",
+        "kernel_source_modified": false,
+        "numerical_or_work_fields_modified": false,
+        "real_kernel_identity_retained_for_anchor_applicability": true,
+        "production_anchor_creation_allowed": true
+      }
+    },
+    "warnings": [],
+    "failures": [],
+    "elapsed_seconds": 488.08526313403854,
+    "completed_unix_seconds": 1793736803.3441572,
+    "reference": {
+      "commit": "242ea15fa032ee117b9113a7f3cd07cc6e9f0254",
+      "source_sha256": {
+        "include/datapump/triad_modem_v3.hpp": "1ddd8e851950036f03e6a903ed7ba4746392ffe8623f49685df04f029c4aff48",
+        "src/channel_perturbation.hpp": "fae3b1b345e3dc19c8b85a5010e4434530bd0a34d595dd4de8cd55349d8d879a",
+        "src/channel_spread.hpp": "bf98698d574869acb79645fa143af7ae563a2f542868e77c672d89d4fb16bdb0",
+        "src/triad_gaussian_fading.hpp": "97f26b082d7d68123952bde7ccb9f97148c5977cf741cf6c15c76e77fcc20944",
+        "src/triad_modem_v3.cpp": "cb6cac016e57edcd4f6ebc70f09c68cc47380e3b772cdbe047d7a3b93e9b434c",
+        "src/triad_receiver_v3.cpp": "ff7409c55f2c62dbb833f1ae24a7b4aab103607aaf2f66945ea585e1e3ba3e2f",
+        "src/triad_simulation_stream.cpp": "afaa1267c36fcd330151174f6f08b6fb401a7f702c660964071ef24b6e82a70d",
+        "src/tuning.cpp": "228578b2dc33b72e657d646d956ccb51aefbbabde1af730ef83a15e6785cb01e",
+        "src/tuning_presets.cpp": "31e1ac552bea10b24036f959485241532066e6aa343931c04a46a65e8734b293",
+        "tools/triad-long.cpp": "dbbdbfa055e7a93a86702ef571f45afa3c7040ed873cf993e4cae384b661b282",
+        "tools/triad_fft_acquire.py": "d4a3c2cc39e0068e6aa6aab27d7ee8eeff6cc7db72a790868fe166c3f1d65843",
+        "tools/triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba",
+        "tools/triad_gaussian_window.py": "b22fe002864922e44bc7e10000672a163353818f610c4882bae5d62cfe1cf883",
+        "tools/triad_group_acquire.py": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+        "tools/triad_noise_likelihood.py": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110",
+        "tools/triad_state_workspace.py": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923"
+      }
+    },
+    "real_worker_identities": {
+      "reference": {
+        "source_root": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/free-qual-001.work/baseline-f8vg0yz_",
+        "source_hashes": {
+          "triad_fft_acquire.py": "d4a3c2cc39e0068e6aa6aab27d7ee8eeff6cc7db72a790868fe166c3f1d65843",
+          "triad_group_acquire.py": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+          "triad_gaussian_window.py": "b22fe002864922e44bc7e10000672a163353818f610c4882bae5d62cfe1cf883",
+          "triad_noise_likelihood.py": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110",
+          "triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba",
+          "triad_state_workspace.py": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923"
+        },
+        "python": "3.13.5",
+        "numpy": "2.5.4",
+        "torch": "2.8.0+cpu",
+        "threads": 2,
+        "cuda_available": false,
+        "device_count": 0,
+        "tf32_allowed": false,
+        "startup_seconds": 0.9922778410254978
+      },
+      "candidate": {
+        "source_root": "/home/user/___quick/p/_cur/dataPump/pumpModem",
+        "source_hashes": {
+          "triad_fft_acquire.py": "d4a3c2cc39e0068e6aa6aab27d7ee8eeff6cc7db72a790868fe166c3f1d65843",
+          "triad_group_acquire.py": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+          "triad_gaussian_window.py": "b22fe002864922e44bc7e10000672a163353818f610c4882bae5d62cfe1cf883",
+          "triad_noise_likelihood.py": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110",
+          "triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba",
+          "triad_state_workspace.py": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923"
+        },
+        "python": "3.13.5",
+        "numpy": "2.5.4",
+        "torch": "2.8.0+cpu",
+        "threads": 2,
+        "cuda_available": false,
+        "device_count": 0,
+        "tf32_allowed": false,
+        "startup_seconds": 1.120219484961126
+      }
+    },
+    "hardware_identity_scope": "metadata only; no hardware stress calibration in this focused driver",
+    "precision_qualification": {
+      "selected": "fp32",
+      "alternatives": {
+        "fp64": {
+          "eligible": true,
+          "checks": [
+            {
+              "eligible": true,
+              "maximum_absolute_score_error": 0.0,
+              "allowed_score_error": 0.0010043677249692497,
+              "reasons": []
+            },
+            {
+              "eligible": true,
+              "maximum_absolute_score_error": 0.0,
+              "allowed_score_error": 0.0010043677249692497,
+              "reasons": []
+            },
+            {
+              "eligible": true,
+              "maximum_absolute_score_error": 0.0,
+              "allowed_score_error": 0.0010043677249692497,
+              "reasons": []
+            }
+          ]
+        },
+        "fp32": {
+          "eligible": true,
+          "checks": [
+            {
+              "eligible": true,
+              "maximum_absolute_score_error": 2.6606193430644964e-06,
+              "allowed_score_error": 0.0010043677249692497,
+              "reasons": []
+            },
+            {
+              "eligible": true,
+              "maximum_absolute_score_error": 2.6606193430644964e-06,
+              "allowed_score_error": 0.0010043677249692497,
+              "reasons": []
+            },
+            {
+              "eligible": true,
+              "maximum_absolute_score_error": 0.0,
+              "allowed_score_error": 0.0010043677259027272,
+              "reasons": []
+            }
+          ]
+        }
+      },
+      "tuning_total_seconds": {
+        "fp64": {
+          "reference": 0.36889804899692535,
+          "candidate": 0.39393750100862235
+        },
+        "fp32": {
+          "reference": 0.08764101000269875,
+          "candidate": 0.09576411795569584
+        }
+      },
+      "selection_frozen_before_prediction_measurements": true,
+      "qualification_cfo_count": 3,
+      "scope": "fixed numerical corpus; lower tensor modes have no implemented FFT adapter and are calibration-only"
+    },
+    "selected_precision": "fp32",
+    "precision_selection_scope": "explicit eligible policy for a matched anchor/control; not a claim that this pilot ranked it fastest",
+    "fixture_preparation_seconds": 0.13030591403366998,
+    "fixture_preparation_scope": "prepare_cases maintains all cached CI fixtures; only selected case is timed",
+    "effective_anchor_directory": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/anchors-v3/cpu",
+    "frozen_commitment": {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/anchors-v3/cpu/1793736320242150987-f64ec44f6551af17.prediction.json",
+      "sha256": "2787e2e3d36258501acb2447e4ec68591661a15dd6cc4592204eb49a68c4f8cf",
+      "frozen_before_validation_as_recorded": true
+    },
+    "worker_cleanup": "closed",
+    "case_sha256": "5b708f7e477b8ce95b3f91ee90f4b97227068690d1113c4b52c2280cea315856",
+    "case": {
+      "id": "free-crystal",
+      "adapter": "fft",
+      "configuration": {
+        "source_case": {
+          "added": 10,
+          "base": "crystal",
+          "cn0": 12,
+          "fhss": false,
+          "margin": 1,
+          "name": "12-free-cb",
+          "nominal_if": 180,
+          "rate": 360,
+          "rf": 500000,
+          "seconds": 8,
+          "selective": "fast-10",
+          "shift": "cb-ssb",
+          "spread": "hf-moderate",
+          "timing": "tight",
+          "wait": 0,
+          "whole_burst": false
+        },
+        "source_plan_sha256": "595342c5d9ae4c725c2036cdfe5e83b46d971fa1d0bfc320055642e2f3304425",
+        "source_plan_identity_current": false,
+        "native_configure": {
+          "new_controls_active": true,
+          "oscillator_presets_active": true,
+          "base_oscillator": "crystal",
+          "shift_oscillator": "cb-ssb",
+          "topology": "independent audio and RF references; effective relative preset accuracy split symmetrically between TX and RX",
+          "shift_oscillator_active": true,
+          "shift_uses_baseband_clock": false,
+          "nominal_conversion_if_hz": 180,
+          "rf_center_hz": 500000,
+          "frequency_parameter_scope": "RF and conversion-IF values multiply oscillator errors; the sampled signal is zero-centered complex baseband",
+          "sampling_clock_model": "constant endpoint ppm; shared mode correlates static RF/audio ppm and counts base phase diffusion once; stochastic phase does not perturb sampling coordinates",
+          "base_nominal_relative_bound_ppm": 100,
+          "shift_nominal_relative_bound_ppm": 40,
+          "base_per_endpoint_bound_ppm": 50,
+          "shift_per_endpoint_bound_ppm": 20,
+          "exact_relative_audio_ratio_bound_ppm": 100.0050002500125,
+          "deterministic_oscillator_cfo_bound_hz": 20.019000950047502,
+          "relative_phase_diffusion_rad_sqrt_s": 0.012341341494884351,
+          "per_endpoint_phase_diffusion_rad_sqrt_s": 0.008726646259971648,
+          "phase_override_explicit": false,
+          "margin": 1,
+          "oscillator_truth_margin_applied": false,
+          "spread_margin_applied_once": true,
+          "spread_preset": "hf-moderate",
+          "selective_perturbation": "fast-10",
+          "selective_channel": {
+            "model": "dispersive-dft-v1",
+            "requested_correlation_scale_hz": 0,
+            "resolved_correlation_scale_hz": 750,
+            "center_hz": 0,
+            "geometry_applied": true,
+            "enabled": true,
+            "modulation_rate_override_hz": null,
+            "resolved_fast_reference_rate_hz": 10,
+            "active_sideband_extent_hz": 10,
+            "capture_allowance_hz": 10,
+            "modulation_rate_source": "effective spread Doppler; slow component runs at one tenth",
+            "frequency_frame": "fixed public channel frame; never recentered from hidden oscillator truth",
+            "selective_tail_floor_seconds": 0,
+            "interpretation": "dispersive-dft-v1 is a spacing-scaled stress law when the scale is auto; selected ray delay and Doppler remain separate physical dimensions"
+          },
+          "spread_delay_ms": 6,
+          "spread_doppler_hz": 10,
+          "perturbation_slow_depth": 0,
+          "perturbation_fast_depth": 0.1,
+          "spread_inputs": {
+            "selected_preset": "hf-moderate",
+            "fallback_channel": "none",
+            "delay_ms_override_nominal": null,
+            "doppler_hz_override_nominal": null,
+            "resolved_nominal_delay_ms": 6,
+            "resolved_nominal_doppler_hz": 10,
+            "applied_margin": 1,
+            "effective_delay_ms": 6,
+            "effective_doppler_hz": 10,
+            "semantics": "selected preset supplies nominal dimensions; explicit physical overrides replace their own nominal dimension before one margin multiplication; without preset, legacy channel values supply the base, and remain already effective when no override is supplied; receiver tap basis is independent"
+          },
+          "path_evolution": {
+            "active": false,
+            "ray_coherence_seconds": 0,
+            "gaussian_doppler_width_hz": 0,
+            "gaussian_doppler_standard_deviation_hz": 0,
+            "gaussian_capture_total_allowance_hz": 0,
+            "gaussian_target_correlation": "exp(-0.5*(pi*B*tau)^2); B=2*sigma of each ray Gaussian Doppler PSD; existing ray-center separation is independent",
+            "gaussian_teacher": "stationary proper-complex white Gaussian innovations convolved with a discrete L2-normalized Gaussian FIR; finite truncation and sampling approximate the target covariance; actual FIR shape is reported separately",
+            "diurnal_phase_amplitude_radians": 0,
+            "diurnal_period_seconds": 86400,
+            "maximum_diurnal_instantaneous_frequency_hz": 0,
+            "outage_start_seconds": -1,
+            "outage_end_seconds": -1,
+            "outage_gain": 0,
+            "outage_ramp_seconds": 60,
+            "time_coordinate": "physical RX time n/(Fs*rx_clock_scale)-capture_lead_seconds",
+            "ray_model": "fixed unit ray gains; existing equal-power two-ray delay and Doppler retained when selected",
+            "outage_model": "signal-only attenuation on [start,end), with cosine descent/ascent inside the interval; thermal noise and path/filter state continue",
+            "scope": "declared physical-path stress, not field calibration; OU is point sampled and has an unbounded analog spectrum; the Gaussian FIR target also has unbounded spectral tails and its six-sigma-per-edge capture allowance is not strict support, so finite deterministic capture bounds are not a bandwidth guarantee and sampling-rate refinement is required"
+          },
+          "audio_error_seconds_per_station": 0.07,
+          "audio_lag_interval_per_station": [
+            0,
+            0.07
+          ],
+          "clock_sync": "GPS_10ms-1ms_region-0ms_offset",
+          "clock_policy_active": true,
+          "clock_accuracy_seconds_per_station": 0.01,
+          "clock_region_total_seconds": 0.001,
+          "clock_propagation_offset_seconds": 0,
+          "initial_arrival_center_seconds": 0,
+          "initial_arrival_half_width_seconds": 0.09050000000000001,
+          "full_observation_calendar_half_width_seconds": 0.09143956826161678,
+          "calendar_timestamp_center_seconds": 0.03500000003259629,
+          "calendar_timestamp_audio_center_shift_seconds": 0.035,
+          "calendar_timestamp_center_shift_applied_to_raw_samples": false,
+          "initial_arrival_bounds_seconds": [
+            -0.09050000000000001,
+            0.09050000000000001
+          ],
+          "explicit_arrival_prior": false,
+          "initial_arrival_prior_source": "configured independent clock/audio draws",
+          "explicit_arrival_seed_domain": "channel seed XOR 0x94d049bb133111eb; independent mt19937_64 stream",
+          "timing_convention": "raw samples use offset + TX lag - RX lag with both lags causal [0,Audio], giving zero-centered +/-Audio relative lag; the calendar timestamp helper has a separate +Audio/2 coordinate center; region is total width and UTC clock bounds are per station",
+          "truth_selection": "physical endpoint/clock draws independent of public search; inactive UTC policy means fixed zero initial timing; explicit truth frequency/drift and keyed epoch offset remain independent",
+          "truth_epoch_offset_seconds": 0,
+          "receiver_pattern_epoch": 1793664000,
+          "transmitter_pattern_epoch": 1793664000,
+          "epoch_address_scope": "explicit independent keyed-epoch offset; PC timing draws do not silently choose a crypto epoch",
+          "suggested_epoch_radius_seconds": 1,
+          "suggested_epoch_alternatives": 3,
+          "suggested_epoch_offsets": [
+            -1,
+            0,
+            1
+          ],
+          "public_search": {
+            "timing_bounds_seconds": [
+              -0.090500000001,
+              -0.090500000001
+            ],
+            "frequency_bounds_hz": [
+              0,
+              0
+            ],
+            "clock_bounds_ppm": [
+              0,
+              0
+            ],
+            "epoch_alternatives": 1,
+            "estimated_hypotheses": 4,
+            "materialization_cap": 10000,
+            "covers_initial_timing_prior": false,
+            "covers_static_oscillator_frequency_prior": false,
+            "covers_audio_clock_prior": false,
+            "covers_suggested_epochs": false
+          },
+          "search_estimates": {
+            "margin_frequency_half_width_hz": 20.019000950047502,
+            "margin_clock_half_width_ppm": 100.0050002500125,
+            "timing_maximum_step_seconds": 0.00016844350714584276,
+            "timing_loss_budget_db": 0.5,
+            "timing_model_fine_rate_hz": 600,
+            "timing_model_carrier_spacing_hz": 750,
+            "timing_model_pulse_rolloff": 0.25,
+            "timing_model": "squared raised-cosine chip autocorrelation times squared equal-power three-carrier Dirichlet factor; first-main-lobe bisection",
+            "timing_model_assumptions": "independent zero-mean random chips; equal mean carrier powers; one shared complex gain; infinite RRC pulse; worst mismatch half a uniform grid step with both endpoints covered",
+            "timing_model_is_finite_waveform_certificate": false,
+            "timing_model_limits": "finite keyed patterns, truncated pulse, sampled interpolation, channel uncertainty, outages and clock/timing joint mismatch require independent validation",
+            "clock_step_model": "endpoint displacement over the complete bit equals timing_maximum_step_seconds; same approximate timing loss budget",
+            "whole_bit_frequency_maximum_step_hz": 0.027173913043478257,
+            "block_frequency_maximum_step_hz": 4.921875,
+            "clock_maximum_step_ppm": 18.30907686367856,
+            "timing_positions": 1087,
+            "whole_bit_frequency_positions": 1475,
+            "clock_positions": 12,
+            "scope": "finite-grid estimates only; no implicit bank generation, pruning, phase-path count or reception guarantee"
+          },
+          "capture": {
+            "sample_rate_hz": 2520,
+            "sample_rate_numerator": 2520,
+            "sample_rate_denominator": 1,
+            "fine_rate_per_carrier_hz": 600,
+            "nominal_triplet_bandwidth_hz": 2250,
+            "deterministic_nyquist_margin_hz": 189.72349809990462,
+            "feasible_for_deterministic_prior": true,
+            "scope": "whole deterministic RF/audio-error bound, public CFO grid, maximum diurnal instantaneous frequency and Gaussian-ray allowance of six sigma per edge; stochastic oscillator and ray spectral tails are not a bounded capture guarantee",
+            "sub_64_hz_model": false,
+            "sampling_model_limits": "below 64 samples/s: FHSS, dropout, active sampled frontend, slow AGC, white/flicker/random-walk FM and white PM are rejected; constant offsets, Wiener phase, fractional two-ray propagation and selected selective perturbations remain modeled in physical seconds; no high-rate integration/decimation equivalence is claimed"
+          },
+          "duration": {
+            "maximum_requested_active_seconds": 315576000,
+            "requested_active_seconds": 8,
+            "rounded_active_seconds": 9.200000000000001,
+            "elapsed_source_calendar_seconds": 9.200000000000001,
+            "source_support_seconds": 9.228968253968254,
+            "scope": "ten-Julian-year requested-active limit; complete private tiles, internal burst waits, pulse padding and channel/capture tails may extend actual elapsed duration"
+          },
+          "whole_bit_symbol_burst": {
+            "enabled": false,
+            "wait_useful_symbols": 0,
+            "changes_inside_one_bit": false,
+            "internal_wait_tiles": 0,
+            "requested_earliest_support_epoch": 1793664000,
+            "useful_samples": 23185,
+            "pulse_padding_samples_each_side": 36,
+            "support_begin": {
+              "epoch": 1793664000,
+              "sample_phase": 0
+            },
+            "payload_begin": {
+              "epoch": 1793664000,
+              "sample_phase": 36
+            },
+            "payload_end": {
+              "epoch": 1793664009,
+              "sample_phase": 541
+            },
+            "support_end": {
+              "epoch": 1793664009,
+              "sample_phase": 577
+            },
+            "next_support_begin": {
+              "epoch": 1793664009,
+              "sample_phase": 577
+            },
+            "next_support_formula": "ceil_UTC_30s(max(support_end + wait_symbols*whole_useful_bit_samples, support_begin + 60s))",
+            "scope": "one-bit source renders this slot only; successor is public calendar metadata, not three internal wait tiles or multi-bit runtime support"
+          },
+          "receiver_observation": {
+            "missed_dwell_indices": [],
+            "maximum_missed_dwell_indices": 4096,
+            "dwell_seconds": 0.4,
+            "public_calendar_origin_seconds": 0.014285714285714285,
+            "missed_dwell_calendar": "floor((n/(Fs*RX_clock_scale) - capture_lead_seconds + retune_offset_seconds - calendar_origin_sample/Fs)/dwell_seconds); only nonnegative public receiver dwell indices are maskable",
+            "erasure_stage": "after physical channel, noise and frontend; output I/Q and validity become zero while all physical state advances",
+            "physical_rf_retuning": false,
+            "minimum_observed_fraction": 0.9,
+            "coverage_policy_scope": "C++ run receiver only; complete-calendar requirement and likelihood thresholds remain unchanged; external scorers declare their own coverage policy"
+          }
+        },
+        "sample_count": 23876,
+        "sample_rate_hz": 2520.0,
+        "source_elapsed_seconds": 9.200000000000001,
+        "lag_group_count": 458,
+        "frequency_grid_spacing_hz_max": 0.040401616448136224,
+        "fixture_generation": "native sampled point model; continuous path/channel state and full natural tails retained"
+      },
+      "fixture_hashes": {
+        "basis.c128": "1882534711f4cd9d01114946ff5c15173d42942a8e375b7853fa650aa1160565",
+        "manifest.json": "0120b5662d534e9d5b8f69634c0ccf0ab0fc7db3b5bfb547ab1285f125be1b7d",
+        "observation.c128": "1fbad0596c5e4d5826fdb3c246c0baee24c2688a50e6bc8558410b324213bfc1",
+        "validity.u8": "5121ba6f1afd12c97ae1b8af0f7753d5e9e6343d0443b36107b9d555a1066636"
+      },
+      "source_bound_metadata": {
+        "binary_sha256": "862b0431f04a3973ce15e7cff9b9959ed45ca36d626e401352db5cf8630c9c6b",
+        "source_hashes": {
+          "tools/triad-long.cpp": "9b852132edb2c4f53d4c218e73db1314653cd6213a78a49c776869af6dc68877",
+          "src/triad_modem_v3.cpp": "cb6cac016e57edcd4f6ebc70f09c68cc47380e3b772cdbe047d7a3b93e9b434c",
+          "src/triad_simulation_stream.cpp": "afaa1267c36fcd330151174f6f08b6fb401a7f702c660964071ef24b6e82a70d",
+          "src/triad_gaussian_fading.hpp": "97f26b082d7d68123952bde7ccb9f97148c5977cf741cf6c15c76e77fcc20944",
+          "src/channel_perturbation.hpp": "fae3b1b345e3dc19c8b85a5010e4434530bd0a34d595dd4de8cd55349d8d879a",
+          "src/channel_spread.hpp": "bf98698d574869acb79645fa143af7ae563a2f542868e77c672d89d4fb16bdb0",
+          "include/datapump/triad_modem_v3.hpp": "1ddd8e851950036f03e6a903ed7ba4746392ffe8623f49685df04f029c4aff48",
+          "include/datapump/pattern_pulse.hpp": "f3053ed41fa5cbca182ae4dcf5ff4796b030a3cb15527f617d7a765e7f989312",
+          "include/datapump/clock_sync.hpp": "dae640fd90eaad12afb5ca33ac36109da13db10d684929978df799ad4c7f761e",
+          "plan": "595342c5d9ae4c725c2036cdfe5e83b46d971fa1d0bfc320055642e2f3304425",
+          "case_config": "4fe9dfe1ea4f03ea2f2a276cac022597ebdb61dc1fb71c15056b6c6f79d03664"
+        },
+        "source_root": "/home/user/___quick/p/_cur/dataPump/pumpModem",
+        "cache_key": "8f0b99bc8a0e224d31eec9b236f4f4bf110090af7349e4de5774e6f365a98784",
+        "cache_manifest": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/triad-performance-fixtures/triad-physical-fixtures/free-crystal/8f0b99bc8a0e224d31eec9b236f4f4bf110090af7349e4de5774e6f365a98784/fixture.json",
+        "cache_hit": true,
+        "four_public_file_hashes_revalidated": true,
+        "configuration_source": "fresh triad_long --mode configure for current binary/arguments",
+        "source_plan_receipt_reused_as_current": false,
+        "channel_manifest": "none",
+        "oscillator_model": {
+          "relative_phase_diffusion_rad_sqrt_s": 0.012341341494884351,
+          "relative_white_fm_hz_sqrt_s": 0,
+          "relative_random_walk_fm_hz_sqrt_s": 0,
+          "relative_flicker_fm_rms_hz": 0,
+          "flicker_tau_seconds": [
+            0.1,
+            86400
+          ],
+          "flicker_bands": 12,
+          "relative_white_pm_rms_rad": 0
+        }
+      },
+      "performance_environment": {
+        "requested_device": "cpu",
+        "os": {
+          "system": "Linux",
+          "release": "7.2.6+deb13-amd64",
+          "machine": "x86_64",
+          "python": "3.13.5"
+        },
+        "cpu": {
+          "vendor_id": "AuthenticAMD",
+          "cpu family": "25",
+          "model": "80",
+          "model name": "AMD Ryzen 5 PRO 5650U with Radeon Graphics",
+          "stepping": "0",
+          "siblings": "12",
+          "cpu cores": "6",
+          "flags": "fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm constant_tsc rep_good nopl xtopology nonstop_tsc cpuid extd_apicid aperfmperf rapl pni pclmulqdq monitor ssse3 fma cx16 sse4_1 sse4_2 movbe popcnt aes xsave avx f16c rdrand lahf_lm cmp_legacy svm extapic cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw ibs skinit wdt tce topoext perfctr_core perfctr_nb bpext perfctr_llc mwaitx cpb cat_l3 cdp_l3 hw_pstate ssbd mba ibrs ibpb stibp vmmcall fsgsbase bmi1 avx2 smep bmi2 erms invpcid cqm rdt_a rdseed adx smap clflushopt clwb sha_ni xsaveopt xsavec xgetbv1 xsaves cqm_llc cqm_occup_llc cqm_mbm_total cqm_mbm_local user_shstk clzero irperf xsaveerptr rdpru wbnoinvd cppc arat npt lbrv svm_lock nrip_save tsc_scale vmcb_clean flushbyasid decodeassists pausefilter pfthreshold avic v_vmsave_vmload vgif v_spec_ctrl umip pku ospke vaes vpclmulqdq rdpid overflow_recov succor smca fsrm debug_swap",
+          "logical_cpu_count": 12,
+          "affinity_cpu_count": 2,
+          "affinity_cpus": [
+            2,
+            4
+          ],
+          "affinity_topology": [
+            {
+              "cpu": 2,
+              "core_id": "1",
+              "physical_package_id": "0",
+              "thread_siblings_list": "2-3"
+            },
+            {
+              "cpu": 4,
+              "core_id": "2",
+              "physical_package_id": "0",
+              "thread_siblings_list": "4-5"
+            }
+          ],
+          "quota_cores": null,
+          "quota_source": null,
+          "effective_core_limit_estimate": 2.0,
+          "numpy_simd": {
+            "baseline": [
+              "X86_V2"
+            ],
+            "found": [
+              "X86_V3"
+            ],
+            "not found": [
+              "X86_V4",
+              "AVX512_ICL",
+              "AVX512_SPR"
+            ]
+          },
+          "numpy_blas": {
+            "name": "scipy-openblas",
+            "version": "0.3.34.106.0",
+            "configuration": "OpenBLAS 0.3.34.106.0  USE64BITINT DYNAMIC_ARCH NO_AFFINITY SkylakeX MAX_THREADS=64"
+          },
+          "numpy_lapack": {
+            "name": "scipy-openblas",
+            "version": "0.3.34.106.0",
+            "configuration": "OpenBLAS 0.3.34.106.0  USE64BITINT DYNAMIC_ARCH NO_AFFINITY SkylakeX MAX_THREADS=64"
+          },
+          "torch_capability": "AVX2"
+        },
+        "requested_threads": 2,
+        "dispatch_environment": {
+          "ATEN_CPU_CAPABILITY": null,
+          "OPENBLAS_CORETYPE": null,
+          "MKL_ENABLE_INSTRUCTIONS": null,
+          "ONEDNN_MAX_CPU_ISA": null,
+          "NPY_DISABLE_CPU_FEATURES": null
+        },
+        "dependencies": {
+          "numpy": "2.5.4",
+          "scipy": "1.18.1",
+          "torch": "2.8.0+cpu",
+          "numpy_import_error": null,
+          "torch_import_error": null
+        },
+        "device": {
+          "status": "available"
+        }
+      },
+      "input_directory": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/triad-performance-fixtures/triad-physical-fixtures/free-crystal/8f0b99bc8a0e224d31eec9b236f4f4bf110090af7349e4de5774e6f365a98784/workspace",
+      "lag_max_seconds": 0.18100000000000002,
+      "lag_step_samples": 1,
+      "group_tile": 512,
+      "memory_mib": 1024,
+      "fixture_scope": "Free-running TX/RX crystal and CB SSB RF oscillator bounds; full CFO grid derived from current native configure metadata",
+      "frequency_bank": {
+        "count": 992,
+        "sha256": "24cd51d21da8da92a26db7491564dc69eb7e20adca305990dfc1ba7f2de7d202",
+        "minimum_hz": -20.019000950047502,
+        "maximum_hz": 20.019000950047502
+      }
+    },
+    "fft_result": {
+      "id": "free-crystal",
+      "adapter": "fft",
+      "scope": "full resident FFT acquisition; excludes fixture generation and interpreter startup",
+      "precision": "fp32",
+      "prediction_valid": true,
+      "comparison": {
+        "gate": "pass",
+        "performance_pass_eligible": true,
+        "expanded_full_prediction_ratio_interval": [
+          0.8844117371641778,
+          1.1214952649365635
+        ],
+        "observed_prediction_ratio": 0.9959234787291371,
+        "mean_reference_full_seconds": 17.86052677770305,
+        "mean_candidate_full_seconds": 17.78107187375493,
+        "absolute_mean_full_seconds_difference": -0.07945490394812182
+      },
+      "full_cfo_count": 992,
+      "full_target_measured": true,
+      "full_target_measurement_count_per_source": 9,
+      "elapsed_seconds": 478.86312951898435,
+      "coverage": {
+        "full_sample_timing_geometry": {
+          "sample_count": 23876,
+          "sample_rate": 2520.0,
+          "nfft": 47916,
+          "lags": 458,
+          "lag_first_sample": 0,
+          "lag_last_sample": 457,
+          "lag_step_samples": 1,
+          "group_tile": 512,
+          "precision": "fp32",
+          "device": "cpu"
+        },
+        "measured_bank_numerical_checks": 77,
+        "all_measured_counts_verified": true
+      },
+      "warnings": [],
+      "fixture_hashes": {
+        "basis.c128": "1882534711f4cd9d01114946ff5c15173d42942a8e375b7853fa650aa1160565",
+        "manifest.json": "0120b5662d534e9d5b8f69634c0ccf0ab0fc7db3b5bfb547ab1285f125be1b7d",
+        "observation.c128": "1fbad0596c5e4d5826fdb3c246c0baee24c2688a50e6bc8558410b324213bfc1",
+        "validity.u8": "5121ba6f1afd12c97ae1b8af0f7753d5e9e6343d0443b36107b9d555a1066636"
+      },
+      "source_bound_metadata": {
+        "binary_sha256": "862b0431f04a3973ce15e7cff9b9959ed45ca36d626e401352db5cf8630c9c6b",
+        "source_hashes": {
+          "tools/triad-long.cpp": "9b852132edb2c4f53d4c218e73db1314653cd6213a78a49c776869af6dc68877",
+          "src/triad_modem_v3.cpp": "cb6cac016e57edcd4f6ebc70f09c68cc47380e3b772cdbe047d7a3b93e9b434c",
+          "src/triad_simulation_stream.cpp": "afaa1267c36fcd330151174f6f08b6fb401a7f702c660964071ef24b6e82a70d",
+          "src/triad_gaussian_fading.hpp": "97f26b082d7d68123952bde7ccb9f97148c5977cf741cf6c15c76e77fcc20944",
+          "src/channel_perturbation.hpp": "fae3b1b345e3dc19c8b85a5010e4434530bd0a34d595dd4de8cd55349d8d879a",
+          "src/channel_spread.hpp": "bf98698d574869acb79645fa143af7ae563a2f542868e77c672d89d4fb16bdb0",
+          "include/datapump/triad_modem_v3.hpp": "1ddd8e851950036f03e6a903ed7ba4746392ffe8623f49685df04f029c4aff48",
+          "include/datapump/pattern_pulse.hpp": "f3053ed41fa5cbca182ae4dcf5ff4796b030a3cb15527f617d7a765e7f989312",
+          "include/datapump/clock_sync.hpp": "dae640fd90eaad12afb5ca33ac36109da13db10d684929978df799ad4c7f761e",
+          "plan": "595342c5d9ae4c725c2036cdfe5e83b46d971fa1d0bfc320055642e2f3304425",
+          "case_config": "4fe9dfe1ea4f03ea2f2a276cac022597ebdb61dc1fb71c15056b6c6f79d03664"
+        },
+        "source_root": "/home/user/___quick/p/_cur/dataPump/pumpModem",
+        "cache_key": "8f0b99bc8a0e224d31eec9b236f4f4bf110090af7349e4de5774e6f365a98784",
+        "cache_manifest": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/triad-performance-fixtures/triad-physical-fixtures/free-crystal/8f0b99bc8a0e224d31eec9b236f4f4bf110090af7349e4de5774e6f365a98784/fixture.json",
+        "cache_hit": true,
+        "four_public_file_hashes_revalidated": true,
+        "configuration_source": "fresh triad_long --mode configure for current binary/arguments",
+        "source_plan_receipt_reused_as_current": false,
+        "channel_manifest": "none",
+        "oscillator_model": {
+          "relative_phase_diffusion_rad_sqrt_s": 0.012341341494884351,
+          "relative_white_fm_hz_sqrt_s": 0,
+          "relative_random_walk_fm_hz_sqrt_s": 0,
+          "relative_flicker_fm_rms_hz": 0,
+          "flicker_tau_seconds": [
+            0.1,
+            86400
+          ],
+          "flicker_bands": 12,
+          "relative_white_pm_rms_rad": 0
+        }
+      },
+      "reduced_bank_admissions_valid": false,
+      "prediction_interval_target": "future outer timing-block mean per original call; not an individual cold invocation",
+      "independence_scope": "paired outer timing blocks in persistent interpreters; inner calls are averaged, not independent samples; cold-process variance is outside this target",
+      "adaptive": {
+        "sample_count": 33,
+        "next_look": null,
+        "policy": {
+          "relative_precision_target": 0.05,
+          "predeclared_looks": [
+            5,
+            9,
+            17,
+            33
+          ],
+          "family_count": 14,
+          "alpha": 0.05,
+          "interval_confidence_per_look": 0.999702380952381,
+          "gate_confidence_per_look": 0.999702380952381,
+          "alpha_allocation": {
+            "timing_intervals_per_family_look_metric": 0.00029761904761904765,
+            "three_timing_intervals_total_across_all_looks_and_families": 0.05,
+            "gate_reuses_paired_timing_interval": true
+          },
+          "slowdown_threshold": 1.3,
+          "fixed_model_log_allowance": 0.051293294387550536
+        },
+        "stop_reason": "precision_reached",
+        "timing_precision_reached": true,
+        "timing_intervals_simultaneously_within_target": true,
+        "model_validation": "validated",
+        "performance_gate": "pass",
+        "gate_performance_pass_eligible": true,
+        "inference": {
+          "method": "predeclared-look Student-t intervals on outer log runtimes; paired log-runtime ratio",
+          "simultaneous_family_scope": "reference, candidate, and paired timing intervals across declared families and predeclared looks; the regression gate reuses the paired interval and adds a separate model-error bound",
+          "conditional_assumptions": [
+            "outer runtimes are independent and stationary within the measured hardware, software, thread, and power regime",
+            "outer log runtimes are approximately normally distributed",
+            "each look is evaluated only at its declared cumulative sample count",
+            "the future-execution interval adds run-to-run spread and independently measured log model-error bounds",
+            "model allowances do not shrink with more timing repetitions"
+          ],
+          "distribution_free_coverage_claim": false,
+          "timing_precision_is_not_model_accuracy": true,
+          "statistical_future_coverage_qualified": false,
+          "model_validation_scope": "qualify_log_residuals tests a fixed-look confidence interval for mean log bias only; it does not validate individual-error tails or future-interval coverage",
+          "future_execution_intervals_are_engineering_scenario_ranges": true,
+          "bounded_model_error_assumption_verified_for_future_runs": false
+        },
+        "reference": {
+          "point_seconds": 17.83588002488667,
+          "timing_mean_confidence_interval_seconds": [
+            17.182953353739222,
+            18.513616938436535
+          ],
+          "future_execution_prediction_interval_seconds": [
+            13.63250880890359,
+            23.335295118561255
+          ],
+          "log_standard_error": 0.00919069889609452,
+          "relative_timing_half_width": 0.037998512694871645,
+          "bounded_model_error_scenario_interval_seconds": [
+            13.63250880890359,
+            23.335295118561255
+          ],
+          "future_execution_interval_scope": "scenario range: timing interval widened by fixed allowance and maximum observed independent residual; future model-error coverage is unverified",
+          "statistical_future_coverage_qualified": false,
+          "independent_model_log_error_bound": 0.051293294387550536,
+          "observed_independent_model_residual_max_log": 0.030900658167933213,
+          "model_error_bound_is_verified_for_future_runs": false
+        },
+        "candidate": {
+          "point_seconds": 17.76317168058066,
+          "timing_mean_confidence_interval_seconds": [
+            17.2080079143561,
+            18.336246108449643
+          ],
+          "future_execution_prediction_interval_seconds": [
+            13.872645155075308,
+            22.744780438526956
+          ],
+          "log_standard_error": 0.007824971921200723,
+          "relative_timing_half_width": 0.032261942752908945,
+          "bounded_model_error_scenario_interval_seconds": [
+            13.872645155075308,
+            22.744780438526956
+          ],
+          "future_execution_interval_scope": "scenario range: timing interval widened by fixed allowance and maximum observed independent residual; future model-error coverage is unverified",
+          "statistical_future_coverage_qualified": false,
+          "independent_model_log_error_bound": 0.06206134087665523,
+          "observed_independent_model_residual_max_log": 0.06206134087665523,
+          "model_error_bound_is_verified_for_future_runs": false
+        },
+        "paired_candidate_over_reference": {
+          "point_seconds": 0.9959234787291371,
+          "timing_mean_confidence_interval_seconds": [
+            0.9487528964835213,
+            1.0454393121330232
+          ],
+          "future_execution_prediction_interval_seconds": [
+            0.7505008017322559,
+            1.3216022863594452
+          ],
+          "log_standard_error": 0.011957614955363412,
+          "relative_timing_half_width": 0.049718511975509916,
+          "model_adjusted_gate_interval": [
+            0.8844117371641778,
+            1.1214952649365635
+          ],
+          "paired_model_log_error_bound": 0.07022566142709356,
+          "paired_model_log_error_bound_source": "independent paired full-run residuals"
+        }
+      },
+      "full_prediction": {
+        "reference": {
+          "predicted_full_time": {
+            "point_seconds": 17.83588002488667,
+            "timing_mean_confidence_interval_seconds": [
+              17.182953353739222,
+              18.513616938436535
+            ],
+            "future_execution_prediction_interval_seconds": [
+              13.63250880890359,
+              23.335295118561255
+            ],
+            "log_standard_error": 0.00919069889609452,
+            "relative_timing_half_width": 0.037998512694871645,
+            "bounded_model_error_scenario_interval_seconds": [
+              13.63250880890359,
+              23.335295118561255
+            ],
+            "future_execution_interval_scope": "scenario range: timing interval widened by fixed allowance and maximum observed independent residual; future model-error coverage is unverified",
+            "statistical_future_coverage_qualified": false,
+            "independent_model_log_error_bound": 0.051293294387550536,
+            "observed_independent_model_residual_max_log": 0.030900658167933213,
+            "model_error_bound_is_verified_for_future_runs": false
+          },
+          "status": "validated"
+        },
+        "candidate": {
+          "predicted_full_time": {
+            "point_seconds": 17.76317168058066,
+            "timing_mean_confidence_interval_seconds": [
+              17.2080079143561,
+              18.336246108449643
+            ],
+            "future_execution_prediction_interval_seconds": [
+              13.872645155075308,
+              22.744780438526956
+            ],
+            "log_standard_error": 0.007824971921200723,
+            "relative_timing_half_width": 0.032261942752908945,
+            "bounded_model_error_scenario_interval_seconds": [
+              13.872645155075308,
+              22.744780438526956
+            ],
+            "future_execution_interval_scope": "scenario range: timing interval widened by fixed allowance and maximum observed independent residual; future model-error coverage is unverified",
+            "statistical_future_coverage_qualified": false,
+            "independent_model_log_error_bound": 0.06206134087665523,
+            "observed_independent_model_residual_max_log": 0.06206134087665523,
+            "model_error_bound_is_verified_for_future_runs": false
+          },
+          "status": "validated"
+        }
+      },
+      "recorded_sampling_work": {
+        "scope": "timing samples only; excluded pilot and validation calls are separate; resident preparation plus scoring",
+        "sources": {
+          "reference": {
+            "outer_sample_count": 33,
+            "actual_preparation_call_count": 33,
+            "actual_score_call_count_by_cfo_bank_size": {
+              "1": 33,
+              "124": 33
+            },
+            "sum_measured_resident_seconds": 75.30284592352109
+          },
+          "candidate": {
+            "outer_sample_count": 33,
+            "actual_preparation_call_count": 33,
+            "actual_score_call_count_by_cfo_bank_size": {
+              "1": 33,
+              "124": 33
+            },
+            "sum_measured_resident_seconds": 74.89733977295691
+          }
+        }
+      },
+      "measurement_plan": {
+        "direct": false,
+        "timing_block_invocations": 1,
+        "training_counts": [
+          1,
+          124
+        ],
+        "intermediate_count": 248,
+        "target_count": 992,
+        "maximum_extrapolation": 8.0,
+        "routine_cfo_work": 1369,
+        "direct_cfo_work": 4960,
+        "confirmation_plan": {
+          "maximum_repeats_per_source": 17,
+          "allowed_looks": [
+            3,
+            5,
+            9,
+            17
+          ],
+          "confirmation_policy": {
+            "looks": [
+              3,
+              5,
+              9,
+              17
+            ],
+            "family_alpha": 0.1,
+            "per_look_two_sided_alpha": 0.025,
+            "confidence": 0.975,
+            "confidence_sidedness": "two-sided",
+            "scope": "Bonferroni family-wise control across the four predeclared looks for one error family; not simultaneous across reference, candidate, paired metrics, or cases",
+            "metric": "mean log(actual full-run time / frozen predicted full-run time)",
+            "cross_metric_or_case_simultaneous_claim": false
+          },
+          "estimated_seconds_per_pair": 35.59905170546732,
+          "training_log_sd": 0.06869126821426515,
+          "scope": "training-only budget cap; fixed forecast and alpha divisor across all four scheduled looks, even when the cap permits fewer"
+        },
+        "pilot_cost_guard": {
+          "applied": true,
+          "original_count_plan": {
+            "direct": false,
+            "training_counts": [
+              1,
+              124
+            ],
+            "intermediate_count": 248,
+            "target_count": 992,
+            "maximum_extrapolation": 8.0,
+            "minimum_repeats": 5,
+            "routine_cfo_work": 1369,
+            "direct_cfo_work": 4960,
+            "minimum_qualification_full_holdouts": 3,
+            "qualification_full_holdout_looks": [
+              3,
+              5,
+              9,
+              17
+            ],
+            "qualification_overhead_amortized_separately": true
+          },
+          "abbreviated_cycle_seconds": {
+            "reference": 2.2316286259447224,
+            "candidate": 2.3180196679895744
+          },
+          "estimated_full_seconds": {
+            "reference": 17.460323018774794,
+            "candidate": 18.12089650321002
+          },
+          "abbreviated_over_estimated_full": {
+            "reference": 0.12781141697923282,
+            "candidate": 0.12791970130059235
+          },
+          "switch_to_direct": false,
+          "direct_threshold": 0.8,
+          "cheap_full_seconds_threshold": 1.0,
+          "cheap_full_direct": false,
+          "inference_eligible": false,
+          "scope": "prospective pilot cost heuristic including actual complete preparation; never retuned from holdouts"
+        }
+      },
+      "anchor": {
+        "status": "validated",
+        "validation_mode": "qualify",
+        "identity": {
+          "schema": "triad-performance-fft-trace-v3",
+          "protocol_sha256": "c903dc8909688bb30598e9efb6b85c7ee08c8199310844f2f80fda643060d167",
+          "adaptive_protocol_sha256": "3ad99d54b955e735f0db832bd6ac3afe91b016d993de80909827efd491174106",
+          "measurement_contract": "full-geometry-resident-fft-affine-cfo-v3",
+          "case": "free-crystal",
+          "input_sha256": {
+            "basis.c128": "1882534711f4cd9d01114946ff5c15173d42942a8e375b7853fa650aa1160565",
+            "manifest.json": "0120b5662d534e9d5b8f69634c0ccf0ab0fc7db3b5bfb547ab1285f125be1b7d",
+            "observation.c128": "1fbad0596c5e4d5826fdb3c246c0baee24c2688a50e6bc8558410b324213bfc1",
+            "validity.u8": "5121ba6f1afd12c97ae1b8af0f7753d5e9e6343d0443b36107b9d555a1066636"
+          },
+          "frequency_offsets_hz": [
+            -20.019000950047502,
+            -19.978599333599373,
+            -19.938197717151247,
+            -19.89779610070312,
+            -19.85739448425499,
+            -19.81699286780686,
+            -19.776591251358735,
+            -19.736189634910605,
+            -19.695788018462476,
+            -19.655386402014347,
+            -19.61498478556622,
+            -19.574583169118092,
+            -19.534181552669963,
+            -19.493779936221838,
+            -19.45337831977371,
+            -19.41297670332558,
+            -19.37257508687745,
+            -19.332173470429325,
+            -19.291771853981196,
+            -19.251370237533067,
+            -19.210968621084938,
+            -19.170567004636812,
+            -19.130165388188683,
+            -19.089763771740554,
+            -19.049362155292425,
+            -19.0089605388443,
+            -18.96855892239617,
+            -18.92815730594804,
+            -18.887755689499915,
+            -18.847354073051786,
+            -18.806952456603657,
+            -18.766550840155528,
+            -18.726149223707402,
+            -18.685747607259273,
+            -18.645345990811144,
+            -18.604944374363015,
+            -18.56454275791489,
+            -18.52414114146676,
+            -18.48373952501863,
+            -18.443337908570506,
+            -18.402936292122376,
+            -18.362534675674247,
+            -18.32213305922612,
+            -18.281731442777993,
+            -18.241329826329864,
+            -18.200928209881734,
+            -18.160526593433605,
+            -18.12012497698548,
+            -18.07972336053735,
+            -18.03932174408922,
+            -17.998920127641092,
+            -17.958518511192967,
+            -17.918116894744838,
+            -17.87771527829671,
+            -17.837313661848583,
+            -17.796912045400454,
+            -17.756510428952325,
+            -17.716108812504196,
+            -17.67570719605607,
+            -17.63530557960794,
+            -17.594903963159812,
+            -17.554502346711686,
+            -17.514100730263557,
+            -17.473699113815428,
+            -17.4332974973673,
+            -17.392895880919173,
+            -17.352494264471044,
+            -17.312092648022915,
+            -17.271691031574786,
+            -17.23128941512666,
+            -17.19088779867853,
+            -17.150486182230402,
+            -17.110084565782273,
+            -17.069682949334148,
+            -17.02928133288602,
+            -16.98887971643789,
+            -16.948478099989764,
+            -16.908076483541635,
+            -16.867674867093505,
+            -16.827273250645376,
+            -16.78687163419725,
+            -16.74647001774912,
+            -16.706068401300993,
+            -16.665666784852867,
+            -16.625265168404738,
+            -16.58486355195661,
+            -16.54446193550848,
+            -16.50406031906035,
+            -16.463658702612225,
+            -16.423257086164096,
+            -16.382855469715967,
+            -16.34245385326784,
+            -16.302052236819712,
+            -16.261650620371583,
+            -16.221249003923454,
+            -16.18084738747533,
+            -16.1404457710272,
+            -16.10004415457907,
+            -16.059642538130944,
+            -16.019240921682815,
+            -15.978839305234686,
+            -15.938437688786557,
+            -15.89803607233843,
+            -15.857634455890302,
+            -15.817232839442173,
+            -15.776831222994046,
+            -15.736429606545919,
+            -15.69602799009779,
+            -15.65562637364966,
+            -15.615224757201533,
+            -15.574823140753406,
+            -15.534421524305277,
+            -15.49401990785715,
+            -15.453618291409022,
+            -15.413216674960893,
+            -15.372815058512764,
+            -15.332413442064635,
+            -15.292011825616507,
+            -15.25161020916838,
+            -15.21120859272025,
+            -15.170806976272122,
+            -15.130405359823996,
+            -15.090003743375867,
+            -15.049602126927738,
+            -15.00920051047961,
+            -14.968798894031483,
+            -14.928397277583354,
+            -14.887995661135225,
+            -14.847594044687098,
+            -14.80719242823897,
+            -14.766790811790841,
+            -14.726389195342714,
+            -14.685987578894586,
+            -14.645585962446457,
+            -14.605184345998328,
+            -14.5647827295502,
+            -14.524381113102073,
+            -14.483979496653944,
+            -14.443577880205817,
+            -14.40317626375769,
+            -14.36277464730956,
+            -14.322373030861431,
+            -14.281971414413302,
+            -14.241569797965175,
+            -14.201168181517048,
+            -14.160766565068919,
+            -14.120364948620791,
+            -14.079963332172664,
+            -14.039561715724535,
+            -13.999160099276406,
+            -13.958758482828278,
+            -13.918356866380151,
+            -13.877955249932022,
+            -13.837553633483893,
+            -13.797152017035767,
+            -13.756750400587638,
+            -13.716348784139509,
+            -13.675947167691382,
+            -13.635545551243254,
+            -13.595143934795125,
+            -13.554742318346996,
+            -13.514340701898869,
+            -13.473939085450741,
+            -13.433537469002612,
+            -13.393135852554485,
+            -13.352734236106357,
+            -13.312332619658228,
+            -13.2719310032101,
+            -13.23152938676197,
+            -13.191127770313843,
+            -13.150726153865715,
+            -13.110324537417586,
+            -13.069922920969459,
+            -13.029521304521332,
+            -12.989119688073202,
+            -12.948718071625073,
+            -12.908316455176946,
+            -12.867914838728819,
+            -12.82751322228069,
+            -12.787111605832562,
+            -12.746709989384435,
+            -12.706308372936306,
+            -12.665906756488177,
+            -12.62550514004005,
+            -12.585103523591922,
+            -12.544701907143793,
+            -12.504300290695664,
+            -12.463898674247538,
+            -12.423497057799409,
+            -12.38309544135128,
+            -12.342693824903153,
+            -12.302292208455025,
+            -12.261890592006896,
+            -12.221488975558767,
+            -12.181087359110638,
+            -12.140685742662512,
+            -12.100284126214383,
+            -12.059882509766254,
+            -12.019480893318127,
+            -11.97907927687,
+            -11.93867766042187,
+            -11.898276043973743,
+            -11.857874427525614,
+            -11.817472811077486,
+            -11.777071194629357,
+            -11.73666957818123,
+            -11.696267961733101,
+            -11.655866345284974,
+            -11.615464728836846,
+            -11.575063112388717,
+            -11.53466149594059,
+            -11.49425987949246,
+            -11.453858263044333,
+            -11.413456646596204,
+            -11.373055030148077,
+            -11.332653413699948,
+            -11.29225179725182,
+            -11.251850180803693,
+            -11.211448564355564,
+            -11.171046947907437,
+            -11.130645331459307,
+            -11.09024371501118,
+            -11.049842098563051,
+            -11.009440482114924,
+            -10.969038865666796,
+            -10.928637249218667,
+            -10.88823563277054,
+            -10.84783401632241,
+            -10.807432399874283,
+            -10.767030783426154,
+            -10.726629166978027,
+            -10.686227550529896,
+            -10.645825934081769,
+            -10.605424317633641,
+            -10.565022701185512,
+            -10.524621084737385,
+            -10.484219468289256,
+            -10.443817851841128,
+            -10.403416235393,
+            -10.363014618944872,
+            -10.322613002496743,
+            -10.282211386048616,
+            -10.241809769600488,
+            -10.201408153152359,
+            -10.161006536704232,
+            -10.120604920256103,
+            -10.080203303807975,
+            -10.039801687359846,
+            -9.999400070911719,
+            -9.958998454463591,
+            -9.918596838015462,
+            -9.878195221567335,
+            -9.837793605119206,
+            -9.797391988671079,
+            -9.75699037222295,
+            -9.716588755774822,
+            -9.676187139326693,
+            -9.635785522878566,
+            -9.595383906430438,
+            -9.55498228998231,
+            -9.514580673534182,
+            -9.474179057086053,
+            -9.433777440637925,
+            -9.393375824189796,
+            -9.352974207741669,
+            -9.312572591293542,
+            -9.272170974845412,
+            -9.231769358397285,
+            -9.191367741949156,
+            -9.150966125501029,
+            -9.1105645090529,
+            -9.070162892604772,
+            -9.029761276156643,
+            -8.989359659708516,
+            -8.948958043260388,
+            -8.90855642681226,
+            -8.868154810364132,
+            -8.827753193916003,
+            -8.787351577467875,
+            -8.746949961019746,
+            -8.706548344571619,
+            -8.66614672812349,
+            -8.62574511167536,
+            -8.585343495227233,
+            -8.544941878779104,
+            -8.504540262330977,
+            -8.464138645882848,
+            -8.42373702943472,
+            -8.383335412986591,
+            -8.342933796538464,
+            -8.302532180090337,
+            -8.262130563642208,
+            -8.22172894719408,
+            -8.181327330745951,
+            -8.140925714297824,
+            -8.100524097849695,
+            -8.060122481401567,
+            -8.019720864953438,
+            -7.979319248505311,
+            -7.9389176320571835,
+            -7.898516015609054,
+            -7.858114399160927,
+            -7.817712782712798,
+            -7.777311166264671,
+            -7.736909549816541,
+            -7.696507933368414,
+            -7.656106316920285,
+            -7.615704700472158,
+            -7.57530308402403,
+            -7.534901467575901,
+            -7.494499851127774,
+            -7.454098234679645,
+            -7.413696618231517,
+            -7.373295001783388,
+            -7.332893385335261,
+            -7.292491768887134,
+            -7.2520901524390045,
+            -7.211688535990877,
+            -7.171286919542748,
+            -7.130885303094621,
+            -7.0904836866464915,
+            -7.050082070198364,
+            -7.009680453750235,
+            -6.969278837302108,
+            -6.92887722085398,
+            -6.888475604405851,
+            -6.848073987957724,
+            -6.807672371509595,
+            -6.7672707550614675,
+            -6.726869138613338,
+            -6.686467522165211,
+            -6.646065905717084,
+            -6.6056642892689545,
+            -6.565262672820825,
+            -6.524861056372696,
+            -6.484459439924569,
+            -6.44405782347644,
+            -6.4036562070283125,
+            -6.363254590580183,
+            -6.322852974132056,
+            -6.282451357683929,
+            -6.2420497412358,
+            -6.201648124787672,
+            -6.161246508339543,
+            -6.120844891891416,
+            -6.080443275443287,
+            -6.040041658995159,
+            -5.99964004254703,
+            -5.959238426098903,
+            -5.9188368096507755,
+            -5.878435193202646,
+            -5.838033576754519,
+            -5.79763196030639,
+            -5.757230343858263,
+            -5.7168287274101335,
+            -5.676427110962006,
+            -5.636025494513879,
+            -5.59562387806575,
+            -5.555222261617622,
+            -5.514820645169493,
+            -5.474419028721366,
+            -5.434017412273237,
+            -5.393615795825109,
+            -5.35321417937698,
+            -5.312812562928853,
+            -5.272410946480726,
+            -5.2320093300325965,
+            -5.191607713584469,
+            -5.15120609713634,
+            -5.110804480688213,
+            -5.070402864240084,
+            -5.030001247791956,
+            -4.989599631343827,
+            -4.9491980148957,
+            -4.908796398447572,
+            -4.868394781999443,
+            -4.827993165551316,
+            -4.787591549103187,
+            -4.7471899326550595,
+            -4.70678831620693,
+            -4.666386699758803,
+            -4.625985083310676,
+            -4.585583466862547,
+            -4.545181850414419,
+            -4.504780233966288,
+            -4.464378617518161,
+            -4.423977001070032,
+            -4.3835753846219045,
+            -4.343173768173775,
+            -4.302772151725648,
+            -4.262370535277521,
+            -4.221968918829392,
+            -4.181567302381264,
+            -4.141165685933135,
+            -4.100764069485008,
+            -4.060362453036879,
+            -4.019960836588751,
+            -3.9795592201406222,
+            -3.9391576036924967,
+            -3.8987559872443676,
+            -3.8583543707962384,
+            -3.8179527543481093,
+            -3.7775511378999838,
+            -3.7371495214518546,
+            -3.6967479050037255,
+            -3.6563462885555964,
+            -3.615944672107471,
+            -3.5755430556593417,
+            -3.5351414392112126,
+            -3.494739822763087,
+            -3.454338206314958,
+            -3.413936589866829,
+            -3.3735349734186997,
+            -3.333133356970574,
+            -3.292731740522445,
+            -3.252330124074316,
+            -3.2119285076261903,
+            -3.171526891178061,
+            -3.131125274729932,
+            -3.090723658281803,
+            -3.0503220418336774,
+            -3.0099204253855483,
+            -2.969518808937419,
+            -2.9291171924892936,
+            -2.8887155760411645,
+            -2.8483139595930353,
+            -2.8079123431449062,
+            -2.7675107266967807,
+            -2.7271091102486515,
+            -2.6867074938005224,
+            -2.6463058773523933,
+            -2.6059042609042677,
+            -2.5655026444561386,
+            -2.5251010280080095,
+            -2.484699411559884,
+            -2.444297795111755,
+            -2.4038961786636257,
+            -2.3634945622154966,
+            -2.323092945767371,
+            -2.282691329319242,
+            -2.242289712871113,
+            -2.201888096422987,
+            -2.161486479974858,
+            -2.121084863526729,
+            -2.0806832470786,
+            -2.0402816306304743,
+            -1.9998800141823452,
+            -1.959478397734216,
+            -1.9190767812860905,
+            -1.8786751648379614,
+            -1.8382735483898323,
+            -1.7978719319417031,
+            -1.7574703154935776,
+            -1.7170686990454485,
+            -1.6766670825973193,
+            -1.6362654661491938,
+            -1.5958638497010647,
+            -1.5554622332529355,
+            -1.5150606168048064,
+            -1.4746590003566808,
+            -1.4342573839085517,
+            -1.393855767460419,
+            -1.35345415101229,
+            -1.3130525345641644,
+            -1.2726509181160353,
+            -1.2322493016679061,
+            -1.1918476852197806,
+            -1.1514460687716515,
+            -1.1110444523235223,
+            -1.0706428358753932,
+            -1.0302412194272677,
+            -0.9898396029791385,
+            -0.9494379865310094,
+            -0.9090363700828838,
+            -0.8686347536347547,
+            -0.8282331371866256,
+            -0.7878315207384965,
+            -0.7474299042903709,
+            -0.7070282878422418,
+            -0.6666266713941127,
+            -0.6262250549459836,
+            -0.585823438497858,
+            -0.5454218220497289,
+            -0.5050202056015998,
+            -0.4646185891534742,
+            -0.4242169727053451,
+            -0.38381535625721597,
+            -0.34341373980908685,
+            -0.3030121233609613,
+            -0.26261050691283216,
+            -0.22220889046470305,
+            -0.18180727401657748,
+            -0.14140565756844836,
+            -0.10100404112031924,
+            -0.060602424672190125,
+            -0.02020080822406456,
+            0.02020080822406456,
+            0.06060242467219368,
+            0.10100404112031924,
+            0.14140565756844836,
+            0.18180727401657748,
+            0.2222088904647066,
+            0.26261050691283216,
+            0.3030121233609613,
+            0.3434137398090904,
+            0.3838153562572195,
+            0.4242169727053451,
+            0.4646185891534742,
+            0.5050202056016033,
+            0.5454218220497289,
+            0.585823438497858,
+            0.6262250549459871,
+            0.6666266713941162,
+            0.7070282878422418,
+            0.7474299042903709,
+            0.7878315207385,
+            0.8282331371866256,
+            0.8686347536347547,
+            0.9090363700828838,
+            0.949437986531013,
+            0.9898396029791385,
+            1.0302412194272677,
+            1.0706428358753968,
+            1.1110444523235223,
+            1.1514460687716515,
+            1.1918476852197806,
+            1.2322493016679097,
+            1.2726509181160353,
+            1.3130525345641644,
+            1.3534541510122935,
+            1.393855767460419,
+            1.4342573839085482,
+            1.4746590003566773,
+            1.5150606168048064,
+            1.555462233252932,
+            1.595863849701061,
+            1.6362654661491902,
+            1.6766670825973193,
+            1.717068699045445,
+            1.757470315493574,
+            1.7978719319417031,
+            1.8382735483898287,
+            1.8786751648379578,
+            1.919076781286087,
+            1.959478397734216,
+            1.9998800141823416,
+            2.0402816306304707,
+            2.0806832470786,
+            2.1210848635267254,
+            2.1614864799748545,
+            2.2018880964229837,
+            2.242289712871113,
+            2.2826913293192383,
+            2.3230929457673675,
+            2.3634945622154966,
+            2.403896178663622,
+            2.4442977951117513,
+            2.4846994115598804,
+            2.5251010280080095,
+            2.565502644456135,
+            2.605904260904264,
+            2.6463058773523933,
+            2.6867074938005224,
+            2.727109110248648,
+            2.7675107266967807,
+            2.80791234314491,
+            2.8483139595930353,
+            2.8887155760411645,
+            2.9291171924892936,
+            2.9695188089374227,
+            3.0099204253855483,
+            3.0503220418336774,
+            3.0907236582818065,
+            3.131125274729932,
+            3.171526891178061,
+            3.2119285076261903,
+            3.2523301240743194,
+            3.292731740522445,
+            3.333133356970574,
+            3.3735349734187032,
+            3.413936589866829,
+            3.454338206314958,
+            3.494739822763087,
+            3.535141439211216,
+            3.5755430556593417,
+            3.615944672107471,
+            3.6563462885556,
+            3.696747905003729,
+            3.7371495214518546,
+            3.7775511378999838,
+            3.817952754348113,
+            3.8583543707962384,
+            3.8987559872443676,
+            3.9391576036924967,
+            3.979559220140626,
+            4.019960836588751,
+            4.0603624530368805,
+            4.10076406948501,
+            4.141165685933135,
+            4.181567302381264,
+            4.221968918829393,
+            4.2623705352775225,
+            4.302772151725648,
+            4.343173768173777,
+            4.383575384621906,
+            4.423977001070032,
+            4.464378617518161,
+            4.50478023396629,
+            4.545181850414419,
+            4.585583466862545,
+            4.625985083310674,
+            4.666386699758803,
+            4.706788316206932,
+            4.747189932655058,
+            4.787591549103187,
+            4.827993165551316,
+            4.8683947819994415,
+            4.908796398447571,
+            4.9491980148957,
+            4.989599631343829,
+            5.0300012477919545,
+            5.070402864240084,
+            5.110804480688213,
+            5.151206097136338,
+            5.191607713584467,
+            5.2320093300325965,
+            5.272410946480726,
+            5.312812562928851,
+            5.35321417937698,
+            5.393615795825109,
+            5.434017412273235,
+            5.474419028721364,
+            5.514820645169493,
+            5.555222261617622,
+            5.595623878065748,
+            5.636025494513877,
+            5.676427110962006,
+            5.716828727410135,
+            5.757230343858261,
+            5.79763196030639,
+            5.838033576754519,
+            5.878435193202645,
+            5.918836809650774,
+            5.959238426098903,
+            5.999640042547032,
+            6.0400416589951575,
+            6.080443275443287,
+            6.120844891891416,
+            6.161246508339541,
+            6.2016481247876705,
+            6.2420497412358,
+            6.282451357683929,
+            6.322852974132054,
+            6.363254590580183,
+            6.4036562070283125,
+            6.444057823476438,
+            6.484459439924567,
+            6.524861056372696,
+            6.565262672820825,
+            6.605664289268951,
+            6.64606590571708,
+            6.686467522165209,
+            6.726869138613335,
+            6.767270755061464,
+            6.807672371509593,
+            6.848073987957722,
+            6.888475604405851,
+            6.92887722085398,
+            6.9692788373021095,
+            7.009680453750239,
+            7.050082070198364,
+            7.090483686646493,
+            7.130885303094622,
+            7.171286919542748,
+            7.211688535990877,
+            7.252090152439006,
+            7.292491768887135,
+            7.332893385335261,
+            7.37329500178339,
+            7.413696618231519,
+            7.454098234679645,
+            7.494499851127774,
+            7.534901467575903,
+            7.575303084024032,
+            7.615704700472158,
+            7.656106316920287,
+            7.696507933368416,
+            7.736909549816545,
+            7.777311166264671,
+            7.8177127827128,
+            7.858114399160929,
+            7.898516015609054,
+            7.9389176320571835,
+            7.979319248505313,
+            8.019720864953442,
+            8.060122481401567,
+            8.100524097849696,
+            8.140925714297826,
+            8.181327330745951,
+            8.22172894719408,
+            8.26213056364221,
+            8.302532180090338,
+            8.342933796538464,
+            8.383335412986593,
+            8.423737029434722,
+            8.464138645882848,
+            8.504540262330977,
+            8.544941878779106,
+            8.585343495227235,
+            8.62574511167536,
+            8.66614672812349,
+            8.706548344571619,
+            8.746949961019745,
+            8.787351577467874,
+            8.827753193916003,
+            8.868154810364132,
+            8.908556426812257,
+            8.948958043260387,
+            8.989359659708516,
+            9.029761276156645,
+            9.07016289260477,
+            9.1105645090529,
+            9.150966125501029,
+            9.191367741949154,
+            9.231769358397283,
+            9.272170974845412,
+            9.312572591293542,
+            9.352974207741667,
+            9.393375824189796,
+            9.433777440637925,
+            9.474179057086051,
+            9.51458067353418,
+            9.55498228998231,
+            9.595383906430438,
+            9.635785522878564,
+            9.676187139326693,
+            9.716588755774822,
+            9.756990372222948,
+            9.797391988671077,
+            9.837793605119206,
+            9.878195221567335,
+            9.91859683801546,
+            9.95899845446359,
+            9.999400070911719,
+            10.039801687359848,
+            10.080203303807973,
+            10.120604920256103,
+            10.161006536704232,
+            10.201408153152357,
+            10.241809769600486,
+            10.282211386048616,
+            10.322613002496745,
+            10.36301461894487,
+            10.403416235393,
+            10.443817851841128,
+            10.484219468289254,
+            10.524621084737383,
+            10.565022701185512,
+            10.605424317633641,
+            10.645825934081767,
+            10.686227550529896,
+            10.726629166978025,
+            10.76703078342615,
+            10.80743239987428,
+            10.847834016322409,
+            10.888235632770538,
+            10.928637249218664,
+            10.969038865666793,
+            11.009440482114925,
+            11.049842098563055,
+            11.09024371501118,
+            11.13064533145931,
+            11.171046947907438,
+            11.211448564355564,
+            11.251850180803693,
+            11.292251797251822,
+            11.332653413699951,
+            11.373055030148077,
+            11.413456646596206,
+            11.453858263044335,
+            11.49425987949246,
+            11.53466149594059,
+            11.575063112388719,
+            11.615464728836848,
+            11.655866345284974,
+            11.696267961733103,
+            11.736669578181232,
+            11.777071194629357,
+            11.817472811077486,
+            11.857874427525616,
+            11.898276043973745,
+            11.93867766042187,
+            11.97907927687,
+            12.019480893318129,
+            12.059882509766258,
+            12.100284126214387,
+            12.140685742662509,
+            12.181087359110638,
+            12.221488975558767,
+            12.261890592006896,
+            12.302292208455025,
+            12.342693824903154,
+            12.383095441351283,
+            12.423497057799413,
+            12.463898674247535,
+            12.504300290695664,
+            12.544701907143793,
+            12.585103523591922,
+            12.625505140040051,
+            12.66590675648818,
+            12.70630837293631,
+            12.746709989384431,
+            12.78711160583256,
+            12.82751322228069,
+            12.867914838728819,
+            12.908316455176948,
+            12.948718071625077,
+            12.989119688073206,
+            13.029521304521328,
+            13.069922920969457,
+            13.110324537417586,
+            13.150726153865715,
+            13.191127770313845,
+            13.231529386761974,
+            13.271931003210103,
+            13.312332619658225,
+            13.352734236106354,
+            13.393135852554483,
+            13.433537469002612,
+            13.473939085450741,
+            13.51434070189887,
+            13.554742318347,
+            13.595143934795122,
+            13.63554555124325,
+            13.67594716769138,
+            13.716348784139509,
+            13.756750400587638,
+            13.797152017035767,
+            13.837553633483896,
+            13.877955249932018,
+            13.918356866380147,
+            13.958758482828276,
+            13.999160099276406,
+            14.039561715724535,
+            14.079963332172664,
+            14.120364948620793,
+            14.160766565068915,
+            14.201168181517044,
+            14.241569797965173,
+            14.281971414413302,
+            14.322373030861431,
+            14.36277464730956,
+            14.40317626375769,
+            14.443577880205812,
+            14.48397949665394,
+            14.52438111310207,
+            14.564782729550199,
+            14.605184345998328,
+            14.645585962446457,
+            14.685987578894586,
+            14.726389195342716,
+            14.766790811790838,
+            14.807192428238967,
+            14.847594044687096,
+            14.887995661135225,
+            14.928397277583354,
+            14.968798894031483,
+            15.009200510479612,
+            15.049602126927734,
+            15.090003743375863,
+            15.130405359823992,
+            15.170806976272122,
+            15.21120859272025,
+            15.25161020916838,
+            15.292011825616509,
+            15.332413442064631,
+            15.37281505851276,
+            15.41321667496089,
+            15.453618291409018,
+            15.494019907857147,
+            15.534421524305277,
+            15.574823140753406,
+            15.615224757201528,
+            15.655626373649657,
+            15.696027990097786,
+            15.736429606545915,
+            15.776831222994044,
+            15.817232839442173,
+            15.857634455890302,
+            15.898036072338424,
+            15.938437688786554,
+            15.978839305234683,
+            16.01924092168281,
+            16.05964253813094,
+            16.10004415457907,
+            16.1404457710272,
+            16.18084738747532,
+            16.22124900392345,
+            16.26165062037158,
+            16.30205223681971,
+            16.342453853267838,
+            16.382855469715967,
+            16.423257086164096,
+            16.463658702612218,
+            16.504060319060347,
+            16.544461935508476,
+            16.584863551956605,
+            16.625265168404734,
+            16.665666784852863,
+            16.706068401300993,
+            16.746470017749115,
+            16.786871634197244,
+            16.827273250645373,
+            16.867674867093502,
+            16.90807648354163,
+            16.94847809998976,
+            16.98887971643789,
+            17.02928133288602,
+            17.06968294933414,
+            17.11008456578227,
+            17.1504861822304,
+            17.190887798678528,
+            17.231289415126664,
+            17.271691031574793,
+            17.312092648022922,
+            17.352494264471044,
+            17.392895880919173,
+            17.433297497367302,
+            17.47369911381543,
+            17.51410073026356,
+            17.55450234671169,
+            17.59490396315982,
+            17.63530557960794,
+            17.67570719605607,
+            17.7161088125042,
+            17.75651042895233,
+            17.796912045400457,
+            17.837313661848587,
+            17.877715278296716,
+            17.918116894744838,
+            17.958518511192967,
+            17.998920127641096,
+            18.039321744089225,
+            18.079723360537354,
+            18.120124976985483,
+            18.160526593433612,
+            18.200928209881734,
+            18.241329826329864,
+            18.281731442777993,
+            18.322133059226122,
+            18.36253467567425,
+            18.40293629212238,
+            18.44333790857051,
+            18.48373952501863,
+            18.52414114146676,
+            18.56454275791489,
+            18.60494437436302,
+            18.645345990811148,
+            18.685747607259277,
+            18.726149223707406,
+            18.766550840155535,
+            18.806952456603657,
+            18.847354073051786,
+            18.887755689499915,
+            18.928157305948044,
+            18.968558922396173,
+            19.008960538844303,
+            19.04936215529243,
+            19.089763771740554,
+            19.130165388188683,
+            19.170567004636812,
+            19.21096862108494,
+            19.25137023753307,
+            19.2917718539812,
+            19.33217347042933,
+            19.37257508687745,
+            19.41297670332558,
+            19.45337831977371,
+            19.493779936221838,
+            19.534181552669967,
+            19.574583169118096,
+            19.614984785566225,
+            19.655386402014347,
+            19.695788018462476,
+            19.736189634910605,
+            19.776591251358735,
+            19.816992867806864,
+            19.857394484254993,
+            19.897796100703122,
+            19.938197717151244,
+            19.978599333599373,
+            20.019000950047502
+          ],
+          "geometry": {
+            "sample_count": 23876,
+            "sample_rate": 2520.0,
+            "nfft": 47916,
+            "lags": 458,
+            "lag_first_sample": 0,
+            "lag_last_sample": 457,
+            "lag_step_samples": 1,
+            "group_tile": 512,
+            "precision": "fp32",
+            "device": "cpu"
+          },
+          "worker_implementations": {
+            "reference": {
+              "source_hashes": {
+                "triad_fft_acquire.py": "d4a3c2cc39e0068e6aa6aab27d7ee8eeff6cc7db72a790868fe166c3f1d65843",
+                "triad_group_acquire.py": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+                "triad_gaussian_window.py": "b22fe002864922e44bc7e10000672a163353818f610c4882bae5d62cfe1cf883",
+                "triad_noise_likelihood.py": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110",
+                "triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba",
+                "triad_state_workspace.py": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923"
+              },
+              "python": "3.13.5",
+              "numpy": "2.5.4",
+              "torch": "2.8.0+cpu",
+              "threads": 2,
+              "tf32_allowed": false
+            },
+            "candidate": {
+              "source_hashes": {
+                "triad_fft_acquire.py": "d4a3c2cc39e0068e6aa6aab27d7ee8eeff6cc7db72a790868fe166c3f1d65843",
+                "triad_group_acquire.py": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+                "triad_gaussian_window.py": "b22fe002864922e44bc7e10000672a163353818f610c4882bae5d62cfe1cf883",
+                "triad_noise_likelihood.py": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110",
+                "triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba",
+                "triad_state_workspace.py": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923"
+              },
+              "python": "3.13.5",
+              "numpy": "2.5.4",
+              "torch": "2.8.0+cpu",
+              "threads": 2,
+              "tf32_allowed": false
+            }
+          },
+          "precision": "fp32",
+          "device": "cpu",
+          "performance_environment": {
+            "requested_device": "cpu",
+            "os": {
+              "system": "Linux",
+              "release": "7.2.6+deb13-amd64",
+              "machine": "x86_64",
+              "python": "3.13.5"
+            },
+            "cpu": {
+              "vendor_id": "AuthenticAMD",
+              "cpu family": "25",
+              "model": "80",
+              "model name": "AMD Ryzen 5 PRO 5650U with Radeon Graphics",
+              "stepping": "0",
+              "siblings": "12",
+              "cpu cores": "6",
+              "flags": "fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm constant_tsc rep_good nopl xtopology nonstop_tsc cpuid extd_apicid aperfmperf rapl pni pclmulqdq monitor ssse3 fma cx16 sse4_1 sse4_2 movbe popcnt aes xsave avx f16c rdrand lahf_lm cmp_legacy svm extapic cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw ibs skinit wdt tce topoext perfctr_core perfctr_nb bpext perfctr_llc mwaitx cpb cat_l3 cdp_l3 hw_pstate ssbd mba ibrs ibpb stibp vmmcall fsgsbase bmi1 avx2 smep bmi2 erms invpcid cqm rdt_a rdseed adx smap clflushopt clwb sha_ni xsaveopt xsavec xgetbv1 xsaves cqm_llc cqm_occup_llc cqm_mbm_total cqm_mbm_local user_shstk clzero irperf xsaveerptr rdpru wbnoinvd cppc arat npt lbrv svm_lock nrip_save tsc_scale vmcb_clean flushbyasid decodeassists pausefilter pfthreshold avic v_vmsave_vmload vgif v_spec_ctrl umip pku ospke vaes vpclmulqdq rdpid overflow_recov succor smca fsrm debug_swap",
+              "logical_cpu_count": 12,
+              "affinity_cpu_count": 2,
+              "affinity_cpus": [
+                2,
+                4
+              ],
+              "affinity_topology": [
+                {
+                  "cpu": 2,
+                  "core_id": "1",
+                  "physical_package_id": "0",
+                  "thread_siblings_list": "2-3"
+                },
+                {
+                  "cpu": 4,
+                  "core_id": "2",
+                  "physical_package_id": "0",
+                  "thread_siblings_list": "4-5"
+                }
+              ],
+              "quota_cores": null,
+              "quota_source": null,
+              "effective_core_limit_estimate": 2.0,
+              "numpy_simd": {
+                "baseline": [
+                  "X86_V2"
+                ],
+                "found": [
+                  "X86_V3"
+                ],
+                "not found": [
+                  "X86_V4",
+                  "AVX512_ICL",
+                  "AVX512_SPR"
+                ]
+              },
+              "numpy_blas": {
+                "name": "scipy-openblas",
+                "version": "0.3.34.106.0",
+                "configuration": "OpenBLAS 0.3.34.106.0  USE64BITINT DYNAMIC_ARCH NO_AFFINITY SkylakeX MAX_THREADS=64"
+              },
+              "numpy_lapack": {
+                "name": "scipy-openblas",
+                "version": "0.3.34.106.0",
+                "configuration": "OpenBLAS 0.3.34.106.0  USE64BITINT DYNAMIC_ARCH NO_AFFINITY SkylakeX MAX_THREADS=64"
+              },
+              "torch_capability": "AVX2"
+            },
+            "requested_threads": 2,
+            "dispatch_environment": {
+              "ATEN_CPU_CAPABILITY": null,
+              "OPENBLAS_CORETYPE": null,
+              "MKL_ENABLE_INSTRUCTIONS": null,
+              "ONEDNN_MAX_CPU_ISA": null,
+              "NPY_DISABLE_CPU_FEATURES": null
+            },
+            "dependencies": {
+              "numpy": "2.5.4",
+              "scipy": "1.18.1",
+              "torch": "2.8.0+cpu",
+              "numpy_import_error": null,
+              "torch_import_error": null
+            },
+            "device": {
+              "status": "available"
+            }
+          },
+          "model_error_limit": 0.05
+        },
+        "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/anchors-v3/cpu/1793736320242150987-f64ec44f6551af17.anchor.json",
+        "lookup_reason": null,
+        "prediction_commitment_path": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/anchors-v3/cpu/1793736320242150987-f64ec44f6551af17.prediction.json",
+        "qualification": {
+          "status": "validated",
+          "log_errors": {
+            "reference": [
+              -0.013462772656876513,
+              0.006676142112266391,
+              -0.008164320550438335,
+              -0.020472628665604554,
+              0.030900658167933213,
+              0.01681550532807792,
+              0.030152872346754983,
+              0.014035603718070666,
+              -0.006870557758841322
+            ],
+            "candidate": [
+              0.00119259367895142,
+              0.004238872166575283,
+              0.06206134087665523,
+              0.0116989924969947,
+              0.007960396045399871,
+              -0.015041360340562616,
+              0.008776815847894009,
+              0.0018094799843166277,
+              0.02170089807202642
+            ],
+            "paired": [
+              0.014655366335827933,
+              -0.0024372699456911076,
+              0.07022566142709356,
+              0.03217162116259925,
+              -0.02294026212253334,
+              -0.03185686566864054,
+              -0.021376056498860974,
+              -0.012226123733754039,
+              0.028571455830867742
+            ]
+          },
+          "intervals": {
+            "reference": {
+              "status": "validated",
+              "mean_log_residual": 0.005512278004593606,
+              "log_residual_interval": [
+                -0.011735558025550603,
+                0.022760114034737815
+              ],
+              "confidence": 0.975,
+              "relative_mean_error_interval": [
+                -0.011666964952668162,
+                0.023021101705381478
+              ],
+              "allowed_relative_mean_error": [
+                -0.05,
+                0.05
+              ],
+              "sample_count": 9,
+              "scope": "conditional on the frozen forecast and independent stationary normal holdout log times"
+            },
+            "candidate": {
+              "status": "validated",
+              "mean_log_residual": 0.011599780980916772,
+              "log_residual_interval": [
+                -0.007958088563019477,
+                0.03115765052485302
+              ],
+              "confidence": 0.975,
+              "relative_mean_error_interval": [
+                -0.007926506808559806,
+                0.03164813093637177
+              ],
+              "allowed_relative_mean_error": [
+                -0.05,
+                0.05
+              ],
+              "sample_count": 9,
+              "scope": "conditional on the frozen forecast and independent stationary normal holdout log times"
+            },
+            "paired": {
+              "status": "validated",
+              "mean_log_residual": 0.006087502976323166,
+              "log_residual_interval": [
+                -0.024362337605423185,
+                0.03653734355806952
+              ],
+              "confidence": 0.975,
+              "relative_mean_error_interval": [
+                -0.02406797118855011,
+                0.037213036519800215
+              ],
+              "allowed_relative_mean_error": [
+                -0.05,
+                0.05
+              ],
+              "sample_count": 9,
+              "scope": "conditional on the frozen forecast and independent stationary normal holdout log times"
+            }
+          },
+          "look_count": 9,
+          "confirmation_policy": {
+            "looks": [
+              3,
+              5,
+              9,
+              17
+            ],
+            "family_alpha": 0.1,
+            "per_look_two_sided_alpha": 0.025,
+            "confidence": 0.975,
+            "confidence_sidedness": "two-sided",
+            "scope": "Bonferroni family-wise control across the four predeclared looks for one error family; not simultaneous across reference, candidate, paired metrics, or cases",
+            "metric": "mean log(actual full-run time / frozen predicted full-run time)",
+            "cross_metric_or_case_simultaneous_claim": false
+          },
+          "scope": "finite predeclared confirmation looks; both source means and paired ratio must establish equivalence; no simultaneous interval claim across metrics or cases"
+        },
+        "qualification_looks": [
+          {
+            "status": "inconclusive",
+            "log_errors": {
+              "reference": [
+                -0.013462772656876513,
+                0.006676142112266391,
+                -0.008164320550438335
+              ],
+              "candidate": [
+                0.00119259367895142,
+                0.004238872166575283,
+                0.06206134087665523
+              ],
+              "paired": [
+                0.014655366335827933,
+                -0.0024372699456911076,
+                0.07022566142709356
+              ]
+            },
+            "intervals": {
+              "reference": {
+                "status": "validated",
+                "mean_log_residual": -0.004983650365016152,
+                "log_residual_interval": [
+                  -0.04238452521246373,
+                  0.03241722448243142
+                ],
+                "confidence": 0.975,
+                "relative_mean_error_interval": [
+                  -0.04149885815363066,
+                  0.03294838676776783
+                ],
+                "allowed_relative_mean_error": [
+                  -0.05,
+                  0.05
+                ],
+                "sample_count": 3,
+                "scope": "conditional on the frozen forecast and independent stationary normal holdout log times"
+              },
+              "candidate": {
+                "status": "inconclusive",
+                "mean_log_residual": 0.022497602240727308,
+                "log_residual_interval": [
+                  -0.10037698816873654,
+                  0.14537219265019116
+                ],
+                "confidence": 0.975,
+                "relative_mean_error_interval": [
+                  -0.09550363067556634,
+                  0.15646991978090044
+                ],
+                "allowed_relative_mean_error": [
+                  -0.05,
+                  0.05
+                ],
+                "sample_count": 3,
+                "scope": "conditional on the frozen forecast and independent stationary normal holdout log times"
+              },
+              "paired": {
+                "status": "inconclusive",
+                "mean_log_residual": 0.027481252605743463,
+                "log_residual_interval": [
+                  -0.10862926925468838,
+                  0.16359177446617532
+                ],
+                "confidence": 0.975,
+                "relative_mean_error_interval": [
+                  -0.10293707533423516,
+                  0.17773343608520648
+                ],
+                "allowed_relative_mean_error": [
+                  -0.05,
+                  0.05
+                ],
+                "sample_count": 3,
+                "scope": "conditional on the frozen forecast and independent stationary normal holdout log times"
+              }
+            },
+            "look_count": 3,
+            "confirmation_policy": {
+              "looks": [
+                3,
+                5,
+                9,
+                17
+              ],
+              "family_alpha": 0.1,
+              "per_look_two_sided_alpha": 0.025,
+              "confidence": 0.975,
+              "confidence_sidedness": "two-sided",
+              "scope": "Bonferroni family-wise control across the four predeclared looks for one error family; not simultaneous across reference, candidate, paired metrics, or cases",
+              "metric": "mean log(actual full-run time / frozen predicted full-run time)",
+              "cross_metric_or_case_simultaneous_claim": false
+            },
+            "scope": "finite predeclared confirmation looks; both source means and paired ratio must establish equivalence; no simultaneous interval claim across metrics or cases"
+          },
+          {
+            "status": "inconclusive",
+            "log_errors": {
+              "reference": [
+                -0.013462772656876513,
+                0.006676142112266391,
+                -0.008164320550438335,
+                -0.020472628665604554,
+                0.030900658167933213
+              ],
+              "candidate": [
+                0.00119259367895142,
+                0.004238872166575283,
+                0.06206134087665523,
+                0.0116989924969947,
+                0.007960396045399871
+              ],
+              "paired": [
+                0.014655366335827933,
+                -0.0024372699456911076,
+                0.07022566142709356,
+                0.03217162116259925,
+                -0.02294026212253334
+              ]
+            },
+            "intervals": {
+              "reference": {
+                "status": "validated",
+                "mean_log_residual": -0.0009045843185439594,
+                "log_residual_interval": [
+                  -0.032771886845124866,
+                  0.030962718208036945
+                ],
+                "confidence": 0.975,
+                "relative_mean_error_interval": [
+                  -0.032240706962532305,
+                  0.03144704897539236
+                ],
+                "allowed_relative_mean_error": [
+                  -0.05,
+                  0.05
+                ],
+                "sample_count": 5,
+                "scope": "conditional on the frozen forecast and independent stationary normal holdout log times"
+              },
+              "candidate": {
+                "status": "inconclusive",
+                "mean_log_residual": 0.0174304390529153,
+                "log_residual_interval": [
+                  -0.022054759674137923,
+                  0.056915637779968525
+                ],
+                "confidence": 0.975,
+                "relative_mean_error_interval": [
+                  -0.021813331598630435,
+                  0.05856650360819829
+                ],
+                "allowed_relative_mean_error": [
+                  -0.05,
+                  0.05
+                ],
+                "sample_count": 5,
+                "scope": "conditional on the frozen forecast and independent stationary normal holdout log times"
+              },
+              "paired": {
+                "status": "inconclusive",
+                "mean_log_residual": 0.01833502337145926,
+                "log_residual_interval": [
+                  -0.03711299543988485,
+                  0.07378304218280338
+                ],
+                "confidence": 0.975,
+                "relative_mean_error_interval": [
+                  -0.03643274950790484,
+                  0.07657320918334633
+                ],
+                "allowed_relative_mean_error": [
+                  -0.05,
+                  0.05
+                ],
+                "sample_count": 5,
+                "scope": "conditional on the frozen forecast and independent stationary normal holdout log times"
+              }
+            },
+            "look_count": 5,
+            "confirmation_policy": {
+              "looks": [
+                3,
+                5,
+                9,
+                17
+              ],
+              "family_alpha": 0.1,
+              "per_look_two_sided_alpha": 0.025,
+              "confidence": 0.975,
+              "confidence_sidedness": "two-sided",
+              "scope": "Bonferroni family-wise control across the four predeclared looks for one error family; not simultaneous across reference, candidate, paired metrics, or cases",
+              "metric": "mean log(actual full-run time / frozen predicted full-run time)",
+              "cross_metric_or_case_simultaneous_claim": false
+            },
+            "scope": "finite predeclared confirmation looks; both source means and paired ratio must establish equivalence; no simultaneous interval claim across metrics or cases"
+          },
+          {
+            "status": "validated",
+            "log_errors": {
+              "reference": [
+                -0.013462772656876513,
+                0.006676142112266391,
+                -0.008164320550438335,
+                -0.020472628665604554,
+                0.030900658167933213,
+                0.01681550532807792,
+                0.030152872346754983,
+                0.014035603718070666,
+                -0.006870557758841322
+              ],
+              "candidate": [
+                0.00119259367895142,
+                0.004238872166575283,
+                0.06206134087665523,
+                0.0116989924969947,
+                0.007960396045399871,
+                -0.015041360340562616,
+                0.008776815847894009,
+                0.0018094799843166277,
+                0.02170089807202642
+              ],
+              "paired": [
+                0.014655366335827933,
+                -0.0024372699456911076,
+                0.07022566142709356,
+                0.03217162116259925,
+                -0.02294026212253334,
+                -0.03185686566864054,
+                -0.021376056498860974,
+                -0.012226123733754039,
+                0.028571455830867742
+              ]
+            },
+            "intervals": {
+              "reference": {
+                "status": "validated",
+                "mean_log_residual": 0.005512278004593606,
+                "log_residual_interval": [
+                  -0.011735558025550603,
+                  0.022760114034737815
+                ],
+                "confidence": 0.975,
+                "relative_mean_error_interval": [
+                  -0.011666964952668162,
+                  0.023021101705381478
+                ],
+                "allowed_relative_mean_error": [
+                  -0.05,
+                  0.05
+                ],
+                "sample_count": 9,
+                "scope": "conditional on the frozen forecast and independent stationary normal holdout log times"
+              },
+              "candidate": {
+                "status": "validated",
+                "mean_log_residual": 0.011599780980916772,
+                "log_residual_interval": [
+                  -0.007958088563019477,
+                  0.03115765052485302
+                ],
+                "confidence": 0.975,
+                "relative_mean_error_interval": [
+                  -0.007926506808559806,
+                  0.03164813093637177
+                ],
+                "allowed_relative_mean_error": [
+                  -0.05,
+                  0.05
+                ],
+                "sample_count": 9,
+                "scope": "conditional on the frozen forecast and independent stationary normal holdout log times"
+              },
+              "paired": {
+                "status": "validated",
+                "mean_log_residual": 0.006087502976323166,
+                "log_residual_interval": [
+                  -0.024362337605423185,
+                  0.03653734355806952
+                ],
+                "confidence": 0.975,
+                "relative_mean_error_interval": [
+                  -0.02406797118855011,
+                  0.037213036519800215
+                ],
+                "allowed_relative_mean_error": [
+                  -0.05,
+                  0.05
+                ],
+                "sample_count": 9,
+                "scope": "conditional on the frozen forecast and independent stationary normal holdout log times"
+              }
+            },
+            "look_count": 9,
+            "confirmation_policy": {
+              "looks": [
+                3,
+                5,
+                9,
+                17
+              ],
+              "family_alpha": 0.1,
+              "per_look_two_sided_alpha": 0.025,
+              "confidence": 0.975,
+              "confidence_sidedness": "two-sided",
+              "scope": "Bonferroni family-wise control across the four predeclared looks for one error family; not simultaneous across reference, candidate, paired metrics, or cases",
+              "metric": "mean log(actual full-run time / frozen predicted full-run time)",
+              "cross_metric_or_case_simultaneous_claim": false
+            },
+            "scope": "finite predeclared confirmation looks; both source means and paired ratio must establish equivalence; no simultaneous interval claim across metrics or cases"
+          }
+        ],
+        "applicability": null,
+        "conditional_check": null,
+        "conditional_model_bounds": null,
+        "frozen_prediction": {
+          "schema": "triad-performance-fft-trace-v3",
+          "identity_sha256": "f64ec44f6551af17b6e3dcc93ad19f3f2c0b4b6fb46aa8579b6479b4f8fd82bb",
+          "training_outer_count": 33,
+          "target_count": 992,
+          "models": {
+            "reference": {
+              "preparation_seconds": 0.03342593604430073,
+              "fixed_score_seconds": 0.0013107384100003255,
+              "per_cfo_seconds": 0.01794470095809714,
+              "predicted_full_seconds": 17.835880024886663
+            },
+            "candidate": {
+              "preparation_seconds": 0.0319628503494935,
+              "fixed_score_seconds": 0.0007299248898472886,
+              "per_cfo_seconds": 0.01787346663844891,
+              "predicted_full_seconds": 17.76317168058066
+            }
+          },
+          "validation_models": {
+            "reference": {
+              "preparation_seconds": 0.03342593604430073,
+              "fixed_score_seconds": 0.0013107384100003255,
+              "per_cfo_seconds": 0.01794470095809714,
+              "predicted_full_seconds": 17.835880024886663
+            },
+            "candidate": {
+              "preparation_seconds": 0.0319628503494935,
+              "fixed_score_seconds": 0.0007299248898472886,
+              "per_cfo_seconds": 0.01787346663844891,
+              "predicted_full_seconds": 17.76317168058066
+            }
+          },
+          "validation_count": 992,
+          "maximum_validation_repeats": 17,
+          "confirmation_policy": {
+            "looks": [
+              3,
+              5,
+              9,
+              17
+            ],
+            "family_alpha": 0.1,
+            "per_look_two_sided_alpha": 0.025,
+            "confidence": 0.975,
+            "confidence_sidedness": "two-sided",
+            "scope": "Bonferroni family-wise control across the four predeclared looks for one error family; not simultaneous across reference, candidate, paired metrics, or cases",
+            "metric": "mean log(actual full-run time / frozen predicted full-run time)",
+            "cross_metric_or_case_simultaneous_claim": false
+          },
+          "confirmation_plan": {
+            "maximum_repeats_per_source": 17,
+            "allowed_looks": [
+              3,
+              5,
+              9,
+              17
+            ],
+            "confirmation_policy": {
+              "looks": [
+                3,
+                5,
+                9,
+                17
+              ],
+              "family_alpha": 0.1,
+              "per_look_two_sided_alpha": 0.025,
+              "confidence": 0.975,
+              "confidence_sidedness": "two-sided",
+              "scope": "Bonferroni family-wise control across the four predeclared looks for one error family; not simultaneous across reference, candidate, paired metrics, or cases",
+              "metric": "mean log(actual full-run time / frozen predicted full-run time)",
+              "cross_metric_or_case_simultaneous_claim": false
+            },
+            "estimated_seconds_per_pair": 35.59905170546732,
+            "training_log_sd": 0.06869126821426515,
+            "scope": "training-only budget cap; fixed forecast and alpha divisor across all four scheduled looks, even when the cap permits fewer"
+          },
+          "model_error_limit": 0.05,
+          "prediction_frozen_before_validation": true
+        },
+        "current_validation": {
+          "record_count": 9,
+          "count_by_source": {
+            "paired": 9
+          },
+          "recorded_scalar_observations": [
+            {
+              "repeat": 0,
+              "purpose": "independent_full",
+              "count": 992,
+              "frozen_prediction_sha256": "bc5ee137fc853663ab7d3f7bf21b32fa590ecadffd097108c54620095cdb003e",
+              "predicted_seconds": {
+                "reference": 17.835880024886663,
+                "candidate": 17.76317168058066
+              },
+              "observed": {
+                "reference": {
+                  "preparation_seconds": 0.03187976899789646,
+                  "score_including_finish_seconds": 17.56548897200264,
+                  "full_seconds": 17.597368741000537
+                },
+                "candidate": {
+                  "preparation_seconds": 0.032387856976129115,
+                  "score_including_finish_seconds": 17.751980706991162,
+                  "full_seconds": 17.78436856396729
+                }
+              },
+              "log_errors": {
+                "reference": -0.013462772656876513,
+                "candidate": 0.00119259367895142
+              },
+              "relative_errors": {
+                "reference": 0.013372554847494366,
+                "candidate": 0.0011933051015774478
+              },
+              "paired_log_error": 0.014655366335827933,
+              "paired_relative_error": 0.014763282757475297,
+              "single_run_within_bound": true,
+              "error_limit": 0.05
+            },
+            {
+              "repeat": 1,
+              "purpose": "independent_full",
+              "count": 992,
+              "frozen_prediction_sha256": "bc5ee137fc853663ab7d3f7bf21b32fa590ecadffd097108c54620095cdb003e",
+              "predicted_seconds": {
+                "reference": 17.835880024886663,
+                "candidate": 17.76317168058066
+              },
+              "observed": {
+                "reference": {
+                  "preparation_seconds": 0.09076233702944592,
+                  "score_including_finish_seconds": 17.864590924000368,
+                  "full_seconds": 17.955353261029813
+                },
+                "candidate": {
+                  "preparation_seconds": 0.038625264016445726,
+                  "score_including_finish_seconds": 17.80000204098178,
+                  "full_seconds": 17.838627304998226
+                }
+              },
+              "log_errors": {
+                "reference": 0.006676142112266391,
+                "candidate": 0.004238872166575283
+              },
+              "relative_errors": {
+                "reference": 0.006698477225483003,
+                "candidate": 0.004247868892696622
+              },
+              "paired_log_error": -0.0024372699456911076,
+              "paired_relative_error": 0.002434302214840379,
+              "single_run_within_bound": true,
+              "error_limit": 0.05
+            },
+            {
+              "repeat": 2,
+              "purpose": "independent_full",
+              "count": 992,
+              "frozen_prediction_sha256": "bc5ee137fc853663ab7d3f7bf21b32fa590ecadffd097108c54620095cdb003e",
+              "predicted_seconds": {
+                "reference": 17.835880024886663,
+                "candidate": 17.76317168058066
+              },
+              "observed": {
+                "reference": {
+                  "preparation_seconds": 0.0394347200053744,
+                  "score_including_finish_seconds": 17.651420284004416,
+                  "full_seconds": 17.69085500400979
+                },
+                "candidate": {
+                  "preparation_seconds": 0.09664791403338313,
+                  "score_including_finish_seconds": 18.803857215039898,
+                  "full_seconds": 18.90050512907328
+                }
+              },
+              "log_errors": {
+                "reference": -0.008164320550438335,
+                "candidate": 0.06206134087665523
+              },
+              "relative_errors": {
+                "reference": 0.008131083000923793,
+                "candidate": 0.06402761111271567
+              },
+              "paired_log_error": 0.07022566142709356,
+              "paired_relative_error": 0.07275023229073183,
+              "single_run_within_bound": false,
+              "error_limit": 0.05
+            },
+            {
+              "repeat": 3,
+              "purpose": "independent_full",
+              "count": 992,
+              "frozen_prediction_sha256": "bc5ee137fc853663ab7d3f7bf21b32fa590ecadffd097108c54620095cdb003e",
+              "predicted_seconds": {
+                "reference": 17.835880024886663,
+                "candidate": 17.76317168058066
+              },
+              "observed": {
+                "reference": {
+                  "preparation_seconds": 0.1387461939593777,
+                  "score_including_finish_seconds": 17.335698868031614,
+                  "full_seconds": 17.47444506199099
+                },
+                "candidate": {
+                  "preparation_seconds": 0.034402163000777364,
+                  "score_including_finish_seconds": 17.93780107499333,
+                  "full_seconds": 17.97220323799411
+                }
+              },
+              "log_errors": {
+                "reference": -0.020472628665604554,
+                "candidate": 0.0116989924969947
+              },
+              "relative_errors": {
+                "reference": 0.02026448722414348,
+                "candidate": 0.011767693358611789
+              },
+              "paired_log_error": 0.03217162116259925,
+              "paired_relative_error": 0.032694722366447035,
+              "single_run_within_bound": true,
+              "error_limit": 0.05
+            },
+            {
+              "repeat": 4,
+              "purpose": "independent_full",
+              "count": 992,
+              "frozen_prediction_sha256": "bc5ee137fc853663ab7d3f7bf21b32fa590ecadffd097108c54620095cdb003e",
+              "predicted_seconds": {
+                "reference": 17.835880024886663,
+                "candidate": 17.76317168058066
+              },
+              "observed": {
+                "reference": {
+                  "preparation_seconds": 0.03192538797156885,
+                  "score_including_finish_seconds": 18.363698760978878,
+                  "full_seconds": 18.395624148950446
+                },
+                "candidate": {
+                  "preparation_seconds": 0.13243272702675313,
+                  "score_including_finish_seconds": 17.772705139010213,
+                  "full_seconds": 17.905137866036966
+                }
+              },
+              "log_errors": {
+                "reference": 0.030900658167933213,
+                "candidate": 0.007960396045399871
+              },
+              "relative_errors": {
+                "reference": 0.03138303931640964,
+                "candidate": 0.007992164237848959
+              },
+              "paired_log_error": -0.02294026212253334,
+              "paired_relative_error": 0.0226791348964435,
+              "single_run_within_bound": true,
+              "error_limit": 0.05
+            },
+            {
+              "repeat": 5,
+              "purpose": "independent_full",
+              "count": 992,
+              "frozen_prediction_sha256": "bc5ee137fc853663ab7d3f7bf21b32fa590ecadffd097108c54620095cdb003e",
+              "predicted_seconds": {
+                "reference": 17.835880024886663,
+                "candidate": 17.76317168058066
+              },
+              "observed": {
+                "reference": {
+                  "preparation_seconds": 0.11803465097909793,
+                  "score_including_finish_seconds": 18.020300550968386,
+                  "full_seconds": 18.138335201947484
+                },
+                "candidate": {
+                  "preparation_seconds": 0.031522321049124,
+                  "score_including_finish_seconds": 17.466466448968276,
+                  "full_seconds": 17.4979887700174
+                }
+              },
+              "log_errors": {
+                "reference": 0.01681550532807792,
+                "candidate": -0.015041360340562616
+              },
+              "relative_errors": {
+                "reference": 0.016957681742577387,
+                "candidate": 0.014928804119658736
+              },
+              "paired_log_error": -0.03185686566864054,
+              "paired_relative_error": 0.031354781457177204,
+              "single_run_within_bound": true,
+              "error_limit": 0.05
+            },
+            {
+              "repeat": 6,
+              "purpose": "independent_full",
+              "count": 992,
+              "frozen_prediction_sha256": "bc5ee137fc853663ab7d3f7bf21b32fa590ecadffd097108c54620095cdb003e",
+              "predicted_seconds": {
+                "reference": 17.835880024886663,
+                "candidate": 17.76317168058066
+              },
+              "observed": {
+                "reference": {
+                  "preparation_seconds": 0.030797615996561944,
+                  "score_including_finish_seconds": 18.351075688027777,
+                  "full_seconds": 18.38187330402434
+                },
+                "candidate": {
+                  "preparation_seconds": 0.1949703100253828,
+                  "score_including_finish_seconds": 17.724791634012945,
+                  "full_seconds": 17.919761944038328
+                }
+              },
+              "log_errors": {
+                "reference": 0.030152872346754983,
+                "candidate": 0.008776815847894009
+              },
+              "relative_errors": {
+                "reference": 0.03061207399779789,
+                "candidate": 0.008815445027132154
+              },
+              "paired_log_error": -0.021376056498860974,
+              "paired_relative_error": 0.021149207854819378,
+              "single_run_within_bound": true,
+              "error_limit": 0.05
+            },
+            {
+              "repeat": 7,
+              "purpose": "independent_full",
+              "count": 992,
+              "frozen_prediction_sha256": "bc5ee137fc853663ab7d3f7bf21b32fa590ecadffd097108c54620095cdb003e",
+              "predicted_seconds": {
+                "reference": 17.835880024886663,
+                "candidate": 17.76317168058066
+              },
+              "observed": {
+                "reference": {
+                  "preparation_seconds": 0.13404932903358713,
+                  "score_including_finish_seconds": 17.95393310597865,
+                  "full_seconds": 18.087982435012236
+                },
+                "candidate": {
+                  "preparation_seconds": 0.03103760798694566,
+                  "score_including_finish_seconds": 17.764305274002254,
+                  "full_seconds": 17.7953428819892
+                }
+              },
+              "log_errors": {
+                "reference": 0.014035603718070666,
+                "candidate": 0.0018094799843166277
+              },
+              "relative_errors": {
+                "reference": 0.014134565256876093,
+                "candidate": 0.0018111180811089087
+              },
+              "paired_log_error": -0.012226123733754039,
+              "paired_relative_error": 0.012151688343889244,
+              "single_run_within_bound": true,
+              "error_limit": 0.05
+            },
+            {
+              "repeat": 8,
+              "purpose": "independent_full",
+              "count": 992,
+              "frozen_prediction_sha256": "bc5ee137fc853663ab7d3f7bf21b32fa590ecadffd097108c54620095cdb003e",
+              "predicted_seconds": {
+                "reference": 17.835880024886663,
+                "candidate": 17.76317168058066
+              },
+              "observed": {
+                "reference": {
+                  "preparation_seconds": 0.03434434998780489,
+                  "score_including_finish_seconds": 17.679413236037362,
+                  "full_seconds": 17.713757586025167
+                },
+                "candidate": {
+                  "preparation_seconds": 0.13387584598967806,
+                  "score_including_finish_seconds": 18.01898562902352,
+                  "full_seconds": 18.152861475013196
+                }
+              },
+              "log_errors": {
+                "reference": -0.006870557758841322,
+                "candidate": 0.02170089807202642
+              },
+              "relative_errors": {
+                "reference": 0.006847009437779153,
+                "candidate": 0.021938075105053516
+              },
+              "paired_log_error": 0.028571455830867742,
+              "paired_relative_error": 0.028983535081072997,
+              "single_run_within_bound": true,
+              "error_limit": 0.05
+            }
+          ]
+        },
+        "historical_full_validation": {
+          "record_count": 9,
+          "count_by_source": {
+            "paired": 9
+          },
+          "recorded_scalar_observations": [
+            {
+              "repeat": 0,
+              "purpose": "independent_full",
+              "count": 992,
+              "frozen_prediction_sha256": "bc5ee137fc853663ab7d3f7bf21b32fa590ecadffd097108c54620095cdb003e",
+              "predicted_seconds": {
+                "reference": 17.835880024886663,
+                "candidate": 17.76317168058066
+              },
+              "observed": {
+                "reference": {
+                  "preparation_seconds": 0.03187976899789646,
+                  "score_including_finish_seconds": 17.56548897200264,
+                  "full_seconds": 17.597368741000537
+                },
+                "candidate": {
+                  "preparation_seconds": 0.032387856976129115,
+                  "score_including_finish_seconds": 17.751980706991162,
+                  "full_seconds": 17.78436856396729
+                }
+              },
+              "log_errors": {
+                "reference": -0.013462772656876513,
+                "candidate": 0.00119259367895142
+              },
+              "relative_errors": {
+                "reference": 0.013372554847494366,
+                "candidate": 0.0011933051015774478
+              },
+              "paired_log_error": 0.014655366335827933,
+              "paired_relative_error": 0.014763282757475297,
+              "single_run_within_bound": true,
+              "error_limit": 0.05
+            },
+            {
+              "repeat": 1,
+              "purpose": "independent_full",
+              "count": 992,
+              "frozen_prediction_sha256": "bc5ee137fc853663ab7d3f7bf21b32fa590ecadffd097108c54620095cdb003e",
+              "predicted_seconds": {
+                "reference": 17.835880024886663,
+                "candidate": 17.76317168058066
+              },
+              "observed": {
+                "reference": {
+                  "preparation_seconds": 0.09076233702944592,
+                  "score_including_finish_seconds": 17.864590924000368,
+                  "full_seconds": 17.955353261029813
+                },
+                "candidate": {
+                  "preparation_seconds": 0.038625264016445726,
+                  "score_including_finish_seconds": 17.80000204098178,
+                  "full_seconds": 17.838627304998226
+                }
+              },
+              "log_errors": {
+                "reference": 0.006676142112266391,
+                "candidate": 0.004238872166575283
+              },
+              "relative_errors": {
+                "reference": 0.006698477225483003,
+                "candidate": 0.004247868892696622
+              },
+              "paired_log_error": -0.0024372699456911076,
+              "paired_relative_error": 0.002434302214840379,
+              "single_run_within_bound": true,
+              "error_limit": 0.05
+            },
+            {
+              "repeat": 2,
+              "purpose": "independent_full",
+              "count": 992,
+              "frozen_prediction_sha256": "bc5ee137fc853663ab7d3f7bf21b32fa590ecadffd097108c54620095cdb003e",
+              "predicted_seconds": {
+                "reference": 17.835880024886663,
+                "candidate": 17.76317168058066
+              },
+              "observed": {
+                "reference": {
+                  "preparation_seconds": 0.0394347200053744,
+                  "score_including_finish_seconds": 17.651420284004416,
+                  "full_seconds": 17.69085500400979
+                },
+                "candidate": {
+                  "preparation_seconds": 0.09664791403338313,
+                  "score_including_finish_seconds": 18.803857215039898,
+                  "full_seconds": 18.90050512907328
+                }
+              },
+              "log_errors": {
+                "reference": -0.008164320550438335,
+                "candidate": 0.06206134087665523
+              },
+              "relative_errors": {
+                "reference": 0.008131083000923793,
+                "candidate": 0.06402761111271567
+              },
+              "paired_log_error": 0.07022566142709356,
+              "paired_relative_error": 0.07275023229073183,
+              "single_run_within_bound": false,
+              "error_limit": 0.05
+            },
+            {
+              "repeat": 3,
+              "purpose": "independent_full",
+              "count": 992,
+              "frozen_prediction_sha256": "bc5ee137fc853663ab7d3f7bf21b32fa590ecadffd097108c54620095cdb003e",
+              "predicted_seconds": {
+                "reference": 17.835880024886663,
+                "candidate": 17.76317168058066
+              },
+              "observed": {
+                "reference": {
+                  "preparation_seconds": 0.1387461939593777,
+                  "score_including_finish_seconds": 17.335698868031614,
+                  "full_seconds": 17.47444506199099
+                },
+                "candidate": {
+                  "preparation_seconds": 0.034402163000777364,
+                  "score_including_finish_seconds": 17.93780107499333,
+                  "full_seconds": 17.97220323799411
+                }
+              },
+              "log_errors": {
+                "reference": -0.020472628665604554,
+                "candidate": 0.0116989924969947
+              },
+              "relative_errors": {
+                "reference": 0.02026448722414348,
+                "candidate": 0.011767693358611789
+              },
+              "paired_log_error": 0.03217162116259925,
+              "paired_relative_error": 0.032694722366447035,
+              "single_run_within_bound": true,
+              "error_limit": 0.05
+            },
+            {
+              "repeat": 4,
+              "purpose": "independent_full",
+              "count": 992,
+              "frozen_prediction_sha256": "bc5ee137fc853663ab7d3f7bf21b32fa590ecadffd097108c54620095cdb003e",
+              "predicted_seconds": {
+                "reference": 17.835880024886663,
+                "candidate": 17.76317168058066
+              },
+              "observed": {
+                "reference": {
+                  "preparation_seconds": 0.03192538797156885,
+                  "score_including_finish_seconds": 18.363698760978878,
+                  "full_seconds": 18.395624148950446
+                },
+                "candidate": {
+                  "preparation_seconds": 0.13243272702675313,
+                  "score_including_finish_seconds": 17.772705139010213,
+                  "full_seconds": 17.905137866036966
+                }
+              },
+              "log_errors": {
+                "reference": 0.030900658167933213,
+                "candidate": 0.007960396045399871
+              },
+              "relative_errors": {
+                "reference": 0.03138303931640964,
+                "candidate": 0.007992164237848959
+              },
+              "paired_log_error": -0.02294026212253334,
+              "paired_relative_error": 0.0226791348964435,
+              "single_run_within_bound": true,
+              "error_limit": 0.05
+            },
+            {
+              "repeat": 5,
+              "purpose": "independent_full",
+              "count": 992,
+              "frozen_prediction_sha256": "bc5ee137fc853663ab7d3f7bf21b32fa590ecadffd097108c54620095cdb003e",
+              "predicted_seconds": {
+                "reference": 17.835880024886663,
+                "candidate": 17.76317168058066
+              },
+              "observed": {
+                "reference": {
+                  "preparation_seconds": 0.11803465097909793,
+                  "score_including_finish_seconds": 18.020300550968386,
+                  "full_seconds": 18.138335201947484
+                },
+                "candidate": {
+                  "preparation_seconds": 0.031522321049124,
+                  "score_including_finish_seconds": 17.466466448968276,
+                  "full_seconds": 17.4979887700174
+                }
+              },
+              "log_errors": {
+                "reference": 0.01681550532807792,
+                "candidate": -0.015041360340562616
+              },
+              "relative_errors": {
+                "reference": 0.016957681742577387,
+                "candidate": 0.014928804119658736
+              },
+              "paired_log_error": -0.03185686566864054,
+              "paired_relative_error": 0.031354781457177204,
+              "single_run_within_bound": true,
+              "error_limit": 0.05
+            },
+            {
+              "repeat": 6,
+              "purpose": "independent_full",
+              "count": 992,
+              "frozen_prediction_sha256": "bc5ee137fc853663ab7d3f7bf21b32fa590ecadffd097108c54620095cdb003e",
+              "predicted_seconds": {
+                "reference": 17.835880024886663,
+                "candidate": 17.76317168058066
+              },
+              "observed": {
+                "reference": {
+                  "preparation_seconds": 0.030797615996561944,
+                  "score_including_finish_seconds": 18.351075688027777,
+                  "full_seconds": 18.38187330402434
+                },
+                "candidate": {
+                  "preparation_seconds": 0.1949703100253828,
+                  "score_including_finish_seconds": 17.724791634012945,
+                  "full_seconds": 17.919761944038328
+                }
+              },
+              "log_errors": {
+                "reference": 0.030152872346754983,
+                "candidate": 0.008776815847894009
+              },
+              "relative_errors": {
+                "reference": 0.03061207399779789,
+                "candidate": 0.008815445027132154
+              },
+              "paired_log_error": -0.021376056498860974,
+              "paired_relative_error": 0.021149207854819378,
+              "single_run_within_bound": true,
+              "error_limit": 0.05
+            },
+            {
+              "repeat": 7,
+              "purpose": "independent_full",
+              "count": 992,
+              "frozen_prediction_sha256": "bc5ee137fc853663ab7d3f7bf21b32fa590ecadffd097108c54620095cdb003e",
+              "predicted_seconds": {
+                "reference": 17.835880024886663,
+                "candidate": 17.76317168058066
+              },
+              "observed": {
+                "reference": {
+                  "preparation_seconds": 0.13404932903358713,
+                  "score_including_finish_seconds": 17.95393310597865,
+                  "full_seconds": 18.087982435012236
+                },
+                "candidate": {
+                  "preparation_seconds": 0.03103760798694566,
+                  "score_including_finish_seconds": 17.764305274002254,
+                  "full_seconds": 17.7953428819892
+                }
+              },
+              "log_errors": {
+                "reference": 0.014035603718070666,
+                "candidate": 0.0018094799843166277
+              },
+              "relative_errors": {
+                "reference": 0.014134565256876093,
+                "candidate": 0.0018111180811089087
+              },
+              "paired_log_error": -0.012226123733754039,
+              "paired_relative_error": 0.012151688343889244,
+              "single_run_within_bound": true,
+              "error_limit": 0.05
+            },
+            {
+              "repeat": 8,
+              "purpose": "independent_full",
+              "count": 992,
+              "frozen_prediction_sha256": "bc5ee137fc853663ab7d3f7bf21b32fa590ecadffd097108c54620095cdb003e",
+              "predicted_seconds": {
+                "reference": 17.835880024886663,
+                "candidate": 17.76317168058066
+              },
+              "observed": {
+                "reference": {
+                  "preparation_seconds": 0.03434434998780489,
+                  "score_including_finish_seconds": 17.679413236037362,
+                  "full_seconds": 17.713757586025167
+                },
+                "candidate": {
+                  "preparation_seconds": 0.13387584598967806,
+                  "score_including_finish_seconds": 18.01898562902352,
+                  "full_seconds": 18.152861475013196
+                }
+              },
+              "log_errors": {
+                "reference": -0.006870557758841322,
+                "candidate": 0.02170089807202642
+              },
+              "relative_errors": {
+                "reference": 0.006847009437779153,
+                "candidate": 0.021938075105053516
+              },
+              "paired_log_error": 0.028571455830867742,
+              "paired_relative_error": 0.028983535081072997,
+              "single_run_within_bound": true,
+              "error_limit": 0.05
+            }
+          ]
+        }
+      },
+      "measured_bank_numerical_checks": {
+        "count": 77,
+        "eligible_counts": {
+          "True": 77
+        },
+        "maximum_absolute_score_error": 0.0
+      }
+    }
+  },
+  "input": {
+    "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/free-qual-001.json",
+    "sha256": "39b4f7e95e0231080c1bc15d89e99c6caba0feb53b7875cb56b98f880160abb1",
+    "bytes": 607104,
+    "encoding": "json"
+  }
+}

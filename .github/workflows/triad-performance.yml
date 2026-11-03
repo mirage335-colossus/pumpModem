@@ -22,7 +22,8 @@ jobs:
   performance:
     name: CPU receiver performance regression
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    # Confidence-driven stopping with bounded install/build overhead.
+    timeout-minutes: 50
     env:
       BASELINE_REF: 242ea15fa032ee117b9113a7f3cd07cc6e9f0254
       CANDIDATE_REF: ${{ inputs.candidate_ref || github.sha }}
@@ -51,6 +52,14 @@ jobs:
           ref: ${{ env.CANDIDATE_REF }}
           path: candidate
 
+      - name: Checkout immutable receiver reference source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ env.BASELINE_REF }}
+          path: reference
+
       - name: Validate candidate and benchmark baseline identities
         shell: bash
         run: |
@@ -60,6 +69,11 @@ jobs:
             exit 2
           }
           actual=$(git -C candidate rev-parse HEAD)
+          baseline=$(git -C reference rev-parse HEAD)
+          [[ "$baseline" == "$BASELINE_REF" ]] || {
+            echo '::error::Reference checkout does not match the declared receiver baseline.'
+            exit 2
+          }
           [[ "$actual" == "$CANDIDATE_REF" ]] || {
             echo '::error::Candidate checkout does not match the requested source ID.'
             exit 2
@@ -119,8 +133,58 @@ jobs:
           Path('build/triad-performance/dispatch.json').write_text(json.dumps(data, indent=2) + '\n')
           PYVERIFY
 
-      - name: Check performance harness contracts
-        run: python -m unittest discover -s tests -p 'test_triad_perf*.py'
+      # Partition expensive qualification anchors by the actually measured
+      # machine/runtime profile, without putting hostnames or other runner IDs
+      # into a cache key. Their contents are still revalidated by the adapters.
+      - name: Fingerprint runner profile for anchor cache
+        id: runner-profile
+        run: |
+          python - <<'PYCACHE'
+          import hashlib, json, os, platform, sys
+          from pathlib import Path
+          sys.path.insert(0, str(Path('tools').resolve()))
+          from triad_perf_hardware import discover_hardware
+          host = discover_hardware('cpu', threads=2)
+          profile = {'os': platform.platform(), 'machine': platform.machine(),
+                     'cpu': host['cpu'], 'affinity': sorted(os.sched_getaffinity(0)),
+                     'numpy': __import__('numpy').__version__,
+                     'scipy': __import__('scipy').__version__,
+                     'torch': __import__('torch').__version__,
+                     'dispatch': 'avx2-fallback'}
+          token = hashlib.sha256(json.dumps(profile, sort_keys=True).encode()).hexdigest()[:20]
+          # Separate persistent hardware-regression baseline identity from
+          # anchor identity: exclude kernel, libraries and source revisions so
+          # those changes can be screened against the first measured profile.
+          cpu = host['cpu']
+          hardware = {'device': host['requested_device'], 'threads': host['requested_threads'],
+                      'cpu_model': cpu.get('model name', cpu.get('model')),
+                      'cpu_vendor': cpu.get('vendor_id'), 'cpu_flags': cpu.get('flags'),
+                      'affinity': cpu.get('affinity_cpu_count'),
+                      'affinity_cpus': cpu.get('affinity_cpus'),
+                      'affinity_topology': cpu.get('affinity_topology'),
+                      'quota': cpu.get('quota_cores'),
+                      'dispatch_environment': host.get('dispatch_environment')}
+          hardware_token = hashlib.sha256(json.dumps(hardware, sort_keys=True).encode()).hexdigest()[:24]
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f'key={token}\n')
+              output.write(f'hardware_key={hardware_token}\n')
+          PYCACHE
+
+      # This immutable first-observation reference is intentionally separate
+      # from source/runtime-specific receiver anchors.
+      - name: Restore first-observed hardware performance profile
+        id: hardware-baseline
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # actions/cache v6.1.0
+        with:
+          path: build/triad-performance/hardware-reference.json
+          key: triad-hardware-reference-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-profile.outputs.hardware_key }}
+
+      - name: Configure baseline CLI and isolated receiver fixture
+        working-directory: reference
+        run: ./build.sh configure --cli --build-dir build/dev-cli -- -DBUILD_TESTING=ON -DDATAPUMP_COMPILER_CACHE=OFF
+
+      - name: Build baseline native simulation and receiver
+        run: cmake --build reference/build/dev-cli --config Release --target triad_long --parallel 2
 
       - name: Configure candidate CLI and isolated receiver fixture
         working-directory: candidate
@@ -130,20 +194,123 @@ jobs:
         working-directory: candidate
         run: cmake --build build/dev-cli --config Release --target triad_long --parallel 2
 
-      - name: Compare the fixed baseline and candidate receiver
+      # Fixtures are independent of report logs and are already validated
+      # against source, binary, configuration and per-file SHA-256 receipts.
+      - name: Compute immutable performance binary identities
+        id: binary-key
+        run: |
+          candidate_sha=$(sha256sum candidate/build/dev-cli/triad_long | cut -d ' ' -f1)
+          reference_sha=$(sha256sum reference/build/dev-cli/triad_long | cut -d ' ' -f1)
+          printf 'candidate=%s\nreference=%s\n' "$candidate_sha" "$reference_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Restore receiver performance anchors
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # actions/cache v6.1.0
+        with:
+          path: build/triad-performance/anchors/**/*anchor.json
+          key: triad-anchors-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-profile.outputs.key }}-${{ steps.binary-key.outputs.candidate }}-${{ steps.binary-key.outputs.reference }}-${{ hashFiles('tools/triad-performance-cases.json', 'tools/triad-performance-native-cases.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Restore deterministic sampled waveform fixtures
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # actions/cache v6.1.0
+        with:
+          path: build/triad-performance/triad-performance-fixtures/triad-physical-fixtures
+          key: triad-fixtures-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.binary-key.outputs.candidate }}-${{ hashFiles('tools/triad_perf_cases.py', 'tools/triad-performance-*.json', 'candidate/tools/triad-long.cpp', 'candidate/src/triad_modem_v3.cpp', 'candidate/src/triad_simulation_stream.cpp', 'candidate/src/triad_gaussian_fading.hpp', 'candidate/src/channel_perturbation.hpp', 'candidate/src/channel_spread.hpp', 'candidate/include/datapump/triad_modem_v3.hpp', 'candidate/include/datapump/pattern_pulse.hpp', 'candidate/include/datapump/clock_sync.hpp') }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Check native performance trace and harness contracts
+        env:
+          TRIAD_LONG_BINARY: ${{ github.workspace }}/candidate/build/dev-cli/triad_long
+          TRIAD_SOURCE_ROOT: ${{ github.workspace }}/candidate
+        run: python -m unittest discover -s tests -p 'test_triad_perf*.py'
+
+      - name: Compare full simulations and receiver paths with the fixed baseline
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p build/triad-performance
+          hardware_args=()
+          if [[ -f build/triad-performance/hardware-reference.json ]]; then
+            hardware_args=(--hardware-baseline build/triad-performance/hardware-reference.json)
+          fi
           python tools/triad-performance.py \
             --output build/triad-performance/report.json \
             --binary candidate/build/dev-cli/triad_long \
+            --reference-binary reference/build/dev-cli/triad_long \
             --device cpu \
-            --budget-seconds 600 \
+            --budget-seconds 1800 \
             --stress-seconds 5 \
             --threads 2 \
+            --precision-target 0.05 \
+            --validation-mode auto \
+            --anchor-directory build/triad-performance/anchors \
+            "${hardware_args[@]}" \
             --baseline-ref "$BASELINE_REF" \
             --candidate-root candidate 2>&1 | tee build/triad-performance/stdout.log
+
+      # Capture only the first complete measurement for this exact hardware
+      # allocation. The immutable cache key prevents later runs ratcheting a
+      # slower or otherwise changed profile into the reference.
+      - name: Capture first complete hardware reference
+        id: captured-hardware-reference
+        if: ${{ success() && steps.hardware-baseline.outputs.cache-hit != 'true' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
+        env:
+          CANDIDATE_REF: ${{ env.CANDIDATE_REF }}
+        run: |
+          python - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          report = Path('build/triad-performance/report.cpu.json')
+          profile = json.loads(report.read_text()).get('hardware_profile')
+          if not isinstance(profile, dict) or profile.get('status') != 'complete' or profile.get('device') != 'cpu':
+              raise SystemExit('No complete CPU hardware profile in the performance report')
+          payload = {'schema': 'triad-first-hardware-reference-v1',
+                     'hardware_profile': profile,
+                     'provenance': {'report_sha256': hashlib.sha256(report.read_bytes()).hexdigest(),
+                                    'candidate_source': os.environ['CANDIDATE_REF'],
+                                    'run_id': os.environ['GITHUB_RUN_ID'],
+                                    'run_attempt': os.environ['GITHUB_RUN_ATTEMPT']}}
+          destination = Path('build/triad-performance/hardware-reference.json')
+          destination.parent.mkdir(parents=True, exist_ok=True)
+          with destination.open('x') as stream:
+              json.dump(payload, stream, indent=2)
+              stream.write('\n')
+          PY
+
+      - name: Save immutable first-observed hardware reference
+        if: ${{ success() && steps.captured-hardware-reference.outcome == 'success' && steps.hardware-baseline.outputs.cache-hit != 'true' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # actions/cache v6.1.0
+        with:
+          path: build/triad-performance/hardware-reference.json
+          key: triad-hardware-reference-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-profile.outputs.hardware_key }}
+
+      - name: Check whether validated receiver anchors are available to cache
+        id: anchor-cache-ready
+        if: success()
+        shell: bash
+        run: |
+          if [[ -d build/triad-performance/anchors ]] && find build/triad-performance/anchors -type f -name '*anchor.json' -print -quit | grep -q .; then
+            echo 'ready=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'ready=false' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Save runner-bound anchors from a trusted default-branch run
+        if: ${{ success() && steps.anchor-cache-ready.outputs.ready == 'true' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # actions/cache v6.1.0
+        with:
+          path: build/triad-performance/anchors/**/*anchor.json
+          key: triad-anchors-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-profile.outputs.key }}-${{ steps.binary-key.outputs.candidate }}-${{ steps.binary-key.outputs.reference }}-${{ hashFiles('tools/triad-performance-cases.json', 'tools/triad-performance-native-cases.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            triad-anchors-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-profile.outputs.key }}-${{ steps.binary-key.outputs.candidate }}-${{ steps.binary-key.outputs.reference }}-${{ hashFiles('tools/triad-performance-cases.json', 'tools/triad-performance-native-cases.json') }}-
+
+      # Only complete successful trusted runs can populate the default-branch
+      # reusable fixture cache. Pull requests can restore but never promote.
+      - name: Save validated sampled fixtures from a trusted default-branch run
+        if: ${{ success() && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # actions/cache v6.1.0
+        with:
+          path: build/triad-performance/triad-performance-fixtures/triad-physical-fixtures
+          key: triad-fixtures-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.binary-key.outputs.candidate }}-${{ hashFiles('tools/triad_perf_cases.py', 'tools/triad-performance-*.json', 'candidate/tools/triad-long.cpp', 'candidate/src/triad_modem_v3.cpp', 'candidate/src/triad_simulation_stream.cpp', 'candidate/src/triad_gaussian_fading.hpp', 'candidate/src/channel_perturbation.hpp', 'candidate/src/channel_spread.hpp', 'candidate/include/datapump/triad_modem_v3.hpp', 'candidate/include/datapump/pattern_pulse.hpp', 'candidate/include/datapump/clock_sync.hpp') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            triad-fixtures-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.binary-key.outputs.candidate }}-${{ hashFiles('tools/triad_perf_cases.py', 'tools/triad-performance-*.json', 'candidate/tools/triad-long.cpp', 'candidate/src/triad_modem_v3.cpp', 'candidate/src/triad_simulation_stream.cpp', 'candidate/src/triad_gaussian_fading.hpp', 'candidate/src/channel_perturbation.hpp', 'candidate/src/channel_spread.hpp', 'candidate/include/datapump/triad_modem_v3.hpp', 'candidate/include/datapump/pattern_pulse.hpp', 'candidate/include/datapump/clock_sync.hpp') }}-
 
       - name: Summarize the result
         if: always()
@@ -175,8 +342,9 @@ jobs:
         with:
           name: Triad-performance-${{ env.CANDIDATE_REF }}-attempt-${{ github.run_attempt }}
           path: |
+            build/triad-performance/**/*.json
+            build/triad-performance/**/*.log
             build/triad-performance/*.json
             build/triad-performance/*.log
-            build/triad-performance/*.work/*.log
           if-no-files-found: warn
           retention-days: 14

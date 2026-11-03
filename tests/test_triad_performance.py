@@ -48,6 +48,24 @@ def case():
 
 
 class OrchestrationTests(unittest.TestCase):
+    def test_severe_endpoint_underprediction_blocks_calibration_not_mean_regression(self):
+        check = {"schema": "triad-performance-conditional-v2",
+                 "status": "unvalidated_request_focused_qualification",
+                 "checks": {"paired": {"log_actual_over_predicted": .4554,
+                     "training_timing_log_half_width": .0417,
+                     "pre_sentinel_historical_observation_log_envelope": .1051}}}
+        for value in ({"anchors": {"conditional_check": check}},
+                      {"current_validation": {"conditional_model": check}}):
+            guard = runner.endpoint_calibration_guard(value)
+            self.assertTrue(guard["blocking"])
+            self.assertEqual(guard["status"], "severe_endpoint_prediction_mismatch")
+            self.assertFalse(guard["false_failure_rate_qualified"])
+        check["checks"]["paired"]["log_actual_over_predicted"] = .20
+        self.assertFalse(runner.endpoint_calibration_guard({"anchors": {"conditional_check": check}})["blocking"])
+        check["status"] = "inconclusive"
+        self.assertFalse(runner.endpoint_calibration_guard({"anchors": {"conditional_check": check}})["blocking"])
+        self.assertFalse(runner.endpoint_calibration_guard({})["blocking"])
+
     def test_cfo_selection_is_public_unique_and_preserves_endpoints(self):
         values = list(range(-100, 101))
         self.assertEqual(runner.frequency_subset(values, 1), [0])
@@ -154,6 +172,18 @@ class OrchestrationTests(unittest.TestCase):
                 runner.extract_baseline(ROOT, "HEAD", directory)
             with self.assertRaises(runner.SuiteError):
                 runner.extract_baseline(ROOT, "242ea15", directory)
+
+    def test_hardware_baseline_cannot_mix_equal_count_different_cpu_masks(self):
+        profile = {"device": "cpu", "hardware": {"requested_threads": 2,
+                   "cpu": {"model name": "fixture", "affinity_cpu_count": 2,
+                           "affinity_cpus": [2, 4]}}, "cases": {}}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "profile.json"
+            path.write_text(json.dumps(profile))
+            current = json.loads(json.dumps(profile))
+            current["hardware"]["cpu"]["affinity_cpus"] = [2, 3]
+            result = runner.hardware_health(current, path)
+            self.assertEqual(result["status"], "hardware_baseline_unavailable")
 
     def test_missing_coverage_is_not_reported_as_pass(self):
         args = runner.parse_args(["--output", "/tmp/not-created-triad-test.json", "--binary", "/tmp/no-binary"])

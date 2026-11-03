@@ -80,8 +80,10 @@ def _cpu_features() -> dict[str, Any]:
 def _cpu_limits() -> dict[str, Any]:
     logical = os.cpu_count()
     affinity = None
+    affinity_cpus = None
     try:
-        affinity = len(os.sched_getaffinity(0))
+        affinity_cpus = sorted(os.sched_getaffinity(0))
+        affinity = len(affinity_cpus)
     except (AttributeError, OSError):
         pass
 
@@ -116,6 +118,12 @@ def _cpu_limits() -> dict[str, Any]:
     positive = [float(value) for value in (logical, affinity, quota)
                 if value is not None and float(value) > 0]
     return {"logical_cpu_count": logical, "affinity_cpu_count": affinity,
+            "affinity_cpus": affinity_cpus,
+            "affinity_topology": [{"cpu": cpu,
+                "core_id": _read(f"/sys/devices/system/cpu/cpu{cpu}/topology/core_id"),
+                "physical_package_id": _read(f"/sys/devices/system/cpu/cpu{cpu}/topology/physical_package_id"),
+                "thread_siblings_list": _read(f"/sys/devices/system/cpu/cpu{cpu}/topology/thread_siblings_list")}
+                for cpu in (affinity_cpus or [])],
             "quota_cores": quota, "quota_source": source,
             "effective_core_limit_estimate": min(positive) if positive else None}
 

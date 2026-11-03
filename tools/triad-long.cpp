@@ -81,6 +81,7 @@ struct Options {
     unsigned trials = 1;
     std::uint8_t signal_bit = 0;
     bool encrypt = true, now = false, fhss = false;
+    bool performance_trace = false;
     bool assume_model_bounds = false;
     bool stats_noisy = false;
     std::string basis = "flat";
@@ -295,6 +296,7 @@ Options parse(int argc, char** argv) {
   --truth-epoch-offset N --truth-frequency-hz HZ --truth-frequency-drift HZ/S
                               Configured physical truth is independent of the public acquisition bank.
   --mode configure            Resolve physical bounds, capture feasibility and search/calendar estimates only.
+  --performance-trace yes|no  Mode run: record bounded setup/read/push/finish stage timings and work counts.
   --cn0 DB-HZ                 Total nominal three-carrier C/N0; N0 normalization uses power1, not faded output.
   --channel none|hf           hf: shared two-ray1.5ms/.3Hz plus slow/fast5% perturbations.
   --basis flat|two-ray        two-ray searches flat and coupled two-ray models; per-carrier fits unsupported.
@@ -359,6 +361,12 @@ Examples:
             return argv[i];
         };
         if (key == "--mode") o.mode = need();
+        else if (key == "--performance-trace") {
+            const auto value=need();
+            if(value=="yes")o.performance_trace=true;
+            else if(value=="no")o.performance_trace=false;
+            else throw std::invalid_argument("performance trace must be yes or no");
+        }
         else if (key == "--seconds") o.seconds = number(need(), "seconds");
         else if (key == "--cn0") o.cn0 = number(need(), "C/N0");
         else if (key == "--rate") o.rate = number(need(), "Rate");
@@ -474,6 +482,8 @@ Examples:
     if (o.now) o.epoch = static_cast<std::uint64_t>(std::time(nullptr));
     if(o.mode=="resolve")o.mode="configure";
     if (o.mode != "configure" && o.mode != "plan" && o.mode != "run" && o.mode != "export" && o.mode != "export-sampled" && o.mode != "export-stats" && o.mode != "export-group-stats") throw std::invalid_argument("mode must be configure, plan, run, export, export-sampled, export-stats, or export-group-stats");
+    if(o.performance_trace&&o.mode!="run")
+        throw std::invalid_argument("--performance-trace yes is supported only by --mode run");
     if (o.channel != "none" && o.channel != "hf") throw std::invalid_argument("channel must be none or hf");
     if (o.selective_model != "legacy-allpass" && o.selective_model != "dispersive-dft")
         throw std::invalid_argument("selective model must be legacy-allpass or dispersive-dft");
@@ -934,10 +944,12 @@ void json_configuration(std::ostream& out,const Options& o,const Format& f,const
        <<",\"physical_rf_retuning\":false,\"minimum_observed_fraction\":"<<o.minimum_observed_fraction
        <<",\"coverage_policy_scope\":\"C++ run receiver only; complete-calendar requirement and likelihood thresholds remain unchanged; external scorers declare their own coverage policy\"}}";
 }
+void json_performance_geometry(std::ostream& out,const Options& o);
 void print_configuration(const Options& o) {
     const auto f=format_for(o);const auto g=geometry(f);
     std::cout<<std::setprecision(17)<<"{\"mode\":\"configure\",\"configuration\":";
-    json_configuration(std::cout,o,f,g);std::cout<<"}\n";
+    json_configuration(std::cout,o,f,g);std::cout<<",\"performance_geometry\":";
+    json_performance_geometry(std::cout,o);std::cout<<"}\n";
 }
 void json_provenance(std::ostream& out,const Options& o,const Format& f,const Geometry& g,std::uint64_t trial=0) {
     const auto channel_seed=o.channel_seed.value_or(o.seed)+trial;
@@ -1460,6 +1472,43 @@ ObservationCalendar observation_calendar(const Options& o,const Format& f,const 
     c.samples=static_cast<std::uint64_t>(std::ceil(end_rows));return c;
 }
 
+void json_performance_geometry(std::ostream& out,const Options& o) {
+    const auto f=format_for(o);const auto g=geometry(f);const auto calendar=observation_calendar(o,f,g);
+    const auto key_seed=o.key_seed.value_or(o.seed);
+    auto key=key_for(o.control=="wrong-key"?key_seed^0x6a09e667f3bcc909ULL:key_seed,0);
+    const auto candidates=candidates_for(o,f,key);
+    std::uint64_t columns=0;
+    for(const auto& candidate:candidates) {
+        const auto width=candidate.channel.taps.size()*(candidate.channel.linear_gain?2U:1U);
+        if(width>UINT64_MAX-columns)throw std::invalid_argument("public candidate basis columns overflow");
+        columns+=static_cast<std::uint64_t>(width);
+    }
+    if(columns&&calendar.samples>UINT64_MAX/columns)
+        throw std::invalid_argument("public full-basis work count overflows");
+    const auto basis_values=calendar.samples*columns;
+    const auto block=block_samples(o,f);
+    const auto block_count=calendar.samples/block+(calendar.samples%block?1:0);
+    const auto fs=effective_sample_rate(f);
+    out<<std::setprecision(17)<<"{\"sample_rate_hz\":"<<fs
+       <<",\"sample_rate_numerator\":"<<f.sample_rate
+       <<",\"sample_rate_denominator\":"<<f.sample_rate_denominator
+       <<",\"source_samples\":"<<g.source_samples
+       <<",\"capture_samples\":"<<calendar.samples
+       <<",\"candidate_count\":"<<candidates.size()
+       <<",\"total_basis_columns\":"<<columns
+       <<",\"basis_values\":"<<basis_values
+       <<",\"block_samples\":"<<block
+       <<",\"block_count\":"<<block_count
+       <<",\"maximum_chunk_samples\":"<<o.chunk
+       <<",\"threads_requested\":"<<o.threads
+       <<",\"memory_limit_bytes\":"<<o.memory_bytes
+       <<",\"channel_working_bytes_bound\":"<<calendar.channel_working_bytes
+       <<",\"channel\":";json_string(out,o.channel);
+    out<<",\"basis_model\":";json_string(out,o.basis);
+    out<<",\"arithmetic_used\":\"fp64\""
+       <<",\"geometry_scope\":\"public deterministic full-calendar row and basis-work estimate; configuration creates no sampled observation or receiver workspace\"}";
+}
+
 void run(const Options& o) {
     const auto base=format_for(o); const auto nominal=geometry(base);
     const auto calendar=observation_calendar(o,base,nominal);
@@ -1492,13 +1541,27 @@ void run(const Options& o) {
         rc.minimum_observed_fraction=o.minimum_observed_fraction;
         StreamingReceiver receiver(rc,rxkey);
         std::vector<Complex> samples(o.chunk); std::vector<std::uint8_t> validity(o.chunk);
+        double setup_seconds=0,channel_read_seconds=0,receiver_push_seconds=0,receiver_finish_seconds=0;
+        std::uint64_t measured_chunks=0,measured_rows=0,minimum_chunk_samples=UINT64_MAX,maximum_chunk_samples=0;
+        if(o.performance_trace)
+            setup_seconds=std::chrono::duration<double>(Clock::now()-trial_started).count();
         auto last_progress=Clock::now();
         while(channel.position()<calendar.samples) {
             const auto wanted=static_cast<std::size_t>(std::min<std::uint64_t>(samples.size(),calendar.samples-channel.position()));
+            const auto read_started=o.performance_trace?Clock::now():Clock::time_point{};
             const auto count=channel.read(std::span(samples).first(wanted),std::span(validity).first(wanted));
+            if(o.performance_trace)
+                channel_read_seconds+=std::chrono::duration<double>(Clock::now()-read_started).count();
             if (!count) break;
             const auto chunk_first=channel.position()-count;
+            const auto push_started=o.performance_trace?Clock::now():Clock::time_point{};
             receiver.push(chunk_first,std::span<const Complex>(samples.data(),count),std::span<const std::uint8_t>(validity.data(),count));
+            if(o.performance_trace) {
+                receiver_push_seconds+=std::chrono::duration<double>(Clock::now()-push_started).count();
+                ++measured_chunks;measured_rows+=count;
+                minimum_chunk_samples=std::min<std::uint64_t>(minimum_chunk_samples,count);
+                maximum_chunk_samples=std::max<std::uint64_t>(maximum_chunk_samples,count);
+            }
             const auto now=Clock::now();
             if(now-last_progress>=std::chrono::seconds(2)) {
                 std::cerr<<"trial="<<trial<<" source_seconds="<<std::fixed<<std::setprecision(1)
@@ -1508,7 +1571,10 @@ void run(const Options& o) {
                 last_progress=now;
             }
         }
+        const auto finish_started=o.performance_trace?Clock::now():Clock::time_point{};
         auto report=receiver.finish(); const auto got=report.source_bit;
+        if(o.performance_trace)
+            receiver_finish_seconds=std::chrono::duration<double>(Clock::now()-finish_started).count();
         const bool positive=o.control=="signal";
         const bool correct_epoch=rc.candidates[report.best_candidate].epoch_offset_seconds==o.truth_epoch_offset;
         const bool correct=report.accepted&&got==o.signal_bit&&correct_epoch&&positive;
@@ -1559,6 +1625,35 @@ void run(const Options& o) {
             <<",\"channel_samples\":"<<channel.report().samples<<",\"channel_tail_samples\":"<<channel.report().tail_samples
             <<",\"threads_used\":"<<report.threads_used<<",\"wall_seconds\":"<<report.wall_seconds
             <<",\"cpu_seconds\":"<<report.cpu_seconds;
+        if(o.performance_trace) {
+            const double stage_sum=setup_seconds+channel_read_seconds+receiver_push_seconds+receiver_finish_seconds;
+            const double other_seconds=std::max(0.,pipeline_wall-stage_sum);
+            const auto arithmetic=report.arithmetic_used==Arithmetic::fp32?"fp32":
+                report.arithmetic_used==Arithmetic::fp64?"fp64":"automatic";
+            std::cout<<",\"performance_trace\":{\"schema\":\"triad-native-run-timing-v1\""
+                <<",\"stage_seconds\":{\"setup\":"<<setup_seconds
+                <<",\"channel_read\":"<<channel_read_seconds
+                <<",\"receiver_push\":"<<receiver_push_seconds
+                <<",\"receiver_finish\":"<<receiver_finish_seconds
+                <<",\"other\":"<<other_seconds<<'}'
+                <<",\"stage_reconciliation_wall_seconds\":"<<stage_sum+other_seconds
+                <<",\"chunk_count\":"<<measured_chunks
+                <<",\"minimum_chunk_samples\":"<<(measured_chunks?minimum_chunk_samples:0)
+                <<",\"maximum_chunk_samples\":"<<maximum_chunk_samples
+                <<",\"processed_rows\":"<<measured_rows
+                <<",\"candidate_count\":"<<rc.candidates.size()
+                <<",\"basis_values\":"<<report.basis_values
+                <<",\"scored_blocks\":"<<report.blocks
+                <<",\"channel_samples\":"<<channel.report().samples
+                <<",\"channel_tail_samples\":"<<channel.report().tail_samples
+                <<",\"missing_samples\":"<<report.missing_samples
+                <<",\"complete_observation\":"<<(report.complete_observation?"true":"false")
+                <<",\"threads_used\":"<<report.threads_used
+                <<",\"arithmetic_used\":\""<<arithmetic<<"\""
+                <<",\"receiver_timing_crosscheck\":{\"push_plus_finish_seconds\":"
+                <<receiver_push_seconds+receiver_finish_seconds<<",\"receiver_report_wall_seconds\":"
+                <<report.wall_seconds<<"}}";
+        }
         json_provenance(std::cout,o,base,nominal,trial);
         json_endpoint_truth(std::cout,channel_cfg);
         json_frontend_report(std::cout,channel.report());

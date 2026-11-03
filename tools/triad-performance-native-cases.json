@@ -1,0 +1,358 @@
+{
+  "schema": "triad-performance-native-cases-v2",
+  "capabilities": {
+    "native_performance_trace": "triad-native-run-timing-v1"
+  },
+  "common_args": [
+    "--mode",
+    "run",
+    "--phase-diffusion",
+    "0",
+    "--chunk",
+    "1024",
+    "--block",
+    "512",
+    "--memory-mib",
+    "64",
+    "--epoch",
+    "1793404800"
+  ],
+  "maximum_extrapolation": 8.0,
+  "model_relative_error_limit": 0.05,
+  "profiles": {
+    "quick": [
+      "native-flat",
+      "native-null"
+    ],
+    "ci": [
+      "native-flat",
+      "native-fhss-selective-burst",
+      "native-vlf-low-cn0",
+      "native-null",
+      "native-wrong-key",
+      "native-frontend",
+      "native-ou-path",
+      "native-gaussian-path"
+    ],
+    "sustain": [
+      "native-flat",
+      "native-fhss-selective-burst",
+      "native-vlf-low-cn0",
+      "native-null",
+      "native-wrong-key",
+      "native-frontend",
+      "native-ou-path",
+      "native-gaussian-path",
+      "native-added-max"
+    ]
+  },
+  "cases": [
+    {
+      "id": "native-flat",
+      "args": [
+        "--rate",
+        "36",
+        "--added",
+        "1",
+        "--sample-rate",
+        "64",
+        "--channel",
+        "none",
+        "--basis",
+        "flat",
+        "--cn0",
+        "40"
+      ],
+      "target_seconds": 262.4,
+      "batch_trials": 4,
+      "witnesses": [
+        "complete",
+        "encrypted",
+        "flat",
+        "white_noise"
+      ],
+      "scope": "Direct complete keyed native simulation; fixed static flat bank and sampled white noise"
+    },
+    {
+      "id": "native-fhss-selective-burst",
+      "args": [
+        "--rate",
+        "1200",
+        "--added",
+        "1",
+        "--sample-rate",
+        "1024",
+        "--channel",
+        "hf",
+        "--basis",
+        "two-ray",
+        "--selective-perturbation",
+        "each-65",
+        "--fhss",
+        "--burst-wait-tiles",
+        "1",
+        "--dropout-ms",
+        "10",
+        "--dropout-every-dwells",
+        "3",
+        "--minimum-observed-fraction",
+        ".8"
+      ],
+      "target_seconds": 140.8,
+      "batch_trials": 1,
+      "witnesses": [
+        "complete",
+        "encrypted",
+        "two_ray",
+        "selective",
+        "erasure",
+        "internal_burst"
+      ],
+      "scope": "Direct complete coupled native fit, dispersive Each65, actual FHSS erasures, multiple internal silent tiles"
+    },
+    {
+      "id": "native-vlf-low-cn0",
+      "args": [
+        "--rate",
+        ".001",
+        "--added",
+        "1",
+        "--sample-rate",
+        "1",
+        "--sample-rate-denominator",
+        "128",
+        "--channel",
+        "none",
+        "--basis",
+        "two-ray",
+        "--spread-doppler-hz",
+        ".001",
+        "--spread-delay-ms",
+        ".005",
+        "--selective-perturbation",
+        "each-65",
+        "--cn0",
+        "-60"
+      ],
+      "training_seconds": [
+        2304001.6,
+        18432012.8
+      ],
+      "holdout_seconds": 36864025.6,
+      "target_seconds": 73728051.2,
+      "batch_trials": 1,
+      "witnesses": [
+        "complete",
+        "encrypted",
+        "two_ray",
+        "selective",
+        "sub_hz",
+        "weak_signal"
+      ],
+      "scope": "Full low-rate point-sampled native observation; -60dB-Hz, 853 active days at target, complete natural tails"
+    },
+    {
+      "id": "native-null",
+      "args": [
+        "--rate",
+        "36",
+        "--added",
+        "1",
+        "--sample-rate",
+        "64",
+        "--channel",
+        "none",
+        "--basis",
+        "flat",
+        "--cn0",
+        "40",
+        "--control",
+        "null"
+      ],
+      "target_seconds": 32.8,
+      "batch_trials": 4,
+      "witnesses": [
+        "complete",
+        "null",
+        "no_signal_energy"
+      ],
+      "scope": "Complete no-transmitter simulation and absent candidate result"
+    },
+    {
+      "id": "native-wrong-key",
+      "args": [
+        "--rate",
+        "36",
+        "--added",
+        "1",
+        "--sample-rate",
+        "64",
+        "--channel",
+        "none",
+        "--basis",
+        "flat",
+        "--cn0",
+        "40",
+        "--control",
+        "wrong-key"
+      ],
+      "target_seconds": 32.8,
+      "batch_trials": 4,
+      "witnesses": [
+        "complete",
+        "wrong_key",
+        "signal_energy"
+      ],
+      "scope": "Wrong-key native candidate path; no generic authentication guarantee"
+    },
+    {
+      "id": "native-frontend",
+      "args": [
+        "--rate",
+        "36",
+        "--added",
+        "1",
+        "--sample-rate",
+        "64",
+        "--channel",
+        "none",
+        "--basis",
+        "flat",
+        "--cn0",
+        "40",
+        "--adc-bits",
+        "8",
+        "--dac-bits",
+        "8",
+        "--adc-full-scale",
+        ".1",
+        "--dac-full-scale",
+        ".1",
+        "--interference-tone",
+        "2",
+        "10",
+        "--interference-impulse",
+        "1",
+        "10",
+        "--rx-lowpass-hz",
+        "20",
+        "--rx-gain-step",
+        "1",
+        "2",
+        "--overload-recovery-seconds",
+        ".1"
+      ],
+      "target_seconds": 32.8,
+      "batch_trials": 2,
+      "witnesses": [
+        "complete",
+        "frontend",
+        "adc_clipping",
+        "dac_clipping",
+        "impulses",
+        "overload"
+      ],
+      "scope": "Actual sampled quantizers, interference, continuous filter and overload; no analytic Gaussian admission claim"
+    },
+    {
+      "id": "native-ou-path",
+      "args": [
+        "--rate",
+        "36",
+        "--added",
+        "1",
+        "--sample-rate",
+        "64",
+        "--channel",
+        "none",
+        "--basis",
+        "flat",
+        "--cn0",
+        "40",
+        "--channel",
+        "hf",
+        "--basis",
+        "two-ray",
+        "--ray-coherence-seconds",
+        "2",
+        "--diurnal-phase-radians",
+        "1",
+        "--diurnal-period-seconds",
+        "30",
+        "--outage-seconds",
+        "2",
+        "5",
+        "--outage-gain",
+        ".1",
+        "--outage-ramp-seconds",
+        ".5"
+      ],
+      "target_seconds": 32.8,
+      "batch_trials": 2,
+      "witnesses": [
+        "complete",
+        "two_ray",
+        "ou_path",
+        "outage"
+      ],
+      "scope": "Continuous stationary OU rays, diurnal phase and a fully elapsed outage"
+    },
+    {
+      "id": "native-gaussian-path",
+      "args": [
+        "--rate",
+        "36",
+        "--added",
+        "1",
+        "--sample-rate",
+        "64",
+        "--channel",
+        "none",
+        "--basis",
+        "flat",
+        "--cn0",
+        "40",
+        "--channel",
+        "hf",
+        "--basis",
+        "two-ray",
+        "--ray-gaussian-width-hz",
+        ".2"
+      ],
+      "target_seconds": 32.8,
+      "batch_trials": 2,
+      "witnesses": [
+        "complete",
+        "two_ray",
+        "gaussian_path"
+      ],
+      "scope": "Actual finite Gaussian Doppler FIR ray model"
+    },
+    {
+      "id": "native-added-max",
+      "args": [
+        "--rate",
+        ".36",
+        "--added",
+        "1000",
+        "--sample-rate",
+        "512",
+        "--channel",
+        "none",
+        "--basis",
+        "flat",
+        "--cn0",
+        "-20"
+      ],
+      "target_seconds": 8,
+      "batch_trials": 1,
+      "witnesses": [
+        "complete",
+        "encrypted",
+        "max_added"
+      ],
+      "scope": "Implemented maximal Added Symbols interleave, complete minimum private tile; direct only"
+    }
+  ],
+  "coverage_scope": "Named executed native source/channel/QR/finalization branches. Not exhaustive numerical states, historical v1/v2, GPU receivers, or every Cartesian configuration."
+}

@@ -3,11 +3,23 @@ import inspect
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from tools import triad_perf_cases as cases
 
 
 class PerformanceCaseTests(unittest.TestCase):
+    def test_selected_fixture_is_filtered_before_plan_or_native_work(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            with patch.object(cases, "_plan", side_effect=RuntimeError("before native work")) as plan:
+                with self.assertRaisesRegex(RuntimeError, "before native work"):
+                    cases.prepare_cases("/bin/true", temporary, case_ids=["free-crystal"])
+                self.assertEqual(plan.call_args.args[0]["id"], "free-crystal")
+                plan.assert_called_once()
+            with patch.object(cases, "_plan") as plan:
+                self.assertEqual(cases.prepare_cases("/bin/true", temporary, case_ids=[]), [])
+                plan.assert_not_called()
+
     def test_profiles_are_diverse_and_long_case_is_real_native_point_model(self):
         selected = cases.scenarios("ci")
         self.assertEqual(len(selected), 5)

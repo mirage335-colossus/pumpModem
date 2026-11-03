@@ -1,0 +1,3440 @@
+{
+  "schema": "triad-performance-evidence-summary-v2",
+  "summary_scope": "recorded evidence only; statistics and source files are not revalidated",
+  "input_evidence_complete": true,
+  "partial_snapshot": false,
+  "completion_scope": "focused invocation finalized; does not imply qualified prediction or full-suite coverage",
+  "recorded_status": "regression",
+  "recorded_exit_code": 2,
+  "recorded_elapsed_seconds": 226.22929269901942,
+  "warnings": [],
+  "failures": [],
+  "followup": {
+    "schema": "triad-fft-performance-followup-v1",
+    "status": "regression",
+    "exit_code": 2,
+    "scope": "one resident FFT case, not complete normal-CI or complete physical-simulation timing",
+    "production_performance_claim_eligible": false,
+    "experiment": {
+      "argv": [
+        "/tmp/triad-weak-env/bin/python",
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/run-fft-followup.py",
+        "--case-id",
+        "broad-hf-timing",
+        "--mode",
+        "reuse",
+        "--precision",
+        "fp32",
+        "--budget-seconds",
+        "500",
+        "--looks",
+        "5,9,17,33",
+        "--anchor-directory",
+        "local-evidence/triad-performance-trace/anchors-v3/cpu",
+        "--output",
+        "local-evidence/triad-performance-trace/fft-uniform-delay-001.json",
+        "--inject",
+        "all-cfo",
+        "--multiplier",
+        "1.6",
+        "--delay-mode",
+        "sleep"
+      ],
+      "case_id": "broad-hf-timing",
+      "mode": "reuse",
+      "baseline_ref": "242ea15fa032ee117b9113a7f3cd07cc6e9f0254",
+      "candidate_root": "/home/user/___quick/p/_cur/dataPump/pumpModem",
+      "source_sha256": {
+        "include/datapump/triad_modem.hpp": "b8b259ec3ed474541f65655a5e124ff7bb9c699387326715112ecde027f6a05c",
+        "include/datapump/triad_modem_v2.hpp": "ead3c3f79eff8c358473b6748ce3f8181481aab2fb022a11e7196c9f4ab3a652",
+        "include/datapump/triad_modem_v3.hpp": "1ddd8e851950036f03e6a903ed7ba4746392ffe8623f49685df04f029c4aff48",
+        "include/datapump/triad_simulation.hpp": "55db1c03f95b6bd9b65bf5e3630a506aba40d1e3dbf473f025218454fbbee34d",
+        "include/datapump/triad_statistics.hpp": "66363bd20b0b613ca5df115265976052957a78052724a00e1017e15220ede6b1",
+        "src/channel_perturbation.hpp": "fae3b1b345e3dc19c8b85a5010e4434530bd0a34d595dd4de8cd55349d8d879a",
+        "src/channel_spread.hpp": "bf98698d574869acb79645fa143af7ae563a2f542868e77c672d89d4fb16bdb0",
+        "src/triad_gaussian_fading.hpp": "97f26b082d7d68123952bde7ccb9f97148c5977cf741cf6c15c76e77fcc20944",
+        "src/triad_modem.cpp": "3eb560ab16ee7d5e615889896457553079ca31c0e6eb3170e391d989f51dd6c2",
+        "src/triad_modem_v2.cpp": "cc5ff38465baf251b252b2be1ba653a6a894730ffed3538f9f3eafc38839f1ad",
+        "src/triad_modem_v3.cpp": "cb6cac016e57edcd4f6ebc70f09c68cc47380e3b772cdbe047d7a3b93e9b434c",
+        "src/triad_receiver_v3.cpp": "ff7409c55f2c62dbb833f1ae24a7b4aab103607aaf2f66945ea585e1e3ba3e2f",
+        "src/triad_simulation.cpp": "3096a14cc68f9ed468e04ed08021b62c5633b83c6024dba3cbf9e36eafde1900",
+        "src/triad_simulation_stream.cpp": "afaa1267c36fcd330151174f6f08b6fb401a7f702c660964071ef24b6e82a70d",
+        "src/triad_statistics.cpp": "18d92c2c51a4057caba6d9de78580305adcd8c038f6e1243ec1a4410f7c00ace",
+        "src/tuning.cpp": "228578b2dc33b72e657d646d956ccb51aefbbabde1af730ef83a15e6785cb01e",
+        "src/tuning_presets.cpp": "31e1ac552bea10b24036f959485241532066e6aa343931c04a46a65e8734b293",
+        "tools/triad-acquisition-compare.py": "d57ebbe2f8eb281ae420be7937281dddbb9ee4009c7fe041e19745a259716a6a",
+        "tools/triad-cfo-batch-study.py": "5c7fb6f8b0ad8cadeaae8591d9fb0e3d489fb5eb4c14962faf800ad46a661665",
+        "tools/triad-conditional-sweep.py": "19d1a733674645dd2d27bb28bce3bad89168c7667679d6f2d79891d37e168073",
+        "tools/triad-consumer-hardware.py": "c2777fffc6838b8e7e07d6a7ad807fe90f17f53737b325587b9db8aa5b181ac0",
+        "tools/triad-consumer-profile.py": "a997c54226176cd6728e1aea5e43398a6eb7a145c6fd9c611e3c19a4deaae29d",
+        "tools/triad-consumer-sustain.py": "b5385c2423d6df5fe67635bd1ea545b1ccf8bd3d4137aaf43a82b208c9bb36fc",
+        "tools/triad-consumer-tiles.py": "1bfe725dba82667a5b838891f959f5cab3ee950e7e3bdac0ca3483f25ba9855f",
+        "tools/triad-coverage.py": "4a7241acab3ba6e4f17bad4e4821e155f7e99064115100313de1bbee438a90e8",
+        "tools/triad-detector-study.py": "647e63e73b4ee6f0d6ab72f1dfd75f403aa377789798b933b2fb9ccfdbc7caac",
+        "tools/triad-diversity-export.py": "bb871b98d436ab45605ad8127513d92fc25fff0461cc66ed26e3c5967e4a9015",
+        "tools/triad-examples-summary.py": "9d76d728b25e1d49d1cc52ecf12a1a126ba701c2127ce7ccd9df1db7df866880",
+        "tools/triad-factor-census.py": "db9b3ded8d318b6e6dc468b2d2d40bcbf814aefe603ed8224d04e9cc7ef026ef",
+        "tools/triad-fft-acquire.py": "a5fd5c4033ef33d3c7a0d16798d2955831de5c91659dee5e829578630c5a51a1",
+        "tools/triad-fp4-campaign.py": "4193c6ed98b381e39e5733f76a7d32779af936d88e927cf1857ae23aafe6a01e",
+        "tools/triad-fp4-sweep.py": "9d43244e2850fae5334d45fa5280c79c5a3eac9f0b34095a73b1b14f576c2d0c",
+        "tools/triad-gpu-study.py": "3c8922b14e4a340e46a4f6eee1a711b85e1fa6faa3d8b6fa8df4ff4bf39ff806",
+        "tools/triad-link-budget.py": "74de2229a69acf7a6462d8f19a113a6f94de40a502b68e8ac9eda30c665cc9c2",
+        "tools/triad-long.cpp": "9b852132edb2c4f53d4c218e73db1314653cd6213a78a49c776869af6dc68877",
+        "tools/triad-lowrate-campaign.py": "5ab3dcc1f3c2b2e926f10e2a35315f2970507a308dd6631c895cf3de39807eb9",
+        "tools/triad-noise-batch-study.py": "5c0e0a0b78a725131854c38b86c215117860c4d4ca17470164ba710de4ff2213",
+        "tools/triad-noise-study.py": "960040dc2a9a00910185a5b79f8af8c84410ffd3b8b7327256399543f396a621",
+        "tools/triad-optimization-study.py": "47ee069647c996df2a1011b048d4cc23b875fb94f73fccb1614128d833186d05",
+        "tools/triad-optimization-summary.py": "fe941d71301007e281a9de369d74640af8482f8e72cde59ed56a37b1eab8d213",
+        "tools/triad-path-study.py": "2c57112f61bd377a521a1e3af85d2a31b4d165e5498411d77a4c759f9934340c",
+        "tools/triad-performance-cases.json": "4fe9dfe1ea4f03ea2f2a276cac022597ebdb61dc1fb71c15056b6c6f79d03664",
+        "tools/triad-performance-native-cases.json": "f8d46beae40f2a52013279cdfdea811c6267be621a82431b612fb05708304a8f",
+        "tools/triad-performance-paths.json": "c67761c6bb61b8d17def9ef4251dc58240b71bf2e57151c52f343dfd874eeba9",
+        "tools/triad-performance.py": "49650e4b227adf1e9212caca4b8ee2df75c8196a8187ead549cc914725f1adfd",
+        "tools/triad-phase-study.py": "c548e62067473597ce9fd4dbbed28a35e07e3170b1804247a820eacad9cae1f5",
+        "tools/triad-profile.py": "bd23158caba3c863510679fe76f14b5062e9719eabd633a158f919d2b9964841",
+        "tools/triad-ray-frequency-study.py": "ea3ca2acde8aea75538066e46e3ccae2e36612afac753db6b2d048bd6ff87dd2",
+        "tools/triad-rbpf-benchmark.py": "f78632dc05ab8495cd6dc3ed052ed9040aceeb0a44344938d574ab215689bf0c",
+        "tools/triad-rbpf-convergence.py": "ed60ef2a77fa3ea3604f6db0a2b9f2e2834eebebf68d2b6fd639aedbc271a8a0",
+        "tools/triad-rbpf-study.py": "34a9797ed7119dcf6545b6be759b8f506cbdaf6ac9ece886b82fa699cd5d085f",
+        "tools/triad-reblock.py": "9b717113fac9124c977c07703ca4485d87bf564ae037b49c550ac6ae7765c893",
+        "tools/triad-resident-campaign.py": "410264ac9f779f932031f948de1a5c63939cc66894a03ed1faa6f3fdeb753d0e",
+        "tools/triad-retained-energy.py": "5e7d4e775305d876427091180375082eb27f193f6ff37958f918362c3f9b764b",
+        "tools/triad-sampling-refinement.py": "d3a40c39e0d05cbb49d0b98652513015e731969c484be54d2ef45cbac07cb799",
+        "tools/triad-scan-workspace.py": "c9c2ab61a37233b43887f594e0c871eb96e4f556cec086bce630faeb0fa45136",
+        "tools/triad-state-campaign.py": "922dbdf53b346ce5061029e6e17a82b1cbf4d04d0dfd73db655cc79e672503fa",
+        "tools/triad-state-study.py": "3fa7491ae93031ff6bfadc4c9b792659336999effc0508a71cf734ada9250402",
+        "tools/triad-static-frequency-study.py": "d1b75e9b49de21041558e97ee1daff2ba07a1fd18a123bc8a6cb928f1052e11b",
+        "tools/triad-stream-study.py": "c236f9c6613e80e7786cc604002ad415c609781f8657c7bbb61b1409d4c8f65e",
+        "tools/triad-sufficient-study.py": "d96210f7408d0c02b717c384e2b9483a0c01ba9c04b1aca150e669a071394236",
+        "tools/triad-summary.py": "b29378f1138590bfa7541c063771127f27df46d436b04f45347ad86273213cc9",
+        "tools/triad-tensor-diagnostics.py": "9219b186bd04a9963293201de1c2a4de1bb73955e9601eb74e7b06bbf745e5a6",
+        "tools/triad_adc_bound.py": "74eb4de89a674e325a6cb323d1df95c83d78681b68a71b67467a9bfedc5e5846",
+        "tools/triad_bounded_run.py": "f117d6be27d38d055f5ab65af2f850c038501badd16cb5f524b5388530218cf2",
+        "tools/triad_correlation_fusion.py": "41216fa6282c648a2e1541c2cc1f8e93ccc73abe65fa2d32d140ee15f7251398",
+        "tools/triad_covariance_reference.py": "e6ca43a136d9781b6c0d9883e72d2069302bcf5ef285e7f8c70137b9fe9e31cb",
+        "tools/triad_coverage_bounds.py": "bb4e1cbf161c5f4b5d9af151e995c357ef0444907d31c312a215c19b2b3a0c5b",
+        "tools/triad_exhaustive_correlation.py": "ae02b1f7d85e2d3f8c2c153000f530a411860ff443aeaf674abaa93cf60ab2d4",
+        "tools/triad_factor_native_inputs.py": "f75225cc5c05a717d63ce52074a4e466cec35274cb921f77f53c4d95df808f26",
+        "tools/triad_fft_acquire.py": "d4a3c2cc39e0068e6aa6aab27d7ee8eeff6cc7db72a790868fe166c3f1d65843",
+        "tools/triad_fp4_native.py": "e9a6811182c57b14d70604fc69894aa58e0c6227c10a6de2db5e5d127a567b3c",
+        "tools/triad_fp4_representation.py": "0f5861ffe646b8e892efdd1abcdcb54e4f168763c5feff1cda119f36ec1cc804",
+        "tools/triad_gaussian_bounds.py": "8910b3c64c2ea7072ef43e3e0c5d47ded6f8cbc903ac974162eb5ad285e1de23",
+        "tools/triad_gaussian_prepared.py": "c88afdf459521393958c49d801517d79cd158cbe2291e4a48c3eff6931e42875",
+        "tools/triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba",
+        "tools/triad_gaussian_window.py": "b22fe002864922e44bc7e10000672a163353818f610c4882bae5d62cfe1cf883",
+        "tools/triad_group_acquire.py": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+        "tools/triad_noise_likelihood.py": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110",
+        "tools/triad_perf_adaptive.py": "3ad99d54b955e735f0db832bd6ac3afe91b016d993de80909827efd491174106",
+        "tools/triad_perf_cases.py": "3a45f599a3e2d93361a02b74285d2b56b90de3068a6d19cd49fb8092c578e14b",
+        "tools/triad_perf_conditional.py": "1cb53367367e6797a8bf7af54b6a62a0c2238668458cb441dff51e238236a6e7",
+        "tools/triad_perf_fft_trace.py": "c903dc8909688bb30598e9efb6b85c7ee08c8199310844f2f80fda643060d167",
+        "tools/triad_perf_hardware.py": "74718bc0791dda7ac7ea0b38b8fb79ab7bb1e41c649da9787f2a2645854706b3",
+        "tools/triad_perf_native.py": "d1384ad557dd10987f37e631e1eaf57fdf8b9d2934b0cbc3b01a98643a5e116c",
+        "tools/triad_perf_paths.py": "31e442c1381a2ce3037f6837605d24cad7c2874d6041d487bc5077c23d803699",
+        "tools/triad_perf_receiver.py": "fd2fd7109e9dfcd8fe984fc526995a65b4517335cf6d80428a749f13994fcb34",
+        "tools/triad_perf_statistics.py": "64ce887c8c3af9144f1d94adc712fa784bbca17cfa86dcbfe1099dbb2efed64b",
+        "tools/triad_perf_sustained.py": "c343626798c491fca1bedba2fac97a840177145e3e9a3f56fd5741cc938b5548",
+        "tools/triad_perf_telemetry.py": "3646802429c1762a661620382ff111f7629640f53e2c3ee015e50d56f6e7bc4b",
+        "tools/triad_phase_frequency.py": "48ee569b1d467b2d7b6fd55088764bd28dd11e0bfecb5974622a318fbb408585",
+        "tools/triad_phase_gpu_benchmark.py": "b599e9d7d6d27dc658879f1e636150c6eb0720db6e9ec1ca6d4dbda157f5d45d",
+        "tools/triad_phase_optimized.py": "759b46d536f2daa1d1de2336190ab19153376aca3eeca32847cba5289d2d63ed",
+        "tools/triad_phase_prior_diagnostic.py": "03c65bdb3daf32fe87817ffad457e402180405132d1c5e154374594fb5f533d0",
+        "tools/triad_phase_reduction.py": "b2f762320fbff5a66fa88123711483f9c42721e1765e406b7699c434048ded98",
+        "tools/triad_phase_tensor.py": "3b1a674ac7ace90ddce72c2773c2d1543bcfe8307d7b65ea965ad03a6525ffda",
+        "tools/triad_precision_probe.py": "e53ee73bf511ee5a38c30a6e80d5985f30f0187a4b1604f7c57978d5dca3f801",
+        "tools/triad_prepared_observation.py": "13d37977620519aaeb457d4ed1163c80d68dca96c8319480de914cae8a6aaec8",
+        "tools/triad_rbpf.py": "d4b64c3a830acd3bd15433421da0e003ba1aa9810bf1dd904c57082d94c3bd54",
+        "tools/triad_scan_workspace.py": "bf0ecb596961951992d13f361150119e04cfb885b703497baa188f942f147dd7",
+        "tools/triad_state_workspace.py": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923",
+        "tools/triad_tensor_native.py": "0ed9242733ae564aaadf7548a4391ac833aaffd27097e2a966c9931aab990c5e",
+        "tools/triad_tensor_probe.py": "90f701183d82c442559909076c424a31fb249566ce7c33dbecf7e04aa169eb84",
+        "driver": "6dc1413a1c0122dc4a09c376c05b7a773cc147a434bc03c654279859571e8cda"
+      },
+      "source_guard_scope": "isolated triad Python/native family and shared channel/tuning files; executable hash separately recorded",
+      "fixture_binary": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/triad_long",
+      "fixture_binary_sha256": "862b0431f04a3973ce15e7cff9b9959ed45ca36d626e401352db5cf8630c9c6b",
+      "device": "cpu",
+      "threads": 2,
+      "budget_seconds": 500.0,
+      "looks": [
+        5,
+        9,
+        17,
+        33
+      ],
+      "family_count": 14,
+      "relative_precision_target": 0.05,
+      "precision_request": "fp32",
+      "anchor_directory": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/anchors-v3/cpu",
+      "fixture_cache_directory": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/triad-performance-fixtures",
+      "started_unix_seconds": 1793738483.4600866,
+      "requalification_fallback": false,
+      "deadline_scope": "maintained worker deadline; caller must supply outer process-group timeout",
+      "injection": {
+        "selection": "all-cfo",
+        "multiplier": 1.6,
+        "delay_mode": "sleep",
+        "scope": "synthetic post-real-kernel score-stage pipeline delay",
+        "kernel_source_modified": false,
+        "numerical_or_work_fields_modified": false,
+        "real_kernel_identity_retained_for_anchor_applicability": true,
+        "production_anchor_creation_allowed": false
+      }
+    },
+    "warnings": [],
+    "failures": [],
+    "elapsed_seconds": 226.22929269901942,
+    "completed_unix_seconds": 1793738708.0521097,
+    "reference": {
+      "commit": "242ea15fa032ee117b9113a7f3cd07cc6e9f0254",
+      "source_sha256": {
+        "include/datapump/triad_modem_v3.hpp": "1ddd8e851950036f03e6a903ed7ba4746392ffe8623f49685df04f029c4aff48",
+        "src/channel_perturbation.hpp": "fae3b1b345e3dc19c8b85a5010e4434530bd0a34d595dd4de8cd55349d8d879a",
+        "src/channel_spread.hpp": "bf98698d574869acb79645fa143af7ae563a2f542868e77c672d89d4fb16bdb0",
+        "src/triad_gaussian_fading.hpp": "97f26b082d7d68123952bde7ccb9f97148c5977cf741cf6c15c76e77fcc20944",
+        "src/triad_modem_v3.cpp": "cb6cac016e57edcd4f6ebc70f09c68cc47380e3b772cdbe047d7a3b93e9b434c",
+        "src/triad_receiver_v3.cpp": "ff7409c55f2c62dbb833f1ae24a7b4aab103607aaf2f66945ea585e1e3ba3e2f",
+        "src/triad_simulation_stream.cpp": "afaa1267c36fcd330151174f6f08b6fb401a7f702c660964071ef24b6e82a70d",
+        "src/tuning.cpp": "228578b2dc33b72e657d646d956ccb51aefbbabde1af730ef83a15e6785cb01e",
+        "src/tuning_presets.cpp": "31e1ac552bea10b24036f959485241532066e6aa343931c04a46a65e8734b293",
+        "tools/triad-long.cpp": "dbbdbfa055e7a93a86702ef571f45afa3c7040ed873cf993e4cae384b661b282",
+        "tools/triad_fft_acquire.py": "d4a3c2cc39e0068e6aa6aab27d7ee8eeff6cc7db72a790868fe166c3f1d65843",
+        "tools/triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba",
+        "tools/triad_gaussian_window.py": "b22fe002864922e44bc7e10000672a163353818f610c4882bae5d62cfe1cf883",
+        "tools/triad_group_acquire.py": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+        "tools/triad_noise_likelihood.py": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110",
+        "tools/triad_state_workspace.py": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923"
+      }
+    },
+    "real_worker_identities": {
+      "reference": {
+        "source_root": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/fft-uniform-delay-001.work/baseline-hkgg44gk",
+        "source_hashes": {
+          "triad_fft_acquire.py": "d4a3c2cc39e0068e6aa6aab27d7ee8eeff6cc7db72a790868fe166c3f1d65843",
+          "triad_group_acquire.py": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+          "triad_gaussian_window.py": "b22fe002864922e44bc7e10000672a163353818f610c4882bae5d62cfe1cf883",
+          "triad_noise_likelihood.py": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110",
+          "triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba",
+          "triad_state_workspace.py": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923"
+        },
+        "python": "3.13.5",
+        "numpy": "2.5.4",
+        "torch": "2.8.0+cpu",
+        "threads": 2,
+        "cuda_available": false,
+        "device_count": 0,
+        "tf32_allowed": false,
+        "startup_seconds": 0.9624218700337224
+      },
+      "candidate": {
+        "source_root": "/home/user/___quick/p/_cur/dataPump/pumpModem",
+        "source_hashes": {
+          "triad_fft_acquire.py": "d4a3c2cc39e0068e6aa6aab27d7ee8eeff6cc7db72a790868fe166c3f1d65843",
+          "triad_group_acquire.py": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+          "triad_gaussian_window.py": "b22fe002864922e44bc7e10000672a163353818f610c4882bae5d62cfe1cf883",
+          "triad_noise_likelihood.py": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110",
+          "triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba",
+          "triad_state_workspace.py": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923"
+        },
+        "python": "3.13.5",
+        "numpy": "2.5.4",
+        "torch": "2.8.0+cpu",
+        "threads": 2,
+        "cuda_available": false,
+        "device_count": 0,
+        "tf32_allowed": false,
+        "startup_seconds": 0.9663032469688915
+      }
+    },
+    "hardware_identity_scope": "metadata only; no hardware stress calibration in this focused driver",
+    "precision_qualification": {
+      "selected": "fp32",
+      "alternatives": {
+        "fp64": {
+          "eligible": true,
+          "checks": [
+            {
+              "eligible": true,
+              "maximum_absolute_score_error": 0.0,
+              "allowed_score_error": 0.0010022937747281874,
+              "reasons": []
+            },
+            {
+              "eligible": true,
+              "maximum_absolute_score_error": 0.0,
+              "allowed_score_error": 0.0010022937747281874,
+              "reasons": []
+            },
+            {
+              "eligible": true,
+              "maximum_absolute_score_error": 0.0,
+              "allowed_score_error": 0.0010022937747281874,
+              "reasons": []
+            }
+          ]
+        },
+        "fp32": {
+          "eligible": true,
+          "checks": [
+            {
+              "eligible": true,
+              "maximum_absolute_score_error": 1.901105370905043e-06,
+              "allowed_score_error": 0.0010022937747281874,
+              "reasons": []
+            },
+            {
+              "eligible": true,
+              "maximum_absolute_score_error": 1.901105370905043e-06,
+              "allowed_score_error": 0.0010022937747281874,
+              "reasons": []
+            },
+            {
+              "eligible": true,
+              "maximum_absolute_score_error": 0.0,
+              "allowed_score_error": 0.0010022937731195938,
+              "reasons": []
+            }
+          ]
+        }
+      },
+      "tuning_total_seconds": {
+        "fp64": {
+          "reference": 1.3809730479842983,
+          "candidate": 1.3449086530017667
+        },
+        "fp32": {
+          "reference": 1.051601801009383,
+          "candidate": 1.037780600017868
+        }
+      },
+      "selection_frozen_before_prediction_measurements": true,
+      "qualification_cfo_count": 3,
+      "scope": "fixed numerical corpus; lower tensor modes have no implemented FFT adapter and are calibration-only"
+    },
+    "selected_precision": "fp32",
+    "precision_selection_scope": "explicit eligible policy for a matched anchor/control; not a claim that this pilot ranked it fastest",
+    "fixture_preparation_seconds": 0.1480610099970363,
+    "fixture_preparation_scope": "prepare_cases maintains all cached CI fixtures; only selected case is timed",
+    "effective_anchor_directory": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/fft-uniform-delay-001.work/anchor-inputs",
+    "anchor_inputs": [
+      {
+        "original": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/anchors-v3/cpu/1793733773891342651-65211525efe568a7.anchor.json",
+        "private_copy": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/fft-uniform-delay-001.work/anchor-inputs/1793733773891342651-65211525efe568a7.anchor.json",
+        "sha256": "4c6fe55133ec27230e4fdb08f9c1e12331be21b0a4dd49e55f877771457469ca"
+      },
+      {
+        "original": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/anchors-v3/cpu/1793733930949112639-8868fa440aed7993.anchor.json",
+        "private_copy": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/fft-uniform-delay-001.work/anchor-inputs/1793733930949112639-8868fa440aed7993.anchor.json",
+        "sha256": "9eb6131d86f52d782c3cfa8a84a4af0bfa99e5d07f922341ef764cc24d884988"
+      },
+      {
+        "original": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/anchors-v3/cpu/1793734488998787256-38ba83e99ef81717.anchor.json",
+        "private_copy": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/fft-uniform-delay-001.work/anchor-inputs/1793734488998787256-38ba83e99ef81717.anchor.json",
+        "sha256": "0adea68473b8c6b40c6e0fd2d328ad3f222ea8d5e5e8297488b82604eea2b8e1"
+      },
+      {
+        "original": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/anchors-v3/cpu/1793736320242150987-f64ec44f6551af17.anchor.json",
+        "private_copy": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/fft-uniform-delay-001.work/anchor-inputs/1793736320242150987-f64ec44f6551af17.anchor.json",
+        "sha256": "8ad145874cb597174d990ed83ea06eaa2c5e4dad5ca7f4aa71cc8e30dc813a94"
+      }
+    ],
+    "anchor_preflight": {
+      "reason": null,
+      "identity": {
+        "schema": "triad-performance-fft-trace-v3",
+        "protocol_sha256": "c903dc8909688bb30598e9efb6b85c7ee08c8199310844f2f80fda643060d167",
+        "adaptive_protocol_sha256": "3ad99d54b955e735f0db832bd6ac3afe91b016d993de80909827efd491174106",
+        "measurement_contract": "full-geometry-resident-fft-affine-cfo-v3",
+        "case": "broad-hf-timing",
+        "input_sha256": {
+          "basis.c128": "345f872061c98035c1627b044971336b8030ff02fde3251d9168e2da423166b9",
+          "manifest.json": "2c9e1e8d1ccfda3ca42d0717c59eeeb2aec925a051c6471472473ff963c58cbc",
+          "observation.c128": "0476a6f6e91b1c364e50cc334fb6980f7eda6b4ae781ae05fc88edba0f7295d7",
+          "validity.u8": "3239a129c933ab69c631d4724616b68d6f0947b48463c06cfdd73d446357d6b4"
+        },
+        "frequency_offsets_hz": [
+          -0.500000172525,
+          -0.4687501617421875,
+          -0.43750015095937494,
+          -0.40625014017656247,
+          -0.37500012939374994,
+          -0.34375011861093746,
+          -0.312500107828125,
+          -0.28125009704531245,
+          -0.2500000862625,
+          -0.2187500754796875,
+          -0.18750006469687497,
+          -0.1562500539140625,
+          -0.12500004313125002,
+          -0.09375003234843748,
+          -0.06250002156562501,
+          -0.031250010782812476,
+          0.0,
+          0.03125001078281253,
+          0.06250002156562495,
+          0.09375003234843748,
+          0.12500004313125002,
+          0.15625005391406244,
+          0.18750006469687497,
+          0.2187500754796875,
+          0.2500000862624999,
+          0.28125009704531245,
+          0.312500107828125,
+          0.3437501186109375,
+          0.37500012939374994,
+          0.40625014017656247,
+          0.437500150959375,
+          0.4687501617421874,
+          0.500000172525
+        ],
+        "geometry": {
+          "sample_count": 24978,
+          "sample_rate": 960.0,
+          "nfft": 50000,
+          "lags": 13509,
+          "lag_first_sample": 0,
+          "lag_last_sample": 13508,
+          "lag_step_samples": 1,
+          "group_tile": 2048,
+          "precision": "fp32",
+          "device": "cpu"
+        },
+        "worker_implementations": {
+          "reference": {
+            "source_hashes": {
+              "triad_fft_acquire.py": "d4a3c2cc39e0068e6aa6aab27d7ee8eeff6cc7db72a790868fe166c3f1d65843",
+              "triad_group_acquire.py": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+              "triad_gaussian_window.py": "b22fe002864922e44bc7e10000672a163353818f610c4882bae5d62cfe1cf883",
+              "triad_noise_likelihood.py": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110",
+              "triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba",
+              "triad_state_workspace.py": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923"
+            },
+            "python": "3.13.5",
+            "numpy": "2.5.4",
+            "torch": "2.8.0+cpu",
+            "threads": 2,
+            "tf32_allowed": false
+          },
+          "candidate": {
+            "source_hashes": {
+              "triad_fft_acquire.py": "d4a3c2cc39e0068e6aa6aab27d7ee8eeff6cc7db72a790868fe166c3f1d65843",
+              "triad_group_acquire.py": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+              "triad_gaussian_window.py": "b22fe002864922e44bc7e10000672a163353818f610c4882bae5d62cfe1cf883",
+              "triad_noise_likelihood.py": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110",
+              "triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba",
+              "triad_state_workspace.py": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923"
+            },
+            "python": "3.13.5",
+            "numpy": "2.5.4",
+            "torch": "2.8.0+cpu",
+            "threads": 2,
+            "tf32_allowed": false
+          }
+        },
+        "precision": "fp32",
+        "device": "cpu",
+        "performance_environment": {
+          "requested_device": "cpu",
+          "os": {
+            "system": "Linux",
+            "release": "7.2.6+deb13-amd64",
+            "machine": "x86_64",
+            "python": "3.13.5"
+          },
+          "cpu": {
+            "vendor_id": "AuthenticAMD",
+            "cpu family": "25",
+            "model": "80",
+            "model name": "AMD Ryzen 5 PRO 5650U with Radeon Graphics",
+            "stepping": "0",
+            "siblings": "12",
+            "cpu cores": "6",
+            "flags": "fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm constant_tsc rep_good nopl xtopology nonstop_tsc cpuid extd_apicid aperfmperf rapl pni pclmulqdq monitor ssse3 fma cx16 sse4_1 sse4_2 movbe popcnt aes xsave avx f16c rdrand lahf_lm cmp_legacy svm extapic cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw ibs skinit wdt tce topoext perfctr_core perfctr_nb bpext perfctr_llc mwaitx cpb cat_l3 cdp_l3 hw_pstate ssbd mba ibrs ibpb stibp vmmcall fsgsbase bmi1 avx2 smep bmi2 erms invpcid cqm rdt_a rdseed adx smap clflushopt clwb sha_ni xsaveopt xsavec xgetbv1 xsaves cqm_llc cqm_occup_llc cqm_mbm_total cqm_mbm_local user_shstk clzero irperf xsaveerptr rdpru wbnoinvd cppc arat npt lbrv svm_lock nrip_save tsc_scale vmcb_clean flushbyasid decodeassists pausefilter pfthreshold avic v_vmsave_vmload vgif v_spec_ctrl umip pku ospke vaes vpclmulqdq rdpid overflow_recov succor smca fsrm debug_swap",
+            "logical_cpu_count": 12,
+            "affinity_cpu_count": 2,
+            "affinity_cpus": [
+              2,
+              4
+            ],
+            "affinity_topology": [
+              {
+                "cpu": 2,
+                "core_id": "1",
+                "physical_package_id": "0",
+                "thread_siblings_list": "2-3"
+              },
+              {
+                "cpu": 4,
+                "core_id": "2",
+                "physical_package_id": "0",
+                "thread_siblings_list": "4-5"
+              }
+            ],
+            "quota_cores": null,
+            "quota_source": null,
+            "effective_core_limit_estimate": 2.0,
+            "numpy_simd": {
+              "baseline": [
+                "X86_V2"
+              ],
+              "found": [
+                "X86_V3"
+              ],
+              "not found": [
+                "X86_V4",
+                "AVX512_ICL",
+                "AVX512_SPR"
+              ]
+            },
+            "numpy_blas": {
+              "name": "scipy-openblas",
+              "version": "0.3.34.106.0",
+              "configuration": "OpenBLAS 0.3.34.106.0  USE64BITINT DYNAMIC_ARCH NO_AFFINITY SkylakeX MAX_THREADS=64"
+            },
+            "numpy_lapack": {
+              "name": "scipy-openblas",
+              "version": "0.3.34.106.0",
+              "configuration": "OpenBLAS 0.3.34.106.0  USE64BITINT DYNAMIC_ARCH NO_AFFINITY SkylakeX MAX_THREADS=64"
+            },
+            "torch_capability": "AVX2"
+          },
+          "requested_threads": 2,
+          "dispatch_environment": {
+            "ATEN_CPU_CAPABILITY": null,
+            "OPENBLAS_CORETYPE": null,
+            "MKL_ENABLE_INSTRUCTIONS": null,
+            "ONEDNN_MAX_CPU_ISA": null,
+            "NPY_DISABLE_CPU_FEATURES": null
+          },
+          "dependencies": {
+            "numpy": "2.5.4",
+            "scipy": "1.18.1",
+            "torch": "2.8.0+cpu",
+            "numpy_import_error": null,
+            "torch_import_error": null
+          },
+          "device": {
+            "status": "available"
+          }
+        },
+        "model_error_limit": 0.05
+      },
+      "matched_private_path": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/fft-uniform-delay-001.work/anchor-inputs/1793733930949112639-8868fa440aed7993.anchor.json",
+      "verified_before_synthetic_injection": true
+    },
+    "frozen_commitment": {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/fft-uniform-delay-001.work/anchor-inputs/1793738490669198661-21562f421857c6d9.prediction.json",
+      "sha256": "12bb14d79e407f6466dac54f14fd90b63ab3173efc46d97b1b013cc0e385933a",
+      "frozen_before_validation_as_recorded": true
+    },
+    "worker_cleanup": "closed",
+    "case_sha256": "486f8bb4f2d4f56b7b9a93156a5a39eaf3aeef101b8707ba2571a7889b44e3ff",
+    "case": {
+      "id": "broad-hf-timing",
+      "adapter": "fft",
+      "configuration": {
+        "source_case": {
+          "added": 10,
+          "base": "gpsdo-tcxo",
+          "cn0": 12,
+          "fhss": false,
+          "margin": 1,
+          "name": "01-anchor",
+          "nominal_if": 1725,
+          "rate": 36,
+          "rf": 500000,
+          "seconds": 8,
+          "selective": "each-1",
+          "shift": "ic-7100",
+          "spread": "sub9-moderate",
+          "timing": "tight",
+          "wait": 0,
+          "whole_burst": false
+        },
+        "source_plan_sha256": "595342c5d9ae4c725c2036cdfe5e83b46d971fa1d0bfc320055642e2f3304425",
+        "source_plan_identity_current": false,
+        "native_configure": {
+          "new_controls_active": true,
+          "oscillator_presets_active": true,
+          "base_oscillator": "gpsdo-tcxo",
+          "shift_oscillator": "ic-7100",
+          "topology": "independent audio and RF references; effective relative preset accuracy split symmetrically between TX and RX",
+          "shift_oscillator_active": true,
+          "shift_uses_baseband_clock": false,
+          "nominal_conversion_if_hz": 1725,
+          "rf_center_hz": 500000,
+          "frequency_parameter_scope": "RF and conversion-IF values multiply oscillator errors; the sampled signal is zero-centered complex baseband",
+          "sampling_clock_model": "constant endpoint ppm; shared mode correlates static RF/audio ppm and counts base phase diffusion once; stochastic phase does not perturb sampling coordinates",
+          "base_nominal_relative_bound_ppm": 0.0001,
+          "shift_nominal_relative_bound_ppm": 1,
+          "base_per_endpoint_bound_ppm": 5e-05,
+          "shift_per_endpoint_bound_ppm": 0.5,
+          "exact_relative_audio_ratio_bound_ppm": 0.000100000000005,
+          "deterministic_oscillator_cfo_bound_hz": 0.500000172525,
+          "relative_phase_diffusion_rad_sqrt_s": 0.001234134149488435,
+          "per_endpoint_phase_diffusion_rad_sqrt_s": 0.0008726646259971648,
+          "phase_override_explicit": false,
+          "margin": 1,
+          "oscillator_truth_margin_applied": false,
+          "spread_margin_applied_once": true,
+          "spread_preset": "sub9-moderate",
+          "selective_perturbation": "each-1",
+          "selective_channel": {
+            "model": "dispersive-dft-v1",
+            "requested_correlation_scale_hz": 0,
+            "resolved_correlation_scale_hz": 75,
+            "center_hz": 0,
+            "geometry_applied": true,
+            "enabled": true,
+            "modulation_rate_override_hz": null,
+            "resolved_fast_reference_rate_hz": 0.005,
+            "active_sideband_extent_hz": 0.005,
+            "capture_allowance_hz": 0.005,
+            "modulation_rate_source": "effective spread Doppler; slow component runs at one tenth",
+            "frequency_frame": "fixed public channel frame; never recentered from hidden oscillator truth",
+            "selective_tail_floor_seconds": 0,
+            "interpretation": "dispersive-dft-v1 is a spacing-scaled stress law when the scale is auto; selected ray delay and Doppler remain separate physical dimensions"
+          },
+          "spread_delay_ms": 0.05,
+          "spread_doppler_hz": 0.005,
+          "perturbation_slow_depth": 0.01,
+          "perturbation_fast_depth": 0.01,
+          "spread_inputs": {
+            "selected_preset": "sub9-moderate",
+            "fallback_channel": "none",
+            "delay_ms_override_nominal": null,
+            "doppler_hz_override_nominal": null,
+            "resolved_nominal_delay_ms": 0.05,
+            "resolved_nominal_doppler_hz": 0.005,
+            "applied_margin": 1,
+            "effective_delay_ms": 0.05,
+            "effective_doppler_hz": 0.005,
+            "semantics": "selected preset supplies nominal dimensions; explicit physical overrides replace their own nominal dimension before one margin multiplication; without preset, legacy channel values supply the base, and remain already effective when no override is supplied; receiver tap basis is independent"
+          },
+          "path_evolution": {
+            "active": false,
+            "ray_coherence_seconds": 0,
+            "gaussian_doppler_width_hz": 0,
+            "gaussian_doppler_standard_deviation_hz": 0,
+            "gaussian_capture_total_allowance_hz": 0,
+            "gaussian_target_correlation": "exp(-0.5*(pi*B*tau)^2); B=2*sigma of each ray Gaussian Doppler PSD; existing ray-center separation is independent",
+            "gaussian_teacher": "stationary proper-complex white Gaussian innovations convolved with a discrete L2-normalized Gaussian FIR; finite truncation and sampling approximate the target covariance; actual FIR shape is reported separately",
+            "diurnal_phase_amplitude_radians": 0,
+            "diurnal_period_seconds": 86400,
+            "maximum_diurnal_instantaneous_frequency_hz": 0,
+            "outage_start_seconds": -1,
+            "outage_end_seconds": -1,
+            "outage_gain": 0,
+            "outage_ramp_seconds": 60,
+            "time_coordinate": "physical RX time n/(Fs*rx_clock_scale)-capture_lead_seconds",
+            "ray_model": "fixed unit ray gains; existing equal-power two-ray delay and Doppler retained when selected",
+            "outage_model": "signal-only attenuation on [start,end), with cosine descent/ascent inside the interval; thermal noise and path/filter state continue",
+            "scope": "declared physical-path stress, not field calibration; OU is point sampled and has an unbounded analog spectrum; the Gaussian FIR target also has unbounded spectral tails and its six-sigma-per-edge capture allowance is not strict support, so finite deterministic capture bounds are not a bandwidth guarantee and sampling-rate refinement is required"
+          },
+          "audio_error_seconds_per_station": 0.07,
+          "audio_lag_interval_per_station": [
+            0,
+            0.07
+          ],
+          "clock_sync": "GPS_10ms-1ms_region-0ms_offset",
+          "clock_policy_active": true,
+          "clock_accuracy_seconds_per_station": 0.01,
+          "clock_region_total_seconds": 0.001,
+          "clock_propagation_offset_seconds": 0,
+          "initial_arrival_center_seconds": 0,
+          "initial_arrival_half_width_seconds": 7.035,
+          "full_observation_calendar_half_width_seconds": 7.035000001890688,
+          "calendar_timestamp_center_seconds": 0,
+          "calendar_timestamp_audio_center_shift_seconds": 0,
+          "calendar_timestamp_center_shift_applied_to_raw_samples": false,
+          "initial_arrival_bounds_seconds": [
+            -7.035,
+            7.035
+          ],
+          "explicit_arrival_prior": true,
+          "initial_arrival_prior_source": "explicit uniform physical arrival prior; replaces clock/audio initial timing only",
+          "explicit_arrival_seed_domain": "channel seed XOR 0x94d049bb133111eb; independent mt19937_64 stream",
+          "timing_convention": "explicit uniform initial physical arrival relative to source support; clock/audio timing draw replaced, endpoint clock-rate and oscillator models preserved",
+          "truth_selection": "initial timing is uniform on the explicit physical prior, drawn from a domain-separated channel-seed stream independent of --start; other configured/legacy draws are unchanged",
+          "truth_epoch_offset_seconds": 0,
+          "receiver_pattern_epoch": 1793664000,
+          "transmitter_pattern_epoch": 1793664000,
+          "epoch_address_scope": "explicit independent keyed-epoch offset; PC timing draws do not silently choose a crypto epoch",
+          "suggested_epoch_radius_seconds": 1,
+          "suggested_epoch_alternatives": 3,
+          "suggested_epoch_offsets": [
+            -1,
+            0,
+            1
+          ],
+          "public_search": {
+            "timing_bounds_seconds": [
+              -7.035,
+              -7.035
+            ],
+            "frequency_bounds_hz": [
+              0,
+              0
+            ],
+            "clock_bounds_ppm": [
+              0,
+              0
+            ],
+            "epoch_alternatives": 1,
+            "estimated_hypotheses": 4,
+            "materialization_cap": 10000,
+            "covers_initial_timing_prior": false,
+            "covers_static_oscillator_frequency_prior": false,
+            "covers_audio_clock_prior": false,
+            "covers_suggested_epochs": false
+          },
+          "search_estimates": {
+            "margin_frequency_half_width_hz": 0.500000172525,
+            "margin_clock_half_width_ppm": 0.000100000000005,
+            "timing_maximum_step_seconds": 0.0016844350714584277,
+            "timing_loss_budget_db": 0.5,
+            "timing_model_fine_rate_hz": 60,
+            "timing_model_carrier_spacing_hz": 75,
+            "timing_model_pulse_rolloff": 0.25,
+            "timing_model": "squared raised-cosine chip autocorrelation times squared equal-power three-carrier Dirichlet factor; first-main-lobe bisection",
+            "timing_model_assumptions": "independent zero-mean random chips; equal mean carrier powers; one shared complex gain; infinite RRC pulse; worst mismatch half a uniform grid step with both endpoints covered",
+            "timing_model_is_finite_waveform_certificate": false,
+            "timing_model_limits": "finite keyed patterns, truncated pulse, sampled interpolation, channel uncertainty, outages and clock/timing joint mismatch require independent validation",
+            "clock_step_model": "endpoint displacement over the complete bit equals timing_maximum_step_seconds; same approximate timing loss budget",
+            "whole_bit_frequency_maximum_step_hz": 0.021551724137931032,
+            "block_frequency_maximum_step_hz": 1.875,
+            "clock_maximum_step_ppm": 145.20991995331272,
+            "timing_positions": 8354,
+            "whole_bit_frequency_positions": 48,
+            "clock_positions": 2,
+            "scope": "finite-grid estimates only; no implicit bank generation, pruning, phase-path count or reception guarantee"
+          },
+          "capture": {
+            "sample_rate_hz": 960,
+            "sample_rate_numerator": 960,
+            "sample_rate_denominator": 1,
+            "fine_rate_per_carrier_hz": 60,
+            "nominal_triplet_bandwidth_hz": 225,
+            "deterministic_nyquist_margin_hz": 733.9799995957001,
+            "feasible_for_deterministic_prior": true,
+            "scope": "whole deterministic RF/audio-error bound, public CFO grid, maximum diurnal instantaneous frequency and Gaussian-ray allowance of six sigma per edge; stochastic oscillator and ray spectral tails are not a bounded capture guarantee",
+            "sub_64_hz_model": false,
+            "sampling_model_limits": "below 64 samples/s: FHSS, dropout, active sampled frontend, slow AGC, white/flicker/random-walk FM and white PM are rejected; constant offsets, Wiener phase, fractional two-ray propagation and selected selective perturbations remain modeled in physical seconds; no high-rate integration/decimation equivalence is claimed"
+          },
+          "duration": {
+            "maximum_requested_active_seconds": 315576000,
+            "requested_active_seconds": 8,
+            "rounded_active_seconds": 11.600000000000001,
+            "elapsed_source_calendar_seconds": 11.600000000000001,
+            "source_support_seconds": 11.871875,
+            "scope": "ten-Julian-year requested-active limit; complete private tiles, internal burst waits, pulse padding and channel/capture tails may extend actual elapsed duration"
+          },
+          "whole_bit_symbol_burst": {
+            "enabled": false,
+            "wait_useful_symbols": 0,
+            "changes_inside_one_bit": false,
+            "internal_wait_tiles": 0,
+            "requested_earliest_support_epoch": 1793664000,
+            "useful_samples": 11137,
+            "pulse_padding_samples_each_side": 130,
+            "support_begin": {
+              "epoch": 1793664000,
+              "sample_phase": 0
+            },
+            "payload_begin": {
+              "epoch": 1793664000,
+              "sample_phase": 130
+            },
+            "payload_end": {
+              "epoch": 1793664011,
+              "sample_phase": 707
+            },
+            "support_end": {
+              "epoch": 1793664011,
+              "sample_phase": 837
+            },
+            "next_support_begin": {
+              "epoch": 1793664011,
+              "sample_phase": 837
+            },
+            "next_support_formula": "ceil_UTC_30s(max(support_end + wait_symbols*whole_useful_bit_samples, support_begin + 60s))",
+            "scope": "one-bit source renders this slot only; successor is public calendar metadata, not three internal wait tiles or multi-bit runtime support"
+          },
+          "receiver_observation": {
+            "missed_dwell_indices": [],
+            "maximum_missed_dwell_indices": 4096,
+            "dwell_seconds": 0.4,
+            "public_calendar_origin_seconds": 0.13541666666666666,
+            "missed_dwell_calendar": "floor((n/(Fs*RX_clock_scale) - capture_lead_seconds + retune_offset_seconds - calendar_origin_sample/Fs)/dwell_seconds); only nonnegative public receiver dwell indices are maskable",
+            "erasure_stage": "after physical channel, noise and frontend; output I/Q and validity become zero while all physical state advances",
+            "physical_rf_retuning": false,
+            "minimum_observed_fraction": 0.9,
+            "coverage_policy_scope": "C++ run receiver only; complete-calendar requirement and likelihood thresholds remain unchanged; external scorers declare their own coverage policy"
+          }
+        },
+        "sample_count": 24978,
+        "sample_rate_hz": 960.0,
+        "source_elapsed_seconds": 11.600000000000001,
+        "lag_group_count": 13509,
+        "frequency_grid_spacing_hz_max": 0.03125001078281253,
+        "fixture_generation": "native sampled point model; continuous path/channel state and full natural tails retained"
+      },
+      "fixture_hashes": {
+        "basis.c128": "345f872061c98035c1627b044971336b8030ff02fde3251d9168e2da423166b9",
+        "manifest.json": "2c9e1e8d1ccfda3ca42d0717c59eeeb2aec925a051c6471472473ff963c58cbc",
+        "observation.c128": "0476a6f6e91b1c364e50cc334fb6980f7eda6b4ae781ae05fc88edba0f7295d7",
+        "validity.u8": "3239a129c933ab69c631d4724616b68d6f0947b48463c06cfdd73d446357d6b4"
+      },
+      "source_bound_metadata": {
+        "binary_sha256": "862b0431f04a3973ce15e7cff9b9959ed45ca36d626e401352db5cf8630c9c6b",
+        "source_hashes": {
+          "tools/triad-long.cpp": "9b852132edb2c4f53d4c218e73db1314653cd6213a78a49c776869af6dc68877",
+          "src/triad_modem_v3.cpp": "cb6cac016e57edcd4f6ebc70f09c68cc47380e3b772cdbe047d7a3b93e9b434c",
+          "src/triad_simulation_stream.cpp": "afaa1267c36fcd330151174f6f08b6fb401a7f702c660964071ef24b6e82a70d",
+          "src/triad_gaussian_fading.hpp": "97f26b082d7d68123952bde7ccb9f97148c5977cf741cf6c15c76e77fcc20944",
+          "src/channel_perturbation.hpp": "fae3b1b345e3dc19c8b85a5010e4434530bd0a34d595dd4de8cd55349d8d879a",
+          "src/channel_spread.hpp": "bf98698d574869acb79645fa143af7ae563a2f542868e77c672d89d4fb16bdb0",
+          "include/datapump/triad_modem_v3.hpp": "1ddd8e851950036f03e6a903ed7ba4746392ffe8623f49685df04f029c4aff48",
+          "include/datapump/pattern_pulse.hpp": "f3053ed41fa5cbca182ae4dcf5ff4796b030a3cb15527f617d7a765e7f989312",
+          "include/datapump/clock_sync.hpp": "dae640fd90eaad12afb5ca33ac36109da13db10d684929978df799ad4c7f761e",
+          "plan": "595342c5d9ae4c725c2036cdfe5e83b46d971fa1d0bfc320055642e2f3304425",
+          "case_config": "4fe9dfe1ea4f03ea2f2a276cac022597ebdb61dc1fb71c15056b6c6f79d03664"
+        },
+        "source_root": "/home/user/___quick/p/_cur/dataPump/pumpModem",
+        "cache_key": "e9c2a42603cdb030f2d6dea0c1b771e4f58cd91ce9e0b4df2bcc866aceef41ea",
+        "cache_manifest": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/triad-performance-fixtures/triad-physical-fixtures/broad-hf-timing/e9c2a42603cdb030f2d6dea0c1b771e4f58cd91ce9e0b4df2bcc866aceef41ea/fixture.json",
+        "cache_hit": true,
+        "four_public_file_hashes_revalidated": true,
+        "configuration_source": "fresh triad_long --mode configure for current binary/arguments",
+        "source_plan_receipt_reused_as_current": false,
+        "channel_manifest": "none",
+        "oscillator_model": {
+          "relative_phase_diffusion_rad_sqrt_s": 0.001234134149488435,
+          "relative_white_fm_hz_sqrt_s": 0,
+          "relative_random_walk_fm_hz_sqrt_s": 0,
+          "relative_flicker_fm_rms_hz": 0,
+          "flicker_tau_seconds": [
+            0.1,
+            86400
+          ],
+          "flicker_bands": 12,
+          "relative_white_pm_rms_rad": 0
+        }
+      },
+      "performance_environment": {
+        "requested_device": "cpu",
+        "os": {
+          "system": "Linux",
+          "release": "7.2.6+deb13-amd64",
+          "machine": "x86_64",
+          "python": "3.13.5"
+        },
+        "cpu": {
+          "vendor_id": "AuthenticAMD",
+          "cpu family": "25",
+          "model": "80",
+          "model name": "AMD Ryzen 5 PRO 5650U with Radeon Graphics",
+          "stepping": "0",
+          "siblings": "12",
+          "cpu cores": "6",
+          "flags": "fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm constant_tsc rep_good nopl xtopology nonstop_tsc cpuid extd_apicid aperfmperf rapl pni pclmulqdq monitor ssse3 fma cx16 sse4_1 sse4_2 movbe popcnt aes xsave avx f16c rdrand lahf_lm cmp_legacy svm extapic cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw ibs skinit wdt tce topoext perfctr_core perfctr_nb bpext perfctr_llc mwaitx cpb cat_l3 cdp_l3 hw_pstate ssbd mba ibrs ibpb stibp vmmcall fsgsbase bmi1 avx2 smep bmi2 erms invpcid cqm rdt_a rdseed adx smap clflushopt clwb sha_ni xsaveopt xsavec xgetbv1 xsaves cqm_llc cqm_occup_llc cqm_mbm_total cqm_mbm_local user_shstk clzero irperf xsaveerptr rdpru wbnoinvd cppc arat npt lbrv svm_lock nrip_save tsc_scale vmcb_clean flushbyasid decodeassists pausefilter pfthreshold avic v_vmsave_vmload vgif v_spec_ctrl umip pku ospke vaes vpclmulqdq rdpid overflow_recov succor smca fsrm debug_swap",
+          "logical_cpu_count": 12,
+          "affinity_cpu_count": 2,
+          "affinity_cpus": [
+            2,
+            4
+          ],
+          "affinity_topology": [
+            {
+              "cpu": 2,
+              "core_id": "1",
+              "physical_package_id": "0",
+              "thread_siblings_list": "2-3"
+            },
+            {
+              "cpu": 4,
+              "core_id": "2",
+              "physical_package_id": "0",
+              "thread_siblings_list": "4-5"
+            }
+          ],
+          "quota_cores": null,
+          "quota_source": null,
+          "effective_core_limit_estimate": 2.0,
+          "numpy_simd": {
+            "baseline": [
+              "X86_V2"
+            ],
+            "found": [
+              "X86_V3"
+            ],
+            "not found": [
+              "X86_V4",
+              "AVX512_ICL",
+              "AVX512_SPR"
+            ]
+          },
+          "numpy_blas": {
+            "name": "scipy-openblas",
+            "version": "0.3.34.106.0",
+            "configuration": "OpenBLAS 0.3.34.106.0  USE64BITINT DYNAMIC_ARCH NO_AFFINITY SkylakeX MAX_THREADS=64"
+          },
+          "numpy_lapack": {
+            "name": "scipy-openblas",
+            "version": "0.3.34.106.0",
+            "configuration": "OpenBLAS 0.3.34.106.0  USE64BITINT DYNAMIC_ARCH NO_AFFINITY SkylakeX MAX_THREADS=64"
+          },
+          "torch_capability": "AVX2"
+        },
+        "requested_threads": 2,
+        "dispatch_environment": {
+          "ATEN_CPU_CAPABILITY": null,
+          "OPENBLAS_CORETYPE": null,
+          "MKL_ENABLE_INSTRUCTIONS": null,
+          "ONEDNN_MAX_CPU_ISA": null,
+          "NPY_DISABLE_CPU_FEATURES": null
+        },
+        "dependencies": {
+          "numpy": "2.5.4",
+          "scipy": "1.18.1",
+          "torch": "2.8.0+cpu",
+          "numpy_import_error": null,
+          "torch_import_error": null
+        },
+        "device": {
+          "status": "available"
+        }
+      },
+      "input_directory": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/triad-performance-fixtures/triad-physical-fixtures/broad-hf-timing/e9c2a42603cdb030f2d6dea0c1b771e4f58cd91ce9e0b4df2bcc866aceef41ea/workspace",
+      "lag_max_seconds": 14.07,
+      "lag_step_samples": 1,
+      "group_tile": 2048,
+      "memory_mib": 1024,
+      "fixture_scope": "Same HF waveform under explicit +/-7.035-second physical arrival uncertainty; complete integer lag lattice",
+      "frequency_bank": {
+        "count": 33,
+        "sha256": "09980577883fb7100a259d279a9811394f8add44ae87287913a5252545974043",
+        "minimum_hz": -0.500000172525,
+        "maximum_hz": 0.500000172525
+      }
+    },
+    "fft_result": {
+      "id": "broad-hf-timing",
+      "adapter": "fft",
+      "scope": "full resident FFT acquisition; excludes fixture generation and interpreter startup",
+      "precision": "fp32",
+      "prediction_valid": true,
+      "comparison": {
+        "gate": "performance_regression",
+        "performance_pass_eligible": false,
+        "expanded_full_prediction_ratio_interval": [
+          1.3624139072410102,
+          1.8214804936152447
+        ],
+        "observed_prediction_ratio": 1.5753127804565128,
+        "mean_reference_full_seconds": 11.330799843676024,
+        "mean_candidate_full_seconds": 17.846280727329724,
+        "conditional": {
+          "status": "conditional_gate_performance_regression",
+          "gate": "performance_regression",
+          "conditional_performance_pass_eligible": false,
+          "timing_ratio_interval": [
+            1.4986552979651113,
+            1.6558913578320404
+          ],
+          "paired_model_log_error_bound": 0.09531017980432487,
+          "model_adjusted_ratio_interval": [
+            1.3624139072410102,
+            1.8214804936152447
+          ],
+          "training_timing_uncertainty_included": false,
+          "future_coverage_qualified": false,
+          "threshold": 1.3,
+          "scope": "conditional scenario gate; paired timing interval receives the prevalidated historical envelope once"
+        },
+        "absolute_mean_full_seconds_difference": 6.5154808836537
+      },
+      "full_cfo_count": 33,
+      "full_target_measured": true,
+      "full_target_measurement_count_per_source": 1,
+      "elapsed_seconds": 213.15998654899886,
+      "coverage": {
+        "full_sample_timing_geometry": {
+          "sample_count": 24978,
+          "sample_rate": 960.0,
+          "nfft": 50000,
+          "lags": 13509,
+          "lag_first_sample": 0,
+          "lag_last_sample": 13508,
+          "lag_step_samples": 1,
+          "group_tile": 2048,
+          "precision": "fp32",
+          "device": "cpu"
+        },
+        "measured_bank_numerical_checks": 69,
+        "all_measured_counts_verified": true
+      },
+      "warnings": [
+        "requested full-runtime timing precision remains unresolved"
+      ],
+      "fixture_hashes": {
+        "basis.c128": "345f872061c98035c1627b044971336b8030ff02fde3251d9168e2da423166b9",
+        "manifest.json": "2c9e1e8d1ccfda3ca42d0717c59eeeb2aec925a051c6471472473ff963c58cbc",
+        "observation.c128": "0476a6f6e91b1c364e50cc334fb6980f7eda6b4ae781ae05fc88edba0f7295d7",
+        "validity.u8": "3239a129c933ab69c631d4724616b68d6f0947b48463c06cfdd73d446357d6b4"
+      },
+      "source_bound_metadata": {
+        "binary_sha256": "862b0431f04a3973ce15e7cff9b9959ed45ca36d626e401352db5cf8630c9c6b",
+        "source_hashes": {
+          "tools/triad-long.cpp": "9b852132edb2c4f53d4c218e73db1314653cd6213a78a49c776869af6dc68877",
+          "src/triad_modem_v3.cpp": "cb6cac016e57edcd4f6ebc70f09c68cc47380e3b772cdbe047d7a3b93e9b434c",
+          "src/triad_simulation_stream.cpp": "afaa1267c36fcd330151174f6f08b6fb401a7f702c660964071ef24b6e82a70d",
+          "src/triad_gaussian_fading.hpp": "97f26b082d7d68123952bde7ccb9f97148c5977cf741cf6c15c76e77fcc20944",
+          "src/channel_perturbation.hpp": "fae3b1b345e3dc19c8b85a5010e4434530bd0a34d595dd4de8cd55349d8d879a",
+          "src/channel_spread.hpp": "bf98698d574869acb79645fa143af7ae563a2f542868e77c672d89d4fb16bdb0",
+          "include/datapump/triad_modem_v3.hpp": "1ddd8e851950036f03e6a903ed7ba4746392ffe8623f49685df04f029c4aff48",
+          "include/datapump/pattern_pulse.hpp": "f3053ed41fa5cbca182ae4dcf5ff4796b030a3cb15527f617d7a765e7f989312",
+          "include/datapump/clock_sync.hpp": "dae640fd90eaad12afb5ca33ac36109da13db10d684929978df799ad4c7f761e",
+          "plan": "595342c5d9ae4c725c2036cdfe5e83b46d971fa1d0bfc320055642e2f3304425",
+          "case_config": "4fe9dfe1ea4f03ea2f2a276cac022597ebdb61dc1fb71c15056b6c6f79d03664"
+        },
+        "source_root": "/home/user/___quick/p/_cur/dataPump/pumpModem",
+        "cache_key": "e9c2a42603cdb030f2d6dea0c1b771e4f58cd91ce9e0b4df2bcc866aceef41ea",
+        "cache_manifest": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/triad-performance-fixtures/triad-physical-fixtures/broad-hf-timing/e9c2a42603cdb030f2d6dea0c1b771e4f58cd91ce9e0b4df2bcc866aceef41ea/fixture.json",
+        "cache_hit": true,
+        "four_public_file_hashes_revalidated": true,
+        "configuration_source": "fresh triad_long --mode configure for current binary/arguments",
+        "source_plan_receipt_reused_as_current": false,
+        "channel_manifest": "none",
+        "oscillator_model": {
+          "relative_phase_diffusion_rad_sqrt_s": 0.001234134149488435,
+          "relative_white_fm_hz_sqrt_s": 0,
+          "relative_random_walk_fm_hz_sqrt_s": 0,
+          "relative_flicker_fm_rms_hz": 0,
+          "flicker_tau_seconds": [
+            0.1,
+            86400
+          ],
+          "flicker_bands": 12,
+          "relative_white_pm_rms_rad": 0
+        }
+      },
+      "reduced_bank_admissions_valid": false,
+      "prediction_interval_target": "future outer timing-block mean per original call; not an individual cold invocation",
+      "independence_scope": "paired outer timing blocks in persistent interpreters; inner calls are averaged, not independent samples; cold-process variance is outside this target",
+      "adaptive": {
+        "sample_count": 33,
+        "next_look": null,
+        "policy": {
+          "relative_precision_target": 0.05,
+          "predeclared_looks": [
+            5,
+            9,
+            17,
+            33
+          ],
+          "family_count": 14,
+          "alpha": 0.05,
+          "interval_confidence_per_look": 0.999702380952381,
+          "gate_confidence_per_look": 0.999702380952381,
+          "alpha_allocation": {
+            "timing_intervals_per_family_look_metric": 0.00029761904761904765,
+            "three_timing_intervals_total_across_all_looks_and_families": 0.05,
+            "gate_reuses_paired_timing_interval": true
+          },
+          "slowdown_threshold": 1.3,
+          "fixed_model_log_allowance": 0.051293294387550536
+        },
+        "stop_reason": "maximum_samples",
+        "timing_precision_reached": false,
+        "timing_intervals_simultaneously_within_target": false,
+        "model_validation": "unvalidated",
+        "performance_gate": "unvalidated",
+        "gate_performance_pass_eligible": false,
+        "inference": {
+          "method": "predeclared-look Student-t intervals on outer log runtimes; paired log-runtime ratio",
+          "simultaneous_family_scope": "reference, candidate, and paired timing intervals across declared families and predeclared looks; the regression gate reuses the paired interval and adds a separate model-error bound",
+          "conditional_assumptions": [
+            "outer runtimes are independent and stationary within the measured hardware, software, thread, and power regime",
+            "outer log runtimes are approximately normally distributed",
+            "each look is evaluated only at its declared cumulative sample count",
+            "the future-execution interval adds run-to-run spread and independently measured log model-error bounds",
+            "model allowances do not shrink with more timing repetitions"
+          ],
+          "distribution_free_coverage_claim": false,
+          "timing_precision_is_not_model_accuracy": true,
+          "statistical_future_coverage_qualified": false,
+          "model_validation_scope": "qualify_log_residuals tests a fixed-look confidence interval for mean log bias only; it does not validate individual-error tails or future-interval coverage",
+          "future_execution_intervals_are_engineering_scenario_ranges": true,
+          "bounded_model_error_assumption_verified_for_future_runs": false
+        },
+        "reference": {
+          "point_seconds": 11.317031513360448,
+          "timing_mean_confidence_interval_seconds": [
+            10.932571162690223,
+            11.715011992007696
+          ],
+          "future_execution_prediction_interval_seconds": [
+            8.788855108322037,
+            14.572455763108547
+          ],
+          "log_standard_error": 0.008517418693978353,
+          "relative_timing_half_width": 0.03516650794666498,
+          "bounded_model_error_scenario_interval_seconds": [
+            8.788855108322037,
+            14.572455763108547
+          ],
+          "future_execution_interval_scope": "scenario range: timing interval widened by fixed allowance and maximum observed independent residual; future model-error coverage is unverified",
+          "statistical_future_coverage_qualified": false,
+          "independent_model_log_error_bound": 0.051293294387550536,
+          "observed_independent_model_residual_max_log": null,
+          "model_error_bound_is_verified_for_future_runs": false
+        },
+        "candidate": {
+          "point_seconds": 17.827864379825836,
+          "timing_mean_confidence_interval_seconds": [
+            17.261063667888607,
+            18.41327709929828
+          ],
+          "future_execution_prediction_interval_seconds": [
+            14.028278118661788,
+            22.65657592877707
+          ],
+          "log_standard_error": 0.007962208265456565,
+          "relative_timing_half_width": 0.03283695158321387,
+          "bounded_model_error_scenario_interval_seconds": [
+            14.028278118661788,
+            22.65657592877707
+          ],
+          "future_execution_interval_scope": "scenario range: timing interval widened by fixed allowance and maximum observed independent residual; future model-error coverage is unverified",
+          "statistical_future_coverage_qualified": false,
+          "independent_model_log_error_bound": 0.051293294387550536,
+          "observed_independent_model_residual_max_log": null,
+          "model_error_bound_is_verified_for_future_runs": false
+        },
+        "paired_candidate_over_reference": {
+          "point_seconds": 1.5753127804565128,
+          "timing_mean_confidence_interval_seconds": [
+            1.4986552979651113,
+            1.6558913578320404
+          ],
+          "future_execution_prediction_interval_seconds": [
+            1.17771165299177,
+            2.1071459639254937
+          ],
+          "log_standard_error": 0.012293646476379374,
+          "relative_timing_half_width": 0.05115084342309251,
+          "model_adjusted_gate_interval": [
+            1.352536406413513,
+            1.8347826679579398
+          ],
+          "paired_model_log_error_bound": 0.10258658877510107,
+          "paired_model_log_error_bound_source": "sum of separate reference and candidate model-error bounds"
+        }
+      },
+      "full_prediction": {
+        "reference": {
+          "predicted_full_time": {
+            "point_seconds": 11.317031513360448,
+            "timing_mean_confidence_interval_seconds": [
+              10.932571162690223,
+              11.715011992007696
+            ],
+            "future_execution_prediction_interval_seconds": [
+              8.788855108322037,
+              14.572455763108547
+            ],
+            "log_standard_error": 0.008517418693978353,
+            "relative_timing_half_width": 0.03516650794666498,
+            "bounded_model_error_scenario_interval_seconds": [
+              8.788855108322037,
+              14.572455763108547
+            ],
+            "future_execution_interval_scope": "scenario range: timing interval widened by fixed allowance and maximum observed independent residual; future model-error coverage is unverified",
+            "statistical_future_coverage_qualified": false,
+            "independent_model_log_error_bound": 0.051293294387550536,
+            "observed_independent_model_residual_max_log": null,
+            "model_error_bound_is_verified_for_future_runs": false,
+            "conditional_model_mean_scenario_interval_seconds": [
+              9.938701056991112,
+              12.886513191208467
+            ],
+            "conditional_model_log_error_bound": 0.09531017980432487,
+            "conditional_model_status": "historically_supported_conditional",
+            "conditional_model_future_coverage_qualified": false
+          },
+          "status": "historically_supported_conditional"
+        },
+        "candidate": {
+          "predicted_full_time": {
+            "point_seconds": 17.827864379825836,
+            "timing_mean_confidence_interval_seconds": [
+              17.261063667888607,
+              18.41327709929828
+            ],
+            "future_execution_prediction_interval_seconds": [
+              14.028278118661788,
+              22.65657592877707
+            ],
+            "log_standard_error": 0.007962208265456565,
+            "relative_timing_half_width": 0.03283695158321387,
+            "bounded_model_error_scenario_interval_seconds": [
+              14.028278118661788,
+              22.65657592877707
+            ],
+            "future_execution_interval_scope": "scenario range: timing interval widened by fixed allowance and maximum observed independent residual; future model-error coverage is unverified",
+            "statistical_future_coverage_qualified": false,
+            "independent_model_log_error_bound": 0.051293294387550536,
+            "observed_independent_model_residual_max_log": null,
+            "model_error_bound_is_verified_for_future_runs": false,
+            "conditional_model_mean_scenario_interval_seconds": [
+              15.691876061716915,
+              20.25460480922811
+            ],
+            "conditional_model_log_error_bound": 0.09531017980432487,
+            "conditional_model_status": "historically_supported_conditional",
+            "conditional_model_future_coverage_qualified": false
+          },
+          "status": "historically_supported_conditional"
+        }
+      },
+      "recorded_sampling_work": {
+        "scope": "timing samples only; excluded pilot and validation calls are separate; resident preparation plus scoring",
+        "sources": {
+          "reference": {
+            "outer_sample_count": 33,
+            "actual_preparation_call_count": 33,
+            "actual_score_call_count_by_cfo_bank_size": {
+              "1": 33,
+              "5": 33
+            },
+            "sum_measured_resident_seconds": 69.13798306405079
+          },
+          "candidate": {
+            "outer_sample_count": 33,
+            "actual_preparation_call_count": 33,
+            "actual_score_call_count_by_cfo_bank_size": {
+              "1": 33,
+              "5": 33
+            },
+            "sum_measured_resident_seconds": 108.45756119809812
+          }
+        }
+      },
+      "measurement_plan": {
+        "direct": false,
+        "timing_block_invocations": 1,
+        "training_counts": [
+          1,
+          5
+        ],
+        "intermediate_count": 9,
+        "target_count": 33,
+        "maximum_extrapolation": 8.0,
+        "routine_cfo_work": 57,
+        "direct_cfo_work": 165,
+        "confirmation_plan": {
+          "maximum_repeats_per_source": 1,
+          "allowed_looks": [
+            1
+          ],
+          "estimated_seconds_per_pair": 29.14489589318628,
+          "scope": "one precommitted full endpoint sentinel; historical support only, no fresh mean-equivalence inference"
+        },
+        "pilot_cost_guard": {
+          "applied": true,
+          "original_count_plan": {
+            "direct": false,
+            "training_counts": [
+              1,
+              5
+            ],
+            "intermediate_count": 9,
+            "target_count": 33,
+            "maximum_extrapolation": 8.0,
+            "minimum_repeats": 5,
+            "routine_cfo_work": 57,
+            "direct_cfo_work": 165,
+            "minimum_qualification_full_holdouts": 3,
+            "qualification_full_holdout_looks": [
+              3,
+              5,
+              9,
+              17
+            ],
+            "qualification_overhead_amortized_separately": true
+          },
+          "abbreviated_cycle_seconds": {
+            "reference": 2.1217687940225005,
+            "candidate": 3.2473924810183235
+          },
+          "estimated_full_seconds": {
+            "reference": 11.245779123564716,
+            "candidate": 17.48125995369628
+          },
+          "abbreviated_over_estimated_full": {
+            "reference": 0.18867245841388505,
+            "candidate": 0.18576421205450278
+          },
+          "switch_to_direct": false,
+          "direct_threshold": 0.8,
+          "cheap_full_seconds_threshold": 1.0,
+          "cheap_full_direct": false,
+          "inference_eligible": false,
+          "scope": "prospective pilot cost heuristic including actual complete preparation; never retuned from holdouts"
+        }
+      },
+      "anchor": {
+        "status": "historically_supported_conditional",
+        "validation_mode": "reuse",
+        "identity": {
+          "schema": "triad-performance-fft-trace-v3",
+          "protocol_sha256": "c903dc8909688bb30598e9efb6b85c7ee08c8199310844f2f80fda643060d167",
+          "adaptive_protocol_sha256": "3ad99d54b955e735f0db832bd6ac3afe91b016d993de80909827efd491174106",
+          "measurement_contract": "full-geometry-resident-fft-affine-cfo-v3",
+          "case": "broad-hf-timing",
+          "input_sha256": {
+            "basis.c128": "345f872061c98035c1627b044971336b8030ff02fde3251d9168e2da423166b9",
+            "manifest.json": "2c9e1e8d1ccfda3ca42d0717c59eeeb2aec925a051c6471472473ff963c58cbc",
+            "observation.c128": "0476a6f6e91b1c364e50cc334fb6980f7eda6b4ae781ae05fc88edba0f7295d7",
+            "validity.u8": "3239a129c933ab69c631d4724616b68d6f0947b48463c06cfdd73d446357d6b4"
+          },
+          "frequency_offsets_hz": [
+            -0.500000172525,
+            -0.4687501617421875,
+            -0.43750015095937494,
+            -0.40625014017656247,
+            -0.37500012939374994,
+            -0.34375011861093746,
+            -0.312500107828125,
+            -0.28125009704531245,
+            -0.2500000862625,
+            -0.2187500754796875,
+            -0.18750006469687497,
+            -0.1562500539140625,
+            -0.12500004313125002,
+            -0.09375003234843748,
+            -0.06250002156562501,
+            -0.031250010782812476,
+            0.0,
+            0.03125001078281253,
+            0.06250002156562495,
+            0.09375003234843748,
+            0.12500004313125002,
+            0.15625005391406244,
+            0.18750006469687497,
+            0.2187500754796875,
+            0.2500000862624999,
+            0.28125009704531245,
+            0.312500107828125,
+            0.3437501186109375,
+            0.37500012939374994,
+            0.40625014017656247,
+            0.437500150959375,
+            0.4687501617421874,
+            0.500000172525
+          ],
+          "geometry": {
+            "sample_count": 24978,
+            "sample_rate": 960.0,
+            "nfft": 50000,
+            "lags": 13509,
+            "lag_first_sample": 0,
+            "lag_last_sample": 13508,
+            "lag_step_samples": 1,
+            "group_tile": 2048,
+            "precision": "fp32",
+            "device": "cpu"
+          },
+          "worker_implementations": {
+            "reference": {
+              "source_hashes": {
+                "triad_fft_acquire.py": "d4a3c2cc39e0068e6aa6aab27d7ee8eeff6cc7db72a790868fe166c3f1d65843",
+                "triad_group_acquire.py": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+                "triad_gaussian_window.py": "b22fe002864922e44bc7e10000672a163353818f610c4882bae5d62cfe1cf883",
+                "triad_noise_likelihood.py": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110",
+                "triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba",
+                "triad_state_workspace.py": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923"
+              },
+              "python": "3.13.5",
+              "numpy": "2.5.4",
+              "torch": "2.8.0+cpu",
+              "threads": 2,
+              "tf32_allowed": false
+            },
+            "candidate": {
+              "source_hashes": {
+                "triad_fft_acquire.py": "d4a3c2cc39e0068e6aa6aab27d7ee8eeff6cc7db72a790868fe166c3f1d65843",
+                "triad_group_acquire.py": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+                "triad_gaussian_window.py": "b22fe002864922e44bc7e10000672a163353818f610c4882bae5d62cfe1cf883",
+                "triad_noise_likelihood.py": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110",
+                "triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba",
+                "triad_state_workspace.py": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923"
+              },
+              "python": "3.13.5",
+              "numpy": "2.5.4",
+              "torch": "2.8.0+cpu",
+              "threads": 2,
+              "tf32_allowed": false
+            }
+          },
+          "precision": "fp32",
+          "device": "cpu",
+          "performance_environment": {
+            "requested_device": "cpu",
+            "os": {
+              "system": "Linux",
+              "release": "7.2.6+deb13-amd64",
+              "machine": "x86_64",
+              "python": "3.13.5"
+            },
+            "cpu": {
+              "vendor_id": "AuthenticAMD",
+              "cpu family": "25",
+              "model": "80",
+              "model name": "AMD Ryzen 5 PRO 5650U with Radeon Graphics",
+              "stepping": "0",
+              "siblings": "12",
+              "cpu cores": "6",
+              "flags": "fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm constant_tsc rep_good nopl xtopology nonstop_tsc cpuid extd_apicid aperfmperf rapl pni pclmulqdq monitor ssse3 fma cx16 sse4_1 sse4_2 movbe popcnt aes xsave avx f16c rdrand lahf_lm cmp_legacy svm extapic cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw ibs skinit wdt tce topoext perfctr_core perfctr_nb bpext perfctr_llc mwaitx cpb cat_l3 cdp_l3 hw_pstate ssbd mba ibrs ibpb stibp vmmcall fsgsbase bmi1 avx2 smep bmi2 erms invpcid cqm rdt_a rdseed adx smap clflushopt clwb sha_ni xsaveopt xsavec xgetbv1 xsaves cqm_llc cqm_occup_llc cqm_mbm_total cqm_mbm_local user_shstk clzero irperf xsaveerptr rdpru wbnoinvd cppc arat npt lbrv svm_lock nrip_save tsc_scale vmcb_clean flushbyasid decodeassists pausefilter pfthreshold avic v_vmsave_vmload vgif v_spec_ctrl umip pku ospke vaes vpclmulqdq rdpid overflow_recov succor smca fsrm debug_swap",
+              "logical_cpu_count": 12,
+              "affinity_cpu_count": 2,
+              "affinity_cpus": [
+                2,
+                4
+              ],
+              "affinity_topology": [
+                {
+                  "cpu": 2,
+                  "core_id": "1",
+                  "physical_package_id": "0",
+                  "thread_siblings_list": "2-3"
+                },
+                {
+                  "cpu": 4,
+                  "core_id": "2",
+                  "physical_package_id": "0",
+                  "thread_siblings_list": "4-5"
+                }
+              ],
+              "quota_cores": null,
+              "quota_source": null,
+              "effective_core_limit_estimate": 2.0,
+              "numpy_simd": {
+                "baseline": [
+                  "X86_V2"
+                ],
+                "found": [
+                  "X86_V3"
+                ],
+                "not found": [
+                  "X86_V4",
+                  "AVX512_ICL",
+                  "AVX512_SPR"
+                ]
+              },
+              "numpy_blas": {
+                "name": "scipy-openblas",
+                "version": "0.3.34.106.0",
+                "configuration": "OpenBLAS 0.3.34.106.0  USE64BITINT DYNAMIC_ARCH NO_AFFINITY SkylakeX MAX_THREADS=64"
+              },
+              "numpy_lapack": {
+                "name": "scipy-openblas",
+                "version": "0.3.34.106.0",
+                "configuration": "OpenBLAS 0.3.34.106.0  USE64BITINT DYNAMIC_ARCH NO_AFFINITY SkylakeX MAX_THREADS=64"
+              },
+              "torch_capability": "AVX2"
+            },
+            "requested_threads": 2,
+            "dispatch_environment": {
+              "ATEN_CPU_CAPABILITY": null,
+              "OPENBLAS_CORETYPE": null,
+              "MKL_ENABLE_INSTRUCTIONS": null,
+              "ONEDNN_MAX_CPU_ISA": null,
+              "NPY_DISABLE_CPU_FEATURES": null
+            },
+            "dependencies": {
+              "numpy": "2.5.4",
+              "scipy": "1.18.1",
+              "torch": "2.8.0+cpu",
+              "numpy_import_error": null,
+              "torch_import_error": null
+            },
+            "device": {
+              "status": "available"
+            }
+          },
+          "model_error_limit": 0.05
+        },
+        "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/fft-uniform-delay-001.work/anchor-inputs/1793733930949112639-8868fa440aed7993.anchor.json",
+        "lookup_reason": null,
+        "prediction_commitment_path": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/fft-uniform-delay-001.work/anchor-inputs/1793738490669198661-21562f421857c6d9.prediction.json",
+        "qualification": null,
+        "qualification_looks": [],
+        "applicability": {
+          "historical_proof_valid": true,
+          "compatible": true,
+          "measurement_contract": "full-geometry-resident-fft-affine-cfo-v3",
+          "historical_contract_mapping": "reviewed CPU002 v3 legacy measurement contract",
+          "current_contract_mapping": "declared reviewed v3 measurement contract",
+          "different_timed_regime_fields": [],
+          "applicability_key": "11105a010595eb03e26747ff7a5834f4bb9697429499f1403d8411871c00161d",
+          "original_identity_sha256": "8868fa440aed79931cf2991d44779c08c05ac5c9dba94b3bfddd6a4482d0b9a7",
+          "original_protocol_sha256": "aa55de6a50b07b6b6dad2113317feec68ea2a49c1da74cf364fc20f92345feb1",
+          "original_adaptive_protocol_sha256": "3ad99d54b955e735f0db832bd6ac3afe91b016d993de80909827efd491174106",
+          "current_protocol_sha256": "c903dc8909688bb30598e9efb6b85c7ee08c8199310844f2f80fda643060d167",
+          "current_adaptive_protocol_sha256": "3ad99d54b955e735f0db832bd6ac3afe91b016d993de80909827efd491174106",
+          "scope": "only reviewed adapter/adaptive harness byte hashes may differ; timed worker sources, fixture, bank, geometry, precision, software and environment remain exact; historical evidence is not rewritten"
+        },
+        "conditional_check": {
+          "schema": "triad-performance-conditional-v2",
+          "status": "historically_supported_conditional",
+          "conditional_performance_pass_eligible": true,
+          "applicability_key": "11105a010595eb03e26747ff7a5834f4bb9697429499f1403d8411871c00161d",
+          "sentinel_id": "1793738490669198661:full-endpoint",
+          "plan_sha256": "4f0ae7e6bb59d915c607fc881d5750b59583f757dba7c28e9295b2cb33efd88a",
+          "frozen_contract_verified": true,
+          "historical_status": "conditional_contract_ready",
+          "checks": {
+            "reference": {
+              "log_actual_over_predicted": 0.04881196579174628,
+              "training_timing_log_half_width": 0.03456229102113094,
+              "sentinel_residual_timing_interval": [
+                0.01424967477061534,
+                0.08337425681287722
+              ],
+              "pre_sentinel_historical_mean_model_log_envelope": 0.09531017980432487,
+              "pre_sentinel_historical_observation_log_envelope": 0.09531017980432487,
+              "mean_model_plus_timing_uncertainty_for_sentinel": 0.1298724708254558,
+              "mean_model_plus_timing_uncertainty_exceeds_maximum": false,
+              "classification": "within_frozen_envelope"
+            },
+            "candidate": {
+              "log_actual_over_predicted": -0.0016886185243669327,
+              "training_timing_log_half_width": 0.03230933797303159,
+              "sentinel_residual_timing_interval": [
+                -0.03399795649739853,
+                0.030620719448664662
+              ],
+              "pre_sentinel_historical_mean_model_log_envelope": 0.09531017980432487,
+              "pre_sentinel_historical_observation_log_envelope": 0.09531017980432487,
+              "mean_model_plus_timing_uncertainty_for_sentinel": 0.12761951777735647,
+              "mean_model_plus_timing_uncertainty_exceeds_maximum": false,
+              "classification": "within_frozen_envelope"
+            },
+            "paired": {
+              "log_actual_over_predicted": -0.050500584316113206,
+              "training_timing_log_half_width": 0.04988560530996535,
+              "sentinel_residual_timing_interval": [
+                -0.10038618962607856,
+                -0.0006149790061478547
+              ],
+              "pre_sentinel_historical_mean_model_log_envelope": 0.09531017980432487,
+              "pre_sentinel_historical_observation_log_envelope": 0.10507563922306766,
+              "mean_model_plus_timing_uncertainty_for_sentinel": 0.1451957851142902,
+              "mean_model_plus_timing_uncertainty_exceeds_maximum": false,
+              "classification": "within_frozen_envelope"
+            }
+          },
+          "model_log_error_envelopes": {
+            "reference": 0.09531017980432487,
+            "candidate": 0.09531017980432487,
+            "paired": 0.09531017980432487
+          },
+          "sentinel_observation_log_envelopes": {
+            "reference": 0.09531017980432487,
+            "candidate": 0.09531017980432487,
+            "paired": 0.10507563922306766
+          },
+          "future_coverage_qualified": false,
+          "sentinel_changes_model_envelope": false,
+          "focused_qualification_required": false,
+          "timing_and_model_uncertainty_separate": true,
+          "scope": "one full paired endpoint conditioned on matching frozen history/signature; not an empirical future-coverage claim"
+        },
+        "conditional_model_bounds": {
+          "status": "historically_supported_conditional",
+          "eligible": true,
+          "model_log_error_bounds": {
+            "reference": 0.09531017980432487,
+            "candidate": 0.09531017980432487,
+            "paired": 0.09531017980432487
+          },
+          "training_timing_uncertainty_included": false,
+          "future_coverage_qualified": false,
+          "scope": "conditional engineering bounds from historical observed residuals and mean intervals; no future-tail guarantee",
+          "plan_sha256": "4f0ae7e6bb59d915c607fc881d5750b59583f757dba7c28e9295b2cb33efd88a",
+          "sentinel_id": "1793738490669198661:full-endpoint"
+        },
+        "frozen_prediction": {
+          "schema": "triad-performance-fft-trace-v3",
+          "identity_sha256": "21562f421857c6d95e2f9e84a6022e94c4ab2fa9fc4835a9428b87637b82ffa2",
+          "training_outer_count": 33,
+          "target_count": 33,
+          "models": {
+            "reference": {
+              "preparation_seconds": 0.038240477260092394,
+              "fixed_score_seconds": 0.0075692725921877885,
+              "per_cfo_seconds": 0.3415521746517628,
+              "predicted_full_seconds": 11.317031513360453
+            },
+            "candidate": {
+              "preparation_seconds": 0.03798794165727279,
+              "fixed_score_seconds": 0.014217685993300888,
+              "per_cfo_seconds": 0.5386563258234927,
+              "predicted_full_seconds": 17.82786437982583
+            }
+          },
+          "validation_models": {
+            "reference": {
+              "preparation_seconds": 0.038240477260092394,
+              "fixed_score_seconds": 0.0075692725921877885,
+              "per_cfo_seconds": 0.3415521746517628,
+              "predicted_full_seconds": 11.317031513360453
+            },
+            "candidate": {
+              "preparation_seconds": 0.03798794165727279,
+              "fixed_score_seconds": 0.014217685993300888,
+              "per_cfo_seconds": 0.5386563258234927,
+              "predicted_full_seconds": 17.82786437982583
+            }
+          },
+          "validation_count": 33,
+          "maximum_validation_repeats": 1,
+          "confirmation_policy": {
+            "looks": [
+              3,
+              5,
+              9,
+              17
+            ],
+            "family_alpha": 0.1,
+            "per_look_two_sided_alpha": 0.025,
+            "confidence": 0.975,
+            "confidence_sidedness": "two-sided",
+            "scope": "Bonferroni family-wise control across the four predeclared looks for one error family; not simultaneous across reference, candidate, paired metrics, or cases",
+            "metric": "mean log(actual full-run time / frozen predicted full-run time)",
+            "cross_metric_or_case_simultaneous_claim": false
+          },
+          "confirmation_plan": {
+            "maximum_repeats_per_source": 1,
+            "allowed_looks": [
+              1
+            ],
+            "estimated_seconds_per_pair": 29.14489589318628,
+            "scope": "one precommitted full endpoint sentinel; historical support only, no fresh mean-equivalence inference"
+          },
+          "model_error_limit": 0.05,
+          "prediction_frozen_before_validation": true,
+          "routine_kind": "historical_full_endpoint_sentinel",
+          "conditional_contract": {
+            "schema": "triad-performance-conditional-v2",
+            "status": "conditional_contract_ready",
+            "applicability_key": "11105a010595eb03e26747ff7a5834f4bb9697429499f1403d8411871c00161d",
+            "historical_anchor_ids": [
+              "451196a3e7182aa9c0f198abd735355fff4c543f67dd3106fd14f5729d62f1ea:full:0",
+              "451196a3e7182aa9c0f198abd735355fff4c543f67dd3106fd14f5729d62f1ea:full:1",
+              "451196a3e7182aa9c0f198abd735355fff4c543f67dd3106fd14f5729d62f1ea:full:2",
+              "451196a3e7182aa9c0f198abd735355fff4c543f67dd3106fd14f5729d62f1ea:full:3",
+              "451196a3e7182aa9c0f198abd735355fff4c543f67dd3106fd14f5729d62f1ea:full:4",
+              "451196a3e7182aa9c0f198abd735355fff4c543f67dd3106fd14f5729d62f1ea:full:5",
+              "451196a3e7182aa9c0f198abd735355fff4c543f67dd3106fd14f5729d62f1ea:full:6",
+              "451196a3e7182aa9c0f198abd735355fff4c543f67dd3106fd14f5729d62f1ea:full:7",
+              "451196a3e7182aa9c0f198abd735355fff4c543f67dd3106fd14f5729d62f1ea:full:8",
+              "451196a3e7182aa9c0f198abd735355fff4c543f67dd3106fd14f5729d62f1ea:full:9",
+              "451196a3e7182aa9c0f198abd735355fff4c543f67dd3106fd14f5729d62f1ea:full:10",
+              "451196a3e7182aa9c0f198abd735355fff4c543f67dd3106fd14f5729d62f1ea:full:11",
+              "451196a3e7182aa9c0f198abd735355fff4c543f67dd3106fd14f5729d62f1ea:full:12",
+              "451196a3e7182aa9c0f198abd735355fff4c543f67dd3106fd14f5729d62f1ea:full:13",
+              "451196a3e7182aa9c0f198abd735355fff4c543f67dd3106fd14f5729d62f1ea:full:14",
+              "451196a3e7182aa9c0f198abd735355fff4c543f67dd3106fd14f5729d62f1ea:full:15",
+              "451196a3e7182aa9c0f198abd735355fff4c543f67dd3106fd14f5729d62f1ea:full:16"
+            ],
+            "training_pair_ids": [
+              "1793738490669198661:training:0",
+              "1793738490669198661:training:1",
+              "1793738490669198661:training:2",
+              "1793738490669198661:training:3",
+              "1793738490669198661:training:4",
+              "1793738490669198661:training:5",
+              "1793738490669198661:training:6",
+              "1793738490669198661:training:7",
+              "1793738490669198661:training:8",
+              "1793738490669198661:training:9",
+              "1793738490669198661:training:10",
+              "1793738490669198661:training:11",
+              "1793738490669198661:training:12",
+              "1793738490669198661:training:13",
+              "1793738490669198661:training:14",
+              "1793738490669198661:training:15",
+              "1793738490669198661:training:16",
+              "1793738490669198661:training:17",
+              "1793738490669198661:training:18",
+              "1793738490669198661:training:19",
+              "1793738490669198661:training:20",
+              "1793738490669198661:training:21",
+              "1793738490669198661:training:22",
+              "1793738490669198661:training:23",
+              "1793738490669198661:training:24",
+              "1793738490669198661:training:25",
+              "1793738490669198661:training:26",
+              "1793738490669198661:training:27",
+              "1793738490669198661:training:28",
+              "1793738490669198661:training:29",
+              "1793738490669198661:training:30",
+              "1793738490669198661:training:31",
+              "1793738490669198661:training:32"
+            ],
+            "historical_log_errors": {
+              "reference": [
+                -0.008429090017622659,
+                -0.011209782259483783,
+                0.00024202046140648064,
+                0.02578678873956701,
+                0.00607696447511003,
+                0.050636663511593565,
+                0.015451723606851677,
+                -0.004864961679769902,
+                -0.0017038527819622953,
+                0.09132354669676829,
+                -0.0010415066018761474,
+                0.011818152685582756,
+                -0.006167409823818058,
+                0.03457405891419659,
+                0.01346983767648637,
+                -0.0058492611873535,
+                0.017096017531011528
+              ],
+              "candidate": [
+                -0.0038492759949880855,
+                0.016250417396571272,
+                0.02162557506663957,
+                0.07852195777735005,
+                0.07178860374012629,
+                0.019211605496969947,
+                0.004004366234698847,
+                0.012920983835261201,
+                0.02718072465877167,
+                -0.01375209252629937,
+                0.009087963465692309,
+                0.08639612929210382,
+                0.021476604544280554,
+                -0.0011198806732971407,
+                0.056780211676564066,
+                0.016090862691637352,
+                0.013581354855491855
+              ],
+              "paired": [
+                0.004579814022634573,
+                0.027460199656055055,
+                0.02138355460523309,
+                0.05273516903778304,
+                0.06571163926501626,
+                -0.031425058014623614,
+                -0.011447357372152831,
+                0.017785945515031102,
+                0.028884577440733965,
+                -0.10507563922306766,
+                0.010129470067568456,
+                0.07457797660652106,
+                0.027644014368098612,
+                -0.035693939587493735,
+                0.043310374000077694,
+                0.02194012387899085,
+                -0.003514662675519673
+              ]
+            },
+            "historical_qualification": {
+              "reference": {
+                "status": "validated",
+                "mean_log_residual": 0.013365288820393409,
+                "log_residual_interval": [
+                  -0.002298553139335694,
+                  0.029029130780122512
+                ],
+                "confidence": 0.975,
+                "relative_mean_error_interval": [
+                  -0.0022959134889147742,
+                  0.02945458285343549
+                ],
+                "allowed_relative_mean_error": [
+                  -0.1,
+                  0.1
+                ],
+                "sample_count": 17,
+                "scope": "conditional on the frozen forecast and independent stationary normal holdout log times"
+              },
+              "candidate": {
+                "status": "validated",
+                "mean_log_residual": 0.025658594796327896,
+                "log_residual_interval": [
+                  0.007898166365024297,
+                  0.0434190232276315
+                ],
+                "confidence": 0.975,
+                "relative_mean_error_interval": [
+                  0.007929439159348307,
+                  0.044375420737112536
+                ],
+                "allowed_relative_mean_error": [
+                  -0.1,
+                  0.1
+                ],
+                "sample_count": 17,
+                "scope": "conditional on the frozen forecast and independent stationary normal holdout log times"
+              },
+              "paired": {
+                "status": "validated",
+                "mean_log_residual": 0.012293305975934485,
+                "log_residual_interval": [
+                  -0.013304157617137402,
+                  0.037890769569006374
+                ],
+                "confidence": 0.975,
+                "relative_mean_error_interval": [
+                  -0.013216048484270385,
+                  0.038617778014718517
+                ],
+                "allowed_relative_mean_error": [
+                  -0.1,
+                  0.1
+                ],
+                "sample_count": 17,
+                "scope": "conditional on the frozen forecast and independent stationary normal holdout log times"
+              }
+            },
+            "model_log_error_envelopes": {
+              "reference": 0.09531017980432487,
+              "candidate": 0.09531017980432487,
+              "paired": 0.09531017980432487
+            },
+            "mean_model_log_error_envelopes": {
+              "reference": 0.09531017980432487,
+              "candidate": 0.09531017980432487,
+              "paired": 0.09531017980432487
+            },
+            "sentinel_observation_log_envelopes": {
+              "reference": 0.09531017980432487,
+              "candidate": 0.09531017980432487,
+              "paired": 0.10507563922306766
+            },
+            "paired_model_log_envelope": 0.09531017980432487,
+            "model_relative_error_floor": 0.1,
+            "maximum_model_error_relative": 0.2,
+            "maximum_model_error_log_envelope": 0.18232155679395462,
+            "training_forecasts": {
+              "reference": {
+                "point_seconds": 11.317031513360453,
+                "timing_mean_confidence_interval_seconds": [
+                  10.932571162690229,
+                  11.715011992007701
+                ],
+                "timing_log_half_width": 0.03456229102113094,
+                "replicate_count": 33,
+                "timing_confidence": 0.999702380952381,
+                "scope": "conditional Student-t confidence interval for the mean of independent training prediction runtimes"
+              },
+              "candidate": {
+                "point_seconds": 17.82786437982583,
+                "timing_mean_confidence_interval_seconds": [
+                  17.2610636678886,
+                  18.41327709929827
+                ],
+                "timing_log_half_width": 0.03230933797303159,
+                "replicate_count": 33,
+                "timing_confidence": 0.999702380952381,
+                "scope": "conditional Student-t confidence interval for the mean of independent training prediction runtimes"
+              },
+              "paired": {
+                "point_seconds": 1.5753127804565128,
+                "timing_mean_confidence_interval_seconds": [
+                  1.4986552979651115,
+                  1.6558913578320404
+                ],
+                "timing_log_half_width": 0.04988560530996535,
+                "replicate_count": 33,
+                "timing_confidence": 0.999702380952381,
+                "scope": "conditional Student-t confidence interval for the mean of independent training prediction runtimes"
+              }
+            },
+            "confirmation_policy": {
+              "looks": [
+                3,
+                5,
+                9,
+                17
+              ],
+              "family_alpha": 0.1,
+              "per_look_two_sided_alpha": 0.025,
+              "confidence": 0.975,
+              "confidence_sidedness": "two-sided",
+              "scope": "Bonferroni family-wise control across the four predeclared looks for one error family; not simultaneous across reference, candidate, paired metrics, or cases",
+              "metric": "mean log(actual full-run time / frozen predicted full-run time)",
+              "cross_metric_or_case_simultaneous_claim": false
+            },
+            "timing_and_model_uncertainty_separate": true,
+            "future_coverage_qualified": false,
+            "engineering_assumptions": [
+              "historical forecast residuals and training timings are independent and applicable to the exact signature",
+              "the maximum observed historical residual and its mean confidence interval define a conditional engineering envelope",
+              "the relative-error floor is fixed before the endpoint sentinel and is not a statistical future-tail bound",
+              "one sentinel checks applicability but cannot establish future residual coverage"
+            ],
+            "plan_sha256": "4f0ae7e6bb59d915c607fc881d5750b59583f757dba7c28e9295b2cb33efd88a"
+          },
+          "sentinel_id": "1793738490669198661:full-endpoint",
+          "current_run_id": "1793738490669198661"
+        },
+        "historical_record": {
+          "schema": "triad-performance-fft-trace-v3",
+          "status": "validated",
+          "identity": {
+            "schema": "triad-performance-fft-trace-v3",
+            "protocol_sha256": "aa55de6a50b07b6b6dad2113317feec68ea2a49c1da74cf364fc20f92345feb1",
+            "adaptive_protocol_sha256": "3ad99d54b955e735f0db832bd6ac3afe91b016d993de80909827efd491174106",
+            "case": "broad-hf-timing",
+            "input_sha256": {
+              "basis.c128": "345f872061c98035c1627b044971336b8030ff02fde3251d9168e2da423166b9",
+              "manifest.json": "2c9e1e8d1ccfda3ca42d0717c59eeeb2aec925a051c6471472473ff963c58cbc",
+              "observation.c128": "0476a6f6e91b1c364e50cc334fb6980f7eda6b4ae781ae05fc88edba0f7295d7",
+              "validity.u8": "3239a129c933ab69c631d4724616b68d6f0947b48463c06cfdd73d446357d6b4"
+            },
+            "frequency_offsets_hz": [
+              -0.500000172525,
+              -0.4687501617421875,
+              -0.43750015095937494,
+              -0.40625014017656247,
+              -0.37500012939374994,
+              -0.34375011861093746,
+              -0.312500107828125,
+              -0.28125009704531245,
+              -0.2500000862625,
+              -0.2187500754796875,
+              -0.18750006469687497,
+              -0.1562500539140625,
+              -0.12500004313125002,
+              -0.09375003234843748,
+              -0.06250002156562501,
+              -0.031250010782812476,
+              0.0,
+              0.03125001078281253,
+              0.06250002156562495,
+              0.09375003234843748,
+              0.12500004313125002,
+              0.15625005391406244,
+              0.18750006469687497,
+              0.2187500754796875,
+              0.2500000862624999,
+              0.28125009704531245,
+              0.312500107828125,
+              0.3437501186109375,
+              0.37500012939374994,
+              0.40625014017656247,
+              0.437500150959375,
+              0.4687501617421874,
+              0.500000172525
+            ],
+            "geometry": {
+              "sample_count": 24978,
+              "sample_rate": 960.0,
+              "nfft": 50000,
+              "lags": 13509,
+              "lag_first_sample": 0,
+              "lag_last_sample": 13508,
+              "lag_step_samples": 1,
+              "group_tile": 2048,
+              "precision": "fp32",
+              "device": "cpu"
+            },
+            "worker_implementations": {
+              "reference": {
+                "source_hashes": {
+                  "triad_fft_acquire.py": "d4a3c2cc39e0068e6aa6aab27d7ee8eeff6cc7db72a790868fe166c3f1d65843",
+                  "triad_group_acquire.py": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+                  "triad_gaussian_window.py": "b22fe002864922e44bc7e10000672a163353818f610c4882bae5d62cfe1cf883",
+                  "triad_noise_likelihood.py": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110",
+                  "triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba",
+                  "triad_state_workspace.py": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923"
+                },
+                "python": "3.13.5",
+                "numpy": "2.5.4",
+                "torch": "2.8.0+cpu",
+                "threads": 2,
+                "tf32_allowed": false
+              },
+              "candidate": {
+                "source_hashes": {
+                  "triad_fft_acquire.py": "d4a3c2cc39e0068e6aa6aab27d7ee8eeff6cc7db72a790868fe166c3f1d65843",
+                  "triad_group_acquire.py": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+                  "triad_gaussian_window.py": "b22fe002864922e44bc7e10000672a163353818f610c4882bae5d62cfe1cf883",
+                  "triad_noise_likelihood.py": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110",
+                  "triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba",
+                  "triad_state_workspace.py": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923"
+                },
+                "python": "3.13.5",
+                "numpy": "2.5.4",
+                "torch": "2.8.0+cpu",
+                "threads": 2,
+                "tf32_allowed": false
+              }
+            },
+            "precision": "fp32",
+            "device": "cpu",
+            "performance_environment": {
+              "requested_device": "cpu",
+              "os": {
+                "system": "Linux",
+                "release": "7.2.6+deb13-amd64",
+                "machine": "x86_64",
+                "python": "3.13.5"
+              },
+              "cpu": {
+                "vendor_id": "AuthenticAMD",
+                "cpu family": "25",
+                "model": "80",
+                "model name": "AMD Ryzen 5 PRO 5650U with Radeon Graphics",
+                "stepping": "0",
+                "siblings": "12",
+                "cpu cores": "6",
+                "flags": "fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm constant_tsc rep_good nopl xtopology nonstop_tsc cpuid extd_apicid aperfmperf rapl pni pclmulqdq monitor ssse3 fma cx16 sse4_1 sse4_2 movbe popcnt aes xsave avx f16c rdrand lahf_lm cmp_legacy svm extapic cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw ibs skinit wdt tce topoext perfctr_core perfctr_nb bpext perfctr_llc mwaitx cpb cat_l3 cdp_l3 hw_pstate ssbd mba ibrs ibpb stibp vmmcall fsgsbase bmi1 avx2 smep bmi2 erms invpcid cqm rdt_a rdseed adx smap clflushopt clwb sha_ni xsaveopt xsavec xgetbv1 xsaves cqm_llc cqm_occup_llc cqm_mbm_total cqm_mbm_local user_shstk clzero irperf xsaveerptr rdpru wbnoinvd cppc arat npt lbrv svm_lock nrip_save tsc_scale vmcb_clean flushbyasid decodeassists pausefilter pfthreshold avic v_vmsave_vmload vgif v_spec_ctrl umip pku ospke vaes vpclmulqdq rdpid overflow_recov succor smca fsrm debug_swap",
+                "logical_cpu_count": 12,
+                "affinity_cpu_count": 2,
+                "affinity_cpus": [
+                  2,
+                  4
+                ],
+                "affinity_topology": [
+                  {
+                    "cpu": 2,
+                    "core_id": "1",
+                    "physical_package_id": "0",
+                    "thread_siblings_list": "2-3"
+                  },
+                  {
+                    "cpu": 4,
+                    "core_id": "2",
+                    "physical_package_id": "0",
+                    "thread_siblings_list": "4-5"
+                  }
+                ],
+                "quota_cores": null,
+                "quota_source": null,
+                "effective_core_limit_estimate": 2.0,
+                "numpy_simd": {
+                  "baseline": [
+                    "X86_V2"
+                  ],
+                  "found": [
+                    "X86_V3"
+                  ],
+                  "not found": [
+                    "X86_V4",
+                    "AVX512_ICL",
+                    "AVX512_SPR"
+                  ]
+                },
+                "numpy_blas": {
+                  "name": "scipy-openblas",
+                  "version": "0.3.34.106.0",
+                  "configuration": "OpenBLAS 0.3.34.106.0  USE64BITINT DYNAMIC_ARCH NO_AFFINITY SkylakeX MAX_THREADS=64"
+                },
+                "numpy_lapack": {
+                  "name": "scipy-openblas",
+                  "version": "0.3.34.106.0",
+                  "configuration": "OpenBLAS 0.3.34.106.0  USE64BITINT DYNAMIC_ARCH NO_AFFINITY SkylakeX MAX_THREADS=64"
+                },
+                "torch_capability": "AVX2"
+              },
+              "requested_threads": 2,
+              "dispatch_environment": {
+                "ATEN_CPU_CAPABILITY": null,
+                "OPENBLAS_CORETYPE": null,
+                "MKL_ENABLE_INSTRUCTIONS": null,
+                "ONEDNN_MAX_CPU_ISA": null,
+                "NPY_DISABLE_CPU_FEATURES": null
+              },
+              "dependencies": {
+                "numpy": "2.5.4",
+                "scipy": "1.18.1",
+                "torch": "2.8.0+cpu",
+                "numpy_import_error": null,
+                "torch_import_error": null
+              },
+              "device": {
+                "status": "available"
+              }
+            },
+            "model_error_limit": 0.05
+          },
+          "identity_sha256": "8868fa440aed79931cf2991d44779c08c05ac5c9dba94b3bfddd6a4482d0b9a7",
+          "payload_sha256": "451196a3e7182aa9c0f198abd735355fff4c543f67dd3106fd14f5729d62f1ea",
+          "frozen_prediction": {
+            "schema": "triad-performance-fft-trace-v3",
+            "identity_sha256": "8868fa440aed79931cf2991d44779c08c05ac5c9dba94b3bfddd6a4482d0b9a7",
+            "training_outer_count": 33,
+            "target_count": 33,
+            "models": {
+              "reference": {
+                "preparation_seconds": 0.03813473359866494,
+                "fixed_score_seconds": 0.009211924705279212,
+                "per_cfo_seconds": 0.3364423641011806,
+                "predicted_full_seconds": 11.149944673642905
+              },
+              "candidate": {
+                "preparation_seconds": 0.03721882557068003,
+                "fixed_score_seconds": 0.013828013142490018,
+                "per_cfo_seconds": 0.33984034414405256,
+                "predicted_full_seconds": 11.265778195466904
+              }
+            },
+            "validation_models": {
+              "reference": {
+                "preparation_seconds": 0.03813473359866494,
+                "fixed_score_seconds": 0.009211924705279212,
+                "per_cfo_seconds": 0.3364423641011806,
+                "predicted_full_seconds": 11.149944673642905
+              },
+              "candidate": {
+                "preparation_seconds": 0.03721882557068003,
+                "fixed_score_seconds": 0.013828013142490018,
+                "per_cfo_seconds": 0.33984034414405256,
+                "predicted_full_seconds": 11.265778195466904
+              }
+            },
+            "validation_count": 33,
+            "maximum_validation_repeats": 17,
+            "confirmation_policy": {
+              "looks": [
+                3,
+                5,
+                9,
+                17
+              ],
+              "family_alpha": 0.1,
+              "per_look_two_sided_alpha": 0.025,
+              "confidence": 0.975,
+              "confidence_sidedness": "two-sided",
+              "scope": "Bonferroni family-wise control across the four predeclared looks for one error family; not simultaneous across reference, candidate, paired metrics, or cases",
+              "metric": "mean log(actual full-run time / frozen predicted full-run time)",
+              "cross_metric_or_case_simultaneous_claim": false
+            },
+            "confirmation_plan": {
+              "maximum_repeats_per_source": 17,
+              "allowed_looks": [
+                3,
+                5,
+                9,
+                17
+              ],
+              "confirmation_policy": {
+                "looks": [
+                  3,
+                  5,
+                  9,
+                  17
+                ],
+                "family_alpha": 0.1,
+                "per_look_two_sided_alpha": 0.025,
+                "confidence": 0.975,
+                "confidence_sidedness": "two-sided",
+                "scope": "Bonferroni family-wise control across the four predeclared looks for one error family; not simultaneous across reference, candidate, paired metrics, or cases",
+                "metric": "mean log(actual full-run time / frozen predicted full-run time)",
+                "cross_metric_or_case_simultaneous_claim": false
+              },
+              "estimated_seconds_per_pair": 22.415722869109807,
+              "training_log_sd": 0.06368073293808886,
+              "scope": "training-only budget cap; fixed forecast and alpha divisor across all four scheduled looks, even when the cap permits fewer"
+            },
+            "model_error_limit": 0.05,
+            "prediction_frozen_before_validation": true
+          },
+          "qualification": {
+            "status": "validated",
+            "log_errors": {
+              "reference": [
+                -0.008429090017622659,
+                -0.011209782259483783,
+                0.00024202046140648064,
+                0.02578678873956701,
+                0.00607696447511003,
+                0.050636663511593565,
+                0.015451723606851677,
+                -0.004864961679769902,
+                -0.0017038527819622953,
+                0.09132354669676829,
+                -0.0010415066018761474,
+                0.011818152685582756,
+                -0.006167409823818058,
+                0.03457405891419659,
+                0.01346983767648637,
+                -0.0058492611873535,
+                0.017096017531011528
+              ],
+              "candidate": [
+                -0.0038492759949880855,
+                0.016250417396571272,
+                0.02162557506663957,
+                0.07852195777735005,
+                0.07178860374012629,
+                0.019211605496969947,
+                0.004004366234698847,
+                0.012920983835261201,
+                0.02718072465877167,
+                -0.01375209252629937,
+                0.009087963465692309,
+                0.08639612929210382,
+                0.021476604544280554,
+                -0.0011198806732971407,
+                0.056780211676564066,
+                0.016090862691637352,
+                0.013581354855491855
+              ],
+              "paired": [
+                0.004579814022634573,
+                0.027460199656055055,
+                0.02138355460523309,
+                0.05273516903778304,
+                0.06571163926501626,
+                -0.031425058014623614,
+                -0.011447357372152831,
+                0.017785945515031102,
+                0.028884577440733965,
+                -0.10507563922306766,
+                0.010129470067568456,
+                0.07457797660652106,
+                0.027644014368098612,
+                -0.035693939587493735,
+                0.043310374000077694,
+                0.02194012387899085,
+                -0.003514662675519673
+              ]
+            },
+            "intervals": {
+              "reference": {
+                "status": "validated",
+                "mean_log_residual": 0.013365288820393409,
+                "log_residual_interval": [
+                  -0.002298553139335694,
+                  0.029029130780122512
+                ],
+                "confidence": 0.975,
+                "relative_mean_error_interval": [
+                  -0.0022959134889147742,
+                  0.02945458285343549
+                ],
+                "allowed_relative_mean_error": [
+                  -0.05,
+                  0.05
+                ],
+                "sample_count": 17,
+                "scope": "conditional on the frozen forecast and independent stationary normal holdout log times"
+              },
+              "candidate": {
+                "status": "validated",
+                "mean_log_residual": 0.025658594796327896,
+                "log_residual_interval": [
+                  0.007898166365024297,
+                  0.0434190232276315
+                ],
+                "confidence": 0.975,
+                "relative_mean_error_interval": [
+                  0.007929439159348307,
+                  0.044375420737112536
+                ],
+                "allowed_relative_mean_error": [
+                  -0.05,
+                  0.05
+                ],
+                "sample_count": 17,
+                "scope": "conditional on the frozen forecast and independent stationary normal holdout log times"
+              },
+              "paired": {
+                "status": "validated",
+                "mean_log_residual": 0.012293305975934485,
+                "log_residual_interval": [
+                  -0.013304157617137402,
+                  0.037890769569006374
+                ],
+                "confidence": 0.975,
+                "relative_mean_error_interval": [
+                  -0.013216048484270385,
+                  0.038617778014718517
+                ],
+                "allowed_relative_mean_error": [
+                  -0.05,
+                  0.05
+                ],
+                "sample_count": 17,
+                "scope": "conditional on the frozen forecast and independent stationary normal holdout log times"
+              }
+            },
+            "look_count": 17,
+            "confirmation_policy": {
+              "looks": [
+                3,
+                5,
+                9,
+                17
+              ],
+              "family_alpha": 0.1,
+              "per_look_two_sided_alpha": 0.025,
+              "confidence": 0.975,
+              "confidence_sidedness": "two-sided",
+              "scope": "Bonferroni family-wise control across the four predeclared looks for one error family; not simultaneous across reference, candidate, paired metrics, or cases",
+              "metric": "mean log(actual full-run time / frozen predicted full-run time)",
+              "cross_metric_or_case_simultaneous_claim": false
+            },
+            "scope": "finite predeclared confirmation looks; both source means and paired ratio must establish equivalence; no simultaneous interval claim across metrics or cases"
+          },
+          "qualification_looks": [
+            {
+              "status": "inconclusive",
+              "log_errors": {
+                "reference": [
+                  -0.008429090017622659,
+                  -0.011209782259483783,
+                  0.00024202046140648064
+                ],
+                "candidate": [
+                  -0.0038492759949880855,
+                  0.016250417396571272,
+                  0.02162557506663957
+                ],
+                "paired": [
+                  0.004579814022634573,
+                  0.027460199656055055,
+                  0.02138355460523309
+                ]
+              },
+              "intervals": {
+                "reference": {
+                  "status": "validated",
+                  "mean_log_residual": -0.006465617271899988,
+                  "log_residual_interval": [
+                    -0.02786502824842685,
+                    0.014933793704626872
+                  ],
+                  "confidence": 0.975,
+                  "relative_mean_error_interval": [
+                    -0.027480379380096946,
+                    0.015045859965035935
+                  ],
+                  "allowed_relative_mean_error": [
+                    -0.05,
+                    0.05
+                  ],
+                  "sample_count": 3,
+                  "scope": "conditional on the frozen forecast and independent stationary normal holdout log times"
+                },
+                "candidate": {
+                  "status": "inconclusive",
+                  "mean_log_residual": 0.01134223882274092,
+                  "log_residual_interval": [
+                    -0.03676549986934411,
+                    0.059449977514825954
+                  ],
+                  "confidence": 0.975,
+                  "relative_mean_error_interval": [
+                    -0.036097855972800644,
+                    0.06125267315564621
+                  ],
+                  "allowed_relative_mean_error": [
+                    -0.05,
+                    0.05
+                  ],
+                  "sample_count": 3,
+                  "scope": "conditional on the frozen forecast and independent stationary normal holdout log times"
+                },
+                "paired": {
+                  "status": "inconclusive",
+                  "mean_log_residual": 0.017807856094640907,
+                  "log_residual_interval": [
+                    -0.024653409610060132,
+                    0.06026912179934195
+                  ],
+                  "confidence": 0.975,
+                  "relative_mean_error_interval": [
+                    -0.024351996342674886,
+                    0.06212234836339774
+                  ],
+                  "allowed_relative_mean_error": [
+                    -0.05,
+                    0.05
+                  ],
+                  "sample_count": 3,
+                  "scope": "conditional on the frozen forecast and independent stationary normal holdout log times"
+                }
+              },
+              "look_count": 3,
+              "confirmation_policy": {
+                "looks": [
+                  3,
+                  5,
+                  9,
+                  17
+                ],
+                "family_alpha": 0.1,
+                "per_look_two_sided_alpha": 0.025,
+                "confidence": 0.975,
+                "confidence_sidedness": "two-sided",
+                "scope": "Bonferroni family-wise control across the four predeclared looks for one error family; not simultaneous across reference, candidate, paired metrics, or cases",
+                "metric": "mean log(actual full-run time / frozen predicted full-run time)",
+                "cross_metric_or_case_simultaneous_claim": false
+              },
+              "scope": "finite predeclared confirmation looks; both source means and paired ratio must establish equivalence; no simultaneous interval claim across metrics or cases"
+            },
+            {
+              "status": "inconclusive",
+              "log_errors": {
+                "reference": [
+                  -0.008429090017622659,
+                  -0.011209782259483783,
+                  0.00024202046140648064,
+                  0.02578678873956701,
+                  0.00607696447511003
+                ],
+                "candidate": [
+                  -0.0038492759949880855,
+                  0.016250417396571272,
+                  0.02162557506663957,
+                  0.07852195777735005,
+                  0.07178860374012629
+                ],
+                "paired": [
+                  0.004579814022634573,
+                  0.027460199656055055,
+                  0.02138355460523309,
+                  0.05273516903778304,
+                  0.06571163926501626
+                ]
+              },
+              "intervals": {
+                "reference": {
+                  "status": "validated",
+                  "mean_log_residual": 0.002493380279795416,
+                  "log_residual_interval": [
+                    -0.020528194773487236,
+                    0.025514955333078067
+                  ],
+                  "confidence": 0.975,
+                  "relative_mean_error_interval": [
+                    -0.02031892580085901,
+                    0.0258432479831835
+                  ],
+                  "allowed_relative_mean_error": [
+                    -0.05,
+                    0.05
+                  ],
+                  "sample_count": 5,
+                  "scope": "conditional on the frozen forecast and independent stationary normal holdout log times"
+                },
+                "candidate": {
+                  "status": "inconclusive",
+                  "mean_log_residual": 0.03686745559713982,
+                  "log_residual_interval": [
+                    -0.019871357461136253,
+                    0.09360626865541588
+                  ],
+                  "confidence": 0.975,
+                  "relative_mean_error_interval": [
+                    -0.019675223336365552,
+                    0.09812729365190044
+                  ],
+                  "allowed_relative_mean_error": [
+                    -0.05,
+                    0.05
+                  ],
+                  "sample_count": 5,
+                  "scope": "conditional on the frozen forecast and independent stationary normal holdout log times"
+                },
+                "paired": {
+                  "status": "inconclusive",
+                  "mean_log_residual": 0.034374075317344405,
+                  "log_residual_interval": [
+                    -0.004102596720235663,
+                    0.07285074735492447
+                  ],
+                  "confidence": 0.975,
+                  "relative_mean_error_interval": [
+                    -0.0040941925671896294,
+                    0.07556999326776044
+                  ],
+                  "allowed_relative_mean_error": [
+                    -0.05,
+                    0.05
+                  ],
+                  "sample_count": 5,
+                  "scope": "conditional on the frozen forecast and independent stationary normal holdout log times"
+                }
+              },
+              "look_count": 5,
+              "confirmation_policy": {
+                "looks": [
+                  3,
+                  5,
+                  9,
+                  17
+                ],
+                "family_alpha": 0.1,
+                "per_look_two_sided_alpha": 0.025,
+                "confidence": 0.975,
+                "confidence_sidedness": "two-sided",
+                "scope": "Bonferroni family-wise control across the four predeclared looks for one error family; not simultaneous across reference, candidate, paired metrics, or cases",
+                "metric": "mean log(actual full-run time / frozen predicted full-run time)",
+                "cross_metric_or_case_simultaneous_claim": false
+              },
+              "scope": "finite predeclared confirmation looks; both source means and paired ratio must establish equivalence; no simultaneous interval claim across metrics or cases"
+            },
+            {
+              "status": "inconclusive",
+              "log_errors": {
+                "reference": [
+                  -0.008429090017622659,
+                  -0.011209782259483783,
+                  0.00024202046140648064,
+                  0.02578678873956701,
+                  0.00607696447511003,
+                  0.050636663511593565,
+                  0.015451723606851677,
+                  -0.004864961679769902,
+                  -0.0017038527819622953
+                ],
+                "candidate": [
+                  -0.0038492759949880855,
+                  0.016250417396571272,
+                  0.02162557506663957,
+                  0.07852195777735005,
+                  0.07178860374012629,
+                  0.019211605496969947,
+                  0.004004366234698847,
+                  0.012920983835261201,
+                  0.02718072465877167
+                ],
+                "paired": [
+                  0.004579814022634573,
+                  0.027460199656055055,
+                  0.02138355460523309,
+                  0.05273516903778304,
+                  0.06571163926501626,
+                  -0.031425058014623614,
+                  -0.011447357372152831,
+                  0.017785945515031102,
+                  0.028884577440733965
+                ]
+              },
+              "intervals": {
+                "reference": {
+                  "status": "validated",
+                  "mean_log_residual": 0.007998497117298903,
+                  "log_residual_interval": [
+                    -0.010207677640854045,
+                    0.026204671875451852
+                  ],
+                  "confidence": 0.975,
+                  "relative_mean_error_interval": [
+                    -0.01015575611568493,
+                    0.026551033098692955
+                  ],
+                  "allowed_relative_mean_error": [
+                    -0.05,
+                    0.05
+                  ],
+                  "sample_count": 9,
+                  "scope": "conditional on the frozen forecast and independent stationary normal holdout log times"
+                },
+                "candidate": {
+                  "status": "inconclusive",
+                  "mean_log_residual": 0.02751721757904453,
+                  "log_residual_interval": [
+                    0.0012894957628014174,
+                    0.05374493939528764
+                  ],
+                  "confidence": 0.975,
+                  "relative_mean_error_interval": [
+                    0.0012903275199399062,
+                    0.05521542394402773
+                  ],
+                  "allowed_relative_mean_error": [
+                    -0.05,
+                    0.05
+                  ],
+                  "sample_count": 9,
+                  "scope": "conditional on the frozen forecast and independent stationary normal holdout log times"
+                },
+                "paired": {
+                  "status": "validated",
+                  "mean_log_residual": 0.019518720461745624,
+                  "log_residual_interval": [
+                    -0.007942429593218753,
+                    0.04697987051671
+                  ],
+                  "confidence": 0.975,
+                  "relative_mean_error_interval": [
+                    -0.007910971838059323,
+                    0.048100911137534036
+                  ],
+                  "allowed_relative_mean_error": [
+                    -0.05,
+                    0.05
+                  ],
+                  "sample_count": 9,
+                  "scope": "conditional on the frozen forecast and independent stationary normal holdout log times"
+                }
+              },
+              "look_count": 9,
+              "confirmation_policy": {
+                "looks": [
+                  3,
+                  5,
+                  9,
+                  17
+                ],
+                "family_alpha": 0.1,
+                "per_look_two_sided_alpha": 0.025,
+                "confidence": 0.975,
+                "confidence_sidedness": "two-sided",
+                "scope": "Bonferroni family-wise control across the four predeclared looks for one error family; not simultaneous across reference, candidate, paired metrics, or cases",
+                "metric": "mean log(actual full-run time / frozen predicted full-run time)",
+                "cross_metric_or_case_simultaneous_claim": false
+              },
+              "scope": "finite predeclared confirmation looks; both source means and paired ratio must establish equivalence; no simultaneous interval claim across metrics or cases"
+            },
+            {
+              "status": "validated",
+              "log_errors": {
+                "reference": [
+                  -0.008429090017622659,
+                  -0.011209782259483783,
+                  0.00024202046140648064,
+                  0.02578678873956701,
+                  0.00607696447511003,
+                  0.050636663511593565,
+                  0.015451723606851677,
+                  -0.004864961679769902,
+                  -0.0017038527819622953,
+                  0.09132354669676829,
+                  -0.0010415066018761474,
+                  0.011818152685582756,
+                  -0.006167409823818058,
+                  0.03457405891419659,
+                  0.01346983767648637,
+                  -0.0058492611873535,
+                  0.017096017531011528
+                ],
+                "candidate": [
+                  -0.0038492759949880855,
+                  0.016250417396571272,
+                  0.02162557506663957,
+                  0.07852195777735005,
+                  0.07178860374012629,
+                  0.019211605496969947,
+                  0.004004366234698847,
+                  0.012920983835261201,
+                  0.02718072465877167,
+                  -0.01375209252629937,
+                  0.009087963465692309,
+                  0.08639612929210382,
+                  0.021476604544280554,
+                  -0.0011198806732971407,
+                  0.056780211676564066,
+                  0.016090862691637352,
+                  0.013581354855491855
+                ],
+                "paired": [
+                  0.004579814022634573,
+                  0.027460199656055055,
+                  0.02138355460523309,
+                  0.05273516903778304,
+                  0.06571163926501626,
+                  -0.031425058014623614,
+                  -0.011447357372152831,
+                  0.017785945515031102,
+                  0.028884577440733965,
+                  -0.10507563922306766,
+                  0.010129470067568456,
+                  0.07457797660652106,
+                  0.027644014368098612,
+                  -0.035693939587493735,
+                  0.043310374000077694,
+                  0.02194012387899085,
+                  -0.003514662675519673
+                ]
+              },
+              "intervals": {
+                "reference": {
+                  "status": "validated",
+                  "mean_log_residual": 0.013365288820393409,
+                  "log_residual_interval": [
+                    -0.002298553139335694,
+                    0.029029130780122512
+                  ],
+                  "confidence": 0.975,
+                  "relative_mean_error_interval": [
+                    -0.0022959134889147742,
+                    0.02945458285343549
+                  ],
+                  "allowed_relative_mean_error": [
+                    -0.05,
+                    0.05
+                  ],
+                  "sample_count": 17,
+                  "scope": "conditional on the frozen forecast and independent stationary normal holdout log times"
+                },
+                "candidate": {
+                  "status": "validated",
+                  "mean_log_residual": 0.025658594796327896,
+                  "log_residual_interval": [
+                    0.007898166365024297,
+                    0.0434190232276315
+                  ],
+                  "confidence": 0.975,
+                  "relative_mean_error_interval": [
+                    0.007929439159348307,
+                    0.044375420737112536
+                  ],
+                  "allowed_relative_mean_error": [
+                    -0.05,
+                    0.05
+                  ],
+                  "sample_count": 17,
+                  "scope": "conditional on the frozen forecast and independent stationary normal holdout log times"
+                },
+                "paired": {
+                  "status": "validated",
+                  "mean_log_residual": 0.012293305975934485,
+                  "log_residual_interval": [
+                    -0.013304157617137402,
+                    0.037890769569006374
+                  ],
+                  "confidence": 0.975,
+                  "relative_mean_error_interval": [
+                    -0.013216048484270385,
+                    0.038617778014718517
+                  ],
+                  "allowed_relative_mean_error": [
+                    -0.05,
+                    0.05
+                  ],
+                  "sample_count": 17,
+                  "scope": "conditional on the frozen forecast and independent stationary normal holdout log times"
+                }
+              },
+              "look_count": 17,
+              "confirmation_policy": {
+                "looks": [
+                  3,
+                  5,
+                  9,
+                  17
+                ],
+                "family_alpha": 0.1,
+                "per_look_two_sided_alpha": 0.025,
+                "confidence": 0.975,
+                "confidence_sidedness": "two-sided",
+                "scope": "Bonferroni family-wise control across the four predeclared looks for one error family; not simultaneous across reference, candidate, paired metrics, or cases",
+                "metric": "mean log(actual full-run time / frozen predicted full-run time)",
+                "cross_metric_or_case_simultaneous_claim": false
+              },
+              "scope": "finite predeclared confirmation looks; both source means and paired ratio must establish equivalence; no simultaneous interval claim across metrics or cases"
+            }
+          ],
+          "timing_boundary": "full preparation plus wrapped scoring on resident fixture",
+          "model_validation_is_conditional_mean_equivalence": true,
+          "individual_prediction_coverage_claim": false,
+          "original_record_sha256": "3f7c2d2a0ea5a11b0159777fa916e0dc5f0d34b663a911e98d10f0a760a13d16",
+          "full_validation": {
+            "record_count": 17,
+            "count_by_source": {
+              "paired": 17
+            },
+            "recorded_scalar_observations": [
+              {
+                "repeat": 0,
+                "purpose": "independent_full",
+                "count": 33,
+                "frozen_prediction_sha256": "fe1cf7f8a4d6b739fbca2757420b328d1bf0b9cbca49a9cb71142b03da315179",
+                "predicted_seconds": {
+                  "reference": 11.149944673642905,
+                  "candidate": 11.265778195466904
+                },
+                "observed": {
+                  "reference": {
+                    "preparation_seconds": 0.03864526603138074,
+                    "score_including_finish_seconds": 11.017710509011522,
+                    "full_seconds": 11.056355775042903
+                  },
+                  "candidate": {
+                    "preparation_seconds": 0.03856240800814703,
+                    "score_including_finish_seconds": 11.183934052998666,
+                    "full_seconds": 11.222496461006813
+                  }
+                },
+                "log_errors": {
+                  "reference": -0.008429090017622659,
+                  "candidate": -0.0038492759949880855
+                },
+                "relative_errors": {
+                  "reference": 0.008393664842233218,
+                  "candidate": 0.003841877028744176
+                },
+                "paired_log_error": 0.004579814022634573,
+                "paired_relative_error": 0.004590317399257926,
+                "single_run_within_bound": true,
+                "error_limit": 0.05
+              },
+              {
+                "repeat": 1,
+                "purpose": "independent_full",
+                "count": 33,
+                "frozen_prediction_sha256": "fe1cf7f8a4d6b739fbca2757420b328d1bf0b9cbca49a9cb71142b03da315179",
+                "predicted_seconds": {
+                  "reference": 11.149944673642905,
+                  "candidate": 11.265778195466904
+                },
+                "observed": {
+                  "reference": {
+                    "preparation_seconds": 0.03863804799038917,
+                    "score_including_finish_seconds": 10.987016109982505,
+                    "full_seconds": 11.025654157972895
+                  },
+                  "candidate": {
+                    "preparation_seconds": 0.03889484400860965,
+                    "score_including_finish_seconds": 11.411452551023103,
+                    "full_seconds": 11.450347395031713
+                  }
+                },
+                "log_errors": {
+                  "reference": -0.011209782259483783,
+                  "candidate": 0.016250417396571272
+                },
+                "relative_errors": {
+                  "reference": 0.011147186762622913,
+                  "candidate": 0.016383173568877415
+                },
+                "paired_log_error": 0.027460199656055055,
+                "paired_relative_error": 0.027840705879542765,
+                "single_run_within_bound": true,
+                "error_limit": 0.05
+              },
+              {
+                "repeat": 2,
+                "purpose": "independent_full",
+                "count": 33,
+                "frozen_prediction_sha256": "fe1cf7f8a4d6b739fbca2757420b328d1bf0b9cbca49a9cb71142b03da315179",
+                "predicted_seconds": {
+                  "reference": 11.149944673642905,
+                  "candidate": 11.265778195466904
+                },
+                "observed": {
+                  "reference": {
+                    "preparation_seconds": 0.03459161700448021,
+                    "score_including_finish_seconds": 11.118051897967234,
+                    "full_seconds": 11.152643514971714
+                  },
+                  "candidate": {
+                    "preparation_seconds": 0.04893059202004224,
+                    "score_including_finish_seconds": 11.463129935960751,
+                    "full_seconds": 11.512060527980793
+                  }
+                },
+                "log_errors": {
+                  "reference": 0.00024202046140648064,
+                  "candidate": 0.02162557506663957
+                },
+                "relative_errors": {
+                  "reference": 0.00024204975072114469,
+                  "candidate": 0.021861102556855565
+                },
+                "paired_log_error": 0.02138355460523309,
+                "paired_relative_error": 0.02161382118610418,
+                "single_run_within_bound": true,
+                "error_limit": 0.05
+              },
+              {
+                "repeat": 3,
+                "purpose": "independent_full",
+                "count": 33,
+                "frozen_prediction_sha256": "fe1cf7f8a4d6b739fbca2757420b328d1bf0b9cbca49a9cb71142b03da315179",
+                "predicted_seconds": {
+                  "reference": 11.149944673642905,
+                  "candidate": 11.265778195466904
+                },
+                "observed": {
+                  "reference": {
+                    "preparation_seconds": 0.05215308995684609,
+                    "score_including_finish_seconds": 11.389052047976293,
+                    "full_seconds": 11.441205137933139
+                  },
+                  "candidate": {
+                    "preparation_seconds": 0.03833897801814601,
+                    "score_including_finish_seconds": 12.147708038974088,
+                    "full_seconds": 12.186047016992234
+                  }
+                },
+                "log_errors": {
+                  "reference": 0.02578678873956701,
+                  "candidate": 0.07852195777735005
+                },
+                "relative_errors": {
+                  "reference": 0.026122144352764186,
+                  "candidate": 0.08168710634615771
+                },
+                "paired_log_error": 0.05273516903778304,
+                "paired_relative_error": 0.054150436475027694,
+                "single_run_within_bound": false,
+                "error_limit": 0.05
+              },
+              {
+                "repeat": 4,
+                "purpose": "independent_full",
+                "count": 33,
+                "frozen_prediction_sha256": "fe1cf7f8a4d6b739fbca2757420b328d1bf0b9cbca49a9cb71142b03da315179",
+                "predicted_seconds": {
+                  "reference": 11.149944673642905,
+                  "candidate": 11.265778195466904
+                },
+                "observed": {
+                  "reference": {
+                    "preparation_seconds": 0.03613652696367353,
+                    "score_including_finish_seconds": 11.181772262963932,
+                    "full_seconds": 11.217908789927606
+                  },
+                  "candidate": {
+                    "preparation_seconds": 0.053584247012622654,
+                    "score_including_finish_seconds": 12.050685427966528,
+                    "full_seconds": 12.10426967497915
+                  }
+                },
+                "log_errors": {
+                  "reference": 0.00607696447511003,
+                  "candidate": 0.07178860374012629
+                },
+                "relative_errors": {
+                  "reference": 0.0060954666838266645,
+                  "candidate": 0.07442818995403587
+                },
+                "paired_log_error": 0.06571163926501626,
+                "paired_relative_error": 0.06791872693298122,
+                "single_run_within_bound": false,
+                "error_limit": 0.05
+              },
+              {
+                "repeat": 5,
+                "purpose": "independent_full",
+                "count": 33,
+                "frozen_prediction_sha256": "fe1cf7f8a4d6b739fbca2757420b328d1bf0b9cbca49a9cb71142b03da315179",
+                "predicted_seconds": {
+                  "reference": 11.149944673642905,
+                  "candidate": 11.265778195466904
+                },
+                "observed": {
+                  "reference": {
+                    "preparation_seconds": 0.06844256399199367,
+                    "score_including_finish_seconds": 11.660637098015286,
+                    "full_seconds": 11.72907966200728
+                  },
+                  "candidate": {
+                    "preparation_seconds": 0.044400070037227124,
+                    "score_including_finish_seconds": 11.43990420899354,
+                    "full_seconds": 11.484304279030766
+                  }
+                },
+                "log_errors": {
+                  "reference": 0.050636663511593565,
+                  "candidate": 0.019211605496969947
+                },
+                "relative_errors": {
+                  "reference": 0.05194061543044055,
+                  "candidate": 0.019397335876166304
+                },
+                "paired_log_error": -0.031425058014623614,
+                "paired_relative_error": 0.03093642271903141,
+                "single_run_within_bound": false,
+                "error_limit": 0.05
+              },
+              {
+                "repeat": 6,
+                "purpose": "independent_full",
+                "count": 33,
+                "frozen_prediction_sha256": "fe1cf7f8a4d6b739fbca2757420b328d1bf0b9cbca49a9cb71142b03da315179",
+                "predicted_seconds": {
+                  "reference": 11.149944673642905,
+                  "candidate": 11.265778195466904
+                },
+                "observed": {
+                  "reference": {
+                    "preparation_seconds": 0.039788983995094895,
+                    "score_including_finish_seconds": 11.283779492019676,
+                    "full_seconds": 11.32356847601477
+                  },
+                  "candidate": {
+                    "preparation_seconds": 0.052609187026973814,
+                    "score_including_finish_seconds": 11.258371754025575,
+                    "full_seconds": 11.310980941052549
+                  }
+                },
+                "log_errors": {
+                  "reference": 0.015451723606851677,
+                  "candidate": 0.004004366234698847
+                },
+                "relative_errors": {
+                  "reference": 0.015571718735276885,
+                  "candidate": 0.004012394421526343
+                },
+                "paired_log_error": -0.011447357372152831,
+                "paired_relative_error": 0.01138208567696805,
+                "single_run_within_bound": true,
+                "error_limit": 0.05
+              },
+              {
+                "repeat": 7,
+                "purpose": "independent_full",
+                "count": 33,
+                "frozen_prediction_sha256": "fe1cf7f8a4d6b739fbca2757420b328d1bf0b9cbca49a9cb71142b03da315179",
+                "predicted_seconds": {
+                  "reference": 11.149944673642905,
+                  "candidate": 11.265778195466904
+                },
+                "observed": {
+                  "reference": {
+                    "preparation_seconds": 0.08178599597886205,
+                    "score_including_finish_seconds": 11.014046358002815,
+                    "full_seconds": 11.095832353981677
+                  },
+                  "candidate": {
+                    "preparation_seconds": 0.036343448038678616,
+                    "score_including_finish_seconds": 11.37594416999491,
+                    "full_seconds": 11.412287618033588
+                  }
+                },
+                "log_errors": {
+                  "reference": -0.004864961679769902,
+                  "candidate": 0.012920983835261201
+                },
+                "relative_errors": {
+                  "reference": 0.004853146920911819,
+                  "candidate": 0.013004820441577305
+                },
+                "paired_log_error": 0.017785945515031102,
+                "paired_relative_error": 0.01794505736237291,
+                "single_run_within_bound": true,
+                "error_limit": 0.05
+              },
+              {
+                "repeat": 8,
+                "purpose": "independent_full",
+                "count": 33,
+                "frozen_prediction_sha256": "fe1cf7f8a4d6b739fbca2757420b328d1bf0b9cbca49a9cb71142b03da315179",
+                "predicted_seconds": {
+                  "reference": 11.149944673642905,
+                  "candidate": 11.265778195466904
+                },
+                "observed": {
+                  "reference": {
+                    "preparation_seconds": 0.03760118898935616,
+                    "score_including_finish_seconds": 11.093361795996316,
+                    "full_seconds": 11.130962984985672
+                  },
+                  "candidate": {
+                    "preparation_seconds": 0.052665265975520015,
+                    "score_including_finish_seconds": 11.523524439020548,
+                    "full_seconds": 11.576189704996068
+                  }
+                },
+                "log_errors": {
+                  "reference": -0.0017038527819622953,
+                  "candidate": 0.02718072465877167
+                },
+                "relative_errors": {
+                  "reference": 0.0017024020488732184,
+                  "candidate": 0.027553490237724243
+                },
+                "paired_log_error": 0.028884577440733965,
+                "paired_relative_error": 0.0293057825107875,
+                "single_run_within_bound": true,
+                "error_limit": 0.05
+              },
+              {
+                "repeat": 9,
+                "purpose": "independent_full",
+                "count": 33,
+                "frozen_prediction_sha256": "fe1cf7f8a4d6b739fbca2757420b328d1bf0b9cbca49a9cb71142b03da315179",
+                "predicted_seconds": {
+                  "reference": 11.149944673642905,
+                  "candidate": 11.265778195466904
+                },
+                "observed": {
+                  "reference": {
+                    "preparation_seconds": 0.06065807497361675,
+                    "score_including_finish_seconds": 12.155482589034364,
+                    "full_seconds": 12.21614066400798
+                  },
+                  "candidate": {
+                    "preparation_seconds": 0.038884808018337935,
+                    "score_including_finish_seconds": 11.073025788995437,
+                    "full_seconds": 11.111910597013775
+                  }
+                },
+                "log_errors": {
+                  "reference": 0.09132354669676829,
+                  "candidate": -0.01375209252629937
+                },
+                "relative_errors": {
+                  "reference": 0.09562343326110233,
+                  "candidate": 0.013657964481764932
+                },
+                "paired_log_error": -0.10507563922306766,
+                "paired_relative_error": 0.09974357468568673,
+                "single_run_within_bound": false,
+                "error_limit": 0.05
+              },
+              {
+                "repeat": 10,
+                "purpose": "independent_full",
+                "count": 33,
+                "frozen_prediction_sha256": "fe1cf7f8a4d6b739fbca2757420b328d1bf0b9cbca49a9cb71142b03da315179",
+                "predicted_seconds": {
+                  "reference": 11.149944673642905,
+                  "candidate": 11.265778195466904
+                },
+                "observed": {
+                  "reference": {
+                    "preparation_seconds": 0.034768698969855905,
+                    "score_including_finish_seconds": 11.103569278959185,
+                    "full_seconds": 11.13833797792904
+                  },
+                  "candidate": {
+                    "preparation_seconds": 0.06651490100193769,
+                    "score_including_finish_seconds": 11.302112914039753,
+                    "full_seconds": 11.368627815041691
+                  }
+                },
+                "log_errors": {
+                  "reference": -0.0010415066018761474,
+                  "candidate": 0.009087963465692309
+                },
+                "relative_errors": {
+                  "reference": 0.0010409644221195695,
+                  "candidate": 0.009129384387859808
+                },
+                "paired_log_error": 0.010129470067568456,
+                "paired_relative_error": 0.010180946813395483,
+                "single_run_within_bound": true,
+                "error_limit": 0.05
+              },
+              {
+                "repeat": 11,
+                "purpose": "independent_full",
+                "count": 33,
+                "frozen_prediction_sha256": "fe1cf7f8a4d6b739fbca2757420b328d1bf0b9cbca49a9cb71142b03da315179",
+                "predicted_seconds": {
+                  "reference": 11.149944673642905,
+                  "candidate": 11.265778195466904
+                },
+                "observed": {
+                  "reference": {
+                    "preparation_seconds": 0.057592472003307194,
+                    "score_including_finish_seconds": 11.224905676033814,
+                    "full_seconds": 11.28249814803712
+                  },
+                  "candidate": {
+                    "preparation_seconds": 0.03494907799176872,
+                    "score_including_finish_seconds": 12.247431739990134,
+                    "full_seconds": 12.282380817981903
+                  }
+                },
+                "log_errors": {
+                  "reference": 0.011818152685582756,
+                  "candidate": 0.08639612929210382
+                },
+                "relative_errors": {
+                  "reference": 0.01188826297116578,
+                  "candidate": 0.09023811803112336
+                },
+                "paired_log_error": 0.07457797660652106,
+                "paired_relative_error": 0.07742935453159824,
+                "single_run_within_bound": false,
+                "error_limit": 0.05
+              },
+              {
+                "repeat": 12,
+                "purpose": "independent_full",
+                "count": 33,
+                "frozen_prediction_sha256": "fe1cf7f8a4d6b739fbca2757420b328d1bf0b9cbca49a9cb71142b03da315179",
+                "predicted_seconds": {
+                  "reference": 11.149944673642905,
+                  "candidate": 11.265778195466904
+                },
+                "observed": {
+                  "reference": {
+                    "preparation_seconds": 0.03865957597736269,
+                    "score_including_finish_seconds": 11.042730438988656,
+                    "full_seconds": 11.081390014966018
+                  },
+                  "candidate": {
+                    "preparation_seconds": 0.0537596870562993,
+                    "score_including_finish_seconds": 11.456586010986939,
+                    "full_seconds": 11.510345698043238
+                  }
+                },
+                "log_errors": {
+                  "reference": -0.006167409823818058,
+                  "candidate": 0.021476604544280554
+                },
+                "relative_errors": {
+                  "reference": 0.006148430389878159,
+                  "candidate": 0.021708886712747705
+                },
+                "paired_log_error": 0.027644014368098612,
+                "paired_relative_error": 0.028029655488247603,
+                "single_run_within_bound": true,
+                "error_limit": 0.05
+              },
+              {
+                "repeat": 13,
+                "purpose": "independent_full",
+                "count": 33,
+                "frozen_prediction_sha256": "fe1cf7f8a4d6b739fbca2757420b328d1bf0b9cbca49a9cb71142b03da315179",
+                "predicted_seconds": {
+                  "reference": 11.149944673642905,
+                  "candidate": 11.265778195466904
+                },
+                "observed": {
+                  "reference": {
+                    "preparation_seconds": 0.08744991000276059,
+                    "score_including_finish_seconds": 11.454735208011698,
+                    "full_seconds": 11.542185118014459
+                  },
+                  "candidate": {
+                    "preparation_seconds": 0.036157633003313094,
+                    "score_including_finish_seconds": 11.217011296947021,
+                    "full_seconds": 11.253168929950334
+                  }
+                },
+                "log_errors": {
+                  "reference": 0.03457405891419659,
+                  "candidate": -0.0011198806732971407
+                },
+                "relative_errors": {
+                  "reference": 0.03517868974711256,
+                  "candidate": 0.0011192538409502523
+                },
+                "paired_log_error": -0.035693939587493735,
+                "paired_relative_error": 0.03506442312576012,
+                "single_run_within_bound": true,
+                "error_limit": 0.05
+              },
+              {
+                "repeat": 14,
+                "purpose": "independent_full",
+                "count": 33,
+                "frozen_prediction_sha256": "fe1cf7f8a4d6b739fbca2757420b328d1bf0b9cbca49a9cb71142b03da315179",
+                "predicted_seconds": {
+                  "reference": 11.149944673642905,
+                  "candidate": 11.265778195466904
+                },
+                "observed": {
+                  "reference": {
+                    "preparation_seconds": 0.036414205038454384,
+                    "score_including_finish_seconds": 11.264734474010766,
+                    "full_seconds": 11.30114867904922
+                  },
+                  "candidate": {
+                    "preparation_seconds": 0.05823464295826852,
+                    "score_including_finish_seconds": 11.865725866984576,
+                    "full_seconds": 11.923960509942845
+                  }
+                },
+                "log_errors": {
+                  "reference": 0.01346983767648637,
+                  "candidate": 0.056780211676564066
+                },
+                "relative_errors": {
+                  "reference": 0.013560964635433836,
+                  "candidate": 0.05842315577815816
+                },
+                "paired_log_error": 0.043310374000077694,
+                "paired_relative_error": 0.044261956318395614,
+                "single_run_within_bound": false,
+                "error_limit": 0.05
+              },
+              {
+                "repeat": 15,
+                "purpose": "independent_full",
+                "count": 33,
+                "frozen_prediction_sha256": "fe1cf7f8a4d6b739fbca2757420b328d1bf0b9cbca49a9cb71142b03da315179",
+                "predicted_seconds": {
+                  "reference": 11.149944673642905,
+                  "candidate": 11.265778195466904
+                },
+                "observed": {
+                  "reference": {
+                    "preparation_seconds": 0.07111635396722704,
+                    "score_including_finish_seconds": 11.013799751002807,
+                    "full_seconds": 11.084916104970034
+                  },
+                  "candidate": {
+                    "preparation_seconds": 0.03708458796609193,
+                    "score_including_finish_seconds": 11.41143599600764,
+                    "full_seconds": 11.448520583973732
+                  }
+                },
+                "log_errors": {
+                  "reference": -0.0058492611873535,
+                  "candidate": 0.016090862691637352
+                },
+                "relative_errors": {
+                  "reference": 0.005832187564714106,
+                  "candidate": 0.016221017788221607
+                },
+                "paired_log_error": 0.02194012387899085,
+                "paired_relative_error": 0.022182578310310445,
+                "single_run_within_bound": true,
+                "error_limit": 0.05
+              },
+              {
+                "repeat": 16,
+                "purpose": "independent_full",
+                "count": 33,
+                "frozen_prediction_sha256": "fe1cf7f8a4d6b739fbca2757420b328d1bf0b9cbca49a9cb71142b03da315179",
+                "predicted_seconds": {
+                  "reference": 11.149944673642905,
+                  "candidate": 11.265778195466904
+                },
+                "observed": {
+                  "reference": {
+                    "preparation_seconds": 0.03562407998833805,
+                    "score_including_finish_seconds": 11.306578987045214,
+                    "full_seconds": 11.342203067033552
+                  },
+                  "candidate": {
+                    "preparation_seconds": 0.09190856799250469,
+                    "score_including_finish_seconds": 11.327917882998008,
+                    "full_seconds": 11.419826450990513
+                  }
+                },
+                "log_errors": {
+                  "reference": 0.017096017531011528,
+                  "candidate": 0.013581354855491855
+                },
+                "relative_errors": {
+                  "reference": 0.017242990796637953,
+                  "candidate": 0.013674000397557486
+                },
+                "paired_log_error": -0.003514662675519673,
+                "paired_relative_error": 0.003508493478323739,
+                "single_run_within_bound": true,
+                "error_limit": 0.05
+              }
+            ]
+          },
+          "proof_scope": "recorded scalar evidence; original payload hash retained, compact record is not an interchangeable anchor"
+        },
+        "current_validation": {
+          "record_count": 1,
+          "count_by_source": {
+            "paired": 1
+          },
+          "recorded_scalar_observations": [
+            {
+              "repeat": 0,
+              "purpose": "historical_endpoint_sentinel",
+              "count": 33,
+              "frozen_prediction_sha256": "64ff086b4417eb9ca46350071dbad5a4828b89aebbb9c261bc940641e13aef86",
+              "predicted_seconds": {
+                "reference": 11.317031513360453,
+                "candidate": 17.82786437982583
+              },
+              "observed": {
+                "reference": {
+                  "preparation_seconds": 0.03909752599429339,
+                  "score_including_finish_seconds": 11.844044631987344,
+                  "full_seconds": 11.883142157981638
+                },
+                "candidate": {
+                  "preparation_seconds": 0.03969705698546022,
+                  "score_including_finish_seconds": 17.75808826397406,
+                  "full_seconds": 17.79778532095952
+                }
+              },
+              "log_errors": {
+                "reference": 0.04881196579174628,
+                "candidate": -0.0016886185243669327
+              },
+              "relative_errors": {
+                "reference": 0.05002289195296987,
+                "candidate": 0.0016871936102648125
+              },
+              "paired_log_error": -0.05050058431611321,
+              "paired_relative_error": 0.049246626868351004,
+              "single_run_within_bound": false,
+              "error_limit": 0.05
+            }
+          ]
+        },
+        "historical_full_validation_alias": "anchor.historical_record.full_validation"
+      },
+      "measured_bank_numerical_checks": {
+        "count": 69,
+        "eligible_counts": {
+          "True": 69
+        },
+        "maximum_absolute_score_error": 0.0
+      }
+    },
+    "synthetic_delay_observations": {
+      "score_calls_seen": 69,
+      "injected_score_call_count": 69,
+      "scope": "not real-kernel acceleration or production performance evidence",
+      "expected_control_response": "regression gate should detect broad synthetic slowdown",
+      "observed_gate": "performance_regression",
+      "observed_prediction_valid": true,
+      "event_count": 69,
+      "events_sha256": "b1f43e0a3b2f2856c88658ba9e8bda3fbaa407056f0018d2abba16c26d46688f",
+      "event_count_by_cfo_count": {
+        "1": 34,
+        "5": 34,
+        "33": 1
+      },
+      "event_aggregates": {
+        "original_real_kernel_wrapped_seconds": {
+          "count": 69,
+          "sum": 80.10076687886612,
+          "min": 0.308485888002906,
+          "max": 11.098746400966775
+        },
+        "requested_synthetic_delay_seconds": {
+          "count": 69,
+          "sum": 48.06046012731968,
+          "min": 0.18509153280174362,
+          "max": 6.659247840580066
+        },
+        "measured_synthetic_delay_seconds": {
+          "count": 69,
+          "sum": 48.071715262078214,
+          "min": 0.18520253902534023,
+          "max": 6.659341863007285
+        },
+        "returned_wrapped_seconds": {
+          "count": 69,
+          "sum": 128.17248214094434,
+          "min": 0.4936884270282462,
+          "max": 17.75808826397406
+        },
+        "actual_parent_request_seconds": {
+          "count": 69,
+          "sum": 128.29491011373466,
+          "min": 0.49493911501485854,
+          "max": 17.760334810009226
+        }
+      },
+      "aggregation_scope": "recorded synthetic delay bookkeeping; not a new performance confidence interval"
+    }
+  },
+  "input": {
+    "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/fft-uniform-delay-001.json",
+    "sha256": "71c86433a022216e6589f1782c3b94bb51cf100dc765bb2ab6dc261c240e7b93",
+    "bytes": 645438,
+    "encoding": "json"
+  }
+}

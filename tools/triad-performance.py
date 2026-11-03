@@ -2,8 +2,9 @@
 """Bounded, paired performance regression study for the isolated triad receiver.
 
 The immutable reference and candidate run in separate persistent processes.
-Only CFO repetition is abbreviated; each FFT retains the full observation and
-arrival lattice. This is not a performance certificate for ordinary Robust.
+Native duration siblings preserve complete streaming execution; FFT abbreviation
+retains the full observation and arrival lattice. Independent full observations
+validate each supported model. Ordinary Robust remains outside this suite.
 """
 from __future__ import annotations
 
@@ -31,7 +32,7 @@ SOURCE_FILES = (
     "src/tuning_presets.cpp", "tools/triad-long.cpp", "tools/triad_fft_acquire.py",
     "tools/triad_gaussian_state.py", "tools/triad_gaussian_window.py",
     "tools/triad_group_acquire.py", "tools/triad_noise_likelihood.py", "tools/triad_state_workspace.py")
-SCHEMA = "triad-performance-v1"
+SCHEMA = "triad-performance-v2"
 
 
 class SuiteError(RuntimeError):
@@ -448,6 +449,7 @@ def profile_identity(profile):
     return {"device": profile.get("device"), "threads": h.get("requested_threads"),
             "cpu_model": cpu.get("model name", cpu.get("model_name", cpu.get("model"))),
             "affinity": cpu.get("affinity_cpu_count"), "quota": cpu.get("quota_cores"),
+            "affinity_cpus": cpu.get("affinity_cpus"), "affinity_topology": cpu.get("affinity_topology"),
             "gpu": gpu.get("name"), "capability": gpu.get("compute_capability")}
 
 
@@ -495,109 +497,284 @@ def hardware_health(profile, baseline_path):
             "scope": "raw environment-health screen; one five-second block does not establish independent-replicate confidence"}
 
 
+def measure_gaussian_adaptive(workers, device, policy):
+    """Time complete helper preparation/scoring in pre-sized outer blocks.
+
+    The pilot chooses only batch size and eligible arithmetic. Its measurements
+    do not enter the subsequent confidence intervals.
+    """
+    from statistics import mean
+    from triad_perf_adaptive import summarize
+    pilot = gaussian_control(workers, device, repeats=3, confidence=.95)
+    chosen = pilot["precision"]
+    calls = min(64, max(1, math.ceil(.1 / max(mean(v) for v in pilot["raw_full_seconds"].values()))))
+    request = dict(action="gaussian", blocks=8, candidates=32, taps=2, window_blocks=8,
+                   doppler_width_hz=.1, memory_mib=256, seed=9182, condition="ordinary",
+                   precision=chosen, device=device)
+    values = {n: [] for n in workers}
+    looks, checks = [], []
+    for index in range(policy.looks[-1]):
+        outputs = {}
+        for name in (("reference", "candidate") if index % 2 == 0 else ("candidate", "reference")):
+            seconds = 0.
+            for _ in range(calls):
+                value = workers[name].request(request)
+                seconds += value["preparation_seconds"] + value["scoring_seconds"]
+            values[name].append(seconds/calls)
+            outputs[name] = value
+        agreement = numeric_agreement(outputs["reference"], outputs["candidate"], gaussian=True)
+        if not agreement["eligible"]:
+            raise SuiteError("Gaussian measured helper numerical disagreement")
+        checks.append(agreement)
+        if index+1 in policy.looks:
+            summary = summarize(values["reference"], values["candidate"], policy, model_validation="direct_full")
+            looks.append(summary)
+            if summary["stop_reason"] != "continue":
+                break
+    return {"id": "gaussian-multiblock", "adapter": "gaussian", "precision": chosen,
+            "qualification": pilot["qualification"], "pilot_excluded_from_inference": True,
+            "calls_per_outer_block": calls, "raw_full_seconds": values,
+            "prediction_valid": True, "full_target_measured": True,
+            "adaptive": summary, "looks": looks, "timing_precision_reached": summary["timing_precision_reached"],
+            "comparison": {"gate": summary["performance_gate"],
+                "expanded_full_prediction_ratio_interval": summary["paired_candidate_over_reference"]["model_adjusted_gate_interval"]},
+            "measured_numerical_checks": checks,
+            "scope": "complete resident algebraic Gaussian helper preparation plus scoring; fixture construction and process startup excluded"}
+
+
+def endpoint_calibration_guard(value):
+    """Block gross underprediction without claiming a new mean-runtime CI.
+
+    This uses the already frozen historical single-observation allowance. It
+    never increases that allowance from the endpoint or retries the endpoint.
+    Ordinary overlap/no-history cases remain unresolved warnings.
+    """
+    check = (value.get("anchors", {}).get("conditional_check") or
+             value.get("current_validation", {}).get("conditional_model") or {})
+    triggers = []
+    if (check.get("schema") == "triad-performance-conditional-v2" and
+            check.get("status") == "unvalidated_request_focused_qualification"):
+        for metric, row in check.get("checks", {}).items():
+            residual = row["log_actual_over_predicted"]
+            timing = row["training_timing_log_half_width"]
+            scatter = row["pre_sentinel_historical_observation_log_envelope"]
+            if not all(math.isfinite(x) for x in (residual, timing, scatter)) or min(timing, scatter) < 0:
+                raise SuiteError("invalid frozen endpoint-calibration evidence")
+            unexplained = residual - timing - scatter
+            if unexplained > math.log1p(.30):
+                triggers.append({"metric": metric, "unexplained_log_underprediction": unexplained,
+                                 "underprediction_ratio_after_frozen_allowances": math.exp(unexplained),
+                                 "training_log_half_width": timing,
+                                 "historical_observation_log_envelope": scatter})
+    return {"status": "severe_endpoint_prediction_mismatch" if triggers else "not_triggered",
+            "blocking": bool(triggers), "threshold_ratio": 1.30, "triggers": triggers,
+            "scope": "engineering calibration guard; not a confirmed regression in mean runtime",
+            "false_failure_rate_qualified": False,
+            "historical_scatter_is_a_proven_tail_bound": False}
+
+
 def run_backend(args, report):
+    """Independent hardware, path witnesses, and source-bound runtime models."""
     from triad_perf_cases import prepare_cases, scenarios
     from triad_perf_hardware import collect_profile
+    from triad_perf_adaptive import AdaptivePolicy
+    from triad_perf_fft_trace import measure_fft as measure_fft_trace
+    from triad_perf_native import scenarios as native_scenarios, measure_native_case
+    from triad_perf_native import identity as native_identity, anchor_compatible, digest
+    from triad_perf_sustained import native_sustained, fft_sustained, _require_native_candidate
     deadline = time.monotonic() + args.budget_seconds
     started = time.perf_counter()
     output = Path(args.output)
     working = output.parent / (output.stem + ".work")
     working.mkdir(parents=True, exist_ok=True)
+    anchor_directory = args.anchor_directory or output.parent / "triad-performance-anchors"
+    anchor_directory.mkdir(parents=True, exist_ok=True)
     workers = {}
-    harness_paths = [Path(__file__), ROOT / "tools/triad_perf_receiver.py",
-        ROOT / "tools/triad_perf_statistics.py", ROOT / "tools/triad_perf_cases.py",
-        ROOT / "tools/triad_perf_hardware.py", ROOT / "tools/triad_perf_telemetry.py",
-        ROOT / "tools/triad_tensor_native.py",
-        ROOT / "tools/triad-performance-cases.json"]
+    harness_paths = sorted(set([Path(__file__), ROOT / "tools/triad_tensor_native.py",
+        *ROOT.glob("tools/triad_perf*.py"), *ROOT.glob("tools/triad-performance*.json")]))
     harness_identity = {p.name: sha(p) for p in harness_paths}
+    application_paths = sorted(set([args.candidate_root / p for p in SOURCE_FILES] +
+                                  list(args.candidate_root.glob("tools/triad*.py"))))
+    application_identity = {str(p.relative_to(args.candidate_root)): sha(p) for p in application_paths}
     try:
+        profile = {"quick": "smoke", "sustain": "extended"}.get(args.profile, args.profile)
+        configured_native = native_scenarios(args.profile)
+        configured_fft = scenarios(profile)
+        all_case_ids = [c["id"] for c in configured_native + configured_fft] + ["gaussian-multiblock"]
+        selected = set(args.case or all_case_ids)
+        unknown = selected - set(all_case_ids)
+        if unknown:
+            raise SuiteError("unknown cases for this profile: " + ", ".join(sorted(unknown)))
+        native_cases = [c for c in configured_native if c["id"] in selected]
+        fft_ids = [c["id"] for c in configured_fft if c["id"] in selected]
+        report["full_profile_case_ids"] = all_case_ids
+        report["selected_case_ids"] = [name for name in all_case_ids if name in selected]
+        report["harness_sha256"] = harness_identity
+        report["candidate"] = {"root": str(args.candidate_root), "source_sha256": application_identity}
         report["hardware_profile"] = collect_profile(device=args._backend_worker, threads=args.threads,
             seconds=args.stress_seconds, memory_limit_bytes=512*1024**2, deadline=deadline)
         if report["hardware_profile"]["status"] != "complete":
-            raise SuiteError("mandatory hardware calibration incomplete: " + report["hardware_profile"]["status"])
+            raise SuiteError("mandatory hardware calibration incomplete")
+        environment = report["hardware_profile"]["hardware"]
         report["hardware_health"] = hardware_health(report["hardware_profile"], args.hardware_baseline)
         if report["hardware_health"].get("warning"):
-            report["warnings"].append("raw hardware throughput screen degraded; independently investigate the environment")
-        profile = {"quick": "smoke", "sustain": "extended"}.get(args.profile, args.profile)
-        cases = prepare_cases(args.binary, output.parent / "triad-performance-fixtures", profile=profile,
-                              deadline=deadline, source_root=args.candidate_root)
-        expected = [c["id"] for c in scenarios(profile)]
-        actual = [c["id"] for c in cases]
-        if not expected or len(actual) != len(set(actual)) or set(actual) != set(expected):
-            raise SuiteError("mandatory physical cases missing, duplicated, or unexpected")
-        report["required_case_ids"] = expected + ["gaussian-multiblock"]
-        report["fixture_preparation_seconds"] = time.perf_counter() - started - report["hardware_profile"]["total_profile_wall_seconds"]
-        with tempfile.TemporaryDirectory(prefix="triad-reference-", dir=working) as directory:
-            report["reference"] = extract_baseline(ROOT, args.baseline_ref, directory)
-            report["candidate"] = {"root": str(args.candidate_root),
-                "source_sha256": {p: sha(args.candidate_root / p) for p in SOURCE_FILES}}
-            report["harness_sha256"] = harness_identity
-            for name, source in (("reference", directory), ("candidate", args.candidate_root)):
-                workers[name] = ReceiverWorker(source, threads=args.threads, deadline=deadline,
-                                                log_directory=working, name=name)
-            report["worker_startup"] = {n: {"external_seconds": w.external_startup_seconds, "identity": w.identity}
-                                        for n, w in workers.items()}
-            confidence = 1. - .05 / (2 * len(report["required_case_ids"]))
-            report["gate_multiplicity"] = {"family_count": len(report["required_case_ids"]), "maximum_looks": 2,
-                "familywise_gate_error_budget": .05, "per_look_confidence": confidence,
-                "scope": "gate decisions across case families and at most two attempts; not simultaneous coverage of all descriptive intervals"}
-            repeats = 3 if args.profile != "sustain" else 5
-            for index, case in enumerate(cases):
-                remaining(deadline)
-                qualification = qualify_fft(case, workers, args._backend_worker)
-                measured = measure_fft(case, workers, qualification["selected"], args._backend_worker,
-                                       repeats=repeats, confidence=confidence, full_holdout=index == 0)
-                measured["precision_qualification"] = qualification
-                if not measured["prediction_valid"] or measured["comparison"]["gate"] == "inconclusive":
-                    # Invalid scaling needs direct evidence. Valid but noisy large
-                    # cases get one fresh abbreviated repeat, avoiding a large
-                    # exhaustive rerun solely to resolve harmless timing noise.
-                    measured["original_abbreviated_result"] = {"prediction": measured["prediction"],
-                                                              "comparison": measured["comparison"]}
-                    small = max(p["predicted_full_time"]["point_seconds"] for p in measured["prediction"].values()) < 1.
-                    direct_retry = not measured["prediction_valid"] or small
-                    measured["retry_policy"] = {"direct": direct_retry, "small_first_estimate": small,
-                        "fresh_outer_repeats": 7 if small else repeats}
-                    retried = measure_fft(case, workers, qualification["selected"], args._backend_worker,
-                                         repeats=7 if small else repeats, confidence=confidence,
-                                         force_direct=direct_retry, full_holdout=index == 0)
-                    measured["bounded_retry"] = retried
-                    if retried["prediction_valid"]:
-                        measured["comparison"] = retried["comparison"]
-                        measured["prediction_valid"] = True
-                    else:
-                        raise SuiteError(case["id"] + ": scaling remains invalid after bounded retry")
-                report["cases"].append(measured)
-                if measured["comparison"]["gate"] == "performance_regression":
-                    report["failures"].append(case["id"] + ": adjusted full-runtime slowdown lower bound exceeds 1.30")
-                elif measured["comparison"]["gate"] == "inconclusive":
-                    report["warnings"].append(case["id"] + ": full-runtime performance comparison inconclusive")
+            report["warnings"].append("raw hardware throughput/utilization screen degraded")
+
+        # The instrumented pass is kept outside every timed receiver call.
+        path_output = working / "executed-paths.json"
+        path_process = subprocess.run([sys.executable, str(ROOT / "tools/triad_perf_paths.py"),
+            "--source-root", str(args.candidate_root), "--device", args._backend_worker,
+            "--threads", str(args.threads), "--output", str(path_output),
+            "--deadline-seconds", str(min(180., remaining(deadline)))],
+            capture_output=True, text=True, timeout=min(185., remaining(deadline)), env=child_environment(args.threads))
+        (working / "executed-paths.stderr.log").write_text(path_process.stderr)
+        if not path_output.is_file():
+            raise SuiteError("executed-path coverage did not produce a report: " + path_process.stderr[-1200:])
+        report["executed_path_coverage"] = json.loads(path_output.read_text())
+        if path_process.returncode or not report["executed_path_coverage"]["complete_applicable_coverage"]:
+            raise SuiteError("required receiver computational paths did not execute successfully")
+
+        # A focused qualification retains the full profile's multiplicity
+        # budget, so selecting a case cannot silently narrow its intervals.
+        family_count = len(all_case_ids)
+        policy = AdaptivePolicy(relative_precision=args.precision_target, looks=args.looks, family_count=family_count)
+        report["adaptive_policy"] = {"relative_timing_precision": args.precision_target, "looks": list(args.looks),
+            "families": family_count, "model_accuracy_is_separate": True,
+            "stop_rule": "first predeclared look meeting precision; confirmed regression; or explicit resource/sample ceiling"}
+
+        def retain_case(value):
+            value["endpoint_calibration_guard"] = endpoint_calibration_guard(value)
+            report["cases"].append(value)
+            comparison = value.get("comparison", {})
+            if value["endpoint_calibration_guard"]["blocking"]:
+                report["failures"].append(value["id"] +
+                    ": severe_endpoint_prediction_mismatch; focused calibration required before release")
+            if comparison.get("gate") == "performance_regression":
+                report["failures"].append(value["id"] + ": full-runtime slowdown lower bound exceeds 1.30")
+            elif comparison.get("gate") not in ("pass",):
+                report["warnings"].append(value["id"] + ": full-runtime comparison is unresolved")
+            if not value.get("prediction_valid", False):
+                report["warnings"].append(value["id"] + ": duration model is invalid or unqualified")
+            adaptive = value.get("adaptive", value.get("prediction", {}))
+            if not adaptive.get("timing_precision_reached", value.get("timing_precision_reached", False)):
+                report["warnings"].append(value["id"] + ": requested timing precision was not reached")
+            atomic_json(output, report)
+
+        report["required_case_ids"] = report["selected_case_ids"]
+        reference_binary = args.reference_binary or args.binary
+        report["native_binary_sha256"] = {"reference": sha(reference_binary), "candidate": sha(args.binary)}
+        report["native_reference_is_candidate"] = args.reference_binary is None
+        if args.reference_binary is None and native_cases:
+            report["warnings"].append("native reference binary was not supplied: native results validate prediction cost only, not an implementation regression")
+        for case in native_cases:
+            remaining(deadline)
+            anchor_path = anchor_directory / (case["id"] + ".native-anchor.json")
+            anchor = json.loads(anchor_path.read_text()) if anchor_path.is_file() else None
+            identities = {"reference": native_identity(reference_binary, case, args.native_threads),
+                          "candidate": native_identity(args.binary, case, args.native_threads)}
+            mode = "qualify" if args.validation_mode == "qualify" or (args.validation_mode == "auto" and not anchor_compatible(anchor, identities, case)) else "routine"
+            def freeze(value, case_id=case["id"]):
+                atomic_json(working / (case_id + ".prediction-" + str(value["index"]) + ".json"), value)
+            measured = measure_native_case(reference_binary, args.binary, case, policy,
+                threads=args.native_threads, deadline=deadline, validation_mode=mode,
+                anchor=anchor, trace_candidate=False, freeze_callback=freeze)
+            # Trace clocks are a separately executed witness, never mixed into
+            # reference/candidate timing comparisons on legacy executables.
+            if mode == "qualify" and measured.get("anchors", {}).get("validated"):
+                atomic_json(anchor_path, measured["anchors"])
+            retain_case(measured)
+        report["native_receiver_performance"] = ("measured; fresh model qualification, historical conditional forecasts and timing precision reported separately per case"
+            if native_cases else "not selected; native performance unmeasured in this focused run")
+        report["sustained_checks"] = []
+        if args.sustained_seconds:
+            eligible = []
+            for case, measured in zip(native_cases, report["cases"]):
+                try:
+                    _require_native_candidate(measured, case)
+                    eligible.append((case, measured))
+                except ValueError:
+                    pass
+            if eligible:
+                # Predeclared preference: largest full observation; select once,
+                # then never retry a disappointing sustained result.
+                case, measured = max(eligible, key=lambda pair: pair[0]["target_seconds"])
+                sustained = native_sustained(args.binary, case, measured,
+                    minimum_seconds=args.sustained_seconds, threads=args.native_threads,
+                    deadline=deadline, freeze_callback=lambda value: atomic_json(
+                        working / "native-sustained-commitment.json", value))
+                report["sustained_checks"].append(sustained)
                 atomic_json(output, report)
-            report["cases"].append(gaussian_control(workers, args._backend_worker, repeats=max(7,repeats), confidence=confidence))
-            last = report["cases"][-1]
-            if last["comparison"]["gate"] == "performance_regression":
-                report["failures"].append("gaussian-multiblock: adjusted full-runtime slowdown lower bound exceeds 1.30")
-            elif last["comparison"]["gate"] == "inconclusive":
-                report["warnings"].append("gaussian-multiblock: full-runtime comparison inconclusive")
-            for worker in workers.values():
-                worker.request({"action": "hello"})
-            if report["candidate"]["source_sha256"] != {p: sha(args.candidate_root / p) for p in SOURCE_FILES}:
-                raise SuiteError("candidate source changed during suite")
-            if harness_identity != {p.name: sha(p) for p in harness_paths}:
-                raise SuiteError("performance harness changed during measurement")
-            completed = {c["id"] for c in report["cases"]}
-            if completed != set(report["required_case_ids"]):
-                raise SuiteError("mandatory case coverage is incomplete")
-            report["complete_required_coverage"] = True
-            if args.profile == "quick":
-                report["complete_required_coverage"] = False
-                report["warnings"].append("quick profile is diagnostic and cannot qualify normal CI coverage")
-            if args.target_profile:
-                report["cross_architecture"] = {"status": "unvalidated_transfer_estimate", "performance_pass_eligible": False,
-                    "target_profile_sha256": sha(args.target_profile),
-                    "reason": "a target profile alone lacks matched stage-shape and independent full-target validation; no confidence interval fabricated"}
             else:
-                report["cross_architecture"] = {"status": "target_profile_unavailable", "performance_pass_eligible": False}
+                report["warnings"].append("native sustained check unavailable: no independently qualified candidate forecast")
+
+        fixture_start = time.perf_counter()
+        cases = prepare_cases(args.binary, output.parent / "triad-performance-fixtures", profile=profile,
+                              deadline=deadline, source_root=args.candidate_root, case_ids=fft_ids) if fft_ids else []
+        cases = [case for case in cases if case["id"] in selected]
+        report["fixture_preparation_seconds"] = time.perf_counter() - fixture_start
+        expected = fft_ids
+        actual = [c["id"] for c in cases]
+        if len(actual) != len(set(actual)) or set(actual) != set(expected):
+            raise SuiteError("mandatory FFT cases missing or duplicated")
+        if cases or "gaussian-multiblock" in selected:
+            with tempfile.TemporaryDirectory(prefix="triad-reference-", dir=working) as directory:
+                report["reference"] = extract_baseline(ROOT, args.baseline_ref, directory)
+                for name, source in (("reference", directory), ("candidate", args.candidate_root)):
+                    workers[name] = ReceiverWorker(source, threads=args.threads, deadline=deadline,
+                                                  log_directory=working, name=name)
+                report["worker_startup"] = {n: {"external_seconds": w.external_startup_seconds, "identity": w.identity}
+                                            for n,w in workers.items()}
+                fft_results = []
+                for case in cases:
+                    case["performance_environment"] = environment
+                    qualification = qualify_fft(case, workers, args._backend_worker)
+                    measured = measure_fft_trace(case, workers, qualification["selected"], args._backend_worker,
+                        policy=policy, deadline=deadline, api=sys.modules[__name__],
+                        anchor_directory=anchor_directory / args._backend_worker, validation_mode=args.validation_mode)
+                    measured["precision_qualification"] = qualification
+                    retain_case(measured)
+                    fft_results.append((case, measured))
+                if args.sustained_seconds:
+                    eligible = [(case, value) for case, value in fft_results
+                                if value.get("prediction_valid") and value.get("anchors", {}).get("status")
+                                in ("validated", "historically_supported_conditional")]
+                    if eligible:
+                        case, measured = max(eligible, key=lambda pair: len(pair[0]["frequency_offsets_hz"]))
+                        sustained = fft_sustained(case, workers["candidate"], measured,
+                            api=sys.modules[__name__], minimum_seconds=args.sustained_seconds,
+                            deadline=deadline, freeze_callback=lambda value: atomic_json(
+                                working / "fft-sustained-commitment.json", value))
+                        report["sustained_checks"].append(sustained)
+                        atomic_json(output, report)
+                    else:
+                        report["warnings"].append("FFT sustained check unavailable: no validated full-bank forecast")
+                if "gaussian-multiblock" in selected:
+                    retain_case(measure_gaussian_adaptive(workers, args._backend_worker, policy))
+                for worker in workers.values():
+                    worker.request({"action": "hello"})
+        if harness_identity != {p.name: sha(p) for p in harness_paths}:
+            raise SuiteError("performance harness changed during measurement")
+        if application_identity != {str(p.relative_to(args.candidate_root)): sha(p) for p in application_paths}:
+            raise SuiteError("application source changed during measurement")
+        if sorted(c["id"] for c in report["cases"]) != sorted(report["required_case_ids"]):
+            raise SuiteError("required computational cases are incomplete or duplicated")
+        report["conditional_forecast_cases"] = [c["id"] for c in report["cases"]
+            if (c.get("adaptive", c.get("prediction", {})).get("model_validation")
+                == "historically_supported_conditional" or c.get("anchors", {}).get("status")
+                == "historically_supported_conditional")]
+        report["conditional_forecast_scope"] = (
+            "historically qualified cost relationship with current abbreviated coefficients and a "
+            "precommitted full paired endpoint check; conditional engineering model allowance, "
+            "not fresh mean-equivalence qualification or statistical future coverage")
+        report["complete_required_coverage"] = args.profile != "quick" and not args.case
+        if args.case:
+            report["warnings"].append("focused case selection is diagnostic and incomplete for normal CI")
+        if args.profile == "quick":
+            report["warnings"].append("quick profile is diagnostic and incomplete for normal CI")
+        report["cross_architecture"] = {"status": "unqualified", "performance_pass_eligible": False,
+            "reason": "no matched target-stage validation; hardware peak-rate scaling is not a runtime model"}
+        if args.target_profile:
+            report["cross_architecture"]["target_profile_sha256"] = sha(args.target_profile)
     except Exception as error:
         report["failures"].append(type(error).__name__ + ": " + str(error))
     finally:
@@ -606,7 +783,7 @@ def run_backend(args, report):
         report["elapsed_seconds"] = time.perf_counter() - started
         report["status"] = "failed" if report["failures"] else ("warning" if report["warnings"] else "passed")
         report["exit_code"] = 2 if report["failures"] else 0
-        report["descendant_cleanup"] = "all started receiver workers reaped; outer supervisor enforces process-group deadline"
+        report["descendant_cleanup"] = "receiver workers reaped; outer supervisor owns process-group termination"
         atomic_json(output, report)
     return report["exit_code"]
 
@@ -616,9 +793,11 @@ def initial_report(args, device):
             "complete_required_coverage": False, "cases": [], "failures": [], "warnings": [],
             "budget_seconds": args.budget_seconds, "stress_seconds_per_case": args.stress_seconds,
             "profile": args.profile, "preferred_budget_seconds": 300,
-            "scope": "isolated Python FFT acquisition and Gaussian helper; native exporter functional path only; ordinary and native receiver performance unqualified",
-            "native_receiver_performance": "unmeasured", "tensor_receiver_policy": "hardware calibration only; no implemented tensor FFT/Gaussian adapter",
-            "uncertainty": "conditional full-runtime prediction intervals with 20% model allowance; paired multiplicity-adjusted log-ratio intervals; no distribution-free coverage claim"}
+            "scope": "native complete simulations, resident FFT/Gaussian runtime predictions, and executed offline receiver-path witnesses; ordinary receiver excluded",
+            "native_receiver_performance": "unmeasured",
+            "native_receiver_target": "complete fixed-bank duration siblings and independent full holds; actual FP64",
+            "tensor_receiver_policy": "explicit supported helper paths and separate hardware calibration; no tensor FFT claim",
+            "uncertainty": "adaptive multiplicity-adjusted timing intervals; fresh mean-error qualification or separately labelled historical conditional model allowance; future variation separate; no distribution-free coverage claim"}
 
 
 def parse_args(argv=None):
@@ -626,26 +805,49 @@ def parse_args(argv=None):
     p.add_argument("--output", type=Path, required=True)
     p.add_argument("--binary", type=Path, required=True)
     p.add_argument("--device", choices=("cpu", "cuda", "auto"), default="cpu")
-    p.add_argument("--budget-seconds", type=float, default=600.)
+    p.add_argument("--budget-seconds", type=float, default=1800.)
     p.add_argument("--stress-seconds", type=float, default=5.)
     p.add_argument("--threads", type=int, default=2)
+    p.add_argument("--native-threads", type=int, default=1)
+    p.add_argument("--reference-binary", type=Path)
+    p.add_argument("--precision-target", type=float, default=.05)
+    p.add_argument("--looks", default="5,9,17,33")
+    p.add_argument("--validation-mode", choices=("auto", "qualify", "reuse"), default="auto")
+    p.add_argument("--anchor-directory", type=Path)
+    p.add_argument("--sustained-seconds", type=float, default=None,
+                   help="one frozen campaign per eligible native/FFT family; default 60 for sustain, otherwise 0")
     p.add_argument("--baseline-ref", default=BASELINE)
     p.add_argument("--candidate-root", type=Path, default=ROOT)
     p.add_argument("--profile", choices=("ci", "quick", "sustain"), default="ci")
+    p.add_argument("--case", action="append", help="focus on one case (repeatable); never counts as complete CI coverage")
     p.add_argument("--hardware-baseline", type=Path)
     p.add_argument("--target-profile", type=Path)
     p.add_argument("--_backend-worker", choices=("cpu", "cuda"), help=argparse.SUPPRESS)
     args = p.parse_args(argv)
-    if not math.isfinite(args.budget_seconds) or not 0 < args.budget_seconds <= 600:
-        p.error("budget-seconds must be in (0,600]")
+    if args.sustained_seconds is None:
+        args.sustained_seconds = 60. if args.profile == "sustain" else 0.
+    if not math.isfinite(args.sustained_seconds) or not 0 <= args.sustained_seconds <= 3600:
+        p.error("sustained-seconds must be in [0,3600]")
+    if not math.isfinite(args.budget_seconds) or not 0 < args.budget_seconds <= 28800:
+        p.error("budget-seconds must be in (0,28800]")
     if not math.isfinite(args.stress_seconds) or not 0 < args.stress_seconds <= 5:
         p.error("stress-seconds must be in (0,5]")
-    if args.threads < 1:
+    if args.threads < 1 or args.native_threads < 1:
         p.error("threads must be positive")
+    try:
+        from triad_perf_adaptive import AdaptivePolicy
+        args.looks = tuple(map(int, args.looks.split(",")))
+        AdaptivePolicy(relative_precision=args.precision_target, looks=args.looks)
+    except ValueError as error:
+        p.error(str(error))
     if not re.fullmatch(r"[0-9a-f]{40}", args.baseline_ref):
         p.error("baseline-ref must be an immutable full commit SHA")
     args.candidate_root = args.candidate_root.resolve()
     args.binary = args.binary.resolve()
+    if args.reference_binary:
+        args.reference_binary = args.reference_binary.resolve()
+    if args.anchor_directory:
+        args.anchor_directory = args.anchor_directory.resolve()
     args.output = args.output.resolve()
     return args
 
@@ -695,7 +897,7 @@ def main(argv=None):
         atomic_json(args.output, result)
     result["complete_required_coverage"] = (len(result["backends"]) == len(devices)
         and all(b.get("complete_required_coverage") for b in result["backends"]))
-    if not result["complete_required_coverage"] and args.profile != "quick":
+    if not result["complete_required_coverage"] and args.profile != "quick" and not args.case:
         result["failures"].append("required backend/case coverage is incomplete")
     result["status"] = "failed" if result["failures"] else ("warning" if result["warnings"] else "passed")
     result["exit_code"] = 2 if result["failures"] else 0

@@ -1,0 +1,17 @@
+{
+  "tools/triad-long.cpp": "9b852132edb2c4f53d4c218e73db1314653cd6213a78a49c776869af6dc68877",
+  "tools/triad-performance-cases.json": "4fe9dfe1ea4f03ea2f2a276cac022597ebdb61dc1fb71c15056b6c6f79d03664",
+  "tools/triad-performance-native-cases.json": "f8d46beae40f2a52013279cdfdea811c6267be621a82431b612fb05708304a8f",
+  "tools/triad-performance-paths.json": "c67761c6bb61b8d17def9ef4251dc58240b71bf2e57151c52f343dfd874eeba9",
+  "tools/triad-performance.py": "da754a9a0004ac93b2bd526a718e2ee3a41a42386238bbbb28eefb31c0c231ef",
+  "tools/triad_perf_adaptive.py": "3ad99d54b955e735f0db832bd6ac3afe91b016d993de80909827efd491174106",
+  "tools/triad_perf_cases.py": "4442a1249fca72deba418d33d72e7a784e26255a9fdaa1dcb5b36938542308e7",
+  "tools/triad_perf_fft_trace.py": "aa55de6a50b07b6b6dad2113317feec68ea2a49c1da74cf364fc20f92345feb1",
+  "tools/triad_perf_hardware.py": "74718bc0791dda7ac7ea0b38b8fb79ab7bb1e41c649da9787f2a2645854706b3",
+  "tools/triad_perf_native.py": "538a03c9002d7767c61faac3ecac3ba4ac7ba1ac9600a51ca7760373fc521bbe",
+  "tools/triad_perf_paths.py": "31e442c1381a2ce3037f6837605d24cad7c2874d6041d487bc5077c23d803699",
+  "tools/triad_perf_receiver.py": "fd2fd7109e9dfcd8fe984fc526995a65b4517335cf6d80428a749f13994fcb34",
+  "tools/triad_perf_statistics.py": "64ce887c8c3af9144f1d94adc712fa784bbca17cfa86dcbfe1099dbb2efed64b",
+  "tools/triad_perf_sustained.py": "0f94ad6d0fff9bf788c8f10b40e1e086f932c77f583eaf5299db346953709879",
+  "tools/triad_perf_telemetry.py": "3646802429c1762a661620382ff111f7629640f53e2c3ee015e50d56f6e7bc4b"
+}
