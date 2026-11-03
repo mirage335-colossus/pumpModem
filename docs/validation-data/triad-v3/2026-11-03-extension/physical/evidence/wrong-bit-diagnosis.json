@@ -1,0 +1,284 @@
+{
+  "capture": "none-am65-validation-07-b1-signal",
+  "evidence_sha256": {
+    "local-evidence/triad-extension/remote/physical-reports/validation-light-12-rescored/scores/rescore-global-frequency-none-am65-validation-07-b1-signal.json": "b52834c7d3961c1e3ae00bd7007d619a3fb832917ce6906224e4ca3299868a65",
+    "local-evidence/triad-extension/remote/physical-reports/validation-light-12-rescored/scores/rescore-global-none-am65-validation-07-b1-signal.json": "db5ab89d59fb338fe48a879f5eb97890adad023391b9d01ad13f24b598021ad2",
+    "local-evidence/triad-extension/remote/physical-reports/validation-light-12-rescored/scores/rescore-window-none-am65-validation-07-b1-signal.json": "3edaa3357c186d5e7858a2b3ced64019ff64436ee4956421264bc176f0bda767",
+    "local-evidence/triad-extension/remote/physical-reports/validation-light-12/workspaces/none-am65-validation-07-b1-signal/manifest.json": "584362db086e8621b5e3b962adbc658b74fdfc65f2370caa5fa14f2bc0ac9429"
+  },
+  "fine_symbol_rate_hz": 6.0,
+  "fine_symbols_per_independent_window": 0.375,
+  "group_column_mapping": [
+    [
+      0
+    ],
+    [
+      1
+    ],
+    [
+      0,
+      0
+    ],
+    [
+      1,
+      1
+    ]
+  ],
+  "methods": {
+    "global": {
+      "best_base_group": 3,
+      "best_group_public_parameters": {
+        "arrival_seconds": 0.140500000001,
+        "clock_ppm": 0.0,
+        "epoch_offset_seconds": 0,
+        "frequency_drift_hz_per_second": 0.0,
+        "frequency_hz": 0.0
+      },
+      "bit_log_likelihoods": [
+        1.9988265858603091,
+        130.38881877747136
+      ],
+      "geometry": {
+        "base_group_count": 7,
+        "block_count": 1,
+        "group_count": 7,
+        "nominal_window_seconds": 19.40625,
+        "reblock": 621,
+        "window_blocks": 1
+      },
+      "group_bit_log_likelihoods": [
+        [
+          -5.2315793475787284,
+          -2.7718864800996066
+        ],
+        [
+          -5.278234692232301,
+          -1.0496265845205395
+        ],
+        [
+          -0.5363314650889484,
+          90.73850133724066
+        ],
+        [
+          3.924163854232801,
+          132.33472892652668
+        ],
+        [
+          -2.3318977956610523,
+          27.27247365858379
+        ],
+        [
+          -2.4468400086857383,
+          12.875227948605552
+        ],
+        [
+          -1.2983625064814461,
+          46.02949561885963
+        ]
+      ],
+      "variance_ucb_range": [
+        265.0823479756826,
+        265.54733380542706
+      ],
+      "window_numerics": {
+        "maximum_mode_orthogonality_error": 2.220446049250313e-16,
+        "maximum_relative_discarded_gram_trace": 0.0,
+        "maximum_whitening_covariance_error": 4.440892098500626e-16,
+        "observable_relative_rank_tolerance": 1e-10,
+        "scope": "fixed observation-mode projection; discarded Gram trace is information loss, not a noise variance floor; residual checks are numerical diagnostics, not an IEEE rare-event proof",
+        "whitening_variance_inflation": 1.0000355271367882
+      }
+    },
+    "global-frequency": {
+      "best_base_group": 3,
+      "best_group_public_parameters": {
+        "arrival_seconds": 0.140500000001,
+        "clock_ppm": 0.0,
+        "epoch_offset_seconds": 0,
+        "frequency_drift_hz_per_second": 0.0,
+        "frequency_hz": -0.0030001725001500084
+      },
+      "bit_log_likelihoods": [
+        1.9375401979309852,
+        130.23846471063317
+      ],
+      "geometry": {
+        "base_group_count": 7,
+        "block_count": 1,
+        "group_count": 21,
+        "nominal_window_seconds": 19.40625,
+        "reblock": 621,
+        "window_blocks": 1
+      },
+      "group_bit_log_likelihoods": [
+        [
+          -5.308450051393717,
+          -3.0066247477090897
+        ],
+        [
+          -5.315254973427392,
+          -1.3639248714089467
+        ],
+        [
+          -0.9315562239444324,
+          89.04807650203836
+        ],
+        [
+          3.6332465434347343,
+          132.78982527026133
+        ],
+        [
+          -2.552142148027034,
+          27.099551456221278
+        ],
+        [
+          -1.9331757845133262,
+          11.896400758858626
+        ],
+        [
+          -0.9502063924542989,
+          46.117838151610236
+        ],
+        [
+          -5.231094719044642,
+          -2.772912130604125
+        ],
+        [
+          -5.2777214352502835,
+          -1.0517095191867796
+        ],
+        [
+          -0.5387304159362909,
+          90.68007054159567
+        ],
+        [
+          3.9190256560420407,
+          132.25076520193647
+        ],
+        [
+          -2.3331936818395893,
+          27.253006297338555
+        ],
+        [
+          -2.4480649324959773,
+          12.864596406782795
+        ],
+        [
+          -1.300292681436134,
+          45.99850840834113
+        ],
+        [
+          -5.136652403240275,
+          -2.5360933350947503
+        ],
+        [
+          -5.203643225129783,
+          -0.7528226291870901
+        ],
+        [
+          -0.28148843247187916,
+          91.04800356167115
+        ],
+        [
+          3.9962183729034892,
+          129.87455382430457
+        ],
+        [
+          -2.1502647725911,
+          26.993330000262077
+        ],
+        [
+          -2.785337633034499,
+          13.644899381870149
+        ],
+        [
+          -1.6672497742463448,
+          45.273838947655484
+        ]
+      ],
+      "variance_ucb_range": [
+        265.24339781160575,
+        265.71051122803163
+      ],
+      "window_numerics": {
+        "maximum_mode_orthogonality_error": 2.220446049250313e-16,
+        "maximum_relative_discarded_gram_trace": 0.0,
+        "maximum_whitening_covariance_error": 4.440892098500626e-16,
+        "observable_relative_rank_tolerance": 1e-10,
+        "scope": "fixed observation-mode projection; discarded Gram trace is information loss, not a noise variance floor; residual checks are numerical diagnostics, not an IEEE rare-event proof",
+        "whitening_variance_inflation": 1.0000355271367882
+      }
+    },
+    "window": {
+      "best_base_group": 3,
+      "best_group_public_parameters": {
+        "arrival_seconds": 0.140500000001,
+        "clock_ppm": 0.0,
+        "epoch_offset_seconds": 0,
+        "frequency_drift_hz_per_second": 0.0,
+        "frequency_hz": 0.0
+      },
+      "bit_log_likelihoods": [
+        50.213344020113546,
+        44.30325247523785
+      ],
+      "geometry": {
+        "base_group_count": 7,
+        "block_count": 621,
+        "group_count": 7,
+        "nominal_window_seconds": 0.0625,
+        "reblock": 1,
+        "window_blocks": 2
+      },
+      "group_bit_log_likelihoods": [
+        [
+          21.158183353023542,
+          17.742371929522765
+        ],
+        [
+          11.699519814035815,
+          12.261487741958446
+        ],
+        [
+          29.443469992898617,
+          45.88331033577374
+        ],
+        [
+          52.15925416775075,
+          44.97779112390685
+        ],
+        [
+          31.683341897991706,
+          17.927242595075683
+        ],
+        [
+          21.71536905789145,
+          39.07304855575305
+        ],
+        [
+          24.557344875102185,
+          42.56759217041808
+        ]
+      ],
+      "variance_ucb_range": [
+        264.5593539179686,
+        264.6861414783605
+      ],
+      "window_numerics": {
+        "maximum_mode_orthogonality_error": 1.1102230246251565e-15,
+        "maximum_relative_discarded_gram_trace": 0.0,
+        "maximum_whitening_covariance_error": 6.661338147750939e-16,
+        "observable_relative_rank_tolerance": 1e-10,
+        "scope": "fixed observation-mode projection; discarded Gram trace is information loss, not a noise variance floor; residual checks are numerical diagnostics, not an IEEE rare-event proof",
+        "whitening_variance_inflation": 1.0000355271367882
+      }
+    }
+  },
+  "physical_noise_variance_evaluation_only": 258.4401282990872,
+  "plan": "validation-light-12",
+  "post_erasure_signal_energy_seconds_evaluation_only": 15.207564475945233,
+  "rho_evaluation_only": 241.0236541183906,
+  "scope": "Observed model-dependent reversal using identical physical capture and full public timing bank. Independent 62.5 ms Gaussian gains discard phase continuity; duplicated 0-delay/0-Doppler taps imply one identifiable complex gain per bit/window. These results do not by themselves prove universal identifiability or rule out every implementation defect. No new scoring or raw-IQ analysis was run here.",
+  "truth_bit_evaluation_only": 1,
+  "window_count": 311
+}

@@ -1,0 +1,2511 @@
+{
+  "schema": "triad-common-phase-discriminator-v1",
+  "seed": 603011,
+  "teacher": "orthogonal candidate sufficient statistics; block-constant continuous-Brownian skeleton",
+  "sampled_waveform": false,
+  "sigma_rad_sqrt_second": 0.001234134149488435,
+  "tau_seconds": 1313122.5400046974,
+  "days": 850.0,
+  "blocks": 4475,
+  "dt_seconds": 16411.173184357544,
+  "dt_over_tau": 0.012497823077729543,
+  "independent_synthetic_phase_noise_paths": 128,
+  "null_paths": 128,
+  "thresholds": {
+    "strict": 22.721063389585737,
+    "relaxed": 17.4227460230377
+  },
+  "calibration": "Gaussian H0 exact-arithmetic normalized likelihood mixtures; union over 2 bits, 16 methods, 8 durations, 1440/day or 720/12h attempts; half budget to scores",
+  "source_sha256": "cb878e5ed3c7e9d9608166e2062501e8b2bd2c63e07a4eff5ea993096e6ea0a9",
+  "library_sha256": "48ee569b1d467b2d7b6fd55088764bd28dd11e0bfecb5974622a318fbb408585",
+  "environment": {
+    "torch": "2.8.0+cpu",
+    "numpy": "2.5.4",
+    "precision": "fp32",
+    "threads": 1
+  },
+  "limitations": [
+    "No triad pulse shape, carrier overlap, delay, Doppler, selective modulation, timing/epoch/CFO search or unknown noise.",
+    "Brownian phase is constant inside teacher blocks; convergence in this script does not validate continuous within-block waveform behavior.",
+    "C/N0 sweeps share paired phase and indexed noise. Counts refer to synthetic independent paths, not physical propagation reliability.",
+    "Known amplitude and orthogonal candidate patterns make this a favorable diagnostic. Oracle phase is unavailable to an ordinary receiver.",
+    "Time scaling preserves c*tau, T/tau, dt/tau only for this stipulated sufficient-statistic teacher, not an accelerated real channel."
+  ],
+  "rows": [
+    {
+      "cn0_db_hz": -63.0,
+      "c_tau": 0.6581202532385717,
+      "energy_snr": 36.80719043758689,
+      "method": "finite_phase_32_reblock_1",
+      "wall_seconds": 3.3698829589993693,
+      "diagnostics": {
+        "algorithm": "finite_phase_frequency_static_gain_marginal_lr",
+        "phase_states": 32,
+        "frequency_states": 1,
+        "frequency_grid_hz": [
+          0.0
+        ],
+        "frequency_spacing_hz": 0.0,
+        "initial_frequency_weights": [
+          1.0
+        ],
+        "initial_frequency_mean_hz": 0.0,
+        "initial_frequency_variance_hz2": 0.0,
+        "generator_stationary_frequency_variance_hz2": null,
+        "generator_stationary_initial_correlation_decay_per_second": null,
+        "grid_convergence_scope": "automatic phase-grid changes also change frequency spacing; vary explicit frequency_grid_hz independently when separating the two discretization errors",
+        "quadrature_states": 1,
+        "frequency_model": "static",
+        "frequency_std_hz": 0.003,
+        "frequency_correlation_seconds": 1000.0,
+        "random_walk_hz_per_sqrt_second": 1e-06,
+        "phase_diffusion_rad_per_sqrt_second": 0.001234134149488435,
+        "nominal_dt_seconds": 16411.173184357544,
+        "transition_order": "half old-frequency phase advection; frequency CTMC; half new-frequency phase advection; independent phase CTMC",
+        "initial_phase_prior": "uniform",
+        "gain_prior_static_through_observation": true,
+        "amplitude_nodes": [
+          1.0
+        ],
+        "amplitude_weights_normalized": [
+          1.0
+        ],
+        "relative_phase_states": 1,
+        "ray_amplitudes": [
+          1.0
+        ],
+        "phase_kernel_tail_probability": 1e-12,
+        "bulk_dtype": "torch.float32",
+        "log_evidence_dtype": "torch.float64",
+        "tf32_allowed": false,
+        "working_bytes_bound": 1121344,
+        "memory_scope": "owned state/temporary/cache array estimate; excludes framework runtime and allocator cache",
+        "maximum_phase_interpolation_variance_radians2_per_interval": 0.0,
+        "maximum_discarded_phase_kernel_mass": 1.1313172620930345e-13,
+        "maximum_frequency_transition_row_error_before_normalizing": 0.0,
+        "updates": 4475,
+        "elapsed_center_separation_seconds": 73423588.82681565,
+        "model_scope": "normalized finite-state likelihood with static proper gain quadrature and block-constant common phase; continuous colored oscillator and arbitrary within-block phase evolution are not exact models",
+        "null_scope": "known white circular Gaussian null and fixed pre-observation priors; finite-precision validation/calibration is separate from the exact-arithmetic mean-one LR identity"
+      },
+      "outcomes": {
+        "strict": {
+          "signal_trials": 128,
+          "correct_accepted": 0,
+          "wrong_accepted": 0,
+          "misses": 128,
+          "correct_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 127
+        },
+        "relaxed": {
+          "signal_trials": 128,
+          "correct_accepted": 2,
+          "wrong_accepted": 0,
+          "misses": 126,
+          "correct_interval95": [
+            0.002783292513040571,
+            0.04836699299276614
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 127
+        }
+      },
+      "paired_vs_finest": {
+        "max_abs_log_lr_difference": 0.019651787160106515,
+        "winner_changes": 0,
+        "admission_changes": {
+          "strict": 0,
+          "relaxed": 0
+        }
+      }
+    },
+    {
+      "cn0_db_hz": -63.0,
+      "c_tau": 0.6581202532385717,
+      "energy_snr": 36.80719043758689,
+      "method": "finite_phase_32_reblock_4",
+      "wall_seconds": 1.064515884994762,
+      "diagnostics": {
+        "algorithm": "finite_phase_frequency_static_gain_marginal_lr",
+        "phase_states": 32,
+        "frequency_states": 1,
+        "frequency_grid_hz": [
+          0.0
+        ],
+        "frequency_spacing_hz": 0.0,
+        "initial_frequency_weights": [
+          1.0
+        ],
+        "initial_frequency_mean_hz": 0.0,
+        "initial_frequency_variance_hz2": 0.0,
+        "generator_stationary_frequency_variance_hz2": null,
+        "generator_stationary_initial_correlation_decay_per_second": null,
+        "grid_convergence_scope": "automatic phase-grid changes also change frequency spacing; vary explicit frequency_grid_hz independently when separating the two discretization errors",
+        "quadrature_states": 1,
+        "frequency_model": "static",
+        "frequency_std_hz": 0.003,
+        "frequency_correlation_seconds": 1000.0,
+        "random_walk_hz_per_sqrt_second": 1e-06,
+        "phase_diffusion_rad_per_sqrt_second": 0.001234134149488435,
+        "nominal_dt_seconds": 65644.69273743017,
+        "transition_order": "half old-frequency phase advection; frequency CTMC; half new-frequency phase advection; independent phase CTMC",
+        "initial_phase_prior": "uniform",
+        "gain_prior_static_through_observation": true,
+        "amplitude_nodes": [
+          1.0
+        ],
+        "amplitude_weights_normalized": [
+          1.0
+        ],
+        "relative_phase_states": 1,
+        "ray_amplitudes": [
+          1.0
+        ],
+        "phase_kernel_tail_probability": 1e-12,
+        "bulk_dtype": "torch.float32",
+        "log_evidence_dtype": "torch.float64",
+        "tf32_allowed": false,
+        "working_bytes_bound": 1121344,
+        "memory_scope": "owned state/temporary/cache array estimate; excludes framework runtime and allocator cache",
+        "maximum_phase_interpolation_variance_radians2_per_interval": 0.0,
+        "maximum_discarded_phase_kernel_mass": 6.532552276894421e-13,
+        "maximum_frequency_transition_row_error_before_normalizing": 0.0,
+        "updates": 1119,
+        "elapsed_center_separation_seconds": 73382560.89385477,
+        "model_scope": "normalized finite-state likelihood with static proper gain quadrature and block-constant common phase; continuous colored oscillator and arbitrary within-block phase evolution are not exact models",
+        "null_scope": "known white circular Gaussian null and fixed pre-observation priors; finite-precision validation/calibration is separate from the exact-arithmetic mean-one LR identity"
+      },
+      "outcomes": {
+        "strict": {
+          "signal_trials": 128,
+          "correct_accepted": 0,
+          "wrong_accepted": 0,
+          "misses": 128,
+          "correct_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 127
+        },
+        "relaxed": {
+          "signal_trials": 128,
+          "correct_accepted": 2,
+          "wrong_accepted": 0,
+          "misses": 126,
+          "correct_interval95": [
+            0.002783292513040571,
+            0.04836699299276614
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 127
+        }
+      },
+      "paired_vs_finest": {
+        "max_abs_log_lr_difference": 0.27706201383684403,
+        "winner_changes": 0,
+        "admission_changes": {
+          "strict": 0,
+          "relaxed": 0
+        }
+      }
+    },
+    {
+      "cn0_db_hz": -63.0,
+      "c_tau": 0.6581202532385717,
+      "energy_snr": 36.80719043758689,
+      "method": "finite_phase_64_reblock_1",
+      "wall_seconds": 5.469999633001862,
+      "diagnostics": {
+        "algorithm": "finite_phase_frequency_static_gain_marginal_lr",
+        "phase_states": 64,
+        "frequency_states": 1,
+        "frequency_grid_hz": [
+          0.0
+        ],
+        "frequency_spacing_hz": 0.0,
+        "initial_frequency_weights": [
+          1.0
+        ],
+        "initial_frequency_mean_hz": 0.0,
+        "initial_frequency_variance_hz2": 0.0,
+        "generator_stationary_frequency_variance_hz2": null,
+        "generator_stationary_initial_correlation_decay_per_second": null,
+        "grid_convergence_scope": "automatic phase-grid changes also change frequency spacing; vary explicit frequency_grid_hz independently when separating the two discretization errors",
+        "quadrature_states": 1,
+        "frequency_model": "static",
+        "frequency_std_hz": 0.003,
+        "frequency_correlation_seconds": 1000.0,
+        "random_walk_hz_per_sqrt_second": 1e-06,
+        "phase_diffusion_rad_per_sqrt_second": 0.001234134149488435,
+        "nominal_dt_seconds": 16411.173184357544,
+        "transition_order": "half old-frequency phase advection; frequency CTMC; half new-frequency phase advection; independent phase CTMC",
+        "initial_phase_prior": "uniform",
+        "gain_prior_static_through_observation": true,
+        "amplitude_nodes": [
+          1.0
+        ],
+        "amplitude_weights_normalized": [
+          1.0
+        ],
+        "relative_phase_states": 1,
+        "ray_amplitudes": [
+          1.0
+        ],
+        "phase_kernel_tail_probability": 1e-12,
+        "bulk_dtype": "torch.float32",
+        "log_evidence_dtype": "torch.float64",
+        "tf32_allowed": false,
+        "working_bytes_bound": 2177088,
+        "memory_scope": "owned state/temporary/cache array estimate; excludes framework runtime and allocator cache",
+        "maximum_phase_interpolation_variance_radians2_per_interval": 0.0,
+        "maximum_discarded_phase_kernel_mass": 5.45785638905727e-13,
+        "maximum_frequency_transition_row_error_before_normalizing": 0.0,
+        "updates": 4475,
+        "elapsed_center_separation_seconds": 73423588.82681565,
+        "model_scope": "normalized finite-state likelihood with static proper gain quadrature and block-constant common phase; continuous colored oscillator and arbitrary within-block phase evolution are not exact models",
+        "null_scope": "known white circular Gaussian null and fixed pre-observation priors; finite-precision validation/calibration is separate from the exact-arithmetic mean-one LR identity"
+      },
+      "outcomes": {
+        "strict": {
+          "signal_trials": 128,
+          "correct_accepted": 0,
+          "wrong_accepted": 0,
+          "misses": 128,
+          "correct_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 127
+        },
+        "relaxed": {
+          "signal_trials": 128,
+          "correct_accepted": 2,
+          "wrong_accepted": 0,
+          "misses": 126,
+          "correct_interval95": [
+            0.002783292513040571,
+            0.04836699299276614
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 127
+        }
+      },
+      "paired_vs_finest": {
+        "max_abs_log_lr_difference": 0.00391714782369057,
+        "winner_changes": 0,
+        "admission_changes": {
+          "strict": 0,
+          "relaxed": 0
+        }
+      }
+    },
+    {
+      "cn0_db_hz": -63.0,
+      "c_tau": 0.6581202532385717,
+      "energy_snr": 36.80719043758689,
+      "method": "finite_phase_64_reblock_4",
+      "wall_seconds": 1.7811834540043492,
+      "diagnostics": {
+        "algorithm": "finite_phase_frequency_static_gain_marginal_lr",
+        "phase_states": 64,
+        "frequency_states": 1,
+        "frequency_grid_hz": [
+          0.0
+        ],
+        "frequency_spacing_hz": 0.0,
+        "initial_frequency_weights": [
+          1.0
+        ],
+        "initial_frequency_mean_hz": 0.0,
+        "initial_frequency_variance_hz2": 0.0,
+        "generator_stationary_frequency_variance_hz2": null,
+        "generator_stationary_initial_correlation_decay_per_second": null,
+        "grid_convergence_scope": "automatic phase-grid changes also change frequency spacing; vary explicit frequency_grid_hz independently when separating the two discretization errors",
+        "quadrature_states": 1,
+        "frequency_model": "static",
+        "frequency_std_hz": 0.003,
+        "frequency_correlation_seconds": 1000.0,
+        "random_walk_hz_per_sqrt_second": 1e-06,
+        "phase_diffusion_rad_per_sqrt_second": 0.001234134149488435,
+        "nominal_dt_seconds": 65644.69273743017,
+        "transition_order": "half old-frequency phase advection; frequency CTMC; half new-frequency phase advection; independent phase CTMC",
+        "initial_phase_prior": "uniform",
+        "gain_prior_static_through_observation": true,
+        "amplitude_nodes": [
+          1.0
+        ],
+        "amplitude_weights_normalized": [
+          1.0
+        ],
+        "relative_phase_states": 1,
+        "ray_amplitudes": [
+          1.0
+        ],
+        "phase_kernel_tail_probability": 1e-12,
+        "bulk_dtype": "torch.float32",
+        "log_evidence_dtype": "torch.float64",
+        "tf32_allowed": false,
+        "working_bytes_bound": 2177088,
+        "memory_scope": "owned state/temporary/cache array estimate; excludes framework runtime and allocator cache",
+        "maximum_phase_interpolation_variance_radians2_per_interval": 0.0,
+        "maximum_discarded_phase_kernel_mass": 5.976330541557218e-13,
+        "maximum_frequency_transition_row_error_before_normalizing": 0.0,
+        "updates": 1119,
+        "elapsed_center_separation_seconds": 73382560.89385477,
+        "model_scope": "normalized finite-state likelihood with static proper gain quadrature and block-constant common phase; continuous colored oscillator and arbitrary within-block phase evolution are not exact models",
+        "null_scope": "known white circular Gaussian null and fixed pre-observation priors; finite-precision validation/calibration is separate from the exact-arithmetic mean-one LR identity"
+      },
+      "outcomes": {
+        "strict": {
+          "signal_trials": 128,
+          "correct_accepted": 0,
+          "wrong_accepted": 0,
+          "misses": 128,
+          "correct_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 127
+        },
+        "relaxed": {
+          "signal_trials": 128,
+          "correct_accepted": 2,
+          "wrong_accepted": 0,
+          "misses": 126,
+          "correct_interval95": [
+            0.002783292513040571,
+            0.04836699299276614
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 127
+        }
+      },
+      "paired_vs_finest": {
+        "max_abs_log_lr_difference": 0.28437219657652424,
+        "winner_changes": 0,
+        "admission_changes": {
+          "strict": 0,
+          "relaxed": 0
+        }
+      }
+    },
+    {
+      "cn0_db_hz": -63.0,
+      "c_tau": 0.6581202532385717,
+      "energy_snr": 36.80719043758689,
+      "method": "finite_phase_128_reblock_1",
+      "wall_seconds": 12.891278472001432,
+      "diagnostics": {
+        "algorithm": "finite_phase_frequency_static_gain_marginal_lr",
+        "phase_states": 128,
+        "frequency_states": 1,
+        "frequency_grid_hz": [
+          0.0
+        ],
+        "frequency_spacing_hz": 0.0,
+        "initial_frequency_weights": [
+          1.0
+        ],
+        "initial_frequency_mean_hz": 0.0,
+        "initial_frequency_variance_hz2": 0.0,
+        "generator_stationary_frequency_variance_hz2": null,
+        "generator_stationary_initial_correlation_decay_per_second": null,
+        "grid_convergence_scope": "automatic phase-grid changes also change frequency spacing; vary explicit frequency_grid_hz independently when separating the two discretization errors",
+        "quadrature_states": 1,
+        "frequency_model": "static",
+        "frequency_std_hz": 0.003,
+        "frequency_correlation_seconds": 1000.0,
+        "random_walk_hz_per_sqrt_second": 1e-06,
+        "phase_diffusion_rad_per_sqrt_second": 0.001234134149488435,
+        "nominal_dt_seconds": 16411.173184357544,
+        "transition_order": "half old-frequency phase advection; frequency CTMC; half new-frequency phase advection; independent phase CTMC",
+        "initial_phase_prior": "uniform",
+        "gain_prior_static_through_observation": true,
+        "amplitude_nodes": [
+          1.0
+        ],
+        "amplitude_weights_normalized": [
+          1.0
+        ],
+        "relative_phase_states": 1,
+        "ray_amplitudes": [
+          1.0
+        ],
+        "phase_kernel_tail_probability": 1e-12,
+        "bulk_dtype": "torch.float32",
+        "log_evidence_dtype": "torch.float64",
+        "tf32_allowed": false,
+        "working_bytes_bound": 4288576,
+        "memory_scope": "owned state/temporary/cache array estimate; excludes framework runtime and allocator cache",
+        "maximum_phase_interpolation_variance_radians2_per_interval": 0.0,
+        "maximum_discarded_phase_kernel_mass": 3.6126657221302594e-13,
+        "maximum_frequency_transition_row_error_before_normalizing": 0.0,
+        "updates": 4475,
+        "elapsed_center_separation_seconds": 73423588.82681565,
+        "model_scope": "normalized finite-state likelihood with static proper gain quadrature and block-constant common phase; continuous colored oscillator and arbitrary within-block phase evolution are not exact models",
+        "null_scope": "known white circular Gaussian null and fixed pre-observation priors; finite-precision validation/calibration is separate from the exact-arithmetic mean-one LR identity"
+      },
+      "outcomes": {
+        "strict": {
+          "signal_trials": 128,
+          "correct_accepted": 0,
+          "wrong_accepted": 0,
+          "misses": 128,
+          "correct_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 127
+        },
+        "relaxed": {
+          "signal_trials": 128,
+          "correct_accepted": 2,
+          "wrong_accepted": 0,
+          "misses": 126,
+          "correct_interval95": [
+            0.002783292513040571,
+            0.04836699299276614
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 127
+        }
+      },
+      "paired_vs_finest": {
+        "max_abs_log_lr_difference": 0.0,
+        "winner_changes": 0,
+        "admission_changes": {
+          "strict": 0,
+          "relaxed": 0
+        }
+      }
+    },
+    {
+      "cn0_db_hz": -63.0,
+      "c_tau": 0.6581202532385717,
+      "energy_snr": 36.80719043758689,
+      "method": "finite_phase_128_reblock_4",
+      "wall_seconds": 4.426534799014917,
+      "diagnostics": {
+        "algorithm": "finite_phase_frequency_static_gain_marginal_lr",
+        "phase_states": 128,
+        "frequency_states": 1,
+        "frequency_grid_hz": [
+          0.0
+        ],
+        "frequency_spacing_hz": 0.0,
+        "initial_frequency_weights": [
+          1.0
+        ],
+        "initial_frequency_mean_hz": 0.0,
+        "initial_frequency_variance_hz2": 0.0,
+        "generator_stationary_frequency_variance_hz2": null,
+        "generator_stationary_initial_correlation_decay_per_second": null,
+        "grid_convergence_scope": "automatic phase-grid changes also change frequency spacing; vary explicit frequency_grid_hz independently when separating the two discretization errors",
+        "quadrature_states": 1,
+        "frequency_model": "static",
+        "frequency_std_hz": 0.003,
+        "frequency_correlation_seconds": 1000.0,
+        "random_walk_hz_per_sqrt_second": 1e-06,
+        "phase_diffusion_rad_per_sqrt_second": 0.001234134149488435,
+        "nominal_dt_seconds": 65644.69273743017,
+        "transition_order": "half old-frequency phase advection; frequency CTMC; half new-frequency phase advection; independent phase CTMC",
+        "initial_phase_prior": "uniform",
+        "gain_prior_static_through_observation": true,
+        "amplitude_nodes": [
+          1.0
+        ],
+        "amplitude_weights_normalized": [
+          1.0
+        ],
+        "relative_phase_states": 1,
+        "ray_amplitudes": [
+          1.0
+        ],
+        "phase_kernel_tail_probability": 1e-12,
+        "bulk_dtype": "torch.float32",
+        "log_evidence_dtype": "torch.float64",
+        "tf32_allowed": false,
+        "working_bytes_bound": 4288576,
+        "memory_scope": "owned state/temporary/cache array estimate; excludes framework runtime and allocator cache",
+        "maximum_phase_interpolation_variance_radians2_per_interval": 0.0,
+        "maximum_discarded_phase_kernel_mass": 9.32920407592519e-13,
+        "maximum_frequency_transition_row_error_before_normalizing": 0.0,
+        "updates": 1119,
+        "elapsed_center_separation_seconds": 73382560.89385477,
+        "model_scope": "normalized finite-state likelihood with static proper gain quadrature and block-constant common phase; continuous colored oscillator and arbitrary within-block phase evolution are not exact models",
+        "null_scope": "known white circular Gaussian null and fixed pre-observation priors; finite-precision validation/calibration is separate from the exact-arithmetic mean-one LR identity"
+      },
+      "outcomes": {
+        "strict": {
+          "signal_trials": 128,
+          "correct_accepted": 0,
+          "wrong_accepted": 0,
+          "misses": 128,
+          "correct_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 127
+        },
+        "relaxed": {
+          "signal_trials": 128,
+          "correct_accepted": 2,
+          "wrong_accepted": 0,
+          "misses": 126,
+          "correct_interval95": [
+            0.002783292513040571,
+            0.04836699299276614
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 127
+        }
+      },
+      "paired_vs_finest": {
+        "max_abs_log_lr_difference": 0.2861916042589634,
+        "winner_changes": 0,
+        "admission_changes": {
+          "strict": 0,
+          "relaxed": 0
+        }
+      }
+    },
+    {
+      "cn0_db_hz": -63.0,
+      "c_tau": 0.6581202532385717,
+      "energy_snr": 36.80719043758689,
+      "method": "global_unknown_phase",
+      "wall_seconds_joint_analytic": 0.08492415098589845,
+      "outcomes": {
+        "strict": {
+          "signal_trials": 128,
+          "correct_accepted": 0,
+          "wrong_accepted": 0,
+          "misses": 128,
+          "correct_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 84
+        },
+        "relaxed": {
+          "signal_trials": 128,
+          "correct_accepted": 0,
+          "wrong_accepted": 0,
+          "misses": 128,
+          "correct_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 84
+        }
+      }
+    },
+    {
+      "cn0_db_hz": -63.0,
+      "c_tau": 0.6581202532385717,
+      "energy_snr": 36.80719043758689,
+      "method": "segmented_0.25_tau",
+      "wall_seconds_joint_analytic": 0.08492415098589845,
+      "outcomes": {
+        "strict": {
+          "signal_trials": 128,
+          "correct_accepted": 0,
+          "wrong_accepted": 0,
+          "misses": 128,
+          "correct_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 122
+        },
+        "relaxed": {
+          "signal_trials": 128,
+          "correct_accepted": 0,
+          "wrong_accepted": 0,
+          "misses": 128,
+          "correct_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 122
+        }
+      }
+    },
+    {
+      "cn0_db_hz": -63.0,
+      "c_tau": 0.6581202532385717,
+      "energy_snr": 36.80719043758689,
+      "method": "segmented_1_tau",
+      "wall_seconds_joint_analytic": 0.08492415098589845,
+      "outcomes": {
+        "strict": {
+          "signal_trials": 128,
+          "correct_accepted": 0,
+          "wrong_accepted": 0,
+          "misses": 128,
+          "correct_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 127
+        },
+        "relaxed": {
+          "signal_trials": 128,
+          "correct_accepted": 1,
+          "wrong_accepted": 0,
+          "misses": 127,
+          "correct_interval95": [
+            0.0004006485813161649,
+            0.03652382505354843
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 127
+        }
+      }
+    },
+    {
+      "cn0_db_hz": -63.0,
+      "c_tau": 0.6581202532385717,
+      "energy_snr": 36.80719043758689,
+      "method": "segmented_4_tau",
+      "wall_seconds_joint_analytic": 0.08492415098589845,
+      "outcomes": {
+        "strict": {
+          "signal_trials": 128,
+          "correct_accepted": 0,
+          "wrong_accepted": 0,
+          "misses": 128,
+          "correct_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 123
+        },
+        "relaxed": {
+          "signal_trials": 128,
+          "correct_accepted": 1,
+          "wrong_accepted": 0,
+          "misses": 127,
+          "correct_interval95": [
+            0.0004006485813161649,
+            0.03652382505354843
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 123
+        }
+      }
+    },
+    {
+      "cn0_db_hz": -63.0,
+      "c_tau": 0.6581202532385717,
+      "energy_snr": 36.80719043758689,
+      "method": "oracle_phase",
+      "wall_seconds_joint_analytic": 0.08492415098589845,
+      "outcomes": {
+        "strict": {
+          "signal_trials": 128,
+          "correct_accepted": 125,
+          "wrong_accepted": 0,
+          "misses": 3,
+          "correct_interval95": [
+            0.940541190608595,
+            0.9935820082523851
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 128
+        },
+        "relaxed": {
+          "signal_trials": 128,
+          "correct_accepted": 128,
+          "wrong_accepted": 0,
+          "misses": 0,
+          "correct_interval95": [
+            0.9768675947482532,
+            1.0
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 128
+        }
+      },
+      "known_waveform_single_candidate_Pd": {
+        "strict": 0.9496803588560531,
+        "relaxed": 0.9880673316691784
+      }
+    },
+    {
+      "cn0_db_hz": -60.0,
+      "c_tau": 1.3131225400046973,
+      "energy_snr": 73.44,
+      "method": "finite_phase_32_reblock_1",
+      "wall_seconds": 3.340651152015198,
+      "diagnostics": {
+        "algorithm": "finite_phase_frequency_static_gain_marginal_lr",
+        "phase_states": 32,
+        "frequency_states": 1,
+        "frequency_grid_hz": [
+          0.0
+        ],
+        "frequency_spacing_hz": 0.0,
+        "initial_frequency_weights": [
+          1.0
+        ],
+        "initial_frequency_mean_hz": 0.0,
+        "initial_frequency_variance_hz2": 0.0,
+        "generator_stationary_frequency_variance_hz2": null,
+        "generator_stationary_initial_correlation_decay_per_second": null,
+        "grid_convergence_scope": "automatic phase-grid changes also change frequency spacing; vary explicit frequency_grid_hz independently when separating the two discretization errors",
+        "quadrature_states": 1,
+        "frequency_model": "static",
+        "frequency_std_hz": 0.003,
+        "frequency_correlation_seconds": 1000.0,
+        "random_walk_hz_per_sqrt_second": 1e-06,
+        "phase_diffusion_rad_per_sqrt_second": 0.001234134149488435,
+        "nominal_dt_seconds": 16411.173184357544,
+        "transition_order": "half old-frequency phase advection; frequency CTMC; half new-frequency phase advection; independent phase CTMC",
+        "initial_phase_prior": "uniform",
+        "gain_prior_static_through_observation": true,
+        "amplitude_nodes": [
+          1.0
+        ],
+        "amplitude_weights_normalized": [
+          1.0
+        ],
+        "relative_phase_states": 1,
+        "ray_amplitudes": [
+          1.0
+        ],
+        "phase_kernel_tail_probability": 1e-12,
+        "bulk_dtype": "torch.float32",
+        "log_evidence_dtype": "torch.float64",
+        "tf32_allowed": false,
+        "working_bytes_bound": 1121344,
+        "memory_scope": "owned state/temporary/cache array estimate; excludes framework runtime and allocator cache",
+        "maximum_phase_interpolation_variance_radians2_per_interval": 0.0,
+        "maximum_discarded_phase_kernel_mass": 1.1313172620930345e-13,
+        "maximum_frequency_transition_row_error_before_normalizing": 0.0,
+        "updates": 4475,
+        "elapsed_center_separation_seconds": 73423588.82681565,
+        "model_scope": "normalized finite-state likelihood with static proper gain quadrature and block-constant common phase; continuous colored oscillator and arbitrary within-block phase evolution are not exact models",
+        "null_scope": "known white circular Gaussian null and fixed pre-observation priors; finite-precision validation/calibration is separate from the exact-arithmetic mean-one LR identity"
+      },
+      "outcomes": {
+        "strict": {
+          "signal_trials": 128,
+          "correct_accepted": 73,
+          "wrong_accepted": 0,
+          "misses": 55,
+          "correct_interval95": [
+            0.4937717397174727,
+            0.6443693350764594
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 128
+        },
+        "relaxed": {
+          "signal_trials": 128,
+          "correct_accepted": 107,
+          "wrong_accepted": 0,
+          "misses": 21,
+          "correct_interval95": [
+            0.7724106540273608,
+            0.8873525135385005
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 128
+        }
+      },
+      "paired_vs_finest": {
+        "max_abs_log_lr_difference": 0.033583580786372025,
+        "winner_changes": 0,
+        "admission_changes": {
+          "strict": 0,
+          "relaxed": 0
+        }
+      }
+    },
+    {
+      "cn0_db_hz": -60.0,
+      "c_tau": 1.3131225400046973,
+      "energy_snr": 73.44,
+      "method": "finite_phase_32_reblock_4",
+      "wall_seconds": 1.0582221990043763,
+      "diagnostics": {
+        "algorithm": "finite_phase_frequency_static_gain_marginal_lr",
+        "phase_states": 32,
+        "frequency_states": 1,
+        "frequency_grid_hz": [
+          0.0
+        ],
+        "frequency_spacing_hz": 0.0,
+        "initial_frequency_weights": [
+          1.0
+        ],
+        "initial_frequency_mean_hz": 0.0,
+        "initial_frequency_variance_hz2": 0.0,
+        "generator_stationary_frequency_variance_hz2": null,
+        "generator_stationary_initial_correlation_decay_per_second": null,
+        "grid_convergence_scope": "automatic phase-grid changes also change frequency spacing; vary explicit frequency_grid_hz independently when separating the two discretization errors",
+        "quadrature_states": 1,
+        "frequency_model": "static",
+        "frequency_std_hz": 0.003,
+        "frequency_correlation_seconds": 1000.0,
+        "random_walk_hz_per_sqrt_second": 1e-06,
+        "phase_diffusion_rad_per_sqrt_second": 0.001234134149488435,
+        "nominal_dt_seconds": 65644.69273743017,
+        "transition_order": "half old-frequency phase advection; frequency CTMC; half new-frequency phase advection; independent phase CTMC",
+        "initial_phase_prior": "uniform",
+        "gain_prior_static_through_observation": true,
+        "amplitude_nodes": [
+          1.0
+        ],
+        "amplitude_weights_normalized": [
+          1.0
+        ],
+        "relative_phase_states": 1,
+        "ray_amplitudes": [
+          1.0
+        ],
+        "phase_kernel_tail_probability": 1e-12,
+        "bulk_dtype": "torch.float32",
+        "log_evidence_dtype": "torch.float64",
+        "tf32_allowed": false,
+        "working_bytes_bound": 1121344,
+        "memory_scope": "owned state/temporary/cache array estimate; excludes framework runtime and allocator cache",
+        "maximum_phase_interpolation_variance_radians2_per_interval": 0.0,
+        "maximum_discarded_phase_kernel_mass": 6.532552276894421e-13,
+        "maximum_frequency_transition_row_error_before_normalizing": 0.0,
+        "updates": 1119,
+        "elapsed_center_separation_seconds": 73382560.89385477,
+        "model_scope": "normalized finite-state likelihood with static proper gain quadrature and block-constant common phase; continuous colored oscillator and arbitrary within-block phase evolution are not exact models",
+        "null_scope": "known white circular Gaussian null and fixed pre-observation priors; finite-precision validation/calibration is separate from the exact-arithmetic mean-one LR identity"
+      },
+      "outcomes": {
+        "strict": {
+          "signal_trials": 128,
+          "correct_accepted": 72,
+          "wrong_accepted": 0,
+          "misses": 56,
+          "correct_interval95": [
+            0.4859475015721615,
+            0.6368448523853687
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 128
+        },
+        "relaxed": {
+          "signal_trials": 128,
+          "correct_accepted": 107,
+          "wrong_accepted": 0,
+          "misses": 21,
+          "correct_interval95": [
+            0.7724106540273608,
+            0.8873525135385005
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 128
+        }
+      },
+      "paired_vs_finest": {
+        "max_abs_log_lr_difference": 0.5106439645050358,
+        "winner_changes": 1,
+        "admission_changes": {
+          "strict": 1,
+          "relaxed": 0
+        }
+      }
+    },
+    {
+      "cn0_db_hz": -60.0,
+      "c_tau": 1.3131225400046973,
+      "energy_snr": 73.44,
+      "method": "finite_phase_64_reblock_1",
+      "wall_seconds": 5.697908423986519,
+      "diagnostics": {
+        "algorithm": "finite_phase_frequency_static_gain_marginal_lr",
+        "phase_states": 64,
+        "frequency_states": 1,
+        "frequency_grid_hz": [
+          0.0
+        ],
+        "frequency_spacing_hz": 0.0,
+        "initial_frequency_weights": [
+          1.0
+        ],
+        "initial_frequency_mean_hz": 0.0,
+        "initial_frequency_variance_hz2": 0.0,
+        "generator_stationary_frequency_variance_hz2": null,
+        "generator_stationary_initial_correlation_decay_per_second": null,
+        "grid_convergence_scope": "automatic phase-grid changes also change frequency spacing; vary explicit frequency_grid_hz independently when separating the two discretization errors",
+        "quadrature_states": 1,
+        "frequency_model": "static",
+        "frequency_std_hz": 0.003,
+        "frequency_correlation_seconds": 1000.0,
+        "random_walk_hz_per_sqrt_second": 1e-06,
+        "phase_diffusion_rad_per_sqrt_second": 0.001234134149488435,
+        "nominal_dt_seconds": 16411.173184357544,
+        "transition_order": "half old-frequency phase advection; frequency CTMC; half new-frequency phase advection; independent phase CTMC",
+        "initial_phase_prior": "uniform",
+        "gain_prior_static_through_observation": true,
+        "amplitude_nodes": [
+          1.0
+        ],
+        "amplitude_weights_normalized": [
+          1.0
+        ],
+        "relative_phase_states": 1,
+        "ray_amplitudes": [
+          1.0
+        ],
+        "phase_kernel_tail_probability": 1e-12,
+        "bulk_dtype": "torch.float32",
+        "log_evidence_dtype": "torch.float64",
+        "tf32_allowed": false,
+        "working_bytes_bound": 2177088,
+        "memory_scope": "owned state/temporary/cache array estimate; excludes framework runtime and allocator cache",
+        "maximum_phase_interpolation_variance_radians2_per_interval": 0.0,
+        "maximum_discarded_phase_kernel_mass": 5.45785638905727e-13,
+        "maximum_frequency_transition_row_error_before_normalizing": 0.0,
+        "updates": 4475,
+        "elapsed_center_separation_seconds": 73423588.82681565,
+        "model_scope": "normalized finite-state likelihood with static proper gain quadrature and block-constant common phase; continuous colored oscillator and arbitrary within-block phase evolution are not exact models",
+        "null_scope": "known white circular Gaussian null and fixed pre-observation priors; finite-precision validation/calibration is separate from the exact-arithmetic mean-one LR identity"
+      },
+      "outcomes": {
+        "strict": {
+          "signal_trials": 128,
+          "correct_accepted": 73,
+          "wrong_accepted": 0,
+          "misses": 55,
+          "correct_interval95": [
+            0.4937717397174727,
+            0.6443693350764594
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 128
+        },
+        "relaxed": {
+          "signal_trials": 128,
+          "correct_accepted": 107,
+          "wrong_accepted": 0,
+          "misses": 21,
+          "correct_interval95": [
+            0.7724106540273608,
+            0.8873525135385005
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 128
+        }
+      },
+      "paired_vs_finest": {
+        "max_abs_log_lr_difference": 0.006691593102035043,
+        "winner_changes": 0,
+        "admission_changes": {
+          "strict": 0,
+          "relaxed": 0
+        }
+      }
+    },
+    {
+      "cn0_db_hz": -60.0,
+      "c_tau": 1.3131225400046973,
+      "energy_snr": 73.44,
+      "method": "finite_phase_64_reblock_4",
+      "wall_seconds": 1.718402159982361,
+      "diagnostics": {
+        "algorithm": "finite_phase_frequency_static_gain_marginal_lr",
+        "phase_states": 64,
+        "frequency_states": 1,
+        "frequency_grid_hz": [
+          0.0
+        ],
+        "frequency_spacing_hz": 0.0,
+        "initial_frequency_weights": [
+          1.0
+        ],
+        "initial_frequency_mean_hz": 0.0,
+        "initial_frequency_variance_hz2": 0.0,
+        "generator_stationary_frequency_variance_hz2": null,
+        "generator_stationary_initial_correlation_decay_per_second": null,
+        "grid_convergence_scope": "automatic phase-grid changes also change frequency spacing; vary explicit frequency_grid_hz independently when separating the two discretization errors",
+        "quadrature_states": 1,
+        "frequency_model": "static",
+        "frequency_std_hz": 0.003,
+        "frequency_correlation_seconds": 1000.0,
+        "random_walk_hz_per_sqrt_second": 1e-06,
+        "phase_diffusion_rad_per_sqrt_second": 0.001234134149488435,
+        "nominal_dt_seconds": 65644.69273743017,
+        "transition_order": "half old-frequency phase advection; frequency CTMC; half new-frequency phase advection; independent phase CTMC",
+        "initial_phase_prior": "uniform",
+        "gain_prior_static_through_observation": true,
+        "amplitude_nodes": [
+          1.0
+        ],
+        "amplitude_weights_normalized": [
+          1.0
+        ],
+        "relative_phase_states": 1,
+        "ray_amplitudes": [
+          1.0
+        ],
+        "phase_kernel_tail_probability": 1e-12,
+        "bulk_dtype": "torch.float32",
+        "log_evidence_dtype": "torch.float64",
+        "tf32_allowed": false,
+        "working_bytes_bound": 2177088,
+        "memory_scope": "owned state/temporary/cache array estimate; excludes framework runtime and allocator cache",
+        "maximum_phase_interpolation_variance_radians2_per_interval": 0.0,
+        "maximum_discarded_phase_kernel_mass": 5.976330541557218e-13,
+        "maximum_frequency_transition_row_error_before_normalizing": 0.0,
+        "updates": 1119,
+        "elapsed_center_separation_seconds": 73382560.89385477,
+        "model_scope": "normalized finite-state likelihood with static proper gain quadrature and block-constant common phase; continuous colored oscillator and arbitrary within-block phase evolution are not exact models",
+        "null_scope": "known white circular Gaussian null and fixed pre-observation priors; finite-precision validation/calibration is separate from the exact-arithmetic mean-one LR identity"
+      },
+      "outcomes": {
+        "strict": {
+          "signal_trials": 128,
+          "correct_accepted": 72,
+          "wrong_accepted": 0,
+          "misses": 56,
+          "correct_interval95": [
+            0.4859475015721615,
+            0.6368448523853687
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 128
+        },
+        "relaxed": {
+          "signal_trials": 128,
+          "correct_accepted": 107,
+          "wrong_accepted": 0,
+          "misses": 21,
+          "correct_interval95": [
+            0.7724106540273608,
+            0.8873525135385005
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 128
+        }
+      },
+      "paired_vs_finest": {
+        "max_abs_log_lr_difference": 0.518420597427145,
+        "winner_changes": 1,
+        "admission_changes": {
+          "strict": 1,
+          "relaxed": 0
+        }
+      }
+    },
+    {
+      "cn0_db_hz": -60.0,
+      "c_tau": 1.3131225400046973,
+      "energy_snr": 73.44,
+      "method": "finite_phase_128_reblock_1",
+      "wall_seconds": 11.131990722991759,
+      "diagnostics": {
+        "algorithm": "finite_phase_frequency_static_gain_marginal_lr",
+        "phase_states": 128,
+        "frequency_states": 1,
+        "frequency_grid_hz": [
+          0.0
+        ],
+        "frequency_spacing_hz": 0.0,
+        "initial_frequency_weights": [
+          1.0
+        ],
+        "initial_frequency_mean_hz": 0.0,
+        "initial_frequency_variance_hz2": 0.0,
+        "generator_stationary_frequency_variance_hz2": null,
+        "generator_stationary_initial_correlation_decay_per_second": null,
+        "grid_convergence_scope": "automatic phase-grid changes also change frequency spacing; vary explicit frequency_grid_hz independently when separating the two discretization errors",
+        "quadrature_states": 1,
+        "frequency_model": "static",
+        "frequency_std_hz": 0.003,
+        "frequency_correlation_seconds": 1000.0,
+        "random_walk_hz_per_sqrt_second": 1e-06,
+        "phase_diffusion_rad_per_sqrt_second": 0.001234134149488435,
+        "nominal_dt_seconds": 16411.173184357544,
+        "transition_order": "half old-frequency phase advection; frequency CTMC; half new-frequency phase advection; independent phase CTMC",
+        "initial_phase_prior": "uniform",
+        "gain_prior_static_through_observation": true,
+        "amplitude_nodes": [
+          1.0
+        ],
+        "amplitude_weights_normalized": [
+          1.0
+        ],
+        "relative_phase_states": 1,
+        "ray_amplitudes": [
+          1.0
+        ],
+        "phase_kernel_tail_probability": 1e-12,
+        "bulk_dtype": "torch.float32",
+        "log_evidence_dtype": "torch.float64",
+        "tf32_allowed": false,
+        "working_bytes_bound": 4288576,
+        "memory_scope": "owned state/temporary/cache array estimate; excludes framework runtime and allocator cache",
+        "maximum_phase_interpolation_variance_radians2_per_interval": 0.0,
+        "maximum_discarded_phase_kernel_mass": 3.6126657221302594e-13,
+        "maximum_frequency_transition_row_error_before_normalizing": 0.0,
+        "updates": 4475,
+        "elapsed_center_separation_seconds": 73423588.82681565,
+        "model_scope": "normalized finite-state likelihood with static proper gain quadrature and block-constant common phase; continuous colored oscillator and arbitrary within-block phase evolution are not exact models",
+        "null_scope": "known white circular Gaussian null and fixed pre-observation priors; finite-precision validation/calibration is separate from the exact-arithmetic mean-one LR identity"
+      },
+      "outcomes": {
+        "strict": {
+          "signal_trials": 128,
+          "correct_accepted": 73,
+          "wrong_accepted": 0,
+          "misses": 55,
+          "correct_interval95": [
+            0.4937717397174727,
+            0.6443693350764594
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 128
+        },
+        "relaxed": {
+          "signal_trials": 128,
+          "correct_accepted": 107,
+          "wrong_accepted": 0,
+          "misses": 21,
+          "correct_interval95": [
+            0.7724106540273608,
+            0.8873525135385005
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 128
+        }
+      },
+      "paired_vs_finest": {
+        "max_abs_log_lr_difference": 0.0,
+        "winner_changes": 0,
+        "admission_changes": {
+          "strict": 0,
+          "relaxed": 0
+        }
+      }
+    },
+    {
+      "cn0_db_hz": -60.0,
+      "c_tau": 1.3131225400046973,
+      "energy_snr": 73.44,
+      "method": "finite_phase_128_reblock_4",
+      "wall_seconds": 4.764238443982322,
+      "diagnostics": {
+        "algorithm": "finite_phase_frequency_static_gain_marginal_lr",
+        "phase_states": 128,
+        "frequency_states": 1,
+        "frequency_grid_hz": [
+          0.0
+        ],
+        "frequency_spacing_hz": 0.0,
+        "initial_frequency_weights": [
+          1.0
+        ],
+        "initial_frequency_mean_hz": 0.0,
+        "initial_frequency_variance_hz2": 0.0,
+        "generator_stationary_frequency_variance_hz2": null,
+        "generator_stationary_initial_correlation_decay_per_second": null,
+        "grid_convergence_scope": "automatic phase-grid changes also change frequency spacing; vary explicit frequency_grid_hz independently when separating the two discretization errors",
+        "quadrature_states": 1,
+        "frequency_model": "static",
+        "frequency_std_hz": 0.003,
+        "frequency_correlation_seconds": 1000.0,
+        "random_walk_hz_per_sqrt_second": 1e-06,
+        "phase_diffusion_rad_per_sqrt_second": 0.001234134149488435,
+        "nominal_dt_seconds": 65644.69273743017,
+        "transition_order": "half old-frequency phase advection; frequency CTMC; half new-frequency phase advection; independent phase CTMC",
+        "initial_phase_prior": "uniform",
+        "gain_prior_static_through_observation": true,
+        "amplitude_nodes": [
+          1.0
+        ],
+        "amplitude_weights_normalized": [
+          1.0
+        ],
+        "relative_phase_states": 1,
+        "ray_amplitudes": [
+          1.0
+        ],
+        "phase_kernel_tail_probability": 1e-12,
+        "bulk_dtype": "torch.float32",
+        "log_evidence_dtype": "torch.float64",
+        "tf32_allowed": false,
+        "working_bytes_bound": 4288576,
+        "memory_scope": "owned state/temporary/cache array estimate; excludes framework runtime and allocator cache",
+        "maximum_phase_interpolation_variance_radians2_per_interval": 0.0,
+        "maximum_discarded_phase_kernel_mass": 9.32920407592519e-13,
+        "maximum_frequency_transition_row_error_before_normalizing": 0.0,
+        "updates": 1119,
+        "elapsed_center_separation_seconds": 73382560.89385477,
+        "model_scope": "normalized finite-state likelihood with static proper gain quadrature and block-constant common phase; continuous colored oscillator and arbitrary within-block phase evolution are not exact models",
+        "null_scope": "known white circular Gaussian null and fixed pre-observation priors; finite-precision validation/calibration is separate from the exact-arithmetic mean-one LR identity"
+      },
+      "outcomes": {
+        "strict": {
+          "signal_trials": 128,
+          "correct_accepted": 72,
+          "wrong_accepted": 0,
+          "misses": 56,
+          "correct_interval95": [
+            0.4859475015721615,
+            0.6368448523853687
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 128
+        },
+        "relaxed": {
+          "signal_trials": 128,
+          "correct_accepted": 107,
+          "wrong_accepted": 0,
+          "misses": 21,
+          "correct_interval95": [
+            0.7724106540273608,
+            0.8873525135385005
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 128
+        }
+      },
+      "paired_vs_finest": {
+        "max_abs_log_lr_difference": 0.5221367011639213,
+        "winner_changes": 1,
+        "admission_changes": {
+          "strict": 1,
+          "relaxed": 0
+        }
+      }
+    },
+    {
+      "cn0_db_hz": -60.0,
+      "c_tau": 1.3131225400046973,
+      "energy_snr": 73.44,
+      "method": "global_unknown_phase",
+      "wall_seconds_joint_analytic": 0.09057755902176723,
+      "outcomes": {
+        "strict": {
+          "signal_trials": 128,
+          "correct_accepted": 0,
+          "wrong_accepted": 0,
+          "misses": 128,
+          "correct_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 97
+        },
+        "relaxed": {
+          "signal_trials": 128,
+          "correct_accepted": 0,
+          "wrong_accepted": 0,
+          "misses": 128,
+          "correct_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 97
+        }
+      }
+    },
+    {
+      "cn0_db_hz": -60.0,
+      "c_tau": 1.3131225400046973,
+      "energy_snr": 73.44,
+      "method": "segmented_0.25_tau",
+      "wall_seconds_joint_analytic": 0.09057755902176723,
+      "outcomes": {
+        "strict": {
+          "signal_trials": 128,
+          "correct_accepted": 1,
+          "wrong_accepted": 0,
+          "misses": 127,
+          "correct_interval95": [
+            0.0004006485813161649,
+            0.03652382505354843
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 128
+        },
+        "relaxed": {
+          "signal_trials": 128,
+          "correct_accepted": 1,
+          "wrong_accepted": 0,
+          "misses": 127,
+          "correct_interval95": [
+            0.0004006485813161649,
+            0.03652382505354843
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 128
+        }
+      }
+    },
+    {
+      "cn0_db_hz": -60.0,
+      "c_tau": 1.3131225400046973,
+      "energy_snr": 73.44,
+      "method": "segmented_1_tau",
+      "wall_seconds_joint_analytic": 0.09057755902176723,
+      "outcomes": {
+        "strict": {
+          "signal_trials": 128,
+          "correct_accepted": 21,
+          "wrong_accepted": 0,
+          "misses": 107,
+          "correct_interval95": [
+            0.11264748646149944,
+            0.22758934597263916
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 128
+        },
+        "relaxed": {
+          "signal_trials": 128,
+          "correct_accepted": 53,
+          "wrong_accepted": 0,
+          "misses": 75,
+          "correct_interval95": [
+            0.3406360263496431,
+            0.4905258221013187
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 128
+        }
+      }
+    },
+    {
+      "cn0_db_hz": -60.0,
+      "c_tau": 1.3131225400046973,
+      "energy_snr": 73.44,
+      "method": "segmented_4_tau",
+      "wall_seconds_joint_analytic": 0.09057755902176723,
+      "outcomes": {
+        "strict": {
+          "signal_trials": 128,
+          "correct_accepted": 4,
+          "wrong_accepted": 0,
+          "misses": 124,
+          "correct_interval95": [
+            0.010743346684149337,
+            0.07008169059228894
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 127
+        },
+        "relaxed": {
+          "signal_trials": 128,
+          "correct_accepted": 13,
+          "wrong_accepted": 0,
+          "misses": 115,
+          "correct_interval95": [
+            0.061127243567842354,
+            0.15661760289398502
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 127
+        }
+      }
+    },
+    {
+      "cn0_db_hz": -60.0,
+      "c_tau": 1.3131225400046973,
+      "energy_snr": 73.44,
+      "method": "oracle_phase",
+      "wall_seconds_joint_analytic": 0.09057755902176723,
+      "outcomes": {
+        "strict": {
+          "signal_trials": 128,
+          "correct_accepted": 128,
+          "wrong_accepted": 0,
+          "misses": 0,
+          "correct_interval95": [
+            0.9768675947482532,
+            1.0
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 128
+        },
+        "relaxed": {
+          "signal_trials": 128,
+          "correct_accepted": 128,
+          "wrong_accepted": 0,
+          "misses": 0,
+          "correct_interval95": [
+            0.9768675947482532,
+            1.0
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 128
+        }
+      },
+      "known_waveform_single_candidate_Pd": {
+        "strict": 0.9999857376691711,
+        "relaxed": 0.9999981007376985
+      }
+    },
+    {
+      "cn0_db_hz": -57.0,
+      "c_tau": 2.6200239190075867,
+      "energy_snr": 146.53206441131445,
+      "method": "finite_phase_32_reblock_1",
+      "wall_seconds": 3.558070814993698,
+      "diagnostics": {
+        "algorithm": "finite_phase_frequency_static_gain_marginal_lr",
+        "phase_states": 32,
+        "frequency_states": 1,
+        "frequency_grid_hz": [
+          0.0
+        ],
+        "frequency_spacing_hz": 0.0,
+        "initial_frequency_weights": [
+          1.0
+        ],
+        "initial_frequency_mean_hz": 0.0,
+        "initial_frequency_variance_hz2": 0.0,
+        "generator_stationary_frequency_variance_hz2": null,
+        "generator_stationary_initial_correlation_decay_per_second": null,
+        "grid_convergence_scope": "automatic phase-grid changes also change frequency spacing; vary explicit frequency_grid_hz independently when separating the two discretization errors",
+        "quadrature_states": 1,
+        "frequency_model": "static",
+        "frequency_std_hz": 0.003,
+        "frequency_correlation_seconds": 1000.0,
+        "random_walk_hz_per_sqrt_second": 1e-06,
+        "phase_diffusion_rad_per_sqrt_second": 0.001234134149488435,
+        "nominal_dt_seconds": 16411.173184357544,
+        "transition_order": "half old-frequency phase advection; frequency CTMC; half new-frequency phase advection; independent phase CTMC",
+        "initial_phase_prior": "uniform",
+        "gain_prior_static_through_observation": true,
+        "amplitude_nodes": [
+          1.0
+        ],
+        "amplitude_weights_normalized": [
+          1.0
+        ],
+        "relative_phase_states": 1,
+        "ray_amplitudes": [
+          1.0
+        ],
+        "phase_kernel_tail_probability": 1e-12,
+        "bulk_dtype": "torch.float32",
+        "log_evidence_dtype": "torch.float64",
+        "tf32_allowed": false,
+        "working_bytes_bound": 1121344,
+        "memory_scope": "owned state/temporary/cache array estimate; excludes framework runtime and allocator cache",
+        "maximum_phase_interpolation_variance_radians2_per_interval": 0.0,
+        "maximum_discarded_phase_kernel_mass": 1.1313172620930345e-13,
+        "maximum_frequency_transition_row_error_before_normalizing": 0.0,
+        "updates": 4475,
+        "elapsed_center_separation_seconds": 73423588.82681565,
+        "model_scope": "normalized finite-state likelihood with static proper gain quadrature and block-constant common phase; continuous colored oscillator and arbitrary within-block phase evolution are not exact models",
+        "null_scope": "known white circular Gaussian null and fixed pre-observation priors; finite-precision validation/calibration is separate from the exact-arithmetic mean-one LR identity"
+      },
+      "outcomes": {
+        "strict": {
+          "signal_trials": 128,
+          "correct_accepted": 128,
+          "wrong_accepted": 0,
+          "misses": 0,
+          "correct_interval95": [
+            0.9768675947482532,
+            1.0
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 128
+        },
+        "relaxed": {
+          "signal_trials": 128,
+          "correct_accepted": 128,
+          "wrong_accepted": 0,
+          "misses": 0,
+          "correct_interval95": [
+            0.9768675947482532,
+            1.0
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 128
+        }
+      },
+      "paired_vs_finest": {
+        "max_abs_log_lr_difference": 0.05883512871989183,
+        "winner_changes": 0,
+        "admission_changes": {
+          "strict": 0,
+          "relaxed": 0
+        }
+      }
+    },
+    {
+      "cn0_db_hz": -57.0,
+      "c_tau": 2.6200239190075867,
+      "energy_snr": 146.53206441131445,
+      "method": "finite_phase_32_reblock_4",
+      "wall_seconds": 0.951909009978408,
+      "diagnostics": {
+        "algorithm": "finite_phase_frequency_static_gain_marginal_lr",
+        "phase_states": 32,
+        "frequency_states": 1,
+        "frequency_grid_hz": [
+          0.0
+        ],
+        "frequency_spacing_hz": 0.0,
+        "initial_frequency_weights": [
+          1.0
+        ],
+        "initial_frequency_mean_hz": 0.0,
+        "initial_frequency_variance_hz2": 0.0,
+        "generator_stationary_frequency_variance_hz2": null,
+        "generator_stationary_initial_correlation_decay_per_second": null,
+        "grid_convergence_scope": "automatic phase-grid changes also change frequency spacing; vary explicit frequency_grid_hz independently when separating the two discretization errors",
+        "quadrature_states": 1,
+        "frequency_model": "static",
+        "frequency_std_hz": 0.003,
+        "frequency_correlation_seconds": 1000.0,
+        "random_walk_hz_per_sqrt_second": 1e-06,
+        "phase_diffusion_rad_per_sqrt_second": 0.001234134149488435,
+        "nominal_dt_seconds": 65644.69273743017,
+        "transition_order": "half old-frequency phase advection; frequency CTMC; half new-frequency phase advection; independent phase CTMC",
+        "initial_phase_prior": "uniform",
+        "gain_prior_static_through_observation": true,
+        "amplitude_nodes": [
+          1.0
+        ],
+        "amplitude_weights_normalized": [
+          1.0
+        ],
+        "relative_phase_states": 1,
+        "ray_amplitudes": [
+          1.0
+        ],
+        "phase_kernel_tail_probability": 1e-12,
+        "bulk_dtype": "torch.float32",
+        "log_evidence_dtype": "torch.float64",
+        "tf32_allowed": false,
+        "working_bytes_bound": 1121344,
+        "memory_scope": "owned state/temporary/cache array estimate; excludes framework runtime and allocator cache",
+        "maximum_phase_interpolation_variance_radians2_per_interval": 0.0,
+        "maximum_discarded_phase_kernel_mass": 6.532552276894421e-13,
+        "maximum_frequency_transition_row_error_before_normalizing": 0.0,
+        "updates": 1119,
+        "elapsed_center_separation_seconds": 73382560.89385477,
+        "model_scope": "normalized finite-state likelihood with static proper gain quadrature and block-constant common phase; continuous colored oscillator and arbitrary within-block phase evolution are not exact models",
+        "null_scope": "known white circular Gaussian null and fixed pre-observation priors; finite-precision validation/calibration is separate from the exact-arithmetic mean-one LR identity"
+      },
+      "outcomes": {
+        "strict": {
+          "signal_trials": 128,
+          "correct_accepted": 128,
+          "wrong_accepted": 0,
+          "misses": 0,
+          "correct_interval95": [
+            0.9768675947482532,
+            1.0
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 128
+        },
+        "relaxed": {
+          "signal_trials": 128,
+          "correct_accepted": 128,
+          "wrong_accepted": 0,
+          "misses": 0,
+          "correct_interval95": [
+            0.9768675947482532,
+            1.0
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 128
+        }
+      },
+      "paired_vs_finest": {
+        "max_abs_log_lr_difference": 0.9591177139462346,
+        "winner_changes": 1,
+        "admission_changes": {
+          "strict": 0,
+          "relaxed": 0
+        }
+      }
+    },
+    {
+      "cn0_db_hz": -57.0,
+      "c_tau": 2.6200239190075867,
+      "energy_snr": 146.53206441131445,
+      "method": "finite_phase_64_reblock_1",
+      "wall_seconds": 7.980617039982462,
+      "diagnostics": {
+        "algorithm": "finite_phase_frequency_static_gain_marginal_lr",
+        "phase_states": 64,
+        "frequency_states": 1,
+        "frequency_grid_hz": [
+          0.0
+        ],
+        "frequency_spacing_hz": 0.0,
+        "initial_frequency_weights": [
+          1.0
+        ],
+        "initial_frequency_mean_hz": 0.0,
+        "initial_frequency_variance_hz2": 0.0,
+        "generator_stationary_frequency_variance_hz2": null,
+        "generator_stationary_initial_correlation_decay_per_second": null,
+        "grid_convergence_scope": "automatic phase-grid changes also change frequency spacing; vary explicit frequency_grid_hz independently when separating the two discretization errors",
+        "quadrature_states": 1,
+        "frequency_model": "static",
+        "frequency_std_hz": 0.003,
+        "frequency_correlation_seconds": 1000.0,
+        "random_walk_hz_per_sqrt_second": 1e-06,
+        "phase_diffusion_rad_per_sqrt_second": 0.001234134149488435,
+        "nominal_dt_seconds": 16411.173184357544,
+        "transition_order": "half old-frequency phase advection; frequency CTMC; half new-frequency phase advection; independent phase CTMC",
+        "initial_phase_prior": "uniform",
+        "gain_prior_static_through_observation": true,
+        "amplitude_nodes": [
+          1.0
+        ],
+        "amplitude_weights_normalized": [
+          1.0
+        ],
+        "relative_phase_states": 1,
+        "ray_amplitudes": [
+          1.0
+        ],
+        "phase_kernel_tail_probability": 1e-12,
+        "bulk_dtype": "torch.float32",
+        "log_evidence_dtype": "torch.float64",
+        "tf32_allowed": false,
+        "working_bytes_bound": 2177088,
+        "memory_scope": "owned state/temporary/cache array estimate; excludes framework runtime and allocator cache",
+        "maximum_phase_interpolation_variance_radians2_per_interval": 0.0,
+        "maximum_discarded_phase_kernel_mass": 5.45785638905727e-13,
+        "maximum_frequency_transition_row_error_before_normalizing": 0.0,
+        "updates": 4475,
+        "elapsed_center_separation_seconds": 73423588.82681565,
+        "model_scope": "normalized finite-state likelihood with static proper gain quadrature and block-constant common phase; continuous colored oscillator and arbitrary within-block phase evolution are not exact models",
+        "null_scope": "known white circular Gaussian null and fixed pre-observation priors; finite-precision validation/calibration is separate from the exact-arithmetic mean-one LR identity"
+      },
+      "outcomes": {
+        "strict": {
+          "signal_trials": 128,
+          "correct_accepted": 128,
+          "wrong_accepted": 0,
+          "misses": 0,
+          "correct_interval95": [
+            0.9768675947482532,
+            1.0
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 128
+        },
+        "relaxed": {
+          "signal_trials": 128,
+          "correct_accepted": 128,
+          "wrong_accepted": 0,
+          "misses": 0,
+          "correct_interval95": [
+            0.9768675947482532,
+            1.0
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 128
+        }
+      },
+      "paired_vs_finest": {
+        "max_abs_log_lr_difference": 0.011885841126925811,
+        "winner_changes": 0,
+        "admission_changes": {
+          "strict": 0,
+          "relaxed": 0
+        }
+      }
+    },
+    {
+      "cn0_db_hz": -57.0,
+      "c_tau": 2.6200239190075867,
+      "energy_snr": 146.53206441131445,
+      "method": "finite_phase_64_reblock_4",
+      "wall_seconds": 2.3833374709938653,
+      "diagnostics": {
+        "algorithm": "finite_phase_frequency_static_gain_marginal_lr",
+        "phase_states": 64,
+        "frequency_states": 1,
+        "frequency_grid_hz": [
+          0.0
+        ],
+        "frequency_spacing_hz": 0.0,
+        "initial_frequency_weights": [
+          1.0
+        ],
+        "initial_frequency_mean_hz": 0.0,
+        "initial_frequency_variance_hz2": 0.0,
+        "generator_stationary_frequency_variance_hz2": null,
+        "generator_stationary_initial_correlation_decay_per_second": null,
+        "grid_convergence_scope": "automatic phase-grid changes also change frequency spacing; vary explicit frequency_grid_hz independently when separating the two discretization errors",
+        "quadrature_states": 1,
+        "frequency_model": "static",
+        "frequency_std_hz": 0.003,
+        "frequency_correlation_seconds": 1000.0,
+        "random_walk_hz_per_sqrt_second": 1e-06,
+        "phase_diffusion_rad_per_sqrt_second": 0.001234134149488435,
+        "nominal_dt_seconds": 65644.69273743017,
+        "transition_order": "half old-frequency phase advection; frequency CTMC; half new-frequency phase advection; independent phase CTMC",
+        "initial_phase_prior": "uniform",
+        "gain_prior_static_through_observation": true,
+        "amplitude_nodes": [
+          1.0
+        ],
+        "amplitude_weights_normalized": [
+          1.0
+        ],
+        "relative_phase_states": 1,
+        "ray_amplitudes": [
+          1.0
+        ],
+        "phase_kernel_tail_probability": 1e-12,
+        "bulk_dtype": "torch.float32",
+        "log_evidence_dtype": "torch.float64",
+        "tf32_allowed": false,
+        "working_bytes_bound": 2177088,
+        "memory_scope": "owned state/temporary/cache array estimate; excludes framework runtime and allocator cache",
+        "maximum_phase_interpolation_variance_radians2_per_interval": 0.0,
+        "maximum_discarded_phase_kernel_mass": 5.976330541557218e-13,
+        "maximum_frequency_transition_row_error_before_normalizing": 0.0,
+        "updates": 1119,
+        "elapsed_center_separation_seconds": 73382560.89385477,
+        "model_scope": "normalized finite-state likelihood with static proper gain quadrature and block-constant common phase; continuous colored oscillator and arbitrary within-block phase evolution are not exact models",
+        "null_scope": "known white circular Gaussian null and fixed pre-observation priors; finite-precision validation/calibration is separate from the exact-arithmetic mean-one LR identity"
+      },
+      "outcomes": {
+        "strict": {
+          "signal_trials": 128,
+          "correct_accepted": 128,
+          "wrong_accepted": 0,
+          "misses": 0,
+          "correct_interval95": [
+            0.9768675947482532,
+            1.0
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 128
+        },
+        "relaxed": {
+          "signal_trials": 128,
+          "correct_accepted": 128,
+          "wrong_accepted": 0,
+          "misses": 0,
+          "correct_interval95": [
+            0.9768675947482532,
+            1.0
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 128
+        }
+      },
+      "paired_vs_finest": {
+        "max_abs_log_lr_difference": 0.937279795246404,
+        "winner_changes": 1,
+        "admission_changes": {
+          "strict": 0,
+          "relaxed": 0
+        }
+      }
+    },
+    {
+      "cn0_db_hz": -57.0,
+      "c_tau": 2.6200239190075867,
+      "energy_snr": 146.53206441131445,
+      "method": "finite_phase_128_reblock_1",
+      "wall_seconds": 14.040661298990017,
+      "diagnostics": {
+        "algorithm": "finite_phase_frequency_static_gain_marginal_lr",
+        "phase_states": 128,
+        "frequency_states": 1,
+        "frequency_grid_hz": [
+          0.0
+        ],
+        "frequency_spacing_hz": 0.0,
+        "initial_frequency_weights": [
+          1.0
+        ],
+        "initial_frequency_mean_hz": 0.0,
+        "initial_frequency_variance_hz2": 0.0,
+        "generator_stationary_frequency_variance_hz2": null,
+        "generator_stationary_initial_correlation_decay_per_second": null,
+        "grid_convergence_scope": "automatic phase-grid changes also change frequency spacing; vary explicit frequency_grid_hz independently when separating the two discretization errors",
+        "quadrature_states": 1,
+        "frequency_model": "static",
+        "frequency_std_hz": 0.003,
+        "frequency_correlation_seconds": 1000.0,
+        "random_walk_hz_per_sqrt_second": 1e-06,
+        "phase_diffusion_rad_per_sqrt_second": 0.001234134149488435,
+        "nominal_dt_seconds": 16411.173184357544,
+        "transition_order": "half old-frequency phase advection; frequency CTMC; half new-frequency phase advection; independent phase CTMC",
+        "initial_phase_prior": "uniform",
+        "gain_prior_static_through_observation": true,
+        "amplitude_nodes": [
+          1.0
+        ],
+        "amplitude_weights_normalized": [
+          1.0
+        ],
+        "relative_phase_states": 1,
+        "ray_amplitudes": [
+          1.0
+        ],
+        "phase_kernel_tail_probability": 1e-12,
+        "bulk_dtype": "torch.float32",
+        "log_evidence_dtype": "torch.float64",
+        "tf32_allowed": false,
+        "working_bytes_bound": 4288576,
+        "memory_scope": "owned state/temporary/cache array estimate; excludes framework runtime and allocator cache",
+        "maximum_phase_interpolation_variance_radians2_per_interval": 0.0,
+        "maximum_discarded_phase_kernel_mass": 3.6126657221302594e-13,
+        "maximum_frequency_transition_row_error_before_normalizing": 0.0,
+        "updates": 4475,
+        "elapsed_center_separation_seconds": 73423588.82681565,
+        "model_scope": "normalized finite-state likelihood with static proper gain quadrature and block-constant common phase; continuous colored oscillator and arbitrary within-block phase evolution are not exact models",
+        "null_scope": "known white circular Gaussian null and fixed pre-observation priors; finite-precision validation/calibration is separate from the exact-arithmetic mean-one LR identity"
+      },
+      "outcomes": {
+        "strict": {
+          "signal_trials": 128,
+          "correct_accepted": 128,
+          "wrong_accepted": 0,
+          "misses": 0,
+          "correct_interval95": [
+            0.9768675947482532,
+            1.0
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 128
+        },
+        "relaxed": {
+          "signal_trials": 128,
+          "correct_accepted": 128,
+          "wrong_accepted": 0,
+          "misses": 0,
+          "correct_interval95": [
+            0.9768675947482532,
+            1.0
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 128
+        }
+      },
+      "paired_vs_finest": {
+        "max_abs_log_lr_difference": 0.0,
+        "winner_changes": 0,
+        "admission_changes": {
+          "strict": 0,
+          "relaxed": 0
+        }
+      }
+    },
+    {
+      "cn0_db_hz": -57.0,
+      "c_tau": 2.6200239190075867,
+      "energy_snr": 146.53206441131445,
+      "method": "finite_phase_128_reblock_4",
+      "wall_seconds": 5.158411547017749,
+      "diagnostics": {
+        "algorithm": "finite_phase_frequency_static_gain_marginal_lr",
+        "phase_states": 128,
+        "frequency_states": 1,
+        "frequency_grid_hz": [
+          0.0
+        ],
+        "frequency_spacing_hz": 0.0,
+        "initial_frequency_weights": [
+          1.0
+        ],
+        "initial_frequency_mean_hz": 0.0,
+        "initial_frequency_variance_hz2": 0.0,
+        "generator_stationary_frequency_variance_hz2": null,
+        "generator_stationary_initial_correlation_decay_per_second": null,
+        "grid_convergence_scope": "automatic phase-grid changes also change frequency spacing; vary explicit frequency_grid_hz independently when separating the two discretization errors",
+        "quadrature_states": 1,
+        "frequency_model": "static",
+        "frequency_std_hz": 0.003,
+        "frequency_correlation_seconds": 1000.0,
+        "random_walk_hz_per_sqrt_second": 1e-06,
+        "phase_diffusion_rad_per_sqrt_second": 0.001234134149488435,
+        "nominal_dt_seconds": 65644.69273743017,
+        "transition_order": "half old-frequency phase advection; frequency CTMC; half new-frequency phase advection; independent phase CTMC",
+        "initial_phase_prior": "uniform",
+        "gain_prior_static_through_observation": true,
+        "amplitude_nodes": [
+          1.0
+        ],
+        "amplitude_weights_normalized": [
+          1.0
+        ],
+        "relative_phase_states": 1,
+        "ray_amplitudes": [
+          1.0
+        ],
+        "phase_kernel_tail_probability": 1e-12,
+        "bulk_dtype": "torch.float32",
+        "log_evidence_dtype": "torch.float64",
+        "tf32_allowed": false,
+        "working_bytes_bound": 4288576,
+        "memory_scope": "owned state/temporary/cache array estimate; excludes framework runtime and allocator cache",
+        "maximum_phase_interpolation_variance_radians2_per_interval": 0.0,
+        "maximum_discarded_phase_kernel_mass": 9.32920407592519e-13,
+        "maximum_frequency_transition_row_error_before_normalizing": 0.0,
+        "updates": 1119,
+        "elapsed_center_separation_seconds": 73382560.89385477,
+        "model_scope": "normalized finite-state likelihood with static proper gain quadrature and block-constant common phase; continuous colored oscillator and arbitrary within-block phase evolution are not exact models",
+        "null_scope": "known white circular Gaussian null and fixed pre-observation priors; finite-precision validation/calibration is separate from the exact-arithmetic mean-one LR identity"
+      },
+      "outcomes": {
+        "strict": {
+          "signal_trials": 128,
+          "correct_accepted": 128,
+          "wrong_accepted": 0,
+          "misses": 0,
+          "correct_interval95": [
+            0.9768675947482532,
+            1.0
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 128
+        },
+        "relaxed": {
+          "signal_trials": 128,
+          "correct_accepted": 128,
+          "wrong_accepted": 0,
+          "misses": 0,
+          "correct_interval95": [
+            0.9768675947482532,
+            1.0
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 128
+        }
+      },
+      "paired_vs_finest": {
+        "max_abs_log_lr_difference": 0.9318383523844318,
+        "winner_changes": 1,
+        "admission_changes": {
+          "strict": 0,
+          "relaxed": 0
+        }
+      }
+    },
+    {
+      "cn0_db_hz": -57.0,
+      "c_tau": 2.6200239190075867,
+      "energy_snr": 146.53206441131445,
+      "method": "global_unknown_phase",
+      "wall_seconds_joint_analytic": 0.091994321992388,
+      "outcomes": {
+        "strict": {
+          "signal_trials": 128,
+          "correct_accepted": 0,
+          "wrong_accepted": 0,
+          "misses": 128,
+          "correct_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 111
+        },
+        "relaxed": {
+          "signal_trials": 128,
+          "correct_accepted": 0,
+          "wrong_accepted": 0,
+          "misses": 128,
+          "correct_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 111
+        }
+      }
+    },
+    {
+      "cn0_db_hz": -57.0,
+      "c_tau": 2.6200239190075867,
+      "energy_snr": 146.53206441131445,
+      "method": "segmented_0.25_tau",
+      "wall_seconds_joint_analytic": 0.091994321992388,
+      "outcomes": {
+        "strict": {
+          "signal_trials": 128,
+          "correct_accepted": 103,
+          "wrong_accepted": 0,
+          "misses": 25,
+          "correct_interval95": [
+            0.7380250249690476,
+            0.8604223031891559
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 128
+        },
+        "relaxed": {
+          "signal_trials": 128,
+          "correct_accepted": 119,
+          "wrong_accepted": 0,
+          "misses": 9,
+          "correct_interval95": [
+            0.8805123440047277,
+            0.962831546357981
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 128
+        }
+      }
+    },
+    {
+      "cn0_db_hz": -57.0,
+      "c_tau": 2.6200239190075867,
+      "energy_snr": 146.53206441131445,
+      "method": "segmented_1_tau",
+      "wall_seconds_joint_analytic": 0.091994321992388,
+      "outcomes": {
+        "strict": {
+          "signal_trials": 128,
+          "correct_accepted": 122,
+          "wrong_accepted": 0,
+          "misses": 6,
+          "correct_interval95": [
+            0.9095827890750269,
+            0.979391828889065
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 128
+        },
+        "relaxed": {
+          "signal_trials": 128,
+          "correct_accepted": 127,
+          "wrong_accepted": 0,
+          "misses": 1,
+          "correct_interval95": [
+            0.9634761749464515,
+            0.9995993514186838
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 128
+        }
+      }
+    },
+    {
+      "cn0_db_hz": -57.0,
+      "c_tau": 2.6200239190075867,
+      "energy_snr": 146.53206441131445,
+      "method": "segmented_4_tau",
+      "wall_seconds_joint_analytic": 0.091994321992388,
+      "outcomes": {
+        "strict": {
+          "signal_trials": 128,
+          "correct_accepted": 27,
+          "wrong_accepted": 0,
+          "misses": 101,
+          "correct_interval95": [
+            0.15326387069517075,
+            0.2789564598022459
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 128
+        },
+        "relaxed": {
+          "signal_trials": 128,
+          "correct_accepted": 34,
+          "wrong_accepted": 0,
+          "misses": 94,
+          "correct_interval95": [
+            0.20213305410990556,
+            0.3374582122182552
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 128
+        }
+      }
+    },
+    {
+      "cn0_db_hz": -57.0,
+      "c_tau": 2.6200239190075867,
+      "energy_snr": 146.53206441131445,
+      "method": "oracle_phase",
+      "wall_seconds_joint_analytic": 0.091994321992388,
+      "outcomes": {
+        "strict": {
+          "signal_trials": 128,
+          "correct_accepted": 128,
+          "wrong_accepted": 0,
+          "misses": 0,
+          "correct_interval95": [
+            0.9768675947482532,
+            1.0
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 128
+        },
+        "relaxed": {
+          "signal_trials": 128,
+          "correct_accepted": 128,
+          "wrong_accepted": 0,
+          "misses": 0,
+          "correct_interval95": [
+            0.9768675947482532,
+            1.0
+          ],
+          "null_trials": 128,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.023132405251746743
+          ],
+          "raw_correct": 128
+        }
+      },
+      "known_waveform_single_candidate_Pd": {
+        "strict": 0.9999999999997626,
+        "relaxed": 0.9999999999999768
+      }
+    }
+  ]
+}

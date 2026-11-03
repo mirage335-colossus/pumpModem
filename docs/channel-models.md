@@ -354,13 +354,29 @@ campaign and response tests use FHSS Off. Treat FHSS behavior under this new
 operator as unvalidated until RF-frame conversion is carried consistently
 through the filter state, physical hop schedule, and post-propagation capture.
 
+The isolated `--selective-modulation-rate-hz R` optionally supplies the effective
+fast modulation rate independently of ray separation; the slow rate is `0.1R`.
+The value is in physical Hz and is not multiplied by margin again. Omission
+retains the historical linkage to effective spread Doppler, including exact
+zero-Doppler bypass. Explicit zero disables the added stage even with nonzero
+ray separation. Thus `--spread-preset none --selective-perturbation each-65
+--selective-modulation-rate-hz .1` is a declared modulation-only synthetic
+channel, with 0.01/0.1-Hz sidebands, not a zero-Doppler propagation claim.
+The ordinary shared channel paths have no such override and retain their
+existing bypass contract. The same resolved rate drives stage construction,
+memory, tails and capture checks. Explicit overrides reserve the largest
+active modulation sideband in addition to ray separation; omitted overrides
+preserve the historical conservative allowance of the full ray separation
+even for slow-only modulation. Metadata distinguishes actual sideband extent
+from this capture allowance.
+
 The stage has finite causal memory, advances continuously across reads/hops,
 and the stream drains its full selected filter tail. `--selective-tail-floor-seconds`
 sets a shared minimum tail for paired legacy/corrected exports; it never clips a
 longer selected filter. The channel report includes model version, requested
 and resolved spacing, frequency frame, ideal period, branch delays, memory and
-tail samples, actual seed/phases, and pre/post modulation energy. None/Off and
-zero Doppler retain exact bypass behavior.
+tail samples, actual seed/phases, and pre/post modulation energy. Off and a
+zero resolved modulation rate retain exact bypass behavior.
 
 Do not transfer the old three-branch energy or KL constants to the corrected
 operator without deriving them for its actual finite FIRs and observation

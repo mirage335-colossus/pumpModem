@@ -95,6 +95,7 @@ struct Options {
     std::optional<std::string> base_oscillator,shift_oscillator,clock_sync_text,spread_preset,selective_perturbation;
     std::string selective_model = "dispersive-dft";
     double selective_scale_hz = 0, selective_center_hz = 0;
+    std::optional<double> selective_modulation_rate_hz;
     std::optional<double> spread_delay_ms,spread_doppler_hz;
     double audio_error_seconds=clock_sync::default_audio_error_seconds,margin=1,nominal_if_hz=1500;
     bool audio_error_explicit=false,margin_explicit=false,phase_diffusion_explicit=false;
@@ -110,15 +111,16 @@ bool path_evolution_active(const Options& o) {
 
 bool configured_physics(const Options& o) {
     return o.base_oscillator||o.shift_oscillator||o.clock_sync_text||o.spread_preset||o.spread_delay_ms||o.spread_doppler_hz||
-        o.selective_perturbation||o.audio_error_explicit||o.margin_explicit||o.symbol_burst_wait||
+        o.selective_perturbation||o.selective_modulation_rate_hz||o.audio_error_explicit||o.margin_explicit||o.symbol_burst_wait||
         o.truth_frequency_hz!=0||o.truth_frequency_drift!=0;
 }
 struct ResolvedConfiguration {
-    bool active=false,oscillators=false;
+    bool active=false,oscillators=false,shared_shift_clock=false,shift_active=false;
     std::string base_id="manual",shift_id="manual",spread_id="manual",perturbation_id="manual";
     double base_ppm=0,rf_ppm=0,phase_diffusion=0;
     double spread_delay_ms=0,spread_doppler_hz=0,slow_depth=0,fast_depth=0;
     double nominal_spread_delay_ms=0,nominal_spread_doppler_hz=0;
+    double selective_rate_hz=0,selective_sideband_hz=0,selective_capture_allowance_hz=0;
     std::optional<clock_sync::Policy> clock;
     double arrival_center=0,arrival_half=0,clock_bound_ppm=0,frequency_bound_hz=0;
 };
@@ -128,11 +130,15 @@ ResolvedConfiguration resolve_configuration(const Options& o) {
     if(o.channel=="hf"){r.spread_delay_ms=1.5;r.spread_doppler_hz=.3;r.slow_depth=r.fast_depth=.05;}
     if(r.oscillators){
         const auto base=tuning::parse_oscillator_preset(o.base_oscillator.value_or("gpsdo-xo"));
-        const auto shift=tuning::parse_oscillator_preset(o.shift_oscillator.value_or("gpsdo-xo"));
+        const bool shared=o.shift_oscillator=="baseband-clock";
+        const auto shift=shared?base:tuning::parse_oscillator_preset(o.shift_oscillator.value_or("gpsdo-xo"));
         if(!base.baseband_supported)throw std::invalid_argument("selected oscillator does not specify a Baseband clock");
-        r.base_id=base.id;r.shift_id=shift.id;r.base_ppm=base.clock_error_ppm;r.rf_ppm=shift.clock_error_ppm;
-        if(!o.phase_diffusion_explicit)r.phase_diffusion=std::hypot(base.phase_noise_degrees_per_sqrt_second,
-            shift.phase_noise_degrees_per_sqrt_second)*std::numbers::pi/180;
+        r.shift_active=o.rf_hz>0;r.shared_shift_clock=r.shift_active&&shared;
+        r.base_id=base.id;r.shift_id=shared?"baseband-clock":shift.id;r.base_ppm=base.clock_error_ppm;
+        r.rf_ppm=r.shift_active?shift.clock_error_ppm:0;
+        if(!o.phase_diffusion_explicit)r.phase_diffusion=(r.shift_active&&!shared?
+            std::hypot(base.phase_noise_degrees_per_sqrt_second,shift.phase_noise_degrees_per_sqrt_second):
+            base.phase_noise_degrees_per_sqrt_second)*std::numbers::pi/180;
         const double rx_min=1-r.base_ppm*.5e-6;
         if(rx_min<=0)throw std::invalid_argument("base oscillator endpoint clock is nonpositive");
         r.clock_bound_ppm=r.base_ppm/rx_min;
@@ -167,6 +173,16 @@ ResolvedConfiguration resolve_configuration(const Options& o) {
             }
         if(!found)throw std::invalid_argument("selective perturbation must be off or slow/fast/each-N (1,5,10,25,65)");
     }
+    r.selective_rate_hz=o.selective_modulation_rate_hz.value_or(r.spread_doppler_hz);
+    if(!std::isfinite(r.selective_rate_hz)||r.selective_rate_hz<0)
+        throw std::invalid_argument("selective modulation rate must be finite and nonnegative");
+    // The gains add their sinusoids; the outermost active sideband is the
+    // maximum component rate, not the sum of the slow and fast rates.
+    r.selective_sideband_hz=r.selective_rate_hz*(r.fast_depth>0?1:r.slow_depth>0?.1:0);
+    // Keep default capture acceptance identical to historical replays, which
+    // conservatively reserved D even for a slow-only component.
+    r.selective_capture_allowance_hz=o.selective_modulation_rate_hz?r.selective_sideband_hz:
+        (r.fast_depth>0||r.slow_depth>0?r.spread_doppler_hz:0);
     if(r.active){
         const auto selected=o.clock_sync_text?clock_sync::parse(*o.clock_sync_text):std::optional<clock_sync::Policy>{};
         r.clock=clock_sync::effective_policy(selected,o.fhss);
@@ -249,11 +265,14 @@ Options parse(int argc, char** argv) {
   --sample-rate-denominator N Reciprocal-integer sampling: N>1 requires --sample-rate 1; Fs=1/N Hz.
                               Rates below64 Hz require FHSS/dropout/frontend/FM/white-PM off.
                               Constant offsets, Wiener phase, two-ray spread and perturbation remain modeled.
-  --base-oscillator ID --shift-oscillator ID   Existing tuning presets; unspecified partner=gpsdo-xo.
+  --base-oscillator ID --shift-oscillator ID|baseband-clock
+                              Existing presets; unspecified partner=gpsdo-xo. Shared mode uses
+                              one clock per endpoint for RF and audio; TX and RX remain independent.
   --clock-sync GPS_10ms-1ms_region-0ms_offset | default
   --audio-error-ms MS --margin X --nominal-if-hz HZ
-                              RF/IF values multiply independent RF/audio oscillator errors;
-                              neither selects a rendered absolute baseband carrier or shared clock topology.
+                              RF/IF values multiply RF/audio oscillator errors in zero-centered I/Q.
+                              RF 0 disables the shift oscillator; IF still models conversion-clock error.
+                              Sampling ppm is constant; stochastic sample-clock jitter is not modeled.
   --arrival-prior-seconds MIN MAX
                               Explicit uniform physical initial-arrival prior, independent of --start.
                               Overrides clock/audio initial timing only; oscillator draws are unchanged.
@@ -266,6 +285,9 @@ Options parse(int argc, char** argv) {
                               branch memory extends about 889 seconds; this is not millisecond ray delay.
   --selective-tail-floor-seconds S
                               Common minimum total selective-model tail for paired runs.
+  --selective-modulation-rate-hz HZ
+                              Effective physical fast AM rate; slow=.1*rate. Default inherits
+                              effective ray Doppler. Explicit 0 bypasses AM; margin is not reapplied.
   --spread-delay-ms MS --spread-doppler-hz HZ
                               Optional physical nominal overrides; preset base, then margin once.
                               Receiver --tap-* basis remains independently selected.
@@ -359,6 +381,7 @@ Examples:
         else if (key == "--selective-model") o.selective_model=std::string(need());
         else if (key == "--selective-scale-hz") o.selective_scale_hz=number(need(),"selective correlation scale");
         else if (key == "--selective-center-hz") o.selective_center_hz=number(need(),"selective frequency frame");
+        else if (key == "--selective-modulation-rate-hz") o.selective_modulation_rate_hz=number(need(),"selective modulation rate");
         else if (key == "--selective-tail-floor-seconds") o.selective_tail_floor_seconds=number(need(),"minimum selective model tail");
         else if (key == "--symbol-burst") o.symbol_burst_wait=parse_whole_bit_burst(need());
         else if (key == "--truth-epoch-offset") o.truth_epoch_offset=signed_integer(need(),"truth epoch offset");
@@ -464,7 +487,7 @@ Examples:
         throw std::invalid_argument("per-carrier tap fits are not implemented; use the coupled shared-tap basis");
     if (o.control != "signal" && o.control != "null" && o.control != "wrong-key") throw std::invalid_argument("control must be signal, null, or wrong-key");
     if (!(o.seconds >= 8 && o.seconds <= 315576000.) ||
-        !(o.rate > 0 && o.rate <= 30000000) || !(o.rf_hz > 0 && o.rf_hz <= 10e9) ||
+        !(o.rate > 0 && o.rate <= 30000000) || !(o.rf_hz >= 0 && o.rf_hz <= 10e9) ||
         !(o.sample_rate == 0 || (o.sample_rate >= 1 && o.sample_rate <= 10000000)) ||
         o.trials == 0 || o.trials > 100000 || o.threads == 0 || o.threads > 256 ||
         o.chunk == 0 || o.chunk > 1000000 || o.block == 0 || o.burst_wait_tiles>1000 ||
@@ -643,7 +666,7 @@ double configuration_capture_margin(const Options& o,const Format& f,const Geome
     const double rx_min=1-base*.5e-6,tx_max=1+base*.5e-6;
     const double public_frequency=std::max(std::abs(o.frequency_low),std::abs(o.frequency_high));
     const double oscillator=std::max(r.frequency_bound_hz+std::abs(o.truth_frequency_hz),public_frequency);
-    const double spread=r.spread_doppler_hz*((r.slow_depth>0||r.fast_depth>0)?2:1);
+    const double spread=r.spread_doppler_hz+r.selective_capture_allowance_hz;
     const double drift=std::abs(o.truth_frequency_drift)*(g.bit_seconds+2*r.arrival_half+2);
     const double diurnal=std::abs(o.path_evolution.diurnal_phase_amplitude_radians)/o.path_evolution.diurnal_period_seconds;
     return effective_sample_rate(f)*rx_min-g.occupied_bandwidth_hz*tx_max-2*(oscillator+spread+drift+diurnal)
@@ -781,9 +804,15 @@ void json_configuration(std::ostream& out,const Options& o,const Format& f,const
     const long double supplied_bank=2.L*supplied_timing*supplied_frequency*o.clocks_ppm.size()*o.epoch_offsets.size()*o.frequency_drifts.size()*(o.basis=="two-ray"?2:1);
     out<<"{\"new_controls_active\":"<<(r.active?"true":"false")<<",\"oscillator_presets_active\":"<<(r.oscillators?"true":"false")
        <<",\"base_oscillator\":";json_string(out,r.base_id);out<<",\"shift_oscillator\":";json_string(out,r.shift_id);
-    out<<",\"topology\":\"independent audio and RF references; effective relative preset accuracy split symmetrically between TX and RX\""
+    out<<",\"topology\":";
+    json_string(out,o.rf_hz==0?"no RF shift oscillator; baseband reference only":r.shared_shift_clock?
+        "shared audio/RF clock within each endpoint; independent TX and RX clocks":
+        "independent audio and RF references; effective relative preset accuracy split symmetrically between TX and RX");
+    out<<",\"shift_oscillator_active\":"<<(o.rf_hz>0?"true":"false")
+       <<",\"shift_uses_baseband_clock\":"<<(r.shared_shift_clock?"true":"false")
        <<",\"nominal_conversion_if_hz\":"<<o.nominal_if_hz<<",\"rf_center_hz\":"<<o.rf_hz
-       <<",\"frequency_parameter_scope\":\"RF and conversion-IF values multiply oscillator errors; they do not render an absolute baseband center or implement a shared audio/RF oscillator\""
+       <<",\"frequency_parameter_scope\":\"RF and conversion-IF values multiply oscillator errors; the sampled signal is zero-centered complex baseband\""
+       <<",\"sampling_clock_model\":\"constant endpoint ppm; shared mode correlates static RF/audio ppm and counts base phase diffusion once; stochastic phase does not perturb sampling coordinates\""
        <<",\"base_nominal_relative_bound_ppm\":"<<r.base_ppm<<",\"shift_nominal_relative_bound_ppm\":"<<r.rf_ppm
        <<",\"base_per_endpoint_bound_ppm\":"<<r.base_ppm/2<<",\"shift_per_endpoint_bound_ppm\":"<<r.rf_ppm/2
        <<",\"exact_relative_audio_ratio_bound_ppm\":"<<r.clock_bound_ppm
@@ -801,6 +830,16 @@ void json_configuration(std::ostream& out,const Options& o,const Format& f,const
        <<",\"resolved_correlation_scale_hz\":"<<selective_scale
        <<",\"center_hz\":"<<o.selective_center_hz
        <<",\"geometry_applied\":"<<(o.selective_model=="dispersive-dft"?"true":"false")
+       <<",\"enabled\":"<<(r.selective_rate_hz>0&&(r.slow_depth>0||r.fast_depth>0)?"true":"false")
+       <<",\"modulation_rate_override_hz\":";
+    if(o.selective_modulation_rate_hz)out<<*o.selective_modulation_rate_hz;else out<<"null";
+    out<<",\"resolved_fast_reference_rate_hz\":"<<r.selective_rate_hz
+       <<",\"active_sideband_extent_hz\":"<<r.selective_sideband_hz
+       <<",\"capture_allowance_hz\":"<<r.selective_capture_allowance_hz
+       <<",\"modulation_rate_source\":";
+    json_string(out,o.selective_modulation_rate_hz?"explicit effective physical rate; no additional margin":
+        "effective spread Doppler; slow component runs at one tenth");
+    out
        <<",\"frequency_frame\":\"fixed public channel frame; never recentered from hidden oscillator truth\""
        <<",\"selective_tail_floor_seconds\":"<<o.selective_tail_floor_seconds
        <<",\"interpretation\":\"dispersive-dft-v1 is a spacing-scaled stress law when the scale is auto; selected ray delay and Doppler remain separate physical dimensions\"}"
@@ -936,6 +975,15 @@ void json_provenance(std::ostream& out,const Options& o,const Format& f,const Ge
        <<",\"selective_scale_resolved_hz\":"<<(o.selective_scale_hz>0?o.selective_scale_hz:g.carrier_spacing_hz)
        <<",\"selective_center_hz\":"<<o.selective_center_hz
        <<",\"selective_geometry_applied\":"<<(o.selective_model=="dispersive-dft"?"true":"false")
+       <<",\"selective_modulation_rate_override_hz\":";
+    if(o.selective_modulation_rate_hz)out<<*o.selective_modulation_rate_hz;else out<<"null";
+    out<<",\"selective_resolved_fast_reference_rate_hz\":"<<resolve_configuration(o).selective_rate_hz
+       <<",\"selective_active_sideband_extent_hz\":"<<resolve_configuration(o).selective_sideband_hz
+       <<",\"selective_capture_allowance_hz\":"<<resolve_configuration(o).selective_capture_allowance_hz
+       <<",\"selective_modulation_rate_source\":";
+    json_string(out,o.selective_modulation_rate_hz?"explicit effective physical rate; no additional margin":
+        "effective spread Doppler; slow component runs at one tenth");
+    out
        <<",\"selective_frequency_frame\":\"fixed public channel frame; hidden oscillator truth is never used to recenter\""
        <<",\"selective_tail_floor_seconds\":"<<o.selective_tail_floor_seconds
        <<",\"selective_law_note\":\"dispersive-dft-v1 with auto scale is a spacing-scaled stress law; it does not represent the separately configured ray delay or Doppler\""
@@ -1048,6 +1096,7 @@ void json_endpoint_truth(std::ostream& out,const StreamChannelConfig& c) {
        <<",\"rx_audio_ppm\":"<<c.effects.rx.audio_ppm<<",\"tx_rf_ppm\":"<<c.effects.tx.rf_ppm
        <<",\"rx_rf_ppm\":"<<c.effects.rx.rf_ppm<<",\"tx_phase_diffusion_rad_sqrt_s\":"<<c.effects.tx.phase_noise_rad_per_sqrt_second
        <<",\"rx_phase_diffusion_rad_sqrt_s\":"<<c.effects.rx.phase_noise_rad_per_sqrt_second
+       <<",\"supplemental_tx_frequency_drift_hz_per_second\":"<<c.tx_frequency_drift_hz_per_second
        <<",\"scope\":\"simulation evaluation only; endpoint realizations are never receiver search inputs\"}";
 }
 
@@ -1202,6 +1251,7 @@ StreamChannelConfig channel_config(const Options& o,const Format& base,const Geo
     channel_cfg.selective_model.correlation_spacing_hz=o.selective_scale_hz>0
         ?o.selective_scale_hz:nominal.carrier_spacing_hz;
     channel_cfg.selective_model.center_hz=o.selective_center_hz;
+    channel_cfg.selective_model.modulation_rate_hz=o.selective_modulation_rate_hz;
     channel_cfg.selective_tail_floor_seconds=o.selective_tail_floor_seconds;
     channel_cfg.minimum_capture_samples=observation_samples;
     channel_cfg.effects.sample_rate=effective_sample_rate(base);
@@ -1239,19 +1289,25 @@ StreamChannelConfig channel_config(const Options& o,const Format& base,const Geo
     channel_cfg.effects.tx.phase_noise_rad_per_sqrt_second=o.phase_diffusion/std::sqrt(2.);
     channel_cfg.effects.rx.phase_noise_rad_per_sqrt_second=o.phase_diffusion/std::sqrt(2.);
     const auto true_drift=drift_truth(truth_rng);
-    channel_cfg.effects.tx.rf_drift_ppm_per_second=true_drift*1e6/o.rf_hz;
+    if(o.rf_hz>0)channel_cfg.effects.tx.rf_drift_ppm_per_second=true_drift*1e6/o.rf_hz;
+    else channel_cfg.tx_frequency_drift_hz_per_second=true_drift;
     channel_cfg.effects.static_doppler_hz+=true_drift*(pad+channel_cfg.effects.timing_offset_seconds);
     const auto resolved=resolve_configuration(o);
     if(resolved.active){
         // Preset values are effective relative bounds, not per-end bounds.
         // Public receiver grids never choose these physical realizations.
         channel_cfg.effects.tx={};channel_cfg.effects.rx={};
+        channel_cfg.tx_frequency_drift_hz_per_second=0;
         const auto uniform=[&](double low,double high){return std::uniform_real_distribution<double>(low,high)(truth_rng);};
         if(resolved.oscillators){
             channel_cfg.effects.tx.audio_ppm=uniform(-resolved.base_ppm/2,resolved.base_ppm/2);
             channel_cfg.effects.rx.audio_ppm=uniform(-resolved.base_ppm/2,resolved.base_ppm/2);
             channel_cfg.effects.tx.rf_ppm=uniform(-resolved.rf_ppm/2,resolved.rf_ppm/2);
             channel_cfg.effects.rx.rf_ppm=uniform(-resolved.rf_ppm/2,resolved.rf_ppm/2);
+            if(resolved.shared_shift_clock){
+                channel_cfg.effects.tx.rf_ppm=channel_cfg.effects.tx.audio_ppm;
+                channel_cfg.effects.rx.rf_ppm=channel_cfg.effects.rx.audio_ppm;
+            }
         }
         channel_cfg.effects.tx.phase_noise_rad_per_sqrt_second=resolved.phase_diffusion/std::sqrt(2.);
         channel_cfg.effects.rx.phase_noise_rad_per_sqrt_second=resolved.phase_diffusion/std::sqrt(2.);
@@ -1264,7 +1320,8 @@ StreamChannelConfig channel_config(const Options& o,const Format& base,const Geo
         }
         const auto rx=1+channel_cfg.effects.rx.audio_ppm*1e-6;
         const auto physical_drift=o.truth_frequency_drift*rx*rx;
-        channel_cfg.effects.tx.rf_drift_ppm_per_second=physical_drift*1e6/o.rf_hz;
+        if(o.rf_hz>0)channel_cfg.effects.tx.rf_drift_ppm_per_second=physical_drift*1e6/o.rf_hz;
+        else channel_cfg.tx_frequency_drift_hz_per_second=physical_drift;
         channel_cfg.effects.static_doppler_hz=o.truth_frequency_hz*rx+
             physical_drift*(pad+channel_cfg.effects.timing_offset_seconds);
     }
@@ -1277,7 +1334,8 @@ StreamChannelConfig channel_config(const Options& o,const Format& base,const Geo
         channel_cfg.effects.timing_offset_seconds=std::uniform_real_distribution<double>(
             (*o.arrival_prior_seconds)[0],(*o.arrival_prior_seconds)[1])(arrival_rng);
         const auto physical_drift=(channel_cfg.effects.tx.rf_drift_ppm_per_second-
-            channel_cfg.effects.rx.rf_drift_ppm_per_second)*o.rf_hz*1e-6;
+            channel_cfg.effects.rx.rf_drift_ppm_per_second)*o.rf_hz*1e-6+
+            channel_cfg.tx_frequency_drift_hz_per_second;
         channel_cfg.effects.static_doppler_hz+=physical_drift*(channel_cfg.effects.timing_offset_seconds-old_arrival);
     }
     channel_cfg.effects.dropout_ms=o.dropout_ms;
@@ -1310,7 +1368,8 @@ double truth_clock(const StreamChannelConfig& c) {
 }
 double truth_drift(const StreamChannelConfig& c) {
     const auto rx=1+c.effects.rx.audio_ppm*1e-6;
-    return (c.effects.tx.rf_drift_ppm_per_second-c.effects.rx.rf_drift_ppm_per_second)*c.effects.rf_hz*1e-6/(rx*rx);
+    return ((c.effects.tx.rf_drift_ppm_per_second-c.effects.rx.rf_drift_ppm_per_second)*c.effects.rf_hz*1e-6+
+        c.tx_frequency_drift_hz_per_second)/(rx*rx);
 }
 double truth_arrival(const StreamChannelConfig& c) {
     return (c.effects.capture_lead_seconds+c.effects.timing_offset_seconds)*(1+c.effects.rx.audio_ppm*1e-6);
@@ -1320,7 +1379,8 @@ double truth_frequency(const StreamChannelConfig& c) {
     if(c.effects.rx.audio_ppm==0&&c.effects.tx.rf_ppm==0&&c.effects.rx.rf_ppm==0)
         return c.effects.static_doppler_hz+c.effects.nominal_conversion_if_hz*c.effects.tx.audio_ppm*1e-6-
             truth_drift(c)*(c.effects.capture_lead_seconds+c.effects.timing_offset_seconds);
-    const auto drift=(c.effects.tx.rf_drift_ppm_per_second-c.effects.rx.rf_drift_ppm_per_second)*c.effects.rf_hz*1e-6;
+    const auto drift=(c.effects.tx.rf_drift_ppm_per_second-c.effects.rx.rf_drift_ppm_per_second)*c.effects.rf_hz*1e-6+
+        c.tx_frequency_drift_hz_per_second;
     return (c.effects.static_doppler_hz+c.effects.rf_hz*(c.effects.tx.rf_ppm-c.effects.rx.rf_ppm)*1e-6+
         c.effects.nominal_conversion_if_hz*(tx-rx)-drift*(c.effects.capture_lead_seconds+c.effects.timing_offset_seconds))/rx;
 }
@@ -1351,7 +1411,7 @@ ObservationCalendar observation_calendar(const Options& o,const Format& f,const 
     ObservationCalendar c;c.pad=std::max(0.,-start_low)+.05;
     long double selective_tail=std::ceil(o.selective_tail_floor_seconds*physical_fs_max);
     long double selective_memory=0;
-    if(resolved.spread_doppler_hz>0&&(resolved.slow_depth>0||resolved.fast_depth>0)) {
+    if(resolved.selective_rate_hz>0&&(resolved.slow_depth>0||resolved.fast_depth>0)) {
         if(o.selective_model=="legacy-allpass") {
             selective_tail=std::max(selective_tail,static_cast<long double>(
                 modem::detail::FrequencySelectivePerturbation::decay_samples(
@@ -2027,6 +2087,12 @@ void export_group_stats(const Options& o) {
         static_cast<long double>(std::min<std::uint64_t>(rows,o.chunk))*sizeof(Complex)*3+calendar.channel_working_bytes;
     if(scratch+source_bytes+channel_bytes>o.memory_bytes)
         throw std::invalid_argument("export-group-stats bounded scratch/source estimate exceeds --memory-mib");
+    // Independent physical channels retain their own source/filter/RNG state.
+    // When both fit, advance them together and synthesize each public basis
+    // once. Preserve the existing sequential passes for smaller RAM budgets.
+    const long double paired_bytes=scratch+source_bytes+2*channel_bytes+
+        static_cast<long double>(o.chunk)*sizeof(Complex);
+    const bool paired_pass=o.stats_noisy&&paired_bytes<=o.memory_bytes;
 
     const auto directory=std::filesystem::path(o.output);
     std::vector<std::string> names{"group_gram.c128","group_mean.c128","intervals.u64","valid_rows.u64","signal_energy.f64","manifest.json"};
@@ -2056,6 +2122,7 @@ void export_group_stats(const Options& o) {
         sources.emplace(source_key,std::make_unique<PatternSource>(addressed,rxkey,source_key.first));
     }
     std::vector<Complex> local_values(o.chunk*max_local),basis_values(o.chunk*d),samples(o.chunk);
+    std::vector<Complex> paired_samples(paired_pass?o.chunk:0);
     std::vector<std::uint8_t> validity(o.chunk),expected_mask(o.chunk);
     std::vector<Complex> block_gram(groups.size()*d*d),block_projection(groups.size()*d);
     double block_energy=0,actual_signal_energy=0,actual_observed_energy=0;
@@ -2071,17 +2138,26 @@ void export_group_stats(const Options& o) {
         block_first=stop;block_rows=0;block_valid=0;block_energy=0;
         std::fill(block_gram.begin(),block_gram.end(),Complex{});std::fill(block_projection.begin(),block_projection.end(),Complex{});
     };
-    auto pass=[&](bool noisy_pass) {
+    auto pass=[&](bool noisy_pass,bool paired=false) {
         PatternSource truth(transmitter_format(o,f),txkey,o.signal_bit);
         auto config=channel_config(o,f,g,channel_seed,noise,pad,trail,calendar.samples);
         config.effects.noise_enabled=noisy_pass;StreamingChannel channel(truth,config);
         if(channel.total_samples()!=rows)throw std::runtime_error("natural channel endpoint exceeds grouped-export calendar");
+        std::unique_ptr<PatternSource> noisy_truth;
+        std::unique_ptr<StreamingChannel> noisy_channel;
+        if(paired) {
+            noisy_truth=std::make_unique<PatternSource>(transmitter_format(o,f),txkey,o.signal_bit);
+            auto noisy_config=config;noisy_config.effects.noise_enabled=true;
+            noisy_channel=std::make_unique<StreamingChannel>(*noisy_truth,noisy_config);
+            if(noisy_channel->total_samples()!=rows)
+                throw std::runtime_error("natural noisy channel endpoint exceeds grouped-export calendar");
+        }
         std::ifstream mask;
         std::ofstream mask_output;
         if(noisy_pass) {
             mask.open(directory/"validity-mask.tmp",std::ios::binary);
             if(!mask)throw std::runtime_error("cannot read grouped validity mask");
-        } else if(o.stats_noisy) {
+        } else if(o.stats_noisy&&!paired) {
             mask_output.open(directory/"validity-mask.tmp",std::ios::binary);
             if(!mask_output)throw std::runtime_error("cannot create grouped validity mask");
         }
@@ -2097,7 +2173,13 @@ void export_group_stats(const Options& o) {
             const auto n=channel.read(std::span(samples).first(wanted),std::span(validity).first(wanted));
             if(!n)throw std::runtime_error("channel ended before grouped-export calendar");
             if(channel.position()-n!=at)throw std::runtime_error("noncontiguous grouped channel samples");
-            if(noisy_pass) {
+            if(paired) {
+                const auto noisy_n=noisy_channel->read(std::span(paired_samples).first(wanted),std::span(expected_mask).first(wanted));
+                if(noisy_n!=n||noisy_channel->position()-noisy_n!=at)
+                    throw std::runtime_error("grouped noiseless and noisy channel calendars differ");
+                if(!std::equal(expected_mask.begin(),expected_mask.begin()+n,validity.begin()))
+                    throw std::runtime_error("grouped noiseless and noisy channel erasure masks differ");
+            } else if(noisy_pass) {
                 mask.read(reinterpret_cast<char*>(expected_mask.data()),static_cast<std::streamsize>(n));
                 if(mask.gcount()!=static_cast<std::streamsize>(n)||!std::equal(expected_mask.begin(),expected_mask.begin()+n,validity.begin()))
                     throw std::runtime_error("grouped noiseless and noisy channel erasure masks differ");
@@ -2143,6 +2225,7 @@ void export_group_stats(const Options& o) {
                                     for(std::size_t j=0;j<d;++j)
                                         block_gram[(group_index*d+i)*d+j]+=ai*basis_values[j*segment+row];
                                 }
+                                if(paired)received_projection[projection_index]+=ai*paired_samples[sample_index];
                             }
                         }
                     }
@@ -2153,9 +2236,11 @@ void export_group_stats(const Options& o) {
                     }
                     block_rows+=segment;
                     if(block_rows==block||at+chunk_offset+segment==rows)emit_noiseless_block();
-                } else {
+                }
+                if(noisy_pass||paired) {
+                    const auto& noisy_samples=paired?paired_samples:samples;
                     for(std::size_t row=0;row<segment;++row)if(validity[chunk_offset+row])
-                        segment_received_energy+=std::norm(samples[chunk_offset+row]);
+                        segment_received_energy+=std::norm(noisy_samples[chunk_offset+row]);
                     received_block_energy+=segment_received_energy;received_block_rows+=segment;
                     if(received_block_rows==block||at+chunk_offset+segment==rows)emit_noisy_block();
                 }
@@ -2164,7 +2249,7 @@ void export_group_stats(const Options& o) {
             at+=n;
         }
         if(mask.is_open())mask.close();if(mask_output.is_open()){mask_output.close();if(!mask_output)throw std::runtime_error("failed writing grouped validity mask");}
-        frontend_report=channel.report();
+        frontend_report=paired?noisy_channel->report():channel.report();
         if(!noisy_pass) {
             actual_signal_energy=channel.report().signal_energy;actual_observed_energy=channel.report().observed_energy;
             actual_channel_samples=channel.report().samples;actual_channel_tail=channel.report().tail_samples;
@@ -2172,7 +2257,8 @@ void export_group_stats(const Options& o) {
             selected_truth_clock=truth_clock(config);selected_truth_drift=truth_drift(config);
         }
     };
-    pass(false);if(o.stats_noisy){pass(true);std::filesystem::remove(directory/"validity-mask.tmp");}
+    pass(false,paired_pass);
+    if(o.stats_noisy&&!paired_pass){pass(true);std::filesystem::remove(directory/"validity-mask.tmp");}
     gram.close();mean.close();intervals.close();valid_rows.close();energy.close();
     if(o.stats_noisy){observation.close();received_energy.close();}
     if(!gram||!mean||!intervals||!valid_rows||!energy||(o.stats_noisy&&(!observation||!received_energy)))
@@ -2240,6 +2326,10 @@ void export_group_stats(const Options& o) {
     manifest<<",\"mean_semantics\":";json_string(manifest,o.frontend.active()?"grouped A^H W transformed no-thermal pass; simulation evaluation only":"grouped A^H W actual signal; simulation evaluation only");
     manifest<<",\"receiver_metadata_warning\":\"All means/energies are simulation truth and are not receiver metadata\",\"stats_noisy\":"<<(o.stats_noisy?"true":"false")
        <<",\"gaussian_projection_supported\":"<<(frontend_report.gaussian_projection_supported?"true":"false");
+    manifest<<",\"grouped_export_execution\":{\"channel_pass_mode\":\""<<(paired_pass?"paired":"sequential")
+       <<"\",\"basis_synthesis_passes\":"<<(o.stats_noisy&&!paired_pass?2:1)
+       <<",\"worker_threads_used\":1,\"bounded_workspace_bytes\":"
+       <<static_cast<std::uint64_t>(paired_pass?paired_bytes:scratch+source_bytes+channel_bytes)<<'}';
     if(o.stats_noisy)manifest<<",\"observation_file\":\"group_observation.c128\",\"observation_shape\":["<<blocks<<','<<groups.size()<<','<<d<<"],\"observation_semantics\":\"A^H W y from the one shared actual noisy channel pass, projected separately for every fixed group\",\"received_energy_file\":\"received_energy.f64\",\"received_energy_shape\":["<<blocks<<"],\"received_energy_semantics\":\"common per-block actual noisy sample energy over valid rows\"";
     manifest<<",\"file_sizes\":{\"group_gram.c128\":"<<size_of("group_gram.c128")<<",\"group_mean.c128\":"<<size_of("group_mean.c128")
        <<",\"intervals.u64\":"<<size_of("intervals.u64")<<",\"valid_rows.u64\":"<<size_of("valid_rows.u64")<<",\"signal_energy.f64\":"<<size_of("signal_energy.f64");

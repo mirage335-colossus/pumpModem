@@ -1,0 +1,370 @@
+{
+  "old_binary_sha256": "ba965b7a8d844bbee67e39ff8a5b5d4292a0c44b89d0fce4aeba2c42db8d7a34",
+  "new_binary_sha256": "5dc89af2902bf5a336045e38ee12f85a3e6723b988c72d334f5f144b375ab5b3",
+  "cases": [
+    {
+      "case": "positive-independent-corrected",
+      "arguments": [
+        "--mode",
+        "export-stats",
+        "--stats-noisy",
+        "--seconds",
+        "8",
+        "--rate",
+        "36",
+        "--added",
+        "1",
+        "--sample-rate",
+        "128",
+        "--rf-hz",
+        "30000000",
+        "--nominal-if-hz",
+        "1725",
+        "--epoch",
+        "1800000001",
+        "--seed",
+        "71231",
+        "--base-oscillator",
+        "gpsdo-xo",
+        "--shift-oscillator",
+        "gpsdo-xo",
+        "--clock-sync",
+        "GPS_10ms-1ms_region-0ms_offset",
+        "--audio-error-ms",
+        "70",
+        "--margin",
+        "3",
+        "--block-seconds",
+        "1",
+        "--threads",
+        "1",
+        "--spread-preset",
+        "hf-best",
+        "--selective-perturbation",
+        "each-65"
+      ],
+      "files": [
+        {
+          "file": "gram.c128",
+          "sha256": "e474938f545e6bd74ec8886300b08d872a1801b3ee41345c0abfc623de13d694",
+          "bytes": 1280,
+          "identical": true
+        },
+        {
+          "file": "intervals.u64",
+          "sha256": "d602c8c3d894e059efc92723e8f9d44cf64bfa74756aa2960aa96617687691c4",
+          "bytes": 320,
+          "identical": true
+        },
+        {
+          "file": "mean.c128",
+          "sha256": "8f0adb5d1c717fafc95f8c5e8e2156e9be5a4983bfd345e5c7aa26a591dc2b35",
+          "bytes": 640,
+          "identical": true
+        },
+        {
+          "file": "observation.c128",
+          "sha256": "a025683c04083c3e425dc8b5aca46ad302f67ad3dc5b965aa294af404f77d360",
+          "bytes": 640,
+          "identical": true
+        },
+        {
+          "file": "received_energy.f64",
+          "sha256": "75386f264c1920b3343ed7df55e46cca72e7b3a83e542761ee8ba59eb613574a",
+          "bytes": 160,
+          "identical": true
+        },
+        {
+          "file": "signal_energy.f64",
+          "sha256": "8d9c2c1b96e4a50777756442f4b74da45230ba806f4e74269430b1110b65b763",
+          "bytes": 160,
+          "identical": true
+        },
+        {
+          "file": "valid_rows.u64",
+          "sha256": "214ffbda8df81fd4c16181a623ffc090c78603cad2bc6973e64d3d10ea470bc0",
+          "bytes": 160,
+          "identical": true
+        }
+      ],
+      "all_binary_arrays_identical": true
+    },
+    {
+      "case": "positive-independent-legacy-slow",
+      "arguments": [
+        "--mode",
+        "export-stats",
+        "--stats-noisy",
+        "--seconds",
+        "8",
+        "--rate",
+        "36",
+        "--added",
+        "1",
+        "--sample-rate",
+        "128",
+        "--rf-hz",
+        "30000000",
+        "--nominal-if-hz",
+        "1725",
+        "--epoch",
+        "1800000001",
+        "--seed",
+        "71231",
+        "--base-oscillator",
+        "gpsdo-xo",
+        "--shift-oscillator",
+        "gpsdo-xo",
+        "--clock-sync",
+        "GPS_10ms-1ms_region-0ms_offset",
+        "--audio-error-ms",
+        "70",
+        "--margin",
+        "3",
+        "--block-seconds",
+        "1",
+        "--threads",
+        "1",
+        "--spread-preset",
+        "sub9-worst",
+        "--selective-perturbation",
+        "slow-65",
+        "--selective-model",
+        "legacy-allpass"
+      ],
+      "files": [
+        {
+          "file": "gram.c128",
+          "sha256": "a4a583dce97483d7a9e399c1dedc00921628e0712b488436856d5594ddd82a5c",
+          "bytes": 1344,
+          "identical": true
+        },
+        {
+          "file": "intervals.u64",
+          "sha256": "2403d6383738b3741967df6af37c6d3ad1e2baee2f203a41a110ced1c5202fc7",
+          "bytes": 336,
+          "identical": true
+        },
+        {
+          "file": "mean.c128",
+          "sha256": "3efeea040e2d22c49daf09d6f5abcc5ab4f15c6ae52ea9d5432d4485e91e8c0e",
+          "bytes": 672,
+          "identical": true
+        },
+        {
+          "file": "observation.c128",
+          "sha256": "46b19916596eb65d69cb5408ea31c54ec948e1e47c8aa47f734745be0be08fbb",
+          "bytes": 672,
+          "identical": true
+        },
+        {
+          "file": "received_energy.f64",
+          "sha256": "b98eedffe670d799b1a727ec353f203aa96e7e29d63ae0dd3459e10633231332",
+          "bytes": 168,
+          "identical": true
+        },
+        {
+          "file": "signal_energy.f64",
+          "sha256": "baf45cac3e9034b9d50489a1be94a6c861f00b3417d1877907f25834525ce76f",
+          "bytes": 168,
+          "identical": true
+        },
+        {
+          "file": "valid_rows.u64",
+          "sha256": "8535929945e1d19288d0dea2f4330cb43934879765265c4608e052afa1511ff4",
+          "bytes": 168,
+          "identical": true
+        }
+      ],
+      "all_binary_arrays_identical": true
+    },
+    {
+      "case": "positive-independent-zero-D",
+      "arguments": [
+        "--mode",
+        "export-stats",
+        "--stats-noisy",
+        "--seconds",
+        "8",
+        "--rate",
+        "36",
+        "--added",
+        "1",
+        "--sample-rate",
+        "128",
+        "--rf-hz",
+        "30000000",
+        "--nominal-if-hz",
+        "1725",
+        "--epoch",
+        "1800000001",
+        "--seed",
+        "71231",
+        "--base-oscillator",
+        "gpsdo-xo",
+        "--shift-oscillator",
+        "gpsdo-xo",
+        "--clock-sync",
+        "GPS_10ms-1ms_region-0ms_offset",
+        "--audio-error-ms",
+        "70",
+        "--margin",
+        "3",
+        "--block-seconds",
+        "1",
+        "--threads",
+        "1",
+        "--spread-preset",
+        "none",
+        "--selective-perturbation",
+        "each-65"
+      ],
+      "files": [
+        {
+          "file": "gram.c128",
+          "sha256": "e474938f545e6bd74ec8886300b08d872a1801b3ee41345c0abfc623de13d694",
+          "bytes": 1280,
+          "identical": true
+        },
+        {
+          "file": "intervals.u64",
+          "sha256": "84dc54c587c5b44c230e598b6161efb0e50b4ce6e2d14015869ac5c14882b547",
+          "bytes": 320,
+          "identical": true
+        },
+        {
+          "file": "mean.c128",
+          "sha256": "f6cb4af6b9d6cd7fb7acea26e20b7e1740e813ee9bc57bcbafc970b93f882afd",
+          "bytes": 640,
+          "identical": true
+        },
+        {
+          "file": "observation.c128",
+          "sha256": "c8338fbe41846cac37492d7ea692008abbf131b05bb775be69b5e9d766fc558d",
+          "bytes": 640,
+          "identical": true
+        },
+        {
+          "file": "received_energy.f64",
+          "sha256": "80711e364731ecfc0701de3035ebc64113816574e0752086037e99163c36562c",
+          "bytes": 160,
+          "identical": true
+        },
+        {
+          "file": "signal_energy.f64",
+          "sha256": "acda51195a7879244e3a69c05f347e0bec0ad02d39d0b9d47e476eb97c4a57e4",
+          "bytes": 160,
+          "identical": true
+        },
+        {
+          "file": "valid_rows.u64",
+          "sha256": "99d3cda00f9228d5289ef60cafb6fa1d5d8db7f944de9189e799eb7644617892",
+          "bytes": 160,
+          "identical": true
+        }
+      ],
+      "all_binary_arrays_identical": true
+    },
+    {
+      "case": "positive-independent-fhss",
+      "arguments": [
+        "--mode",
+        "export-stats",
+        "--stats-noisy",
+        "--seconds",
+        "8",
+        "--rate",
+        "36",
+        "--added",
+        "1",
+        "--sample-rate",
+        "128",
+        "--rf-hz",
+        "30000000",
+        "--nominal-if-hz",
+        "1725",
+        "--epoch",
+        "1800000001",
+        "--seed",
+        "71231",
+        "--base-oscillator",
+        "gpsdo-xo",
+        "--shift-oscillator",
+        "gpsdo-xo",
+        "--clock-sync",
+        "GPS_10ms-1ms_region-0ms_offset",
+        "--audio-error-ms",
+        "70",
+        "--margin",
+        "3",
+        "--block-seconds",
+        "1",
+        "--threads",
+        "1",
+        "--rate",
+        "360",
+        "--added",
+        "10",
+        "--sample-rate",
+        "4096",
+        "--fhss",
+        "--spread-preset",
+        "hf-best",
+        "--selective-perturbation",
+        "each-25",
+        "--missed-dwells",
+        "1,2,7,8",
+        "--base-oscillator",
+        "gpsdo-ocxo",
+        "--shift-oscillator",
+        "gpsdo-ocxo"
+      ],
+      "files": [
+        {
+          "file": "gram.c128",
+          "sha256": "c43054cacc53b765750959be2b27d2e534d9ea384f8301698924e13cfcfbbfff",
+          "bytes": 640,
+          "identical": true
+        },
+        {
+          "file": "intervals.u64",
+          "sha256": "53f8d0fe67c50339ebb74922c6e7ced367a997f58721e233dbdf8599761ad5dc",
+          "bytes": 160,
+          "identical": true
+        },
+        {
+          "file": "mean.c128",
+          "sha256": "081574e5af17d034f227f8551ff37402aa035522ad86c04d5595ddc43695b5b1",
+          "bytes": 320,
+          "identical": true
+        },
+        {
+          "file": "observation.c128",
+          "sha256": "def8ede0e3ed0595c20ec86e0a31c358ee75ca38ddc1e45a084bc81f3d4a519c",
+          "bytes": 320,
+          "identical": true
+        },
+        {
+          "file": "received_energy.f64",
+          "sha256": "42a6969e3ef7805269a876e4bbd72c0de12d8d569cd7352595da44f11df3482c",
+          "bytes": 80,
+          "identical": true
+        },
+        {
+          "file": "signal_energy.f64",
+          "sha256": "de54792d07b5aae8635ec30ee3a6eff99f4602b547e01a544c04a1a931e43984",
+          "bytes": 80,
+          "identical": true
+        },
+        {
+          "file": "valid_rows.u64",
+          "sha256": "53418a63c9dd5304afe1f2c1fe5e3c7f1ec48aa5e719e9a4ae28d6c62ca0f2cf",
+          "bytes": 80,
+          "identical": true
+        }
+      ],
+      "all_binary_arrays_identical": true
+    }
+  ],
+  "claim": "Exact paired-seed array identity for listed existing physical configurations; metadata additions intentionally differ."
+}

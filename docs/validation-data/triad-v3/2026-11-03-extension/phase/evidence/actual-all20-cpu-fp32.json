@@ -1,0 +1,1591 @@
+{
+  "schema": "triad-resident-actual-phase-v1",
+  "failed_physical_path_records": 0,
+  "device": "cpu",
+  "precision": "fp32",
+  "implementation": "reference",
+  "sigma": 0.001234134149488435,
+  "phase_states": 32,
+  "prepared_input_sha256": "dd4a25ae1a87b1a74defb1d53c43240d65e2f30f1009a768d1acf2d7c4fc776a",
+  "inputs": [
+    {
+      "workspace": "/workspace/triad-results/phase/workspaces/flat-tcxo-signal-00",
+      "manifest_sha256": "fe031a3a9ea6321bd0d97d5488c8b75a479316ae40a232204a89c184883125a1",
+      "control": "signal",
+      "bit": 0,
+      "sample_count": 18456032,
+      "sample_rate": 0.25,
+      "noise_variance": 250000.0,
+      "methods": {
+        "global_unknown_phase": {
+          "scores": [
+            -62.9500717767716,
+            -48.99628601861177
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_0.25_tau": {
+          "scores": [
+            11.197889173805505,
+            -4.246743982381128
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_1_tau": {
+          "scores": [
+            12.2754701948737,
+            -16.873123326616398
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_4_tau": {
+          "scores": [
+            0.9699366516203926,
+            -35.95891969985533
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "finite_phase": {
+          "scores": [
+            25.205323187582017,
+            -14.48117618746987
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        }
+      }
+    },
+    {
+      "workspace": "/workspace/triad-results/phase/workspaces/flat-tcxo-signal-01",
+      "manifest_sha256": "63ebf45b899820b261a23c7ca78855e818f087965bae89264b56c4d8ee2cf970",
+      "control": "signal",
+      "bit": 1,
+      "sample_count": 18456032,
+      "sample_rate": 0.25,
+      "noise_variance": 250000.0,
+      "methods": {
+        "global_unknown_phase": {
+          "scores": [
+            -47.03422800721849,
+            -70.73574632747614
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_0.25_tau": {
+          "scores": [
+            -10.82466444564944,
+            13.223041084578503
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_1_tau": {
+          "scores": [
+            -29.179984948708206,
+            30.62698972870369
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        },
+        "segmented_4_tau": {
+          "scores": [
+            -40.1896718167306,
+            2.5065141686145744
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "finite_phase": {
+          "scores": [
+            -21.060031233867765,
+            35.51232742089841
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        }
+      }
+    },
+    {
+      "workspace": "/workspace/triad-results/phase/workspaces/flat-tcxo-signal-02",
+      "manifest_sha256": "3a83e5ea88a4f400206c655c0131a186c76367ecc93e5ba9afeeeb8344a015ca",
+      "control": "signal",
+      "bit": 0,
+      "sample_count": 18456032,
+      "sample_rate": 0.25,
+      "noise_variance": 250000.0,
+      "methods": {
+        "global_unknown_phase": {
+          "scores": [
+            -68.50231311021186,
+            -54.980883401351775
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_0.25_tau": {
+          "scores": [
+            13.446834104192204,
+            -15.060534763997754
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_1_tau": {
+          "scores": [
+            9.929804665625783,
+            -27.720955602910358
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_4_tau": {
+          "scores": [
+            -9.971371308550829,
+            -40.21736460293994
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "finite_phase": {
+          "scores": [
+            22.671808399965506,
+            -19.215823487780323
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "correct_accepted"
+          }
+        }
+      }
+    },
+    {
+      "workspace": "/workspace/triad-results/phase/workspaces/flat-tcxo-signal-03",
+      "manifest_sha256": "e941d2b55a827afac32ff15e4c894bb5fc6595745b88929409b3100b7d919638",
+      "control": "signal",
+      "bit": 1,
+      "sample_count": 18456032,
+      "sample_rate": 0.25,
+      "noise_variance": 250000.0,
+      "methods": {
+        "global_unknown_phase": {
+          "scores": [
+            -51.472033831078676,
+            -37.72576950448235
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_0.25_tau": {
+          "scores": [
+            -4.9076797428208705,
+            5.050989490464072
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_1_tau": {
+          "scores": [
+            -17.9375117895818,
+            18.13964875025496
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "correct_accepted"
+          }
+        },
+        "segmented_4_tau": {
+          "scores": [
+            -38.642493291572954,
+            16.170578343828492
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "finite_phase": {
+          "scores": [
+            -19.034469045308686,
+            29.150640198295918
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        }
+      }
+    },
+    {
+      "workspace": "/workspace/triad-results/phase/workspaces/flat-tcxo-signal-04",
+      "manifest_sha256": "ef95957c8414ae60114563824ee3364e32c4c733e8368404db025e940d14fc11",
+      "control": "signal",
+      "bit": 0,
+      "sample_count": 18456032,
+      "sample_rate": 0.25,
+      "noise_variance": 250000.0,
+      "methods": {
+        "global_unknown_phase": {
+          "scores": [
+            -63.58276444925365,
+            -55.92099937655124
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_0.25_tau": {
+          "scores": [
+            7.2537639944206544,
+            -4.1566182467106
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_1_tau": {
+          "scores": [
+            8.592975410134253,
+            -13.913363823675468
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_4_tau": {
+          "scores": [
+            3.978489498878953,
+            -26.54322962490315
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "finite_phase": {
+          "scores": [
+            20.46897158729121,
+            -11.88849959588049
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "correct_accepted"
+          }
+        }
+      }
+    },
+    {
+      "workspace": "/workspace/triad-results/phase/workspaces/flat-tcxo-signal-05",
+      "manifest_sha256": "fd0f9d904b62e6c92dbe430355df425345ce2b752f86c29b186f9375d80a5e33",
+      "control": "signal",
+      "bit": 1,
+      "sample_count": 18456032,
+      "sample_rate": 0.25,
+      "noise_variance": 250000.0,
+      "methods": {
+        "global_unknown_phase": {
+          "scores": [
+            -57.66451162926343,
+            -47.73163221526076
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_0.25_tau": {
+          "scores": [
+            -11.635461809437043,
+            5.198682637779217
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_1_tau": {
+          "scores": [
+            -24.881436560817342,
+            22.562392251081885
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "correct_accepted"
+          }
+        },
+        "segmented_4_tau": {
+          "scores": [
+            -37.805579061148435,
+            3.8373991713875997
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "finite_phase": {
+          "scores": [
+            -24.121707538018367,
+            21.074213152830108
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "correct_accepted"
+          }
+        }
+      }
+    },
+    {
+      "workspace": "/workspace/triad-results/phase/workspaces/flat-tcxo-signal-06",
+      "manifest_sha256": "dd8392e7b2cc8d0f5f8dc0917d9ab7dd9ec3302ea8b0705ff9cca63ea857c134",
+      "control": "signal",
+      "bit": 0,
+      "sample_count": 18456032,
+      "sample_rate": 0.25,
+      "noise_variance": 250000.0,
+      "methods": {
+        "global_unknown_phase": {
+          "scores": [
+            -49.817028885859884,
+            -64.30459896528843
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_0.25_tau": {
+          "scores": [
+            10.465855050486073,
+            -5.293431255914201
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_1_tau": {
+          "scores": [
+            11.116669976102596,
+            -15.065006123303938
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_4_tau": {
+          "scores": [
+            -12.761023241831898,
+            -42.36807787887214
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "finite_phase": {
+          "scores": [
+            23.39798488836715,
+            -18.169833024145923
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        }
+      }
+    },
+    {
+      "workspace": "/workspace/triad-results/phase/workspaces/flat-tcxo-signal-07",
+      "manifest_sha256": "975982779cbb44353d0ff74f9ea222b6899e018ef82bbf78032b4e376a3d31bf",
+      "control": "signal",
+      "bit": 1,
+      "sample_count": 18456032,
+      "sample_rate": 0.25,
+      "noise_variance": 250000.0,
+      "methods": {
+        "global_unknown_phase": {
+          "scores": [
+            -61.02276600142467,
+            -45.58179296408774
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_0.25_tau": {
+          "scores": [
+            -6.359628845069294,
+            3.8717704593845257
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_1_tau": {
+          "scores": [
+            -21.44126362085392,
+            13.035925339484917
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_4_tau": {
+          "scores": [
+            -37.90836286195864,
+            -11.060565735849272
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "finite_phase": {
+          "scores": [
+            -19.126258228631414,
+            21.663813758443766
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "correct_accepted"
+          }
+        }
+      }
+    },
+    {
+      "workspace": "/workspace/triad-results/phase/workspaces/flat-tcxo-signal-08",
+      "manifest_sha256": "310fa72999fa345d15c8fdccc24c39037a0b45ec61d4f2840437ad812ef6bcdb",
+      "control": "signal",
+      "bit": 0,
+      "sample_count": 18456032,
+      "sample_rate": 0.25,
+      "noise_variance": 250000.0,
+      "methods": {
+        "global_unknown_phase": {
+          "scores": [
+            -47.22162007889002,
+            -61.12660389528729
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_0.25_tau": {
+          "scores": [
+            12.193572898968963,
+            -4.2029878903263835
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_1_tau": {
+          "scores": [
+            20.139440728691646,
+            -20.139296508276498
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "correct_accepted"
+          }
+        },
+        "segmented_4_tau": {
+          "scores": [
+            11.754352246341519,
+            -41.2983082053673
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "finite_phase": {
+          "scores": [
+            29.652172108450124,
+            -20.165216202191186
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        }
+      }
+    },
+    {
+      "workspace": "/workspace/triad-results/phase/workspaces/flat-tcxo-signal-09",
+      "manifest_sha256": "77308cd7cafbbd13c5a6330c5912dfe15ea787fb116085050cdf3537c2c5ee4e",
+      "control": "signal",
+      "bit": 1,
+      "sample_count": 18456032,
+      "sample_rate": 0.25,
+      "noise_variance": 250000.0,
+      "methods": {
+        "global_unknown_phase": {
+          "scores": [
+            -59.6604340809821,
+            -30.3450247039304
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_0.25_tau": {
+          "scores": [
+            -16.991527077656986,
+            7.8779456509567805
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_1_tau": {
+          "scores": [
+            -33.097269076415344,
+            26.96731173583171
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        },
+        "segmented_4_tau": {
+          "scores": [
+            -42.451552952514234,
+            19.175349199453002
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "correct_accepted"
+          }
+        },
+        "finite_phase": {
+          "scores": [
+            -25.64630982877573,
+            34.90598551706669
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        }
+      }
+    },
+    {
+      "workspace": "/workspace/triad-results/phase/workspaces/flat-tcxo-signal-10",
+      "manifest_sha256": "df4aff345ce1bf7a31864af8998e62fbd2859ea359cd6b67fe19841a76909b70",
+      "control": "signal",
+      "bit": 0,
+      "sample_count": 18456032,
+      "sample_rate": 0.25,
+      "noise_variance": 250000.0,
+      "methods": {
+        "global_unknown_phase": {
+          "scores": [
+            -36.940206923071884,
+            -66.34723146320154
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_0.25_tau": {
+          "scores": [
+            8.511282041033274,
+            -11.813943882702494
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_1_tau": {
+          "scores": [
+            16.445221554969017,
+            -24.770662251864866
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_4_tau": {
+          "scores": [
+            15.199641283357872,
+            -44.99483438011116
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "finite_phase": {
+          "scores": [
+            30.549989639899053,
+            -21.67282047389781
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        }
+      }
+    },
+    {
+      "workspace": "/workspace/triad-results/phase/workspaces/flat-tcxo-signal-11",
+      "manifest_sha256": "861a4c6115ddc3dc49af9eb4b6f4d1eaba723e78a4369fbf17a27c60861d45f9",
+      "control": "signal",
+      "bit": 1,
+      "sample_count": 18456032,
+      "sample_rate": 0.25,
+      "noise_variance": 250000.0,
+      "methods": {
+        "global_unknown_phase": {
+          "scores": [
+            -49.86511785725727,
+            -43.27546294789636
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_0.25_tau": {
+          "scores": [
+            -5.460808313070814,
+            5.320043029779601
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_1_tau": {
+          "scores": [
+            -21.05028718367564,
+            11.72038096503851
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_4_tau": {
+          "scores": [
+            -37.621284455629855,
+            4.460551809051686
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "finite_phase": {
+          "scores": [
+            -17.58608767541438,
+            18.75809388838576
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "correct_accepted"
+          }
+        }
+      }
+    },
+    {
+      "workspace": "/workspace/triad-results/phase/workspaces/flat-tcxo-signal-12",
+      "manifest_sha256": "0fc2915fc936a5d6a890849cced4d3f98be9848cfb9092b9a7d2a932acdb4b3c",
+      "control": "signal",
+      "bit": 0,
+      "sample_count": 18456032,
+      "sample_rate": 0.25,
+      "noise_variance": 250000.0,
+      "methods": {
+        "global_unknown_phase": {
+          "scores": [
+            -15.151626072380594,
+            -68.21166375494998
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_0.25_tau": {
+          "scores": [
+            11.198635713414486,
+            -6.672981354711187
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_1_tau": {
+          "scores": [
+            14.255347247171287,
+            -22.827588481154834
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_4_tau": {
+          "scores": [
+            6.283358999852649,
+            -36.68220766524111
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "finite_phase": {
+          "scores": [
+            20.849163551790905,
+            -22.379894727361606
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "correct_accepted"
+          }
+        }
+      }
+    },
+    {
+      "workspace": "/workspace/triad-results/phase/workspaces/flat-tcxo-signal-13",
+      "manifest_sha256": "796e99013bf96fb2952e76d18c0aa2a73cbaca9082746dbcae3af17524bd455a",
+      "control": "signal",
+      "bit": 1,
+      "sample_count": 18456032,
+      "sample_rate": 0.25,
+      "noise_variance": 250000.0,
+      "methods": {
+        "global_unknown_phase": {
+          "scores": [
+            -67.58788059954276,
+            -31.110821360410732
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_0.25_tau": {
+          "scores": [
+            -5.093352688393122,
+            10.329925709835331
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_1_tau": {
+          "scores": [
+            -25.74278584030048,
+            17.67838169868489
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "correct_accepted"
+          }
+        },
+        "segmented_4_tau": {
+          "scores": [
+            -36.75260131109757,
+            2.958788183952874
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "finite_phase": {
+          "scores": [
+            -17.929681776334025,
+            29.775535440420974
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        }
+      }
+    },
+    {
+      "workspace": "/workspace/triad-results/phase/workspaces/flat-tcxo-signal-14",
+      "manifest_sha256": "179f268715100bf10c06425e01274e38c08338bccfe6820bea5f76c68b40d54e",
+      "control": "signal",
+      "bit": 0,
+      "sample_count": 18456032,
+      "sample_rate": 0.25,
+      "noise_variance": 250000.0,
+      "methods": {
+        "global_unknown_phase": {
+          "scores": [
+            -48.46457423430153,
+            -53.58443925311688
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_0.25_tau": {
+          "scores": [
+            12.002227014372721,
+            -13.99169859062097
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_1_tau": {
+          "scores": [
+            25.865949158647208,
+            -26.21561179001068
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        },
+        "segmented_4_tau": {
+          "scores": [
+            3.205069362945779,
+            -42.83447436939961
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "finite_phase": {
+          "scores": [
+            34.25117816441747,
+            -19.056442783310345
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        }
+      }
+    },
+    {
+      "workspace": "/workspace/triad-results/phase/workspaces/flat-tcxo-signal-15",
+      "manifest_sha256": "2b8a66bf8d4f27cf150fcd64eff451433988ab1abebd68d017fb7fdfdc07fae1",
+      "control": "signal",
+      "bit": 1,
+      "sample_count": 18456032,
+      "sample_rate": 0.25,
+      "noise_variance": 250000.0,
+      "methods": {
+        "global_unknown_phase": {
+          "scores": [
+            -66.69041096477655,
+            -51.58020313944417
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_0.25_tau": {
+          "scores": [
+            -7.417094197919323,
+            2.692862775188098
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_1_tau": {
+          "scores": [
+            -24.573816168128506,
+            11.383033791683324
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_4_tau": {
+          "scores": [
+            -42.490738729751016,
+            5.513230064245833
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "finite_phase": {
+          "scores": [
+            -19.630735065476134,
+            19.188730160127378
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "correct_accepted"
+          }
+        }
+      }
+    },
+    {
+      "workspace": "/workspace/triad-results/phase/workspaces/flat-tcxo-null-00",
+      "manifest_sha256": "41efc597a64996408680150a5cb879683a1c0f4fc04b537d96800fe7573f97e6",
+      "control": "null",
+      "bit": 0,
+      "sample_count": 18456032,
+      "sample_rate": 0.25,
+      "noise_variance": 250000.0,
+      "methods": {
+        "global_unknown_phase": {
+          "scores": [
+            -66.0705129760663,
+            -59.780080748498634
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "null_rejected",
+            "relaxed": "null_rejected"
+          }
+        },
+        "segmented_0.25_tau": {
+          "scores": [
+            -5.13759853426557,
+            -11.20621738710759
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "null_rejected",
+            "relaxed": "null_rejected"
+          }
+        },
+        "segmented_1_tau": {
+          "scores": [
+            -18.854955995135793,
+            -23.913226590968364
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "null_rejected",
+            "relaxed": "null_rejected"
+          }
+        },
+        "segmented_4_tau": {
+          "scores": [
+            -34.502099412809606,
+            -39.53912399240169
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "null_rejected",
+            "relaxed": "null_rejected"
+          }
+        },
+        "finite_phase": {
+          "scores": [
+            -13.178740735390624,
+            -25.35633452219859
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "null_rejected",
+            "relaxed": "null_rejected"
+          }
+        }
+      }
+    },
+    {
+      "workspace": "/workspace/triad-results/phase/workspaces/flat-tcxo-null-01",
+      "manifest_sha256": "2ca181d6228555db24f099993e51f85ea68b5f25eff2509f693a617db0075e72",
+      "control": "null",
+      "bit": 1,
+      "sample_count": 18456032,
+      "sample_rate": 0.25,
+      "noise_variance": 250000.0,
+      "methods": {
+        "global_unknown_phase": {
+          "scores": [
+            -49.864426378530794,
+            -64.27437799382615
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "null_rejected",
+            "relaxed": "null_rejected"
+          }
+        },
+        "segmented_0.25_tau": {
+          "scores": [
+            -4.903263110615678,
+            -13.569319954968865
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "null_rejected",
+            "relaxed": "null_rejected"
+          }
+        },
+        "segmented_1_tau": {
+          "scores": [
+            -13.787912231823011,
+            -12.681386332613076
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "null_rejected",
+            "relaxed": "null_rejected"
+          }
+        },
+        "segmented_4_tau": {
+          "scores": [
+            -38.8153581197053,
+            -32.83008195986216
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "null_rejected",
+            "relaxed": "null_rejected"
+          }
+        },
+        "finite_phase": {
+          "scores": [
+            -16.91336582630866,
+            -7.481944773841296
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "null_rejected",
+            "relaxed": "null_rejected"
+          }
+        }
+      }
+    },
+    {
+      "workspace": "/workspace/triad-results/phase/workspaces/flat-tcxo-null-02",
+      "manifest_sha256": "99c4af2b3cf6432d3a84018b4f2f464b12bcb6c0f4511a84c64308389a4f4748",
+      "control": "null",
+      "bit": 0,
+      "sample_count": 18456032,
+      "sample_rate": 0.25,
+      "noise_variance": 250000.0,
+      "methods": {
+        "global_unknown_phase": {
+          "scores": [
+            -63.57843687939561,
+            -61.83324263292312
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "null_rejected",
+            "relaxed": "null_rejected"
+          }
+        },
+        "segmented_0.25_tau": {
+          "scores": [
+            -9.924726760795576,
+            -13.108788305164014
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "null_rejected",
+            "relaxed": "null_rejected"
+          }
+        },
+        "segmented_1_tau": {
+          "scores": [
+            -25.822652174738547,
+            -19.562507212762654
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "null_rejected",
+            "relaxed": "null_rejected"
+          }
+        },
+        "segmented_4_tau": {
+          "scores": [
+            -38.370907492279386,
+            -29.00626103078769
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "null_rejected",
+            "relaxed": "null_rejected"
+          }
+        },
+        "finite_phase": {
+          "scores": [
+            -21.346750262131675,
+            -11.135511637698237
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "null_rejected",
+            "relaxed": "null_rejected"
+          }
+        }
+      }
+    },
+    {
+      "workspace": "/workspace/triad-results/phase/workspaces/flat-tcxo-null-03",
+      "manifest_sha256": "0f7016d19a5f192d194ff7308b84a89ee0df65d0517eca2bf12ebfca99f0d14e",
+      "control": "null",
+      "bit": 1,
+      "sample_count": 18456032,
+      "sample_rate": 0.25,
+      "noise_variance": 250000.0,
+      "methods": {
+        "global_unknown_phase": {
+          "scores": [
+            -52.91205893470682,
+            -71.88255550456806
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "null_rejected",
+            "relaxed": "null_rejected"
+          }
+        },
+        "segmented_0.25_tau": {
+          "scores": [
+            -5.567180950299833,
+            -15.911103428983392
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "null_rejected",
+            "relaxed": "null_rejected"
+          }
+        },
+        "segmented_1_tau": {
+          "scores": [
+            -19.890152844861976,
+            -27.921358888510074
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "null_rejected",
+            "relaxed": "null_rejected"
+          }
+        },
+        "segmented_4_tau": {
+          "scores": [
+            -37.93016973134602,
+            -48.22853867989796
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "null_rejected",
+            "relaxed": "null_rejected"
+          }
+        },
+        "finite_phase": {
+          "scores": [
+            -16.067555426853556,
+            -28.369458748719172
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "null_rejected",
+            "relaxed": "null_rejected"
+          }
+        }
+      }
+    }
+  ],
+  "source_sha256": {
+    "docs/validation-data/triad-v3/2026-11-03-extension/phase/score_actual_batch.py": "4dc68023065c4b87e9ad2737a7abd198480312fe18bcffdb0638252821f8099a",
+    "docs/validation-data/triad-v3/2026-11-03-extension/phase/score_actual.py": "787b9d979f75f8f4f2e87f7e1e529aa9de5092577a916d8c9a52c73f0ae9a1a6",
+    "docs/validation-data/triad-v3/2026-11-03-extension/phase/diagnostic.py": "cb878e5ed3c7e9d9608166e2062501e8b2bd2c63e07a4eff5ea993096e6ea0a9",
+    "tools/triad_state_workspace.py": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923",
+    "tools/triad_phase_frequency.py": "48ee569b1d467b2d7b6fd55088764bd28dd11e0bfecb5974622a318fbb408585"
+  },
+  "thresholds": {
+    "strict": 22.721063389585737,
+    "relaxed": 17.4227460230377
+  },
+  "summary": {
+    "global_unknown_phase": {
+      "strict": {
+        "correct_accepted": 0,
+        "wrong_accepted": 0,
+        "miss": 16,
+        "false_admission": 0,
+        "null_rejected": 4,
+        "correct_two_one_sided_95_bounds": [
+          0.0,
+          0.1707497229824809
+        ],
+        "false_admission_two_one_sided_95_bounds": [
+          0.0,
+          0.527129195498412
+        ]
+      },
+      "relaxed": {
+        "correct_accepted": 0,
+        "wrong_accepted": 0,
+        "miss": 16,
+        "false_admission": 0,
+        "null_rejected": 4,
+        "correct_two_one_sided_95_bounds": [
+          0.0,
+          0.1707497229824809
+        ],
+        "false_admission_two_one_sided_95_bounds": [
+          0.0,
+          0.527129195498412
+        ]
+      }
+    },
+    "segmented_0.25_tau": {
+      "strict": {
+        "correct_accepted": 0,
+        "wrong_accepted": 0,
+        "miss": 16,
+        "false_admission": 0,
+        "null_rejected": 4,
+        "correct_two_one_sided_95_bounds": [
+          0.0,
+          0.1707497229824809
+        ],
+        "false_admission_two_one_sided_95_bounds": [
+          0.0,
+          0.527129195498412
+        ]
+      },
+      "relaxed": {
+        "correct_accepted": 0,
+        "wrong_accepted": 0,
+        "miss": 16,
+        "false_admission": 0,
+        "null_rejected": 4,
+        "correct_two_one_sided_95_bounds": [
+          0.0,
+          0.1707497229824809
+        ],
+        "false_admission_two_one_sided_95_bounds": [
+          0.0,
+          0.527129195498412
+        ]
+      }
+    },
+    "segmented_1_tau": {
+      "strict": {
+        "correct_accepted": 3,
+        "wrong_accepted": 0,
+        "miss": 13,
+        "false_admission": 0,
+        "null_rejected": 4,
+        "correct_two_one_sided_95_bounds": [
+          0.05314598448266387,
+          0.4165722807061528
+        ],
+        "false_admission_two_one_sided_95_bounds": [
+          0.0,
+          0.527129195498412
+        ]
+      },
+      "relaxed": {
+        "correct_accepted": 7,
+        "wrong_accepted": 0,
+        "miss": 9,
+        "false_admission": 0,
+        "null_rejected": 4,
+        "correct_two_one_sided_95_bounds": [
+          0.22669156846628724,
+          0.6666258284750756
+        ],
+        "false_admission_two_one_sided_95_bounds": [
+          0.0,
+          0.527129195498412
+        ]
+      }
+    },
+    "segmented_4_tau": {
+      "strict": {
+        "correct_accepted": 0,
+        "wrong_accepted": 0,
+        "miss": 16,
+        "false_admission": 0,
+        "null_rejected": 4,
+        "correct_two_one_sided_95_bounds": [
+          0.0,
+          0.1707497229824809
+        ],
+        "false_admission_two_one_sided_95_bounds": [
+          0.0,
+          0.527129195498412
+        ]
+      },
+      "relaxed": {
+        "correct_accepted": 1,
+        "wrong_accepted": 0,
+        "miss": 15,
+        "false_admission": 0,
+        "null_rejected": 4,
+        "correct_two_one_sided_95_bounds": [
+          0.0032006977101884967,
+          0.2639573972885685
+        ],
+        "false_admission_two_one_sided_95_bounds": [
+          0.0,
+          0.527129195498412
+        ]
+      }
+    },
+    "finite_phase": {
+      "strict": {
+        "correct_accepted": 9,
+        "wrong_accepted": 0,
+        "miss": 7,
+        "false_admission": 0,
+        "null_rejected": 4,
+        "correct_two_one_sided_95_bounds": [
+          0.3333741715249244,
+          0.7733084315337126
+        ],
+        "false_admission_two_one_sided_95_bounds": [
+          0.0,
+          0.527129195498412
+        ]
+      },
+      "relaxed": {
+        "correct_accepted": 16,
+        "wrong_accepted": 0,
+        "miss": 0,
+        "false_admission": 0,
+        "null_rejected": 4,
+        "correct_two_one_sided_95_bounds": [
+          0.8292502770175191,
+          1.0
+        ],
+        "false_admission_two_one_sided_95_bounds": [
+          0.0,
+          0.527129195498412
+        ]
+      }
+    }
+  },
+  "signal_paths": 16,
+  "null_paths": 4,
+  "timings": {
+    "workspace_load_validate_seconds": 10.656442726030946,
+    "analytic_baseline_seconds": 0.028044069884344935,
+    "preparation_and_transfer_seconds": 0.015425055054947734,
+    "synchronized_update_seconds": 10.374291758984327,
+    "update_timing_scope": "resident input indexing, all updates and final device synchronization; includes first graph warmup/capture",
+    "memory_budget": {
+      "total_bytes": 536870912,
+      "resident_estimate_bytes": 285850400,
+      "remaining_state_budget_bytes": 251020512,
+      "state_estimate_bytes": 154688,
+      "combined_estimate_bytes": 286005088,
+      "scope": "conservative owned input/state/temporary bounds; excludes framework runtime and allocator caches"
+    },
+    "diagnostics": {
+      "algorithm": "finite_phase_frequency_static_gain_marginal_lr",
+      "phase_states": 32,
+      "frequency_states": 1,
+      "frequency_grid_hz": [
+        0.0
+      ],
+      "frequency_spacing_hz": 0.0,
+      "initial_frequency_weights": [
+        1.0
+      ],
+      "initial_frequency_mean_hz": 0.0,
+      "initial_frequency_variance_hz2": 0.0,
+      "generator_stationary_frequency_variance_hz2": null,
+      "generator_stationary_initial_correlation_decay_per_second": null,
+      "grid_convergence_scope": "automatic phase-grid changes also change frequency spacing; vary explicit frequency_grid_hz independently when separating the two discretization errors",
+      "quadrature_states": 1,
+      "frequency_model": "static",
+      "frequency_std_hz": 0.003,
+      "frequency_correlation_seconds": 1000.0,
+      "random_walk_hz_per_sqrt_second": 1e-06,
+      "phase_diffusion_rad_per_sqrt_second": 0.001234134149488435,
+      "nominal_dt_seconds": 1000.0,
+      "transition_order": "half old-frequency phase advection; frequency CTMC; half new-frequency phase advection; independent phase CTMC",
+      "initial_phase_prior": "uniform",
+      "gain_prior_static_through_observation": true,
+      "amplitude_nodes": [
+        1.0
+      ],
+      "amplitude_weights_normalized": [
+        1.0
+      ],
+      "relative_phase_states": 1,
+      "ray_amplitudes": [
+        1.0
+      ],
+      "phase_kernel_tail_probability": 1e-12,
+      "bulk_dtype": "torch.float32",
+      "log_evidence_dtype": "torch.float64",
+      "tf32_allowed": false,
+      "working_bytes_bound": 154688,
+      "memory_scope": "owned state/temporary/cache array estimate; excludes framework runtime and allocator cache",
+      "maximum_phase_interpolation_variance_radians2_per_interval": 0.0,
+      "maximum_discarded_phase_kernel_mass": 1.5920598173124745e-13,
+      "maximum_frequency_transition_row_error_before_normalizing": 0.0,
+      "updates": 73825,
+      "elapsed_center_separation_seconds": 73823564.0,
+      "model_scope": "normalized finite-state likelihood with static proper gain quadrature and block-constant common phase; continuous colored oscillator and arbitrary within-block phase evolution are not exact models",
+      "null_scope": "known white circular Gaussian null and fixed pre-observation priors; finite-precision validation/calibration is separate from the exact-arithmetic mean-one LR identity"
+    },
+    "process_seconds_before_json_write": 22.08492277795449
+  },
+  "resident_host_device_estimate_bytes": 285850400,
+  "environment": {
+    "torch": "2.8.0+cu128",
+    "numpy": "2.5.2",
+    "cuda": "12.8",
+    "triton": "3.4.0",
+    "gpu": null
+  },
+  "limitations": [
+    "Actual noisy complex observations; no replacement noise or simulator signal means are consumed.",
+    "The injected Gaussian noise variance is known from the export manifest and normalizes observations/Grams. This is not an unknown-noise calibrated receiver.",
+    "Known unit gain, known arrival equal to public capture lead, zeroCFO/clock/epoch, one flat tap. Not general physical oscillator acquisition.",
+    "Each case retains its own candidate Gram and actual noise; batches require identical complete public calendars.",
+    "Finite phase model is block-constant; it is not exact within-block Brownian waveform inference.",
+    "FP32 bulk retains FP64 log-evidence reductions and public input preparation. TF32 disabled.",
+    "Process time includes imports but excludes interpreter startup and JSON writing; runner external wall time is the full-process comparison.",
+    "No GPU speedup is claimed until same-input paired backend results are measured."
+  ]
+}

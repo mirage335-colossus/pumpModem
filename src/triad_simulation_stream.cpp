@@ -278,7 +278,7 @@ void validate_effects(const SimulationConfig& c, const Format& f) {
     for (double x : finite_values) require(std::isfinite(x), "non-finite streaming channel configuration");
     require(c.sample_rate == effective_sample_rate(f) && c.sample_rate > 0 &&
         c.occupied_bandwidth_hz > 0 && c.occupied_bandwidth_hz < c.sample_rate &&
-        c.rf_hz > 0 && c.nominal_conversion_if_hz >= 0 &&
+        c.rf_hz >= 0 && c.nominal_conversion_if_hz >= 0 &&
         c.dwell_seconds > 0, "streaming channel rate or bandwidth is invalid");
     require(finite_nonnegative(c.spread_delay_ms) && finite_nonnegative(c.spread_doppler_hz) &&
         finite_nonnegative(c.perturbation_slow_depth) &&
@@ -312,10 +312,14 @@ StreamChannelConfig checked_config(const StreamChannelConfig& cfg, const Format&
     validate_path_evolution(cfg.path_evolution);
     require((cfg.selective_model.model == SelectiveModel::LegacyAllpass ||
              cfg.selective_model.model == SelectiveModel::DispersiveDft) &&
+            (!cfg.selective_model.modulation_rate_hz ||
+             finite_nonnegative(*cfg.selective_model.modulation_rate_hz)) &&
             finite_nonnegative(cfg.selective_model.correlation_spacing_hz) &&
             std::isfinite(cfg.selective_model.center_hz) &&
             finite_nonnegative(cfg.selective_tail_floor_seconds),
             "invalid versioned selective modulation model");
+    require(std::isfinite(cfg.tx_frequency_drift_hz_per_second),
+            "invalid supplemental TX frequency drift");
     require(cfg.missed_receiver_dwell_indices.size() <= 4096,
             "receiver missed-dwell schedule exceeds its 4096-entry bound");
     require(cfg.missed_receiver_dwell_indices.empty() || format.fhss || cfg.effects.fhss,
@@ -410,8 +414,14 @@ struct StreamingChannel::Impl {
                 "stream channel interpolation tail overflows sample coordinates");
         tx_interpolation_tail = static_cast<std::uint64_t>(interpolation_tail);
         const bool spread_enabled = effects.spread_delay_ms > 0 || effects.spread_doppler_hz > 0;
-        const bool perturb_enabled = effects.spread_doppler_hz > 0 &&
+        const double selective_rate = config.selective_model.modulation_rate_hz.value_or(
+            effects.spread_doppler_hz);
+        const bool perturb_enabled = selective_rate > 0 &&
             (effects.perturbation_slow_depth > 0 || effects.perturbation_fast_depth > 0);
+        const double selective_sideband = selective_rate * (effects.perturbation_fast_depth > 0 ? 1 :
+            effects.perturbation_slow_depth > 0 ? .1 : 0);
+        const double selective_capture_allowance = config.selective_model.modulation_rate_hz ?
+            selective_sideband : (perturb_enabled ? effects.spread_doppler_hz : 0);
         const bool dispersive = config.selective_model.model == SelectiveModel::DispersiveDft;
         const double selective_spacing = config.selective_model.correlation_spacing_hz > 0 ?
             config.selective_model.correlation_spacing_hz : geometry.carrier_spacing_hz;
@@ -473,7 +483,8 @@ struct StreamingChannel::Impl {
                 (std::abs(effects.tx.audio_ppm) + std::abs(effects.rx.audio_ppm)) * 1e-6 +
             std::abs(effects.static_doppler_hz) +
             (spread_enabled ? effects.spread_doppler_hz : 0) +
-            (perturb_enabled ? effects.spread_doppler_hz : 0) +
+            selective_capture_allowance + std::abs(config.tx_frequency_drift_hz_per_second) *
+                (static_cast<double>(geometry.source_samples) * dt_tx) +
             config.path_evolution.diurnal_phase_amplitude_radians/config.path_evolution.diurnal_period_seconds;
         // Six sigma at each spectral edge: declared allowance for Gaussian
         // tails, not a proof that a stochastic finite-FIR spectrum is compact.
@@ -525,7 +536,7 @@ struct StreamingChannel::Impl {
             if (dispersive) {
                 dispersive_perturbation = std::make_unique<DispersiveSelectivePerturbation>(
                     effects.sample_rate * rx_scale, config.selective_model.center_hz, selective_spacing,
-                    effects.spread_doppler_hz, effects.perturbation_slow_depth,
+                    selective_rate, effects.perturbation_slow_depth,
                     effects.perturbation_fast_depth, seed);
                 diagnostic.correlation_spacing_hz = selective_spacing;
                 diagnostic.center_hz = config.selective_model.center_hz;
@@ -542,7 +553,7 @@ struct StreamingChannel::Impl {
                 // initial phases and RNG domains. No ordinary path changes.
                 perturbation = std::make_unique<FrequencySelectivePerturbation>(
                     effects.sample_rate * rx_scale, 0, effects.occupied_bandwidth_hz,
-                    effects.spread_doppler_hz, effects.perturbation_slow_depth,
+                    selective_rate, effects.perturbation_slow_depth,
                     effects.perturbation_fast_depth, seed);
                 diagnostic.band_width_hz = perturbation->band_width_hz;
                 diagnostic.component_rates_hz = perturbation->rates_hz;
@@ -598,6 +609,10 @@ struct StreamingChannel::Impl {
             const double rf = effects.rf_hz + hop;
             tx_osc.phase += oscillator_phase_step(tx_osc, effects.tx, config.tx_spectrum,
                 tx_spectrum_rng, rf, effects.nominal_conversion_if_hz, tx_scale, t, dt_tx);
+            // Keep the historical positive-RF arithmetic unchanged when this
+            // supplemental emission-time slope is off.
+            if (config.tx_frequency_drift_hz_per_second != 0)
+                tx_osc.phase += tau * config.tx_frequency_drift_hz_per_second * t * dt_tx;
             tx_osc.phase = std::remainder(tx_osc.phase, tau);
             auto value = effects.signal_enabled ? source.sample_at(static_cast<long double>(tx_next)) : Complex{};
             if (effects.signal_enabled && (config.frontend.dac.nominal_bits || config.frontend.dac.gain != 1))

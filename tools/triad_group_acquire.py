@@ -8,11 +8,17 @@ across groups; normalized likelihood mixtures do not require independent groups.
 The workspace has no inter-group Gram: independently resampling group noise is
 unsupported. No simulator means, signal energies or injected variance enter the
 receiver. This is an isolated fixed-window study, not an anytime receiver.
+
+Optional residual-frequency offsets rotate the original block correlations
+before reblocking. This exactly scores a piecewise-constant common phase model;
+continuous frequency is an approximation with a reported, enforced phase-arc
+bound on each original block. The bound is not a likelihood-error certificate.
 """
 from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+from decimal import Decimal
 import hashlib
 import json
 import math
@@ -33,6 +39,8 @@ SYNC_FIELDS = ("arrival_seconds", "frequency_hz", "clock_ppm",
                "epoch_offset_seconds", "frequency_drift_hz_per_second")
 INPUT_FILES = ("manifest.json", "group_gram.c128", "group_observation.c128",
                "received_energy.f64", "intervals.u64", "valid_rows.u64")
+MAX_FREQUENCY_OFFSETS = 4096
+MAX_EFFECTIVE_GROUPS = 1_000_000
 
 
 def _integer(value, name, minimum=1):
@@ -63,6 +71,93 @@ def sha256(path):
         for block in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def frequency_offset_grid(low, high, maximum_step):
+    """A fixed endpoint-inclusive public grid; no observation selects its extent."""
+    low = _number(low, "frequency grid lower endpoint")
+    high = _number(high, "frequency grid upper endpoint")
+    maximum_step = _number(maximum_step, "frequency grid maximum step", positive=True)
+    if high < low:
+        raise ValueError("frequency grid upper endpoint must not precede lower endpoint")
+    if high == low:
+        return (low,)
+    if not math.isfinite(high-low) or (high-low)/maximum_step >= MAX_FREQUENCY_OFFSETS:
+        raise ValueError("frequency offset grid exceeds 4096 alternatives")
+    left = math.ceil(-low/maximum_step) if low < 0 < high else 0
+    right = math.ceil(high/maximum_step) if low < 0 < high else 0
+    intervals = left+right if left else math.ceil((high-low)/maximum_step)
+    if intervals >= MAX_FREQUENCY_OFFSETS:
+        raise ValueError("frequency offset grid exceeds 4096 alternatives")
+    if left:
+        return tuple(float(x) for x in np.concatenate((
+            np.linspace(low, 0., left+1), np.linspace(0., high, right+1)[1:])))
+    return tuple(float(x) for x in np.linspace(low, high, intervals+1))
+
+
+def frequency_reuse_bound(frequency_offsets_hz, block_seconds, maximum_loss_db):
+    """Universal phase-arc bound, including arbitrary shaping and erasure masks.
+
+    Within an interval of length T, midpoint approximation differs by at most
+    theta=pi*abs(f)*T radians. For any nonnegative sample-energy weights the
+    matched template overlap is >=cos(theta), provided theta<pi/2. Also
+    ||(D-D_mid)x|| <= 2*sin(theta/2)*||x||. This does not bound a nonlinear
+    marginal likelihood or channel-subspace discrimination error.
+    """
+    theta = math.pi*max(abs(f) for f in frequency_offsets_hz)*block_seconds
+    if theta >= math.pi/2:
+        raise ValueError("frequency reuse phase arc reaches pi/2 within an original block")
+    # log1p avoids cancellation of the small, relevant losses.
+    loss = -10/math.log(10)*math.log1p(-math.sin(theta)**2)
+    if loss > maximum_loss_db*(1+1e-12)+1e-15:
+        raise ValueError("frequency reuse exceeds maximum original-block phase loss; export shorter blocks")
+    return dict(maximum_original_block_seconds=block_seconds,
+                maximum_phase_error_radians=theta,
+                coherent_power_loss_bound_db=loss,
+                relative_template_operator_error_bound=2*math.sin(theta/2),
+                allowed_coherent_power_loss_db=maximum_loss_db,
+                scope="phase-arc bound for arbitrary sample-energy weights and erasure masks; not a marginal-likelihood error bound")
+
+
+def _normalize_scientific_arguments(arguments):
+    """Keep negative scientific floats positional on older argparse versions.
+
+    Some supported versions classify ``-8.27e-7`` as an option before applying
+    type=float. An exact fixed-decimal spelling of its binary64 value avoids
+    that ambiguity without private parser hooks or a change in numeric value.
+    Only the two frequency-bank options' numeric arguments are normalized;
+    filenames and all other option arguments retain their original spelling.
+    Decimal.from_float bounds expansion even for huge underflowing exponents;
+    the longest finite binary64 spelling is about 1076 characters. Malformed
+    and nonfinite tokens retain normal parser/validation errors. Everything
+    after the explicit option terminator remains untouched, including paths.
+    """
+    result=[]
+    terminated=False
+    remaining=0
+    frequency_list=False
+    for token in arguments:
+        if token == "--":
+            terminated=True
+        if not terminated and token in ("--frequency-offset-grid","--frequency-offsets-hz"):
+            remaining=3 if token == "--frequency-offset-grid" else 0
+            frequency_list=token == "--frequency-offsets-hz"
+        elif not terminated and (remaining or frequency_list):
+            try:
+                value=float(token)
+            except ValueError:
+                if token.startswith("-"):
+                    # The next option ends this bank's arguments. Do not
+                    # normalize an output path or another option's values.
+                    remaining=0
+                    frequency_list=False
+            else:
+                if math.isfinite(value) and token.startswith("-") and "e" in token.lower():
+                    token=format(Decimal.from_float(value),"f")
+            if remaining:
+                remaining-=1
+        result.append(token)
+    return result
 
 
 class GroupedWorkspace:
@@ -223,13 +318,26 @@ class GroupedWorkspace:
         result = np.column_stack((interval[first,0], interval[np.minimum(first+reblock,self.blocks)-1,1]))
         return result, np.add.reduceat(valid, first), np.add.reduceat(energy, first)
 
-    def read_group_tile(self, first, stop, reblock):
+    def read_group_tile(self, first, stop, reblock, frequency_offset_hz=0.):
         if not 0 <= first < stop <= self.groups:
             raise ValueError("invalid fixed group tile")
+        _number(frequency_offset_hz, "frequency offset")
         G = np.array(self.array("group_gram.c128")[:,first:stop])
         r = np.array(self.array("group_observation.c128")[:,first:stop])
         if not np.isfinite(G).all() or not np.isfinite(r).all():
             raise WorkspaceError("grouped actual statistics are nonfinite")
+        if frequency_offset_hz != 0:
+            # The native basis uses exp(+j*2*pi*f*t) on every column. Hence
+            # A^H y rotates with the negative sign. Preserve physical sample
+            # coordinates through gaps/erasures and the shortened last block;
+            # do not use compressed valid-row or payload time. Long-double
+            # phase preparation is tiny compared with retained bulk scoring.
+            interval = self.array("intervals.u64")
+            center = (interval[:,0].astype(np.longdouble)+
+                      interval[:,1].astype(np.longdouble))/(2*np.longdouble(self.sample_rate))
+            cycles = np.remainder(np.longdouble(frequency_offset_hz)*center, np.longdouble(1))
+            phase = np.asarray(-2*np.longdouble(str(math.pi))*cycles, dtype=np.float64)
+            r *= np.exp(1j*phase)[:,None,None]
         if reblock != 1:
             indices = np.arange(0, self.blocks, reblock)
             G = np.add.reduceat(G, indices, axis=0)
@@ -255,6 +363,8 @@ class AcquisitionConfig:
     model_alternatives: int = 16
     calibration_segments: int = 2
     known_noise_variance: float | None = None
+    frequency_offsets_hz: tuple[float, ...] = (0.,)
+    maximum_block_phase_loss_db: float = .01
 
     def __post_init__(self):
         _number(self.doppler_width_hz, "Doppler width")
@@ -268,6 +378,14 @@ class AcquisitionConfig:
             _number(self.window_seconds, "window seconds", positive=True)
         if self.known_noise_variance is not None:
             _number(self.known_noise_variance, "known noise diagnostic variance", positive=True)
+        if (not isinstance(self.frequency_offsets_hz, tuple) or not self.frequency_offsets_hz or
+                len(self.frequency_offsets_hz) > MAX_FREQUENCY_OFFSETS):
+            raise ValueError("one to 4096 fixed frequency offsets are required")
+        for frequency in self.frequency_offsets_hz:
+            _number(frequency, "frequency offset")
+        if len(set(self.frequency_offsets_hz)) != len(self.frequency_offsets_hz):
+            raise ValueError("duplicate frequency offsets are not allowed")
+        _number(self.maximum_block_phase_loss_db, "maximum block phase loss", positive=True)
         if len(self.stationary_power) != 2 or any(not math.isfinite(p) or p < 0 for p in self.stationary_power):
             raise ValueError("two nonnegative finite tap powers are required")
         if self.precision not in ("fp32", "fp64") or (self.device != "cpu" and not self.device.startswith("cuda")):
@@ -333,7 +451,10 @@ def decision(scores, threshold):
 def score_workspace(workspace, config):
     started = time.perf_counter()
     strict, relaxed = config.budgets()
-    delta = math.nextafter(strict.delta_per_segment/workspace.groups,0.)
+    effective_groups = workspace.groups*len(config.frequency_offsets_hz)
+    if effective_groups > MAX_EFFECTIVE_GROUPS:
+        raise ValueError("timing/frequency bank exceeds 1000000 effective groups")
+    delta = math.nextafter(strict.delta_per_segment/effective_groups,0.)
     if delta <= 0:
         raise ValueError("group calibration allocation underflow")
     b = (workspace.blocks+config.reblock-1)//config.reblock
@@ -345,14 +466,19 @@ def score_workspace(workspace, config):
     retained_bytes = b*tile*(d*d+d+2*2+2*2*2)*16
     projection_bytes = min(b,config.projection_tile_blocks)*tile*(24*d*d*16+32*d*16+256)
     calendar_bytes = (workspace.blocks+b)*64
+    if any(config.frequency_offsets_hz):
+        calendar_bytes += workspace.blocks*(4*np.dtype(np.longdouble).itemsize+48)
     # These arrays survive all group tiles: two bit scores, UCB/residual/DOF,
     # rank histograms, selected local columns and selected candidate indices.
     # Their size depends on the entire declared bank, not the working tile.
-    all_group_bytes = workspace.groups*(96+8*d)
+    all_group_bytes = effective_groups*(96+8*d)
     base_bound = source_bytes+retained_bytes+projection_bytes+calendar_bytes+all_group_bytes+65536
     if base_bound >= config.memory_limit_bytes:
         raise MemoryError("grouped acquisition arrays exceed explicit memory limit")
     intervals, valid, energy = workspace.calendar(config.reblock)
+    frequency_bound = frequency_reuse_bound(config.frequency_offsets_hz,
+        min(workspace.block_samples, workspace.sample_count)/workspace.sample_rate,
+        config.maximum_block_phase_loss_db)
     centers = (intervals[:,0].astype(float)+intervals[:,1].astype(float))/(2*workspace.sample_rate)
     window_blocks = config.window_blocks
     if config.window_seconds is not None:
@@ -362,11 +488,11 @@ def score_workspace(workspace, config):
             raise ValueError("physical window seconds must be an integer number of reblocked sample blocks")
     if window_blocks > 1024:
         raise ValueError("Gaussian window exceeds 1024 blocks")
-    values = np.empty((workspace.groups,2))
-    upper_all = np.empty(workspace.groups)
-    residual_all = np.empty(workspace.groups)
-    dof_all = np.empty(workspace.groups,np.int64)
-    ranks_all = np.empty((workspace.groups,d+1),np.int64)
+    values = np.empty((effective_groups,2))
+    upper_all = np.empty(effective_groups)
+    residual_all = np.empty(effective_groups)
+    dof_all = np.empty(effective_groups,np.int64)
+    ranks_all = np.empty((effective_groups,d+1),np.int64)
     elapsed = dict(read_reblock_seconds=0.,residual_calibration_seconds=0.,factor_preparation_seconds=0.,score_seconds=0.)
     maximum_factor_bytes = 0
     observable_rank_tolerance = None
@@ -375,63 +501,77 @@ def score_workspace(workspace, config):
                            maximum_whitening_covariance_error=0.,
                            maximum_mode_orthogonality_error=0.)
     maximum_array_bound = base_bound
-    for first in range(0,workspace.groups,tile):
-        stop = min(first+tile,workspace.groups)
-        mark = time.perf_counter()
-        G,r = workspace.read_group_tile(first,stop,config.reblock)
-        elapsed["read_reblock_seconds"] += time.perf_counter()-mark
-        mark = time.perf_counter()
-        correlations,grams,upper,residual,dof,ranks = prepare_group_tile(
-            G,r,energy,valid,workspace.mapping[first:stop],reference=config.reference_variance,
-            delta=delta,projection_tile_blocks=config.projection_tile_blocks)
-        elapsed["residual_calibration_seconds"] += time.perf_counter()-mark
-        chosen = upper if config.known_noise_variance is None else np.full_like(upper,config.known_noise_variance/config.reference_variance)
-        mark = time.perf_counter()
-        plan = PreparedWindowedGaussian(grams.reshape(b,(stop-first)*2,2,2),centers,
-            doppler_width_hz=config.doppler_width_hz,window_blocks=window_blocks,
-            stationary_power=config.stationary_power,memory_limit_bytes=config.memory_limit_bytes-base_bound)
-        elapsed["factor_preparation_seconds"] += time.perf_counter()-mark
-        maximum_factor_bytes = max(maximum_factor_bytes,plan.owned_factor_bytes)
-        observable_rank_tolerance = plan.relative_tolerance
-        for name in window_numerics:
-            window_numerics[name] = max(window_numerics[name],getattr(plan,name))
-        maximum_array_bound = max(maximum_array_bound,base_bound+plan.preparation_array_bound_bytes)
-        if config.device.startswith("cuda"):
-            torch.cuda.synchronize(config.device)
-        mark = time.perf_counter()
-        scores = plan.score(correlations.reshape(b,(stop-first)*2,2),
-            variance_scale=np.repeat(chosen,2)[None,:],device=config.device,precision=config.precision).detach().cpu().numpy()
-        if config.device.startswith("cuda"):
-            torch.cuda.synchronize(config.device)
-        elapsed["score_seconds"] += time.perf_counter()-mark
-        maximum_array_bound = max(maximum_array_bound,base_bound+plan.last_score_array_bound_bytes)
-        values[first:stop] = scores.reshape(stop-first,2)
-        upper_all[first:stop],residual_all[first:stop],dof_all[first:stop],ranks_all[first:stop] = upper,residual,dof,ranks
-        del G,r,correlations,grams,plan
+    for frequency_index,frequency_offset in enumerate(config.frequency_offsets_hz):
+        for first in range(0,workspace.groups,tile):
+            stop = min(first+tile,workspace.groups)
+            mark = time.perf_counter()
+            G,r = workspace.read_group_tile(first,stop,config.reblock,frequency_offset)
+            elapsed["read_reblock_seconds"] += time.perf_counter()-mark
+            mark = time.perf_counter()
+            correlations,grams,upper,residual,dof,ranks = prepare_group_tile(
+                G,r,energy,valid,workspace.mapping[first:stop],reference=config.reference_variance,
+                delta=delta,projection_tile_blocks=config.projection_tile_blocks)
+            elapsed["residual_calibration_seconds"] += time.perf_counter()-mark
+            chosen = upper if config.known_noise_variance is None else np.full_like(upper,config.known_noise_variance/config.reference_variance)
+            mark = time.perf_counter()
+            plan = PreparedWindowedGaussian(grams.reshape(b,(stop-first)*2,2,2),centers,
+                doppler_width_hz=config.doppler_width_hz,window_blocks=window_blocks,
+                stationary_power=config.stationary_power,memory_limit_bytes=config.memory_limit_bytes-base_bound)
+            elapsed["factor_preparation_seconds"] += time.perf_counter()-mark
+            maximum_factor_bytes = max(maximum_factor_bytes,plan.owned_factor_bytes)
+            observable_rank_tolerance = plan.relative_tolerance
+            for name in window_numerics:
+                window_numerics[name] = max(window_numerics[name],getattr(plan,name))
+            maximum_array_bound = max(maximum_array_bound,base_bound+plan.preparation_array_bound_bytes)
+            if config.device.startswith("cuda"):
+                torch.cuda.synchronize(config.device)
+            mark = time.perf_counter()
+            scores = plan.score(correlations.reshape(b,(stop-first)*2,2),
+                variance_scale=np.repeat(chosen,2)[None,:],device=config.device,precision=config.precision).detach().cpu().numpy()
+            if config.device.startswith("cuda"):
+                torch.cuda.synchronize(config.device)
+            elapsed["score_seconds"] += time.perf_counter()-mark
+            maximum_array_bound = max(maximum_array_bound,base_bound+plan.last_score_array_bound_bytes)
+            target = slice(frequency_index*workspace.groups+first,frequency_index*workspace.groups+stop)
+            values[target] = scores.reshape(stop-first,2)
+            upper_all[target],residual_all[target],dof_all[target],ranks_all[target] = upper,residual,dof,ranks
+            del G,r,correlations,grams,plan
     workspace.verify_unchanged()
     mixed = bit_mixture(values)
     winner = int(np.argmax(mixed))
     best = int(np.argmax(values[:,winner]))
+    best_frequency_index,best_base_group = divmod(best,workspace.groups)
+    best_parameters = dict(workspace.sync_keys[best_base_group])
+    best_parameters["frequency_hz"] += config.frequency_offsets_hz[best_frequency_index]
     elapsed["total_receiver_seconds"] = time.perf_counter()-started
     return {"format":"triad-group-acquisition-result-v1","input":str(workspace.directory),
         "mode":"actual-noisy", "method":"group-local-gaussian-window-ucb" if config.known_noise_variance is None else "group-local-gaussian-window-known-noise-diagnostic",
         "bit_log_likelihoods":mixed.tolist(),"group_bit_log_likelihoods":values.tolist(),
         "strict":decision(mixed,strict.log_threshold),"relaxed":decision(mixed,relaxed.log_threshold),
-        "best_scoring_group_for_winning_bit":best,"best_group_public_parameters":workspace.sync_keys[best],
+        "best_scoring_group_for_winning_bit":best,"best_group_public_parameters":best_parameters,
+        "best_base_group":best_base_group,"best_frequency_offset_hz":config.frequency_offsets_hz[best_frequency_index],
         "best_group_scope":"score diagnostic only; all fixed groups remain in the bit mixture and calibration",
         "calibration":{"scope":"stationary proper-complex white Gaussian noise; fixed group-local complete-column residuals; union allocation across all predeclared groups",
-            "group_count":workspace.groups,"delta_per_group":delta,"strict":strict.diagnostics(),"relaxed":relaxed.diagnostics(),
+            "group_count":effective_groups,"base_group_count":workspace.groups,"delta_per_group":delta,"strict":strict.diagnostics(),"relaxed":relaxed.diagnostics(),
             "relaxed_uses_strict_calibration":True,"reference_variance":config.reference_variance,
             "known_noise_variance_diagnostic":config.known_noise_variance,
             "variance_upper_over_reference":upper_all.tolist(),"pooled_residual_energy_over_reference":residual_all.tolist(),
             "pooled_complex_dof":dof_all.tolist(),"rank_histograms":ranks_all.tolist(),
             "inter_group_independence_assumed":False,"conditional_noise_resampling_supported":False},
-        "geometry":{"group_count":workspace.groups,"group_dimension":d,"selected_candidates":workspace.selected_indices.tolist(),
+        "geometry":{"group_count":effective_groups,"base_group_count":workspace.groups,"group_dimension":d,"selected_candidates":workspace.selected_indices.tolist(),
             "sample_count":workspace.sample_count,"sample_rate":workspace.sample_rate,"base_block_samples":workspace.block_samples,
             "reblock":config.reblock,"block_samples":workspace.block_samples*config.reblock,"block_count":b,
             "window_blocks":window_blocks,"nominal_window_seconds":window_blocks*workspace.block_samples*config.reblock/workspace.sample_rate,
             "public_group_parameters":workspace.sync_keys,
-            "mixture":"uniform over every fixed synchronization group, separately for each bit; no pruning"},
+            "frequency_offsets_hz":list(config.frequency_offsets_hz),
+            "effective_group_order":"frequency offset major, base synchronization group minor",
+            "mixture":"uniform over every fixed synchronization group and frequency offset, separately for each bit; no pruning"},
+        "frequency_reuse":dict(frequency_bound,
+            model="exact sufficient-statistic phase transformation for the piecewise-constant template; surrounding Gaussian likelihood and UCB model limits retained",
+            gram="unchanged: one unit-modulus phase factor per original block, common to all columns",
+            calibration="separate residual UCB for every effective group; union allocation includes all frequency offsets",
+            phase_preparation="CPU longdouble cycle reduction followed by float64 complex exponential",
+            phase_preparation_mantissa_bits=int(np.finfo(np.longdouble).nmant)+1),
         "arithmetic":{"bulk":config.precision,"device":config.device,"preparation":"CPU complex128/float64 rank projection, observation whitening, prior roots and rectangular SVD",
             "window_whitening":"FP64 small block whitening/scaling on selected device before bounded bulk mode GEMM",
             "finish":"FP64 residual pooling, variance quantiles, likelihood weights/logdet/evidence and bit mixtures","tf32_allowed":False},
@@ -443,7 +583,8 @@ def score_workspace(workspace, config):
             "memory_limit_bytes":config.memory_limit_bytes,"scope":"explicit arrays; mapped files, parsed JSON/report objects, framework allocator and solver internals are not whole-process memory"},
         "timing":elapsed,"limits":["independent Gaussian windows and block-center tap coefficients are an alternative model, not a full sampled channel likelihood",
             "noise-only calibration does not guarantee rejection of wrong-key signals or wrong-bit admission under model mismatch",
-            "fixed completed windows only; no adaptive stopping or uncharged selection of groups, blocks, widths or models"]}
+            "fixed completed windows only; no adaptive stopping or uncharged selection of groups, blocks, widths or models",
+            "residual frequency reuse approximates continuous phase inside original exported blocks; its coherent mismatch bound does not certify nonlinear likelihood accuracy"]}
 
 
 def parse_args(argv=None):
@@ -455,6 +596,13 @@ def parse_args(argv=None):
     window.add_argument("--window-blocks",type=int)
     window.add_argument("--window-seconds",type=float)
     parser.add_argument("--reblock",type=int,default=1)
+    frequency=parser.add_mutually_exclusive_group()
+    frequency.add_argument("--frequency-offsets-hz",type=float,nargs="+",
+        help="fixed residual CFO alternatives added to every public group, rotated before reblocking")
+    frequency.add_argument("--frequency-offset-grid",type=float,nargs=3,metavar=("LOW","HIGH","MAX_STEP"),
+        help="endpoint-inclusive residual CFO grid in Hz; every alternative enters the mixture and calibration")
+    parser.add_argument("--maximum-block-phase-loss-db",type=float,default=.01,
+        help="maximum universal coherent mismatch bound from continuous CFO to original-block midpoint phase (default .01 dB)")
     parser.add_argument("--reference-variance",type=float,default=1.)
     parser.add_argument("--tap-powers",type=float,nargs=2,default=(.5,.5))
     parser.add_argument("--group-tile",type=int,default=1)
@@ -471,12 +619,18 @@ def parse_args(argv=None):
     parser.add_argument("--evaluate-simulation",action="store_true",help="append truth/control outcome after receiver decisions")
     parser.add_argument("--output",type=Path)
     parser.add_argument("--scores-output",type=Path)
-    args=parser.parse_args(argv)
+    args=parser.parse_args(_normalize_scientific_arguments(sys.argv[1:] if argv is None else argv))
     # A default equal to an explicitly supplied small integer is not counted
     # as selected by some argparse versions for a required exclusive group.
     # Apply the seconds-mode placeholder only after checking the explicit choice.
     if args.window_blocks is None:
         args.window_blocks=16
+    if args.frequency_offset_grid is not None:
+        args.frequency_offsets_hz=frequency_offset_grid(*args.frequency_offset_grid)
+    elif args.frequency_offsets_hz is None:
+        args.frequency_offsets_hz=(0.,)
+    else:
+        args.frequency_offsets_hz=tuple(args.frequency_offsets_hz)
     return args
 
 
@@ -500,7 +654,8 @@ def main(argv=None):
     config = AcquisitionConfig(args.doppler_width_hz, args.window_blocks,args.window_seconds,args.reblock,
         args.reference_variance,tuple(args.tap_powers),args.group_tile,args.projection_tile_blocks,
         int(args.memory_mib*1024*1024),args.device,args.precision,args.attempts_per_day,
-        args.duration_alternatives,args.selection_methods,args.calibration_segments,args.known_noise_variance)
+        args.duration_alternatives,args.selection_methods,args.calibration_segments,args.known_noise_variance,
+        args.frequency_offsets_hz,args.maximum_block_phase_loss_db)
     results=[]
     arrays={}
     for index,path in enumerate(args.inputs):

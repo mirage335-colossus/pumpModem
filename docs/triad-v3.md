@@ -11,6 +11,10 @@ rate/oscillator/spread/modulation axes with a factorized validity census and
 selected sampled experiments. It records explicit arrival priors, missed-dwell
 controls, corrected observable-subspace likelihoods and long coherent versus
 short-window comparisons. A census pass is not a demonstrated reception.
+The subsequent [configuration and acquisition extension](validation-data/triad-v3/2026-11-03-extension/README.md)
+adds direct zero-shift and shared-clock simulation, an explicit independent
+modulation timescale, and block-statistic frequency reuse. Its measured coverage
+and remaining gaps are separate from the historical census.
 
 The [noise-calibration and configuration-diversity extension](triad-noise-calibration.md)
 documents the common-scale and independent-residual likelihoods, their explicit
@@ -263,6 +267,22 @@ shapes the source envelope only; it does not retune the simulated RF channel or
 validate real FHSS hardware. Oscillator white FM, random-walk FM, finite-band
 flicker FM, white PM and Wiener phase diffusion are synthetic spectra, not
 measurements or a device-specific Allan-deviation model.
+
+`triad_long --rf-hz` supplies the shift oscillator's frequency coefficient;
+the numerical waveform remains zero-centered complex I/Q. Zero removes the
+shift oscillator, retaining the base oscillator's `--nominal-if-hz` contribution.
+For positive shift, `--shift-oscillator baseband-clock` uses the base clock's
+same static ppm realization for RF and sampling within each endpoint; TX and
+RX still draw independent endpoint errors. Base phase diffusion is counted
+once in these two topologies, and independent positive-shift defaults remain
+unchanged. Stochastic carrier-phase noise does not perturb sampling coordinates:
+this is the established effective oscillator model, not a simulation of shared
+stochastic sample-edge jitter. The historical nominal delayed-ray constant
+phase convention is retained for paired-seed reproducibility; a fitted complex
+ray coefficient absorbs that constant. These controls do not qualify absolute
+real-audio placement or physical RF retuning. Explicit frequency drift at zero
+shift is applied as continuous emission-time TX phase before propagation,
+including the delayed ray, rather than dividing by zero RF frequency.
 
 ### Optional long-span path evolution
 

@@ -1,0 +1,1897 @@
+{
+  "schema": "triad-source-bound-phase-cn57-summary-v1",
+  "report_archive_sha256": "c5dad374c92b9f08399738a05bc9583ced528495770310bb02cf0e0b898ac898",
+  "plan_sha256": "8787b8cb4f2b3e8d6d4edcfe6a4df70eb08781822ced1ef573866e26f735d3a1",
+  "source_archive_sha256": "8dc41344f3565ef6912108ddf690a6b84d576376330e1d5b1890606c79e737e4",
+  "build_provenance_sha256": "46fd02bbef6702596fd63c3034ef9d6f8f4e94f61416137d249ad855c074b724",
+  "binary_sha256": "86b5cfa169a9a2b34c1c96173b3f3cb78b5c7ad1ef0c809cec34d3473f56c522",
+  "executed_source_file_sha256": {
+    "docs/validation-data/triad-v3/2026-11-03-extension/phase/prepare_actual.py": "c79ea60c93319306aa28409da7bf15bfbc95bcd909971f3385eddec8c4fa49f9",
+    "docs/validation-data/triad-v3/2026-11-03-extension/phase/score_actual_batch.py": "4dc68023065c4b87e9ad2737a7abd198480312fe18bcffdb0638252821f8099a",
+    "docs/validation-data/triad-v3/2026-11-03-extension/phase/score_actual.py": "787b9d979f75f8f4f2e87f7e1e529aa9de5092577a916d8c9a52c73f0ae9a1a6",
+    "docs/validation-data/triad-v3/2026-11-03-extension/phase/diagnostic.py": "cb878e5ed3c7e9d9608166e2062501e8b2bd2c63e07a4eff5ea993096e6ea0a9",
+    "tools/triad_phase_frequency.py": "48ee569b1d467b2d7b6fd55088764bd28dd11e0bfecb5974622a318fbb408585",
+    "tools/triad_phase_optimized.py": "759b46d536f2daa1d1de2336190ab19153376aca3eeca32847cba5289d2d63ed",
+    "tools/triad_state_workspace.py": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923",
+    "tools/triad_bounded_run.py": "f117d6be27d38d055f5ab65af2f850c038501badd16cb5f524b5388530218cf2",
+    "src/triad_modem_v3.cpp": "cb6cac016e57edcd4f6ebc70f09c68cc47380e3b772cdbe047d7a3b93e9b434c",
+    "src/triad_simulation_stream.cpp": "afaa1267c36fcd330151174f6f08b6fb401a7f702c660964071ef24b6e82a70d",
+    "include/datapump/triad_modem_v3.hpp": "1ddd8e851950036f03e6a903ed7ba4746392ffe8623f49685df04f029c4aff48",
+    "tools/triad-long.cpp": "4e38246ea0dce8b37d1a983ac2499a326d49519fe3706e22aec5caeee08bf8ac"
+  },
+  "energy_sums_report_sha256": "20ecd883351e53308951d37285a6949e6cf4596a0ac8bc4150fc4d8ab1dd70a1",
+  "receipts": {
+    "configure": {
+      "sha256": "8c822363645ee466bb00bace3fed696c3afe1ac35ddf43bdc31077bbe0f3af0e",
+      "count": 20,
+      "wall_seconds": 0.11927809799090028,
+      "source_unchanged": true,
+      "binary_unchanged": true
+    },
+    "export": {
+      "sha256": "8da6e21a29da62f949e9ac261cb56464bda8af27f284b9001f890bba368455df",
+      "count": 20,
+      "wall_seconds": 190.10335245495662,
+      "source_unchanged": true,
+      "binary_unchanged": true
+    },
+    "actual": {
+      "sha256": "1d32f2c800597e23bccc9f3406f32f021c9fe0e15c706f808537f333db0571b4",
+      "count": 1,
+      "wall_seconds": 21.914859920972958,
+      "source_unchanged": true,
+      "binary_unchanged": true
+    },
+    "benchmark": {
+      "sha256": "b302eca587f199fd6bc56b5fc280600a9f254d78df980e45073254aa179bd4d0",
+      "count": 5,
+      "wall_seconds": 52.19105218700133,
+      "source_unchanged": true,
+      "binary_unchanged": true
+    }
+  },
+  "all_46_declared_jobs_completed": true,
+  "job_definition_hashes_independently_recomputed": true,
+  "verification": "Recomputed admissions from each saved score; verified plan/job definitions, bounded completion, report/manifest/energy-file hash bindings. Energy sums supplied by the verified remote reduction and crosschecked against manifests; raw energy arrays were not reread locally for this summary.",
+  "model": {
+    "cn0_db_hz": -57,
+    "gui_rate_hz": 0.001,
+    "added_symbols": 1,
+    "encrypted": true,
+    "spread": "none",
+    "additional_modulation": "off",
+    "known_alignment": true,
+    "known_unit_gain": true,
+    "known_injected_noise_variance": true,
+    "physical_oscillator_presets": false,
+    "explicit_relative_wiener_sigma_rad_sqrt_s": 0.001234134149488435,
+    "phase_states": 32,
+    "frequency_states": 1,
+    "block_seconds": 1000,
+    "sample_rate_hz": 0.25
+  },
+  "seed_offset": 10000000,
+  "all_seven_seed_domains_independently_offset_verified": true,
+  "thresholds": {
+    "strict": 22.721063389585737,
+    "relaxed": 17.4227460230377
+  },
+  "signal_paths": 16,
+  "null_paths": 4,
+  "outcomes": {
+    "global_unknown_phase": {
+      "strict": {
+        "correct_accepted": 0,
+        "wrong_accepted": 0,
+        "miss": 16,
+        "false_admission": 0,
+        "null_rejected": 4,
+        "correct_two_one_sided_95_bounds": [
+          0.0,
+          0.1707497229824809
+        ],
+        "false_admission_two_one_sided_95_bounds": [
+          0.0,
+          0.527129195498412
+        ]
+      },
+      "relaxed": {
+        "correct_accepted": 0,
+        "wrong_accepted": 0,
+        "miss": 16,
+        "false_admission": 0,
+        "null_rejected": 4,
+        "correct_two_one_sided_95_bounds": [
+          0.0,
+          0.1707497229824809
+        ],
+        "false_admission_two_one_sided_95_bounds": [
+          0.0,
+          0.527129195498412
+        ]
+      }
+    },
+    "segmented_0.25_tau": {
+      "strict": {
+        "correct_accepted": 8,
+        "wrong_accepted": 0,
+        "miss": 8,
+        "false_admission": 0,
+        "null_rejected": 4,
+        "correct_two_one_sided_95_bounds": [
+          0.2786026855021703,
+          0.7213973144978296
+        ],
+        "false_admission_two_one_sided_95_bounds": [
+          0.0,
+          0.527129195498412
+        ]
+      },
+      "relaxed": {
+        "correct_accepted": 14,
+        "wrong_accepted": 0,
+        "miss": 2,
+        "false_admission": 0,
+        "null_rejected": 4,
+        "correct_two_one_sided_95_bounds": [
+          0.6561748007704107,
+          0.9773212172775543
+        ],
+        "false_admission_two_one_sided_95_bounds": [
+          0.0,
+          0.527129195498412
+        ]
+      }
+    },
+    "segmented_1_tau": {
+      "strict": {
+        "correct_accepted": 16,
+        "wrong_accepted": 0,
+        "miss": 0,
+        "false_admission": 0,
+        "null_rejected": 4,
+        "correct_two_one_sided_95_bounds": [
+          0.8292502770175191,
+          1.0
+        ],
+        "false_admission_two_one_sided_95_bounds": [
+          0.0,
+          0.527129195498412
+        ]
+      },
+      "relaxed": {
+        "correct_accepted": 16,
+        "wrong_accepted": 0,
+        "miss": 0,
+        "false_admission": 0,
+        "null_rejected": 4,
+        "correct_two_one_sided_95_bounds": [
+          0.8292502770175191,
+          1.0
+        ],
+        "false_admission_two_one_sided_95_bounds": [
+          0.0,
+          0.527129195498412
+        ]
+      }
+    },
+    "segmented_4_tau": {
+      "strict": {
+        "correct_accepted": 1,
+        "wrong_accepted": 0,
+        "miss": 15,
+        "false_admission": 0,
+        "null_rejected": 4,
+        "correct_two_one_sided_95_bounds": [
+          0.0032006977101884967,
+          0.2639573972885685
+        ],
+        "false_admission_two_one_sided_95_bounds": [
+          0.0,
+          0.527129195498412
+        ]
+      },
+      "relaxed": {
+        "correct_accepted": 2,
+        "wrong_accepted": 0,
+        "miss": 14,
+        "false_admission": 0,
+        "null_rejected": 4,
+        "correct_two_one_sided_95_bounds": [
+          0.022678782722445716,
+          0.34382519922958943
+        ],
+        "false_admission_two_one_sided_95_bounds": [
+          0.0,
+          0.527129195498412
+        ]
+      }
+    },
+    "finite_phase": {
+      "strict": {
+        "correct_accepted": 16,
+        "wrong_accepted": 0,
+        "miss": 0,
+        "false_admission": 0,
+        "null_rejected": 4,
+        "correct_two_one_sided_95_bounds": [
+          0.8292502770175191,
+          1.0
+        ],
+        "false_admission_two_one_sided_95_bounds": [
+          0.0,
+          0.527129195498412
+        ]
+      },
+      "relaxed": {
+        "correct_accepted": 16,
+        "wrong_accepted": 0,
+        "miss": 0,
+        "false_admission": 0,
+        "null_rejected": 4,
+        "correct_two_one_sided_95_bounds": [
+          0.8292502770175191,
+          1.0
+        ],
+        "false_admission_two_one_sided_95_bounds": [
+          0.0,
+          0.527129195498412
+        ]
+      }
+    }
+  },
+  "cases": [
+    {
+      "id": "flat-tcxo-signal-00",
+      "control": "signal",
+      "bit": 0,
+      "manifest_sha256": "2e15fda9b71ccf3317b596344cd8e8abd43b8c3b0ad0dc3e723e161ad9947301",
+      "energy_file_sha256": "3e6038573a3254de7b9eec6b4571b59457140cf7ffaffdd357098d7c3967d471",
+      "energy_snr": 146.99005736935928,
+      "cn0_db_hz": -57.0,
+      "requested_active_seconds": 73440000,
+      "actual_active_seconds": 73728051.2,
+      "capture_seconds": 73824128.0,
+      "sample_count": 18456032,
+      "methods": {
+        "global_unknown_phase": {
+          "scores": [
+            -75.71622195475037,
+            -138.79232650702016
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_0.25_tau": {
+          "scores": [
+            22.459340799629015,
+            -23.16043890259654
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "correct_accepted"
+          }
+        },
+        "segmented_1_tau": {
+          "scores": [
+            37.648725151969856,
+            -54.179439317939604
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        },
+        "segmented_4_tau": {
+          "scores": [
+            -9.941847922622756,
+            -101.39102502859616
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "finite_phase": {
+          "scores": [
+            60.61108320698405,
+            -44.222398974359955
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        }
+      }
+    },
+    {
+      "id": "flat-tcxo-signal-01",
+      "control": "signal",
+      "bit": 1,
+      "manifest_sha256": "26c993fa9790d5b86b83e44a37d8cba092629e9703d47816c5d7beec71d6d8b7",
+      "energy_file_sha256": "056467a5300904393e12731f353053475a9962c25082d53d427acc5c7c4f6f20",
+      "energy_snr": 146.98732207506237,
+      "cn0_db_hz": -57.0,
+      "requested_active_seconds": 73440000,
+      "actual_active_seconds": 73728051.2,
+      "capture_seconds": 73824128.0,
+      "sample_count": 18456032,
+      "methods": {
+        "global_unknown_phase": {
+          "scores": [
+            -123.78041304456794,
+            -131.14711227339134
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_0.25_tau": {
+          "scores": [
+            -20.20612781631844,
+            18.740405096286977
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "correct_accepted"
+          }
+        },
+        "segmented_1_tau": {
+          "scores": [
+            -34.983556628187834,
+            28.87902929856724
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        },
+        "segmented_4_tau": {
+          "scores": [
+            -83.64009598946737,
+            -6.72528622837789
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "finite_phase": {
+          "scores": [
+            -38.75788584407941,
+            49.29267849348384
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        }
+      }
+    },
+    {
+      "id": "flat-tcxo-signal-02",
+      "control": "signal",
+      "bit": 0,
+      "manifest_sha256": "ae198d35aca41498ed757a498391b2c3e164f538b6db4581a0501cba6fa96a17",
+      "energy_file_sha256": "03dd28e57c98c84fe12274f2cdd4664830764413ba13d8901308aff907a70279",
+      "energy_snr": 146.9928159940081,
+      "cn0_db_hz": -57.0,
+      "requested_active_seconds": 73440000,
+      "actual_active_seconds": 73728051.2,
+      "capture_seconds": 73824128.0,
+      "sample_count": 18456032,
+      "methods": {
+        "global_unknown_phase": {
+          "scores": [
+            -121.95113808746893,
+            -122.95276967110706
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_0.25_tau": {
+          "scores": [
+            20.801052973124698,
+            -28.292754283534126
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "correct_accepted"
+          }
+        },
+        "segmented_1_tau": {
+          "scores": [
+            25.25056493371669,
+            -48.637446119092814
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        },
+        "segmented_4_tau": {
+          "scores": [
+            -26.242152182301943,
+            -74.17534605717726
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "finite_phase": {
+          "scores": [
+            42.03292916543918,
+            -44.53662957600623
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        }
+      }
+    },
+    {
+      "id": "flat-tcxo-signal-03",
+      "control": "signal",
+      "bit": 1,
+      "manifest_sha256": "56e27aa9096c2c7ce4bb76293a0932408db96c82baa4e21446cbb4d39ca5d65a",
+      "energy_file_sha256": "af76191d9ffce532b7af708ff4cb70921b1dd90758b604dc7f6b9726e7d71439",
+      "energy_snr": 146.98897350710095,
+      "cn0_db_hz": -57.0,
+      "requested_active_seconds": 73440000,
+      "actual_active_seconds": 73728051.2,
+      "capture_seconds": 73824128.0,
+      "sample_count": 18456032,
+      "methods": {
+        "global_unknown_phase": {
+          "scores": [
+            -145.23995776034172,
+            -105.90492185985718
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_0.25_tau": {
+          "scores": [
+            -27.104220517470026,
+            47.65872465605729
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        },
+        "segmented_1_tau": {
+          "scores": [
+            -71.6811486229316,
+            50.26628500080747
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        },
+        "segmented_4_tau": {
+          "scores": [
+            -98.66683156947185,
+            -2.781772765129969
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "finite_phase": {
+          "scores": [
+            -54.0333455439511,
+            73.01807314728504
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        }
+      }
+    },
+    {
+      "id": "flat-tcxo-signal-04",
+      "control": "signal",
+      "bit": 0,
+      "manifest_sha256": "d7084cc439340388a124281db44dfbd20785f00c83cc9db2fbd52b0e0ef321c7",
+      "energy_file_sha256": "aa7fe07cfa02b0b06c29105b1ca65d4a4b245fb336354004359da1e27b6dc100",
+      "energy_snr": 146.98939881689662,
+      "cn0_db_hz": -57.0,
+      "requested_active_seconds": 73440000,
+      "actual_active_seconds": 73728051.2,
+      "capture_seconds": 73824128.0,
+      "sample_count": 18456032,
+      "methods": {
+        "global_unknown_phase": {
+          "scores": [
+            -107.2285904155417,
+            -134.89190293706244
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_0.25_tau": {
+          "scores": [
+            58.75258026798199,
+            -34.72621921888575
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        },
+        "segmented_1_tau": {
+          "scores": [
+            75.8302269322322,
+            -68.54399217853387
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        },
+        "segmented_4_tau": {
+          "scores": [
+            18.33623893075849,
+            -101.82990560019246
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "correct_accepted"
+          }
+        },
+        "finite_phase": {
+          "scores": [
+            104.1944783657026,
+            -57.72646050965188
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        }
+      }
+    },
+    {
+      "id": "flat-tcxo-signal-05",
+      "control": "signal",
+      "bit": 1,
+      "manifest_sha256": "c6a4e088e5da874017a476dac35fd2116b604ac5cd31b78c2cc71c2814583d74",
+      "energy_file_sha256": "6628afdfb1855ae9c28ae279f979f65adbcec92006be1bcb9d972b045f39073a",
+      "energy_snr": 146.99037464329416,
+      "cn0_db_hz": -57.0,
+      "requested_active_seconds": 73440000,
+      "actual_active_seconds": 73728051.2,
+      "capture_seconds": 73824128.0,
+      "sample_count": 18456032,
+      "methods": {
+        "global_unknown_phase": {
+          "scores": [
+            -122.96016355548973,
+            -115.15369945778956
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_0.25_tau": {
+          "scores": [
+            -29.58550638690608,
+            29.292739121315783
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        },
+        "segmented_1_tau": {
+          "scores": [
+            -56.78204187099247,
+            57.794138859451465
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        },
+        "segmented_4_tau": {
+          "scores": [
+            -76.03981010466019,
+            26.14011526351608
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        },
+        "finite_phase": {
+          "scores": [
+            -46.06738510347774,
+            65.48866286484599
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        }
+      }
+    },
+    {
+      "id": "flat-tcxo-signal-06",
+      "control": "signal",
+      "bit": 0,
+      "manifest_sha256": "b7a7e9bd0493965ae8e146804416b5839984d8383d550d3030fe9a75655bcd67",
+      "energy_file_sha256": "3b79f0ea2b81f796cebbf874a7c6b3edb305ca984ac5bc5b1c1f6d7adb445910",
+      "energy_snr": 146.98599818611953,
+      "cn0_db_hz": -57.0,
+      "requested_active_seconds": 73440000,
+      "actual_active_seconds": 73728051.2,
+      "capture_seconds": 73824128.0,
+      "sample_count": 18456032,
+      "methods": {
+        "global_unknown_phase": {
+          "scores": [
+            -113.64297438560729,
+            -134.25032750942717
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_0.25_tau": {
+          "scores": [
+            31.81551989799012,
+            -26.394029006066763
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        },
+        "segmented_1_tau": {
+          "scores": [
+            33.411949717019006,
+            -52.00647082386459
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        },
+        "segmented_4_tau": {
+          "scores": [
+            -3.0444687006350923,
+            -82.92728963806788
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "finite_phase": {
+          "scores": [
+            60.75023102666512,
+            -44.67486837554804
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        }
+      }
+    },
+    {
+      "id": "flat-tcxo-signal-07",
+      "control": "signal",
+      "bit": 1,
+      "manifest_sha256": "a8b7de8440882a0b8c48f49b963e4f04da4cffd3a9548caac55ad6095f2175ce",
+      "energy_file_sha256": "a0cc701f000392660f94bbb8e9360f5069ea91679ee1c01bbdf2602999c89f4c",
+      "energy_snr": 146.9861857036624,
+      "cn0_db_hz": -57.0,
+      "requested_active_seconds": 73440000,
+      "actual_active_seconds": 73728051.2,
+      "capture_seconds": 73824128.0,
+      "sample_count": 18456032,
+      "methods": {
+        "global_unknown_phase": {
+          "scores": [
+            -116.64389001089738,
+            -100.86431545842386
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_0.25_tau": {
+          "scores": [
+            -28.036707589414938,
+            20.853872262013
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "correct_accepted"
+          }
+        },
+        "segmented_1_tau": {
+          "scores": [
+            -49.59187909712273,
+            32.093754752320585
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        },
+        "segmented_4_tau": {
+          "scores": [
+            -71.91549582953954,
+            -24.6088289792675
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "finite_phase": {
+          "scores": [
+            -40.98747595453697,
+            55.574257772939966
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        }
+      }
+    },
+    {
+      "id": "flat-tcxo-signal-08",
+      "control": "signal",
+      "bit": 0,
+      "manifest_sha256": "aa17c65a1d2f34e79c42ad27f79f20f0e0de28a7be403a201b583a694cbb99d0",
+      "energy_file_sha256": "f61dd5658baee4f9868839a41e7a4ee4fa96cbce8107c3f1e0c9870214195b8d",
+      "energy_snr": 146.99281870166118,
+      "cn0_db_hz": -57.0,
+      "requested_active_seconds": 73440000,
+      "actual_active_seconds": 73728051.2,
+      "capture_seconds": 73824128.0,
+      "sample_count": 18456032,
+      "methods": {
+        "global_unknown_phase": {
+          "scores": [
+            -118.0133387324657,
+            -135.69256772462424
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_0.25_tau": {
+          "scores": [
+            22.036904578349564,
+            -36.00959326048533
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "correct_accepted"
+          }
+        },
+        "segmented_1_tau": {
+          "scores": [
+            44.09587819063,
+            -79.95396280401961
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        },
+        "segmented_4_tau": {
+          "scores": [
+            13.717906225706844,
+            -104.87056979501061
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "finite_phase": {
+          "scores": [
+            59.84121791203798,
+            -70.67912417092306
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        }
+      }
+    },
+    {
+      "id": "flat-tcxo-signal-09",
+      "control": "signal",
+      "bit": 1,
+      "manifest_sha256": "a4c1508a0017a0d1633eba6f4a2c1ceadde4b0fd874fd084fc0a4b8162969220",
+      "energy_file_sha256": "bc4c6d437ff342d4ba1a41787d222c2efa6bd6a1ca21b80729aab3786d4f323a",
+      "energy_snr": 146.98980232006443,
+      "cn0_db_hz": -57.0,
+      "requested_active_seconds": 73440000,
+      "actual_active_seconds": 73728051.2,
+      "capture_seconds": 73824128.0,
+      "sample_count": 18456032,
+      "methods": {
+        "global_unknown_phase": {
+          "scores": [
+            -108.77293013291373,
+            -84.93798582934573
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_0.25_tau": {
+          "scores": [
+            -29.43382853108152,
+            30.55118007828855
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        },
+        "segmented_1_tau": {
+          "scores": [
+            -49.86181936961018,
+            40.53627238233038
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        },
+        "segmented_4_tau": {
+          "scores": [
+            -88.07288003419187,
+            -4.310403195346369
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "finite_phase": {
+          "scores": [
+            -46.16960936456559,
+            52.37741938698384
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        }
+      }
+    },
+    {
+      "id": "flat-tcxo-signal-10",
+      "control": "signal",
+      "bit": 0,
+      "manifest_sha256": "b4dac56a8439cd333a7d26aa0ba7d9b34a05cdba74d57681ad63ef20c247642c",
+      "energy_file_sha256": "3e69e0e9fee6958024680a4e51013357dcfff2b7acd3bb79a551d98cc4b5c2fe",
+      "energy_snr": 146.98928851840495,
+      "cn0_db_hz": -57.0,
+      "requested_active_seconds": 73440000,
+      "actual_active_seconds": 73728051.2,
+      "capture_seconds": 73824128.0,
+      "sample_count": 18456032,
+      "methods": {
+        "global_unknown_phase": {
+          "scores": [
+            -112.3502011699504,
+            -112.15108091484831
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_0.25_tau": {
+          "scores": [
+            28.278590971121016,
+            -9.285317463449912
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        },
+        "segmented_1_tau": {
+          "scores": [
+            50.542346280675694,
+            -39.70236800400682
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        },
+        "segmented_4_tau": {
+          "scores": [
+            8.944620169746758,
+            -78.39214700683107
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "finite_phase": {
+          "scores": [
+            77.25097029198147,
+            -30.182658412050998
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        }
+      }
+    },
+    {
+      "id": "flat-tcxo-signal-11",
+      "control": "signal",
+      "bit": 1,
+      "manifest_sha256": "1b426bf0aa01ea01e520c68f073fa33189ff560f70655360a419494c29aa46a1",
+      "energy_file_sha256": "98304a689ab36227fe550d4c50a3777a0469232006b8d1a3ea5827d4de82bcb1",
+      "energy_snr": 146.98839686870278,
+      "cn0_db_hz": -57.0,
+      "requested_active_seconds": 73440000,
+      "actual_active_seconds": 73728051.2,
+      "capture_seconds": 73824128.0,
+      "sample_count": 18456032,
+      "methods": {
+        "global_unknown_phase": {
+          "scores": [
+            -127.63172270873652,
+            -110.12636856779451
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_0.25_tau": {
+          "scores": [
+            -37.88794176632583,
+            15.441073230790733
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_1_tau": {
+          "scores": [
+            -76.37239769560121,
+            33.96706322185018
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        },
+        "segmented_4_tau": {
+          "scores": [
+            -94.44747069599059,
+            11.623388902994972
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "finite_phase": {
+          "scores": [
+            -69.86452429678369,
+            53.781571007237424
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        }
+      }
+    },
+    {
+      "id": "flat-tcxo-signal-12",
+      "control": "signal",
+      "bit": 0,
+      "manifest_sha256": "0bcfe786ca519c08595502c727c01bbbb1a67f31ff1a1152e6942c2a9de9c72f",
+      "energy_file_sha256": "049fb489d492aad78be483e727f39127f56aab710d479c4961824350c866c8c3",
+      "energy_snr": 146.99331477296195,
+      "cn0_db_hz": -57.0,
+      "requested_active_seconds": 73440000,
+      "actual_active_seconds": 73728051.2,
+      "capture_seconds": 73824128.0,
+      "sample_count": 18456032,
+      "methods": {
+        "global_unknown_phase": {
+          "scores": [
+            -131.50148686222715,
+            -124.31773535017398
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_0.25_tau": {
+          "scores": [
+            16.81312010924019,
+            -25.875536840914528
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_1_tau": {
+          "scores": [
+            37.176866675377134,
+            -46.33541950404809
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        },
+        "segmented_4_tau": {
+          "scores": [
+            -23.512818401737924,
+            -87.56940684108308
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "finite_phase": {
+          "scores": [
+            58.05307974007601,
+            -41.26598619926213
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        }
+      }
+    },
+    {
+      "id": "flat-tcxo-signal-13",
+      "control": "signal",
+      "bit": 1,
+      "manifest_sha256": "9361d398c3b5ab028d69ddc82561f4a24ebba67c13ffaee9602a711abfb7d537",
+      "energy_file_sha256": "19fd98512f55fc2f98a4f9de8933660e504209e9c06c2e3e0cb6ddfe0da6509f",
+      "energy_snr": 146.98766972991925,
+      "cn0_db_hz": -57.0,
+      "requested_active_seconds": 73440000,
+      "actual_active_seconds": 73728051.2,
+      "capture_seconds": 73824128.0,
+      "sample_count": 18456032,
+      "methods": {
+        "global_unknown_phase": {
+          "scores": [
+            -133.04353230116462,
+            -138.4194498469525
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_0.25_tau": {
+          "scores": [
+            -26.45757199900851,
+            33.07291120967011
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        },
+        "segmented_1_tau": {
+          "scores": [
+            -58.26482727672686,
+            23.5682501043253
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        },
+        "segmented_4_tau": {
+          "scores": [
+            -96.01294265063578,
+            13.034463945329252
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "finite_phase": {
+          "scores": [
+            -50.08251440922661,
+            58.237250110626555
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        }
+      }
+    },
+    {
+      "id": "flat-tcxo-signal-14",
+      "control": "signal",
+      "bit": 0,
+      "manifest_sha256": "c44817c942878fe47ef35057f7dc70867226f380a39604eb96e3265ce53ac972",
+      "energy_file_sha256": "e1734998ccca60da54d24ecfdee0500e01e69c6a366d5dcc6ac6a02ce66a4dea",
+      "energy_snr": 146.9866476318301,
+      "cn0_db_hz": -57.0,
+      "requested_active_seconds": 73440000,
+      "actual_active_seconds": 73728051.2,
+      "capture_seconds": 73824128.0,
+      "sample_count": 18456032,
+      "methods": {
+        "global_unknown_phase": {
+          "scores": [
+            -140.83041829173578,
+            -93.14638816932641
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_0.25_tau": {
+          "scores": [
+            21.146300161911533,
+            -26.283967632175127
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "correct_accepted"
+          }
+        },
+        "segmented_1_tau": {
+          "scores": [
+            25.955614899928467,
+            -51.002678155341414
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        },
+        "segmented_4_tau": {
+          "scores": [
+            -6.636715996743858,
+            -65.89603182552861
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "finite_phase": {
+          "scores": [
+            47.684469994157595,
+            -36.7542669797527
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        }
+      }
+    },
+    {
+      "id": "flat-tcxo-signal-15",
+      "control": "signal",
+      "bit": 1,
+      "manifest_sha256": "f524d15e4c8e74ec49f4f736a9ba7f796de5720088987433b3a89731c47347ba",
+      "energy_file_sha256": "0c587c19eb4b57d72a87bd3cd7ef69ebc746f09a089895a3a6d4fee525bba874",
+      "energy_snr": 146.98336201519973,
+      "cn0_db_hz": -57.0,
+      "requested_active_seconds": 73440000,
+      "actual_active_seconds": 73728051.2,
+      "capture_seconds": 73824128.0,
+      "sample_count": 18456032,
+      "methods": {
+        "global_unknown_phase": {
+          "scores": [
+            -126.34969658088636,
+            -136.5696421038467
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_0.25_tau": {
+          "scores": [
+            -31.20978141459895,
+            26.03406824226527
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        },
+        "segmented_1_tau": {
+          "scores": [
+            -66.31551388027924,
+            41.61454695360846
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        },
+        "segmented_4_tau": {
+          "scores": [
+            -94.04325546992715,
+            -23.37183236216113
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "finite_phase": {
+          "scores": [
+            -50.48186127657496,
+            58.00984951232349
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        }
+      }
+    },
+    {
+      "id": "flat-tcxo-null-00",
+      "control": "null",
+      "bit": 0,
+      "manifest_sha256": "a181851321fb5f4e61638e9a30662ec6a17a948795779e3dbbab93cb38fdb15f",
+      "energy_file_sha256": "0c7a2aee6d4f80856fb6ccfa13d76607a799afd41d22934f7a106cec6d78916c",
+      "energy_snr": 0.0,
+      "cn0_db_hz": -57.0,
+      "requested_active_seconds": 73440000,
+      "actual_active_seconds": 73728051.2,
+      "capture_seconds": 73824128.0,
+      "sample_count": 18456032,
+      "methods": {
+        "global_unknown_phase": {
+          "scores": [
+            -146.47830231429046,
+            -132.91985656042834
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "null_rejected",
+            "relaxed": "null_rejected"
+          }
+        },
+        "segmented_0.25_tau": {
+          "scores": [
+            -36.28381022990806,
+            -35.81622202142516
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "null_rejected",
+            "relaxed": "null_rejected"
+          }
+        },
+        "segmented_1_tau": {
+          "scores": [
+            -63.27642239528236,
+            -52.91573113225014
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "null_rejected",
+            "relaxed": "null_rejected"
+          }
+        },
+        "segmented_4_tau": {
+          "scores": [
+            -94.57050563141914,
+            -86.17485801960574
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "null_rejected",
+            "relaxed": "null_rejected"
+          }
+        },
+        "finite_phase": {
+          "scores": [
+            -53.484542460789626,
+            -49.491289023377185
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "null_rejected",
+            "relaxed": "null_rejected"
+          }
+        }
+      }
+    },
+    {
+      "id": "flat-tcxo-null-01",
+      "control": "null",
+      "bit": 1,
+      "manifest_sha256": "f75eb31ced40eddf031ec737a9451018bff927c45ee5f413e381deb3d752b387",
+      "energy_file_sha256": "0c7a2aee6d4f80856fb6ccfa13d76607a799afd41d22934f7a106cec6d78916c",
+      "energy_snr": 0.0,
+      "cn0_db_hz": -57.0,
+      "requested_active_seconds": 73440000,
+      "actual_active_seconds": 73728051.2,
+      "capture_seconds": 73824128.0,
+      "sample_count": 18456032,
+      "methods": {
+        "global_unknown_phase": {
+          "scores": [
+            -125.95723348976844,
+            -131.53004760221728
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "null_rejected",
+            "relaxed": "null_rejected"
+          }
+        },
+        "segmented_0.25_tau": {
+          "scores": [
+            -17.9786680649343,
+            -27.822066348862734
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "null_rejected",
+            "relaxed": "null_rejected"
+          }
+        },
+        "segmented_1_tau": {
+          "scores": [
+            -55.08527524554586,
+            -60.75343885130171
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "null_rejected",
+            "relaxed": "null_rejected"
+          }
+        },
+        "segmented_4_tau": {
+          "scores": [
+            -80.01069892510016,
+            -84.14469704214383
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "null_rejected",
+            "relaxed": "null_rejected"
+          }
+        },
+        "finite_phase": {
+          "scores": [
+            -39.0956327946426,
+            -46.55003129203751
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "null_rejected",
+            "relaxed": "null_rejected"
+          }
+        }
+      }
+    },
+    {
+      "id": "flat-tcxo-null-02",
+      "control": "null",
+      "bit": 0,
+      "manifest_sha256": "3d42b8d6976a1cf02045c09ffea2dd7826c84c07a23482fe516405d3822c478f",
+      "energy_file_sha256": "0c7a2aee6d4f80856fb6ccfa13d76607a799afd41d22934f7a106cec6d78916c",
+      "energy_snr": 0.0,
+      "cn0_db_hz": -57.0,
+      "requested_active_seconds": 73440000,
+      "actual_active_seconds": 73728051.2,
+      "capture_seconds": 73824128.0,
+      "sample_count": 18456032,
+      "methods": {
+        "global_unknown_phase": {
+          "scores": [
+            -126.30999126947222,
+            -121.13108010255993
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "null_rejected",
+            "relaxed": "null_rejected"
+          }
+        },
+        "segmented_0.25_tau": {
+          "scores": [
+            -23.91099888484831,
+            -26.960513024244186
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "null_rejected",
+            "relaxed": "null_rejected"
+          }
+        },
+        "segmented_1_tau": {
+          "scores": [
+            -38.451330335558104,
+            -56.577995473935694
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "null_rejected",
+            "relaxed": "null_rejected"
+          }
+        },
+        "segmented_4_tau": {
+          "scores": [
+            -79.0499105746214,
+            -88.61281027453607
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "null_rejected",
+            "relaxed": "null_rejected"
+          }
+        },
+        "finite_phase": {
+          "scores": [
+            -37.15953578218068,
+            -47.64450732871675
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "null_rejected",
+            "relaxed": "null_rejected"
+          }
+        }
+      }
+    },
+    {
+      "id": "flat-tcxo-null-03",
+      "control": "null",
+      "bit": 1,
+      "manifest_sha256": "7a4fe0862db2a9e5e6fb6e87b587c654b9a8bb8607e9aaeba650b94963786c16",
+      "energy_file_sha256": "0c7a2aee6d4f80856fb6ccfa13d76607a799afd41d22934f7a106cec6d78916c",
+      "energy_snr": 0.0,
+      "cn0_db_hz": -57.0,
+      "requested_active_seconds": 73440000,
+      "actual_active_seconds": 73728051.2,
+      "capture_seconds": 73824128.0,
+      "sample_count": 18456032,
+      "methods": {
+        "global_unknown_phase": {
+          "scores": [
+            -124.00447747862076,
+            -140.68441008363666
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "null_rejected",
+            "relaxed": "null_rejected"
+          }
+        },
+        "segmented_0.25_tau": {
+          "scores": [
+            -28.267356106323355,
+            -34.57915917907403
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "null_rejected",
+            "relaxed": "null_rejected"
+          }
+        },
+        "segmented_1_tau": {
+          "scores": [
+            -56.28173416149815,
+            -47.94204579324087
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "null_rejected",
+            "relaxed": "null_rejected"
+          }
+        },
+        "segmented_4_tau": {
+          "scores": [
+            -90.54553221826735,
+            -87.43910354769541
+          ],
+          "winner": 1,
+          "outcomes": {
+            "strict": "null_rejected",
+            "relaxed": "null_rejected"
+          }
+        },
+        "finite_phase": {
+          "scores": [
+            -41.334469834769386,
+            -48.395990036418176
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "null_rejected",
+            "relaxed": "null_rejected"
+          }
+        }
+      }
+    }
+  ],
+  "ranges": {
+    "energy_snr": [
+      146.98336201519973,
+      146.99331477296195
+    ],
+    "actual_active_seconds": [
+      73728051.2,
+      73728051.2
+    ],
+    "capture_seconds": [
+      73824128.0,
+      73824128.0
+    ],
+    "winning_phase_signal_score": [
+      42.03292916543918,
+      104.1944783657026
+    ],
+    "winning_segment_tau_signal_score": [
+      23.5682501043253,
+      75.8302269322322
+    ]
+  },
+  "benchmarks": {
+    "actual-all20-cpu-fp32": {
+      "device": "cpu",
+      "precision": "fp32",
+      "implementation": "reference",
+      "captures": 20,
+      "external_process_seconds": 21.912278226111084,
+      "load_validate_seconds": 10.687316136900336,
+      "analytic_baseline_seconds": 0.020484925946220756,
+      "prepare_transfer_seconds": 0.011360532836988568,
+      "synchronized_update_seconds": 9.747704821871594,
+      "script_seconds_before_write": 21.547523258952424,
+      "graph_warmup_seconds": 0,
+      "graph_capture_seconds": 0,
+      "combined_memory_estimate_bytes": 286005088,
+      "environment": {
+        "torch": "2.8.0+cu128",
+        "numpy": "2.5.2",
+        "cuda": "12.8",
+        "triton": "3.4.0",
+        "gpu": null
+      },
+      "prepared_input_sha256": "aabb39b5167be71ec442e7772dffe17fe2c9f0ab09125415fe357fc824dae662",
+      "score_report_sha256": "0c59e008b95fd3ae48ca915ea526b6e07df5596c030913ca0dbaf07305fce059"
+    },
+    "benchmark-cpu-fp32": {
+      "device": "cpu",
+      "precision": "fp32",
+      "implementation": "reference",
+      "captures": 1,
+      "external_process_seconds": 11.414173527853563,
+      "load_validate_seconds": 0.5125307799316943,
+      "analytic_baseline_seconds": 0.0024266259279102087,
+      "prepare_transfer_seconds": 0.0026158939581364393,
+      "synchronized_update_seconds": 9.599472616100684,
+      "script_seconds_before_write": 11.069024860160425,
+      "graph_warmup_seconds": 0,
+      "graph_capture_seconds": 0,
+      "combined_memory_estimate_bytes": 16613664,
+      "environment": {
+        "torch": "2.8.0+cu128",
+        "numpy": "2.5.2",
+        "cuda": "12.8",
+        "triton": "3.4.0",
+        "gpu": null
+      },
+      "prepared_input_sha256": "5c1a99bdca6dbf10da01d583bb34b82c12e35704d13e276c49ed5ee5aedf4615",
+      "score_report_sha256": "150c750cede4af7817907ff8efef1aa171076e7ec2bedde997e4868e64e1435b"
+    },
+    "benchmark-cpu-fp64": {
+      "device": "cpu",
+      "precision": "fp64",
+      "implementation": "reference",
+      "captures": 1,
+      "external_process_seconds": 10.844337201910093,
+      "load_validate_seconds": 0.5924134240485728,
+      "analytic_baseline_seconds": 0.002528415061533451,
+      "prepare_transfer_seconds": 0.002692952984943986,
+      "synchronized_update_seconds": 8.68827359797433,
+      "script_seconds_before_write": 10.413582918932661,
+      "graph_warmup_seconds": 0,
+      "graph_capture_seconds": 0,
+      "combined_memory_estimate_bytes": 16617760,
+      "environment": {
+        "torch": "2.8.0+cu128",
+        "numpy": "2.5.2",
+        "cuda": "12.8",
+        "triton": "3.4.0",
+        "gpu": null
+      },
+      "prepared_input_sha256": "5c1a99bdca6dbf10da01d583bb34b82c12e35704d13e276c49ed5ee5aedf4615",
+      "score_report_sha256": "f65421e3c36a8f9b35035fdcb7f2719b72598a5fd609bd632294f4acd01f511c"
+    },
+    "benchmark-cuda-fp32": {
+      "device": "cuda:0",
+      "precision": "fp32",
+      "implementation": "graph",
+      "captures": 1,
+      "external_process_seconds": 5.920937372138724,
+      "load_validate_seconds": 0.5193609658163041,
+      "analytic_baseline_seconds": 0.0024703459348529577,
+      "prepare_transfer_seconds": 0.33582185790874064,
+      "synchronized_update_seconds": 3.6701304209418595,
+      "script_seconds_before_write": 5.488970485981554,
+      "graph_warmup_seconds": 0.28816109825856984,
+      "graph_capture_seconds": 0.20324490405619144,
+      "combined_memory_estimate_bytes": 16844544,
+      "environment": {
+        "torch": "2.8.0+cu128",
+        "numpy": "2.5.2",
+        "cuda": "12.8",
+        "triton": "3.4.0",
+        "gpu": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition"
+      },
+      "prepared_input_sha256": "5c1a99bdca6dbf10da01d583bb34b82c12e35704d13e276c49ed5ee5aedf4615",
+      "score_report_sha256": "c39398ba43a5ce7165359355b3f9fa1f5fcb7162088ec12e4b99d584ea06b6a0"
+    },
+    "benchmark-cuda-fp64": {
+      "device": "cuda:0",
+      "precision": "fp64",
+      "implementation": "graph",
+      "captures": 1,
+      "external_process_seconds": 6.047798373969272,
+      "load_validate_seconds": 0.5211789500899613,
+      "analytic_baseline_seconds": 0.002468725899234414,
+      "prepare_transfer_seconds": 0.2513251688797027,
+      "synchronized_update_seconds": 3.8326805990654975,
+      "script_seconds_before_write": 5.557971969014034,
+      "graph_warmup_seconds": 0.3005747669376433,
+      "graph_capture_seconds": 0.199095263145864,
+      "combined_memory_estimate_bytes": 16861216,
+      "environment": {
+        "torch": "2.8.0+cu128",
+        "numpy": "2.5.2",
+        "cuda": "12.8",
+        "triton": "3.4.0",
+        "gpu": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition"
+      },
+      "prepared_input_sha256": "5c1a99bdca6dbf10da01d583bb34b82c12e35704d13e276c49ed5ee5aedf4615",
+      "score_report_sha256": "ffb0c3ed48d44ccd90c0dc2965bca2100aaabf1f3aeeac6d56cfd0af729a6cd9"
+    },
+    "benchmark-all20-cuda-fp32": {
+      "device": "cuda:0",
+      "precision": "fp32",
+      "implementation": "graph",
+      "captures": 20,
+      "external_process_seconds": 17.958956287940964,
+      "load_validate_seconds": 11.775389273883775,
+      "analytic_baseline_seconds": 0.02700590598396957,
+      "prepare_transfer_seconds": 0.33927549002692103,
+      "synchronized_update_seconds": 4.1853304042015225,
+      "script_seconds_before_write": 17.50171316205524,
+      "graph_warmup_seconds": 0.3104305290617049,
+      "graph_capture_seconds": 0.24023252283222973,
+      "combined_memory_estimate_bytes": 286474912,
+      "environment": {
+        "torch": "2.8.0+cu128",
+        "numpy": "2.5.2",
+        "cuda": "12.8",
+        "triton": "3.4.0",
+        "gpu": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition"
+      },
+      "prepared_input_sha256": "aabb39b5167be71ec442e7772dffe17fe2c9f0ab09125415fe357fc824dae662",
+      "score_report_sha256": "000c04a112153873116a3e397e3edfdad1f785e9018890ad909acd27d2103bc5"
+    }
+  },
+  "precision_and_backend_parity": {
+    "actual-all20-cpu-fp32": {
+      "reference": "actual-all20-cpu-fp32",
+      "max_abs_log_lr_difference": 0.0,
+      "winner_changes": 0,
+      "admission_changes": {
+        "strict": 0,
+        "relaxed": 0
+      }
+    },
+    "benchmark-cpu-fp32": {
+      "reference": "benchmark-cpu-fp64",
+      "max_abs_log_lr_difference": 0.00067171969757851,
+      "winner_changes": 0,
+      "admission_changes": {
+        "strict": 0,
+        "relaxed": 0
+      }
+    },
+    "benchmark-cpu-fp64": {
+      "reference": "benchmark-cpu-fp64",
+      "max_abs_log_lr_difference": 0.0,
+      "winner_changes": 0,
+      "admission_changes": {
+        "strict": 0,
+        "relaxed": 0
+      }
+    },
+    "benchmark-cuda-fp32": {
+      "reference": "benchmark-cpu-fp64",
+      "max_abs_log_lr_difference": 0.0005695811146821939,
+      "winner_changes": 0,
+      "admission_changes": {
+        "strict": 0,
+        "relaxed": 0
+      }
+    },
+    "benchmark-cuda-fp64": {
+      "reference": "benchmark-cpu-fp64",
+      "max_abs_log_lr_difference": 1.2789769243681803e-13,
+      "winner_changes": 0,
+      "admission_changes": {
+        "strict": 0,
+        "relaxed": 0
+      }
+    },
+    "benchmark-all20-cuda-fp32": {
+      "reference": "actual-all20-cpu-fp32",
+      "max_abs_log_lr_difference": 0.0002737181753929008,
+      "winner_changes": 0,
+      "admission_changes": {
+        "strict": 0,
+        "relaxed": 0
+      }
+    }
+  },
+  "observed_speedup": {
+    "all20_update_cpu_over_cuda": 2.3290167992677895,
+    "all20_full_process_cpu_over_cuda": 1.220130940505974,
+    "all20_export_plus_score_cpu_over_cuda": 1.0190006636091655,
+    "single_fp32_full_process_cpu_over_cuda": 1.9277646106448525
+  },
+  "concurrent_host_load": {
+    "other_cpu_workers": 18,
+    "scope": "Campaign coordinator reports concurrent heavy CPU work during both CPU and GPU timings; not an exclusive-host latency experiment."
+  },
+  "comparison_to_cn60": {
+    "summary_sha256": "fdaccf1271dd713429bc08de54876cde498092da5de2b4691b57480b643981f2",
+    "independent_seed_roots": true,
+    "same_snr_trial_pooling": false,
+    "conclusion": "Coherence-length segmented likelihood and finite-phase inference both16/16 at\u221257; no observed reception gain from the more complex phase tracker at this operating point. At\u221260 the phase tracker admitted more signals; these are separate16-signal cohorts."
+  },
+  "limits": [
+    "Flat knownsync knownunitgain knownGaussianvariance study; no full oscillator-profile acquisition, spread, modulation, FHSS or burst qualification.",
+    "Pointwise binomial intervals assume independent paths under the stated law;16/16 lower95% bound82.925% does not qualify90% or99%. Four nulls give upper95%52.713%.",
+    "Backend repeats reuse the same actual captures; they add no independent reception trials.",
+    "Synchronized update times include Python dispatch and graph warmup/capture; no pure kernel timing or separately measured warm steady-state run.",
+    "One timed run per backend. Setup/cache/order effects and concurrent-host load preclude precise universal throughput claims.",
+    "The earlier local executable-ambiguous pilot is excluded entirely from accepted counts and timing comparisons.",
+    "No wrong-key controls were included in this flat phase cohort; structured wrong-key admission remains outside this evidence.",
+    "This independent\u221257cohort is not combined with\u221260as32same-SNR trials.",
+    "Both receiver methods16/16 still have82.925%one-sided95%lower bound, not90%/99%qualification.",
+    "Timings overlapped18heavyCPUworkers and have one sample/backend; ratios are observations, not latency distributions."
+  ]
+}

@@ -12,6 +12,11 @@ The current [broad configuration study](validation-data/triad-v3/2026-11-03-broa
 separates unsupported configurations, capture limits, incomplete acquisition and
 receiver failures. It also records corrected high-C/N₀ numerical failures;
 consult it before reusing earlier noise-admission results.
+The [configuration/acquisition extension](validation-data/triad-v3/2026-11-03-extension/README.md)
+adds zero-shift/shared-clock support, independent modulation timescales,
+frequency reuse from retained complex blocks, and the TCXO phase-continuity
+diagnostic. Use its measured scope and remaining failures when selecting a
+receiver; long exports remain optional research, not default regressions.
 
 **Developing Robust simulation software:** start with the
 [Doppler/delay spread and frequency-selective amplitude modulation guide](channel-models.md).

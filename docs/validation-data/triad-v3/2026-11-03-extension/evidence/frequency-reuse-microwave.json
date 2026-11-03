@@ -1,0 +1,1165 @@
+{
+  "format": "triad-cfo-microwave-direct-comparison-v1",
+  "parent_configuration_sha256": "c3c69f9dd2ac11819a529c3a2234243553b5e3e1ed60659892fbbfa390544009",
+  "binary_sha256": "5dc89af2902bf5a336045e38ee12f85a3e6723b988c72d334f5f144b375ab5b3",
+  "receiver_sha256": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+  "limits": [
+    "Paired two signal paths and one null only; no reliability or rare false admission qualification.",
+    "CFO endpoints and zero are a deliberately coarse public diagnostic bank, not complete continuous acquisition.",
+    "The phase-arc bound is a template/operator bound, not a nonlinear log-likelihood error certificate.",
+    "Signal energy is read only after receiver scoring for simulation audit.",
+    "The .02 dB budget is a separately declared research arm; the receiver default remains .01 dB. Signal winners in this endpoint-grid diagnostic are dominated by zero CFO and far above threshold; near-threshold endpoint-winner decisions remain unqualified."
+  ],
+  "captures": [
+    {
+      "case": "shared-microwave-am65-paired-00-b0-null",
+      "control": "null",
+      "bit": 0,
+      "original_block_samples": 128,
+      "physical_sample_count": 79430,
+      "sample_rate_hz": 4096.0,
+      "capture_seconds": 19.39208984375,
+      "source_blocks": 621,
+      "public_timing_values": [
+        0.04999999999999999,
+        0.080166666667,
+        0.110333333334,
+        0.140500000001,
+        0.170666666668,
+        0.200833333335,
+        0.231000000002
+      ],
+      "frequency_offsets_hz": [
+        -0.5800001725289999,
+        0.0,
+        0.5800001725289999
+      ],
+      "input_sha256": {
+        "manifest.json": "7182ae8f24f38c88e39d2fb3ca37eb30ca04e56d9de45da26f4bcfcc82feffc8",
+        "group_gram.c128": "6666b571d4c2fabeef40532f106b7f156dacbbed6ac9c1501589648e2052cd7d",
+        "group_observation.c128": "8f184723aee3b1ebc223467713adca5f695a24d3c7be539e7eb71e569d4a7d12",
+        "received_energy.f64": "637d1721822de7a014eb63cba2435d1aa1509030ca778498bb4cb9f30adda7ea",
+        "intervals.u64": "39264bd78fdcc6b1a2eb994e3f36faaf7dd97a2c8b8e34097115be0ff7f2a4e5",
+        "valid_rows.u64": "49b2d41ea01718f0ee030ef30e5dd8a0c95377aabadd5c892bf01efb468209a9",
+        "signal_energy.f64": "f7d57a5a4bc24c94e9e2ea83f6708f1e69e17dd54d3b27f237a5bd469b3ffc41"
+      },
+      "projection_comparison": [
+        {
+          "offset_hz": -0.5800001725289999,
+          "max_normalized_correlation_error": 0.008734287526338114,
+          "max_absolute_gram_error": 1.7053025658242404e-13,
+          "bound": {
+            "maximum_original_block_seconds": 0.03125,
+            "maximum_phase_error_radians": 0.05694138378430996,
+            "coherent_power_loss_bound_db": 0.014088837894943355,
+            "relative_template_operator_error_bound": 0.056933691502115684,
+            "allowed_coherent_power_loss_db": 0.02,
+            "scope": "phase-arc bound for arbitrary sample-energy weights and erasure masks; not a marginal-likelihood error bound"
+          }
+        },
+        {
+          "offset_hz": 0.0,
+          "max_normalized_correlation_error": 0.0,
+          "max_absolute_gram_error": 0.0,
+          "bound": {
+            "maximum_original_block_seconds": 0.03125,
+            "maximum_phase_error_radians": 0.0,
+            "coherent_power_loss_bound_db": 0.0,
+            "relative_template_operator_error_bound": 0.0,
+            "allowed_coherent_power_loss_db": 0.02,
+            "scope": "phase-arc bound for arbitrary sample-energy weights and erasure masks; not a marginal-likelihood error bound"
+          }
+        },
+        {
+          "offset_hz": 0.5800001725289999,
+          "max_normalized_correlation_error": 0.008541626689569815,
+          "max_absolute_gram_error": 1.7053025658242404e-13,
+          "bound": {
+            "maximum_original_block_seconds": 0.03125,
+            "maximum_phase_error_radians": 0.05694138378430996,
+            "coherent_power_loss_bound_db": 0.014088837894943355,
+            "relative_template_operator_error_bound": 0.056933691502115684,
+            "allowed_coherent_power_loss_db": 0.02,
+            "scope": "phase-arc bound for arbitrary sample-energy weights and erasure masks; not a marginal-likelihood error bound"
+          }
+        }
+      ],
+      "maximum_group_log_score_error": 0.1485760876742308,
+      "maximum_mixture_log_score_error": 0.004777478357036458,
+      "direct_bit_scores": [
+        -6.116474644894787,
+        -6.245296605545512
+      ],
+      "reused_bit_scores": [
+        -6.11169716653775,
+        -6.243927275995095
+      ],
+      "direct": {
+        "strict": {
+          "bit": 0,
+          "accepted": false,
+          "score": -6.116474644894787,
+          "opposite_bit_margin": 0.1288219606507255,
+          "log_threshold": 22.72106338958574
+        },
+        "relaxed": {
+          "bit": 0,
+          "accepted": false,
+          "score": -6.116474644894787,
+          "opposite_bit_margin": 0.1288219606507255,
+          "log_threshold": 17.422746023037703
+        }
+      },
+      "reused": {
+        "strict": {
+          "bit": 0,
+          "accepted": false,
+          "score": -6.11169716653775,
+          "opposite_bit_margin": 0.13223010945734437,
+          "log_threshold": 22.72106338958574
+        },
+        "relaxed": {
+          "bit": 0,
+          "accepted": false,
+          "score": -6.11169716653775,
+          "opposite_bit_margin": 0.13223010945734437,
+          "log_threshold": 17.422746023037703
+        }
+      },
+      "outcome": {
+        "direct": {
+          "strict": {
+            "false_admission": 0,
+            "not_admitted": 1
+          },
+          "relaxed": {
+            "false_admission": 0,
+            "not_admitted": 1
+          }
+        },
+        "reused": {
+          "strict": {
+            "false_admission": 0,
+            "not_admitted": 1
+          },
+          "relaxed": {
+            "false_admission": 0,
+            "not_admitted": 1
+          }
+        }
+      },
+      "received_energy_samples": 3258980.527487711,
+      "signal_energy_samples_simulation_only": 0.0,
+      "export_seconds": 6.728824621997774
+    },
+    {
+      "case": "shared-microwave-am65-paired-00-b0-null",
+      "control": "null",
+      "bit": 0,
+      "original_block_samples": 64,
+      "physical_sample_count": 79430,
+      "sample_rate_hz": 4096.0,
+      "capture_seconds": 19.39208984375,
+      "source_blocks": 1242,
+      "public_timing_values": [
+        0.04999999999999999,
+        0.080166666667,
+        0.110333333334,
+        0.140500000001,
+        0.170666666668,
+        0.200833333335,
+        0.231000000002
+      ],
+      "frequency_offsets_hz": [
+        -0.5800001725289999,
+        0.0,
+        0.5800001725289999
+      ],
+      "input_sha256": {
+        "manifest.json": "eaf77c48cca7f5cee1a6ce141e7824247d906f3cadbd9407a1c3ddb0ab555f8b",
+        "group_gram.c128": "75f42ae1443898b74ac6dc454761a01ba1b19074f662a874becf7df6fffcf3c1",
+        "group_observation.c128": "5fe4cc4dc3a8ba260e606a57e853929d8d11fe62475f67f81d0e483589c15a73",
+        "received_energy.f64": "c651199be26793ea2ed5e7eb8b29160d4f8a55a930d7e6337f97452556452051",
+        "intervals.u64": "4307d4fa938f73c6803225996c4b52f2997a26ec0f1feee02d23c39bc63f5792",
+        "valid_rows.u64": "83a123d2d10f66089853adf43ca8f6618caf9061287da0cf8f73cc48fd7c7900",
+        "signal_energy.f64": "2fed0fabf6ae409d105411e456b75271312aa9a5b1333dc260f0e1ab150cc6f8"
+      },
+      "projection_comparison": [
+        {
+          "offset_hz": -0.5800001725289999,
+          "max_normalized_correlation_error": 0.006888074398761082,
+          "max_absolute_gram_error": 1.1368683772161603e-13,
+          "bound": {
+            "maximum_original_block_seconds": 0.015625,
+            "maximum_phase_error_radians": 0.02847069189215498,
+            "coherent_power_loss_bound_db": 0.0035207811850131157,
+            "relative_template_operator_error_bound": 0.028469730327652657,
+            "allowed_coherent_power_loss_db": 0.02,
+            "scope": "phase-arc bound for arbitrary sample-energy weights and erasure masks; not a marginal-likelihood error bound"
+          }
+        },
+        {
+          "offset_hz": 0.0,
+          "max_normalized_correlation_error": 0.0,
+          "max_absolute_gram_error": 0.0,
+          "bound": {
+            "maximum_original_block_seconds": 0.015625,
+            "maximum_phase_error_radians": 0.0,
+            "coherent_power_loss_bound_db": 0.0,
+            "relative_template_operator_error_bound": 0.0,
+            "allowed_coherent_power_loss_db": 0.02,
+            "scope": "phase-arc bound for arbitrary sample-energy weights and erasure masks; not a marginal-likelihood error bound"
+          }
+        },
+        {
+          "offset_hz": 0.5800001725289999,
+          "max_normalized_correlation_error": 0.006926178028192941,
+          "max_absolute_gram_error": 1.1370071466249427e-13,
+          "bound": {
+            "maximum_original_block_seconds": 0.015625,
+            "maximum_phase_error_radians": 0.02847069189215498,
+            "coherent_power_loss_bound_db": 0.0035207811850131157,
+            "relative_template_operator_error_bound": 0.028469730327652657,
+            "allowed_coherent_power_loss_db": 0.02,
+            "scope": "phase-arc bound for arbitrary sample-energy weights and erasure masks; not a marginal-likelihood error bound"
+          }
+        }
+      ],
+      "maximum_group_log_score_error": 0.04669730783470172,
+      "maximum_mixture_log_score_error": 0.0020678758154133448,
+      "direct_bit_scores": [
+        -6.116474644894785,
+        -6.245296605545512
+      ],
+      "reused_bit_scores": [
+        -6.118542520710198,
+        -6.243864319254685
+      ],
+      "direct": {
+        "strict": {
+          "bit": 0,
+          "accepted": false,
+          "score": -6.116474644894785,
+          "opposite_bit_margin": 0.12882196065072726,
+          "log_threshold": 22.72106338958574
+        },
+        "relaxed": {
+          "bit": 0,
+          "accepted": false,
+          "score": -6.116474644894785,
+          "opposite_bit_margin": 0.12882196065072726,
+          "log_threshold": 17.422746023037703
+        }
+      },
+      "reused": {
+        "strict": {
+          "bit": 0,
+          "accepted": false,
+          "score": -6.118542520710198,
+          "opposite_bit_margin": 0.125321798544487,
+          "log_threshold": 22.72106338958574
+        },
+        "relaxed": {
+          "bit": 0,
+          "accepted": false,
+          "score": -6.118542520710198,
+          "opposite_bit_margin": 0.125321798544487,
+          "log_threshold": 17.422746023037703
+        }
+      },
+      "outcome": {
+        "direct": {
+          "strict": {
+            "false_admission": 0,
+            "not_admitted": 1
+          },
+          "relaxed": {
+            "false_admission": 0,
+            "not_admitted": 1
+          }
+        },
+        "reused": {
+          "strict": {
+            "false_admission": 0,
+            "not_admitted": 1
+          },
+          "relaxed": {
+            "false_admission": 0,
+            "not_admitted": 1
+          }
+        }
+      },
+      "received_energy_samples": 3258980.527487711,
+      "signal_energy_samples_simulation_only": 0.0,
+      "export_seconds": 8.019433659006609
+    },
+    {
+      "case": "shared-microwave-am65-paired-00-b0-signal",
+      "control": "signal",
+      "bit": 0,
+      "original_block_samples": 128,
+      "physical_sample_count": 79430,
+      "sample_rate_hz": 4096.0,
+      "capture_seconds": 19.39208984375,
+      "source_blocks": 621,
+      "public_timing_values": [
+        0.04999999999999999,
+        0.080166666667,
+        0.110333333334,
+        0.140500000001,
+        0.170666666668,
+        0.200833333335,
+        0.231000000002
+      ],
+      "frequency_offsets_hz": [
+        -0.5800001725289999,
+        0.0,
+        0.5800001725289999
+      ],
+      "input_sha256": {
+        "manifest.json": "e60efad1bbecab2108f7850f7fec03ae5c822ad55232864d5fa6ed05af4dc4d1",
+        "group_gram.c128": "6666b571d4c2fabeef40532f106b7f156dacbbed6ac9c1501589648e2052cd7d",
+        "group_observation.c128": "66c0b5c29b3114b37fb39ed3e431757a772aa7d49206c693e4ec3b8f3dce3db9",
+        "received_energy.f64": "b02e98f146db916de991c037035603750143d0fc54fd4970b0f275699e24c7ac",
+        "intervals.u64": "39264bd78fdcc6b1a2eb994e3f36faaf7dd97a2c8b8e34097115be0ff7f2a4e5",
+        "valid_rows.u64": "49b2d41ea01718f0ee030ef30e5dd8a0c95377aabadd5c892bf01efb468209a9",
+        "signal_energy.f64": "693582abf92fe356afcef8c4a43e21daa3965b1d119e6083952b885b0df95b59"
+      },
+      "projection_comparison": [
+        {
+          "offset_hz": -0.5800001725289999,
+          "max_normalized_correlation_error": 0.013960099563233365,
+          "max_absolute_gram_error": 1.7053025658242404e-13,
+          "bound": {
+            "maximum_original_block_seconds": 0.03125,
+            "maximum_phase_error_radians": 0.05694138378430996,
+            "coherent_power_loss_bound_db": 0.014088837894943355,
+            "relative_template_operator_error_bound": 0.056933691502115684,
+            "allowed_coherent_power_loss_db": 0.02,
+            "scope": "phase-arc bound for arbitrary sample-energy weights and erasure masks; not a marginal-likelihood error bound"
+          }
+        },
+        {
+          "offset_hz": 0.0,
+          "max_normalized_correlation_error": 0.0,
+          "max_absolute_gram_error": 0.0,
+          "bound": {
+            "maximum_original_block_seconds": 0.03125,
+            "maximum_phase_error_radians": 0.0,
+            "coherent_power_loss_bound_db": 0.0,
+            "relative_template_operator_error_bound": 0.0,
+            "allowed_coherent_power_loss_db": 0.02,
+            "scope": "phase-arc bound for arbitrary sample-energy weights and erasure masks; not a marginal-likelihood error bound"
+          }
+        },
+        {
+          "offset_hz": 0.5800001725289999,
+          "max_normalized_correlation_error": 0.013832735411140277,
+          "max_absolute_gram_error": 1.7053025658242404e-13,
+          "bound": {
+            "maximum_original_block_seconds": 0.03125,
+            "maximum_phase_error_radians": 0.05694138378430996,
+            "coherent_power_loss_bound_db": 0.014088837894943355,
+            "relative_template_operator_error_bound": 0.056933691502115684,
+            "allowed_coherent_power_loss_db": 0.02,
+            "scope": "phase-arc bound for arbitrary sample-energy weights and erasure masks; not a marginal-likelihood error bound"
+          }
+        }
+      ],
+      "maximum_group_log_score_error": 0.47772007295808194,
+      "maximum_mixture_log_score_error": 4.5049581842704356e-08,
+      "direct_bit_scores": [
+        526.1767873137934,
+        36.741935693214735
+      ],
+      "reused_bit_scores": [
+        526.1767873137934,
+        36.74193564816515
+      ],
+      "direct": {
+        "strict": {
+          "bit": 0,
+          "accepted": true,
+          "score": 526.1767873137934,
+          "opposite_bit_margin": 489.4348516205787,
+          "log_threshold": 22.72106338958574
+        },
+        "relaxed": {
+          "bit": 0,
+          "accepted": true,
+          "score": 526.1767873137934,
+          "opposite_bit_margin": 489.4348516205787,
+          "log_threshold": 17.422746023037703
+        }
+      },
+      "reused": {
+        "strict": {
+          "bit": 0,
+          "accepted": true,
+          "score": 526.1767873137934,
+          "opposite_bit_margin": 489.43485166562823,
+          "log_threshold": 22.72106338958574
+        },
+        "relaxed": {
+          "bit": 0,
+          "accepted": true,
+          "score": 526.1767873137934,
+          "opposite_bit_margin": 489.43485166562823,
+          "log_threshold": 17.422746023037703
+        }
+      },
+      "outcome": {
+        "direct": {
+          "strict": {
+            "correct": 1,
+            "wrong": 0,
+            "miss": 0
+          },
+          "relaxed": {
+            "correct": 1,
+            "wrong": 0,
+            "miss": 0
+          }
+        },
+        "reused": {
+          "strict": {
+            "correct": 1,
+            "wrong": 0,
+            "miss": 0
+          },
+          "relaxed": {
+            "correct": 1,
+            "wrong": 0,
+            "miss": 0
+          }
+        }
+      },
+      "received_energy_samples": 3345503.9158506943,
+      "signal_energy_samples_simulation_only": 87752.06988740618,
+      "export_seconds": 7.659509837976657
+    },
+    {
+      "case": "shared-microwave-am65-paired-00-b0-signal",
+      "control": "signal",
+      "bit": 0,
+      "original_block_samples": 64,
+      "physical_sample_count": 79430,
+      "sample_rate_hz": 4096.0,
+      "capture_seconds": 19.39208984375,
+      "source_blocks": 1242,
+      "public_timing_values": [
+        0.04999999999999999,
+        0.080166666667,
+        0.110333333334,
+        0.140500000001,
+        0.170666666668,
+        0.200833333335,
+        0.231000000002
+      ],
+      "frequency_offsets_hz": [
+        -0.5800001725289999,
+        0.0,
+        0.5800001725289999
+      ],
+      "input_sha256": {
+        "manifest.json": "0e7470d9592c51f17365d8b8b388c26d24229b1c65175ad03a9f572487b3e4c1",
+        "group_gram.c128": "75f42ae1443898b74ac6dc454761a01ba1b19074f662a874becf7df6fffcf3c1",
+        "group_observation.c128": "9a13e2b132cb87348585b0d568939f72bbdec36c4499961d5d6fb0c77d5b4670",
+        "received_energy.f64": "2964b4e02ac2592efd023b033a34b5db91e95cfaae8ce8869bba523fd3c2fad3",
+        "intervals.u64": "4307d4fa938f73c6803225996c4b52f2997a26ec0f1feee02d23c39bc63f5792",
+        "valid_rows.u64": "83a123d2d10f66089853adf43ca8f6618caf9061287da0cf8f73cc48fd7c7900",
+        "signal_energy.f64": "8170e408a606fc84f9684bbd7e74cba92b3d022c1d04961192649e4e8ceca6a1"
+      },
+      "projection_comparison": [
+        {
+          "offset_hz": -0.5800001725289999,
+          "max_normalized_correlation_error": 0.009619794071615185,
+          "max_absolute_gram_error": 1.1368683772161603e-13,
+          "bound": {
+            "maximum_original_block_seconds": 0.015625,
+            "maximum_phase_error_radians": 0.02847069189215498,
+            "coherent_power_loss_bound_db": 0.0035207811850131157,
+            "relative_template_operator_error_bound": 0.028469730327652657,
+            "allowed_coherent_power_loss_db": 0.02,
+            "scope": "phase-arc bound for arbitrary sample-energy weights and erasure masks; not a marginal-likelihood error bound"
+          }
+        },
+        {
+          "offset_hz": 0.0,
+          "max_normalized_correlation_error": 0.0,
+          "max_absolute_gram_error": 0.0,
+          "bound": {
+            "maximum_original_block_seconds": 0.015625,
+            "maximum_phase_error_radians": 0.0,
+            "coherent_power_loss_bound_db": 0.0,
+            "relative_template_operator_error_bound": 0.0,
+            "allowed_coherent_power_loss_db": 0.02,
+            "scope": "phase-arc bound for arbitrary sample-energy weights and erasure masks; not a marginal-likelihood error bound"
+          }
+        },
+        {
+          "offset_hz": 0.5800001725289999,
+          "max_normalized_correlation_error": 0.009586810461014901,
+          "max_absolute_gram_error": 1.1370071466249427e-13,
+          "bound": {
+            "maximum_original_block_seconds": 0.015625,
+            "maximum_phase_error_radians": 0.02847069189215498,
+            "coherent_power_loss_bound_db": 0.0035207811850131157,
+            "relative_template_operator_error_bound": 0.028469730327652657,
+            "allowed_coherent_power_loss_db": 0.02,
+            "scope": "phase-arc bound for arbitrary sample-energy weights and erasure masks; not a marginal-likelihood error bound"
+          }
+        }
+      ],
+      "maximum_group_log_score_error": 0.17322839153158398,
+      "maximum_mixture_log_score_error": 1.8959225656089984e-07,
+      "direct_bit_scores": [
+        526.1767873137935,
+        36.74193569321475
+      ],
+      "reused_bit_scores": [
+        526.1767873137935,
+        36.74193550362249
+      ],
+      "direct": {
+        "strict": {
+          "bit": 0,
+          "accepted": true,
+          "score": 526.1767873137935,
+          "opposite_bit_margin": 489.43485162057874,
+          "log_threshold": 22.72106338958574
+        },
+        "relaxed": {
+          "bit": 0,
+          "accepted": true,
+          "score": 526.1767873137935,
+          "opposite_bit_margin": 489.43485162057874,
+          "log_threshold": 17.422746023037703
+        }
+      },
+      "reused": {
+        "strict": {
+          "bit": 0,
+          "accepted": true,
+          "score": 526.1767873137935,
+          "opposite_bit_margin": 489.43485181017104,
+          "log_threshold": 22.72106338958574
+        },
+        "relaxed": {
+          "bit": 0,
+          "accepted": true,
+          "score": 526.1767873137935,
+          "opposite_bit_margin": 489.43485181017104,
+          "log_threshold": 17.422746023037703
+        }
+      },
+      "outcome": {
+        "direct": {
+          "strict": {
+            "correct": 1,
+            "wrong": 0,
+            "miss": 0
+          },
+          "relaxed": {
+            "correct": 1,
+            "wrong": 0,
+            "miss": 0
+          }
+        },
+        "reused": {
+          "strict": {
+            "correct": 1,
+            "wrong": 0,
+            "miss": 0
+          },
+          "relaxed": {
+            "correct": 1,
+            "wrong": 0,
+            "miss": 0
+          }
+        }
+      },
+      "received_energy_samples": 3345503.9158506943,
+      "signal_energy_samples_simulation_only": 87752.06988740618,
+      "export_seconds": 8.556573144975118
+    },
+    {
+      "case": "shared-microwave-am65-paired-01-b1-signal",
+      "control": "signal",
+      "bit": 1,
+      "original_block_samples": 128,
+      "physical_sample_count": 79430,
+      "sample_rate_hz": 4096.0,
+      "capture_seconds": 19.39208984375,
+      "source_blocks": 621,
+      "public_timing_values": [
+        0.04999999999999999,
+        0.080166666667,
+        0.110333333334,
+        0.140500000001,
+        0.170666666668,
+        0.200833333335,
+        0.231000000002
+      ],
+      "frequency_offsets_hz": [
+        -0.5800001725289999,
+        0.0,
+        0.5800001725289999
+      ],
+      "input_sha256": {
+        "manifest.json": "0b23a81eec0915d5df6d92aa976380917ec74a8f3b8408ccf7c151dec4a5b126",
+        "group_gram.c128": "bb32d657ab22f60ff9fe6208de36a44ddfbf777e5f1edcfdc4cc5287bc142e92",
+        "group_observation.c128": "faa9713c4b51c29540369930287071a10ed1de1e5d75a2baaa666d713119e7ef",
+        "received_energy.f64": "f231c0f002822670b9dc214f5f1707281eea7f6c1d7ee31946a169818bc13c35",
+        "intervals.u64": "39264bd78fdcc6b1a2eb994e3f36faaf7dd97a2c8b8e34097115be0ff7f2a4e5",
+        "valid_rows.u64": "49b2d41ea01718f0ee030ef30e5dd8a0c95377aabadd5c892bf01efb468209a9",
+        "signal_energy.f64": "130fe00a3ccba3742b43f73261b7c527bff551d3fcd70a2b5d530d88886db897"
+      },
+      "projection_comparison": [
+        {
+          "offset_hz": -0.5800001725289999,
+          "max_normalized_correlation_error": 0.014947025122077072,
+          "max_absolute_gram_error": 1.7053025658242404e-13,
+          "bound": {
+            "maximum_original_block_seconds": 0.03125,
+            "maximum_phase_error_radians": 0.05694138378430996,
+            "coherent_power_loss_bound_db": 0.014088837894943355,
+            "relative_template_operator_error_bound": 0.056933691502115684,
+            "allowed_coherent_power_loss_db": 0.02,
+            "scope": "phase-arc bound for arbitrary sample-energy weights and erasure masks; not a marginal-likelihood error bound"
+          }
+        },
+        {
+          "offset_hz": 0.0,
+          "max_normalized_correlation_error": 0.0,
+          "max_absolute_gram_error": 0.0,
+          "bound": {
+            "maximum_original_block_seconds": 0.03125,
+            "maximum_phase_error_radians": 0.0,
+            "coherent_power_loss_bound_db": 0.0,
+            "relative_template_operator_error_bound": 0.0,
+            "allowed_coherent_power_loss_db": 0.02,
+            "scope": "phase-arc bound for arbitrary sample-energy weights and erasure masks; not a marginal-likelihood error bound"
+          }
+        },
+        {
+          "offset_hz": 0.5800001725289999,
+          "max_normalized_correlation_error": 0.014814680075750411,
+          "max_absolute_gram_error": 1.7053025658242404e-13,
+          "bound": {
+            "maximum_original_block_seconds": 0.03125,
+            "maximum_phase_error_radians": 0.05694138378430996,
+            "coherent_power_loss_bound_db": 0.014088837894943355,
+            "relative_template_operator_error_bound": 0.056933691502115684,
+            "allowed_coherent_power_loss_db": 0.02,
+            "scope": "phase-arc bound for arbitrary sample-energy weights and erasure masks; not a marginal-likelihood error bound"
+          }
+        }
+      ],
+      "maximum_group_log_score_error": 0.25902367860310616,
+      "maximum_mixture_log_score_error": 1.0052048082798137e-10,
+      "direct_bit_scores": [
+        34.42089592658315,
+        118.43586435673637
+      ],
+      "reused_bit_scores": [
+        34.42089592648263,
+        118.43586435673637
+      ],
+      "direct": {
+        "strict": {
+          "bit": 1,
+          "accepted": true,
+          "score": 118.43586435673637,
+          "opposite_bit_margin": 84.01496843015323,
+          "log_threshold": 22.72106338958574
+        },
+        "relaxed": {
+          "bit": 1,
+          "accepted": true,
+          "score": 118.43586435673637,
+          "opposite_bit_margin": 84.01496843015323,
+          "log_threshold": 17.422746023037703
+        }
+      },
+      "reused": {
+        "strict": {
+          "bit": 1,
+          "accepted": true,
+          "score": 118.43586435673637,
+          "opposite_bit_margin": 84.01496843025375,
+          "log_threshold": 22.72106338958574
+        },
+        "relaxed": {
+          "bit": 1,
+          "accepted": true,
+          "score": 118.43586435673637,
+          "opposite_bit_margin": 84.01496843025375,
+          "log_threshold": 17.422746023037703
+        }
+      },
+      "outcome": {
+        "direct": {
+          "strict": {
+            "correct": 1,
+            "wrong": 0,
+            "miss": 0
+          },
+          "relaxed": {
+            "correct": 1,
+            "wrong": 0,
+            "miss": 0
+          }
+        },
+        "reused": {
+          "strict": {
+            "correct": 1,
+            "wrong": 0,
+            "miss": 0
+          },
+          "relaxed": {
+            "correct": 1,
+            "wrong": 0,
+            "miss": 0
+          }
+        }
+      },
+      "received_energy_samples": 3379509.7487318916,
+      "signal_energy_samples_simulation_only": 119578.72226405237,
+      "export_seconds": 8.067598914989503
+    },
+    {
+      "case": "shared-microwave-am65-paired-01-b1-signal",
+      "control": "signal",
+      "bit": 1,
+      "original_block_samples": 64,
+      "physical_sample_count": 79430,
+      "sample_rate_hz": 4096.0,
+      "capture_seconds": 19.39208984375,
+      "source_blocks": 1242,
+      "public_timing_values": [
+        0.04999999999999999,
+        0.080166666667,
+        0.110333333334,
+        0.140500000001,
+        0.170666666668,
+        0.200833333335,
+        0.231000000002
+      ],
+      "frequency_offsets_hz": [
+        -0.5800001725289999,
+        0.0,
+        0.5800001725289999
+      ],
+      "input_sha256": {
+        "manifest.json": "d7e73738e37eb36f9e0cab820e32ca32ae5801fb547c5cd1593d132a38e23b85",
+        "group_gram.c128": "e47fdc59aceeff6b744a65a49d4a4784cd588421c70fabbe33cb8fd6d40774e3",
+        "group_observation.c128": "798107bdd843c3b261c57a9b325278e409c0657ba86fbb79dcaa3957e2290ecb",
+        "received_energy.f64": "b4e04bc493e0ea8a6d914a1056dc66ae6290a7599c81e910edf03e613ede4ed2",
+        "intervals.u64": "4307d4fa938f73c6803225996c4b52f2997a26ec0f1feee02d23c39bc63f5792",
+        "valid_rows.u64": "83a123d2d10f66089853adf43ca8f6618caf9061287da0cf8f73cc48fd7c7900",
+        "signal_energy.f64": "9503735cb4217eaa00985f7aff93cf9ccf996b14b08978653e7582e4c04d4642"
+      },
+      "projection_comparison": [
+        {
+          "offset_hz": -0.5800001725289999,
+          "max_normalized_correlation_error": 0.008820207971722331,
+          "max_absolute_gram_error": 8.5265778810034e-14,
+          "bound": {
+            "maximum_original_block_seconds": 0.015625,
+            "maximum_phase_error_radians": 0.02847069189215498,
+            "coherent_power_loss_bound_db": 0.0035207811850131157,
+            "relative_template_operator_error_bound": 0.028469730327652657,
+            "allowed_coherent_power_loss_db": 0.02,
+            "scope": "phase-arc bound for arbitrary sample-energy weights and erasure masks; not a marginal-likelihood error bound"
+          }
+        },
+        {
+          "offset_hz": 0.0,
+          "max_normalized_correlation_error": 0.0,
+          "max_absolute_gram_error": 0.0,
+          "bound": {
+            "maximum_original_block_seconds": 0.015625,
+            "maximum_phase_error_radians": 0.0,
+            "coherent_power_loss_bound_db": 0.0,
+            "relative_template_operator_error_bound": 0.0,
+            "allowed_coherent_power_loss_db": 0.02,
+            "scope": "phase-arc bound for arbitrary sample-energy weights and erasure masks; not a marginal-likelihood error bound"
+          }
+        },
+        {
+          "offset_hz": 0.5800001725289999,
+          "max_normalized_correlation_error": 0.008844719950029093,
+          "max_absolute_gram_error": 8.526512829121202e-14,
+          "bound": {
+            "maximum_original_block_seconds": 0.015625,
+            "maximum_phase_error_radians": 0.02847069189215498,
+            "coherent_power_loss_bound_db": 0.0035207811850131157,
+            "relative_template_operator_error_bound": 0.028469730327652657,
+            "allowed_coherent_power_loss_db": 0.02,
+            "scope": "phase-arc bound for arbitrary sample-energy weights and erasure masks; not a marginal-likelihood error bound"
+          }
+        }
+      ],
+      "maximum_group_log_score_error": 0.14334614810099566,
+      "maximum_mixture_log_score_error": 6.921396789039136e-11,
+      "direct_bit_scores": [
+        34.42089592658312,
+        118.43586435673635
+      ],
+      "reused_bit_scores": [
+        34.42089592651391,
+        118.43586435673635
+      ],
+      "direct": {
+        "strict": {
+          "bit": 1,
+          "accepted": true,
+          "score": 118.43586435673635,
+          "opposite_bit_margin": 84.01496843015323,
+          "log_threshold": 22.72106338958574
+        },
+        "relaxed": {
+          "bit": 1,
+          "accepted": true,
+          "score": 118.43586435673635,
+          "opposite_bit_margin": 84.01496843015323,
+          "log_threshold": 17.422746023037703
+        }
+      },
+      "reused": {
+        "strict": {
+          "bit": 1,
+          "accepted": true,
+          "score": 118.43586435673635,
+          "opposite_bit_margin": 84.01496843022244,
+          "log_threshold": 22.72106338958574
+        },
+        "relaxed": {
+          "bit": 1,
+          "accepted": true,
+          "score": 118.43586435673635,
+          "opposite_bit_margin": 84.01496843022244,
+          "log_threshold": 17.422746023037703
+        }
+      },
+      "outcome": {
+        "direct": {
+          "strict": {
+            "correct": 1,
+            "wrong": 0,
+            "miss": 0
+          },
+          "relaxed": {
+            "correct": 1,
+            "wrong": 0,
+            "miss": 0
+          }
+        },
+        "reused": {
+          "strict": {
+            "correct": 1,
+            "wrong": 0,
+            "miss": 0
+          },
+          "relaxed": {
+            "correct": 1,
+            "wrong": 0,
+            "miss": 0
+          }
+        }
+      },
+      "received_energy_samples": 3379509.7487318916,
+      "signal_energy_samples_simulation_only": 119578.72226405237,
+      "export_seconds": 7.296020751004107
+    }
+  ],
+  "block_partition_checks": [
+    {
+      "case": "shared-microwave-am65-paired-00-b0-null",
+      "same_physical_calendar": true,
+      "max_gram_difference": 3.979039320256561e-13,
+      "max_correlation_difference": 1.9907880820997403e-13,
+      "max_received_energy_difference": 6.366462912410498e-12,
+      "scope": "Matching indexed noisy projected observations and energy under two block partitions; raw I/Q was not exported."
+    },
+    {
+      "case": "shared-microwave-am65-paired-00-b0-signal",
+      "same_physical_calendar": true,
+      "max_gram_difference": 3.979039320256561e-13,
+      "max_correlation_difference": 5.728578676879116e-13,
+      "max_received_energy_difference": 6.366462912410498e-12,
+      "scope": "Matching indexed noisy projected observations and energy under two block partitions; raw I/Q was not exported."
+    },
+    {
+      "case": "shared-microwave-am65-paired-01-b1-signal",
+      "same_physical_calendar": true,
+      "max_gram_difference": 4.547473508864641e-13,
+      "max_correlation_difference": 7.961175758339185e-13,
+      "max_received_energy_difference": 6.366462912410498e-12,
+      "scope": "Matching indexed noisy projected observations and energy under two block partitions; raw I/Q was not exported."
+    }
+  ],
+  "maximum_python_rss_kib": 255700,
+  "maximum_native_child_rss_kib": 255700,
+  "configuration_inputs": [
+    {
+      "id": "configure-shared-microwave-am65-paired-00-b0-null",
+      "case": "shared-microwave-am65",
+      "argv": [
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/triad_long",
+        "--mode",
+        "configure",
+        "--seconds",
+        "8",
+        "--rate",
+        "36",
+        "--added",
+        "1",
+        "--sample-rate",
+        "4096",
+        "--rf-hz",
+        "5800000000.0",
+        "--nominal-if-hz",
+        "1725",
+        "--base-oscillator",
+        "gpsdo-ocxo",
+        "--shift-oscillator",
+        "baseband-clock",
+        "--clock-sync",
+        "GPS_10ms-1ms_region-0ms_offset",
+        "--audio-error-ms",
+        "70",
+        "--margin",
+        "1",
+        "--spread-preset",
+        "none",
+        "--selective-perturbation",
+        "each-65",
+        "--basis",
+        "two-ray",
+        "--tap-delay-ms",
+        "0",
+        "--tap-doppler-hz",
+        "0",
+        "--cn0",
+        "20.0",
+        "--threads",
+        "1",
+        "--memory-mib",
+        "512",
+        "--export-max-samples",
+        "2000000",
+        "--export-max-mib",
+        "2048",
+        "--sample-rate-denominator",
+        "1",
+        "--block",
+        "128",
+        "--signal-bit",
+        "0",
+        "--control",
+        "null",
+        "--output",
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-extension/physical/local-paired/workspaces/shared-microwave-am65-paired-00-b0-null",
+        "--stats-noisy",
+        "--seed",
+        "1105000",
+        "--key-seed",
+        "2105000",
+        "--channel-seed",
+        "3105000",
+        "--oscillator-seed",
+        "4105000",
+        "--noise-seed",
+        "5105000",
+        "--frontend-seed",
+        "6105000",
+        "--path-seed",
+        "7105000",
+        "--start",
+        "-0.090500000001",
+        "0.090500000001",
+        "0.030166666667000002",
+        "--selective-modulation-rate-hz",
+        "0.1"
+      ],
+      "control": "null",
+      "bit": 0,
+      "public_frequency_bound_hz": 0.5800001725289999
+    },
+    {
+      "id": "configure-shared-microwave-am65-paired-00-b0-signal",
+      "case": "shared-microwave-am65",
+      "argv": [
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/triad_long",
+        "--mode",
+        "configure",
+        "--seconds",
+        "8",
+        "--rate",
+        "36",
+        "--added",
+        "1",
+        "--sample-rate",
+        "4096",
+        "--rf-hz",
+        "5800000000.0",
+        "--nominal-if-hz",
+        "1725",
+        "--base-oscillator",
+        "gpsdo-ocxo",
+        "--shift-oscillator",
+        "baseband-clock",
+        "--clock-sync",
+        "GPS_10ms-1ms_region-0ms_offset",
+        "--audio-error-ms",
+        "70",
+        "--margin",
+        "1",
+        "--spread-preset",
+        "none",
+        "--selective-perturbation",
+        "each-65",
+        "--basis",
+        "two-ray",
+        "--tap-delay-ms",
+        "0",
+        "--tap-doppler-hz",
+        "0",
+        "--cn0",
+        "20.0",
+        "--threads",
+        "1",
+        "--memory-mib",
+        "512",
+        "--export-max-samples",
+        "2000000",
+        "--export-max-mib",
+        "2048",
+        "--sample-rate-denominator",
+        "1",
+        "--block",
+        "128",
+        "--signal-bit",
+        "0",
+        "--control",
+        "signal",
+        "--output",
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-extension/physical/local-paired/workspaces/shared-microwave-am65-paired-00-b0-signal",
+        "--stats-noisy",
+        "--seed",
+        "1105000",
+        "--key-seed",
+        "2105000",
+        "--channel-seed",
+        "3105000",
+        "--oscillator-seed",
+        "4105000",
+        "--noise-seed",
+        "5105000",
+        "--frontend-seed",
+        "6105000",
+        "--path-seed",
+        "7105000",
+        "--start",
+        "-0.090500000001",
+        "0.090500000001",
+        "0.030166666667000002",
+        "--selective-modulation-rate-hz",
+        "0.1"
+      ],
+      "control": "signal",
+      "bit": 0,
+      "public_frequency_bound_hz": 0.5800001725289999
+    },
+    {
+      "id": "configure-shared-microwave-am65-paired-01-b1-signal",
+      "case": "shared-microwave-am65",
+      "argv": [
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/triad_long",
+        "--mode",
+        "configure",
+        "--seconds",
+        "8",
+        "--rate",
+        "36",
+        "--added",
+        "1",
+        "--sample-rate",
+        "4096",
+        "--rf-hz",
+        "5800000000.0",
+        "--nominal-if-hz",
+        "1725",
+        "--base-oscillator",
+        "gpsdo-ocxo",
+        "--shift-oscillator",
+        "baseband-clock",
+        "--clock-sync",
+        "GPS_10ms-1ms_region-0ms_offset",
+        "--audio-error-ms",
+        "70",
+        "--margin",
+        "1",
+        "--spread-preset",
+        "none",
+        "--selective-perturbation",
+        "each-65",
+        "--basis",
+        "two-ray",
+        "--tap-delay-ms",
+        "0",
+        "--tap-doppler-hz",
+        "0",
+        "--cn0",
+        "20.0",
+        "--threads",
+        "1",
+        "--memory-mib",
+        "512",
+        "--export-max-samples",
+        "2000000",
+        "--export-max-mib",
+        "2048",
+        "--sample-rate-denominator",
+        "1",
+        "--block",
+        "128",
+        "--signal-bit",
+        "1",
+        "--control",
+        "signal",
+        "--output",
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-extension/physical/local-paired/workspaces/shared-microwave-am65-paired-01-b1-signal",
+        "--stats-noisy",
+        "--seed",
+        "1105001",
+        "--key-seed",
+        "2105001",
+        "--channel-seed",
+        "3105001",
+        "--oscillator-seed",
+        "4105001",
+        "--noise-seed",
+        "5105001",
+        "--frontend-seed",
+        "6105001",
+        "--path-seed",
+        "7105001",
+        "--start",
+        "-0.090500000001",
+        "0.090500000001",
+        "0.030166666667000002",
+        "--selective-modulation-rate-hz",
+        "0.1"
+      ],
+      "control": "signal",
+      "bit": 1,
+      "public_frequency_bound_hz": 0.5800001725289999
+    }
+  ],
+  "original_reproducer_script_sha256": "4d7d8b0e35bab9fbc2e24161596720c8e2564821d82c5e81f904b4e67248c88f",
+  "maintained_reproducer_sha256": "0a2e9b0586da0271c8b89fa4345f5466941c4f31eea86239be9759f17f90417d",
+  "retention": "Full workspaces, fixed binary and export receipts remain under local-evidence/triad-extension/cfo-microwave; this compact record embeds the original public commands/seeds for reproduction."
+}

@@ -4,6 +4,7 @@ import copy
 import json
 import math
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -16,7 +17,8 @@ from scipy.special import gammaincinv, logsumexp
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/"tools"))
 from triad_group_acquire import (AcquisitionConfig, GroupedWorkspace, WorkspaceError,
-    bit_mixture, decision, main, parse_args, prepare_group_tile, score_workspace)
+    _normalize_scientific_arguments, bit_mixture, decision, frequency_offset_grid, frequency_reuse_bound,
+    main, parse_args, prepare_group_tile, score_workspace)
 from triad_gaussian_window import PreparedWindowedGaussian
 from triad_noise_likelihood import whole_bank_residual, variance_upper_confidence
 
@@ -249,6 +251,171 @@ class GroupAcquisitionTests(unittest.TestCase):
             self.assertIn('simulation_evaluation_only',report['captures'][0])
             self.assertTrue((root/'scores.npz').is_file())
             with self.assertRaises(ValueError):main([str(root/'input'),'--doppler-width-hz','1','--window-blocks','2','--output',str(root/'result.json')])
+
+    def test_public_frequency_grid_includes_endpoints_zero_and_limits(self):
+        grid=frequency_offset_grid(-.003,.003,.0011)
+        self.assertEqual(grid[0],-.003)
+        self.assertEqual(grid[-1],.003)
+        self.assertIn(0.,grid)
+        self.assertLessEqual(max(np.diff(grid)),.0011)
+        self.assertEqual(frequency_offset_grid(.2,.2,.01),(.2,))
+        args=parse_args(['fixture','--doppler-width-hz','0','--window-blocks','1',
+                         '--frequency-offset-grid','-.003','.003','.0011'])
+        self.assertEqual(args.frequency_offsets_hz,grid)
+        explicit=parse_args(['fixture','--doppler-width-hz','0','--window-blocks','1',
+                             '--frequency-offsets-hz','-.003','0','.003'])
+        self.assertEqual(explicit.frequency_offsets_hz,(-.003,0.,.003))
+        self.assertEqual(parse_args(['fixture','--doppler-width-hz','0','--window-blocks','1']).frequency_offsets_hz,(0.,))
+        for limits in ((1.,-1.,.1),(-1.,1.,0.),(-1.,1.,1e-9),(-1e308,1e308,1.)):
+            with self.assertRaises(ValueError):frequency_offset_grid(*limits)
+        for offsets in ((),(0.,0.),(float('nan'),),tuple(range(4097))):
+            with self.assertRaises(ValueError):AcquisitionConfig(0.,frequency_offsets_hz=offsets)
+
+    def test_negative_scientific_cli_spelling_preserves_full_float_value(self):
+        tokens=['-8.27e-7','-1.2345678901234567e-200','-5e-324','-1.7976931348623157e308',
+                '-0e0','-1e-1000000000']
+        normalized=_normalize_scientific_arguments(['--frequency-offsets-hz',*tokens])[1:]
+        for original,fixed in zip(tokens,normalized):
+            self.assertEqual(float(original).hex(),float(fixed).hex())
+            self.assertNotIn('e',fixed.lower())
+            self.assertLessEqual(len(fixed),1077)
+        untouched=['--frequency-offset-grid','8.27e-7','0','-bad','-1e999','--','-8.27e-7']
+        self.assertEqual(_normalize_scientific_arguments(untouched),untouched)
+        paths=['--output','-8.27e-7','--frequency-offset-grid','-8.27e-7','0','8.27e-7',
+               '--scores-output','-5e-324','--frequency-offsets-hz','-8.27e-7','--output','-1e-5']
+        normalized=_normalize_scientific_arguments(paths)
+        for index in (1,7,11):self.assertEqual(normalized[index],paths[index])
+        for index in (3,9):self.assertEqual(float(normalized[index]).hex(),float(paths[index]).hex())
+        self.assertNotIn('e',normalized[3].lower())
+        args=parse_args(['fixture','--doppler-width-hz','0','--window-blocks','1',
+                         '--frequency-offsets-hz','-8.27e-7','--output=-8.27e-7'])
+        self.assertEqual(args.output,Path('-8.27e-7'))
+
+    def test_actual_cli_accepts_scientific_grid_and_list_and_rejects_bad_values(self):
+        # This must also run on the supported older Python used by cloud
+        # workers: newer argparse versions already accept the original form.
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);write_fixture(root/'input',fixture(groups=1))
+            command=[sys.executable,str(Path(__file__).resolve().parents[1]/'tools/triad_group_acquire.py'),
+                     str(root/'input'),'--doppler-width-hz','0','--window-blocks','1']
+            for index,option in enumerate((
+                    ['--frequency-offset-grid','-8.27e-7','8.27e-7','8.27e-7'],
+                    ['--frequency-offsets-hz','-8.27e-7','0','8.27e-7'],
+                    ['--frequency-offsets-hz','-5e-324','0','5e-324'])):
+                output=root/f'result-{index}.json'
+                result=subprocess.run(command+option+['--output',str(output)],capture_output=True,text=True,timeout=30)
+                self.assertEqual(result.returncode,0,result.stderr)
+                report=json.loads(output.read_text())['captures'][0]
+                expected=(-8.27e-7,0.,8.27e-7) if index<2 else (-5e-324,0.,5e-324)
+                actual=report['geometry']['frequency_offsets_hz']
+                self.assertEqual([x.hex() for x in actual],[x.hex() for x in expected])
+            for option in (['--frequency-offset-grid','-8.27e-no','0','1e-6'],
+                           ['--frequency-offsets-hz','-1e999'],
+                           ['--frequency-offsets-hz','0','nan'],
+                           ['--frequency-offset-grid','0','1e999','1e-6']):
+                result=subprocess.run(command+option,capture_output=True,text=True,timeout=30)
+                self.assertEqual(result.returncode,2,result.stderr)
+                self.assertTrue(result.stderr)
+
+    def test_frequency_reuse_matches_raw_piecewise_design_with_gap_and_short_tail(self):
+        data=list(fixture(blocks=6,groups=2,erased=True))
+        A,y,_,_,_,valid,mapping=data
+        A[-1,:,-3:]=0;y[-1,-3:]=0;valid[-1]-=3
+        data[2]=np.einsum('bhni,bhnj->bhij',A.conj(),A)
+        data[3]=np.einsum('bhni,bn->bhi',A.conj(),y)
+        data[4]=np.sum(abs(y)**2,axis=1)
+        sample_rate=128.;stops=np.asarray([8,16,24,32,40,45])
+        centers=(np.arange(6)*8+stops)/(2*sample_rate)
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            def save(path,values):
+                m=write_fixture(path,values,sample_rate)
+                m['sample_count']=45
+                (path/'manifest.json').write_text(json.dumps(m))
+                np.column_stack((np.arange(6)*8,stops)).astype('<u8').tofile(path/'intervals.u64')
+            save(root/'base',data)
+            for frequency in (-.1,.1):
+                phase=np.exp(2j*np.pi*frequency*centers)
+                shifted=A*phase[:,None,None,None]
+                direct=list(data)
+                direct[0]=shifted
+                direct[2]=np.einsum('bhni,bhnj->bhij',shifted.conj(),shifted)
+                direct[3]=np.einsum('bhni,bn->bhi',shifted.conj(),y)
+                save(root/'direct',direct)
+                base=GroupedWorkspace(root/'base')
+                G,r=base.read_group_tile(0,2,2,frequency)
+                expected_G,expected_r=GroupedWorkspace(root/'direct').read_group_tile(0,2,2)
+                np.testing.assert_allclose(G,expected_G,atol=1e-15)
+                np.testing.assert_allclose(r,expected_r,atol=2e-15)
+                reused=score_workspace(base,AcquisitionConfig(0.,window_blocks=1,reblock=6,frequency_offsets_hz=(frequency,)))
+                raw=score_workspace(GroupedWorkspace(root/'direct'),AcquisitionConfig(0.,window_blocks=1,reblock=6))
+                np.testing.assert_allclose(reused['bit_log_likelihoods'],raw['bit_log_likelihoods'],atol=1e-12)
+                np.testing.assert_allclose(reused['calibration']['variance_upper_over_reference'],raw['calibration']['variance_upper_over_reference'],atol=1e-14)
+
+    def test_continuous_phase_bound_covers_shaping_mask_and_both_cfo_signs(self):
+        rng=np.random.default_rng(8294)
+        rows=97;fs=128.;times=np.arange(rows)/fs;center=rows/(2*fs)
+        x=cn(rng,rows)*np.linspace(.1,2.,rows)
+        x[11:29]=0;x[68:91]=0
+        for frequency in (-.015,.015):
+            bound=frequency_reuse_bound((frequency,),rows/fs,.01)
+            exact=x*np.exp(2j*np.pi*frequency*times)
+            midpoint=x*np.exp(2j*np.pi*frequency*center)
+            norm2=np.vdot(x,x).real
+            loss=-10*math.log10(abs(np.vdot(exact,midpoint)/norm2)**2)
+            self.assertLessEqual(loss,bound['coherent_power_loss_bound_db'])
+            self.assertLessEqual(np.linalg.norm(exact-midpoint)/math.sqrt(norm2),bound['relative_template_operator_error_bound'])
+            # The bound on correlations follows Cauchy-Schwarz for arbitrary
+            # actual observations, without assuming rectangular chip power.
+            y=cn(rng,rows)
+            error=abs(np.vdot(exact,y)-np.vdot(midpoint,y))
+            self.assertLessEqual(error,bound['relative_template_operator_error_bound']*math.sqrt(norm2)*np.linalg.norm(y))
+        with self.assertRaisesRegex(ValueError,'phase loss'):
+            frequency_reuse_bound((.1,),rows/fs,.01)
+        with self.assertRaisesRegex(ValueError,'pi/2'):
+            frequency_reuse_bound((1.,),rows/fs,100.)
+
+    def test_frequency_alternatives_enter_mixture_calibration_and_recover_sign(self):
+        data=list(fixture(blocks=128,groups=2,rows=8))
+        A,y,_,_,_,valid,mapping=data
+        fs=256.;centers=(np.arange(128)+.5)*8/fs
+        frequency=.35
+        y=y+10*(A[:,1,:,0]+(.4+.2j)*A[:,1,:,1])*np.exp(2j*np.pi*frequency*centers[:,None])
+        data[1]=y;data[3]=np.einsum('bhni,bn->bhi',A.conj(),y);data[4]=np.sum(abs(y)**2,axis=1)
+        offsets=(-frequency,0.,frequency)
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp);write_fixture(path,data,fs)
+            config=AcquisitionConfig(0.,window_blocks=1,reblock=128,frequency_offsets_hz=offsets)
+            report=score_workspace(GroupedWorkspace(path),config)
+            single=score_workspace(GroupedWorkspace(path),AcquisitionConfig(0.,window_blocks=1,reblock=128))
+        scores=np.asarray(report['group_bit_log_likelihoods'])
+        self.assertEqual(scores.shape,(6,2))
+        np.testing.assert_allclose(report['bit_log_likelihoods'],logsumexp(scores,axis=0)-math.log(6),atol=1e-12)
+        self.assertEqual(report['calibration']['delta_per_group'],math.nextafter(config.budgets()[0].delta_per_segment/6,0.))
+        self.assertFalse(report['calibration']['inter_group_independence_assumed'])
+        self.assertEqual(report['best_frequency_offset_hz'],frequency)
+        self.assertEqual(report['best_base_group'],1)
+        self.assertEqual(report['strict']['bit'],0)
+        self.assertTrue(report['strict']['accepted'])
+        self.assertGreater(report['strict']['score'],single['strict']['score']+100)
+
+    def test_zero_frequency_path_and_frequency_resource_guards(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp);write_fixture(path,fixture())
+            ws=GroupedWorkspace(path)
+            G,r=ws.read_group_tile(0,3,2)
+            explicit_G,explicit_r=ws.read_group_tile(0,3,2,0.)
+            np.testing.assert_array_equal(G,explicit_G);np.testing.assert_array_equal(r,explicit_r)
+            default=score_workspace(ws,AcquisitionConfig(.5,reblock=2))
+            explicit=score_workspace(ws,AcquisitionConfig(.5,reblock=2,frequency_offsets_hz=(0.,)))
+            self.assertEqual(default['bit_log_likelihoods'],explicit['bit_log_likelihoods'])
+            self.assertEqual(default['calibration'],explicit['calibration'])
+            with patch('triad_group_acquire.PreparedWindowedGaussian',side_effect=AssertionError('factor before bound')):
+                with self.assertRaisesRegex(ValueError,'phase loss'):
+                    score_workspace(ws,AcquisitionConfig(.5,frequency_offsets_hz=(1.,)))
+        huge=SimpleNamespace(groups=5000)
+        with self.assertRaisesRegex(ValueError,'effective groups'):
+            score_workspace(huge,AcquisitionConfig(0.,frequency_offsets_hz=tuple(range(201))))
 
 
 if __name__=='__main__':unittest.main()

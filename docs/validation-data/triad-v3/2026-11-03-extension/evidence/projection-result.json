@@ -1,0 +1,234 @@
+{
+  "format": "triad-clean-projection-diagnostic-v1",
+  "receiver_source_sha256": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+  "diagnostic_source_sha256": "2efc92fc99bc4c1e4c4408e301e78118abe2b97cd4a255a82233d0f3d7555630",
+  "score_report_sha256": "99b8ff57fe368174e47fca2716f7879e3dea792b268502ee030cf7340cbed3a3",
+  "input_sha256": {
+    "manifest.json": "fe40461b8a98c924ceb1b93c78bbca97bf2822b1fabba63bfd70ec2752609231",
+    "group_gram.c128": "805cf89372b5f45e808253bd9658ee606c7e6dac476430a52821dd9a7e490a19",
+    "group_observation.c128": "a9757bf64702d3e376904e8027cf5ca7ff5cad2bdfb17ab7b8b18bb680559de2",
+    "received_energy.f64": "f43dacaf69a02e7ef41b853387fb8f246add7e89d6077a3555d60d1e8fc5e953",
+    "intervals.u64": "50bb842ff953d81d753d47117d66c1a026020b505e0ae5c7751e3610133143b9",
+    "valid_rows.u64": "ce39e88c174cdc4dddc6eb92c83665408902ae7b872929936230745640e4e34b",
+    "group_mean.c128": "ec79709f9d95fb7aa53c6c1f696bb2c8630e39c5c88f6632d41fbd391fe1b733",
+    "signal_energy.f64": "b8d27e9a127775e23f17f2ce7e85d78d4c87938279102b86f39d4198a3a52c16"
+  },
+  "scope": "evaluation only after fixed receiver decisions; noiseless means and truth never enter acquisition or new hypotheses",
+  "geometry": {
+    "groups": 455,
+    "blocks": 1481,
+    "sample_rate": 4096.0,
+    "block_samples": 128,
+    "sample_count": 189500,
+    "frequency_offsets_hz": [
+      -0.0030001725001500084,
+      0.0,
+      0.0030001725001500084
+    ]
+  },
+  "frequency_reuse": {
+    "maximum_original_block_seconds": 0.03125,
+    "maximum_phase_error_radians": 0.0002945412464366684,
+    "coherent_power_loss_bound_db": 3.7677021088524194e-07,
+    "relative_template_operator_error_bound": 0.0002945412453719687,
+    "allowed_coherent_power_loss_db": 0.01,
+    "scope": "phase-arc bound for arbitrary sample-energy weights and erasure masks; not a marginal-likelihood error bound"
+  },
+  "signal_bit_simulation_truth": 1,
+  "total_clean_energy_samples_simulation_only": 71907.05903649122,
+  "true_noise_variance_simulation_only": 1028.868682346324,
+  "total_energy_over_true_noise_simulation_only": 69.8894429097676,
+  "total_received_noisy_energy_samples": 146149152.53137714,
+  "observed_receiver": {
+    "bit_log_likelihoods": [
+      -3.7676542389329857,
+      9.067170891713092
+    ],
+    "strict": {
+      "bit": 1,
+      "accepted": false,
+      "score": 9.067170891713092,
+      "opposite_bit_margin": 12.834825130646077,
+      "log_threshold": 22.72106338958574
+    },
+    "relaxed": {
+      "bit": 1,
+      "accepted": false,
+      "score": 9.067170891713092,
+      "opposite_bit_margin": 12.834825130646077,
+      "log_threshold": 17.422746023037703
+    }
+  },
+  "best_global_clean_projection_per_bit": [
+    {
+      "bit": 0,
+      "projected_clean_energy_samples": 435.53450953763445,
+      "retained_fraction": 0.006056908951270145,
+      "projected_energy_over_true_noise": 0.4233139923594551,
+      "frequency_index": 1,
+      "base_group_index": 256,
+      "public_parameters": {
+        "arrival_seconds": 0.1520616740099383,
+        "frequency_hz": 0.0,
+        "clock_ppm": 0.0,
+        "epoch_offset_seconds": 0,
+        "frequency_drift_hz_per_second": 0.0
+      },
+      "arrival_seconds_error_simulation_only": 0.0001586733269618723,
+      "frequency_hz_error_simulation_only": 0.0012284163403391362,
+      "clock_ppm_error_simulation_only": -3.549449623108103e-05
+    },
+    {
+      "bit": 1,
+      "projected_clean_energy_samples": 30207.656270195635,
+      "retained_fraction": 0.4200930572736388,
+      "projected_energy_over_true_noise": 29.36006974311571,
+      "frequency_index": 1,
+      "base_group_index": 256,
+      "public_parameters": {
+        "arrival_seconds": 0.1520616740099383,
+        "frequency_hz": 0.0,
+        "clock_ppm": 0.0,
+        "epoch_offset_seconds": 0,
+        "frequency_drift_hz_per_second": 0.0
+      },
+      "arrival_seconds_error_simulation_only": 0.0001586733269618723,
+      "frequency_hz_error_simulation_only": 0.0012284163403391362,
+      "clock_ppm_error_simulation_only": -3.549449623108103e-05
+    }
+  ],
+  "rank_tolerance": 1e-10,
+  "maximum_discarded_gram_trace_fraction": 9.091138486361958e-11,
+  "projection_rank_range": [
+    2,
+    2
+  ],
+  "limits": [
+    "Maximizing clean projection is an oracle evaluation, not the operational noisy likelihood or a calibrated detector.",
+    "Retained energy is relative to this public shaped two-tap subspace. It does not establish a fundamental channel information limit.",
+    "Common block-midpoint CFO rephasing uses exactly the existing finite bank and keeps physical timestamps across erasures.",
+    "Projection rank truncation follows the receiver relative Gram tolerance; small discarded modes represent lost modeled information.",
+    "This comparison cannot separately identify all timing, phase, modulation and channel-mismatch losses without additional controlled observations."
+  ],
+  "best_zero_cfo_projection_per_bit": [
+    {
+      "bit": 0,
+      "projected_clean_energy_samples": 435.53450953763445,
+      "retained_fraction": 0.006056908951270145,
+      "projected_energy_over_true_noise": 0.4233139923594551,
+      "frequency_index": 1,
+      "base_group_index": 256,
+      "public_parameters": {
+        "arrival_seconds": 0.1520616740099383,
+        "frequency_hz": 0.0,
+        "clock_ppm": 0.0,
+        "epoch_offset_seconds": 0,
+        "frequency_drift_hz_per_second": 0.0
+      },
+      "arrival_seconds_error_simulation_only": 0.0001586733269618723,
+      "frequency_hz_error_simulation_only": 0.0012284163403391362,
+      "clock_ppm_error_simulation_only": -3.549449623108103e-05
+    },
+    {
+      "bit": 1,
+      "projected_clean_energy_samples": 30207.656270195635,
+      "retained_fraction": 0.4200930572736388,
+      "projected_energy_over_true_noise": 29.36006974311571,
+      "frequency_index": 1,
+      "base_group_index": 256,
+      "public_parameters": {
+        "arrival_seconds": 0.1520616740099383,
+        "frequency_hz": 0.0,
+        "clock_ppm": 0.0,
+        "epoch_offset_seconds": 0,
+        "frequency_drift_hz_per_second": 0.0
+      },
+      "arrival_seconds_error_simulation_only": 0.0001586733269618723,
+      "frequency_hz_error_simulation_only": 0.0012284163403391362,
+      "clock_ppm_error_simulation_only": -3.549449623108103e-05
+    }
+  ],
+  "projection_at_actual_receiver_choice_per_bit": [
+    {
+      "bit": 0,
+      "projected_clean_energy_samples": 435.53450953763445,
+      "retained_fraction": 0.006056908951270145,
+      "projected_energy_over_true_noise": 0.4233139923594551,
+      "frequency_index": 1,
+      "base_group_index": 256,
+      "public_parameters": {
+        "arrival_seconds": 0.1520616740099383,
+        "frequency_hz": 0.0,
+        "clock_ppm": 0.0,
+        "epoch_offset_seconds": 0,
+        "frequency_drift_hz_per_second": 0.0
+      },
+      "arrival_seconds_error_simulation_only": 0.0001586733269618723,
+      "frequency_hz_error_simulation_only": 0.0012284163403391362,
+      "clock_ppm_error_simulation_only": -3.549449623108103e-05
+    },
+    {
+      "bit": 1,
+      "projected_clean_energy_samples": 30207.656270195635,
+      "retained_fraction": 0.4200930572736388,
+      "projected_energy_over_true_noise": 29.36006974311571,
+      "frequency_index": 1,
+      "base_group_index": 256,
+      "public_parameters": {
+        "arrival_seconds": 0.1520616740099383,
+        "frequency_hz": 0.0,
+        "clock_ppm": 0.0,
+        "epoch_offset_seconds": 0,
+        "frequency_drift_hz_per_second": 0.0
+      },
+      "arrival_seconds_error_simulation_only": 0.0001586733269618723,
+      "frequency_hz_error_simulation_only": 0.0012284163403391362,
+      "clock_ppm_error_simulation_only": -3.549449623108103e-05
+    }
+  ],
+  "segmented_oracle": {
+    "window_blocks": 2,
+    "nominal_window_seconds": 0.0625,
+    "best_clean_projection_per_bit": [
+      {
+        "bit": 0,
+        "projected_clean_energy_samples": 4111.998711341346,
+        "retained_fraction": 0.057184910166533154,
+        "projected_energy_over_true_noise": 3.996621514384107,
+        "frequency_index": 2,
+        "base_group_index": 256,
+        "public_parameters": {
+          "arrival_seconds": 0.1520616740099383,
+          "frequency_hz": 0.0030001725001500084,
+          "clock_ppm": 0.0,
+          "epoch_offset_seconds": 0,
+          "frequency_drift_hz_per_second": 0.0
+        },
+        "arrival_seconds_error_simulation_only": 0.0001586733269618723,
+        "frequency_hz_error_simulation_only": 0.004228588840489145,
+        "clock_ppm_error_simulation_only": -3.549449623108103e-05
+      },
+      {
+        "bit": 1,
+        "projected_clean_energy_samples": 44692.65988536054,
+        "retained_fraction": 0.6215336920215304,
+        "projected_energy_over_true_noise": 43.438643485035826,
+        "frequency_index": 0,
+        "base_group_index": 256,
+        "public_parameters": {
+          "arrival_seconds": 0.1520616740099383,
+          "frequency_hz": -0.0030001725001500084,
+          "clock_ppm": 0.0,
+          "epoch_offset_seconds": 0,
+          "frequency_drift_hz_per_second": 0.0
+        },
+        "arrival_seconds_error_simulation_only": 0.0001586733269618723,
+        "frequency_hz_error_simulation_only": -0.0017717561598108722,
+        "clock_ppm_error_simulation_only": -3.549449623108103e-05
+      }
+    ],
+    "warning": "Independent gains per segment can absorb the wrong pattern. This is a flexibility/representation diagnostic, not achievable noisy sensitivity."
+  },
+  "elapsed_seconds": 1.281645790906623,
+  "maximum_rss_kib": 747552
+}

@@ -1,0 +1,676 @@
+{
+  "schema": "triad-common-phase-discriminator-v1",
+  "seed": 703011,
+  "teacher": "orthogonal candidate sufficient statistics; block-constant continuous-Brownian skeleton",
+  "sampled_waveform": false,
+  "sigma_rad_sqrt_second": 0.001234134149488435,
+  "tau_seconds": 1313122.5400046974,
+  "days": 850.0,
+  "blocks": 4475,
+  "dt_seconds": 16411.173184357544,
+  "dt_over_tau": 0.012497823077729543,
+  "independent_synthetic_phase_noise_paths": 256,
+  "null_paths": 256,
+  "thresholds": {
+    "strict": 22.721063389585737,
+    "relaxed": 17.4227460230377
+  },
+  "calibration": "Gaussian H0 exact-arithmetic normalized likelihood mixtures; union over 2 bits, 16 methods, 8 durations, 1440/day or 720/12h attempts; half budget to scores",
+  "source_sha256": "cb878e5ed3c7e9d9608166e2062501e8b2bd2c63e07a4eff5ea993096e6ea0a9",
+  "library_sha256": "48ee569b1d467b2d7b6fd55088764bd28dd11e0bfecb5974622a318fbb408585",
+  "environment": {
+    "torch": "2.8.0+cpu",
+    "numpy": "2.5.4",
+    "precision": "fp32",
+    "threads": 1
+  },
+  "limitations": [
+    "No triad pulse shape, carrier overlap, delay, Doppler, selective modulation, timing/epoch/CFO search or unknown noise.",
+    "Brownian phase is constant inside teacher blocks; convergence in this script does not validate continuous within-block waveform behavior.",
+    "C/N0 sweeps share paired phase and indexed noise. Counts refer to synthetic independent paths, not physical propagation reliability.",
+    "Known amplitude and orthogonal candidate patterns make this a favorable diagnostic. Oracle phase is unavailable to an ordinary receiver.",
+    "Time scaling preserves c*tau, T/tau, dt/tau only for this stipulated sufficient-statistic teacher, not an accelerated real channel."
+  ],
+  "rows": [
+    {
+      "cn0_db_hz": -60.0,
+      "c_tau": 1.3131225400046973,
+      "energy_snr": 73.44,
+      "method": "finite_phase_32_reblock_1",
+      "wall_seconds": 4.991197710012784,
+      "diagnostics": {
+        "algorithm": "finite_phase_frequency_static_gain_marginal_lr",
+        "phase_states": 32,
+        "frequency_states": 1,
+        "frequency_grid_hz": [
+          0.0
+        ],
+        "frequency_spacing_hz": 0.0,
+        "initial_frequency_weights": [
+          1.0
+        ],
+        "initial_frequency_mean_hz": 0.0,
+        "initial_frequency_variance_hz2": 0.0,
+        "generator_stationary_frequency_variance_hz2": null,
+        "generator_stationary_initial_correlation_decay_per_second": null,
+        "grid_convergence_scope": "automatic phase-grid changes also change frequency spacing; vary explicit frequency_grid_hz independently when separating the two discretization errors",
+        "quadrature_states": 1,
+        "frequency_model": "static",
+        "frequency_std_hz": 0.003,
+        "frequency_correlation_seconds": 1000.0,
+        "random_walk_hz_per_sqrt_second": 1e-06,
+        "phase_diffusion_rad_per_sqrt_second": 0.001234134149488435,
+        "nominal_dt_seconds": 16411.173184357544,
+        "transition_order": "half old-frequency phase advection; frequency CTMC; half new-frequency phase advection; independent phase CTMC",
+        "initial_phase_prior": "uniform",
+        "gain_prior_static_through_observation": true,
+        "amplitude_nodes": [
+          1.0
+        ],
+        "amplitude_weights_normalized": [
+          1.0
+        ],
+        "relative_phase_states": 1,
+        "ray_amplitudes": [
+          1.0
+        ],
+        "phase_kernel_tail_probability": 1e-12,
+        "bulk_dtype": "torch.float32",
+        "log_evidence_dtype": "torch.float64",
+        "tf32_allowed": false,
+        "working_bytes_bound": 2169920,
+        "memory_scope": "owned state/temporary/cache array estimate; excludes framework runtime and allocator cache",
+        "maximum_phase_interpolation_variance_radians2_per_interval": 0.0,
+        "maximum_discarded_phase_kernel_mass": 1.1313172620930345e-13,
+        "maximum_frequency_transition_row_error_before_normalizing": 0.0,
+        "updates": 4475,
+        "elapsed_center_separation_seconds": 73423588.82681565,
+        "model_scope": "normalized finite-state likelihood with static proper gain quadrature and block-constant common phase; continuous colored oscillator and arbitrary within-block phase evolution are not exact models",
+        "null_scope": "known white circular Gaussian null and fixed pre-observation priors; finite-precision validation/calibration is separate from the exact-arithmetic mean-one LR identity"
+      },
+      "outcomes": {
+        "strict": {
+          "signal_trials": 256,
+          "correct_accepted": 145,
+          "wrong_accepted": 0,
+          "misses": 111,
+          "correct_interval95": [
+            0.5131269082334622,
+            0.6185288906456333
+          ],
+          "null_trials": 256,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.011633876163163281
+          ],
+          "raw_correct": 256
+        },
+        "relaxed": {
+          "signal_trials": 256,
+          "correct_accepted": 202,
+          "wrong_accepted": 0,
+          "misses": 54,
+          "correct_interval95": [
+            0.7427517087322324,
+            0.8302896599491083
+          ],
+          "null_trials": 256,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.011633876163163281
+          ],
+          "raw_correct": 256
+        }
+      },
+      "paired_vs_finest": {
+        "max_abs_log_lr_difference": 0.0,
+        "winner_changes": 0,
+        "admission_changes": {
+          "strict": 0,
+          "relaxed": 0
+        }
+      }
+    },
+    {
+      "cn0_db_hz": -60.0,
+      "c_tau": 1.3131225400046973,
+      "energy_snr": 73.44,
+      "method": "global_unknown_phase",
+      "wall_seconds_joint_analytic": 0.49882487099966966,
+      "outcomes": {
+        "strict": {
+          "signal_trials": 256,
+          "correct_accepted": 0,
+          "wrong_accepted": 0,
+          "misses": 256,
+          "correct_interval95": [
+            0.0,
+            0.011633876163163281
+          ],
+          "null_trials": 256,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.011633876163163281
+          ],
+          "raw_correct": 213
+        },
+        "relaxed": {
+          "signal_trials": 256,
+          "correct_accepted": 0,
+          "wrong_accepted": 0,
+          "misses": 256,
+          "correct_interval95": [
+            0.0,
+            0.011633876163163281
+          ],
+          "null_trials": 256,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.011633876163163281
+          ],
+          "raw_correct": 213
+        }
+      }
+    },
+    {
+      "cn0_db_hz": -60.0,
+      "c_tau": 1.3131225400046973,
+      "energy_snr": 73.44,
+      "method": "segmented_0.25_tau",
+      "wall_seconds_joint_analytic": 0.49882487099966966,
+      "outcomes": {
+        "strict": {
+          "signal_trials": 256,
+          "correct_accepted": 1,
+          "wrong_accepted": 0,
+          "misses": 255,
+          "correct_interval95": [
+            0.00020034435958929205,
+            0.018395769886273644
+          ],
+          "null_trials": 256,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.011633876163163281
+          ],
+          "raw_correct": 256
+        },
+        "relaxed": {
+          "signal_trials": 256,
+          "correct_accepted": 9,
+          "wrong_accepted": 0,
+          "misses": 247,
+          "correct_interval95": [
+            0.018460766151090078,
+            0.06054567535893999
+          ],
+          "null_trials": 256,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.011633876163163281
+          ],
+          "raw_correct": 256
+        }
+      }
+    },
+    {
+      "cn0_db_hz": -60.0,
+      "c_tau": 1.3131225400046973,
+      "energy_snr": 73.44,
+      "method": "segmented_1_tau",
+      "wall_seconds_joint_analytic": 0.49882487099966966,
+      "outcomes": {
+        "strict": {
+          "signal_trials": 256,
+          "correct_accepted": 45,
+          "wrong_accepted": 0,
+          "misses": 211,
+          "correct_interval95": [
+            0.13765997083183357,
+            0.21962646698447816
+          ],
+          "null_trials": 256,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.011633876163163281
+          ],
+          "raw_correct": 256
+        },
+        "relaxed": {
+          "signal_trials": 256,
+          "correct_accepted": 105,
+          "wrong_accepted": 0,
+          "misses": 151,
+          "correct_interval95": [
+            0.35861632920043424,
+            0.46326165143518616
+          ],
+          "null_trials": 256,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.011633876163163281
+          ],
+          "raw_correct": 256
+        }
+      }
+    },
+    {
+      "cn0_db_hz": -60.0,
+      "c_tau": 1.3131225400046973,
+      "energy_snr": 73.44,
+      "method": "segmented_4_tau",
+      "wall_seconds_joint_analytic": 0.49882487099966966,
+      "outcomes": {
+        "strict": {
+          "signal_trials": 256,
+          "correct_accepted": 7,
+          "wrong_accepted": 0,
+          "misses": 249,
+          "correct_interval95": [
+            0.01290205550315666,
+            0.05074424259612599
+          ],
+          "null_trials": 256,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.011633876163163281
+          ],
+          "raw_correct": 256
+        },
+        "relaxed": {
+          "signal_trials": 256,
+          "correct_accepted": 22,
+          "wrong_accepted": 0,
+          "misses": 234,
+          "correct_interval95": [
+            0.05889481845519613,
+            0.12043902124714234
+          ],
+          "null_trials": 256,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.011633876163163281
+          ],
+          "raw_correct": 256
+        }
+      }
+    },
+    {
+      "cn0_db_hz": -60.0,
+      "c_tau": 1.3131225400046973,
+      "energy_snr": 73.44,
+      "method": "oracle_phase",
+      "wall_seconds_joint_analytic": 0.49882487099966966,
+      "outcomes": {
+        "strict": {
+          "signal_trials": 256,
+          "correct_accepted": 256,
+          "wrong_accepted": 0,
+          "misses": 0,
+          "correct_interval95": [
+            0.9883661238368368,
+            1.0
+          ],
+          "null_trials": 256,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.011633876163163281
+          ],
+          "raw_correct": 256
+        },
+        "relaxed": {
+          "signal_trials": 256,
+          "correct_accepted": 256,
+          "wrong_accepted": 0,
+          "misses": 0,
+          "correct_interval95": [
+            0.9883661238368368,
+            1.0
+          ],
+          "null_trials": 256,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.011633876163163281
+          ],
+          "raw_correct": 256
+        }
+      },
+      "known_waveform_single_candidate_Pd": {
+        "strict": 0.9999857376691711,
+        "relaxed": 0.9999981007376985
+      }
+    },
+    {
+      "cn0_db_hz": -57.0,
+      "c_tau": 2.6200239190075867,
+      "energy_snr": 146.53206441131445,
+      "method": "finite_phase_32_reblock_1",
+      "wall_seconds": 5.234141471999465,
+      "diagnostics": {
+        "algorithm": "finite_phase_frequency_static_gain_marginal_lr",
+        "phase_states": 32,
+        "frequency_states": 1,
+        "frequency_grid_hz": [
+          0.0
+        ],
+        "frequency_spacing_hz": 0.0,
+        "initial_frequency_weights": [
+          1.0
+        ],
+        "initial_frequency_mean_hz": 0.0,
+        "initial_frequency_variance_hz2": 0.0,
+        "generator_stationary_frequency_variance_hz2": null,
+        "generator_stationary_initial_correlation_decay_per_second": null,
+        "grid_convergence_scope": "automatic phase-grid changes also change frequency spacing; vary explicit frequency_grid_hz independently when separating the two discretization errors",
+        "quadrature_states": 1,
+        "frequency_model": "static",
+        "frequency_std_hz": 0.003,
+        "frequency_correlation_seconds": 1000.0,
+        "random_walk_hz_per_sqrt_second": 1e-06,
+        "phase_diffusion_rad_per_sqrt_second": 0.001234134149488435,
+        "nominal_dt_seconds": 16411.173184357544,
+        "transition_order": "half old-frequency phase advection; frequency CTMC; half new-frequency phase advection; independent phase CTMC",
+        "initial_phase_prior": "uniform",
+        "gain_prior_static_through_observation": true,
+        "amplitude_nodes": [
+          1.0
+        ],
+        "amplitude_weights_normalized": [
+          1.0
+        ],
+        "relative_phase_states": 1,
+        "ray_amplitudes": [
+          1.0
+        ],
+        "phase_kernel_tail_probability": 1e-12,
+        "bulk_dtype": "torch.float32",
+        "log_evidence_dtype": "torch.float64",
+        "tf32_allowed": false,
+        "working_bytes_bound": 2169920,
+        "memory_scope": "owned state/temporary/cache array estimate; excludes framework runtime and allocator cache",
+        "maximum_phase_interpolation_variance_radians2_per_interval": 0.0,
+        "maximum_discarded_phase_kernel_mass": 1.1313172620930345e-13,
+        "maximum_frequency_transition_row_error_before_normalizing": 0.0,
+        "updates": 4475,
+        "elapsed_center_separation_seconds": 73423588.82681565,
+        "model_scope": "normalized finite-state likelihood with static proper gain quadrature and block-constant common phase; continuous colored oscillator and arbitrary within-block phase evolution are not exact models",
+        "null_scope": "known white circular Gaussian null and fixed pre-observation priors; finite-precision validation/calibration is separate from the exact-arithmetic mean-one LR identity"
+      },
+      "outcomes": {
+        "strict": {
+          "signal_trials": 256,
+          "correct_accepted": 256,
+          "wrong_accepted": 0,
+          "misses": 0,
+          "correct_interval95": [
+            0.9883661238368368,
+            1.0
+          ],
+          "null_trials": 256,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.011633876163163281
+          ],
+          "raw_correct": 256
+        },
+        "relaxed": {
+          "signal_trials": 256,
+          "correct_accepted": 256,
+          "wrong_accepted": 0,
+          "misses": 0,
+          "correct_interval95": [
+            0.9883661238368368,
+            1.0
+          ],
+          "null_trials": 256,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.011633876163163281
+          ],
+          "raw_correct": 256
+        }
+      },
+      "paired_vs_finest": {
+        "max_abs_log_lr_difference": 0.0,
+        "winner_changes": 0,
+        "admission_changes": {
+          "strict": 0,
+          "relaxed": 0
+        }
+      }
+    },
+    {
+      "cn0_db_hz": -57.0,
+      "c_tau": 2.6200239190075867,
+      "energy_snr": 146.53206441131445,
+      "method": "global_unknown_phase",
+      "wall_seconds_joint_analytic": 0.16839949501445517,
+      "outcomes": {
+        "strict": {
+          "signal_trials": 256,
+          "correct_accepted": 0,
+          "wrong_accepted": 0,
+          "misses": 256,
+          "correct_interval95": [
+            0.0,
+            0.011633876163163281
+          ],
+          "null_trials": 256,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.011633876163163281
+          ],
+          "raw_correct": 230
+        },
+        "relaxed": {
+          "signal_trials": 256,
+          "correct_accepted": 0,
+          "wrong_accepted": 0,
+          "misses": 256,
+          "correct_interval95": [
+            0.0,
+            0.011633876163163281
+          ],
+          "null_trials": 256,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.011633876163163281
+          ],
+          "raw_correct": 230
+        }
+      }
+    },
+    {
+      "cn0_db_hz": -57.0,
+      "c_tau": 2.6200239190075867,
+      "energy_snr": 146.53206441131445,
+      "method": "segmented_0.25_tau",
+      "wall_seconds_joint_analytic": 0.16839949501445517,
+      "outcomes": {
+        "strict": {
+          "signal_trials": 256,
+          "correct_accepted": 202,
+          "wrong_accepted": 0,
+          "misses": 54,
+          "correct_interval95": [
+            0.7427517087322324,
+            0.8302896599491083
+          ],
+          "null_trials": 256,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.011633876163163281
+          ],
+          "raw_correct": 256
+        },
+        "relaxed": {
+          "signal_trials": 256,
+          "correct_accepted": 236,
+          "wrong_accepted": 0,
+          "misses": 20,
+          "correct_interval95": [
+            0.8884992667676722,
+            0.9476259476863097
+          ],
+          "null_trials": 256,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.011633876163163281
+          ],
+          "raw_correct": 256
+        }
+      }
+    },
+    {
+      "cn0_db_hz": -57.0,
+      "c_tau": 2.6200239190075867,
+      "energy_snr": 146.53206441131445,
+      "method": "segmented_1_tau",
+      "wall_seconds_joint_analytic": 0.16839949501445517,
+      "outcomes": {
+        "strict": {
+          "signal_trials": 256,
+          "correct_accepted": 243,
+          "wrong_accepted": 0,
+          "misses": 13,
+          "correct_interval95": [
+            0.9204747766210399,
+            0.9697047337578512
+          ],
+          "null_trials": 256,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.011633876163163281
+          ],
+          "raw_correct": 256
+        },
+        "relaxed": {
+          "signal_trials": 256,
+          "correct_accepted": 251,
+          "wrong_accepted": 0,
+          "misses": 5,
+          "correct_interval95": [
+            0.9593743815005897,
+            0.9922733511391899
+          ],
+          "null_trials": 256,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.011633876163163281
+          ],
+          "raw_correct": 256
+        }
+      }
+    },
+    {
+      "cn0_db_hz": -57.0,
+      "c_tau": 2.6200239190075867,
+      "energy_snr": 146.53206441131445,
+      "method": "segmented_4_tau",
+      "wall_seconds_joint_analytic": 0.16839949501445517,
+      "outcomes": {
+        "strict": {
+          "signal_trials": 256,
+          "correct_accepted": 67,
+          "wrong_accepted": 0,
+          "misses": 189,
+          "correct_interval95": [
+            0.2168161572716843,
+            0.31079565398411113
+          ],
+          "null_trials": 256,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.011633876163163281
+          ],
+          "raw_correct": 256
+        },
+        "relaxed": {
+          "signal_trials": 256,
+          "correct_accepted": 84,
+          "wrong_accepted": 0,
+          "misses": 172,
+          "correct_interval95": [
+            0.27958076078311433,
+            0.37967053463689054
+          ],
+          "null_trials": 256,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.011633876163163281
+          ],
+          "raw_correct": 256
+        }
+      }
+    },
+    {
+      "cn0_db_hz": -57.0,
+      "c_tau": 2.6200239190075867,
+      "energy_snr": 146.53206441131445,
+      "method": "oracle_phase",
+      "wall_seconds_joint_analytic": 0.16839949501445517,
+      "outcomes": {
+        "strict": {
+          "signal_trials": 256,
+          "correct_accepted": 256,
+          "wrong_accepted": 0,
+          "misses": 0,
+          "correct_interval95": [
+            0.9883661238368368,
+            1.0
+          ],
+          "null_trials": 256,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.011633876163163281
+          ],
+          "raw_correct": 256
+        },
+        "relaxed": {
+          "signal_trials": 256,
+          "correct_accepted": 256,
+          "wrong_accepted": 0,
+          "misses": 0,
+          "correct_interval95": [
+            0.9883661238368368,
+            1.0
+          ],
+          "null_trials": 256,
+          "false_admissions": 0,
+          "null_interval95": [
+            0.0,
+            0.011633876163163281
+          ],
+          "raw_correct": 256
+        }
+      },
+      "known_waveform_single_candidate_Pd": {
+        "strict": 0.9999999999997626,
+        "relaxed": 0.9999999999999768
+      }
+    }
+  ]
+}

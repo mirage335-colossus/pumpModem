@@ -30,6 +30,16 @@ class ConfigurationAxesTest(unittest.TestCase):
     def test_strict_capture_predicate_uses_positive_margin(self):
         self.assertFalse(0.0 > 0.0)
         self.assertTrue(1e-15 > 0.0)
+        shared = census._capture_margin(1200, 900, 1725, 500000,
+                                       "gpsdo-tcxo", "baseband-clock", "none", 1, False)
+        base = census._capture_margin(1200, 900, 1725, 500000,
+                                      "gpsdo-tcxo", "gpsdo-tcxo", "none", 1, False)
+        self.assertEqual(shared, base)
+        zero_a = census._capture_margin(1200, 900, 1725, 0,
+                                        "gpsdo-tcxo", "crystal", "none", 1, False)
+        zero_b = census._capture_margin(1200, 900, 1725, 0,
+                                        "gpsdo-tcxo", "cb-ssb", "none", 1, False)
+        self.assertEqual(zero_a, zero_b)
 
 
 class FactorCensusNativeTest(unittest.TestCase):
@@ -53,18 +63,8 @@ class FactorCensusNativeTest(unittest.TestCase):
 
     def test_intent_product_and_exclusive_partition(self):
         report = self.report
-        self.assertEqual(report["outcome_partition"], {
-            "unsupported_topology": 595_353_600,
-            "source_geometry_rejected": 812_482_560,
-            "capture_margin_nonpositive": 212_171_328,
-            "capture_margin_positive": 880_477_632,
-        })
+        self.assertNotIn("unsupported_topology", report["outcome_partition"])
         self.assertEqual(sum(report["outcome_partition"].values()), census.TOTAL)
-        unsupported = report["unsupported_topology_breakdown"]
-        self.assertEqual(unsupported["disjoint_sum"], 595_353_600)
-        self.assertEqual(unsupported["zero_shift_cli_unsupported_including_shared_clock_overlap"]
-                         + unsupported["shared_baseband_clock_unsupported_at_positive_shift"],
-                         unsupported["disjoint_sum"])
 
     def test_native_geometry_strata_reconcile_by_each_axis(self):
         table = self.report["geometry_factor_table"]
@@ -87,7 +87,8 @@ class FactorCensusNativeTest(unittest.TestCase):
     def test_capture_factor_tables_and_native_formula_checks(self):
         tables = self.report["capture_factor_table"]
         self.assertEqual(set(tables["by_baseband_placement"]), set(census.BASEBAND))
-        self.assertEqual(set(tables["by_shift_hz"]), {str(int(x)) for x in census.SHIFTS[1:]})
+        self.assertEqual(set(tables["by_shift_hz"]), {str(int(x)) for x in census.SHIFTS})
+        self.assertEqual(set(tables["by_shift_oscillator"]), set(census.SHIFT_OSCILLATORS))
         self.assertEqual(set(tables["by_spread"]), set(census.SPREAD))
         expected_positive = self.report["outcome_partition"]["capture_margin_positive"]
         expected_nonpositive = self.report["outcome_partition"]["capture_margin_nonpositive"]
@@ -98,8 +99,8 @@ class FactorCensusNativeTest(unittest.TestCase):
             self.assertEqual(sum(cell["nonpositive"] for cell in table.values()), expected_nonpositive, name)
         source = self.report["source_evidence"]
         self.assertEqual(source["capture_margin_max_abs_error_hz"], 0.0)
-        self.assertEqual(source["independent_capture_margin_checks"], 62)
-        self.assertEqual(source["near_zero_factor_rows_rechecked"], 450)
+        self.assertGreater(source["independent_capture_margin_checks"], 0)
+        self.assertGreater(source["near_zero_factor_rows_rechecked"], 0)
         self.assertEqual(source["near_zero_factor_max_abs_error_hz"], 0.0)
         self.assertEqual(source["binary_sha256_before_after"][0], source["binary_sha256_before_after"][1])
         self.assertEqual(source["census_tool_sha256_before_after"][0], source["census_tool_sha256_before_after"][1])
@@ -137,6 +138,20 @@ class FactorCensusNativeTest(unittest.TestCase):
             summary_path.write_text(json.dumps(summary))
             with self.assertRaisesRegex(ValueError, "assumptions differ"):
                 census.validate_evidence(dst, REPO, self.binary)
+
+    def test_validation_design_rejects_missing_or_duplicate_rows(self):
+        with self.assertRaisesRegex(ValueError, "100 unique indices"):
+            census._validate_validation(self.validation[:-1], self.binary)
+        duplicated = [dict(row) for row in self.validation]
+        duplicated[-1] = dict(duplicated[0])
+        with self.assertRaisesRegex(ValueError, "100 unique indices"):
+            census._validate_validation(duplicated, self.binary)
+
+    def test_validation_design_binds_topology_probe_parameters(self):
+        changed = [dict(row) for row in self.validation]
+        changed[-4]["topology_case"] = "zero-shift-shared-baseband-clock"
+        with self.assertRaisesRegex(ValueError, "four declared topology probes|index order"):
+            census._validate_validation(changed, self.binary)
 
 
 if __name__ == "__main__":

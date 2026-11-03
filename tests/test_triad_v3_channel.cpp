@@ -45,12 +45,13 @@ Format fixture_format() {
 }
 
 std::vector<Complex> capture(std::size_t chunk_size, StreamChannelConfig cfg,
-                             const Format& f, StreamChannelReport* report = nullptr) {
+                             const Format& f, StreamChannelReport* report = nullptr,
+                             double rf_hz = 30e6) {
     const auto key = fixture_key();
     PatternSource source(f, key, 1);
     cfg.effects.sample_rate = effective_sample_rate(f);
     cfg.effects.occupied_bandwidth_hz = geometry(f).occupied_bandwidth_hz;
-    cfg.effects.rf_hz = 30e6;
+    cfg.effects.rf_hz = rf_hz;
     cfg.effects.seed = 0x13579bdf;
     cfg.maximum_chunk_samples = chunk_size;
     StreamingChannel channel(source, cfg);
@@ -206,6 +207,141 @@ void historical_phase_and_energy_checks() {
     check(std::abs(channel.report().signal_energy - static_cast<double>(observed)) <
               1e-10 * std::max(1.0, static_cast<double>(observed)),
           "signal-energy report omitted propagated filter-tail samples");
+}
+
+void zero_shift_and_emission_drift_checks() {
+    auto f = fixture_format();
+    f.sample_rate = 1024;
+    StreamChannelConfig cfg;
+    cfg.effects.noise_enabled = false;
+    cfg.complex_noise_variance = 0;
+    const auto direct = capture(127, cfg, f, nullptr, 0);
+    // An absent shift oscillator contributes neither static RF error nor RF
+    // drift, including when retained endpoint fields are nonzero.
+    auto absent_shift = cfg;
+    absent_shift.effects.tx.rf_ppm = 100;
+    absent_shift.effects.rx.rf_ppm = -100;
+    absent_shift.effects.tx.rf_drift_ppm_per_second = 1;
+    check(capture(73, absent_shift, f, nullptr, 0) == direct,
+          "zero RF shift retained a shift-oscillator contribution");
+    rejects([&] { (void)capture(127, cfg, f, nullptr, -1); },
+            "negative RF shift was accepted");
+
+    const auto key = fixture_key();
+    PatternSource source(f, key, 1);
+    const double dt = 1. / f.sample_rate;
+    for (const double drift : {-.03, .03}) {
+        auto drifted_cfg = cfg;
+        drifted_cfg.tx_frequency_drift_hz_per_second = drift;
+        const auto drifted = capture(73, drifted_cfg, f, nullptr, 0);
+        check(drifted == capture(4096, drifted_cfg, f, nullptr, 0),
+              "emission-time drift changed across read boundaries");
+        // Independent discrete-time phase sum: the TX phase is advanced at
+        // emission row k by 2*pi*drift*(k*dt)*dt before that sample is stored.
+        for (std::size_t n = 0; n < drifted.size(); ++n) {
+            const long double phase = 2.L * std::numbers::pi * drift * dt * dt *
+                static_cast<long double>(n) * (static_cast<long double>(n) + 1) / 2;
+            const auto expected = source.sample_at(static_cast<long double>(n)) *
+                std::polar(1., static_cast<double>(phase));
+            check(std::abs(drifted[n] - expected) < 1e-10,
+                  "zero-shift frequency drift disagreed with physical emission phase");
+        }
+        // Echoes must use the already drifted historical emission, rather than
+        // applying the current arrival-time phase a second time.
+        drifted_cfg.effects.spread_delay_ms = 31.25;
+        const auto echoed = capture(257, drifted_cfg, f, nullptr, 0);
+        modem::detail::SpreadRay reference(f.sample_rate, 0,
+                                          0x13579bdf ^ 0x325449415443484eULL);
+        for (std::size_t n = 0; n < echoed.size(); ++n) {
+            const auto now = n < drifted.size() ? drifted[n] : Complex{};
+            const auto old = n >= 32 && n - 32 < drifted.size() ? drifted[n - 32] : Complex{};
+            check(std::abs(echoed[n] - reference.process(now, old)) < 1e-10,
+                  "zero-shift delayed ray lost its emitted frequency-drift history");
+        }
+    }
+    cfg.tx_frequency_drift_hz_per_second = 100;
+    rejects([&] { (void)capture(127, cfg, f, nullptr, 0); },
+            "supplemental emission drift bypassed the capture-band guard");
+    cfg.tx_frequency_drift_hz_per_second = std::numeric_limits<double>::quiet_NaN();
+    rejects([&] { (void)capture(127, cfg, f, nullptr, 0); },
+            "nonfinite supplemental emission drift was accepted");
+}
+
+void measured_shared_clock_checks() {
+    auto f = fixture_format();
+    f.sample_rate = 1024;
+    const auto key = fixture_key();
+    PatternSource source(f, key, 1);
+    constexpr double shift_hz = 500000, conversion_if_hz = 1725;
+    for (const double sign : {-1., 1.}) {
+        StreamChannelConfig no_reference;
+        no_reference.effects.noise_enabled = false;
+        no_reference.complex_noise_variance = 0;
+        no_reference.effects.tx.audio_ppm = sign * 40;
+        no_reference.effects.rx.audio_ppm = -sign * 25;
+        no_reference.effects.capture_lead_seconds = .03;
+        no_reference.effects.timing_offset_seconds = sign * .013;
+        const auto baseline = capture(127, no_reference, f, nullptr, 0);
+        auto base_only = no_reference;
+        base_only.effects.nominal_conversion_if_hz = conversion_if_hz;
+        const auto base_waveform = capture(73, base_only, f, nullptr, 0);
+        auto shared = base_only;
+        shared.effects.tx.rf_ppm = shared.effects.tx.audio_ppm;
+        shared.effects.rx.rf_ppm = shared.effects.rx.audio_ppm;
+        const auto shared_waveform = capture(257, shared, f, nullptr, shift_hz);
+        check(shared_waveform == capture(4096, shared, f, nullptr, shift_hz),
+              "shared-clock carrier phase changed across sampled read boundaries");
+        check(baseline.size() == base_waveform.size() && baseline.size() == shared_waveform.size(),
+              "oscillator frequency changed the sampled observation calendar");
+
+        // Estimate frequency from the actual waveform ratio. A short lag
+        // avoids frequency aliasing for these crystal-sized signed offsets;
+        // waveform power supplies weights without reading simulator metadata.
+        auto measured_frequency = [&](const auto& received, const auto& reference) {
+            constexpr std::size_t lag = 8;
+            Complex phase_sum{};
+            for (std::size_t n = 32; n + lag + 32 < baseline.size(); ++n) {
+                const auto earlier = received[n] * std::conj(reference[n]);
+                const auto later = received[n + lag] * std::conj(reference[n + lag]);
+                phase_sum += later * std::conj(earlier);
+            }
+            check(std::abs(phase_sum) > 1,
+                  "shared-clock measured carrier had no usable sampled phase evidence");
+            return std::arg(phase_sum) * f.sample_rate / (2 * std::numbers::pi * lag);
+        };
+        const double tx_scale = 1 + no_reference.effects.tx.audio_ppm * 1e-6;
+        const double rx_scale = 1 + no_reference.effects.rx.audio_ppm * 1e-6;
+        const double clock_ratio_error = tx_scale / rx_scale - 1;
+        const double measured_if = measured_frequency(base_waveform, baseline);
+        const double measured_rf = measured_frequency(shared_waveform, base_waveform);
+        const double measured_joint = measured_frequency(shared_waveform, baseline);
+        check(std::abs(measured_if - conversion_if_hz * clock_ratio_error) < .002 &&
+              std::abs(measured_rf - shift_hz * clock_ratio_error) < .002 &&
+              std::abs(measured_joint - (shift_hz + conversion_if_hz) * clock_ratio_error) < .002,
+              "actual shared-clock IF/RF phase rate disagreed with the independent clock-ratio prediction");
+
+        // Independently locate the actual affine sampling-clock ratio using
+        // direct continuous source evaluations. Wrong ratios differ by10ppm;
+        // the correct ratio must explain the waveform much better despite
+        // the channel's separate finite sampled-interpolation approximation.
+        std::array<long double, 3> errors{};
+        for (std::size_t n = 64; n + 64 < baseline.size(); n += 17) {
+            for (unsigned branch = 0; branch < errors.size(); ++branch) {
+                const long double ratio = static_cast<long double>(tx_scale) / rx_scale +
+                    (static_cast<int>(branch) - 1) * 10e-6L;
+                const long double position = static_cast<long double>(n) * ratio -
+                    (static_cast<long double>(no_reference.effects.capture_lead_seconds) +
+                     no_reference.effects.timing_offset_seconds) * f.sample_rate * tx_scale;
+                errors[branch] += std::norm(baseline[n] - source.sample_at(position));
+            }
+        }
+        check(errors[1] < .02L * std::min(errors[0], errors[2]),
+              "actual shared-clock sample timing did not retain the independent TX/RX clock ratio");
+        std::cout << "shared-clock measured sign=" << sign << " IF_Hz=" << measured_if
+                  << " RF_Hz=" << measured_rf << " joint_Hz=" << measured_joint
+                  << " clock_fit_error_ratio=" << static_cast<double>(errors[1] /
+                      std::min(errors[0], errors[2])) << '\n';
+    }
 }
 
 void bounded_configuration_checks() {
@@ -1483,6 +1619,60 @@ void selective_response_checks() {
     const auto large_reads = capture(4096, spread_cfg, f);
     check(small_reads == large_reads,
           "dispersive selective filter state or tails changed across stream read boundaries");
+
+    // Independent AM dynamics are explicitly requested. A None propagation
+    // preset can therefore exercise the same continuous selective operator
+    // without inventing a geometric delayed ray or hidden Doppler floor.
+    for (const auto model : {SelectiveModel::LegacyAllpass, SelectiveModel::DispersiveDft}) {
+        auto independent = zero_d_cfg;
+        independent.selective_model.model = model;
+        independent.selective_model.modulation_rate_hz = .3;
+        StreamChannelReport independent_report;
+        const auto modulated = capture(73, independent, f, &independent_report);
+        check(independent_report.selective_perturbation.has_value(),
+              "explicit nonzero AM rate with zero ray Doppler was bypassed");
+        const auto& measured = *independent_report.selective_perturbation;
+        check(std::abs(measured.component_rates_hz[0] - .03) < 1e-15 &&
+              std::abs(measured.component_rates_hz[1] - .3) < 1e-15,
+              "independent AM rate was margin-scaled or coupled back to ray Doppler");
+        check(modulated == capture(4096, independent, f),
+              "independent AM filter state changed across read boundaries");
+        check(measured.decay_tail_samples > 0 && measured.processed_rows == modulated.size() &&
+              independent_report.tail_samples > 10,
+              "independent AM omitted its filter state, complete tail or energy calendar");
+        long double difference = 0;
+        for (std::size_t n = 0; n < std::min(direct.size(), modulated.size()); ++n)
+            difference += std::norm(modulated[n] - direct[n]);
+        check(difference > .01,
+              "independent AM reported metadata without changing the actual complex waveform");
+
+        auto implicit = spread_cfg;
+        implicit.selective_model.model = model;
+        auto explicit_rate = implicit;
+        explicit_rate.selective_model.modulation_rate_hz = implicit.effects.spread_doppler_hz;
+        check(capture(257, implicit, f) == capture(73, explicit_rate, f),
+              "explicit rate equal to ray Doppler changed established sampled AM");
+
+        auto disabled = implicit;
+        disabled.selective_model.modulation_rate_hz = 0;
+        auto off = implicit;
+        off.effects.perturbation_slow_depth = off.effects.perturbation_fast_depth = 0;
+        StreamChannelReport disabled_report;
+        check(capture(73, disabled, f, &disabled_report) == capture(257, off, f),
+              "explicit zero AM rate failed exact bypass with nonzero ray Doppler");
+        check(!disabled_report.selective_perturbation,
+              "explicit zero AM rate retained active-stage diagnostics");
+
+        independent.selective_model.modulation_rate_hz = 400;
+        rejects([&] { (void)capture(73, independent, f); },
+                "independent AM sidebands bypassed the capture-band guard");
+        independent.selective_model.modulation_rate_hz = -1;
+        rejects([&] { (void)capture(73, independent, f); },
+                "negative independent AM rate was accepted");
+        independent.selective_model.modulation_rate_hz = std::numeric_limits<double>::quiet_NaN();
+        rejects([&] { (void)capture(73, independent, f); },
+                "nonfinite independent AM rate was accepted");
+    }
 }
 } // namespace
 
@@ -1491,6 +1681,8 @@ int main() {
         exact_bypass_checks();
         chunk_and_impairment_checks();
         historical_phase_and_energy_checks();
+        zero_shift_and_emission_drift_checks();
+        measured_shared_clock_checks();
         bounded_configuration_checks();
         sampled_frontend_checks();
         independent_seed_root_checks();

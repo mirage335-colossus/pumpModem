@@ -1,5 +1,13 @@
 # Broad configuration coverage of the isolated three-carrier modem
 
+This is the retained baseline study. The [configuration/acquisition extension](../2026-11-03-extension/README.md)
+supersedes its **implementation limitations** for zero RF shift, a shared
+baseband/shift clock, and independently selected modulation rate with spread
+None. It provides a new source-bound census; the original counts and sampled
+results below remain historical evidence, not current unsupported-topology
+counts. Its phase-continuity experiments also qualify the constant-phase
+receiver's long-observation failures.
+
 This study separates **configuration validity, capture feasibility, acquisition
 coverage and correct admission**. The factorized census classifies all
 2,500,485,120 requested configuration coordinates under stated assumptions.

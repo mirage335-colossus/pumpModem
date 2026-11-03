@@ -1,0 +1,494 @@
+{
+  "schema": "triad-equal-energy-phase-v1",
+  "seed": 803011,
+  "source_sha256": "2e3e9e309769295e508c59632d21308602fe8f27e5961ee09e032ce854809d99",
+  "dependency_sha256": {
+    "docs/validation-data/triad-v3/2026-11-03-extension/phase/diagnostic.py": "cb878e5ed3c7e9d9608166e2062501e8b2bd2c63e07a4eff5ea993096e6ea0a9",
+    "tools/triad_phase_frequency.py": "48ee569b1d467b2d7b6fd55088764bd28dd11e0bfecb5974622a318fbb408585"
+  },
+  "paired_paths": 128,
+  "thresholds": {
+    "strict": 22.721063389585737,
+    "relaxed": 17.4227460230377
+  },
+  "known_waveform_benchmarks": {
+    "strict": {
+      "per_candidate_alpha": 1.3563368055555557e-10,
+      "target_detection": 0.99,
+      "known_waveform_Neyman_Pearson_energy": 37.330987295550365,
+      "known_waveform_fixed_LR_gate_energy": 44.72261104740586
+    },
+    "relaxed": {
+      "per_candidate_alpha": 2.7126736111111112e-08,
+      "target_detection": 0.9,
+      "known_waveform_Neyman_Pearson_energy": 22.567958244115747,
+      "known_waveform_fixed_LR_gate_energy": 26.806356666292142
+    }
+  },
+  "rows": [
+    {
+      "arm": "double_duration",
+      "days": 1700.0,
+      "cn0_db_hz": -60.0,
+      "c_tau": 1.3131225400046973,
+      "energy_snr": 146.88000000000002,
+      "blocks": 8950,
+      "dt_seconds": 16411.173184357544,
+      "phase_wall_seconds": 6.426777421002043,
+      "outcomes": {
+        "global_unknown_phase": {
+          "strict": {
+            "signal_trials": 128,
+            "correct_accepted": 0,
+            "wrong_accepted": 0,
+            "misses": 128,
+            "correct_interval95": [
+              0.0,
+              0.023132405251746743
+            ],
+            "null_trials": 128,
+            "false_admissions": 0,
+            "null_interval95": [
+              0.0,
+              0.023132405251746743
+            ],
+            "raw_correct": 104
+          },
+          "relaxed": {
+            "signal_trials": 128,
+            "correct_accepted": 0,
+            "wrong_accepted": 0,
+            "misses": 128,
+            "correct_interval95": [
+              0.0,
+              0.023132405251746743
+            ],
+            "null_trials": 128,
+            "false_admissions": 0,
+            "null_interval95": [
+              0.0,
+              0.023132405251746743
+            ],
+            "raw_correct": 104
+          }
+        },
+        "segmented_0.25_tau": {
+          "strict": {
+            "signal_trials": 128,
+            "correct_accepted": 19,
+            "wrong_accepted": 0,
+            "misses": 109,
+            "correct_interval95": [
+              0.09943636496220504,
+              0.21015553792762062
+            ],
+            "null_trials": 128,
+            "false_admissions": 0,
+            "null_interval95": [
+              0.0,
+              0.023132405251746743
+            ],
+            "raw_correct": 128
+          },
+          "relaxed": {
+            "signal_trials": 128,
+            "correct_accepted": 60,
+            "wrong_accepted": 0,
+            "misses": 68,
+            "correct_interval95": [
+              0.39343153498152444,
+              0.5451718869687527
+            ],
+            "null_trials": 128,
+            "false_admissions": 0,
+            "null_interval95": [
+              0.0,
+              0.023132405251746743
+            ],
+            "raw_correct": 128
+          }
+        },
+        "segmented_1_tau": {
+          "strict": {
+            "signal_trials": 128,
+            "correct_accepted": 102,
+            "wrong_accepted": 0,
+            "misses": 26,
+            "correct_interval95": [
+              0.7295179518534144,
+              0.8535962281348975
+            ],
+            "null_trials": 128,
+            "false_admissions": 0,
+            "null_interval95": [
+              0.0,
+              0.023132405251746743
+            ],
+            "raw_correct": 128
+          },
+          "relaxed": {
+            "signal_trials": 128,
+            "correct_accepted": 110,
+            "wrong_accepted": 0,
+            "misses": 18,
+            "correct_interval95": [
+              0.7986299244265497,
+              0.907096389056077
+            ],
+            "null_trials": 128,
+            "false_admissions": 0,
+            "null_interval95": [
+              0.0,
+              0.023132405251746743
+            ],
+            "raw_correct": 128
+          }
+        },
+        "segmented_4_tau": {
+          "strict": {
+            "signal_trials": 128,
+            "correct_accepted": 11,
+            "wrong_accepted": 0,
+            "misses": 117,
+            "correct_interval95": [
+              0.04894145019492707,
+              0.13823672319378216
+            ],
+            "null_trials": 128,
+            "false_admissions": 0,
+            "null_interval95": [
+              0.0,
+              0.023132405251746743
+            ],
+            "raw_correct": 128
+          },
+          "relaxed": {
+            "signal_trials": 128,
+            "correct_accepted": 22,
+            "wrong_accepted": 0,
+            "misses": 106,
+            "correct_interval95": [
+              0.1193200678733256,
+              0.2362428396345593
+            ],
+            "null_trials": 128,
+            "false_admissions": 0,
+            "null_interval95": [
+              0.0,
+              0.023132405251746743
+            ],
+            "raw_correct": 128
+          }
+        },
+        "oracle_phase": {
+          "strict": {
+            "signal_trials": 128,
+            "correct_accepted": 128,
+            "wrong_accepted": 0,
+            "misses": 0,
+            "correct_interval95": [
+              0.9768675947482532,
+              1.0
+            ],
+            "null_trials": 128,
+            "false_admissions": 0,
+            "null_interval95": [
+              0.0,
+              0.023132405251746743
+            ],
+            "raw_correct": 128
+          },
+          "relaxed": {
+            "signal_trials": 128,
+            "correct_accepted": 128,
+            "wrong_accepted": 0,
+            "misses": 0,
+            "correct_interval95": [
+              0.9768675947482532,
+              1.0
+            ],
+            "null_trials": 128,
+            "false_admissions": 0,
+            "null_interval95": [
+              0.0,
+              0.023132405251746743
+            ],
+            "raw_correct": 128
+          }
+        },
+        "finite_phase_32": {
+          "strict": {
+            "signal_trials": 128,
+            "correct_accepted": 127,
+            "wrong_accepted": 0,
+            "misses": 1,
+            "correct_interval95": [
+              0.9634761749464515,
+              0.9995993514186838
+            ],
+            "null_trials": 128,
+            "false_admissions": 0,
+            "null_interval95": [
+              0.0,
+              0.023132405251746743
+            ],
+            "raw_correct": 128
+          },
+          "relaxed": {
+            "signal_trials": 128,
+            "correct_accepted": 128,
+            "wrong_accepted": 0,
+            "misses": 0,
+            "correct_interval95": [
+              0.9768675947482532,
+              1.0
+            ],
+            "null_trials": 128,
+            "false_admissions": 0,
+            "null_interval95": [
+              0.0,
+              0.023132405251746743
+            ],
+            "raw_correct": 128
+          }
+        }
+      }
+    },
+    {
+      "arm": "double_power",
+      "days": 850.0,
+      "cn0_db_hz": -56.98970004336019,
+      "c_tau": 2.6262450800093946,
+      "energy_snr": 146.88000000000002,
+      "blocks": 4475,
+      "dt_seconds": 16411.173184357544,
+      "phase_wall_seconds": 3.210424064018298,
+      "outcomes": {
+        "global_unknown_phase": {
+          "strict": {
+            "signal_trials": 128,
+            "correct_accepted": 0,
+            "wrong_accepted": 0,
+            "misses": 128,
+            "correct_interval95": [
+              0.0,
+              0.023132405251746743
+            ],
+            "null_trials": 128,
+            "false_admissions": 0,
+            "null_interval95": [
+              0.0,
+              0.023132405251746743
+            ],
+            "raw_correct": 107
+          },
+          "relaxed": {
+            "signal_trials": 128,
+            "correct_accepted": 0,
+            "wrong_accepted": 0,
+            "misses": 128,
+            "correct_interval95": [
+              0.0,
+              0.023132405251746743
+            ],
+            "null_trials": 128,
+            "false_admissions": 0,
+            "null_interval95": [
+              0.0,
+              0.023132405251746743
+            ],
+            "raw_correct": 107
+          }
+        },
+        "segmented_0.25_tau": {
+          "strict": {
+            "signal_trials": 128,
+            "correct_accepted": 100,
+            "wrong_accepted": 0,
+            "misses": 28,
+            "correct_interval95": [
+              0.7126005006479916,
+              0.8398434192734866
+            ],
+            "null_trials": 128,
+            "false_admissions": 0,
+            "null_interval95": [
+              0.0,
+              0.023132405251746743
+            ],
+            "raw_correct": 128
+          },
+          "relaxed": {
+            "signal_trials": 128,
+            "correct_accepted": 118,
+            "wrong_accepted": 0,
+            "misses": 10,
+            "correct_interval95": [
+              0.8710861774778809,
+              0.9570035621907496
+            ],
+            "null_trials": 128,
+            "false_admissions": 0,
+            "null_interval95": [
+              0.0,
+              0.023132405251746743
+            ],
+            "raw_correct": 128
+          }
+        },
+        "segmented_1_tau": {
+          "strict": {
+            "signal_trials": 128,
+            "correct_accepted": 125,
+            "wrong_accepted": 0,
+            "misses": 3,
+            "correct_interval95": [
+              0.940541190608595,
+              0.9935820082523851
+            ],
+            "null_trials": 128,
+            "false_admissions": 0,
+            "null_interval95": [
+              0.0,
+              0.023132405251746743
+            ],
+            "raw_correct": 128
+          },
+          "relaxed": {
+            "signal_trials": 128,
+            "correct_accepted": 127,
+            "wrong_accepted": 0,
+            "misses": 1,
+            "correct_interval95": [
+              0.9634761749464515,
+              0.9995993514186838
+            ],
+            "null_trials": 128,
+            "false_admissions": 0,
+            "null_interval95": [
+              0.0,
+              0.023132405251746743
+            ],
+            "raw_correct": 128
+          }
+        },
+        "segmented_4_tau": {
+          "strict": {
+            "signal_trials": 128,
+            "correct_accepted": 22,
+            "wrong_accepted": 0,
+            "misses": 106,
+            "correct_interval95": [
+              0.1193200678733256,
+              0.2362428396345593
+            ],
+            "null_trials": 128,
+            "false_admissions": 0,
+            "null_interval95": [
+              0.0,
+              0.023132405251746743
+            ],
+            "raw_correct": 128
+          },
+          "relaxed": {
+            "signal_trials": 128,
+            "correct_accepted": 33,
+            "wrong_accepted": 0,
+            "misses": 95,
+            "correct_interval95": [
+              0.19506807789975253,
+              0.3291819186317932
+            ],
+            "null_trials": 128,
+            "false_admissions": 0,
+            "null_interval95": [
+              0.0,
+              0.023132405251746743
+            ],
+            "raw_correct": 128
+          }
+        },
+        "oracle_phase": {
+          "strict": {
+            "signal_trials": 128,
+            "correct_accepted": 128,
+            "wrong_accepted": 0,
+            "misses": 0,
+            "correct_interval95": [
+              0.9768675947482532,
+              1.0
+            ],
+            "null_trials": 128,
+            "false_admissions": 0,
+            "null_interval95": [
+              0.0,
+              0.023132405251746743
+            ],
+            "raw_correct": 128
+          },
+          "relaxed": {
+            "signal_trials": 128,
+            "correct_accepted": 128,
+            "wrong_accepted": 0,
+            "misses": 0,
+            "correct_interval95": [
+              0.9768675947482532,
+              1.0
+            ],
+            "null_trials": 128,
+            "false_admissions": 0,
+            "null_interval95": [
+              0.0,
+              0.023132405251746743
+            ],
+            "raw_correct": 128
+          }
+        },
+        "finite_phase_32": {
+          "strict": {
+            "signal_trials": 128,
+            "correct_accepted": 128,
+            "wrong_accepted": 0,
+            "misses": 0,
+            "correct_interval95": [
+              0.9768675947482532,
+              1.0
+            ],
+            "null_trials": 128,
+            "false_admissions": 0,
+            "null_interval95": [
+              0.0,
+              0.023132405251746743
+            ],
+            "raw_correct": 128
+          },
+          "relaxed": {
+            "signal_trials": 128,
+            "correct_accepted": 128,
+            "wrong_accepted": 0,
+            "misses": 0,
+            "correct_interval95": [
+              0.9768675947482532,
+              1.0
+            ],
+            "null_trials": 128,
+            "false_admissions": 0,
+            "null_interval95": [
+              0.0,
+              0.023132405251746743
+            ],
+            "raw_correct": 128
+          }
+        }
+      }
+    }
+  ],
+  "assumptions": [
+    "Controlled orthogonal-pattern, unit-gain, known-alignment Brownian-block teacher; not sampled triad propagation.",
+    "Long arm continues the identical phase/noise prefix to twice duration; high-power arm doubles signal power, not noise.",
+    "Both arms have energy SNR146.88; c*tau differs by two. Pairing does not create independent evidence between arms.",
+    "interval95 fields are two one-sided95% Clopper-Pearson bounds, not two-sided95% intervals.",
+    "Known-waveform bound uses the same operational per-candidate alpha as the gate, not one-completion alpha1e-4.",
+    "Neyman-Pearson presence bound and conservative fixed-LR gate benchmark differ; neither is an unknown-phase achievability claim."
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "schema": "triad-extension-archive-v1",
+  "archive": "triad-extension-evidence.tar.zst",
+  "archive_sha256": "fcedba8e0c40d48a3e06fed83250552619f8e992f125353c850d092de41702cf",
+  "archive_bytes": 7168684665,
+  "inventory_sha256": "525e01cf8281e2483af95e9ef608b749358c4d286ac3d29bf5d4124bfdf65740",
+  "logical_bytes": 42940313616,
+  "payload_files": 8635,
+  "unique_content_bytes": 28532930047,
+  "tar_hardlink_aliases": 3199,
+  "receipt_bound_files": 4952,
+  "receipt_count": 56,
+  "elapsed_seconds": 38.20860489481129,
+  "completed_utc": "2026-11-03T05:10:20.060150+00:00",
+  "generator_sha256": "65e375310eb3e2795d9266379b49f2361d9a6bda628b50f63cb8e89a191239b0"
+}

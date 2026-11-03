@@ -1,0 +1,48 @@
+{
+  "command": "CCACHE_DISABLE=1 ./build.sh test triad --cli --build-jobs 4 --jobs 2",
+  "isolated_tests_passed": 14,
+  "isolated_test_elapsed_seconds": 27.05,
+  "channel_test_elapsed_seconds": 9.19,
+  "runtime_binary_sha256": "5dc89af2902bf5a336045e38ee12f85a3e6723b988c72d334f5f144b375ab5b3",
+  "channel_test_binary_sha256": "e6e43b2970535e54534cb1cf2ab47a1a975ece586740ad0901251f2bdfa18927",
+  "channel_test_source_sha256": "e86e8ea388b6bc5403ad8e8585acec370415106b2df4185d9e3e8b5ef4c39a9a",
+  "ctest_log_sha256": "ff91d6afa8edad9f314865c75c1b739916c2cf23ae303fe44a9c8ef7836e2f01",
+  "assertions": {
+    "sampled_CFO_absolute_error_hz_max": 0.002,
+    "source_correct_clock_fit_error_vs_best_wrong_10ppm_ratio_max": 0.02,
+    "chunk_sizes": [
+      257,
+      4096
+    ],
+    "noise_and_stochastic_phase": "off"
+  },
+  "actual_sampled_results": [
+    {
+      "log_line": "shared-clock measured sign=-1 IF_Hz=-0.112123 RF_Hz=-32.4993 joint_Hz=-32.6115 clock_fit_error_ratio=0.000266179",
+      "tx_audio_ppm": -40.0,
+      "rx_audio_ppm": 25.0,
+      "physical_arrival_seconds": -0.013,
+      "expected_IF_hz": -0.11212219694502201,
+      "expected_RF_hz": -32.49918752029623,
+      "expected_joint_hz": -32.611309717241255,
+      "measured_IF_hz_printed": -0.112123,
+      "measured_RF_hz_printed": -32.4993,
+      "measured_joint_hz_printed": -32.6115,
+      "source_clock_fit_error_ratio_printed": 0.000266179
+    },
+    {
+      "log_line": "shared-clock measured sign=1 IF_Hz=0.112128 RF_Hz=32.501 joint_Hz=32.6131 clock_fit_error_ratio=0.000183745",
+      "tx_audio_ppm": 40.0,
+      "rx_audio_ppm": -25.0,
+      "physical_arrival_seconds": 0.013,
+      "expected_IF_hz": 0.11212780319529436,
+      "expected_RF_hz": 32.50081252037518,
+      "expected_joint_hz": 32.61294032357047,
+      "measured_IF_hz_printed": 0.112128,
+      "measured_RF_hz_printed": 32.501,
+      "measured_joint_hz_printed": 32.6131,
+      "source_clock_fit_error_ratio_printed": 0.000183745
+    }
+  ],
+  "scope": "Finite sampled-waveform validation of static shared-clock RF/IF phase and affine sampling ratio, with independent signed TX/RX errors and nonzero arrival; not stochastic sample-clock jitter qualification."
+}

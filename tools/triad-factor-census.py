@@ -52,6 +52,16 @@ MARGINS = (1.0, 3.0)
 ADDED = (1, 10, 100, 1000)
 FHSS = (False, True)
 BURST = ("off", "3x")
+VALIDATION_SEED = 20261104
+DIRECTED_NEAR_ZERO_COUNT = 6
+SEEDED_RANDOM_COUNT = 90
+TOPOLOGY_PROBES = {
+    "zero-shift": ("gpsdo-ocxo", "cb-ssb", 0.0),
+    "shared-baseband-clock": ("gpsdo-tcxo", "baseband-clock", 500000.0),
+    "microwave-shared-baseband-clock": ("crystal", "baseband-clock", 5.8e9),
+    "zero-shift-shared-baseband-clock": ("gpsdo-xo", "baseband-clock", 0.0),
+}
+VALIDATION_QUERY_COUNT = DIRECTED_NEAR_ZERO_COUNT + SEEDED_RANDOM_COUNT + len(TOPOLOGY_PROBES)
 
 AXES = {
     "rate_hz": RATES,
@@ -80,7 +90,8 @@ BASE_OSC_ID = {
     "free-running-crystal": "crystal", "gpsdo-hobbyist-xo": "gpsdo-xo",
     "gpsdo-tcxo": "gpsdo-tcxo", "gpsdo-ocxo": "gpsdo-ocxo",
 }
-SHIFT_OSC_ID = {**BASE_OSC_ID, "cb-ssb-20ppm": "cb-ssb", "ic-7100-0.5ppm": "ic-7100"}
+SHIFT_OSC_ID = {**BASE_OSC_ID, "cb-ssb-20ppm": "cb-ssb", "ic-7100-0.5ppm": "ic-7100",
+                "baseband-clock": "baseband-clock"}
 SPREAD_DOPPLER = {
     "none": 0.0, "sub9-best": .001, "sub9-moderate": .005, "sub9-worst": .05,
     "hf-best": .1, "hf-moderate": 10.0, "hf-worst": 30.0,
@@ -97,7 +108,7 @@ ASSUMPTIONS = {
     "gaussian_doppler_width_hz": 0,
     "whole_bit_symbol_burst": ["off", "3x"],
     "timing": list(TIMING),
-    "topology": "positive RF shift and distinct supported endpoint oscillator presets only",
+    "topology": "all RF shifts; zero shift ignores shift oscillator; baseband-clock shares base endpoint ppm",
     "interleave": "enabled for every Added Symbols level",
 }
 
@@ -122,18 +133,29 @@ def validate_evidence(evidence_dir: Path, repo: Path = REPO,
     """Validate immutable evidence identity and native comparisons before counting."""
     summary_path = evidence_dir / "summary.json"
     summary = _read_json(summary_path)
-    if summary.get("schema") != "triad-native-config-factorization-diagnostic-v1":
-        raise ValueError("unexpected prototype schema")
+    if summary.get("schema") != "triad-native-config-factorization-diagnostic-v2":
+        raise ValueError("unexpected native factorization schema")
     if summary.get("assumptions") != {
         "automatic_sample_rate": True, "diurnal_phase_radians": 0,
         "gaussian_doppler_width_hz": 0, "internal_burst_wait_tiles": 0,
         "public_frequency_grid": [0, 0], "requested_seconds": 8,
         "timing_choices": ["tight", "explicit-uniform +/-7.035s"], "truth_frequency_drift": 0,
         "truth_frequency_hz": 0, "whole_bit_burst_choices": ["off", "3"],
+        "zero_shift_oscillator": "selected shift oscillator is unused; RF contribution is zero",
+        "shared_baseband_clock": "shift ppm equals base endpoint ppm",
     }:
         raise ValueError("prototype assumptions differ from this census contract")
     if summary.get("total_intent_count") != TOTAL or summary.get("replication_factor") != REPLICATION:
         raise ValueError("prototype intent/replication dimensions differ")
+    validation_design = summary.get("validation", {})
+    validation_results = (validation_design.get("valid_compared"),
+                          validation_design.get("source_rejected"))
+    if (validation_design.get("seed") != VALIDATION_SEED
+            or validation_design.get("queries") != VALIDATION_QUERY_COUNT
+            or validation_design.get("directed_near_zero_queries") != DIRECTED_NEAR_ZERO_COUNT
+            or any(not isinstance(value, int) for value in validation_results)
+            or sum(validation_results) != VALIDATION_QUERY_COUNT):
+        raise ValueError("native validation summary differs from the declared 6+90+4 input design")
     before, after = summary.get("source_sha256_before"), summary.get("source_sha256_after")
     if before != after or not summary.get("source_and_binary_unchanged"):
         raise ValueError("native prototype changed source or executable during collection")
@@ -152,7 +174,8 @@ def validate_evidence(evidence_dir: Path, repo: Path = REPO,
     geometry = _read_json(evidence_dir / "geometry.json")
     validation = _read_json(evidence_dir / "validation.json")
     near_zero = _read_json(evidence_dir / "near-zero.json")
-    if len(geometry) != 136 or len(validation) != 96:
+    if (len(geometry) != len(RATES) * len(ADDED) * len(FHSS)
+            or len(validation) != VALIDATION_QUERY_COUNT):
         raise ValueError("native evidence row counts differ from the declared bounded design")
     _validate_geometry(geometry, binary)
     _validate_validation(validation, binary)
@@ -245,15 +268,52 @@ def _recompute_capture(cfg: dict[str, Any], args: dict[str, list[str]]) -> float
 
 
 def _validate_validation(rows: list[dict[str, Any]], binary: Path | None = None) -> None:
-    if sum(bool(r.get("near_zero_directed")) for r in rows) != 6:
-        raise ValueError("native validation set must contain six directed near-zero cases")
-    if sum(not bool(r.get("near_zero_directed")) for r in rows) != 90:
-        raise ValueError("native validation set must contain ninety independently seeded cases")
+    expected_indices = set(range(VALIDATION_QUERY_COUNT))
+    indices = [r.get("index") for r in rows]
+    if (len(rows) != VALIDATION_QUERY_COUNT or any(not isinstance(i, int) for i in indices)
+            or len(set(indices)) != VALIDATION_QUERY_COUNT or set(indices) != expected_indices):
+        raise ValueError("native validation set must contain 100 unique indices 0..99")
+    directed = {r["index"] for r in rows if bool(r.get("near_zero_directed"))}
+    if directed != set(range(DIRECTED_NEAR_ZERO_COUNT)):
+        raise ValueError("native validation set must retain the six directed near-zero rows at indices 0..5")
+    by_index = {r["index"]: r for r in rows}
+    for index in range(DIRECTED_NEAR_ZERO_COUNT):
+        args = _argv_options(by_index[index].get("receipt", {}))
+        expected_base = ("gpsdo-xo", "gpsdo-tcxo", "gpsdo-ocxo")[index % 3]
+        expected_if = (1725.0, 600.0, 8270.0)[index % 3]
+        if (float(args.get("--rate", ["nan"])[0]) != 1200.0
+                or int(args.get("--added", ["-1"])[0]) != 1
+                or "--fhss" in args
+                or args.get("--base-oscillator", [""])[0] != expected_base
+                or args.get("--shift-oscillator", [""])[0] != "crystal"
+                or float(args.get("--rf-hz", ["nan"])[0]) != 500000.0
+                or float(args.get("--nominal-if-hz", ["nan"])[0]) != expected_if
+                or args.get("--spread-preset", [""])[0] != "aurora-worst"
+                or float(args.get("--margin", ["nan"])[0]) != 1.0
+                or args.get("--selective-perturbation", [""])[0] != "off"):
+            raise ValueError("directed near-zero receipt inputs differ from their declared design")
+    topology_indices = range(DIRECTED_NEAR_ZERO_COUNT + SEEDED_RANDOM_COUNT,
+                             VALIDATION_QUERY_COUNT)
+    declared_topologies = {by_index[i].get("topology_case") for i in topology_indices}
+    if declared_topologies != set(TOPOLOGY_PROBES):
+        raise ValueError("native validation set must contain exactly the four declared topology probes")
+    for index, expected_case in zip(topology_indices, TOPOLOGY_PROBES):
+        if by_index[index].get("topology_case") != expected_case:
+            raise ValueError("native topology probes do not match their declared index order")
+    for index in range(DIRECTED_NEAR_ZERO_COUNT,
+                       DIRECTED_NEAR_ZERO_COUNT + SEEDED_RANDOM_COUNT):
+        if by_index[index].get("near_zero_directed") or by_index[index].get("topology_case"):
+            raise ValueError("native validation random rows do not match the declared 90-row index range")
+    for index in topology_indices:
+        if by_index[index].get("near_zero_directed"):
+            raise ValueError("native topology probes cannot replace directed near-zero rows")
     valid = rejected = 0
     for row in rows:
         rec = row.get("receipt", {})
         _validate_receipt_identity(rec, binary)
         if rec.get("returncode") != 0:
+            if row.get("topology_case") in TOPOLOGY_PROBES:
+                raise ValueError(f"required topology probe was rejected: {row['topology_case']}")
             rejected += 1
             continue
         valid += 1
@@ -261,18 +321,41 @@ def _validate_validation(rows: list[dict[str, Any]], binary: Path | None = None)
         cfg = raw.get("configuration")
         if not isinstance(cfg, dict):
             raise ValueError("validation native stdout lacks configuration")
-        margin = _recompute_capture(cfg, _argv_options(rec))
+        args = _argv_options(rec)
+        margin = _recompute_capture(cfg, args)
         reported = float(cfg["capture"]["deterministic_nyquist_margin_hz"])
         if abs(margin - reported) > 2e-12:
             raise ValueError("native capture margin failed independent formula check")
+        factor_margin = _capture_margin(
+            float(cfg["capture"]["sample_rate_hz"]),
+            float(cfg["capture"]["nominal_triplet_bandwidth_hz"]),
+            float(args.get("--nominal-if-hz", ["0"])[0]),
+            float(args.get("--rf-hz", ["0"])[0]),
+            args.get("--base-oscillator", [""])[0],
+            args.get("--shift-oscillator", [""])[0],
+            args.get("--spread-preset", ["none"])[0],
+            float(args.get("--margin", ["1"])[0]),
+            args.get("--selective-perturbation", ["off"])[0] != "off")
+        if abs(factor_margin - reported) > 2e-12:
+            raise ValueError("native capture margin disagrees with independent oscillator/topology formula")
+        if row.get("near_zero_directed") and abs(factor_margin) > 0.01:
+            raise ValueError("directed near-zero receipt is outside its declared boundary tolerance")
         if (margin > 0) != bool(cfg["capture"]["feasible_for_deterministic_prior"]):
             raise ValueError("native capture feasibility has incorrect strict-sign semantics")
-        if abs(margin - float(row["predicted_capture_margin_hz"])) > 2e-12:
+        if abs(factor_margin - float(row["predicted_capture_margin_hz"])) > 2e-12:
             raise ValueError("stored factor prediction disagrees with native capture margin")
         if bool(row["sign_matches"]) != ((margin > 0) == bool(cfg["capture"]["feasible_for_deterministic_prior"])):
             raise ValueError("stored validation sign check is inconsistent")
-    if (valid, rejected) != (62, 34):
-        raise ValueError(f"unexpected validation outcomes: valid={valid}, rejected={rejected}")
+        topology_case = row.get("topology_case")
+        if topology_case:
+            rf_hz = float(args.get("--rf-hz", ["0"])[0])
+            base_id = args.get("--base-oscillator", [""])[0]
+            shift = args.get("--shift-oscillator", [""])[0]
+            expected_base, expected_shift, expected_rf = TOPOLOGY_PROBES[topology_case]
+            if (base_id, shift, rf_hz) != (expected_base, expected_shift, expected_rf):
+                raise ValueError(f"topology probe parameters do not match declared case: {topology_case}")
+    if valid + rejected != len(rows):
+        raise ValueError("native validation receipts were not fully classified")
 
 
 def _validate_near_zero(rows: list[dict[str, Any]], geometry: list[dict[str, Any]]) -> float:
@@ -305,7 +388,8 @@ def _baseband_hz(value: str, rate: float) -> float:
 def _capture_margin(sample_rate: float, bandwidth: float, if_hz: float, rf_hz: float,
                     base_id: str, shift_id: str, spread_id: str, margin: float,
                     selective_active: bool) -> float:
-    base_ppm, shift_ppm = OSC_PPM[base_id], OSC_PPM[shift_id]
+    base_ppm = OSC_PPM[base_id]
+    shift_ppm = base_ppm if shift_id == "baseband-clock" else OSC_PPM[shift_id]
     rx_min, tx_max = 1 - base_ppm * .5e-6, 1 + base_ppm * .5e-6
     cfo = (rf_hz * shift_ppm + if_hz * base_ppm) * 1e-6 / rx_min
     spread = SPREAD_DOPPLER[spread_id] * margin * (2 if selective_active else 1)
@@ -317,18 +401,10 @@ def build_census(summary: dict[str, Any], geometry: list[dict], validation: list
     """Count exact intent outcomes from validated factor tables, without product expansion."""
     _validate_geometry(geometry)
     _validate_validation(validation)
-    topology_supported = ((len(SHIFTS) - 1) * (len(BASE_OSCILLATORS))
-                          * (len(SHIFT_OSCILLATORS) - 1))
-    topology_all = len(SHIFTS) * len(BASE_OSCILLATORS) * len(SHIFT_OSCILLATORS)
     topology_factor = (len(BASEBAND) * len(TIMING) * len(SPREAD) * len(SELECTIVE)
                        * len(CN0) * len(MARGINS) * len(BURST))
-    unsupported_replication = (len(RATES) * len(ADDED) * len(FHSS) * topology_factor)
-    unsupported_zero_shift = len(BASE_OSCILLATORS) * len(SHIFT_OSCILLATORS) * unsupported_replication
-    unsupported_shared_clock_positive_shift = ((len(SHIFTS)-1) * len(BASE_OSCILLATORS)
-                                               * unsupported_replication)
-    unsupported = (topology_all - topology_supported) * len(RATES) * len(ADDED) * len(FHSS) * topology_factor
-    mult = (len(BASEBAND) * (len(SHIFTS)-1) * len(BASE_OSCILLATORS)
-            * (len(SHIFT_OSCILLATORS)-1) * len(SPREAD) * len(SELECTIVE)
+    mult = (len(BASEBAND) * len(SHIFTS) * len(BASE_OSCILLATORS)
+            * len(SHIFT_OSCILLATORS) * len(SPREAD) * len(SELECTIVE)
             * len(CN0) * len(MARGINS) * len(TIMING) * len(BURST))
 
     geometry_counts = Counter()
@@ -357,7 +433,7 @@ def build_census(summary: dict[str, Any], geometry: list[dict], validation: list
         bw = float(cfg["capture"]["nominal_triplet_bandwidth_hz"])
         for bb in BASEBAND:
             if_hz = _baseband_hz(bb, rate)
-            for rf_hz in SHIFTS[1:]:
+            for rf_hz in SHIFTS:
                 for base_label, base_id in BASE_OSC_ID.items():
                     for shift_label, shift_id in SHIFT_OSC_ID.items():
                         for margin in MARGINS:
@@ -391,13 +467,13 @@ def build_census(summary: dict[str, Any], geometry: list[dict], validation: list
     geometry_rejected = geometry_counts["geometry_rejected"]
     geometry_valid = geometry_counts["geometry_valid"]
     selective_bypass_intent = TOTAL * (len(SELECTIVE) - 1) // (len(SPREAD) * len(SELECTIVE))
-    if unsupported + geometry_rejected + capture_counts["capture_nonpositive"] + capture_counts["capture_positive"] != TOTAL:
+    if geometry_rejected + capture_counts["capture_nonpositive"] + capture_counts["capture_positive"] != TOTAL:
         raise AssertionError("factorized outcome classes do not partition the complete intent grid")
     if geometry_rejected + geometry_valid != (58 + 78) * mult:
         raise AssertionError("geometry factor table failed cardinality check")
 
     return {
-        "schema": "triad-factorized-configuration-census-v1",
+        "schema": "triad-factorized-configuration-census-v2",
         "source_evidence": {
             "prototype_summary_sha256": None,
             "executable_sha256": sha256(binary),
@@ -405,7 +481,7 @@ def build_census(summary: dict[str, Any], geometry: list[dict], validation: list
             "source_files": list(SOURCE_FILES),
             "native_geometry_receipts": len(geometry),
             "independent_native_validation_receipts": len(validation),
-            "independent_capture_margin_checks": 62,
+            "independent_capture_margin_checks": sum(r["receipt"]["returncode"] == 0 for r in validation),
             "near_zero_factor_rows_rechecked": int(summary.get("_verified_near_zero_rows", 0)),
             "near_zero_factor_max_abs_error_hz": float(summary.get("_near_zero_max_abs_delta_hz", 0.0)),
             "capture_margin_max_abs_error_hz": max(
@@ -421,15 +497,9 @@ def build_census(summary: dict[str, Any], geometry: list[dict], validation: list
         "replication_factor": REPLICATION,
         "assumptions": ASSUMPTIONS,
         "outcome_partition": {
-            "unsupported_topology": unsupported,
             "source_geometry_rejected": geometry_rejected,
             "capture_margin_nonpositive": capture_counts["capture_nonpositive"],
             "capture_margin_positive": capture_counts["capture_positive"],
-        },
-        "unsupported_topology_breakdown": {
-            "zero_shift_cli_unsupported_including_shared_clock_overlap": unsupported_zero_shift,
-            "shared_baseband_clock_unsupported_at_positive_shift": unsupported_shared_clock_positive_shift,
-            "disjoint_sum": unsupported_zero_shift + unsupported_shared_clock_positive_shift,
         },
         "geometry_factor_table": {
             "by_rate_hz": by_rate, "by_added_symbols": by_added, "by_fhss": by_fhss,
@@ -445,10 +515,10 @@ def build_census(summary: dict[str, Any], geometry: list[dict], validation: list
             "within_spread_none_selective_selected_but_bypassed_supported_capture_cells": selective_bypass_count,
         },
         "capture_predicate": {
-            "formula": "Fs*(1-base_ppm*0.5e-6) - BW*(1+base_ppm*0.5e-6) - 2*(abs((RF*shift_ppm + IF*base_ppm)*1e-6/rx_min) + spread_doppler*margin*(2 if selective active else 1)) > 0",
+            "formula": "Fs*(1-base_ppm*0.5e-6) - BW*(1+base_ppm*0.5e-6) - 2*((RF*shift_ppm + IF*base_ppm)*1e-6/rx_min + spread_doppler*margin*(2 if selective active else 1)) > 0; shared baseband clock sets shift_ppm=base_ppm; RF=0 nulls its contribution",
             "strict_positive_only": True,
             "scope": "the native deterministic capture-margin predicate; Gaussian and diurnal terms are zero by assumptions",
-            "validation": "62/62 accepted native configurations; 6 directed near-zero and 90 seeded probes total; exact sign agreement, max absolute residual reported above",
+            "validation": "All accepted native configurations are independently recomputed; includes directed near-zero, zero-shift, shared-clock and microwave-shared-clock probes plus seeded cases. Rejected native configurations remain separately counted.",
         },
         "nonexclusive_model_warnings": {
             "fhss_envelope_only_cells": TOTAL // 2,
@@ -459,8 +529,8 @@ def build_census(summary: dict[str, Any], geometry: list[dict], validation: list
         "limitations": [
             "No physical reception, sampled waveform, low-C/N0 sensitivity, false-admission rate, or duration reliability is inferred.",
             "Capture-positive means only that the configured deterministic bound fits the current narrowband model; it is not physical frontend compatibility.",
-            "The listed baseband placement maps approximately to --nominal-if-hz; waveform remains zero-centered complex baseband and no shared baseband-clock topology is modeled.",
-            "Positive RF shift is required by the current CLI; shift=0 and shift-oscillator=baseband-clock are unsupported topology coordinates, not physically impossible cases.",
+            "The listed baseband placement maps approximately to --nominal-if-hz; waveform remains zero-centered complex baseband.",
+            "At zero RF shift the shift oscillator is unused; baseband-clock shares the base endpoint's oscillator ppm.",
             "Automatic Fs and requested 8-second active span are fixed census assumptions; changing duration, sample rate, oscillator/noise priors, timing or path evolution needs a new census.",
             "FHSS is source-envelope shaping only. Symbol Burst selects whole-bit calendar spacing only. Added Symbols remain interleaved in this implementation.",
         ],

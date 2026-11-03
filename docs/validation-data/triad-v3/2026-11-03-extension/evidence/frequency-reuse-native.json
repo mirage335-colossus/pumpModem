@@ -1,0 +1,94 @@
+{
+  "native_binary_sha256": "5dc89af2902bf5a336045e38ee12f85a3e6723b988c72d334f5f144b375ab5b3",
+  "receiver_sha256": "98a2c1554dada9d27016027300c0f1791ef00f22c4d54e14f15664f7c206d3a8",
+  "input_sha256": {
+    "manifest.json": "efefe0828850e2afffa4b7e2ee9aca4374df60484791e355810efd9f4809e80c",
+    "group_gram.c128": "d90c115742c3e07802eb25be8060f94caad4a1dbe0d1b01268c9f907c5a5d7f2",
+    "group_observation.c128": "6e57e7135ac5da0620409effb9604583818a9a499f67ee33988bbd2ca523b71a",
+    "received_energy.f64": "de22e4957034d9c0b464a5856bb3623948f0bc910ae3daf2139319cd57b5b529",
+    "intervals.u64": "9a093f89a08f727979b48ba76166cd978c9d34a01c9672ddd9d5a9c302ec2dd1",
+    "valid_rows.u64": "9db98d930841f6ef4e23be7610b12f20ffa5dd6f7c4d2f7d2609e8ba68a37370"
+  },
+  "sample_count": 12427,
+  "seconds": 12.1357421875,
+  "original_blocks": 777,
+  "projection_comparison": [
+    {
+      "frequency_hz": -0.003,
+      "max_gram_difference": 1.0658141036401503e-14,
+      "max_normalized_correlation_error": 7.091486259046393e-05,
+      "bound": {
+        "maximum_original_block_seconds": 0.015625,
+        "maximum_phase_error_radians": 0.00014726215563702155,
+        "coherent_power_loss_bound_db": 9.418172048115441e-08,
+        "relative_template_operator_error_bound": 0.00014726215550395704,
+        "allowed_coherent_power_loss_db": 0.01,
+        "scope": "phase-arc bound for arbitrary sample-energy weights and erasure masks; not a marginal-likelihood error bound"
+      }
+    },
+    {
+      "frequency_hz": 0.0,
+      "max_gram_difference": 0.0,
+      "max_normalized_correlation_error": 0.0,
+      "bound": {
+        "maximum_original_block_seconds": 0.015625,
+        "maximum_phase_error_radians": 0.0,
+        "coherent_power_loss_bound_db": 0.0,
+        "relative_template_operator_error_bound": 0.0,
+        "allowed_coherent_power_loss_db": 0.01,
+        "scope": "phase-arc bound for arbitrary sample-energy weights and erasure masks; not a marginal-likelihood error bound"
+      }
+    },
+    {
+      "frequency_hz": 0.003,
+      "max_gram_difference": 7.136584070361083e-15,
+      "max_normalized_correlation_error": 7.091461933293554e-05,
+      "bound": {
+        "maximum_original_block_seconds": 0.015625,
+        "maximum_phase_error_radians": 0.00014726215563702155,
+        "coherent_power_loss_bound_db": 9.418172048115441e-08,
+        "relative_template_operator_error_bound": 0.00014726215550395704,
+        "allowed_coherent_power_loss_db": 0.01,
+        "scope": "phase-arc bound for arbitrary sample-energy weights and erasure masks; not a marginal-likelihood error bound"
+      }
+    }
+  ],
+  "direct_scores": [
+    -4.893149800983576,
+    -3.2478590504733766
+  ],
+  "reused_scores": [
+    -4.893150818489431,
+    -3.2478707131144917
+  ],
+  "max_log_score_difference": 0.0001280253699875722,
+  "direct_strict": {
+    "bit": 1,
+    "accepted": false,
+    "score": -3.2478590504733766,
+    "opposite_bit_margin": 1.645290750510199,
+    "log_threshold": 22.72106338958574
+  },
+  "reused_strict": {
+    "bit": 1,
+    "accepted": false,
+    "score": -3.2478707131144917,
+    "opposite_bit_margin": 1.6452801053749395,
+    "log_threshold": 22.72106338958574
+  },
+  "direct_time": {
+    "read_reblock_seconds": 0.0006188289844430983,
+    "residual_calibration_seconds": 0.42544920099317096,
+    "factor_preparation_seconds": 0.002188057958846912,
+    "score_seconds": 0.001358934008749202,
+    "total_receiver_seconds": 0.43058934598229825
+  },
+  "reuse_time": {
+    "read_reblock_seconds": 0.0007570779998786747,
+    "residual_calibration_seconds": 0.0036203500058036298,
+    "factor_preparation_seconds": 0.0015769530145917088,
+    "score_seconds": 0.0012200939818285406,
+    "total_receiver_seconds": 0.007892049005022272
+  },
+  "scope": "one actual sampled HF-worst Each65 observation; exact public CFO projections versus piecewise block rephasing, not reception reliability or sensitivity gain"
+}

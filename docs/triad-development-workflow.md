@@ -15,10 +15,15 @@ by default.
 Run `tools/triad-coverage.py` or the factorized census before exporting waveforms;
 use `tools/triad_factor_native_inputs.py` to regenerate small source-matched
 native census inputs. The 2.50-billion-coordinate count is an algebraic
-configuration census, not a reception campaign. Zero RF shift and shared
-baseband/RF clock topology remain unsupported by this isolated CLI; automatic
+configuration census, not a reception campaign. The subsequent
+[configuration and acquisition extension](validation-data/triad-v3/2026-11-03-extension/README.md)
+adds zero RF shift and a shared baseband/RF static-clock topology; automatic
 1-MHz/30-MHz rate geometry exceeds its current bounds. Low-rate FHSS can lack
 any complete pattern cells inside the protected dwell aperture.
+Use the current source-matched census for these new topologies and preserve
+the dated broad study's unsupported counts as historical. The explicit
+`--selective-modulation-rate-hz` control permits modulation-only stress with
+spread None; without it, the historical zero-Doppler bypass remains exact.
 
 The broad study corrected numerical false admissions in both static and
 Gaussian-window receivers by projecting onto observable Gram modes and using
@@ -44,6 +49,50 @@ tracking solution for renewed fading or free-running oscillators. Do not prune
 the timing bank using truth alignment. The sampled timing comparison recovered
 ten selected signal captures and rejected five nulls with both complete-bank
 methods; nominal-timing misses were not sensitivity boundaries.
+
+The [extension's frequency bank](validation-data/triad-v3/2026-11-03-extension/README.md#reusing-complex-statistics-for-frequency-acquisition)
+also reuses retained complex blocks for a public residual-CFO search before
+reblocking. Its phase-arc guard bounds the within-block template approximation,
+not the complete likelihood error. Do not silently enlarge that budget, omit
+frequency alternatives from calibration, or replace physical timestamps with
+deinterleaved symbol indices. Clock-rate and keyed-epoch banks remain separate
+unimplemented acquisition work in these recipes.
+
+Use the [independent short-window failure evidence](validation-data/triad-v3/2026-11-03-extension/physical/evidence/README.md)
+when choosing channel model dimension. A 62.5-ms independent-gain window at
+six fine symbols/s admitted one wrong bit and two wrong-key controls in the
+12-dB-Hz screen; whole-observation fitting resolved those same examples.
+Noise-only calibration does not certify the chosen bit or authenticate a key.
+Physically constrained continuity should be tried before adding flexible
+per-window nuisance gains.
+
+For an hour-scale, maximal-spreading reference, reuse the
+[rate 0.1 / Added ×1000 sensitivity bracket](validation-data/triad-v3/2026-11-03-extension/physical/evidence/frontier-README.md).
+At fixed 3,842-second source duration, the complete public timing/CFO bank
+accepted 5/16, 12/16 and 16/16 signals at −20, −18 and −16 dB-Hz under the
+strict gate. The same physical paths were reused across levels; the two weaker
+levels were selected followups. All raw CFO bit choices were correct, but many
+did not pass admission. Keep the gate fixed when investigating that gap, and
+compare actual retained signal energy with the favorable known-waveform bound.
+These observations neither qualify 99% reliability nor prescribe a duration
+multiplier. Recounting the saved score packages is cheap; do that before
+regenerating the sampled captures.
+
+Use the [clean-projection diagnostic](validation-data/triad-v3/2026-11-03-extension/evidence/projection-README.md)
+after fixed noisy decisions to distinguish available energy from energy retained
+by the receiver's channel basis. One missed-hop capture retained only 42% even
+at its best existing public timing/CFO group. This diagnostic is evaluation
+only: never feed clean means or truth into acquisition. More flexible short
+fits retain more signal but can also erase pattern distinctions. Reproduction
+of that case needs roughly 1 GiB RAM, not the unsuccessful 512-MiB estimate.
+
+For long phase evolution, the [TCXO isolation study](validation-data/triad-v3/2026-11-03-extension/phase/README.md)
+compares constant phase, coherence-length segmentation and existing finite-state
+phase inference on actual sampled 850-day captures. At −60 dB-Hz phase inference
+helped materially; at −57 dB-Hz the inexpensive coherence-length baseline
+matched its 16/16 screening result. Start with that cheaper baseline where its
+assumptions fit. Neither result establishes blind acquisition or qualified
+99% reliability under the full propagation model.
 
 The 850-day exports and the large conditional CPU/GPU batch are optional research
 recipes, never default regression tests. Start with the small affected Python
@@ -90,6 +139,17 @@ campaigns remain reproducible study evidence, not automatic regression
 prerequisites. The current acquisition campaign searches arrival only;
 frequency, clock drift and keyed-epoch uncertainty need their own declared
 banks and evidence.
+
+Grouped export now shares deterministic template synthesis between separate
+clean/noisy streaming channel instances when the declared memory budget permits.
+It retains a sequential fallback and reports the selected execution mode.
+The optimized arrays were compared byte-for-byte with the prior exporter,
+including nonlinear frontends, missed dwells and complete tails. This exporter
+still uses one worker per capture: increasing `--threads` does not parallelize
+its group loop. Batch independent captures within host CPU/memory limits;
+do not multiply outer workers by a presumed inner speedup. Large timing banks
+remain expensive, so inspect group count, sample count and disk estimates before
+launching them. See the extension record for measured scope and remaining limits.
 
 The same study includes an optional **pattern-consistency postprocessor** for
 structured wrong-key admissions. It compares one fixed bit across windows

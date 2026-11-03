@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate bounded, reproducible native inputs for the triad factor census.
 
-This performs 232 short ``triad_long --mode configure`` calls (no waveforms).
+This performs bounded short ``triad_long --mode configure`` calls (no waveforms).
 It writes geometry.json, validation.json, near-zero.json, and summary.json to
 a new output directory, binding every receipt to the current source and binary.
 """
@@ -36,12 +36,13 @@ BASE = (("crystal", 100), ("gpsdo-xo", .0001), ("gpsdo-tcxo", .0001),
         ("gpsdo-ocxo", .0001))
 RF = (("crystal", 100), ("cb-ssb", 40), ("ic-7100", 1), ("gpsdo-xo", .0001),
       ("gpsdo-tcxo", .0001), ("gpsdo-ocxo", .0001))
-SHIFTS = (500000, 1e6, 3.5e6, 7e6, 10e6, 14e6, 30e6, 5.8e9)
+SHIFTS = (0, 500000, 1e6, 3.5e6, 7e6, 10e6, 14e6, 30e6, 5.8e9)
 SPREAD = tuple(zip(("none", "sub9-best", "sub9-moderate", "sub9-worst", "hf-best",
                     "hf-moderate", "hf-worst", "aurora-best", "aurora-worst", "eme-focused"),
                    (0, .001, .005, .05, .1, 10, 30, 10, 55, 6)))
 SELECTORS = ("off", *(f"{kind}-{depth}" for kind in ("slow", "fast", "each")
                          for depth in (1, 5, 10, 25, 65)))
+SHIFT_CHOICES = (*RF, ("baseband-clock", None))
 SOURCE_DIRS = tuple(ROOT / p for p in SOURCE_PATHS)
 
 
@@ -136,8 +137,9 @@ def generate(output: Path, binary: Path = DEFAULT_BINARY, root: Path = ROOT,
             continue
         capture = config["capture"]
         fs, bw = capture["sample_rate_hz"], capture["nominal_triplet_bandwidth_hz"]
-        for if_hz, shift, (base_id, base_ppm), (shift_id, shift_ppm), (spread_id, doppler), margin, active in itertools.product(
-                (1725, row["rate_hz"] / 2, 8270), SHIFTS, BASE, RF, SPREAD, (1, 3), (False, True)):
+        for if_hz, shift, (base_id, base_ppm), (shift_id, selected_shift_ppm), (spread_id, doppler), margin, active in itertools.product(
+                (1725, row["rate_hz"] / 2, 8270), SHIFTS, BASE, SHIFT_CHOICES, SPREAD, (1, 3), (False, True)):
+            shift_ppm = base_ppm if selected_shift_ppm is None else selected_shift_ppm
             value = capture_margin(fs, bw, if_hz, shift, base_ppm, shift_ppm, doppler, margin, active)
             outcome = "positive" if value > 0 else "nonpositive"
             capture_counts[outcome] += 15 if active else 1
@@ -198,18 +200,51 @@ def generate(output: Path, binary: Path = DEFAULT_BINARY, root: Path = ROOT,
             sign_mismatches += not matched
             valid += 1
         validation.append(item)
+    topology_probes = (
+        ("zero-shift", "gpsdo-ocxo", "cb-ssb", 0),
+        ("shared-baseband-clock", "gpsdo-tcxo", "baseband-clock", 500000),
+        ("microwave-shared-baseband-clock", "crystal", "baseband-clock", 5.8e9),
+        ("zero-shift-shared-baseband-clock", "gpsdo-xo", "baseband-clock", 0),
+    )
+    for index, (topology_case, base_id, shift_id, shift) in enumerate(topology_probes):
+        rate, added, fhss = 1200, 1, False
+        if_hz, spread_id, doppler, margin, selector = 1725, "aurora-worst", 55, 1, "off"
+        argv = ["--mode", "configure", "--seconds", "8", "--rate", str(rate),
+                "--added", str(added), "--base-oscillator", base_id,
+                "--shift-oscillator", shift_id, "--rf-hz", str(shift),
+                "--nominal-if-hz", str(if_hz), "--margin", str(margin),
+                "--spread-preset", spread_id, "--selective-perturbation", selector,
+                "--symbol-burst", "off", "--cn0", "6",
+                "--clock-sync", "GPS_10ms-1ms_region-0ms_offset", "--audio-error-ms", "70"]
+        receipt, config = invoke(binary, root, argv, deadline)
+        item = {"index": 96 + index, "near_zero_directed": False,
+                "topology_case": topology_case, "receipt": receipt, "configuration": config}
+        if config is not None:
+            capture = config["capture"]
+            base_ppm = dict(BASE)[base_id]
+            shift_ppm = base_ppm if shift_id == "baseband-clock" else dict(RF)[shift_id]
+            predicted = capture_margin(
+                capture["sample_rate_hz"], capture["nominal_triplet_bandwidth_hz"],
+                if_hz, shift, base_ppm, shift_ppm, doppler, margin, False)
+            actual = capture["deterministic_nyquist_margin_hz"]
+            item.update(predicted_capture_margin_hz=predicted,
+                        absolute_delta_hz=abs(actual - predicted),
+                        sign_matches=(predicted > 0) == bool(capture["feasible_for_deterministic_prior"]))
+            max_delta = max(max_delta, abs(actual - predicted))
+            sign_mismatches += not item["sign_matches"]
+            valid += 1
+        validation.append(item)
     validation_artifact = _write(output, "validation.json", validation)
 
     replication = len(("tight", "default")) * 19 * len(("off", "3"))
     total = math.prod((17, 3, 9, 2, 4, 7, 10, 16, 19, 2, 4, 2, 2))
-    supported = total * 48 // 63
-    per_geometry = 3 * 8 * 4 * 6 * 10 * 2 * 16 * replication
+    per_geometry = 3 * len(SHIFTS) * len(BASE) * (len(RF) + 1) * 10 * 2 * 16 * replication
     geometry_valid = sum(row["configuration"] is not None for row in geometry)
     source_after = {name: sha(root / name) for name in SOURCE_PATHS}
     binary_after = sha(binary)
     unchanged = source_before == source_after and binary_before == binary_after
     summary = {
-        "schema": "triad-native-config-factorization-diagnostic-v1",
+        "schema": "triad-native-config-factorization-diagnostic-v2",
         "scope": "source geometry and deterministic capture predicates only; no reception or channel-stream qualification",
         "assumptions": {
             "requested_seconds": 8, "automatic_sample_rate": True,
@@ -218,14 +253,15 @@ def generate(output: Path, binary: Path = DEFAULT_BINARY, root: Path = ROOT,
             "diurnal_phase_radians": 0, "gaussian_doppler_width_hz": 0,
             "whole_bit_burst_choices": ["off", "3"],
             "timing_choices": ["tight", "explicit-uniform +/-7.035s"],
+            "zero_shift_oscillator": "selected shift oscillator is unused; RF contribution is zero",
+            "shared_baseband_clock": "shift ppm equals base endpoint ppm",
         },
         "primary_partition": {
-            "unsupported_topology": total - supported,
             "source_geometry_rejected": (len(geometry) - geometry_valid) * per_geometry,
             "capture_margin_nonpositive": capture_counts["nonpositive"] * replication,
             "capture_margin_positive": capture_counts["positive"] * replication,
         },
-        "total_intent_count": total, "supported_topology_count": supported,
+        "total_intent_count": total,
         "geometry_table_count": len(geometry), "geometry_valid_count": geometry_valid,
         "geometry_error_counts": dict(errors), "near_zero_factor_rows": len(near_zero),
         "replication_factor": replication,
@@ -247,7 +283,7 @@ def generate(output: Path, binary: Path = DEFAULT_BINARY, root: Path = ROOT,
         raise RuntimeError("source or binary changed during native input generation")
     if sum(summary["primary_partition"].values()) != total:
         raise AssertionError("generated factor-input partition does not sum to the intent total")
-    if (valid, sign_mismatches) != (62, 0) or max_delta > 2e-12:
+    if sign_mismatches or max_delta > 2e-12:
         raise AssertionError("independent native capture validation did not match expected boundary checks")
     return summary
 
@@ -259,7 +295,7 @@ def main(argv: list[str] | None = None) -> int:
                         help="compatible built triad_long executable (or env TRIAD_LONG_BINARY)")
     parser.add_argument("--output", type=Path, required=True, help="new empty output directory")
     parser.add_argument("--max-seconds", type=float, default=120.0,
-                        help="overall wall-time bound for all 232 native configure calls")
+                        help="overall wall-time bound for native configure calls")
     options = parser.parse_args(argv)
     try:
         report = generate(options.output, options.binary, options.root, options.max_seconds)

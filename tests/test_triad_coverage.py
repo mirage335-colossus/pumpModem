@@ -53,23 +53,20 @@ class BroadCoverageTests(unittest.TestCase):
         self.assertEqual(full_plan["row_count"], len(rows))
         self.assertEqual(full_plan["selected_row_pair_coverage"]["covered_pairs"], report["total_pairs"])
 
-    def test_unimplemented_coordinates_are_retained_as_unsupported(self):
+    def test_zero_shift_and_shared_clock_are_projected_as_supported(self):
         row = coverage.mixed_radix_row(0)
         row["selective"] = "each-65"
         row["fhss"] = "envelope-only"
         row["symbol_burst"] = "3x"
         projected = coverage.project_configuration(row)
-        unsupported = {item["dimension"]: item["reason"]
-                       for item in projected["unsupported_dimensions"]}
-        self.assertIn("shift_hz", unsupported)
-        self.assertIn("baseband-clock", unsupported["shift_oscillator"])
+        self.assertEqual(projected["unsupported_dimensions"], [])
         self.assertEqual(projected["frontend_interpretation"]["status"],
                          "approximate_reference_mapping_unvalidated_as_physical_carrier_placement")
         self.assertEqual(projected["configuration_probe_status"], "not_run")
         self.assertEqual(projected["reception_status"], "untested")
-        self.assertNotIn("--rf-hz", projected["cli_projection"])
+        self.assertEqual(projected["cli_projection"][projected["cli_projection"].index("--rf-hz") + 1], "0")
         self.assertEqual(projected["cli_projection"][projected["cli_projection"].index("--nominal-if-hz") + 1], "1725")
-        self.assertNotIn("--shift-oscillator", projected["cli_projection"])
+        self.assertEqual(projected["cli_projection"][projected["cli_projection"].index("--shift-oscillator") + 1], "baseband-clock")
         row["baseband_carrier"] = "half-rate"
         self.assertEqual(coverage.baseband_hz(row), coverage.RATES[0] / 2)
         self.assertTrue(any("bypassed" in warning for warning in projected["configuration_warnings"]))

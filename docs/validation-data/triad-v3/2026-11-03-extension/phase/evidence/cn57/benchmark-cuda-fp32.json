@@ -1,0 +1,333 @@
+{
+  "schema": "triad-resident-actual-phase-v1",
+  "failed_physical_path_records": 0,
+  "device": "cuda:0",
+  "precision": "fp32",
+  "implementation": "graph",
+  "sigma": 0.001234134149488435,
+  "phase_states": 32,
+  "prepared_input_sha256": "5c1a99bdca6dbf10da01d583bb34b82c12e35704d13e276c49ed5ee5aedf4615",
+  "inputs": [
+    {
+      "workspace": "/workspace/triad-results/phase-cn57/workspaces/flat-tcxo-signal-00",
+      "manifest_sha256": "2e15fda9b71ccf3317b596344cd8e8abd43b8c3b0ad0dc3e723e161ad9947301",
+      "control": "signal",
+      "bit": 0,
+      "sample_count": 18456032,
+      "sample_rate": 0.25,
+      "noise_variance": 125296.80840681813,
+      "methods": {
+        "global_unknown_phase": {
+          "scores": [
+            -75.71622195475037,
+            -138.79232650702016
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "segmented_0.25_tau": {
+          "scores": [
+            22.459340799629015,
+            -23.16043890259654
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "correct_accepted"
+          }
+        },
+        "segmented_1_tau": {
+          "scores": [
+            37.648725151969856,
+            -54.179439317939604
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        },
+        "segmented_4_tau": {
+          "scores": [
+            -9.941847922622756,
+            -101.39102502859616
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "miss",
+            "relaxed": "miss"
+          }
+        },
+        "finite_phase": {
+          "scores": [
+            60.61098106840115,
+            -44.22263523613452
+          ],
+          "winner": 0,
+          "outcomes": {
+            "strict": "correct_accepted",
+            "relaxed": "correct_accepted"
+          }
+        }
+      }
+    }
+  ],
+  "source_sha256": {
+    "docs/validation-data/triad-v3/2026-11-03-extension/phase/score_actual_batch.py": "4dc68023065c4b87e9ad2737a7abd198480312fe18bcffdb0638252821f8099a",
+    "docs/validation-data/triad-v3/2026-11-03-extension/phase/score_actual.py": "787b9d979f75f8f4f2e87f7e1e529aa9de5092577a916d8c9a52c73f0ae9a1a6",
+    "docs/validation-data/triad-v3/2026-11-03-extension/phase/diagnostic.py": "cb878e5ed3c7e9d9608166e2062501e8b2bd2c63e07a4eff5ea993096e6ea0a9",
+    "tools/triad_state_workspace.py": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923",
+    "tools/triad_phase_frequency.py": "48ee569b1d467b2d7b6fd55088764bd28dd11e0bfecb5974622a318fbb408585",
+    "tools/triad_phase_optimized.py": "759b46d536f2daa1d1de2336190ab19153376aca3eeca32847cba5289d2d63ed"
+  },
+  "thresholds": {
+    "strict": 22.721063389585737,
+    "relaxed": 17.4227460230377
+  },
+  "summary": {
+    "global_unknown_phase": {
+      "strict": {
+        "correct_accepted": 0,
+        "wrong_accepted": 0,
+        "miss": 1,
+        "false_admission": 0,
+        "null_rejected": 0,
+        "correct_two_one_sided_95_bounds": [
+          0.0,
+          0.95
+        ]
+      },
+      "relaxed": {
+        "correct_accepted": 0,
+        "wrong_accepted": 0,
+        "miss": 1,
+        "false_admission": 0,
+        "null_rejected": 0,
+        "correct_two_one_sided_95_bounds": [
+          0.0,
+          0.95
+        ]
+      }
+    },
+    "segmented_0.25_tau": {
+      "strict": {
+        "correct_accepted": 0,
+        "wrong_accepted": 0,
+        "miss": 1,
+        "false_admission": 0,
+        "null_rejected": 0,
+        "correct_two_one_sided_95_bounds": [
+          0.0,
+          0.95
+        ]
+      },
+      "relaxed": {
+        "correct_accepted": 1,
+        "wrong_accepted": 0,
+        "miss": 0,
+        "false_admission": 0,
+        "null_rejected": 0,
+        "correct_two_one_sided_95_bounds": [
+          0.05,
+          1.0
+        ]
+      }
+    },
+    "segmented_1_tau": {
+      "strict": {
+        "correct_accepted": 1,
+        "wrong_accepted": 0,
+        "miss": 0,
+        "false_admission": 0,
+        "null_rejected": 0,
+        "correct_two_one_sided_95_bounds": [
+          0.05,
+          1.0
+        ]
+      },
+      "relaxed": {
+        "correct_accepted": 1,
+        "wrong_accepted": 0,
+        "miss": 0,
+        "false_admission": 0,
+        "null_rejected": 0,
+        "correct_two_one_sided_95_bounds": [
+          0.05,
+          1.0
+        ]
+      }
+    },
+    "segmented_4_tau": {
+      "strict": {
+        "correct_accepted": 0,
+        "wrong_accepted": 0,
+        "miss": 1,
+        "false_admission": 0,
+        "null_rejected": 0,
+        "correct_two_one_sided_95_bounds": [
+          0.0,
+          0.95
+        ]
+      },
+      "relaxed": {
+        "correct_accepted": 0,
+        "wrong_accepted": 0,
+        "miss": 1,
+        "false_admission": 0,
+        "null_rejected": 0,
+        "correct_two_one_sided_95_bounds": [
+          0.0,
+          0.95
+        ]
+      }
+    },
+    "finite_phase": {
+      "strict": {
+        "correct_accepted": 1,
+        "wrong_accepted": 0,
+        "miss": 0,
+        "false_admission": 0,
+        "null_rejected": 0,
+        "correct_two_one_sided_95_bounds": [
+          0.05,
+          1.0
+        ]
+      },
+      "relaxed": {
+        "correct_accepted": 1,
+        "wrong_accepted": 0,
+        "miss": 0,
+        "false_admission": 0,
+        "null_rejected": 0,
+        "correct_two_one_sided_95_bounds": [
+          0.05,
+          1.0
+        ]
+      }
+    }
+  },
+  "signal_paths": 1,
+  "null_paths": 0,
+  "timings": {
+    "workspace_load_validate_seconds": 0.5193609658163041,
+    "analytic_baseline_seconds": 0.0024703459348529577,
+    "preparation_and_transfer_seconds": 0.33582185790874064,
+    "synchronized_update_seconds": 3.6701304209418595,
+    "update_timing_scope": "resident input indexing, all updates and final device synchronization; includes first graph warmup/capture",
+    "memory_budget": {
+      "total_bytes": 536870912,
+      "resident_estimate_bytes": 16536800,
+      "remaining_state_budget_bytes": 520334112,
+      "state_estimate_bytes": 307744,
+      "combined_estimate_bytes": 16844544,
+      "scope": "conservative owned input/state/temporary bounds; excludes framework runtime and allocator caches"
+    },
+    "diagnostics": {
+      "algorithm": "finite_phase_frequency_static_gain_marginal_lr",
+      "phase_states": 32,
+      "frequency_states": 1,
+      "frequency_grid_hz": [
+        0.0
+      ],
+      "frequency_spacing_hz": 0.0,
+      "initial_frequency_weights": [
+        1.0
+      ],
+      "initial_frequency_mean_hz": 0.0,
+      "initial_frequency_variance_hz2": 0.0,
+      "generator_stationary_frequency_variance_hz2": null,
+      "generator_stationary_initial_correlation_decay_per_second": null,
+      "grid_convergence_scope": "automatic phase-grid changes also change frequency spacing; vary explicit frequency_grid_hz independently when separating the two discretization errors",
+      "quadrature_states": 1,
+      "frequency_model": "static",
+      "frequency_std_hz": 0.003,
+      "frequency_correlation_seconds": 1000.0,
+      "random_walk_hz_per_sqrt_second": 1e-06,
+      "phase_diffusion_rad_per_sqrt_second": 0.001234134149488435,
+      "nominal_dt_seconds": 1000.0,
+      "transition_order": "half old-frequency phase advection; frequency CTMC; half new-frequency phase advection; independent phase CTMC",
+      "initial_phase_prior": "uniform",
+      "gain_prior_static_through_observation": true,
+      "amplitude_nodes": [
+        1.0
+      ],
+      "amplitude_weights_normalized": [
+        1.0
+      ],
+      "relative_phase_states": 1,
+      "ray_amplitudes": [
+        1.0
+      ],
+      "phase_kernel_tail_probability": 1e-12,
+      "bulk_dtype": "torch.float32",
+      "log_evidence_dtype": "torch.float64",
+      "tf32_allowed": false,
+      "working_bytes_bound": 76864,
+      "memory_scope": "owned state/temporary/cache array estimate; excludes framework runtime and allocator cache",
+      "maximum_phase_interpolation_variance_radians2_per_interval": 0.0,
+      "maximum_discarded_phase_kernel_mass": 1.5920598173124745e-13,
+      "maximum_frequency_transition_row_error_before_normalizing": 0.0,
+      "updates": 73825,
+      "elapsed_center_separation_seconds": 73823564.0,
+      "model_scope": "normalized finite-state likelihood with static proper gain quadrature and block-constant common phase; continuous colored oscillator and arbitrary within-block phase evolution are not exact models",
+      "null_scope": "known white circular Gaussian null and fixed pre-observation priors; finite-precision validation/calibration is separate from the exact-arithmetic mean-one LR identity",
+      "implementation": "experimental_positive_stencil_cuda_graph_v1",
+      "backend": "triton_cuda_graph",
+      "gpu_optimized_execution": true,
+      "fallback_executed": false,
+      "frequency_contraction": "batched_T_transpose_matmul",
+      "phase_transition": "same_positive_support_fused_with_second_advection",
+      "emission_update": "reference_log_domain",
+      "stencil_product_precision": "torch.float32",
+      "stencil_accumulation_precision": "torch.float32",
+      "cuda_stencil_fp_fusion_enabled": false,
+      "triton_version": "3.4.0",
+      "posterior_normalizer_dtype": "torch.float64",
+      "optimized_transition_preparations": 2,
+      "optimized_stencil_calls": 73824,
+      "optimized_integral_first_advections": 73824,
+      "optimized_fractional_first_advections": 0,
+      "maximum_phase_stencil_support": 11,
+      "implementation_scope": "same finite state/model and exhaustive states; numerical equivalence and sensitivity require paired validation",
+      "graph_captures": 3,
+      "graph_replays": 73825,
+      "graph_cache_entries": 3,
+      "graph_cache_maximum_entries": 4,
+      "graph_cached_dt_seconds": [
+        0.0,
+        1000.0,
+        564.0
+      ],
+      "graph_cache_evictions": 0,
+      "graph_resets": 0,
+      "graph_warmup_synchronized_wall_seconds": 0.28816109825856984,
+      "graph_capture_synchronized_wall_seconds": 0.20324490405619144,
+      "graph_peak_working_bytes_estimate": 307744,
+      "graph_memory_scope": "conservative private-pool and state/temporary estimate; excludes allocator cache and CUDA runtime",
+      "graph_state_policy": "persistent storage; preparation restores exact pre-call state; each update applies one replay; reset is explicit",
+      "graph_stream_policy": "updates/reset require the construction CUDA stream"
+    },
+    "process_seconds_before_json_write": 5.488970485981554
+  },
+  "resident_host_device_estimate_bytes": 16536800,
+  "environment": {
+    "torch": "2.8.0+cu128",
+    "numpy": "2.5.2",
+    "cuda": "12.8",
+    "triton": "3.4.0",
+    "gpu": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition"
+  },
+  "limitations": [
+    "Actual noisy complex observations; no replacement noise or simulator signal means are consumed.",
+    "The injected Gaussian noise variance is known from the export manifest and normalizes observations/Grams. This is not an unknown-noise calibrated receiver.",
+    "Known unit gain, known arrival equal to public capture lead, zeroCFO/clock/epoch, one flat tap. Not general physical oscillator acquisition.",
+    "Each case retains its own candidate Gram and actual noise; batches require identical complete public calendars.",
+    "Finite phase model is block-constant; it is not exact within-block Brownian waveform inference.",
+    "FP32 bulk retains FP64 log-evidence reductions and public input preparation. TF32 disabled.",
+    "Process time includes imports but excludes interpreter startup and JSON writing; runner external wall time is the full-process comparison.",
+    "No GPU speedup is claimed until same-input paired backend results are measured."
+  ]
+}

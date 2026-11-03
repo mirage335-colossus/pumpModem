@@ -1,0 +1,14 @@
+{
+  "schema": "triad-extension-archive-verifier-selftest-v1",
+  "verifier_sha256": "202305094d681d241ef1e1a68cfcd30da96f948369d3f436223b79e974f6aaca",
+  "command": [
+    "/usr/bin/python3",
+    "local-evidence/triad-extension/remote/verify_archive.py",
+    "--self-test"
+  ],
+  "exit_code": 0,
+  "elapsed_seconds": 0.06765042801271193,
+  "stdout": "",
+  "stderr": "test_full_pipeline_and_external_hash_rejection (__main__.SelfTests.test_full_pipeline_and_external_hash_rejection) ... ok\ntest_pax_long_paths_and_hardlink_targets (__main__.SelfTests.test_pax_long_paths_and_hardlink_targets) ... ok\ntest_pax_size_bound (__main__.SelfTests.test_pax_size_bound) ... ok\ntest_reap_live_child (__main__.SelfTests.test_reap_live_child) ... ok\ntest_regular_empty_earlier_hardlink_and_inventory (__main__.SelfTests.test_regular_empty_earlier_hardlink_and_inventory) ... ok\ntest_rejections (__main__.SelfTests.test_rejections) ... ok\ntest_trailing_payload (__main__.SelfTests.test_trailing_payload) ... ok\n\n----------------------------------------------------------------------\nRan 7 tests in 0.012s\n\nOK\n",
+  "scope": "Synthetic temporary fixtures only; real downloaded archive not opened or verified."
+}

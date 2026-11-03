@@ -423,6 +423,44 @@ def main():
 
         grouped_noisy = root / "grouped-bank-noisy"
         grouped_noisy_manifest = export_group_stats(grouped_noisy, *grouped_options, "--stats-noisy")
+        execution = grouped_noisy_manifest["grouped_export_execution"]
+        if execution["channel_pass_mode"] != "paired" or execution["basis_synthesis_passes"] != 1:
+            raise AssertionError("default noisy grouped export did not share deterministic basis synthesis")
+        if execution["worker_threads_used"] != 1:
+            raise AssertionError("grouped exporter overstates its worker count")
+        for file_name in ("group_gram.c128", "group_mean.c128", "intervals.u64", "valid_rows.u64", "signal_energy.f64"):
+            if (grouped/file_name).read_bytes() != (grouped_noisy/file_name).read_bytes():
+                raise AssertionError(f"paired noisy export changed clean statistic {file_name}")
+
+        # A large caller chunk creates a >1-MiB gap between the paired and
+        # sequential bounds. Select a budget inside that gap without depending
+        # on a particular source/cache size, and retain the nonlinear frontend.
+        paired = root / "grouped-paired-frontend"
+        pair_options = ("--basis", "two-ray", "--start", "0", ".002", ".001", "--stats-noisy",
+                        "--chunk", "65536", "--adc-bits", "16", "--adc-full-scale", ".25",
+                        "--adc-gain", "10", "--rx-lowpass-hz", "100", "--overload-recovery-seconds", ".02")
+        pair_manifest = export_group_stats(paired, *pair_options)
+        pair_execution = pair_manifest["grouped_export_execution"]
+        if pair_execution["channel_pass_mode"] != "paired" or pair_manifest["gaussian_projection_supported"]:
+            raise AssertionError("paired nonlinear fixture did not retain independent frontend simulation")
+        fallback_mib = (pair_execution["bounded_workspace_bytes"]-1)//(1024*1024)
+        sequential = root / "grouped-sequential-frontend"
+        serial_manifest = export_group_stats(sequential, *pair_options, "--memory-mib", str(fallback_mib))
+        serial_execution = serial_manifest["grouped_export_execution"]
+        if serial_execution["channel_pass_mode"] != "sequential" or serial_execution["basis_synthesis_passes"] != 2:
+            raise AssertionError("grouped export did not preserve its lower-memory sequential fallback")
+        if serial_execution["bounded_workspace_bytes"] > fallback_mib*1024*1024:
+            raise AssertionError("grouped fallback exceeded its declared workspace budget")
+        for file_name in pair_manifest["file_sizes"]:
+            if (paired/file_name).read_bytes() != (sequential/file_name).read_bytes():
+                raise AssertionError(f"paired and sequential physical channels differ in {file_name}")
+        if pair_manifest["frontend_report"] != serial_manifest["frontend_report"]:
+            raise AssertionError("paired export changed noisy frontend diagnostics")
+        ram_rejected = root / "grouped-ram-rejected"
+        rejected_ram = invoke("--mode", "export-group-stats", *COMMON, "--channel", "none",
+                              *pair_options, "--memory-mib", "1", "--output", str(ram_rejected), ok=False)
+        if "bounded scratch/source estimate" not in rejected_ram.stderr or ram_rejected.exists():
+            raise AssertionError("grouped RAM preflight did not reject before creating outputs")
         full_noisy = root / "full-bank-noisy"
         full_noisy_manifest = export_stats(full_noisy, *grouped_options, "--stats-noisy")
         if grouped_noisy_manifest["sample_count"] != full_noisy_manifest["sample_count"]:

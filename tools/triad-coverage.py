@@ -66,6 +66,7 @@ AXES: dict[str, tuple[Any, ...]] = {
 }
 
 NATIVE_OSC = {
+    "baseband-clock": "baseband-clock",
     "free-running-crystal": "crystal",
     "gpsdo-hobbyist-xo": "gpsdo-xo",
     "gpsdo-tcxo": "gpsdo-tcxo",
@@ -153,13 +154,6 @@ def pair_coverage(rows: list[dict[str, Any]], axes: dict[str, tuple[Any, ...]] =
 def project_configuration(row: dict[str, Any]) -> dict[str, Any]:
     unsupported: list[dict[str, str]] = []
     warnings: list[str] = []
-    if row["shift_hz"] == 0:
-        unsupported.append({"dimension": "shift_hz", "requested": "0",
-                            "reason": "triad_long --rf-hz requires a positive value and its meaning is oscillator-reference frequency, not a zero-shift carrier selector"})
-    if row["shift_oscillator"] == "baseband-clock":
-        unsupported.append({"dimension": "shift_oscillator",
-                            "requested": "baseband-clock",
-                            "reason": "no shared baseband-clock TX/RX oscillator topology; choosing identical preset IDs still creates independent endpoint draws"})
     if row["spread"] == "none" and row["selective"] != "off":
         warnings.append("selected added amplitude modulation is bypassed when spread Doppler is zero; this setting does not produce modulation in the sampled channel")
     if row["fhss"] == "envelope-only":
@@ -175,8 +169,7 @@ def project_configuration(row: dict[str, Any]) -> dict[str, Any]:
             "--selective-perturbation", str(row["selective"]),
             "--margin", format(float(row["margin"]), ".17g"),
             "--nominal-if-hz", format(baseband_hz(row), ".17g")]
-    if row["shift_hz"] > 0:
-        args += ["--rf-hz", format(float(row["shift_hz"]), ".17g")]
+    args += ["--rf-hz", format(float(row["shift_hz"]), ".17g")]
     if row["shift_oscillator"] in NATIVE_OSC:
         args += ["--shift-oscillator", NATIVE_OSC[row["shift_oscillator"]]]
     if row["timing"] == "gps-10ms-1ms-0ms-audio70ms":
@@ -194,8 +187,8 @@ def project_configuration(row: dict[str, Any]) -> dict[str, Any]:
         args += ["--symbol-burst", "3"]
     return {
         "cli_projection": ["triad_long", *args],
-        "represented_dimensions": ["rate_hz", "shift_hz (positive values only)",
-                                    "timing", "base_oscillator", "shift_oscillator (except shared baseband clock)",
+        "represented_dimensions": ["rate_hz", "shift_hz", "timing", "base_oscillator",
+                                    "shift_oscillator (unused when shift_hz is zero)",
                                     "spread", "selective", "cn0_db_hz", "margin", "added_symbols",
                                     "fhss (envelope only)", "symbol_burst (calendar only)"],
         "unsupported_dimensions": unsupported,
@@ -240,10 +233,10 @@ def manifest() -> dict[str, Any]:
             "DSSS factors are the isolated v3 Added Symbols coordinate; v3 currently always interleaves it.",
             "FHSS envelope-only does not enable physical RF retuning.",
             "Symbol Burst changes whole-bit calendar spacing and does not model within-bit receiver backlog.",
-            "Baseband clock and zero shift are explicit unsupported coordinates; nominal-IF mapping does not place an actual audio carrier.",
+            "At zero shift the selected shift oscillator is unused; baseband-clock represents a shared endpoint oscillator.",
             "With the None spread preset, selected added modulation is bypassed because the effective Doppler is zero.",
             "Default timing configure rows declare the observed 14.07-second candidate interval; they do not randomize actual arrival or score candidates.",
-            "The CLI projection is an explicit subset and must not be reported as validation of unsupported coordinates.",
+            "The CLI projection is a configuration request and must not be reported as native or reception validation.",
         ],
     }
 

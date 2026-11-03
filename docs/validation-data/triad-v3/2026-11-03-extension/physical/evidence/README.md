@@ -1,0 +1,83 @@
+# Extension physical-campaign recount and fixed-path energy benchmark
+
+This record covers the first nine plans, 222 sampled condition captures and 666 repaired-variant receiver scores (each scored at two gates). All saved NPZ arrays agree with score JSON; independently recomputed uniform group mixtures and outcome counts agree with receipts. Every original execution failure remains separate: three zero-shift VLF frequency-CLI failures and three microwave frequency mismatch-guard failures. The repaired microwave arm explicitly allows 0.02 dB original-block phase-arc loss (reported bound 0.01408884 dB); other cells retain 0.01 dB. This is an approximation allowance change, not a sensitivity improvement.
+
+Reproduce only this analysis, on one CPU, from the repository root:
+
+```sh
+STUDY=docs/validation-data/triad-v3/2026-11-03-extension/physical/evidence
+REPORTS=local-evidence/triad-extension/remote/physical-reports
+OUT=local-evidence/triad-extension/analysis-reproduction
+PYTHON=/tmp/triad-weak-env/bin/python
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 "$PYTHON" "$STUDY/analyze_physical.py" --input "$REPORTS" --output "$OUT/physical-analysis.json"
+"$PYTHON" "$STUDY/describe_physical.py" --input "$OUT/physical-analysis.json" --reports "$REPORTS" --output-dir "$OUT"
+```
+
+`physical-analysis.json` is a generated local artifact retaining per-condition outcomes and available input hashes; [summary.json](summary.json) is the maintained compact aggregation; [wrong-bit-diagnosis.json](wrong-bit-diagnosis.json) binds the failure comparison. The summary retains the full-analysis digest and reproducer hashes. The Python environment needs NumPy and SciPy; the report directory must be restored from the original compact campaign archive before reproduction. Later independent scheduling and maximum-spreading results are separate records and are not included here. Raw exported statistics are not in this compact package: their hashes are carried by original receipts and were not re-read here. This evidence promotion changes no receiver behavior, waveform or score; the ordinary receiver and its regression campaign remain outside scope.
+
+## Independent validation cells
+
+Each row has 16 balanced signal paths. Columns report correct/wrong/missed at strict then relaxed gate. Methods and C/N0 alternatives reuse the same paths; they are not additional independent trials. Requested 8 seconds rounds to 16.4 seconds of source calendar and approximately 19.392 seconds of sampled observation in these low-rate cells.
+
+| Case | C/N0 dB-Hz | Short window, strict; relaxed | Global, strict; relaxed | Global + public CFO, strict; relaxed |
+| --- | ---: | --- | --- | --- |
+| none-am65 | -6 | 0/0/16; 0/0/16 | 0/0/16; 0/0/16 | 0/0/16; 0/0/16 |
+| none-am65 | 0 | 0/0/16; 0/0/16 | 2/0/14; 4/0/12 | 2/0/14; 4/0/12 |
+| none-am65 | 6 | 1/0/15; 2/0/14 | 9/0/7; 10/0/6 | 9/0/7; 10/0/6 |
+| none-am65 | 12 | 9/1/6; 11/1/4 | 16/0/0; 16/0/0 | 16/0/0; 16/0/0 |
+| shared-microwave-am65 | -6 | 0/0/16; 0/0/16 | 0/0/16; 0/0/16 | 0/0/16; 0/0/16 |
+| shared-microwave-am65 | 0 | 0/0/16; 0/0/16 | 0/0/16; 0/0/16 | 1/0/15; 1/0/15 |
+| shared-microwave-am65 | 6 | 0/0/16; 1/0/15 | 0/0/16; 1/0/15 | 11/0/5; 11/0/5 |
+| shared-microwave-am65 | 12 | 12/0/4; 12/0/4 | 1/0/15; 1/0/15 | 15/0/1; 15/0/1 |
+
+No null was admitted in any completed variant score. There is only one null and one wrong-key capture per validation cell/C/N0. At 12 dB-Hz the short-window method admitted **both** wrong-key controls (`none-am65-validation-41-b1-wrong-key` and `shared-microwave-am65-validation-41-b1-wrong-key`) at both gates; global and CFO methods rejected them. Other sampled wrong-key controls were rejected. These controls are not white-noise H0 and cannot be pooled with nulls. Their repeated SNR scores are not independent controls.
+
+Even 16/16 has only an 82.925% one-sided 95% lower confidence bound under the usual independent/common-probability assumption. The corresponding 15/16 lower bound is 73.604%; 0/1 control admissions has a 95% upper bound of 95%. No 99% reliability or rare operational false-admission qualification follows. The JSON retains pointwise intervals for every cell.
+
+## Known-waveform energy benchmark
+
+Assume the actual post-channel, post-erasure complex waveform, transmitted bit, alignment, phase and white proper-complex noise variance are all known. Put rho=E/N0=post-erasure energy-seconds times 10^(C/N0/10). The normalized real matched-filter output is N(0,1) under H0 and N(sqrt(2 rho),1) under H1. At **alpha=exp(-the actual receiver log gate)**, the Neyman–Pearson presence benchmark is Pd=Phi(sqrt(2 rho)-norm.isf(alpha)); required rho for target p is 0.5*(norm.isf(alpha)+norm.ppf(p))². No subtraction 1-alpha is used. This is a conditional Gaussian presence benchmark, not a demonstrated receiver, unknown-bit correctness bound, authentication claim, or a new duration planner.
+
+| Gate | Log gate | Allocated alpha | Target | Required rho |
+| --- | ---: | ---: | ---: | ---: |
+| strict | 22.72106339 | 1.3563368e-10 | .99 | 37.33098730 |
+| relaxed | 17.42274602 | 2.7126736e-08 | .90 | 22.56795824 |
+
+These allocations preserve the attempted-family charge, rather than incorrectly giving each capture the entire daily/12-hour false-admission budget. The realized post-erasure energies equal the export receipts and their independent manifest totals; they are identical across each case/seed SNR sweep.
+
+| Validation case | C/N0 | Mean genie Pd strict / relaxed |
+| --- | ---: | ---: |
+| none-am65 | -6 | 0.00684298 / 0.0394264 |
+| none-am65 | 0 | 0.444107 / 0.600398 |
+| none-am65 | 6 | 0.977866 / 0.995129 |
+| none-am65 | 12 | 1 / 1 |
+| shared-microwave-am65 | -6 | 0.00257764 / 0.0194518 |
+| shared-microwave-am65 | 0 | 0.412683 / 0.624929 |
+| shared-microwave-am65 | 6 | 0.976686 / 0.993615 |
+| shared-microwave-am65 | 12 | 1 / 1 |
+
+The -6 dB-Hz light-cell misses are consistent with inadequate total energy even for this genie. At 6 dB-Hz, mean genie Pd is about 97.7%, while practical whole/CFO successes are 9/16 and 11/16: unknown synchronization/channel and receiver/model losses remain substantial. At 12 dB-Hz the energy benchmark is essentially unity on every retained path; observed short-window misses and errors therefore cannot be attributed to insufficient total energy alone. This is not an estimate of a universal dB implementation gap: sixteen paths, selected C/N0 points and a favorable genie do not establish a near-bound operating point.
+
+## Wrong-bit diagnosis
+
+`none-am65-validation-07-b1-signal` at 12 dB-Hz is the sole wrong signal admission. Short-window bit scores are [50.213344,44.303252], so bit 0 wins despite truth 1. Global scores [1.998827,130.388819] and CFO scores [1.937540,130.238465] correctly favor 1. All three winning candidates use the same base arrival group 3 (0.1405s), making a missing timing hypothesis an inadequate explanation for this reversal. No truth-selected receiver hypothesis is used in this comparison.
+
+The short likelihood windows last 62.5 ms, only 0.375 fine-symbol periods at 6 symbols/s, with 311 independent windows across the capture. Selected two-ray columns duplicate the same zero-delay/zero-Doppler template; the rank-aware model therefore has one identifiable complex gain per bit/window, not two identifiable rays. Independent window gains discard much of the keyed phase continuity that separates the bits over the whole capture. This modeling explanation is supported by the same-capture reversal, not a proof of universal pattern identifiability or a full source audit.
+
+Post-erasure energy is 15.20756 seconds and rho 241.02365. Window residual UCB ranges 264.559–264.686, global 265.082–265.547, against true thermal variance 258.440; a large calibration change does not explain the reversal. Numerical whitening residual is 6.66e-16 and the declared inflation is 1.00003553. This evidence points to short-window information loss/model mismatch, not the previously corrected singular-mode blowup. It does not rule out every numerical or implementation defect.
+
+## Paired schedule, rate and energy findings
+
+At 20 dB-Hz all ten paired cells accepted 2/2 correct signals with all three variant methods and rejected their null. This small development screen covers middle losses, random 10%/25% losses, internal waits, rate 1200/Added1, rate 36/Added100, None/off, None/Each65, direct zero-shift VLF and shared microwave. It establishes exercised configurations, not high reliability.
+
+For the four paired sensitivity cases (random 25%, internal waits, None/Each65, shared microwave), -6 and 0 dB-Hz yielded no admissions at either gate. At 6 dB-Hz global/CFO recovered 2/2 for random 25%, internal waits and None; microwave needed the CFO bank for 2/2. Every short-window 6 dB case missed both. At 12 dB-Hz all were 2/2 except zero-CFO microwave global 1/2. The two paired paths are not independent validation of those transitions.
+
+Importantly, the 0 dB internal-wait captures already have genie strict Pd 0.999174 and 0.999960, yet all practical methods miss. Random 25% at 0 dB has genie Pd 0.739466 and 0.992732 and also misses. Those failures are not explained by total energy alone; channel/acquisition/model losses remain unresolved.
+
+Measured same-calendar retained energy ratios relative to the prior paired no-loss capture are 0.9650/0.9745 for middle losses, 0.8797/0.8931 for random 10%, and 0.7489/0.7682 for random 25% (bits 0/1). Internal waits extend source calendar 46→156.4 s and retain 44.754/52.595 energy-seconds; ratios 1.3853/1.0535 reflect a changed physical calendar and are not a pure erasure penalty.
+
+At low rate the paired explicit Each65 channel has 21.426/29.189 energy-seconds versus 14.775/14.786 with added modulation off, factors 1.4501/1.9741. That energy gain is part of this stress model, not receiver improvement. Rate 1200/Added1 and rate 36/Added100 change both elapsed duration and sampled waveform, so their no-loss ratios are likewise not sensitivity gains. The JSON retains per-path energies, elapsed/sample durations and calendar-equality flags.
+
+For the independent 12 dB light captures, median measured receiver time is approximately 0.265 s window versus 0.184 s global and 0.187 s CFO at HF; microwave CFO is 0.270 s versus 0.269 s window. These are single-CPU receiver timings from the completed host, not GPU acceleration measurements or export cost. The simpler whole-observation choice is faster and more effective for these stable cases; it is not a remedy for arbitrary renewed fading.
+
+Additional independent scheduling and maximum-spreading results are recorded separately; they are not counted in these first nine plans. No new -60 dB-Hz sampled observation, long-duration qualification, general wrong-key solution, or ordinary-receiver integration is established by this report.

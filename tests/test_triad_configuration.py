@@ -128,7 +128,108 @@ def observation_control_checks():
         invoke("--mode", "export", *erased_args, "--output", str(pathlib.Path(root)/"unsupported"), ok=False)
 
 
+def topology_and_independent_modulation_checks():
+    # Public CFO bounds use correlated RF/audio errors only within each radio.
+    # The two endpoint clocks are separate draws even in shared-reference mode.
+    profiles = (("crystal", 100, .5), ("gpsdo-xo", .0001, .5),
+                ("gpsdo-tcxo", .0001, .05), ("gpsdo-ocxo", .0001, .005))
+    for base, ppm, phase in profiles:
+        for rf in (0, 500000, 5800000000):
+            shared = configure("--base-oscillator", base, "--shift-oscillator", "baseband-clock",
+                               "--rf-hz", str(rf), "--nominal-if-hz", "1725")
+            check(shared["shift_oscillator_active"] == (rf > 0), "zero shift retained an RF oscillator")
+            check(shared["shift_uses_baseband_clock"] == (rf > 0), "shared clock topology was lost")
+            near(shared["relative_phase_diffusion_rad_sqrt_s"], phase*math.pi/180,
+                 "shared/zero-shift clock counted its phase diffusion twice")
+            near(shared["shift_nominal_relative_bound_ppm"], ppm if rf else 0,
+                 "inactive shift retained an RF accuracy term")
+            near(shared["deterministic_oscillator_cfo_bound_hz"],
+                 (rf+1725)*ppm*1e-6/(1-ppm*.5e-6), "shared-clock joint CFO bound")
+            check("stochastic phase does not perturb sampling coordinates" in shared["sampling_clock_model"],
+                  "shared-clock sampling-jitter limitation omitted")
+
+    none = configure("--spread-preset", "none", "--selective-perturbation", "each-65")
+    check(not none["selective_channel"]["enabled"], "historical zero-D bypass changed")
+    explicit = configure("--spread-preset", "none", "--selective-perturbation", "each-65",
+                         "--selective-modulation-rate-hz", ".2", "--margin", "3")
+    selected = explicit["selective_channel"]
+    check(selected["enabled"], "independent modulation control remained bypassed with None spread")
+    near(selected["resolved_fast_reference_rate_hz"], .2, "explicit physical AM rate was margin-scaled")
+    near(selected["active_sideband_extent_hz"], .2, "fast AM sideband capture extent")
+    near(explicit["capture"]["deterministic_nyquist_margin_hz"],
+         none["capture"]["deterministic_nyquist_margin_hz"]-.4, "independent AM missing from capture edges")
+    slow = configure("--spread-preset", "none", "--selective-perturbation", "slow-65",
+                     "--selective-modulation-rate-hz", ".2")
+    near(slow["selective_channel"]["capture_allowance_hz"], .02, "slow-only explicit AM capture extent")
+    near(configure("--selective-perturbation", "slow-65")["selective_channel"]["capture_allowance_hz"],
+         .1, "historical slow-only conservative capture changed")
+    disabled = configure("--selective-modulation-rate-hz", "0")["selective_channel"]
+    check(not disabled["enabled"], "explicit zero AM rate was ignored")
+    near(disabled["capture_allowance_hz"], 0, "disabled AM retained its capture allowance")
+    for bad in ("-1", "nan", "inf"):
+        invoke("--mode", "configure", *COMMON, "--selective-modulation-rate-hz", bad, ok=False)
+
+    with tempfile.TemporaryDirectory() as root_text:
+        root = pathlib.Path(root_text)
+        endpoint_manifests = []
+        for index, (rf, shift) in enumerate(((500000, "baseband-clock"), (500000, "gpsdo-tcxo"),
+                                            (0, "crystal"), (0, "gpsdo-ocxo"))):
+            destination = root/str(index)
+            invoke("--mode", "export-stats", "--stats-noisy", *COMMON, "--base-oscillator", "gpsdo-tcxo",
+                   "--shift-oscillator", shift, "--rf-hz", str(rf), "--nominal-if-hz", "1725",
+                   "--spread-preset", "none", "--selective-perturbation", "off",
+                   "--clock-sync", "default", "--arrival-prior-seconds", "0", "0",
+                   "--truth-frequency-hz", ".2", "--truth-frequency-drift", "-.01",
+                   "--output", str(destination))
+            manifest = json.loads((destination/"manifest.json").read_text())
+            endpoint = manifest["endpoint_truth"]
+            tx = endpoint["tx_audio_ppm"]
+            rx = endpoint["rx_audio_ppm"]
+            rx_scale = 1+rx*1e-6
+            if shift == "baseband-clock":
+                check(endpoint["tx_rf_ppm"] == tx and endpoint["rx_rf_ppm"] == rx,
+                      "shared reference did not correlate RF/audio ppm inside each endpoint")
+                check(tx != rx, "shared reference incorrectly locked TX to RX")
+            elif rf:
+                check(endpoint["tx_rf_ppm"] != tx and endpoint["rx_rf_ppm"] != rx,
+                      "independent reference accidentally reused the endpoint sample clock")
+            else:
+                check(endpoint["tx_rf_ppm"] == endpoint["rx_rf_ppm"] == 0,
+                      "zero RF shift retained an endpoint RF error")
+                near(endpoint["supplemental_tx_frequency_drift_hz_per_second"], -.01*rx_scale**2,
+                     "zero-shift physical drift was lost or nonfinite")
+            expected_cfo = .2+(rf*(endpoint["tx_rf_ppm"]-endpoint["rx_rf_ppm"])*1e-6+
+                              1725*((1+tx*1e-6)-rx_scale))/rx_scale
+            near(manifest["selected_truth_frequency_hz_simulation_only"], expected_cfo,
+                 "joint clock/IF/RF CFO truth disagreed with endpoint errors")
+            near(manifest["selected_truth_frequency_drift_hz_per_second_simulation_only"], -.01,
+                 "zero/positive RF changed the physical frequency-drift target")
+            endpoint_manifests.append((destination, manifest))
+        # RF0 removes the selected shift profile's phase noise as well as ppm.
+        # Same physical base clock/noise seed gives the same complete waveform.
+        for filename in ("mean.c128", "signal_energy.f64", "observation.c128", "received_energy.f64", "gram.c128"):
+            left, lm = endpoint_manifests[-2]
+            right, rm = endpoint_manifests[-1]
+            check((left/filename).read_bytes() == (right/filename).read_bytes(),
+                  "inactive shift profile changed actual zero-shift samples")
+
+        for model in ("legacy-allpass", "dispersive-dft"):
+            destination = root/("am-"+model)
+            invoke("--mode", "export-stats", *COMMON, "--spread-preset", "none",
+                   "--selective-model", model, "--selective-perturbation", "each-65",
+                   "--selective-modulation-rate-hz", ".2", "--margin", "3",
+                   "--output", str(destination))
+            manifest = json.loads((destination/"manifest.json").read_text())
+            actual = manifest["path_truth_simulation_only"]["selective_perturbation"]
+            check(actual["enabled"], "sampled None+AM export silently bypassed the selected effect")
+            near(actual["component_rates_hz"][0], .02, "sampled independent slow AM rate")
+            near(actual["component_rates_hz"][1], .2, "sampled independent fast AM rate")
+            check(actual["processed_rows"] == manifest["sample_count"] and actual["decay_tail_samples"] > 0,
+                  "independent AM export did not preserve complete filter state/tails")
+
+
 def main():
+    topology_and_independent_modulation_checks()
     observation_control_checks()
     configured_selective = configure()["selective_channel"]
     check(configured_selective["model"] == "dispersive-dft-v1",

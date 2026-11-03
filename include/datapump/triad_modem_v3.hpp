@@ -149,6 +149,11 @@ struct PathEvolutionConfig {
 enum class SelectiveModel { LegacyAllpass, DispersiveDft };
 struct SelectiveModelConfig {
     SelectiveModel model = SelectiveModel::DispersiveDft;
+    // Effective physical fast-component rate; slow runs at one tenth of it.
+    // Unset retains the historical linkage to effects.spread_doppler_hz.
+    // Explicit zero disables added modulation even with nonzero ray Doppler.
+    // This isolated stress control is not scaled by spread margin again.
+    std::optional<double> modulation_rate_hz;
     // DispersiveDft only; LegacyAllpass retains its historical geometry and
     // ignores both geometry fields. Zero uses the public transmitted carrier spacing. Positive values fix
     // the selectivity scale in Hz independently of waveform rate. This is a
@@ -160,6 +165,11 @@ struct SelectiveModelConfig {
 };
 struct StreamChannelConfig {
     SimulationConfig effects{};
+    // Additional deterministic TX frequency slope in physical Hz/second,
+    // applied at emission before propagation. Allows zero-RF direct conversion
+    // to retain explicit frequency drift without an RF-ppm division by zero.
+    // Sampling-clock ppm remains constant; stochastic sample jitter is absent.
+    double tx_frequency_drift_hz_per_second = 0;
     // With physical effects.fhss, RF hops and dropout windows use the public
     // source calendar origin. Envelope-only paths retain capture-relative
     // dropout windows. RF dwell clocks remain independent of audio-clock ppm.
@@ -226,7 +236,7 @@ struct StreamChannelReport {
     // Simulation-model diagnostics, not receiver channel realizations. Exact
     // finite-teacher covariance at lag m is sum_k h[k]h[k+m]; empty when off.
     std::vector<double> path_gaussian_fir_coefficients;
-    // Absent for the exact Off/zero-spread-Doppler bypass.
+    // Absent when depths or resolved modulation rate disable the added stage.
     std::optional<SelectivePerturbationReport> selective_perturbation;
     bool gaussian_projection_supported = true;
     std::size_t working_bytes = 0;
