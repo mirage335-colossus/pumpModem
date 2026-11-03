@@ -1,0 +1,333 @@
+{
+  "scope": "null implementation comparison; receiver source modules unchanged versus fixed baseline; timings conditional on declared hardware/thread/software/model",
+  "runs": {
+    "ryzen-cost-guard": {
+      "total_wall_seconds": 410.5756882549904,
+      "backend_seconds": 406.84553536298336,
+      "status": "warning",
+      "complete_required_coverage": true,
+      "warnings": [
+        "broad-hf-timing: full-runtime performance comparison inconclusive",
+        "vlf-850-day: full-runtime performance comparison inconclusive",
+        "gaussian-multiblock: full-runtime comparison inconclusive"
+      ],
+      "failures": [],
+      "cases": {
+        "narrow-hf-tight": {
+          "precision": "fp32",
+          "gate": "pass",
+          "full_seconds_point": 0.2712032521565264,
+          "full_ratio_interval": [
+            0.9532964356426484,
+            1.0080414361768555
+          ]
+        },
+        "broad-hf-timing": {
+          "precision": "fp64",
+          "gate": "inconclusive",
+          "full_seconds_point": 11.27035810847424,
+          "full_ratio_interval": [
+            0.7385836101034366,
+            1.3480814805018515
+          ]
+        },
+        "hf30-fhss-missed": {
+          "precision": "fp32",
+          "gate": "pass",
+          "full_seconds_point": 0.2787659927056392,
+          "full_ratio_interval": [
+            0.7669789294353222,
+            1.1794686947989792
+          ]
+        },
+        "free-crystal": {
+          "precision": "fp64",
+          "gate": "pass",
+          "full_seconds_point": 20.577299695515997,
+          "full_ratio_interval": [
+            0.8230990867274484,
+            1.2968895019254072
+          ]
+        },
+        "vlf-850-day": {
+          "precision": "fp32",
+          "gate": "inconclusive",
+          "full_seconds_point": 1.6785342785148243,
+          "full_ratio_interval": [
+            0.7648040859347386,
+            1.3377095323298636
+          ]
+        },
+        "gaussian-multiblock": {
+          "precision": "fp32",
+          "gate": "inconclusive",
+          "full_seconds_point": 0.004152534425624513,
+          "full_ratio_interval": [
+            0.6854429479634151,
+            1.3213017448190743
+          ]
+        }
+      }
+    },
+    "ryzen-bounded": {
+      "total_wall_seconds": 346.47926953501883,
+      "backend_seconds": 342.58100094497786,
+      "status": "warning",
+      "complete_required_coverage": true,
+      "warnings": [
+        "broad-hf-timing: full-runtime performance comparison inconclusive",
+        "free-crystal: full-runtime performance comparison inconclusive",
+        "gaussian-multiblock: full-runtime comparison inconclusive"
+      ],
+      "failures": [],
+      "cases": {
+        "narrow-hf-tight": {
+          "precision": "fp32",
+          "gate": "pass",
+          "full_seconds_point": 0.31106184438242374,
+          "full_ratio_interval": [
+            0.8302378472761748,
+            1.230765882620789
+          ]
+        },
+        "broad-hf-timing": {
+          "precision": "fp64",
+          "gate": "inconclusive",
+          "full_seconds_point": 12.291920624364469,
+          "full_ratio_interval": [
+            0.5837087162816482,
+            1.793369924509726
+          ]
+        },
+        "hf30-fhss-missed": {
+          "precision": "fp32",
+          "gate": "pass",
+          "full_seconds_point": 0.30436667747884805,
+          "full_ratio_interval": [
+            0.8353095777432745,
+            1.1451488023106962
+          ]
+        },
+        "free-crystal": {
+          "precision": "fp32",
+          "gate": "inconclusive",
+          "full_seconds_point": 19.078000830229197,
+          "full_ratio_interval": [
+            0.6789901847025084,
+            1.4131444136098765
+          ]
+        },
+        "vlf-850-day": {
+          "precision": "fp32",
+          "gate": "pass",
+          "full_seconds_point": 1.946236591927075,
+          "full_ratio_interval": [
+            0.8939404604272952,
+            1.1366671784303357
+          ]
+        },
+        "gaussian-multiblock": {
+          "precision": "fp32",
+          "gate": "inconclusive",
+          "full_seconds_point": 0.005182620857210297,
+          "full_ratio_interval": [
+            0.8523538757619885,
+            1.365684417773117
+          ]
+        }
+      }
+    },
+    "epyc-cpu": {
+      "total_wall_seconds": 258.75637185096275,
+      "backend_seconds": 257.1574506700272,
+      "status": "warning",
+      "complete_required_coverage": true,
+      "warnings": [
+        "vlf-850-day: full-runtime performance comparison inconclusive"
+      ],
+      "failures": [],
+      "cases": {
+        "narrow-hf-tight": {
+          "precision": "fp32",
+          "gate": "pass",
+          "full_seconds_point": 0.2404441471231142,
+          "full_ratio_interval": [
+            0.7927960210289783,
+            1.270660104323637
+          ]
+        },
+        "broad-hf-timing": {
+          "precision": "fp32",
+          "gate": "pass",
+          "full_seconds_point": 9.706226337625225,
+          "full_ratio_interval": [
+            0.980773756975006,
+            1.0221357663230273
+          ]
+        },
+        "hf30-fhss-missed": {
+          "precision": "fp32",
+          "gate": "pass",
+          "full_seconds_point": 0.2153971860596034,
+          "full_ratio_interval": [
+            1.02426639668938,
+            1.0994733950827467
+          ]
+        },
+        "free-crystal": {
+          "precision": "fp32",
+          "gate": "pass",
+          "full_seconds_point": 16.330228008230513,
+          "full_ratio_interval": [
+            0.7920368723686487,
+            1.2632634561108154
+          ]
+        },
+        "vlf-850-day": {
+          "precision": "fp64",
+          "gate": "inconclusive",
+          "full_seconds_point": 2.849468479790488,
+          "full_ratio_interval": [
+            0.08868824990508822,
+            15.428254306609427
+          ]
+        },
+        "gaussian-multiblock": {
+          "precision": "fp64",
+          "gate": "pass",
+          "full_seconds_point": 0.003216540241347892,
+          "full_ratio_interval": [
+            0.9778588383266509,
+            1.0298008415195197
+          ]
+        }
+      }
+    },
+    "rtx-pro-6000": {
+      "total_wall_seconds": 298.9856398499105,
+      "backend_seconds": 297.07923641090747,
+      "status": "warning",
+      "complete_required_coverage": true,
+      "warnings": [
+        "broad-hf-timing: full-runtime performance comparison inconclusive",
+        "free-crystal: full-runtime performance comparison inconclusive",
+        "vlf-850-day: full-runtime performance comparison inconclusive"
+      ],
+      "failures": [],
+      "cases": {
+        "narrow-hf-tight": {
+          "precision": "fp32",
+          "gate": "pass",
+          "full_seconds_point": 0.24987054977756937,
+          "full_ratio_interval": [
+            0.9364600302889474,
+            0.9835358930607796
+          ]
+        },
+        "broad-hf-timing": {
+          "precision": "fp32",
+          "gate": "inconclusive",
+          "full_seconds_point": 10.169713110418009,
+          "full_ratio_interval": [
+            0.4599179540803782,
+            2.1950173693295922
+          ]
+        },
+        "hf30-fhss-missed": {
+          "precision": "fp32",
+          "gate": "pass",
+          "full_seconds_point": 0.20776187275706842,
+          "full_ratio_interval": [
+            0.5496243169523896,
+            1.2823397281314874
+          ]
+        },
+        "free-crystal": {
+          "precision": "fp32",
+          "gate": "inconclusive",
+          "full_seconds_point": 14.896493483300384,
+          "full_ratio_interval": [
+            0.6100502808156808,
+            1.6645944669256056
+          ]
+        },
+        "vlf-850-day": {
+          "precision": "fp32",
+          "gate": "inconclusive",
+          "full_seconds_point": 1.2574145251567066,
+          "full_ratio_interval": [
+            0.33262277240474736,
+            2.5227982300437595
+          ]
+        },
+        "gaussian-multiblock": {
+          "precision": "fp64",
+          "gate": "pass",
+          "full_seconds_point": 0.0039650435958589825,
+          "full_ratio_interval": [
+            0.4019451758761056,
+            1.1936782292261536
+          ]
+        }
+      }
+    }
+  },
+  "matched_workloads": [
+    {
+      "id": "narrow-hf-tight",
+      "cpu_policy": "fp32",
+      "gpu_policy": "fp32",
+      "cpu_full_seconds": 0.2404441471231142,
+      "gpu_full_seconds": 0.24987054977756937,
+      "observed_cpu_over_gpu_ratio": 0.9622748552686726,
+      "naive_gemm_scaled_gpu_seconds": 0.0008384161581421174,
+      "naive_underprediction_factor": 298.02687764423376,
+      "transfer_status": "rejected illustrative whole-pipeline GEMM scaling; no confidence-qualified transfer or matched-backend speedup claim"
+    },
+    {
+      "id": "broad-hf-timing",
+      "cpu_policy": "fp32",
+      "gpu_policy": "fp32",
+      "cpu_full_seconds": 9.706226337625225,
+      "gpu_full_seconds": 10.169713110418009,
+      "observed_cpu_over_gpu_ratio": 0.9544247937222554,
+      "naive_gemm_scaled_gpu_seconds": 0.03384510329495674,
+      "naive_underprediction_factor": 300.47812298842643,
+      "transfer_status": "rejected illustrative whole-pipeline GEMM scaling; no confidence-qualified transfer or matched-backend speedup claim"
+    },
+    {
+      "id": "hf30-fhss-missed",
+      "cpu_policy": "fp32",
+      "gpu_policy": "fp32",
+      "cpu_full_seconds": 0.2153971860596034,
+      "gpu_full_seconds": 0.20776187275706842,
+      "observed_cpu_over_gpu_ratio": 1.036750310349112,
+      "naive_gemm_scaled_gpu_seconds": 0.0007510787156663333,
+      "naive_underprediction_factor": 276.61797415301356,
+      "transfer_status": "rejected illustrative whole-pipeline GEMM scaling; no confidence-qualified transfer or matched-backend speedup claim"
+    },
+    {
+      "id": "free-crystal",
+      "cpu_policy": "fp32",
+      "gpu_policy": "fp32",
+      "cpu_full_seconds": 16.330228008230513,
+      "gpu_full_seconds": 14.896493483300384,
+      "observed_cpu_over_gpu_ratio": 1.0962464439391328,
+      "naive_gemm_scaled_gpu_seconds": 0.056942650474394695,
+      "naive_underprediction_factor": 261.6052003058563,
+      "transfer_status": "rejected illustrative whole-pipeline GEMM scaling; no confidence-qualified transfer or matched-backend speedup claim"
+    },
+    {
+      "id": "vlf-850-day",
+      "cpu_policy": "fp64",
+      "gpu_policy": "fp32",
+      "cpu_full_seconds": 2.849468479790488,
+      "gpu_full_seconds": 1.2574145251567066,
+      "observed_cpu_over_gpu_ratio": 2.2661329440546827,
+      "naive_gemm_scaled_gpu_seconds": 0.009935947471201054,
+      "naive_underprediction_factor": 126.55205040095795,
+      "transfer_status": "rejected illustrative whole-pipeline GEMM scaling; no confidence-qualified transfer or matched-backend speedup claim"
+    }
+  ],
+  "measured_gemm_gpu_over_cpu_ratio": 286.7837705512794
+}

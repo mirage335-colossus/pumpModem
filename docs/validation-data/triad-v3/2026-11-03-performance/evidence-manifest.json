@@ -1,0 +1,74 @@
+{
+  "ryzen-cost-guard": {
+    "file": "ryzen-cost-guard.json.gz",
+    "original_report_sha256": "8a40170422c2432a6e1e813c949a846f3373190ebc5c7b2efd9c6f7e1b9f222b",
+    "retained_gzip_sha256": "3dd9995ea30ee4acbfe6683ecb920bf8c942573ad4e7d29d2d8e64980512b630",
+    "sanitization": "repository/reference paths and uname hostname normalized; absolute monotonic deadline removed; numerical evidence and source hashes retained"
+  },
+  "avx2-dispatch": {
+    "file": "avx2-dispatch.json.gz",
+    "original_report_sha256": "6a926f13c5358918e8d1bdc2b5f69a03ca527903e0d3621e9fcad913df50bcc5",
+    "retained_gzip_sha256": "b7540a8afb1d62a7578c4e2180de68ed3ba99e0d6a2c5c9ce416a147ad519e69",
+    "sanitization": "repository/reference paths and uname hostname normalized; absolute monotonic deadline removed; numerical evidence and source hashes retained"
+  },
+  "ryzen-initial": {
+    "file": "ryzen-initial.json.gz",
+    "original_report_sha256": "bab55099e7b7551183559c98edf3c20cb40b8f94b522d9d09f5e18d5f1346f1c",
+    "retained_gzip_sha256": "18a45cede8d26a9a4b77dc6649e7c43a84f6aba66481f1ad04b6294c43178296",
+    "sanitization": "repository/reference paths and uname hostname normalized; absolute monotonic deadline removed; numerical evidence and source hashes retained"
+  },
+  "ryzen-full-retry": {
+    "file": "ryzen-full-retry.json.gz",
+    "original_report_sha256": "063eed4fbdb3a7ddcb48b5a6971b5db8f9cac2b394b0673752020bb25d5a65b8",
+    "retained_gzip_sha256": "a6ffc6884011e9ab6bf30fc1f43678d9eb86be2162644eb18e3e20e761f84c76",
+    "sanitization": "repository/reference paths and uname hostname normalized; absolute monotonic deadline removed; numerical evidence and source hashes retained"
+  },
+  "ryzen-bounded": {
+    "file": "ryzen-bounded.json.gz",
+    "original_report_sha256": "8d566093f2efcf7de3701da1f46401ad7b17086427b7362fcd0c03f1f541ad89",
+    "retained_gzip_sha256": "6fa05de17c89e92951e0ba48983632a77c600cc10b74a0723aac12185f62ad38",
+    "sanitization": "repository/reference paths and uname hostname normalized; absolute monotonic deadline removed; numerical evidence and source hashes retained"
+  },
+  "epyc-cpu": {
+    "file": "epyc-cpu.json.gz",
+    "original_report_sha256": "eba5c2f124b37701bbf8fa3236f89cbcf1c4815725e9aab31dde9c38ceac0d49",
+    "retained_gzip_sha256": "d78e4cc2971824a23e6a05caaab407f712761e7910d7f9c7e7965f613c7af174",
+    "sanitization": "repository/reference paths and uname hostname normalized; absolute monotonic deadline removed; numerical evidence and source hashes retained"
+  },
+  "rtx-pro-6000": {
+    "file": "rtx-pro-6000.json.gz",
+    "original_report_sha256": "026541b33be7f98b2ed82c9ad4d4b17b36dd82b5558ae45ff02133368eceb4ac",
+    "retained_gzip_sha256": "454d451176b9f06553cdb2463643b013433a6feda83616222c0ba519823f92b0",
+    "sanitization": "repository/reference paths and uname hostname normalized; absolute monotonic deadline removed; numerical evidence and source hashes retained"
+  },
+  "gpu-fp8-rejection": {
+    "file": "gpu-fp8-rejection.json.gz",
+    "original_report_sha256": "4385115bea2db6ca660f550d0cb3dcca96d20991e8d3ee46c9e95e9ad95cc545",
+    "retained_gzip_sha256": "3a7f0c11e16f60909d3b5fcbbfec9f08df99b8ad5f6db9b2a6543940c08c1616",
+    "sanitization": "repository/reference paths and uname hostname normalized; absolute monotonic deadline removed; numerical evidence and source hashes retained"
+  },
+  "ryzen-12-thread-hardware": {
+    "file": "ryzen-12-thread-hardware.json.gz",
+    "original_report_sha256": "5364bc929b487898cb763f5193679938ac7915478c0f25f89324656e12873a94",
+    "retained_gzip_sha256": "b04afed0a3646bc7b616e16b45fc5d7dd043c9dae8931a55ee48bd02b78cbece",
+    "sanitization": "repository/reference paths and uname hostname normalized; absolute monotonic deadline removed; numerical evidence and source hashes retained"
+  },
+  "failed-initial-model": {
+    "file": "failed-initial-model.json.gz",
+    "original_report_sha256": "a0f98c80279a455eaec0f049a690117b051463dc1d15bae46811f9490a1c9c18",
+    "retained_gzip_sha256": "b32a2a96e33eed0f1fcf3881ae81e8a1e6724409449a479bdee3dc828c2a443c",
+    "sanitization": "repository/reference paths and uname hostname normalized; absolute monotonic deadline removed; numerical evidence and source hashes retained"
+  },
+  "batch-size-diagnostic": {
+    "file": "batch-size-diagnostic.json.gz",
+    "original_report_sha256": "f6436610b558977a8a39c6a42914c3c6bd036161de89d5c6580e8e2d4116c3dd",
+    "retained_gzip_sha256": "d20e80d219b7900864aa6754102098412b908c1cb7519dfbc9c2a1da71bde1e9",
+    "sanitization": "repository/reference paths and uname hostname normalized; absolute monotonic deadline removed; numerical evidence and source hashes retained"
+  },
+  "deliberate-slowdown-control": {
+    "file": "deliberate-slowdown-control.json.gz",
+    "original_report_sha256": "019c320118247ecc8fd373915239d955e63721202e29af1d1ae4d34f2cde2b16",
+    "retained_gzip_sha256": "605ff40473c6a71bd3b03555f66135ea0fe2c610e004ac4316c91ba0bed0c4b7",
+    "sanitization": "repository/reference paths and uname hostname normalized; absolute monotonic deadline removed; numerical evidence and source hashes retained"
+  }
+}

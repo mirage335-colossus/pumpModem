@@ -1,0 +1,39 @@
+{
+  "receiver_baseline_commit": "242ea15fa032ee117b9113a7f3cd07cc6e9f0254",
+  "final_harness_files": {
+    "tools/triad-performance-cases.json": "4fe9dfe1ea4f03ea2f2a276cac022597ebdb61dc1fb71c15056b6c6f79d03664",
+    "tools/triad-performance.py": "ac34cad83e1b8e1c3913acfe7cc2eae9b16c81f8fa09c176de26027591ef1a05",
+    "tools/triad_perf_cases.py": "4442a1249fca72deba418d33d72e7a784e26255a9fdaa1dcb5b36938542308e7",
+    "tools/triad_perf_hardware.py": "3af35541873521807f18c8b0b90ef7c40294875d0435e6c8ea48da0660bb4411",
+    "tools/triad_perf_receiver.py": "fd2fd7109e9dfcd8fe984fc526995a65b4517335cf6d80428a749f13994fcb34",
+    "tools/triad_perf_statistics.py": "64ce887c8c3af9144f1d94adc712fa784bbca17cfa86dcbfe1099dbb2efed64b",
+    "tools/triad_perf_telemetry.py": "3646802429c1762a661620382ff111f7629640f53e2c3ee015e50d56f6e7bc4b",
+    "tools/triad_tensor_native.py": "0ed9242733ae564aaadf7548a4391ac833aaffd27097e2a966c9931aab990c5e"
+  },
+  "snapshots": {
+    "measured-bounded-harness.tar.gz": "ad1ece59cd14d2e8fc49fa9134f7c80fd323ee19c231f1d28a8fcde269a4f220",
+    "measured-cost-guard-harness.tar.gz": "464d738e27e95604da6870cda3a5e2e35c3d3f49dcd04740919ba0116c5bc529"
+  },
+  "post_campaign_controls": "Final edits after timing add selected-device source metadata and hardware health screens; focused tests cover these. Exact measured harness snapshots retain the measured variants. Final whitespace-only cleanup leaves Python syntax trees unchanged.",
+  "checks": {
+    "focused_unit_tests": 58,
+    "status": "passed",
+    "seconds": 9.697,
+    "hosted_ci_executed": false,
+    "ordinary_receiver_regressions_executed": false,
+    "yaml_workflows_parsed": 4,
+    "final_harness_digests_match": true,
+    "measured_archives_match_report_digests": true,
+    "local_documentation_links": "passed",
+    "local_avx2_preflight": {
+      "aten": "AVX2",
+      "numpy_selected": [
+        "X86_V3",
+        "baseline(X86_V2)"
+      ],
+      "scope": "observed dispatch check; not full ISA quarantine or old CPU emulation"
+    },
+    "independent_review": "no remaining concrete blocker"
+  },
+  "unchanged_support_source": "tools/triad_tensor_native.py equals fixed baseline byte-for-byte; its hash is included in final source guard"
+}

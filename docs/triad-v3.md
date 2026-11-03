@@ -4,6 +4,11 @@
 [three-carrier development workflow](triad-development-workflow.md) for efficient
 simulation recipes, evidence-backed receiver choices and scope-based validation.
 Start with its small diagnostics before reproducing a full dated campaign.
+For computational regressions, use the [bounded performance suite](triad-performance.md).
+It preserves full sample/timing geometry while abbreviating CFO repetitions,
+checks the resulting runtime model on held-out work, and keeps hardware health
+separate from receiver efficiency. Its scope is the isolated Python FFT and
+Gaussian helpers, not ordinary or native receiver throughput qualification.
 
 **Current configuration and failure map:** the
 [broad study](validation-data/triad-v3/2026-11-03-broad/README.md) covers the requested

@@ -152,6 +152,7 @@ jobs:
           python3 tests/test_package_wasm.py
           python3 tests/test_wasm_sdk_release.py
           python3 tests/test_verify_latest_release.py
+          python3 tests/test_triad_performance_workflow.py
       - name: Record the remaining candidate gate
         run: echo 'Automatic checks are focused feedback only. Completed runtime changes require explicit ci.yml devfast=false, applicable SDK qualification, and release certification when publishing.' >> "$GITHUB_STEP_SUMMARY"
 
@@ -175,6 +176,13 @@ jobs:
     with:
       linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
       windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
+
+  triad-performance:
+    if: ${{ !inputs.devfast }}
+    name: Isolated three-carrier performance regression
+    uses: ./.github/workflows/triad-performance.yml
+    with:
+      candidate_ref: ${{ github.sha }}
 
   certification-diagnostic:
     if: github.event_name == 'workflow_dispatch' && inputs.devfast && (inputs.diagnostic == 'certification' || inputs.diagnostic == 'windows-certification' || inputs.diagnostic == 'arm-rev-adapter' || inputs.diagnostic == 'sdk-live')

@@ -215,6 +215,7 @@ jobs:
           python3 tests/test_sdk_release.py
           python3 tests/test_release_rev_tools.py
           python3 tests/test_windows_base.py
+          python3 tests/test_triad_performance_workflow.py
 
   metadata:
     if: github.event_name == 'workflow_dispatch' && !inputs.source_release
@@ -225,6 +226,7 @@ jobs:
       contents: write
     outputs:
       tag: ${{ steps.meta.outputs.tag }}
+      source_sha: ${{ steps.meta.outputs.source_sha }}
       metadata_json: ${{ steps.meta.outputs.metadata_json }}
       linux_matrix: ${{ steps.meta.outputs.linux_matrix }}
       windows_matrix: ${{ steps.meta.outputs.windows_matrix }}
@@ -278,7 +280,7 @@ jobs:
 
   linux:
     name: Linux ${{ matrix.arch }} / ${{ matrix.backend }}
-    needs: metadata
+    needs: [metadata, triad-performance]
     runs-on: ${{ matrix.arch == 'aarch64' && (inputs.arm_runner || 'ubuntu-24.04-arm') || inputs.linux_runner || 'ubuntu-24.04' }}
     container: ${{ matrix.image }}
     timeout-minutes: 45
@@ -364,7 +366,7 @@ jobs:
 
   windows:
     name: Windows x64 / ${{ matrix.backend }}
-    needs: metadata
+    needs: [metadata, triad-performance]
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.metadata.outputs.windows_matrix) }}
@@ -412,17 +414,25 @@ jobs:
 
   wasm:
     name: Platform-independent HTML application
-    needs: metadata
+    needs: [metadata, triad-performance]
     uses: ./.github/workflows/wasm-application.yml
     with:
       linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
       scope: packages
       artifact_name: DataPump-Wasm
 
+  triad-performance:
+    if: github.event_name == 'workflow_dispatch' && !inputs.source_release && inputs.package_check == 'none'
+    name: Qualify exact application source before release builds
+    needs: metadata
+    uses: ./.github/workflows/triad-performance.yml
+    with:
+      candidate_ref: ${{ needs.metadata.outputs.source_sha }}
+
   publish:
     outputs:
       release_tag: ${{ needs.metadata.outputs.tag }}
-    needs: [metadata, linux, windows, wasm]
+    needs: [metadata, triad-performance, linux, windows, wasm]
     runs-on: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
     timeout-minutes: 15
     permissions:

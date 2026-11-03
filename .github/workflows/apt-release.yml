@@ -19,6 +19,10 @@ on:
       arm_runner:
         type: string
         default: ubuntu-24.04-arm
+    outputs:
+      source_sha:
+        description: 'Verified application source SHA recorded in the unchanged source release assets'
+        value: ${{ jobs.package.outputs.source_sha }}
     secrets:
       DATAPUMP_APT_SIGNING_KEY:
         required: true
@@ -64,6 +68,7 @@ jobs:
     outputs:
       tag: ${{ steps.package.outputs.tag }}
       inventory_sha256: ${{ steps.package.outputs.inventory_sha256 }}
+      source_sha: ${{ steps.package.outputs.source_sha }}
     env:
       GH_TOKEN: ${{ github.token }}
       SOURCE_TAG: ${{ inputs.source_tag }}
@@ -82,6 +87,7 @@ jobs:
           python3 tests/test_release.py
           python3 tests/test_release_dependencies.py
           python3 tests/test_certify_release.py
+          python3 tests/test_triad_performance_workflow.py
       - name: Create a new experiment with unchanged archive bytes and signed distribution update channels
         id: package
         env:
@@ -106,10 +112,17 @@ jobs:
       - name: Explain release status and next validation stage
         env:
           RELEASE_TAG: ${{ steps.package.outputs.tag }}
+          SOURCE_SHA: ${{ steps.package.outputs.source_sha }}
         run: |
           {
             printf 'Release: [%s](https://github.com/%s/releases/tag/%s)\n\n' "$RELEASE_TAG" "$GITHUB_REPOSITORY" "$RELEASE_TAG"
-            echo 'Portable archive bytes were reused unchanged; no application or SDK was rebuilt.'
+            echo 'The verified application archives are reused byte-for-byte; this run does not rebuild the application or SDK.'
+            echo 'Triad receiver performance was not evaluated in this repackage run, so this report makes no performance qualification claim.'
+            if [[ "$SOURCE_SHA" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]]; then
+              printf 'Application source commit recorded in the verified source release: `%s`.\n' "$SOURCE_SHA"
+            else
+              echo 'Application source commit: unavailable in the repackage output.'
+            fi
             echo 'This is an experiment and is never marked Latest. Published experiments receive Debian/Ubuntu APT and Arch/Gentoo repository installation checks below.'
             echo 'Full hash-bound release certification remains a separate workflow; these packaging checks do not certify the application.'
           } >> "$GITHUB_STEP_SUMMARY"

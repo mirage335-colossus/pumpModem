@@ -463,6 +463,16 @@ audio. `./build.sh test triad --cli` builds the isolated group's prerequisites
 and runs its registered checks; optional Python research tools also have their
 own focused tests that are not all registered in this group.
 
+The [isolated receiver performance suite](triad-performance.md) runs in a
+separate normal-CI job unless `devfast` is selected. It uses five-second hardware
+probes and paired abbreviated receiver measurements, preserving the full sample
+and timing geometry and validating full-runtime estimates on held-out work.
+Allow up to ten minutes of measurements per backend, with five minutes preferred;
+dependency setup and the narrow `triad_long` build are separate. This job is not
+repeated in every CTest/sanitizer leg and does not qualify ordinary or native
+Robust receiver throughput. See the guide for warning-versus-failure semantics
+and the unchanged-archive repackaging exemption.
+
 A dated Monte Carlo, GPU or multi-day sensitivity campaign is not automatically
 a regression prerequisite for an isolated study edit. Reuse unchanged evidence,
 run the affected focused checks, and add fresh sampled observations or long-span

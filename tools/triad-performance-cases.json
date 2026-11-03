@@ -1,0 +1,106 @@
+{
+  "schema": "triad-performance-cases-v1",
+  "fixture_contract": "native-triad-long-export-sampled-v1",
+  "source_plans": {
+    "physical": "../docs/validation-data/triad-v3/2026-11-03-fft-timing/physical/reproduction/preflight-003/plan.json",
+    "long": "../docs/validation-data/triad-v3/2026-11-03-fft-timing/physical/reproduction/long-preflight-001/plan.json"
+  },
+  "limits": {
+    "max_samples": 1000000,
+    "max_groups": 1000000,
+    "max_frequency_offsets": 4096,
+    "memory_mib": 1024,
+    "export_max_mib": 512,
+    "subprocess_timeout_seconds": 60,
+    "frequency_loss_db": 0.5
+  },
+  "profiles": {
+    "smoke": [
+      "narrow-hf-tight"
+    ],
+    "ci": [
+      "narrow-hf-tight",
+      "broad-hf-timing",
+      "hf30-fhss-missed",
+      "free-crystal",
+      "vlf-850-day"
+    ],
+    "extended": [
+      "narrow-hf-tight",
+      "broad-hf-timing",
+      "hf30-fhss-missed",
+      "free-crystal",
+      "microwave-ocxo",
+      "vlf-850-day"
+    ]
+  },
+  "cases": [
+    {
+      "id": "narrow-hf-tight",
+      "source_plan": "physical",
+      "source_case": "01-anchor",
+      "source_trial": 0,
+      "scope": "8-second HF narrow timing prior; GPSDO TCXO / IC-7100; sub-9 moderate two-ray; Each 1% selective modulation; actual sampled channel and noise",
+      "group_tile": 512
+    },
+    {
+      "id": "broad-hf-timing",
+      "source_plan": "physical",
+      "source_case": "01-anchor",
+      "source_trial": 0,
+      "native_overrides": [
+        "--arrival-prior-seconds",
+        "-7.035",
+        "7.035",
+        "--start",
+        "-7.035",
+        "-7.035",
+        "1"
+      ],
+      "scope": "Same HF waveform under explicit +/-7.035-second physical arrival uncertainty; complete integer lag lattice",
+      "group_tile": 2048,
+      "training_counts": [
+        3,
+        9
+      ],
+      "holdout_count": 17,
+      "full_holdout_first_repeat": true
+    },
+    {
+      "id": "hf30-fhss-missed",
+      "source_plan": "physical",
+      "source_case": "16-miss-middle-scattered",
+      "source_trial": 0,
+      "native_overrides": [
+        "--selective-perturbation",
+        "each-65"
+      ],
+      "scope": "HF worst-case 30-Hz ray separation, 7-ms delay, Each 65%, FHSS with ten actual missed dwell masks",
+      "group_tile": 512
+    },
+    {
+      "id": "free-crystal",
+      "source_plan": "physical",
+      "source_case": "12-free-cb",
+      "source_trial": 0,
+      "scope": "Free-running TX/RX crystal and CB SSB RF oscillator bounds; full CFO grid derived from current native configure metadata",
+      "group_tile": 512
+    },
+    {
+      "id": "microwave-ocxo",
+      "source_plan": "physical",
+      "source_case": "07-microwave-ocxo",
+      "source_trial": 0,
+      "scope": "5.8-GHz translated channel, OCXO, Aurora worst-case delay/Doppler and Each 25% modulation",
+      "group_tile": 512
+    },
+    {
+      "id": "vlf-850-day",
+      "source_plan": "long",
+      "source_case": "long850-each65",
+      "source_trial": 0,
+      "scope": "Actual 0.001-Hz / 1-of-128-Hz sample point model, -60 dB-Hz, GPSDO OCXO, 0.001-Hz ray separation and Each 65%; full 850-day source duration and natural channel tails",
+      "group_tile": 512
+    }
+  ]
+}
