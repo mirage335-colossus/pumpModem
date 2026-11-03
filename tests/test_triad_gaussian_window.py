@@ -69,7 +69,8 @@ class GaussianWindowTests(unittest.TestCase):
         for width in (0., .001, .02):
             plan = prepare_windowed_gaussian(G, time, doppler_width_hz=width,
                                              window_blocks=3, stationary_power=powers)
-            expected = dense_raw_oracle(A, y, time, width, 3, powers, scales)
+            expected = dense_raw_oracle(A, y, time, width, 3, powers,
+                                        scales * plan.whitening_variance_inflation)
             actual = plan.score(r, variance_scale=scales)
             np.testing.assert_allclose(actual.numpy(), expected, rtol=2e-11, atol=2e-11)
             scaled = plan.score(r / scales[None, :, :, None], variance_scale=scales,
@@ -81,7 +82,8 @@ class GaussianWindowTests(unittest.TestCase):
         plan = prepare_windowed_gaussian(G, time, doppler_width_hz=0, window_blocks=6)
         model = GaussianStateFilter(GaussianPrior(coherence_seconds=math.inf))
         for j in range(len(time)):
-            model.update(torch.from_numpy(r[j]), torch.from_numpy(G[j]),
+            model.update(torch.from_numpy(r[j] / plan.whitening_variance_inflation),
+                         torch.from_numpy(G[j] / plan.whitening_variance_inflation),
                          0. if j == 0 else time[j] - time[j-1])
         np.testing.assert_allclose(plan.score(r).numpy(), model.finish().numpy(), atol=2e-11, rtol=2e-11)
 
@@ -136,7 +138,8 @@ class GaussianWindowTests(unittest.TestCase):
                 real_solves = sum(call.args[0].ndim == 2 and np.isrealobj(call.args[0])
                                   for call in eig.call_args_list)
                 self.assertEqual(real_solves, prior_solves)
-                expected = dense_raw_oracle(A, y, centers, 3, 3, (.7, .3), 1.3)
+                expected = dense_raw_oracle(A, y, centers, 3, 3, (.7, .3),
+                                            1.3 * plan.whitening_variance_inflation)
                 np.testing.assert_allclose(plan.score(r, variance_scale=1.3).numpy(),
                                            expected, rtol=2e-11, atol=2e-11)
 
@@ -148,7 +151,8 @@ class GaussianWindowTests(unittest.TestCase):
                 with self.subTest(powers=powers, width=width):
                     plan = prepare_windowed_gaussian(G, centers, doppler_width_hz=width,
                                                      window_blocks=3, stationary_power=powers)
-                    expected = dense_raw_oracle(A, y, centers, width, 3, powers, 1.)
+                    expected = dense_raw_oracle(A, y, centers, width, 3, powers,
+                                                plan.whitening_variance_inflation)
                     np.testing.assert_allclose(plan.score(r).numpy(), expected, rtol=2e-11, atol=2e-11)
                     # Separate construction cannot reuse a preceding window's
                     # factor. Whole-array versus per-window Gram repair may
@@ -189,6 +193,81 @@ class GaussianWindowTests(unittest.TestCase):
         conservative = plan.score(r, variance_scale=1.8).exp().mean(0).numpy()
         self.assertTrue(np.all(conservative <= 1.005), conservative)
         # This finite moment check is a diagnostic, not a rare-tail certificate.
+
+    def test_static_extreme_noise_scales_match_raw_thin_svd(self):
+        # At B=0 the exact sample-domain alternative has only two tap modes.
+        # Numerical positive eigenvalues of a rank-two temporal covariance must
+        # not create additional evidence when the noise is extremely small.
+        A, y, G, r, time = fixture(blocks=16, trials=5)
+        powers = np.asarray([.7, .3])
+        model = prepare_windowed_gaussian(G, time, doppler_width_hz=0,
+                                         window_blocks=16, stationary_power=powers)
+        self.assertEqual(model.maximum_window_rank, 2)
+        for alpha in (1e-20, 1., 1e20):
+            raw = y * math.sqrt(alpha)
+            correlations = r * math.sqrt(alpha)
+            expected = np.empty((y.shape[1], A.shape[1]))
+            for candidate in range(A.shape[1]):
+                design = A[:, candidate].reshape(-1, 2) * np.sqrt(powers)
+                u, singular, _ = np.linalg.svd(design, full_matrices=False)
+                projected = raw.transpose(1, 0, 2).reshape(y.shape[1], -1) @ u.conj()
+                effective = alpha * model.whitening_variance_inflation
+                energy = abs(projected / math.sqrt(effective))**2
+                lam = singular**2
+                expected[:, candidate] = (energy * (lam / (effective + lam))).sum(-1) - np.log1p(lam / effective).sum()
+            for precision, tolerance in (("fp64", 2e-10), ("fp32", 2e-5)):
+                for scaled in (False, True):
+                    observed = correlations / alpha if scaled else correlations
+                    actual = model.score(observed, variance_scale=alpha,
+                                         correlations_scaled=scaled, precision=precision).numpy()
+                    np.testing.assert_allclose(actual, expected, atol=tolerance, rtol=tolerance)
+
+    def test_small_positive_width_extreme_noise_is_a_contraction(self):
+        A, y, G, r, time = fixture(blocks=16, trials=8)
+        # Both scales of tiny positive temporal eigenvalues occurred in the
+        # failing real null capture. This bound is in sample space and does not
+        # duplicate the receiver's whitening/eigensolver implementation.
+        for width in (1e-12, 1e-8, .001):
+            model = prepare_windowed_gaussian(G, time, doppler_width_hz=width,
+                                             window_blocks=16)
+            for alpha in (1e-20, 1., 1e20):
+                determinant = sum(np.log1p(w.eigenvalues / alpha).sum(-1) for w in model._windows)
+                raw_energy = np.sum(abs(y)**2, axis=(0, 2))[:, None]
+                bound = raw_energy - determinant[None]
+                reference = model.score(r * math.sqrt(alpha), variance_scale=alpha).numpy()
+                self.assertTrue(np.all(reference <= bound + 2e-8))
+                fp32 = model.score(r / math.sqrt(alpha), variance_scale=alpha,
+                                   correlations_scaled=True, precision="fp32").numpy()
+                np.testing.assert_allclose(fp32, reference, atol=3e-5, rtol=3e-6)
+
+    def test_observable_rank_policy_handles_null_and_boundary_modes(self):
+        rng = np.random.default_rng(774)
+        # A non-axis-aligned exact null checks roundoff leakage after whitening;
+        # the two nonzero ratios bracket the declared observation-rank cutoff.
+        unitary = np.asarray([[1, 1j], [1j, 1]], complex) / math.sqrt(2)
+        for ratio, expected_rank in ((0., 1), (5e-11, 1), (2e-10, 2)):
+            A = np.diag(np.sqrt([1., ratio])) @ unitary.conj().T
+            grams = np.tile((A.conj().T @ A)[None, None], (8, 1, 1, 1))
+            y = cn(rng, (8, 4, 2))
+            correlations = np.einsum("ij,btj->bti", A.conj().T, y)[:, :, None]
+            for width in (0., 1e-8):
+                model = prepare_windowed_gaussian(grams, np.arange(8.),
+                    doppler_width_hz=width, window_blocks=8)
+                self.assertEqual(model.observable_rank_min, expected_rank)
+                self.assertEqual(model.observable_rank_max, expected_rank)
+                self.assertLessEqual(model.maximum_relative_discarded_gram_trace, 1e-10)
+                covariance = model._whitener @ grams @ model._whitener.conj().swapaxes(-1, -2)
+                self.assertLessEqual(float(np.linalg.eigvalsh(covariance).max()), 1.)
+                self.assertGreaterEqual(model.whitening_variance_inflation, 1.)
+                alpha = 1e-20
+                scores = model.score(correlations * math.sqrt(alpha), variance_scale=alpha,
+                                     precision="fp32").numpy()
+                self.assertTrue(np.isfinite(scores).all())
+                self.assertTrue(np.all(scores < 0), scores)
+        zero = prepare_windowed_gaussian(np.zeros_like(grams), np.arange(8.),
+                                         doppler_width_hz=1e-8, window_blocks=8)
+        np.testing.assert_array_equal(zero.score(np.zeros_like(correlations), variance_scale=1e-20), 0.)
+        self.assertEqual(zero.observable_rank_max, 0)
 
     def test_input_failures_and_memory_preflight(self):
         _, _, G, r, time = fixture()

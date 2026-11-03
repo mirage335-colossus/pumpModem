@@ -369,6 +369,11 @@ def score_workspace(workspace, config):
     ranks_all = np.empty((workspace.groups,d+1),np.int64)
     elapsed = dict(read_reblock_seconds=0.,residual_calibration_seconds=0.,factor_preparation_seconds=0.,score_seconds=0.)
     maximum_factor_bytes = 0
+    observable_rank_tolerance = None
+    window_numerics = dict(whitening_variance_inflation=1.,
+                           maximum_relative_discarded_gram_trace=0.,
+                           maximum_whitening_covariance_error=0.,
+                           maximum_mode_orthogonality_error=0.)
     maximum_array_bound = base_bound
     for first in range(0,workspace.groups,tile):
         stop = min(first+tile,workspace.groups)
@@ -387,6 +392,9 @@ def score_workspace(workspace, config):
             stationary_power=config.stationary_power,memory_limit_bytes=config.memory_limit_bytes-base_bound)
         elapsed["factor_preparation_seconds"] += time.perf_counter()-mark
         maximum_factor_bytes = max(maximum_factor_bytes,plan.owned_factor_bytes)
+        observable_rank_tolerance = plan.relative_tolerance
+        for name in window_numerics:
+            window_numerics[name] = max(window_numerics[name],getattr(plan,name))
         maximum_array_bound = max(maximum_array_bound,base_bound+plan.preparation_array_bound_bytes)
         if config.device.startswith("cuda"):
             torch.cuda.synchronize(config.device)
@@ -424,8 +432,12 @@ def score_workspace(workspace, config):
             "window_blocks":window_blocks,"nominal_window_seconds":window_blocks*workspace.block_samples*config.reblock/workspace.sample_rate,
             "public_group_parameters":workspace.sync_keys,
             "mixture":"uniform over every fixed synchronization group, separately for each bit; no pruning"},
-        "arithmetic":{"bulk":config.precision,"device":config.device,"preparation":"CPU complex128/float64 rank projection and covariance eigensolves",
+        "arithmetic":{"bulk":config.precision,"device":config.device,"preparation":"CPU complex128/float64 rank projection, observation whitening, prior roots and rectangular SVD",
+            "window_whitening":"FP64 small block whitening/scaling on selected device before bounded bulk mode GEMM",
             "finish":"FP64 residual pooling, variance quantiles, likelihood weights/logdet/evidence and bit mixtures","tf32_allowed":False},
+        "window_numerics":dict(window_numerics,
+            observable_relative_rank_tolerance=observable_rank_tolerance,
+            scope="fixed observation-mode projection; discarded Gram trace is information loss, not a noise variance floor; residual checks are numerical diagnostics, not an IEEE rare-event proof"),
         "resources":{"group_tile":tile,"explicit_array_bound_bytes":maximum_array_bound,"maximum_retained_factor_bytes":maximum_factor_bytes,
             "all_group_retained_array_bytes":all_group_bytes,
             "memory_limit_bytes":config.memory_limit_bytes,"scope":"explicit arrays; mapped files, parsed JSON/report objects, framework allocator and solver internals are not whole-process memory"},
@@ -440,7 +452,7 @@ def parse_args(argv=None):
     parser.add_argument("--mode",choices=("actual-noisy",),default="actual-noisy")
     parser.add_argument("--doppler-width-hz",type=float,required=True)
     window=parser.add_mutually_exclusive_group(required=True)
-    window.add_argument("--window-blocks",type=int,default=16)
+    window.add_argument("--window-blocks",type=int)
     window.add_argument("--window-seconds",type=float)
     parser.add_argument("--reblock",type=int,default=1)
     parser.add_argument("--reference-variance",type=float,default=1.)
@@ -459,7 +471,13 @@ def parse_args(argv=None):
     parser.add_argument("--evaluate-simulation",action="store_true",help="append truth/control outcome after receiver decisions")
     parser.add_argument("--output",type=Path)
     parser.add_argument("--scores-output",type=Path)
-    return parser.parse_args(argv)
+    args=parser.parse_args(argv)
+    # A default equal to an explicitly supplied small integer is not counted
+    # as selected by some argparse versions for a required exclusive group.
+    # Apply the seconds-mode placeholder only after checking the explicit choice.
+    if args.window_blocks is None:
+        args.window_blocks=16
+    return args
 
 
 def main(argv=None):

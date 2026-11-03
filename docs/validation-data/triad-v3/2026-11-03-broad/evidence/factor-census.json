@@ -1,0 +1,521 @@
+{
+  "assumptions": {
+    "diurnal_phase_amplitude_radians": 0,
+    "gaussian_doppler_width_hz": 0,
+    "interleave": "enabled for every Added Symbols level",
+    "internal_burst_wait_tiles": 0,
+    "public_frequency_grid_hz": [
+      0,
+      0
+    ],
+    "requested_active_seconds": 8,
+    "sample_rate": "automatic native sample rate",
+    "timing": [
+      "gps-10ms-1ms-0ms-audio70ms",
+      "default-plus-minus-7.035s-search"
+    ],
+    "topology": "positive RF shift and distinct supported endpoint oscillator presets only",
+    "truth_frequency_drift_hz_per_second": 0,
+    "truth_frequency_hz": 0,
+    "whole_bit_symbol_burst": [
+      "off",
+      "3x"
+    ]
+  },
+  "axes": {
+    "added_symbols": [
+      1,
+      10,
+      100,
+      1000
+    ],
+    "base_oscillator": [
+      "free-running-crystal",
+      "gpsdo-hobbyist-xo",
+      "gpsdo-tcxo",
+      "gpsdo-ocxo"
+    ],
+    "baseband_carrier": [
+      "1725-Hz",
+      "half-rate",
+      "8270-Hz"
+    ],
+    "cn0_db_hz": [
+      200.0,
+      140.0,
+      120.0,
+      100.0,
+      80.0,
+      60.0,
+      55.0,
+      40.0,
+      32.0,
+      20.0,
+      6.0,
+      -6.0,
+      -10.0,
+      -16.0,
+      -20.0,
+      -23.0,
+      -26.0,
+      -30.0,
+      -60.0
+    ],
+    "fhss": [
+      false,
+      true
+    ],
+    "margin": [
+      1.0,
+      3.0
+    ],
+    "rate_hz": [
+      0.001,
+      0.01,
+      0.1,
+      1.0,
+      3.6,
+      10.0,
+      36.0,
+      100.0,
+      360.0,
+      1200.0,
+      2400.0,
+      3600.0,
+      12000.0,
+      18000.0,
+      24000.0,
+      1000000.0,
+      30000000.0
+    ],
+    "selective": [
+      "off",
+      "slow-1",
+      "slow-5",
+      "slow-10",
+      "slow-25",
+      "slow-65",
+      "fast-1",
+      "fast-5",
+      "fast-10",
+      "fast-25",
+      "fast-65",
+      "each-1",
+      "each-5",
+      "each-10",
+      "each-25",
+      "each-65"
+    ],
+    "shift_hz": [
+      0.0,
+      500000.0,
+      1000000.0,
+      3500000.0,
+      7000000.0,
+      10000000.0,
+      14000000.0,
+      30000000.0,
+      5800000000.0
+    ],
+    "shift_oscillator": [
+      "baseband-clock",
+      "free-running-crystal",
+      "cb-ssb-20ppm",
+      "ic-7100-0.5ppm",
+      "gpsdo-hobbyist-xo",
+      "gpsdo-tcxo",
+      "gpsdo-ocxo"
+    ],
+    "spread": [
+      "none",
+      "sub9-best",
+      "sub9-moderate",
+      "sub9-worst",
+      "hf-best",
+      "hf-moderate",
+      "hf-worst",
+      "aurora-best",
+      "aurora-worst",
+      "eme-focused"
+    ],
+    "symbol_burst": [
+      "off",
+      "3x"
+    ],
+    "timing": [
+      "gps-10ms-1ms-0ms-audio70ms",
+      "default-plus-minus-7.035s-search"
+    ]
+  },
+  "axis_cardinalities": {
+    "added_symbols": 4,
+    "base_oscillator": 4,
+    "baseband_carrier": 3,
+    "cn0_db_hz": 19,
+    "fhss": 2,
+    "margin": 2,
+    "rate_hz": 17,
+    "selective": 16,
+    "shift_hz": 9,
+    "shift_oscillator": 7,
+    "spread": 10,
+    "symbol_burst": 2,
+    "timing": 2
+  },
+  "capture_factor_table": {
+    "by_base_oscillator": {
+      "free-running-crystal": {
+        "nonpositive": 53042832,
+        "positive": 220119408
+      },
+      "gpsdo-hobbyist-xo": {
+        "nonpositive": 53042832,
+        "positive": 220119408
+      },
+      "gpsdo-ocxo": {
+        "nonpositive": 53042832,
+        "positive": 220119408
+      },
+      "gpsdo-tcxo": {
+        "nonpositive": 53042832,
+        "positive": 220119408
+      }
+    },
+    "by_baseband_placement": {
+      "1725-Hz": {
+        "nonpositive": 70723776,
+        "positive": 293492544
+      },
+      "8270-Hz": {
+        "nonpositive": 70723776,
+        "positive": 293492544
+      },
+      "half-rate": {
+        "nonpositive": 70723776,
+        "positive": 293492544
+      }
+    },
+    "by_margin": {
+      "1": {
+        "nonpositive": 96834336,
+        "positive": 449490144
+      },
+      "3": {
+        "nonpositive": 115336992,
+        "positive": 430987488
+      }
+    },
+    "by_selective_activity": {
+      "active": {
+        "nonpositive": 199837440,
+        "positive": 824520960
+      },
+      "off": {
+        "nonpositive": 12333888,
+        "positive": 55956672
+      }
+    },
+    "by_shift_hz": {
+      "1000000": {
+        "nonpositive": 5057952,
+        "positive": 131523168
+      },
+      "10000000": {
+        "nonpositive": 27318960,
+        "positive": 109262160
+      },
+      "14000000": {
+        "nonpositive": 34987968,
+        "positive": 101593152
+      },
+      "30000000": {
+        "nonpositive": 37045440,
+        "positive": 99535680
+      },
+      "3500000": {
+        "nonpositive": 13477536,
+        "positive": 123103584
+      },
+      "500000": {
+        "nonpositive": 3754704,
+        "positive": 132826416
+      },
+      "5800000000": {
+        "nonpositive": 67052064,
+        "positive": 69529056
+      },
+      "7000000": {
+        "nonpositive": 23476704,
+        "positive": 113104416
+      }
+    },
+    "by_shift_oscillator": {
+      "cb-ssb-20ppm": {
+        "nonpositive": 74367216,
+        "positive": 107740944
+      },
+      "free-running-crystal": {
+        "nonpositive": 100379280,
+        "positive": 81728880
+      },
+      "gpsdo-hobbyist-xo": {
+        "nonpositive": 4479744,
+        "positive": 177628416
+      },
+      "gpsdo-ocxo": {
+        "nonpositive": 4479744,
+        "positive": 177628416
+      },
+      "gpsdo-tcxo": {
+        "nonpositive": 4479744,
+        "positive": 177628416
+      },
+      "ic-7100-0.5ppm": {
+        "nonpositive": 23985600,
+        "positive": 158122560
+      }
+    },
+    "by_spread": {
+      "aurora-best": {
+        "nonpositive": 19207632,
+        "positive": 90057264
+      },
+      "aurora-worst": {
+        "nonpositive": 32832912,
+        "positive": 76431984
+      },
+      "eme-focused": {
+        "nonpositive": 18938592,
+        "positive": 90326304
+      },
+      "hf-best": {
+        "nonpositive": 18590208,
+        "positive": 90674688
+      },
+      "hf-moderate": {
+        "nonpositive": 19207632,
+        "positive": 90057264
+      },
+      "hf-worst": {
+        "nonpositive": 29033520,
+        "positive": 80231376
+      },
+      "none": {
+        "nonpositive": 18590208,
+        "positive": 90674688
+      },
+      "sub9-best": {
+        "nonpositive": 18590208,
+        "positive": 90674688
+      },
+      "sub9-moderate": {
+        "nonpositive": 18590208,
+        "positive": 90674688
+      },
+      "sub9-worst": {
+        "nonpositive": 18590208,
+        "positive": 90674688
+      }
+    },
+    "within_spread_none_selective_selected_but_bypassed_supported_capture_cells": 102435840
+  },
+  "capture_predicate": {
+    "formula": "Fs*(1-base_ppm*0.5e-6) - BW*(1+base_ppm*0.5e-6) - 2*(abs((RF*shift_ppm + IF*base_ppm)*1e-6/rx_min) + spread_doppler*margin*(2 if selective active else 1)) > 0",
+    "scope": "the native deterministic capture-margin predicate; Gaussian and diurnal terms are zero by assumptions",
+    "strict_positive_only": true,
+    "validation": "62/62 accepted native configurations; 6 directed near-zero and 90 seeded probes total; exact sign agreement, max absolute residual reported above"
+  },
+  "geometry_factor_table": {
+    "by_added_symbols": {
+      "1": {
+        "geometry_rejected": 182108160,
+        "geometry_valid": 294174720
+      },
+      "10": {
+        "geometry_rejected": 154091520,
+        "geometry_valid": 322191360
+      },
+      "100": {
+        "geometry_rejected": 210124800,
+        "geometry_valid": 266158080
+      },
+      "1000": {
+        "geometry_rejected": 266158080,
+        "geometry_valid": 210124800
+      }
+    },
+    "by_fhss": {
+      "envelope-only": {
+        "geometry_rejected": 574341120,
+        "geometry_valid": 378224640
+      },
+      "off": {
+        "geometry_rejected": 238141440,
+        "geometry_valid": 714424320
+      }
+    },
+    "by_rate_hz": {
+      "0.001": {
+        "geometry_rejected": 56033280,
+        "geometry_valid": 56033280
+      },
+      "0.01": {
+        "geometry_rejected": 56033280,
+        "geometry_valid": 56033280
+      },
+      "0.1": {
+        "geometry_rejected": 56033280,
+        "geometry_valid": 56033280
+      },
+      "1.0": {
+        "geometry_rejected": 42024960,
+        "geometry_valid": 70041600
+      },
+      "10.0": {
+        "geometry_rejected": 28016640,
+        "geometry_valid": 84049920
+      },
+      "100.0": {
+        "geometry_rejected": 14008320,
+        "geometry_valid": 98058240
+      },
+      "1000000.0": {
+        "geometry_rejected": 112066560,
+        "geometry_valid": 0
+      },
+      "1200.0": {
+        "geometry_rejected": 28016640,
+        "geometry_valid": 84049920
+      },
+      "12000.0": {
+        "geometry_rejected": 56033280,
+        "geometry_valid": 56033280
+      },
+      "18000.0": {
+        "geometry_rejected": 56033280,
+        "geometry_valid": 56033280
+      },
+      "2400.0": {
+        "geometry_rejected": 28016640,
+        "geometry_valid": 84049920
+      },
+      "24000.0": {
+        "geometry_rejected": 56033280,
+        "geometry_valid": 56033280
+      },
+      "3.6": {
+        "geometry_rejected": 42024960,
+        "geometry_valid": 70041600
+      },
+      "30000000.0": {
+        "geometry_rejected": 112066560,
+        "geometry_valid": 0
+      },
+      "36.0": {
+        "geometry_rejected": 28016640,
+        "geometry_valid": 84049920
+      },
+      "360.0": {
+        "geometry_rejected": 14008320,
+        "geometry_valid": 98058240
+      },
+      "3600.0": {
+        "geometry_rejected": 28016640,
+        "geometry_valid": 84049920
+      }
+    },
+    "native_geometry_cases": {
+      "protected_dwell_reject": 24,
+      "source_valid": 78,
+      "tile_workspace_reject": 32,
+      "uint32_sample_rate_reject": 2
+    }
+  },
+  "limitations": [
+    "No physical reception, sampled waveform, low-C/N0 sensitivity, false-admission rate, or duration reliability is inferred.",
+    "Capture-positive means only that the configured deterministic bound fits the current narrowband model; it is not physical frontend compatibility.",
+    "The listed baseband placement maps approximately to --nominal-if-hz; waveform remains zero-centered complex baseband and no shared baseband-clock topology is modeled.",
+    "Positive RF shift is required by the current CLI; shift=0 and shift-oscillator=baseband-clock are unsupported topology coordinates, not physically impossible cases.",
+    "Automatic Fs and requested 8-second active span are fixed census assumptions; changing duration, sample rate, oscillator/noise priors, timing or path evolution needs a new census.",
+    "FHSS is source-envelope shaping only. Symbol Burst selects whole-bit calendar spacing only. Added Symbols remain interleaved in this implementation."
+  ],
+  "nonexclusive_model_warnings": {
+    "fhss_envelope_only_cells": 1250242560,
+    "note": "These are requested-coordinate counts, not reception failures or physical RF/processing qualification.",
+    "selected_modulation_bypassed_by_none_spread_intent_cells": 234420480,
+    "symbol_burst_calendar_only_cells": 1250242560
+  },
+  "outcome_partition": {
+    "capture_margin_nonpositive": 212171328,
+    "capture_margin_positive": 880477632,
+    "source_geometry_rejected": 812482560,
+    "unsupported_topology": 595353600
+  },
+  "primary_intent_count": 78140160,
+  "replication_axes": {
+    "cn0_db_hz": 19,
+    "symbol_burst": 2,
+    "timing": 2
+  },
+  "replication_factor": 76,
+  "schema": "triad-factorized-configuration-census-v1",
+  "source_evidence": {
+    "binary_sha256_before_after": [
+      "ba965b7a8d844bbee67e39ff8a5b5d4292a0c44b89d0fce4aeba2c42db8d7a34",
+      "ba965b7a8d844bbee67e39ff8a5b5d4292a0c44b89d0fce4aeba2c42db8d7a34"
+    ],
+    "capture_margin_max_abs_error_hz": 0.0,
+    "census_tool_sha256_before_after": [
+      "25fb1a364e5b092681aaf3a8c6e1c68827c5fcf15b84fb2222b6671c59f5bb0c",
+      "25fb1a364e5b092681aaf3a8c6e1c68827c5fcf15b84fb2222b6671c59f5bb0c"
+    ],
+    "executable_sha256": "ba965b7a8d844bbee67e39ff8a5b5d4292a0c44b89d0fce4aeba2c42db8d7a34",
+    "independent_capture_margin_checks": 62,
+    "independent_native_validation_receipts": 96,
+    "native_geometry_receipts": 136,
+    "near_zero_factor_max_abs_error_hz": 0.0,
+    "near_zero_factor_rows_rechecked": 450,
+    "prototype_artifact_sha256": {
+      "geometry.json": "b392d16386c68436d470a27ae39f3cdc21283efea3e29058d238d6bdd41644ec",
+      "near-zero.json": "e50916d23c8445457450b5350d19d05e6032d1e8702507601a445e7ed786aabd",
+      "validation.json": "c9971f3935a87913acf90413b4f37efa3587566a0d0517cbf8a5cebdc168f651"
+    },
+    "prototype_summary_sha256": "1d76cddc82b116f60eb56160775be30114bb380d25b9f13e3f98e45cbc566f92",
+    "source_files": [
+      "include/datapump/clock_sync.hpp",
+      "src/triad_modem_v3.cpp",
+      "src/tuning_presets.cpp",
+      "tools/triad-long.cpp"
+    ],
+    "source_sha256": {
+      "include/datapump/clock_sync.hpp": "dae640fd90eaad12afb5ca33ac36109da13db10d684929978df799ad4c7f761e",
+      "src/triad_modem_v3.cpp": "cb6cac016e57edcd4f6ebc70f09c68cc47380e3b772cdbe047d7a3b93e9b434c",
+      "src/tuning_presets.cpp": "31e1ac552bea10b24036f959485241532066e6aa343931c04a46a65e8734b293",
+      "tools/triad-long.cpp": "eb6b967af3a3e1d8e21fb42e595960e586e5c4f52e9ee0af0eacd26016ca108f"
+    },
+    "underlying_source_sha256_before_after": {
+      "include/datapump/clock_sync.hpp": [
+        "dae640fd90eaad12afb5ca33ac36109da13db10d684929978df799ad4c7f761e",
+        "dae640fd90eaad12afb5ca33ac36109da13db10d684929978df799ad4c7f761e"
+      ],
+      "src/triad_modem_v3.cpp": [
+        "cb6cac016e57edcd4f6ebc70f09c68cc47380e3b772cdbe047d7a3b93e9b434c",
+        "cb6cac016e57edcd4f6ebc70f09c68cc47380e3b772cdbe047d7a3b93e9b434c"
+      ],
+      "src/tuning_presets.cpp": [
+        "31e1ac552bea10b24036f959485241532066e6aa343931c04a46a65e8734b293",
+        "31e1ac552bea10b24036f959485241532066e6aa343931c04a46a65e8734b293"
+      ],
+      "tools/triad-long.cpp": [
+        "eb6b967af3a3e1d8e21fb42e595960e586e5c4f52e9ee0af0eacd26016ca108f",
+        "eb6b967af3a3e1d8e21fb42e595960e586e5c4f52e9ee0af0eacd26016ca108f"
+      ]
+    }
+  },
+  "total_intent_count": 2500485120,
+  "unsupported_topology_breakdown": {
+    "disjoint_sum": 595353600,
+    "shared_baseband_clock_unsupported_at_positive_shift": 317521920,
+    "zero_shift_cli_unsupported_including_shared_clock_overlap": 277831680
+  }
+}

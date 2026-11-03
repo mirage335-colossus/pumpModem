@@ -1,0 +1,4081 @@
+{
+  "schema": "triad-coverage-bounds-v1",
+  "source_sha256": "bb4e1cbf161c5f4b5d9af151e995c357ef0444907d31c312a215c19b2b3a0c5b",
+  "cn0_grid_sorted": [
+    -60.0,
+    -30.0,
+    -26.0,
+    -23.0,
+    -20.0,
+    -16.0,
+    -10.0,
+    -6.0,
+    6.0,
+    20.0,
+    32.0,
+    40.0,
+    55.0,
+    60.0,
+    80.0,
+    100.0,
+    120.0,
+    140.0,
+    200.0
+  ],
+  "rate_geometry": [
+    {
+      "gui_rate_hz": 0.001,
+      "inner_rate_per_carrier_hz": 0.00016666666666666666,
+      "fine_rate_per_carrier_hz": 0.00016666666666666666,
+      "spacing_hz": 0.00020833333333333335,
+      "nominal_triplet_bandwidth_hz": 0.000625,
+      "minimum_pattern_active_seconds_lower_bound": 384000.0,
+      "note": "64 inner coefficients and 8-second floor only; omits halos/tile rounding/native limits"
+    },
+    {
+      "gui_rate_hz": 0.01,
+      "inner_rate_per_carrier_hz": 0.0016666666666666668,
+      "fine_rate_per_carrier_hz": 0.0016666666666666668,
+      "spacing_hz": 0.0020833333333333333,
+      "nominal_triplet_bandwidth_hz": 0.00625,
+      "minimum_pattern_active_seconds_lower_bound": 38400.0,
+      "note": "64 inner coefficients and 8-second floor only; omits halos/tile rounding/native limits"
+    },
+    {
+      "gui_rate_hz": 0.1,
+      "inner_rate_per_carrier_hz": 0.016666666666666666,
+      "fine_rate_per_carrier_hz": 0.016666666666666666,
+      "spacing_hz": 0.020833333333333332,
+      "nominal_triplet_bandwidth_hz": 0.0625,
+      "minimum_pattern_active_seconds_lower_bound": 3840.0,
+      "note": "64 inner coefficients and 8-second floor only; omits halos/tile rounding/native limits"
+    },
+    {
+      "gui_rate_hz": 1.0,
+      "inner_rate_per_carrier_hz": 0.16666666666666666,
+      "fine_rate_per_carrier_hz": 0.16666666666666666,
+      "spacing_hz": 0.20833333333333334,
+      "nominal_triplet_bandwidth_hz": 0.625,
+      "minimum_pattern_active_seconds_lower_bound": 384.0,
+      "note": "64 inner coefficients and 8-second floor only; omits halos/tile rounding/native limits"
+    },
+    {
+      "gui_rate_hz": 3.6,
+      "inner_rate_per_carrier_hz": 0.6,
+      "fine_rate_per_carrier_hz": 0.6,
+      "spacing_hz": 0.75,
+      "nominal_triplet_bandwidth_hz": 2.25,
+      "minimum_pattern_active_seconds_lower_bound": 106.66666666666666,
+      "note": "64 inner coefficients and 8-second floor only; omits halos/tile rounding/native limits"
+    },
+    {
+      "gui_rate_hz": 10.0,
+      "inner_rate_per_carrier_hz": 1.6666666666666667,
+      "fine_rate_per_carrier_hz": 1.6666666666666667,
+      "spacing_hz": 2.0833333333333335,
+      "nominal_triplet_bandwidth_hz": 6.25,
+      "minimum_pattern_active_seconds_lower_bound": 38.4,
+      "note": "64 inner coefficients and 8-second floor only; omits halos/tile rounding/native limits"
+    },
+    {
+      "gui_rate_hz": 36.0,
+      "inner_rate_per_carrier_hz": 6.0,
+      "fine_rate_per_carrier_hz": 6.0,
+      "spacing_hz": 7.5,
+      "nominal_triplet_bandwidth_hz": 22.5,
+      "minimum_pattern_active_seconds_lower_bound": 10.666666666666666,
+      "note": "64 inner coefficients and 8-second floor only; omits halos/tile rounding/native limits"
+    },
+    {
+      "gui_rate_hz": 100.0,
+      "inner_rate_per_carrier_hz": 16.666666666666668,
+      "fine_rate_per_carrier_hz": 16.666666666666668,
+      "spacing_hz": 20.833333333333332,
+      "nominal_triplet_bandwidth_hz": 62.5,
+      "minimum_pattern_active_seconds_lower_bound": 8.0,
+      "note": "64 inner coefficients and 8-second floor only; omits halos/tile rounding/native limits"
+    },
+    {
+      "gui_rate_hz": 360.0,
+      "inner_rate_per_carrier_hz": 60.0,
+      "fine_rate_per_carrier_hz": 60.0,
+      "spacing_hz": 75.0,
+      "nominal_triplet_bandwidth_hz": 225.0,
+      "minimum_pattern_active_seconds_lower_bound": 8.0,
+      "note": "64 inner coefficients and 8-second floor only; omits halos/tile rounding/native limits"
+    },
+    {
+      "gui_rate_hz": 1200.0,
+      "inner_rate_per_carrier_hz": 200.0,
+      "fine_rate_per_carrier_hz": 200.0,
+      "spacing_hz": 250.0,
+      "nominal_triplet_bandwidth_hz": 750.0,
+      "minimum_pattern_active_seconds_lower_bound": 8.0,
+      "note": "64 inner coefficients and 8-second floor only; omits halos/tile rounding/native limits"
+    },
+    {
+      "gui_rate_hz": 2400.0,
+      "inner_rate_per_carrier_hz": 400.0,
+      "fine_rate_per_carrier_hz": 400.0,
+      "spacing_hz": 500.0,
+      "nominal_triplet_bandwidth_hz": 1500.0,
+      "minimum_pattern_active_seconds_lower_bound": 8.0,
+      "note": "64 inner coefficients and 8-second floor only; omits halos/tile rounding/native limits"
+    },
+    {
+      "gui_rate_hz": 3600.0,
+      "inner_rate_per_carrier_hz": 600.0,
+      "fine_rate_per_carrier_hz": 600.0,
+      "spacing_hz": 750.0,
+      "nominal_triplet_bandwidth_hz": 2250.0,
+      "minimum_pattern_active_seconds_lower_bound": 8.0,
+      "note": "64 inner coefficients and 8-second floor only; omits halos/tile rounding/native limits"
+    },
+    {
+      "gui_rate_hz": 12000.0,
+      "inner_rate_per_carrier_hz": 2000.0,
+      "fine_rate_per_carrier_hz": 2000.0,
+      "spacing_hz": 2500.0,
+      "nominal_triplet_bandwidth_hz": 7500.0,
+      "minimum_pattern_active_seconds_lower_bound": 8.0,
+      "note": "64 inner coefficients and 8-second floor only; omits halos/tile rounding/native limits"
+    },
+    {
+      "gui_rate_hz": 18000.0,
+      "inner_rate_per_carrier_hz": 3000.0,
+      "fine_rate_per_carrier_hz": 3000.0,
+      "spacing_hz": 3750.0,
+      "nominal_triplet_bandwidth_hz": 11250.0,
+      "minimum_pattern_active_seconds_lower_bound": 8.0,
+      "note": "64 inner coefficients and 8-second floor only; omits halos/tile rounding/native limits"
+    },
+    {
+      "gui_rate_hz": 24000.0,
+      "inner_rate_per_carrier_hz": 4000.0,
+      "fine_rate_per_carrier_hz": 4000.0,
+      "spacing_hz": 5000.0,
+      "nominal_triplet_bandwidth_hz": 15000.0,
+      "minimum_pattern_active_seconds_lower_bound": 8.0,
+      "note": "64 inner coefficients and 8-second floor only; omits halos/tile rounding/native limits"
+    },
+    {
+      "gui_rate_hz": 1000000.0,
+      "inner_rate_per_carrier_hz": 166666.66666666666,
+      "fine_rate_per_carrier_hz": 166666.66666666666,
+      "spacing_hz": 208333.33333333334,
+      "nominal_triplet_bandwidth_hz": 625000.0,
+      "minimum_pattern_active_seconds_lower_bound": 8.0,
+      "note": "64 inner coefficients and 8-second floor only; omits halos/tile rounding/native limits"
+    },
+    {
+      "gui_rate_hz": 30000000.0,
+      "inner_rate_per_carrier_hz": 5000000.0,
+      "fine_rate_per_carrier_hz": 5000000.0,
+      "spacing_hz": 6250000.0,
+      "nominal_triplet_bandwidth_hz": 18750000.0,
+      "minimum_pattern_active_seconds_lower_bound": 8.0,
+      "note": "64 inner coefficients and 8-second floor only; omits halos/tile rounding/native limits"
+    }
+  ],
+  "cn0_rows": [
+    {
+      "cn0_db_hz": -60.0,
+      "targets": {
+        "strict": {
+          "correct_probability": 0.99,
+          "horizon_alpha": 0.0001,
+          "horizon_seconds": 86400.0,
+          "known_waveform_one_completion_presence_floor": {
+            "required_energy_snr": 18.27321511953539,
+            "useful_energy_equivalent_seconds": 18273215.11953539,
+            "active_seconds_lower_bound": 18273215.11953539,
+            "wall_seconds_lower_bound": 18273215.11953539
+          },
+          "known_waveform_chosen_family_allocation": {
+            "attempt_count": 1440,
+            "family_count": 368640,
+            "component_alpha": 1.3563368055555557e-10,
+            "required_energy_snr": 37.33098729555035,
+            "useful_energy_equivalent_seconds": 37330987.295550354,
+            "active_seconds_lower_bound": 37330987.295550354,
+            "wall_seconds_lower_bound": 37330987.295550354
+          },
+          "known_antipodal_bit_classification_floor": {
+            "required_energy_snr": 2.7059472155271695,
+            "useful_energy_equivalent_seconds": 2705947.21552717,
+            "active_seconds_lower_bound": 2705947.21552717,
+            "wall_seconds_lower_bound": 2705947.21552717
+          },
+          "known_orthogonal_bit_classification_reference": {
+            "required_energy_snr": 5.411894431054339,
+            "useful_energy_equivalent_seconds": 5411894.43105434,
+            "active_seconds_lower_bound": 5411894.43105434,
+            "wall_seconds_lower_bound": 5411894.43105434
+          }
+        },
+        "relaxed": {
+          "correct_probability": 0.9,
+          "horizon_alpha": 0.01,
+          "horizon_seconds": 43200.0,
+          "known_waveform_one_completion_presence_floor": {
+            "required_energy_snr": 6.5084691830804715,
+            "useful_energy_equivalent_seconds": 6508469.183080472,
+            "active_seconds_lower_bound": 6508469.183080472,
+            "wall_seconds_lower_bound": 6508469.183080472
+          },
+          "known_waveform_chosen_family_allocation": {
+            "attempt_count": 720,
+            "family_count": 184320,
+            "component_alpha": 2.7126736111111112e-08,
+            "required_energy_snr": 22.567958244115744,
+            "useful_energy_equivalent_seconds": 22567958.244115744,
+            "active_seconds_lower_bound": 22567958.244115744,
+            "wall_seconds_lower_bound": 22567958.244115744
+          },
+          "known_antipodal_bit_classification_floor": {
+            "required_energy_snr": 0.8211872075749086,
+            "useful_energy_equivalent_seconds": 821187.2075749086,
+            "active_seconds_lower_bound": 821187.2075749086,
+            "wall_seconds_lower_bound": 821187.2075749086
+          },
+          "known_orthogonal_bit_classification_reference": {
+            "required_energy_snr": 1.6423744151498172,
+            "useful_energy_equivalent_seconds": 1642374.4151498172,
+            "active_seconds_lower_bound": 1642374.4151498172,
+            "wall_seconds_lower_bound": 1642374.4151498172
+          }
+        }
+      },
+      "representation": {
+        "sample_snr_db": -93.11329952303794,
+        "sample_rate_hz": 2048.0,
+        "formats": {
+          "fp32": {
+            "significand_bits": 24,
+            "covariance_or_subtractive_residual_scale_db": 72.24719895935549,
+            "raw_signal_plus_noise_scale_db": 144.49439791871097,
+            "covariance_or_subtractive_residual_risk": false,
+            "raw_signal_plus_noise_risk": false
+          },
+          "fp64": {
+            "significand_bits": 53,
+            "covariance_or_subtractive_residual_scale_db": 159.54589770191004,
+            "raw_signal_plus_noise_scale_db": 319.0917954038201,
+            "covariance_or_subtractive_residual_risk": false,
+            "raw_signal_plus_noise_risk": false
+          }
+        },
+        "classification": "numerical_scale_diagnostic_not_physical_exclusion"
+      }
+    },
+    {
+      "cn0_db_hz": -30.0,
+      "targets": {
+        "strict": {
+          "correct_probability": 0.99,
+          "horizon_alpha": 0.0001,
+          "horizon_seconds": 86400.0,
+          "known_waveform_one_completion_presence_floor": {
+            "required_energy_snr": 18.27321511953539,
+            "useful_energy_equivalent_seconds": 18273.21511953539,
+            "active_seconds_lower_bound": 18273.21511953539,
+            "wall_seconds_lower_bound": 18273.21511953539
+          },
+          "known_waveform_chosen_family_allocation": {
+            "attempt_count": 1440,
+            "family_count": 368640,
+            "component_alpha": 1.3563368055555557e-10,
+            "required_energy_snr": 37.33098729555035,
+            "useful_energy_equivalent_seconds": 37330.98729555035,
+            "active_seconds_lower_bound": 37330.98729555035,
+            "wall_seconds_lower_bound": 37330.98729555035
+          },
+          "known_antipodal_bit_classification_floor": {
+            "required_energy_snr": 2.7059472155271695,
+            "useful_energy_equivalent_seconds": 2705.9472155271696,
+            "active_seconds_lower_bound": 2705.9472155271696,
+            "wall_seconds_lower_bound": 2705.9472155271696
+          },
+          "known_orthogonal_bit_classification_reference": {
+            "required_energy_snr": 5.411894431054339,
+            "useful_energy_equivalent_seconds": 5411.894431054339,
+            "active_seconds_lower_bound": 5411.894431054339,
+            "wall_seconds_lower_bound": 5411.894431054339
+          }
+        },
+        "relaxed": {
+          "correct_probability": 0.9,
+          "horizon_alpha": 0.01,
+          "horizon_seconds": 43200.0,
+          "known_waveform_one_completion_presence_floor": {
+            "required_energy_snr": 6.5084691830804715,
+            "useful_energy_equivalent_seconds": 6508.469183080471,
+            "active_seconds_lower_bound": 6508.469183080471,
+            "wall_seconds_lower_bound": 6508.469183080471
+          },
+          "known_waveform_chosen_family_allocation": {
+            "attempt_count": 720,
+            "family_count": 184320,
+            "component_alpha": 2.7126736111111112e-08,
+            "required_energy_snr": 22.567958244115744,
+            "useful_energy_equivalent_seconds": 22567.958244115744,
+            "active_seconds_lower_bound": 22567.958244115744,
+            "wall_seconds_lower_bound": 22567.958244115744
+          },
+          "known_antipodal_bit_classification_floor": {
+            "required_energy_snr": 0.8211872075749086,
+            "useful_energy_equivalent_seconds": 821.1872075749086,
+            "active_seconds_lower_bound": 821.1872075749086,
+            "wall_seconds_lower_bound": 821.1872075749086
+          },
+          "known_orthogonal_bit_classification_reference": {
+            "required_energy_snr": 1.6423744151498172,
+            "useful_energy_equivalent_seconds": 1642.3744151498172,
+            "active_seconds_lower_bound": 1642.3744151498172,
+            "wall_seconds_lower_bound": 1642.3744151498172
+          }
+        }
+      },
+      "representation": {
+        "sample_snr_db": -63.11329952303793,
+        "sample_rate_hz": 2048.0,
+        "formats": {
+          "fp32": {
+            "significand_bits": 24,
+            "covariance_or_subtractive_residual_scale_db": 72.24719895935549,
+            "raw_signal_plus_noise_scale_db": 144.49439791871097,
+            "covariance_or_subtractive_residual_risk": false,
+            "raw_signal_plus_noise_risk": false
+          },
+          "fp64": {
+            "significand_bits": 53,
+            "covariance_or_subtractive_residual_scale_db": 159.54589770191004,
+            "raw_signal_plus_noise_scale_db": 319.0917954038201,
+            "covariance_or_subtractive_residual_risk": false,
+            "raw_signal_plus_noise_risk": false
+          }
+        },
+        "classification": "numerical_scale_diagnostic_not_physical_exclusion"
+      }
+    },
+    {
+      "cn0_db_hz": -26.0,
+      "targets": {
+        "strict": {
+          "correct_probability": 0.99,
+          "horizon_alpha": 0.0001,
+          "horizon_seconds": 86400.0,
+          "known_waveform_one_completion_presence_floor": {
+            "required_energy_snr": 18.27321511953539,
+            "useful_energy_equivalent_seconds": 7274.697968153622,
+            "active_seconds_lower_bound": 7274.697968153622,
+            "wall_seconds_lower_bound": 7274.697968153622
+          },
+          "known_waveform_chosen_family_allocation": {
+            "attempt_count": 1440,
+            "family_count": 368640,
+            "component_alpha": 1.3563368055555557e-10,
+            "required_energy_snr": 37.33098729555035,
+            "useful_energy_equivalent_seconds": 14861.733726200107,
+            "active_seconds_lower_bound": 14861.733726200107,
+            "wall_seconds_lower_bound": 14861.733726200107
+          },
+          "known_antipodal_bit_classification_floor": {
+            "required_energy_snr": 2.7059472155271695,
+            "useful_energy_equivalent_seconds": 1077.2569896406362,
+            "active_seconds_lower_bound": 1077.2569896406362,
+            "wall_seconds_lower_bound": 1077.2569896406362
+          },
+          "known_orthogonal_bit_classification_reference": {
+            "required_energy_snr": 5.411894431054339,
+            "useful_energy_equivalent_seconds": 2154.5139792812724,
+            "active_seconds_lower_bound": 2154.5139792812724,
+            "wall_seconds_lower_bound": 2154.5139792812724
+          }
+        },
+        "relaxed": {
+          "correct_probability": 0.9,
+          "horizon_alpha": 0.01,
+          "horizon_seconds": 43200.0,
+          "known_waveform_one_completion_presence_floor": {
+            "required_energy_snr": 6.5084691830804715,
+            "useful_energy_equivalent_seconds": 2591.068251110799,
+            "active_seconds_lower_bound": 2591.068251110799,
+            "wall_seconds_lower_bound": 2591.068251110799
+          },
+          "known_waveform_chosen_family_allocation": {
+            "attempt_count": 720,
+            "family_count": 184320,
+            "component_alpha": 2.7126736111111112e-08,
+            "required_energy_snr": 22.567958244115744,
+            "useful_energy_equivalent_seconds": 8984.466001734392,
+            "active_seconds_lower_bound": 8984.466001734392,
+            "wall_seconds_lower_bound": 8984.466001734392
+          },
+          "known_antipodal_bit_classification_floor": {
+            "required_energy_snr": 0.8211872075749086,
+            "useful_energy_equivalent_seconds": 326.92051570237436,
+            "active_seconds_lower_bound": 326.92051570237436,
+            "wall_seconds_lower_bound": 326.92051570237436
+          },
+          "known_orthogonal_bit_classification_reference": {
+            "required_energy_snr": 1.6423744151498172,
+            "useful_energy_equivalent_seconds": 653.8410314047487,
+            "active_seconds_lower_bound": 653.8410314047487,
+            "wall_seconds_lower_bound": 653.8410314047487
+          }
+        }
+      },
+      "representation": {
+        "sample_snr_db": -59.11329952303794,
+        "sample_rate_hz": 2048.0,
+        "formats": {
+          "fp32": {
+            "significand_bits": 24,
+            "covariance_or_subtractive_residual_scale_db": 72.24719895935549,
+            "raw_signal_plus_noise_scale_db": 144.49439791871097,
+            "covariance_or_subtractive_residual_risk": false,
+            "raw_signal_plus_noise_risk": false
+          },
+          "fp64": {
+            "significand_bits": 53,
+            "covariance_or_subtractive_residual_scale_db": 159.54589770191004,
+            "raw_signal_plus_noise_scale_db": 319.0917954038201,
+            "covariance_or_subtractive_residual_risk": false,
+            "raw_signal_plus_noise_risk": false
+          }
+        },
+        "classification": "numerical_scale_diagnostic_not_physical_exclusion"
+      }
+    },
+    {
+      "cn0_db_hz": -23.0,
+      "targets": {
+        "strict": {
+          "correct_probability": 0.99,
+          "horizon_alpha": 0.0001,
+          "horizon_seconds": 86400.0,
+          "known_waveform_one_completion_presence_floor": {
+            "required_energy_snr": 18.27321511953539,
+            "useful_energy_equivalent_seconds": 3645.98575013285,
+            "active_seconds_lower_bound": 3645.98575013285,
+            "wall_seconds_lower_bound": 3645.98575013285
+          },
+          "known_waveform_chosen_family_allocation": {
+            "attempt_count": 1440,
+            "family_count": 368640,
+            "component_alpha": 1.3563368055555557e-10,
+            "required_energy_snr": 37.33098729555035,
+            "useful_energy_equivalent_seconds": 7448.51121313936,
+            "active_seconds_lower_bound": 7448.51121313936,
+            "wall_seconds_lower_bound": 7448.51121313936
+          },
+          "known_antipodal_bit_classification_floor": {
+            "required_energy_snr": 2.7059472155271695,
+            "useful_energy_equivalent_seconds": 539.9074505436332,
+            "active_seconds_lower_bound": 539.9074505436332,
+            "wall_seconds_lower_bound": 539.9074505436332
+          },
+          "known_orthogonal_bit_classification_reference": {
+            "required_energy_snr": 5.411894431054339,
+            "useful_energy_equivalent_seconds": 1079.8149010872664,
+            "active_seconds_lower_bound": 1079.8149010872664,
+            "wall_seconds_lower_bound": 1079.8149010872664
+          }
+        },
+        "relaxed": {
+          "correct_probability": 0.9,
+          "horizon_alpha": 0.01,
+          "horizon_seconds": 43200.0,
+          "known_waveform_one_completion_presence_floor": {
+            "required_energy_snr": 6.5084691830804715,
+            "useful_energy_equivalent_seconds": 1298.610328913675,
+            "active_seconds_lower_bound": 1298.610328913675,
+            "wall_seconds_lower_bound": 1298.610328913675
+          },
+          "known_waveform_chosen_family_allocation": {
+            "attempt_count": 720,
+            "family_count": 184320,
+            "component_alpha": 2.7126736111111112e-08,
+            "required_energy_snr": 22.567958244115744,
+            "useful_energy_equivalent_seconds": 4502.899661027537,
+            "active_seconds_lower_bound": 4502.899661027537,
+            "wall_seconds_lower_bound": 4502.899661027537
+          },
+          "known_antipodal_bit_classification_floor": {
+            "required_energy_snr": 0.8211872075749086,
+            "useful_energy_equivalent_seconds": 163.84838888087415,
+            "active_seconds_lower_bound": 163.84838888087415,
+            "wall_seconds_lower_bound": 163.84838888087415
+          },
+          "known_orthogonal_bit_classification_reference": {
+            "required_energy_snr": 1.6423744151498172,
+            "useful_energy_equivalent_seconds": 327.6967777617483,
+            "active_seconds_lower_bound": 327.6967777617483,
+            "wall_seconds_lower_bound": 327.6967777617483
+          }
+        }
+      },
+      "representation": {
+        "sample_snr_db": -56.113299523037924,
+        "sample_rate_hz": 2048.0,
+        "formats": {
+          "fp32": {
+            "significand_bits": 24,
+            "covariance_or_subtractive_residual_scale_db": 72.24719895935549,
+            "raw_signal_plus_noise_scale_db": 144.49439791871097,
+            "covariance_or_subtractive_residual_risk": false,
+            "raw_signal_plus_noise_risk": false
+          },
+          "fp64": {
+            "significand_bits": 53,
+            "covariance_or_subtractive_residual_scale_db": 159.54589770191004,
+            "raw_signal_plus_noise_scale_db": 319.0917954038201,
+            "covariance_or_subtractive_residual_risk": false,
+            "raw_signal_plus_noise_risk": false
+          }
+        },
+        "classification": "numerical_scale_diagnostic_not_physical_exclusion"
+      }
+    },
+    {
+      "cn0_db_hz": -20.0,
+      "targets": {
+        "strict": {
+          "correct_probability": 0.99,
+          "horizon_alpha": 0.0001,
+          "horizon_seconds": 86400.0,
+          "known_waveform_one_completion_presence_floor": {
+            "required_energy_snr": 18.27321511953539,
+            "useful_energy_equivalent_seconds": 1827.321511953539,
+            "active_seconds_lower_bound": 1827.321511953539,
+            "wall_seconds_lower_bound": 1827.321511953539
+          },
+          "known_waveform_chosen_family_allocation": {
+            "attempt_count": 1440,
+            "family_count": 368640,
+            "component_alpha": 1.3563368055555557e-10,
+            "required_energy_snr": 37.33098729555035,
+            "useful_energy_equivalent_seconds": 3733.098729555035,
+            "active_seconds_lower_bound": 3733.098729555035,
+            "wall_seconds_lower_bound": 3733.098729555035
+          },
+          "known_antipodal_bit_classification_floor": {
+            "required_energy_snr": 2.7059472155271695,
+            "useful_energy_equivalent_seconds": 270.594721552717,
+            "active_seconds_lower_bound": 270.594721552717,
+            "wall_seconds_lower_bound": 270.594721552717
+          },
+          "known_orthogonal_bit_classification_reference": {
+            "required_energy_snr": 5.411894431054339,
+            "useful_energy_equivalent_seconds": 541.189443105434,
+            "active_seconds_lower_bound": 541.189443105434,
+            "wall_seconds_lower_bound": 541.189443105434
+          }
+        },
+        "relaxed": {
+          "correct_probability": 0.9,
+          "horizon_alpha": 0.01,
+          "horizon_seconds": 43200.0,
+          "known_waveform_one_completion_presence_floor": {
+            "required_energy_snr": 6.5084691830804715,
+            "useful_energy_equivalent_seconds": 650.8469183080472,
+            "active_seconds_lower_bound": 650.8469183080472,
+            "wall_seconds_lower_bound": 650.8469183080472
+          },
+          "known_waveform_chosen_family_allocation": {
+            "attempt_count": 720,
+            "family_count": 184320,
+            "component_alpha": 2.7126736111111112e-08,
+            "required_energy_snr": 22.567958244115744,
+            "useful_energy_equivalent_seconds": 2256.7958244115744,
+            "active_seconds_lower_bound": 2256.7958244115744,
+            "wall_seconds_lower_bound": 2256.7958244115744
+          },
+          "known_antipodal_bit_classification_floor": {
+            "required_energy_snr": 0.8211872075749086,
+            "useful_energy_equivalent_seconds": 82.11872075749086,
+            "active_seconds_lower_bound": 82.11872075749086,
+            "wall_seconds_lower_bound": 82.11872075749086
+          },
+          "known_orthogonal_bit_classification_reference": {
+            "required_energy_snr": 1.6423744151498172,
+            "useful_energy_equivalent_seconds": 164.23744151498173,
+            "active_seconds_lower_bound": 164.23744151498173,
+            "wall_seconds_lower_bound": 164.23744151498173
+          }
+        }
+      },
+      "representation": {
+        "sample_snr_db": -53.11329952303793,
+        "sample_rate_hz": 2048.0,
+        "formats": {
+          "fp32": {
+            "significand_bits": 24,
+            "covariance_or_subtractive_residual_scale_db": 72.24719895935549,
+            "raw_signal_plus_noise_scale_db": 144.49439791871097,
+            "covariance_or_subtractive_residual_risk": false,
+            "raw_signal_plus_noise_risk": false
+          },
+          "fp64": {
+            "significand_bits": 53,
+            "covariance_or_subtractive_residual_scale_db": 159.54589770191004,
+            "raw_signal_plus_noise_scale_db": 319.0917954038201,
+            "covariance_or_subtractive_residual_risk": false,
+            "raw_signal_plus_noise_risk": false
+          }
+        },
+        "classification": "numerical_scale_diagnostic_not_physical_exclusion"
+      }
+    },
+    {
+      "cn0_db_hz": -16.0,
+      "targets": {
+        "strict": {
+          "correct_probability": 0.99,
+          "horizon_alpha": 0.0001,
+          "horizon_seconds": 86400.0,
+          "known_waveform_one_completion_presence_floor": {
+            "required_energy_snr": 18.27321511953539,
+            "useful_energy_equivalent_seconds": 727.4697968153622,
+            "active_seconds_lower_bound": 727.4697968153622,
+            "wall_seconds_lower_bound": 727.4697968153622
+          },
+          "known_waveform_chosen_family_allocation": {
+            "attempt_count": 1440,
+            "family_count": 368640,
+            "component_alpha": 1.3563368055555557e-10,
+            "required_energy_snr": 37.33098729555035,
+            "useful_energy_equivalent_seconds": 1486.1733726200107,
+            "active_seconds_lower_bound": 1486.1733726200107,
+            "wall_seconds_lower_bound": 1486.1733726200107
+          },
+          "known_antipodal_bit_classification_floor": {
+            "required_energy_snr": 2.7059472155271695,
+            "useful_energy_equivalent_seconds": 107.72569896406361,
+            "active_seconds_lower_bound": 107.72569896406361,
+            "wall_seconds_lower_bound": 107.72569896406361
+          },
+          "known_orthogonal_bit_classification_reference": {
+            "required_energy_snr": 5.411894431054339,
+            "useful_energy_equivalent_seconds": 215.45139792812722,
+            "active_seconds_lower_bound": 215.45139792812722,
+            "wall_seconds_lower_bound": 215.45139792812722
+          }
+        },
+        "relaxed": {
+          "correct_probability": 0.9,
+          "horizon_alpha": 0.01,
+          "horizon_seconds": 43200.0,
+          "known_waveform_one_completion_presence_floor": {
+            "required_energy_snr": 6.5084691830804715,
+            "useful_energy_equivalent_seconds": 259.1068251110799,
+            "active_seconds_lower_bound": 259.1068251110799,
+            "wall_seconds_lower_bound": 259.1068251110799
+          },
+          "known_waveform_chosen_family_allocation": {
+            "attempt_count": 720,
+            "family_count": 184320,
+            "component_alpha": 2.7126736111111112e-08,
+            "required_energy_snr": 22.567958244115744,
+            "useful_energy_equivalent_seconds": 898.4466001734393,
+            "active_seconds_lower_bound": 898.4466001734393,
+            "wall_seconds_lower_bound": 898.4466001734393
+          },
+          "known_antipodal_bit_classification_floor": {
+            "required_energy_snr": 0.8211872075749086,
+            "useful_energy_equivalent_seconds": 32.69205157023744,
+            "active_seconds_lower_bound": 32.69205157023744,
+            "wall_seconds_lower_bound": 32.69205157023744
+          },
+          "known_orthogonal_bit_classification_reference": {
+            "required_energy_snr": 1.6423744151498172,
+            "useful_energy_equivalent_seconds": 65.38410314047488,
+            "active_seconds_lower_bound": 65.38410314047488,
+            "wall_seconds_lower_bound": 65.38410314047488
+          }
+        }
+      },
+      "representation": {
+        "sample_snr_db": -49.11329952303794,
+        "sample_rate_hz": 2048.0,
+        "formats": {
+          "fp32": {
+            "significand_bits": 24,
+            "covariance_or_subtractive_residual_scale_db": 72.24719895935549,
+            "raw_signal_plus_noise_scale_db": 144.49439791871097,
+            "covariance_or_subtractive_residual_risk": false,
+            "raw_signal_plus_noise_risk": false
+          },
+          "fp64": {
+            "significand_bits": 53,
+            "covariance_or_subtractive_residual_scale_db": 159.54589770191004,
+            "raw_signal_plus_noise_scale_db": 319.0917954038201,
+            "covariance_or_subtractive_residual_risk": false,
+            "raw_signal_plus_noise_risk": false
+          }
+        },
+        "classification": "numerical_scale_diagnostic_not_physical_exclusion"
+      }
+    },
+    {
+      "cn0_db_hz": -10.0,
+      "targets": {
+        "strict": {
+          "correct_probability": 0.99,
+          "horizon_alpha": 0.0001,
+          "horizon_seconds": 86400.0,
+          "known_waveform_one_completion_presence_floor": {
+            "required_energy_snr": 18.27321511953539,
+            "useful_energy_equivalent_seconds": 182.73215119535388,
+            "active_seconds_lower_bound": 182.73215119535388,
+            "wall_seconds_lower_bound": 182.73215119535388
+          },
+          "known_waveform_chosen_family_allocation": {
+            "attempt_count": 1440,
+            "family_count": 368640,
+            "component_alpha": 1.3563368055555557e-10,
+            "required_energy_snr": 37.33098729555035,
+            "useful_energy_equivalent_seconds": 373.30987295550347,
+            "active_seconds_lower_bound": 373.30987295550347,
+            "wall_seconds_lower_bound": 373.30987295550347
+          },
+          "known_antipodal_bit_classification_floor": {
+            "required_energy_snr": 2.7059472155271695,
+            "useful_energy_equivalent_seconds": 27.059472155271695,
+            "active_seconds_lower_bound": 27.059472155271695,
+            "wall_seconds_lower_bound": 27.059472155271695
+          },
+          "known_orthogonal_bit_classification_reference": {
+            "required_energy_snr": 5.411894431054339,
+            "useful_energy_equivalent_seconds": 54.11894431054339,
+            "active_seconds_lower_bound": 54.11894431054339,
+            "wall_seconds_lower_bound": 54.11894431054339
+          }
+        },
+        "relaxed": {
+          "correct_probability": 0.9,
+          "horizon_alpha": 0.01,
+          "horizon_seconds": 43200.0,
+          "known_waveform_one_completion_presence_floor": {
+            "required_energy_snr": 6.5084691830804715,
+            "useful_energy_equivalent_seconds": 65.08469183080472,
+            "active_seconds_lower_bound": 65.08469183080472,
+            "wall_seconds_lower_bound": 65.08469183080472
+          },
+          "known_waveform_chosen_family_allocation": {
+            "attempt_count": 720,
+            "family_count": 184320,
+            "component_alpha": 2.7126736111111112e-08,
+            "required_energy_snr": 22.567958244115744,
+            "useful_energy_equivalent_seconds": 225.67958244115744,
+            "active_seconds_lower_bound": 225.67958244115744,
+            "wall_seconds_lower_bound": 225.67958244115744
+          },
+          "known_antipodal_bit_classification_floor": {
+            "required_energy_snr": 0.8211872075749086,
+            "useful_energy_equivalent_seconds": 8.211872075749085,
+            "active_seconds_lower_bound": 8.211872075749085,
+            "wall_seconds_lower_bound": 8.211872075749085
+          },
+          "known_orthogonal_bit_classification_reference": {
+            "required_energy_snr": 1.6423744151498172,
+            "useful_energy_equivalent_seconds": 16.42374415149817,
+            "active_seconds_lower_bound": 16.42374415149817,
+            "wall_seconds_lower_bound": 16.42374415149817
+          }
+        }
+      },
+      "representation": {
+        "sample_snr_db": -43.11329952303793,
+        "sample_rate_hz": 2048.0,
+        "formats": {
+          "fp32": {
+            "significand_bits": 24,
+            "covariance_or_subtractive_residual_scale_db": 72.24719895935549,
+            "raw_signal_plus_noise_scale_db": 144.49439791871097,
+            "covariance_or_subtractive_residual_risk": false,
+            "raw_signal_plus_noise_risk": false
+          },
+          "fp64": {
+            "significand_bits": 53,
+            "covariance_or_subtractive_residual_scale_db": 159.54589770191004,
+            "raw_signal_plus_noise_scale_db": 319.0917954038201,
+            "covariance_or_subtractive_residual_risk": false,
+            "raw_signal_plus_noise_risk": false
+          }
+        },
+        "classification": "numerical_scale_diagnostic_not_physical_exclusion"
+      }
+    },
+    {
+      "cn0_db_hz": -6.0,
+      "targets": {
+        "strict": {
+          "correct_probability": 0.99,
+          "horizon_alpha": 0.0001,
+          "horizon_seconds": 86400.0,
+          "known_waveform_one_completion_presence_floor": {
+            "required_energy_snr": 18.27321511953539,
+            "useful_energy_equivalent_seconds": 72.7469796815362,
+            "active_seconds_lower_bound": 72.7469796815362,
+            "wall_seconds_lower_bound": 72.7469796815362
+          },
+          "known_waveform_chosen_family_allocation": {
+            "attempt_count": 1440,
+            "family_count": 368640,
+            "component_alpha": 1.3563368055555557e-10,
+            "required_energy_snr": 37.33098729555035,
+            "useful_energy_equivalent_seconds": 148.61733726200103,
+            "active_seconds_lower_bound": 148.61733726200103,
+            "wall_seconds_lower_bound": 148.61733726200103
+          },
+          "known_antipodal_bit_classification_floor": {
+            "required_energy_snr": 2.7059472155271695,
+            "useful_energy_equivalent_seconds": 10.772569896406358,
+            "active_seconds_lower_bound": 10.772569896406358,
+            "wall_seconds_lower_bound": 10.772569896406358
+          },
+          "known_orthogonal_bit_classification_reference": {
+            "required_energy_snr": 5.411894431054339,
+            "useful_energy_equivalent_seconds": 21.545139792812716,
+            "active_seconds_lower_bound": 21.545139792812716,
+            "wall_seconds_lower_bound": 21.545139792812716
+          }
+        },
+        "relaxed": {
+          "correct_probability": 0.9,
+          "horizon_alpha": 0.01,
+          "horizon_seconds": 43200.0,
+          "known_waveform_one_completion_presence_floor": {
+            "required_energy_snr": 6.5084691830804715,
+            "useful_energy_equivalent_seconds": 25.910682511107982,
+            "active_seconds_lower_bound": 25.910682511107982,
+            "wall_seconds_lower_bound": 25.910682511107982
+          },
+          "known_waveform_chosen_family_allocation": {
+            "attempt_count": 720,
+            "family_count": 184320,
+            "component_alpha": 2.7126736111111112e-08,
+            "required_energy_snr": 22.567958244115744,
+            "useful_energy_equivalent_seconds": 89.84466001734391,
+            "active_seconds_lower_bound": 89.84466001734391,
+            "wall_seconds_lower_bound": 89.84466001734391
+          },
+          "known_antipodal_bit_classification_floor": {
+            "required_energy_snr": 0.8211872075749086,
+            "useful_energy_equivalent_seconds": 3.269205157023743,
+            "active_seconds_lower_bound": 3.269205157023743,
+            "wall_seconds_lower_bound": 3.269205157023743
+          },
+          "known_orthogonal_bit_classification_reference": {
+            "required_energy_snr": 1.6423744151498172,
+            "useful_energy_equivalent_seconds": 6.538410314047486,
+            "active_seconds_lower_bound": 6.538410314047486,
+            "wall_seconds_lower_bound": 6.538410314047486
+          }
+        }
+      },
+      "representation": {
+        "sample_snr_db": -39.11329952303793,
+        "sample_rate_hz": 2048.0,
+        "formats": {
+          "fp32": {
+            "significand_bits": 24,
+            "covariance_or_subtractive_residual_scale_db": 72.24719895935549,
+            "raw_signal_plus_noise_scale_db": 144.49439791871097,
+            "covariance_or_subtractive_residual_risk": false,
+            "raw_signal_plus_noise_risk": false
+          },
+          "fp64": {
+            "significand_bits": 53,
+            "covariance_or_subtractive_residual_scale_db": 159.54589770191004,
+            "raw_signal_plus_noise_scale_db": 319.0917954038201,
+            "covariance_or_subtractive_residual_risk": false,
+            "raw_signal_plus_noise_risk": false
+          }
+        },
+        "classification": "numerical_scale_diagnostic_not_physical_exclusion"
+      }
+    },
+    {
+      "cn0_db_hz": 6.0,
+      "targets": {
+        "strict": {
+          "correct_probability": 0.99,
+          "horizon_alpha": 0.0001,
+          "horizon_seconds": 86400.0,
+          "known_waveform_one_completion_presence_floor": {
+            "required_energy_snr": 18.27321511953539,
+            "useful_energy_equivalent_seconds": 4.590024111881666,
+            "active_seconds_lower_bound": 4.590024111881666,
+            "wall_seconds_lower_bound": 4.590024111881666
+          },
+          "known_waveform_chosen_family_allocation": {
+            "attempt_count": 1440,
+            "family_count": 368640,
+            "component_alpha": 1.3563368055555557e-10,
+            "required_energy_snr": 37.33098729555035,
+            "useful_energy_equivalent_seconds": 9.377120046254944,
+            "active_seconds_lower_bound": 9.377120046254944,
+            "wall_seconds_lower_bound": 9.377120046254944
+          },
+          "known_antipodal_bit_classification_floor": {
+            "required_energy_snr": 2.7059472155271695,
+            "useful_energy_equivalent_seconds": 0.6797032095063827,
+            "active_seconds_lower_bound": 0.6797032095063827,
+            "wall_seconds_lower_bound": 0.6797032095063827
+          },
+          "known_orthogonal_bit_classification_reference": {
+            "required_energy_snr": 5.411894431054339,
+            "useful_energy_equivalent_seconds": 1.3594064190127655,
+            "active_seconds_lower_bound": 1.3594064190127655,
+            "wall_seconds_lower_bound": 1.3594064190127655
+          }
+        },
+        "relaxed": {
+          "correct_probability": 0.9,
+          "horizon_alpha": 0.01,
+          "horizon_seconds": 43200.0,
+          "known_waveform_one_completion_presence_floor": {
+            "required_energy_snr": 6.5084691830804715,
+            "useful_energy_equivalent_seconds": 1.634853543087808,
+            "active_seconds_lower_bound": 1.634853543087808,
+            "wall_seconds_lower_bound": 1.634853543087808
+          },
+          "known_waveform_chosen_family_allocation": {
+            "attempt_count": 720,
+            "family_count": 184320,
+            "component_alpha": 2.7126736111111112e-08,
+            "required_energy_snr": 22.567958244115744,
+            "useful_energy_equivalent_seconds": 5.668814810026911,
+            "active_seconds_lower_bound": 5.668814810026911,
+            "wall_seconds_lower_bound": 5.668814810026911
+          },
+          "known_antipodal_bit_classification_floor": {
+            "required_energy_snr": 0.8211872075749086,
+            "useful_energy_equivalent_seconds": 0.20627290044366542,
+            "active_seconds_lower_bound": 0.20627290044366542,
+            "wall_seconds_lower_bound": 0.20627290044366542
+          },
+          "known_orthogonal_bit_classification_reference": {
+            "required_energy_snr": 1.6423744151498172,
+            "useful_energy_equivalent_seconds": 0.41254580088733084,
+            "active_seconds_lower_bound": 0.41254580088733084,
+            "wall_seconds_lower_bound": 0.41254580088733084
+          }
+        }
+      },
+      "representation": {
+        "sample_snr_db": -27.11329952303793,
+        "sample_rate_hz": 2048.0,
+        "formats": {
+          "fp32": {
+            "significand_bits": 24,
+            "covariance_or_subtractive_residual_scale_db": 72.24719895935549,
+            "raw_signal_plus_noise_scale_db": 144.49439791871097,
+            "covariance_or_subtractive_residual_risk": false,
+            "raw_signal_plus_noise_risk": false
+          },
+          "fp64": {
+            "significand_bits": 53,
+            "covariance_or_subtractive_residual_scale_db": 159.54589770191004,
+            "raw_signal_plus_noise_scale_db": 319.0917954038201,
+            "covariance_or_subtractive_residual_risk": false,
+            "raw_signal_plus_noise_risk": false
+          }
+        },
+        "classification": "numerical_scale_diagnostic_not_physical_exclusion"
+      }
+    },
+    {
+      "cn0_db_hz": 20.0,
+      "targets": {
+        "strict": {
+          "correct_probability": 0.99,
+          "horizon_alpha": 0.0001,
+          "horizon_seconds": 86400.0,
+          "known_waveform_one_completion_presence_floor": {
+            "required_energy_snr": 18.27321511953539,
+            "useful_energy_equivalent_seconds": 0.1827321511953539,
+            "active_seconds_lower_bound": 0.1827321511953539,
+            "wall_seconds_lower_bound": 0.1827321511953539
+          },
+          "known_waveform_chosen_family_allocation": {
+            "attempt_count": 1440,
+            "family_count": 368640,
+            "component_alpha": 1.3563368055555557e-10,
+            "required_energy_snr": 37.33098729555035,
+            "useful_energy_equivalent_seconds": 0.3733098729555035,
+            "active_seconds_lower_bound": 0.3733098729555035,
+            "wall_seconds_lower_bound": 0.3733098729555035
+          },
+          "known_antipodal_bit_classification_floor": {
+            "required_energy_snr": 2.7059472155271695,
+            "useful_energy_equivalent_seconds": 0.027059472155271696,
+            "active_seconds_lower_bound": 0.027059472155271696,
+            "wall_seconds_lower_bound": 0.027059472155271696
+          },
+          "known_orthogonal_bit_classification_reference": {
+            "required_energy_snr": 5.411894431054339,
+            "useful_energy_equivalent_seconds": 0.05411894431054339,
+            "active_seconds_lower_bound": 0.05411894431054339,
+            "wall_seconds_lower_bound": 0.05411894431054339
+          }
+        },
+        "relaxed": {
+          "correct_probability": 0.9,
+          "horizon_alpha": 0.01,
+          "horizon_seconds": 43200.0,
+          "known_waveform_one_completion_presence_floor": {
+            "required_energy_snr": 6.5084691830804715,
+            "useful_energy_equivalent_seconds": 0.06508469183080472,
+            "active_seconds_lower_bound": 0.06508469183080472,
+            "wall_seconds_lower_bound": 0.06508469183080472
+          },
+          "known_waveform_chosen_family_allocation": {
+            "attempt_count": 720,
+            "family_count": 184320,
+            "component_alpha": 2.7126736111111112e-08,
+            "required_energy_snr": 22.567958244115744,
+            "useful_energy_equivalent_seconds": 0.22567958244115743,
+            "active_seconds_lower_bound": 0.22567958244115743,
+            "wall_seconds_lower_bound": 0.22567958244115743
+          },
+          "known_antipodal_bit_classification_floor": {
+            "required_energy_snr": 0.8211872075749086,
+            "useful_energy_equivalent_seconds": 0.008211872075749086,
+            "active_seconds_lower_bound": 0.008211872075749086,
+            "wall_seconds_lower_bound": 0.008211872075749086
+          },
+          "known_orthogonal_bit_classification_reference": {
+            "required_energy_snr": 1.6423744151498172,
+            "useful_energy_equivalent_seconds": 0.016423744151498172,
+            "active_seconds_lower_bound": 0.016423744151498172,
+            "wall_seconds_lower_bound": 0.016423744151498172
+          }
+        }
+      },
+      "representation": {
+        "sample_snr_db": -13.11329952303793,
+        "sample_rate_hz": 2048.0,
+        "formats": {
+          "fp32": {
+            "significand_bits": 24,
+            "covariance_or_subtractive_residual_scale_db": 72.24719895935549,
+            "raw_signal_plus_noise_scale_db": 144.49439791871097,
+            "covariance_or_subtractive_residual_risk": false,
+            "raw_signal_plus_noise_risk": false
+          },
+          "fp64": {
+            "significand_bits": 53,
+            "covariance_or_subtractive_residual_scale_db": 159.54589770191004,
+            "raw_signal_plus_noise_scale_db": 319.0917954038201,
+            "covariance_or_subtractive_residual_risk": false,
+            "raw_signal_plus_noise_risk": false
+          }
+        },
+        "classification": "numerical_scale_diagnostic_not_physical_exclusion"
+      }
+    },
+    {
+      "cn0_db_hz": 32.0,
+      "targets": {
+        "strict": {
+          "correct_probability": 0.99,
+          "horizon_alpha": 0.0001,
+          "horizon_seconds": 86400.0,
+          "known_waveform_one_completion_presence_floor": {
+            "required_energy_snr": 18.27321511953539,
+            "useful_energy_equivalent_seconds": 0.011529619286937362,
+            "active_seconds_lower_bound": 0.011529619286937362,
+            "wall_seconds_lower_bound": 0.011529619286937362
+          },
+          "known_waveform_chosen_family_allocation": {
+            "attempt_count": 1440,
+            "family_count": 368640,
+            "component_alpha": 1.3563368055555557e-10,
+            "required_energy_snr": 37.33098729555035,
+            "useful_energy_equivalent_seconds": 0.023554260610824274,
+            "active_seconds_lower_bound": 0.023554260610824274,
+            "wall_seconds_lower_bound": 0.023554260610824274
+          },
+          "known_antipodal_bit_classification_floor": {
+            "required_energy_snr": 2.7059472155271695,
+            "useful_energy_equivalent_seconds": 0.0017073372694125955,
+            "active_seconds_lower_bound": 0.0017073372694125955,
+            "wall_seconds_lower_bound": 0.0017073372694125955
+          },
+          "known_orthogonal_bit_classification_reference": {
+            "required_energy_snr": 5.411894431054339,
+            "useful_energy_equivalent_seconds": 0.003414674538825191,
+            "active_seconds_lower_bound": 0.003414674538825191,
+            "wall_seconds_lower_bound": 0.003414674538825191
+          }
+        },
+        "relaxed": {
+          "correct_probability": 0.9,
+          "horizon_alpha": 0.01,
+          "horizon_seconds": 43200.0,
+          "known_waveform_one_completion_presence_floor": {
+            "required_energy_snr": 6.5084691830804715,
+            "useful_energy_equivalent_seconds": 0.0041065664323876256,
+            "active_seconds_lower_bound": 0.0041065664323876256,
+            "wall_seconds_lower_bound": 0.0041065664323876256
+          },
+          "known_waveform_chosen_family_allocation": {
+            "attempt_count": 720,
+            "family_count": 184320,
+            "component_alpha": 2.7126736111111112e-08,
+            "required_energy_snr": 22.567958244115744,
+            "useful_energy_equivalent_seconds": 0.01423941900404715,
+            "active_seconds_lower_bound": 0.01423941900404715,
+            "wall_seconds_lower_bound": 0.01423941900404715
+          },
+          "known_antipodal_bit_classification_floor": {
+            "required_energy_snr": 0.8211872075749086,
+            "useful_energy_equivalent_seconds": 0.0005181340998125694,
+            "active_seconds_lower_bound": 0.0005181340998125694,
+            "wall_seconds_lower_bound": 0.0005181340998125694
+          },
+          "known_orthogonal_bit_classification_reference": {
+            "required_energy_snr": 1.6423744151498172,
+            "useful_energy_equivalent_seconds": 0.0010362681996251388,
+            "active_seconds_lower_bound": 0.0010362681996251388,
+            "wall_seconds_lower_bound": 0.0010362681996251388
+          }
+        }
+      },
+      "representation": {
+        "sample_snr_db": -1.11329952303793,
+        "sample_rate_hz": 2048.0,
+        "formats": {
+          "fp32": {
+            "significand_bits": 24,
+            "covariance_or_subtractive_residual_scale_db": 72.24719895935549,
+            "raw_signal_plus_noise_scale_db": 144.49439791871097,
+            "covariance_or_subtractive_residual_risk": false,
+            "raw_signal_plus_noise_risk": false
+          },
+          "fp64": {
+            "significand_bits": 53,
+            "covariance_or_subtractive_residual_scale_db": 159.54589770191004,
+            "raw_signal_plus_noise_scale_db": 319.0917954038201,
+            "covariance_or_subtractive_residual_risk": false,
+            "raw_signal_plus_noise_risk": false
+          }
+        },
+        "classification": "numerical_scale_diagnostic_not_physical_exclusion"
+      }
+    },
+    {
+      "cn0_db_hz": 40.0,
+      "targets": {
+        "strict": {
+          "correct_probability": 0.99,
+          "horizon_alpha": 0.0001,
+          "horizon_seconds": 86400.0,
+          "known_waveform_one_completion_presence_floor": {
+            "required_energy_snr": 18.27321511953539,
+            "useful_energy_equivalent_seconds": 0.001827321511953539,
+            "active_seconds_lower_bound": 0.001827321511953539,
+            "wall_seconds_lower_bound": 0.001827321511953539
+          },
+          "known_waveform_chosen_family_allocation": {
+            "attempt_count": 1440,
+            "family_count": 368640,
+            "component_alpha": 1.3563368055555557e-10,
+            "required_energy_snr": 37.33098729555035,
+            "useful_energy_equivalent_seconds": 0.003733098729555035,
+            "active_seconds_lower_bound": 0.003733098729555035,
+            "wall_seconds_lower_bound": 0.003733098729555035
+          },
+          "known_antipodal_bit_classification_floor": {
+            "required_energy_snr": 2.7059472155271695,
+            "useful_energy_equivalent_seconds": 0.00027059472155271697,
+            "active_seconds_lower_bound": 0.00027059472155271697,
+            "wall_seconds_lower_bound": 0.00027059472155271697
+          },
+          "known_orthogonal_bit_classification_reference": {
+            "required_energy_snr": 5.411894431054339,
+            "useful_energy_equivalent_seconds": 0.0005411894431054339,
+            "active_seconds_lower_bound": 0.0005411894431054339,
+            "wall_seconds_lower_bound": 0.0005411894431054339
+          }
+        },
+        "relaxed": {
+          "correct_probability": 0.9,
+          "horizon_alpha": 0.01,
+          "horizon_seconds": 43200.0,
+          "known_waveform_one_completion_presence_floor": {
+            "required_energy_snr": 6.5084691830804715,
+            "useful_energy_equivalent_seconds": 0.0006508469183080472,
+            "active_seconds_lower_bound": 0.0006508469183080472,
+            "wall_seconds_lower_bound": 0.0006508469183080472
+          },
+          "known_waveform_chosen_family_allocation": {
+            "attempt_count": 720,
+            "family_count": 184320,
+            "component_alpha": 2.7126736111111112e-08,
+            "required_energy_snr": 22.567958244115744,
+            "useful_energy_equivalent_seconds": 0.0022567958244115744,
+            "active_seconds_lower_bound": 0.0022567958244115744,
+            "wall_seconds_lower_bound": 0.0022567958244115744
+          },
+          "known_antipodal_bit_classification_floor": {
+            "required_energy_snr": 0.8211872075749086,
+            "useful_energy_equivalent_seconds": 8.211872075749086e-05,
+            "active_seconds_lower_bound": 8.211872075749086e-05,
+            "wall_seconds_lower_bound": 8.211872075749086e-05
+          },
+          "known_orthogonal_bit_classification_reference": {
+            "required_energy_snr": 1.6423744151498172,
+            "useful_energy_equivalent_seconds": 0.0001642374415149817,
+            "active_seconds_lower_bound": 0.0001642374415149817,
+            "wall_seconds_lower_bound": 0.0001642374415149817
+          }
+        }
+      },
+      "representation": {
+        "sample_snr_db": 6.886700476962069,
+        "sample_rate_hz": 2048.0,
+        "formats": {
+          "fp32": {
+            "significand_bits": 24,
+            "covariance_or_subtractive_residual_scale_db": 72.24719895935549,
+            "raw_signal_plus_noise_scale_db": 144.49439791871097,
+            "covariance_or_subtractive_residual_risk": false,
+            "raw_signal_plus_noise_risk": false
+          },
+          "fp64": {
+            "significand_bits": 53,
+            "covariance_or_subtractive_residual_scale_db": 159.54589770191004,
+            "raw_signal_plus_noise_scale_db": 319.0917954038201,
+            "covariance_or_subtractive_residual_risk": false,
+            "raw_signal_plus_noise_risk": false
+          }
+        },
+        "classification": "numerical_scale_diagnostic_not_physical_exclusion"
+      }
+    },
+    {
+      "cn0_db_hz": 55.0,
+      "targets": {
+        "strict": {
+          "correct_probability": 0.99,
+          "horizon_alpha": 0.0001,
+          "horizon_seconds": 86400.0,
+          "known_waveform_one_completion_presence_floor": {
+            "required_energy_snr": 18.27321511953539,
+            "useful_energy_equivalent_seconds": 5.778497995195783e-05,
+            "active_seconds_lower_bound": 5.778497995195783e-05,
+            "wall_seconds_lower_bound": 5.778497995195783e-05
+          },
+          "known_waveform_chosen_family_allocation": {
+            "attempt_count": 1440,
+            "family_count": 368640,
+            "component_alpha": 1.3563368055555557e-10,
+            "required_energy_snr": 37.33098729555035,
+            "useful_energy_equivalent_seconds": 0.00011805094715674847,
+            "active_seconds_lower_bound": 0.00011805094715674847,
+            "wall_seconds_lower_bound": 0.00011805094715674847
+          },
+          "known_antipodal_bit_classification_floor": {
+            "required_energy_snr": 2.7059472155271695,
+            "useful_energy_equivalent_seconds": 8.5569564292564e-06,
+            "active_seconds_lower_bound": 8.5569564292564e-06,
+            "wall_seconds_lower_bound": 8.5569564292564e-06
+          },
+          "known_orthogonal_bit_classification_reference": {
+            "required_energy_snr": 5.411894431054339,
+            "useful_energy_equivalent_seconds": 1.71139128585128e-05,
+            "active_seconds_lower_bound": 1.71139128585128e-05,
+            "wall_seconds_lower_bound": 1.71139128585128e-05
+          }
+        },
+        "relaxed": {
+          "correct_probability": 0.9,
+          "horizon_alpha": 0.01,
+          "horizon_seconds": 43200.0,
+          "known_waveform_one_completion_presence_floor": {
+            "required_energy_snr": 6.5084691830804715,
+            "useful_energy_equivalent_seconds": 2.058158669954972e-05,
+            "active_seconds_lower_bound": 2.058158669954972e-05,
+            "wall_seconds_lower_bound": 2.058158669954972e-05
+          },
+          "known_waveform_chosen_family_allocation": {
+            "attempt_count": 720,
+            "family_count": 184320,
+            "component_alpha": 2.7126736111111112e-08,
+            "required_energy_snr": 22.567958244115744,
+            "useful_energy_equivalent_seconds": 7.136615019098002e-05,
+            "active_seconds_lower_bound": 7.136615019098002e-05,
+            "wall_seconds_lower_bound": 7.136615019098002e-05
+          },
+          "known_antipodal_bit_classification_floor": {
+            "required_energy_snr": 0.8211872075749086,
+            "useful_energy_equivalent_seconds": 2.596821961330187e-06,
+            "active_seconds_lower_bound": 2.596821961330187e-06,
+            "wall_seconds_lower_bound": 2.596821961330187e-06
+          },
+          "known_orthogonal_bit_classification_reference": {
+            "required_energy_snr": 1.6423744151498172,
+            "useful_energy_equivalent_seconds": 5.193643922660374e-06,
+            "active_seconds_lower_bound": 5.193643922660374e-06,
+            "wall_seconds_lower_bound": 5.193643922660374e-06
+          }
+        }
+      },
+      "representation": {
+        "sample_snr_db": 21.886700476962066,
+        "sample_rate_hz": 2048.0,
+        "formats": {
+          "fp32": {
+            "significand_bits": 24,
+            "covariance_or_subtractive_residual_scale_db": 72.24719895935549,
+            "raw_signal_plus_noise_scale_db": 144.49439791871097,
+            "covariance_or_subtractive_residual_risk": false,
+            "raw_signal_plus_noise_risk": false
+          },
+          "fp64": {
+            "significand_bits": 53,
+            "covariance_or_subtractive_residual_scale_db": 159.54589770191004,
+            "raw_signal_plus_noise_scale_db": 319.0917954038201,
+            "covariance_or_subtractive_residual_risk": false,
+            "raw_signal_plus_noise_risk": false
+          }
+        },
+        "classification": "numerical_scale_diagnostic_not_physical_exclusion"
+      }
+    },
+    {
+      "cn0_db_hz": 60.0,
+      "targets": {
+        "strict": {
+          "correct_probability": 0.99,
+          "horizon_alpha": 0.0001,
+          "horizon_seconds": 86400.0,
+          "known_waveform_one_completion_presence_floor": {
+            "required_energy_snr": 18.27321511953539,
+            "useful_energy_equivalent_seconds": 1.827321511953539e-05,
+            "active_seconds_lower_bound": 1.827321511953539e-05,
+            "wall_seconds_lower_bound": 1.827321511953539e-05
+          },
+          "known_waveform_chosen_family_allocation": {
+            "attempt_count": 1440,
+            "family_count": 368640,
+            "component_alpha": 1.3563368055555557e-10,
+            "required_energy_snr": 37.33098729555035,
+            "useful_energy_equivalent_seconds": 3.733098729555035e-05,
+            "active_seconds_lower_bound": 3.733098729555035e-05,
+            "wall_seconds_lower_bound": 3.733098729555035e-05
+          },
+          "known_antipodal_bit_classification_floor": {
+            "required_energy_snr": 2.7059472155271695,
+            "useful_energy_equivalent_seconds": 2.7059472155271697e-06,
+            "active_seconds_lower_bound": 2.7059472155271697e-06,
+            "wall_seconds_lower_bound": 2.7059472155271697e-06
+          },
+          "known_orthogonal_bit_classification_reference": {
+            "required_energy_snr": 5.411894431054339,
+            "useful_energy_equivalent_seconds": 5.411894431054339e-06,
+            "active_seconds_lower_bound": 5.411894431054339e-06,
+            "wall_seconds_lower_bound": 5.411894431054339e-06
+          }
+        },
+        "relaxed": {
+          "correct_probability": 0.9,
+          "horizon_alpha": 0.01,
+          "horizon_seconds": 43200.0,
+          "known_waveform_one_completion_presence_floor": {
+            "required_energy_snr": 6.5084691830804715,
+            "useful_energy_equivalent_seconds": 6.508469183080472e-06,
+            "active_seconds_lower_bound": 6.508469183080472e-06,
+            "wall_seconds_lower_bound": 6.508469183080472e-06
+          },
+          "known_waveform_chosen_family_allocation": {
+            "attempt_count": 720,
+            "family_count": 184320,
+            "component_alpha": 2.7126736111111112e-08,
+            "required_energy_snr": 22.567958244115744,
+            "useful_energy_equivalent_seconds": 2.2567958244115742e-05,
+            "active_seconds_lower_bound": 2.2567958244115742e-05,
+            "wall_seconds_lower_bound": 2.2567958244115742e-05
+          },
+          "known_antipodal_bit_classification_floor": {
+            "required_energy_snr": 0.8211872075749086,
+            "useful_energy_equivalent_seconds": 8.211872075749086e-07,
+            "active_seconds_lower_bound": 8.211872075749086e-07,
+            "wall_seconds_lower_bound": 8.211872075749086e-07
+          },
+          "known_orthogonal_bit_classification_reference": {
+            "required_energy_snr": 1.6423744151498172,
+            "useful_energy_equivalent_seconds": 1.6423744151498172e-06,
+            "active_seconds_lower_bound": 1.6423744151498172e-06,
+            "wall_seconds_lower_bound": 1.6423744151498172e-06
+          }
+        }
+      },
+      "representation": {
+        "sample_snr_db": 26.88670047696207,
+        "sample_rate_hz": 2048.0,
+        "formats": {
+          "fp32": {
+            "significand_bits": 24,
+            "covariance_or_subtractive_residual_scale_db": 72.24719895935549,
+            "raw_signal_plus_noise_scale_db": 144.49439791871097,
+            "covariance_or_subtractive_residual_risk": false,
+            "raw_signal_plus_noise_risk": false
+          },
+          "fp64": {
+            "significand_bits": 53,
+            "covariance_or_subtractive_residual_scale_db": 159.54589770191004,
+            "raw_signal_plus_noise_scale_db": 319.0917954038201,
+            "covariance_or_subtractive_residual_risk": false,
+            "raw_signal_plus_noise_risk": false
+          }
+        },
+        "classification": "numerical_scale_diagnostic_not_physical_exclusion"
+      }
+    },
+    {
+      "cn0_db_hz": 80.0,
+      "targets": {
+        "strict": {
+          "correct_probability": 0.99,
+          "horizon_alpha": 0.0001,
+          "horizon_seconds": 86400.0,
+          "known_waveform_one_completion_presence_floor": {
+            "required_energy_snr": 18.27321511953539,
+            "useful_energy_equivalent_seconds": 1.827321511953539e-07,
+            "active_seconds_lower_bound": 1.827321511953539e-07,
+            "wall_seconds_lower_bound": 1.827321511953539e-07
+          },
+          "known_waveform_chosen_family_allocation": {
+            "attempt_count": 1440,
+            "family_count": 368640,
+            "component_alpha": 1.3563368055555557e-10,
+            "required_energy_snr": 37.33098729555035,
+            "useful_energy_equivalent_seconds": 3.733098729555035e-07,
+            "active_seconds_lower_bound": 3.733098729555035e-07,
+            "wall_seconds_lower_bound": 3.733098729555035e-07
+          },
+          "known_antipodal_bit_classification_floor": {
+            "required_energy_snr": 2.7059472155271695,
+            "useful_energy_equivalent_seconds": 2.7059472155271697e-08,
+            "active_seconds_lower_bound": 2.7059472155271697e-08,
+            "wall_seconds_lower_bound": 2.7059472155271697e-08
+          },
+          "known_orthogonal_bit_classification_reference": {
+            "required_energy_snr": 5.411894431054339,
+            "useful_energy_equivalent_seconds": 5.411894431054339e-08,
+            "active_seconds_lower_bound": 5.411894431054339e-08,
+            "wall_seconds_lower_bound": 5.411894431054339e-08
+          }
+        },
+        "relaxed": {
+          "correct_probability": 0.9,
+          "horizon_alpha": 0.01,
+          "horizon_seconds": 43200.0,
+          "known_waveform_one_completion_presence_floor": {
+            "required_energy_snr": 6.5084691830804715,
+            "useful_energy_equivalent_seconds": 6.508469183080472e-08,
+            "active_seconds_lower_bound": 6.508469183080472e-08,
+            "wall_seconds_lower_bound": 6.508469183080472e-08
+          },
+          "known_waveform_chosen_family_allocation": {
+            "attempt_count": 720,
+            "family_count": 184320,
+            "component_alpha": 2.7126736111111112e-08,
+            "required_energy_snr": 22.567958244115744,
+            "useful_energy_equivalent_seconds": 2.2567958244115743e-07,
+            "active_seconds_lower_bound": 2.2567958244115743e-07,
+            "wall_seconds_lower_bound": 2.2567958244115743e-07
+          },
+          "known_antipodal_bit_classification_floor": {
+            "required_energy_snr": 0.8211872075749086,
+            "useful_energy_equivalent_seconds": 8.211872075749086e-09,
+            "active_seconds_lower_bound": 8.211872075749086e-09,
+            "wall_seconds_lower_bound": 8.211872075749086e-09
+          },
+          "known_orthogonal_bit_classification_reference": {
+            "required_energy_snr": 1.6423744151498172,
+            "useful_energy_equivalent_seconds": 1.6423744151498172e-08,
+            "active_seconds_lower_bound": 1.6423744151498172e-08,
+            "wall_seconds_lower_bound": 1.6423744151498172e-08
+          }
+        }
+      },
+      "representation": {
+        "sample_snr_db": 46.88670047696207,
+        "sample_rate_hz": 2048.0,
+        "formats": {
+          "fp32": {
+            "significand_bits": 24,
+            "covariance_or_subtractive_residual_scale_db": 72.24719895935549,
+            "raw_signal_plus_noise_scale_db": 144.49439791871097,
+            "covariance_or_subtractive_residual_risk": false,
+            "raw_signal_plus_noise_risk": false
+          },
+          "fp64": {
+            "significand_bits": 53,
+            "covariance_or_subtractive_residual_scale_db": 159.54589770191004,
+            "raw_signal_plus_noise_scale_db": 319.0917954038201,
+            "covariance_or_subtractive_residual_risk": false,
+            "raw_signal_plus_noise_risk": false
+          }
+        },
+        "classification": "numerical_scale_diagnostic_not_physical_exclusion"
+      }
+    },
+    {
+      "cn0_db_hz": 100.0,
+      "targets": {
+        "strict": {
+          "correct_probability": 0.99,
+          "horizon_alpha": 0.0001,
+          "horizon_seconds": 86400.0,
+          "known_waveform_one_completion_presence_floor": {
+            "required_energy_snr": 18.27321511953539,
+            "useful_energy_equivalent_seconds": 1.827321511953539e-09,
+            "active_seconds_lower_bound": 1.827321511953539e-09,
+            "wall_seconds_lower_bound": 1.827321511953539e-09
+          },
+          "known_waveform_chosen_family_allocation": {
+            "attempt_count": 1440,
+            "family_count": 368640,
+            "component_alpha": 1.3563368055555557e-10,
+            "required_energy_snr": 37.33098729555035,
+            "useful_energy_equivalent_seconds": 3.733098729555035e-09,
+            "active_seconds_lower_bound": 3.733098729555035e-09,
+            "wall_seconds_lower_bound": 3.733098729555035e-09
+          },
+          "known_antipodal_bit_classification_floor": {
+            "required_energy_snr": 2.7059472155271695,
+            "useful_energy_equivalent_seconds": 2.7059472155271694e-10,
+            "active_seconds_lower_bound": 2.7059472155271694e-10,
+            "wall_seconds_lower_bound": 2.7059472155271694e-10
+          },
+          "known_orthogonal_bit_classification_reference": {
+            "required_energy_snr": 5.411894431054339,
+            "useful_energy_equivalent_seconds": 5.411894431054339e-10,
+            "active_seconds_lower_bound": 5.411894431054339e-10,
+            "wall_seconds_lower_bound": 5.411894431054339e-10
+          }
+        },
+        "relaxed": {
+          "correct_probability": 0.9,
+          "horizon_alpha": 0.01,
+          "horizon_seconds": 43200.0,
+          "known_waveform_one_completion_presence_floor": {
+            "required_energy_snr": 6.5084691830804715,
+            "useful_energy_equivalent_seconds": 6.508469183080472e-10,
+            "active_seconds_lower_bound": 6.508469183080472e-10,
+            "wall_seconds_lower_bound": 6.508469183080472e-10
+          },
+          "known_waveform_chosen_family_allocation": {
+            "attempt_count": 720,
+            "family_count": 184320,
+            "component_alpha": 2.7126736111111112e-08,
+            "required_energy_snr": 22.567958244115744,
+            "useful_energy_equivalent_seconds": 2.2567958244115745e-09,
+            "active_seconds_lower_bound": 2.2567958244115745e-09,
+            "wall_seconds_lower_bound": 2.2567958244115745e-09
+          },
+          "known_antipodal_bit_classification_floor": {
+            "required_energy_snr": 0.8211872075749086,
+            "useful_energy_equivalent_seconds": 8.211872075749086e-11,
+            "active_seconds_lower_bound": 8.211872075749086e-11,
+            "wall_seconds_lower_bound": 8.211872075749086e-11
+          },
+          "known_orthogonal_bit_classification_reference": {
+            "required_energy_snr": 1.6423744151498172,
+            "useful_energy_equivalent_seconds": 1.6423744151498172e-10,
+            "active_seconds_lower_bound": 1.6423744151498172e-10,
+            "wall_seconds_lower_bound": 1.6423744151498172e-10
+          }
+        }
+      },
+      "representation": {
+        "sample_snr_db": 66.88670047696208,
+        "sample_rate_hz": 2048.0,
+        "formats": {
+          "fp32": {
+            "significand_bits": 24,
+            "covariance_or_subtractive_residual_scale_db": 72.24719895935549,
+            "raw_signal_plus_noise_scale_db": 144.49439791871097,
+            "covariance_or_subtractive_residual_risk": false,
+            "raw_signal_plus_noise_risk": false
+          },
+          "fp64": {
+            "significand_bits": 53,
+            "covariance_or_subtractive_residual_scale_db": 159.54589770191004,
+            "raw_signal_plus_noise_scale_db": 319.0917954038201,
+            "covariance_or_subtractive_residual_risk": false,
+            "raw_signal_plus_noise_risk": false
+          }
+        },
+        "classification": "numerical_scale_diagnostic_not_physical_exclusion"
+      }
+    },
+    {
+      "cn0_db_hz": 120.0,
+      "targets": {
+        "strict": {
+          "correct_probability": 0.99,
+          "horizon_alpha": 0.0001,
+          "horizon_seconds": 86400.0,
+          "known_waveform_one_completion_presence_floor": {
+            "required_energy_snr": 18.27321511953539,
+            "useful_energy_equivalent_seconds": 1.827321511953539e-11,
+            "active_seconds_lower_bound": 1.827321511953539e-11,
+            "wall_seconds_lower_bound": 1.827321511953539e-11
+          },
+          "known_waveform_chosen_family_allocation": {
+            "attempt_count": 1440,
+            "family_count": 368640,
+            "component_alpha": 1.3563368055555557e-10,
+            "required_energy_snr": 37.33098729555035,
+            "useful_energy_equivalent_seconds": 3.733098729555035e-11,
+            "active_seconds_lower_bound": 3.733098729555035e-11,
+            "wall_seconds_lower_bound": 3.733098729555035e-11
+          },
+          "known_antipodal_bit_classification_floor": {
+            "required_energy_snr": 2.7059472155271695,
+            "useful_energy_equivalent_seconds": 2.7059472155271694e-12,
+            "active_seconds_lower_bound": 2.7059472155271694e-12,
+            "wall_seconds_lower_bound": 2.7059472155271694e-12
+          },
+          "known_orthogonal_bit_classification_reference": {
+            "required_energy_snr": 5.411894431054339,
+            "useful_energy_equivalent_seconds": 5.411894431054339e-12,
+            "active_seconds_lower_bound": 5.411894431054339e-12,
+            "wall_seconds_lower_bound": 5.411894431054339e-12
+          }
+        },
+        "relaxed": {
+          "correct_probability": 0.9,
+          "horizon_alpha": 0.01,
+          "horizon_seconds": 43200.0,
+          "known_waveform_one_completion_presence_floor": {
+            "required_energy_snr": 6.5084691830804715,
+            "useful_energy_equivalent_seconds": 6.508469183080472e-12,
+            "active_seconds_lower_bound": 6.508469183080472e-12,
+            "wall_seconds_lower_bound": 6.508469183080472e-12
+          },
+          "known_waveform_chosen_family_allocation": {
+            "attempt_count": 720,
+            "family_count": 184320,
+            "component_alpha": 2.7126736111111112e-08,
+            "required_energy_snr": 22.567958244115744,
+            "useful_energy_equivalent_seconds": 2.2567958244115743e-11,
+            "active_seconds_lower_bound": 2.2567958244115743e-11,
+            "wall_seconds_lower_bound": 2.2567958244115743e-11
+          },
+          "known_antipodal_bit_classification_floor": {
+            "required_energy_snr": 0.8211872075749086,
+            "useful_energy_equivalent_seconds": 8.211872075749086e-13,
+            "active_seconds_lower_bound": 8.211872075749086e-13,
+            "wall_seconds_lower_bound": 8.211872075749086e-13
+          },
+          "known_orthogonal_bit_classification_reference": {
+            "required_energy_snr": 1.6423744151498172,
+            "useful_energy_equivalent_seconds": 1.6423744151498173e-12,
+            "active_seconds_lower_bound": 1.6423744151498173e-12,
+            "wall_seconds_lower_bound": 1.6423744151498173e-12
+          }
+        }
+      },
+      "representation": {
+        "sample_snr_db": 86.88670047696206,
+        "sample_rate_hz": 2048.0,
+        "formats": {
+          "fp32": {
+            "significand_bits": 24,
+            "covariance_or_subtractive_residual_scale_db": 72.24719895935549,
+            "raw_signal_plus_noise_scale_db": 144.49439791871097,
+            "covariance_or_subtractive_residual_risk": true,
+            "raw_signal_plus_noise_risk": false
+          },
+          "fp64": {
+            "significand_bits": 53,
+            "covariance_or_subtractive_residual_scale_db": 159.54589770191004,
+            "raw_signal_plus_noise_scale_db": 319.0917954038201,
+            "covariance_or_subtractive_residual_risk": false,
+            "raw_signal_plus_noise_risk": false
+          }
+        },
+        "classification": "numerical_scale_diagnostic_not_physical_exclusion"
+      }
+    },
+    {
+      "cn0_db_hz": 140.0,
+      "targets": {
+        "strict": {
+          "correct_probability": 0.99,
+          "horizon_alpha": 0.0001,
+          "horizon_seconds": 86400.0,
+          "known_waveform_one_completion_presence_floor": {
+            "required_energy_snr": 18.27321511953539,
+            "useful_energy_equivalent_seconds": 1.827321511953539e-13,
+            "active_seconds_lower_bound": 1.827321511953539e-13,
+            "wall_seconds_lower_bound": 1.827321511953539e-13
+          },
+          "known_waveform_chosen_family_allocation": {
+            "attempt_count": 1440,
+            "family_count": 368640,
+            "component_alpha": 1.3563368055555557e-10,
+            "required_energy_snr": 37.33098729555035,
+            "useful_energy_equivalent_seconds": 3.733098729555035e-13,
+            "active_seconds_lower_bound": 3.733098729555035e-13,
+            "wall_seconds_lower_bound": 3.733098729555035e-13
+          },
+          "known_antipodal_bit_classification_floor": {
+            "required_energy_snr": 2.7059472155271695,
+            "useful_energy_equivalent_seconds": 2.7059472155271695e-14,
+            "active_seconds_lower_bound": 2.7059472155271695e-14,
+            "wall_seconds_lower_bound": 2.7059472155271695e-14
+          },
+          "known_orthogonal_bit_classification_reference": {
+            "required_energy_snr": 5.411894431054339,
+            "useful_energy_equivalent_seconds": 5.411894431054339e-14,
+            "active_seconds_lower_bound": 5.411894431054339e-14,
+            "wall_seconds_lower_bound": 5.411894431054339e-14
+          }
+        },
+        "relaxed": {
+          "correct_probability": 0.9,
+          "horizon_alpha": 0.01,
+          "horizon_seconds": 43200.0,
+          "known_waveform_one_completion_presence_floor": {
+            "required_energy_snr": 6.5084691830804715,
+            "useful_energy_equivalent_seconds": 6.508469183080471e-14,
+            "active_seconds_lower_bound": 6.508469183080471e-14,
+            "wall_seconds_lower_bound": 6.508469183080471e-14
+          },
+          "known_waveform_chosen_family_allocation": {
+            "attempt_count": 720,
+            "family_count": 184320,
+            "component_alpha": 2.7126736111111112e-08,
+            "required_energy_snr": 22.567958244115744,
+            "useful_energy_equivalent_seconds": 2.2567958244115744e-13,
+            "active_seconds_lower_bound": 2.2567958244115744e-13,
+            "wall_seconds_lower_bound": 2.2567958244115744e-13
+          },
+          "known_antipodal_bit_classification_floor": {
+            "required_energy_snr": 0.8211872075749086,
+            "useful_energy_equivalent_seconds": 8.211872075749085e-15,
+            "active_seconds_lower_bound": 8.211872075749085e-15,
+            "wall_seconds_lower_bound": 8.211872075749085e-15
+          },
+          "known_orthogonal_bit_classification_reference": {
+            "required_energy_snr": 1.6423744151498172,
+            "useful_energy_equivalent_seconds": 1.642374415149817e-14,
+            "active_seconds_lower_bound": 1.642374415149817e-14,
+            "wall_seconds_lower_bound": 1.642374415149817e-14
+          }
+        }
+      },
+      "representation": {
+        "sample_snr_db": 106.88670047696206,
+        "sample_rate_hz": 2048.0,
+        "formats": {
+          "fp32": {
+            "significand_bits": 24,
+            "covariance_or_subtractive_residual_scale_db": 72.24719895935549,
+            "raw_signal_plus_noise_scale_db": 144.49439791871097,
+            "covariance_or_subtractive_residual_risk": true,
+            "raw_signal_plus_noise_risk": false
+          },
+          "fp64": {
+            "significand_bits": 53,
+            "covariance_or_subtractive_residual_scale_db": 159.54589770191004,
+            "raw_signal_plus_noise_scale_db": 319.0917954038201,
+            "covariance_or_subtractive_residual_risk": false,
+            "raw_signal_plus_noise_risk": false
+          }
+        },
+        "classification": "numerical_scale_diagnostic_not_physical_exclusion"
+      }
+    },
+    {
+      "cn0_db_hz": 200.0,
+      "targets": {
+        "strict": {
+          "correct_probability": 0.99,
+          "horizon_alpha": 0.0001,
+          "horizon_seconds": 86400.0,
+          "known_waveform_one_completion_presence_floor": {
+            "required_energy_snr": 18.27321511953539,
+            "useful_energy_equivalent_seconds": 1.827321511953539e-19,
+            "active_seconds_lower_bound": 1.827321511953539e-19,
+            "wall_seconds_lower_bound": 1.827321511953539e-19
+          },
+          "known_waveform_chosen_family_allocation": {
+            "attempt_count": 1440,
+            "family_count": 368640,
+            "component_alpha": 1.3563368055555557e-10,
+            "required_energy_snr": 37.33098729555035,
+            "useful_energy_equivalent_seconds": 3.733098729555035e-19,
+            "active_seconds_lower_bound": 3.733098729555035e-19,
+            "wall_seconds_lower_bound": 3.733098729555035e-19
+          },
+          "known_antipodal_bit_classification_floor": {
+            "required_energy_snr": 2.7059472155271695,
+            "useful_energy_equivalent_seconds": 2.7059472155271694e-20,
+            "active_seconds_lower_bound": 2.7059472155271694e-20,
+            "wall_seconds_lower_bound": 2.7059472155271694e-20
+          },
+          "known_orthogonal_bit_classification_reference": {
+            "required_energy_snr": 5.411894431054339,
+            "useful_energy_equivalent_seconds": 5.411894431054339e-20,
+            "active_seconds_lower_bound": 5.411894431054339e-20,
+            "wall_seconds_lower_bound": 5.411894431054339e-20
+          }
+        },
+        "relaxed": {
+          "correct_probability": 0.9,
+          "horizon_alpha": 0.01,
+          "horizon_seconds": 43200.0,
+          "known_waveform_one_completion_presence_floor": {
+            "required_energy_snr": 6.5084691830804715,
+            "useful_energy_equivalent_seconds": 6.508469183080472e-20,
+            "active_seconds_lower_bound": 6.508469183080472e-20,
+            "wall_seconds_lower_bound": 6.508469183080472e-20
+          },
+          "known_waveform_chosen_family_allocation": {
+            "attempt_count": 720,
+            "family_count": 184320,
+            "component_alpha": 2.7126736111111112e-08,
+            "required_energy_snr": 22.567958244115744,
+            "useful_energy_equivalent_seconds": 2.2567958244115746e-19,
+            "active_seconds_lower_bound": 2.2567958244115746e-19,
+            "wall_seconds_lower_bound": 2.2567958244115746e-19
+          },
+          "known_antipodal_bit_classification_floor": {
+            "required_energy_snr": 0.8211872075749086,
+            "useful_energy_equivalent_seconds": 8.211872075749086e-21,
+            "active_seconds_lower_bound": 8.211872075749086e-21,
+            "wall_seconds_lower_bound": 8.211872075749086e-21
+          },
+          "known_orthogonal_bit_classification_reference": {
+            "required_energy_snr": 1.6423744151498172,
+            "useful_energy_equivalent_seconds": 1.642374415149817e-20,
+            "active_seconds_lower_bound": 1.642374415149817e-20,
+            "wall_seconds_lower_bound": 1.642374415149817e-20
+          }
+        }
+      },
+      "representation": {
+        "sample_snr_db": 166.88670047696206,
+        "sample_rate_hz": 2048.0,
+        "formats": {
+          "fp32": {
+            "significand_bits": 24,
+            "covariance_or_subtractive_residual_scale_db": 72.24719895935549,
+            "raw_signal_plus_noise_scale_db": 144.49439791871097,
+            "covariance_or_subtractive_residual_risk": true,
+            "raw_signal_plus_noise_risk": true
+          },
+          "fp64": {
+            "significand_bits": 53,
+            "covariance_or_subtractive_residual_scale_db": 159.54589770191004,
+            "raw_signal_plus_noise_scale_db": 319.0917954038201,
+            "covariance_or_subtractive_residual_risk": true,
+            "raw_signal_plus_noise_risk": false
+          }
+        },
+        "classification": "numerical_scale_diagnostic_not_physical_exclusion"
+      }
+    }
+  ],
+  "configuration": {
+    "spreading": 1,
+    "sample_rate_hz": 2048.0,
+    "duty_cycle": 1.0,
+    "retained_energy_fraction": 1.0,
+    "attempt_spacing_seconds": 60.0,
+    "candidates": 2,
+    "durations": 8,
+    "models": 16,
+    "score_budget_fraction": 0.5
+  },
+  "optional_gaussian_screens": [
+    {
+      "cn0_db_hz": -60.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.001,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 0.08902229534824155,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": true
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": true
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": -30.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.001,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 89022.29534824155,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": -26.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.001,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 561692.7107245792,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": -23.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.001,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 1581626.6243916014,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": -20.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.001,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 3155760.0,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": -16.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.001,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 7926910.72510067,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": -10.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.001,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 31557600.0,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": -6.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.001,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 79269107.25100672,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 6.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.001,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 1256330684.5459044,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 20.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.001,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 31557600000.0,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 32.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.001,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 500154254104.1085,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 40.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.001,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 3155760000000.0,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 55.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.001,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 99793893488529.64,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 60.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.001,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 315576000000000.0,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 80.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.001,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 3.15576e+16,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 100.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.001,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 3.15576e+18,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 120.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.001,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 3.15576e+20,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 140.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.001,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 3.15576e+22,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 200.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.001,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 3.15576e+28,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": -60.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.005,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 0.017804467175342998,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": true
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": true
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": -30.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.005,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 17804.467175342998,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": -26.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.005,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 112338.59328839178,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": -23.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.005,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 447227.9951800181,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": -20.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.005,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 1780446.7175343,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": -16.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.005,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 7926910.72510067,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": -10.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.005,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 31557600.0,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": -6.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.005,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 79269107.25100672,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 6.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.005,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 1256330684.5459044,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 20.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.005,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 31557600000.0,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 32.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.005,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 500154254104.1085,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 40.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.005,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 3155760000000.0,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 55.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.005,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 99793893488529.64,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 60.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.005,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 315576000000000.0,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 80.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.005,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 3.15576e+16,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 100.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.005,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 3.15576e+18,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 120.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.005,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 3.15576e+20,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 140.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.005,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 3.15576e+22,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 200.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.005,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 3.15576e+28,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": -60.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.05,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 0.0017804468999124306,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": true
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": true
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": -30.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.05,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 1780.4468999124304,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": -26.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.05,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 11233.86047956739,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": -23.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.05,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 44722.804099133326,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": -20.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.05,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 178044.68999124307,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": -16.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.05,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 1123386.0479567389,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": -10.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.05,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 17804468.999124307,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": -6.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.05,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 79269107.25100672,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 6.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.05,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 1256330684.5459044,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 20.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.05,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 31557600000.0,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 32.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.05,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 500154254104.1085,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 40.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.05,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 3155760000000.0,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 55.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.05,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 99793893488529.64,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 60.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.05,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 315576000000000.0,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 80.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.05,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 3.15576e+16,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 100.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.05,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 3.15576e+18,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 120.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.05,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 3.15576e+20,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 140.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.05,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 3.15576e+22,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 200.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.05,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 3.15576e+28,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": -60.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.1,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 0.0008902234550222745,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": true
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": true
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": -30.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.1,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 890.2234550222745,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": -26.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.1,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 5616.930271748367,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": -23.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.1,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 22361.402176820317,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": -20.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.1,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 89022.34550222746,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": -16.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.1,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 561693.0271748367,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": -10.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.1,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 8902234.550222747,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": -6.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.1,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 56169302.717483714,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 6.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.1,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 1256330684.5459044,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 20.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.1,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 31557600000.0,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 32.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.1,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 500154254104.1085,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 40.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.1,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 3155760000000.0,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 55.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.1,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 99793893488529.64,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 60.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.1,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 315576000000000.0,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 80.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.1,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 3.15576e+16,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 100.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.1,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 3.15576e+18,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 120.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.1,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 3.15576e+20,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 140.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.1,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 3.15576e+22,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 200.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 0.1,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 3.15576e+28,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": -60.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 10.0,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 8.90223460037673e-06,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": true
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": true
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": -30.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 10.0,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 8.90223460037673,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": true
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": -26.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 10.0,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 56.16930303393393,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": -23.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 10.0,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 223.61402302801434,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": -20.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 10.0,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 890.2234600376731,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": -16.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 10.0,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 5616.930303393393,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": -10.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 10.0,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 89022.34600376732,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": -6.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 10.0,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 561693.0303393397,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 6.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 10.0,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 141090910.1582886,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 20.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 10.0,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 31557600000.0,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 32.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 10.0,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 500154254104.1085,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 40.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 10.0,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 3155760000000.0,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 55.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 10.0,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 99793893488529.64,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 60.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 10.0,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 315576000000000.0,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 80.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 10.0,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 3.15576e+16,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 100.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 10.0,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 3.15576e+18,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 120.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 10.0,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 3.15576e+20,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 140.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 10.0,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 3.15576e+22,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 200.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 10.0,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 3.15576e+28,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": -60.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 55.0,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 1.6185881092347683e-06,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": true
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": true
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": -30.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 55.0,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 1.6185881092347683,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": true
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": true
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": -26.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 55.0,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 10.21260055209986,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": -23.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 55.0,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 40.657095097895635,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": -20.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 55.0,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 161.85881092347685,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": -16.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 55.0,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 1021.2600552099858,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": -10.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 55.0,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 16185.881092347687,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": -6.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 55.0,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 102126.00552099866,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 6.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 55.0,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 25652892.757246893,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 20.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 55.0,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 16185881092.347685,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 32.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 55.0,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 500154254104.1085,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 40.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 55.0,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 3155760000000.0,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 55.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 55.0,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 99793893488529.64,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 60.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 55.0,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 315576000000000.0,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 80.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 55.0,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 3.15576e+16,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 100.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 55.0,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 3.15576e+18,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 120.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 55.0,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 3.15576e+20,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 140.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 55.0,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 3.15576e+22,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    },
+    {
+      "cn0_db_hz": 200.0,
+      "seconds": 315576000.0,
+      "B_2sigma_hz": 55.0,
+      "peak_power_upper": 1.0,
+      "kl_upper_nats": 3.15576e+28,
+      "targets": {
+        "strict": {
+          "required_binary_kl_nats": 9.062236433951577,
+          "excluded_in_this_continuous_gaussian_model": false
+        },
+        "relaxed": {
+          "required_binary_kl_nats": 3.8205752275831846,
+          "excluded_in_this_continuous_gaussian_model": false
+        }
+      },
+      "law": "continuous_zero_mean_Gaussian_covariance_envelope_without_selective_modulation",
+      "not_a_spread_preset_or_sampled_channel_prediction": true
+    }
+  ],
+  "limits": [
+    "These are favorable benchmarks and conditional exclusions, not achieved reception, minimum feasible duration or native configuration validation.",
+    "C/N0 is total triplet received power per noise density during active transmission. Actual useful energy includes measured channel, shaping, outages and capture effects.",
+    "Known-mean bit classification, signal presence and correct admission are different decisions; antipodal means are not identifiable under arbitrary unknown common phase.",
+    "The one-completion presence floor gives a known waveform the whole horizon allowance. The separately reported component-family allocation is chosen Bonferroni accounting, not a universal necessary search penalty.",
+    "Duty-cycle conversion holds active-time power fixed and does not model reacquisition, oscillator evolution, erasure position or receiver backlog.",
+    "Rate/spreading geometry does not establish hardware passband, representability, anti-aliasing, minimum distinguishable keyed pattern or complete interleave support.",
+    "Optional Gaussian widths are explicit additional laws, never inferred from preset ray separation. Their continuous model does not include the sampled Gaussian FIR, arbitrary clock interpolation, selective mixtures or physical field calibration.",
+    "Floating-point scale warnings are neither guaranteed numerical failure nor physical impossibility. Structured low-rank likelihoods/direct residuals may avoid subtractive loss without globally wider arithmetic."
+  ]
+}

@@ -13,6 +13,7 @@
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iomanip>
 #include <iostream>
 #include <limits>
@@ -49,6 +50,7 @@ struct Options {
     double cn0 = 8;
     double rate = 36, rf_hz = 30e6;
     double start_low = 0, start_high = 0, start_step = 1;
+    std::optional<std::array<double,2>> arrival_prior_seconds;
     double frequency_low = 0, frequency_high = 0, frequency_step = .1;
     double sample_rate = 0;
     std::uint32_t sample_rate_denominator = 1;
@@ -59,6 +61,8 @@ struct Options {
     unsigned flicker_bands = 12;
     double dropout_ms = 0, dropout_start_ms = 0;
     std::size_t dropout_every_dwells = 1;
+    std::vector<std::uint64_t> missed_dwells;
+    double minimum_observed_fraction = .9;
     double correct = .99, false_probability = 1e-4, horizon = 86400;
     double attempt_spacing = 60;
     double outage = 0;
@@ -169,7 +173,17 @@ ResolvedConfiguration resolve_configuration(const Options& o) {
         if(r.clock){r.arrival_center=r.clock->offset_seconds;
             r.arrival_half=r.clock->half_window_seconds()+o.audio_error_seconds;}
     }
+    if(o.arrival_prior_seconds){
+        const auto [low,high]=*o.arrival_prior_seconds;
+        r.arrival_center=std::midpoint(low,high);
+        r.arrival_half=high/2-low/2;
+    }
     return r;
+}
+std::array<double,2> initial_arrival_bounds(const Options& o,const ResolvedConfiguration& r) {
+    if(o.arrival_prior_seconds)return *o.arrival_prior_seconds;
+    if(r.active)return {r.arrival_center-r.arrival_half,r.arrival_center+r.arrival_half};
+    return {o.start_low,o.start_high};
 }
 std::string channel_name(const Options& o) {
     return o.spread_preset?std::string(tuning::parse_spread_preset(*o.spread_preset).id):o.channel;
@@ -204,7 +218,7 @@ std::int64_t signed_integer(std::string_view s,const char* name) {
     if(n!=s.size())throw std::invalid_argument(std::string("invalid ")+name);
     return v;
 }
-template<class T> std::vector<T> list(std::string_view input, const char* name) {
+template<class T> std::vector<T> list(std::string_view input, const char* name,std::size_t maximum=1000) {
     if(input.empty() || input.back()==',')throw std::invalid_argument(std::string("invalid ")+name+" list");
     std::vector<T> out;
     std::stringstream stream{std::string(input)};
@@ -215,7 +229,7 @@ template<class T> std::vector<T> list(std::string_view input, const char* name) 
         else if constexpr(std::is_integral_v<T>) out.push_back(static_cast<T>(integer(part,name)));
         else out.push_back(number(part,name));
     }
-    if(out.empty()||out.size()>1000) throw std::invalid_argument(std::string("invalid ")+name+" list");
+    if(out.empty()||out.size()>maximum) throw std::invalid_argument(std::string("invalid ")+name+" list");
     return out;
 }
 unsigned parse_whole_bit_burst(std::string_view value) {
@@ -238,6 +252,11 @@ Options parse(int argc, char** argv) {
   --base-oscillator ID --shift-oscillator ID   Existing tuning presets; unspecified partner=gpsdo-xo.
   --clock-sync GPS_10ms-1ms_region-0ms_offset | default
   --audio-error-ms MS --margin X --nominal-if-hz HZ
+                              RF/IF values multiply independent RF/audio oscillator errors;
+                              neither selects a rendered absolute baseband carrier or shared clock topology.
+  --arrival-prior-seconds MIN MAX
+                              Explicit uniform physical initial-arrival prior, independent of --start.
+                              Overrides clock/audio initial timing only; oscillator draws are unchanged.
   --spread-preset ID --selective-perturbation off|slow-N|fast-N|each-N
   --selective-model legacy-allpass|dispersive-dft
   --selective-scale-hz HZ --selective-center-hz HZ
@@ -276,6 +295,9 @@ Options parse(int argc, char** argv) {
                               Physical-path attenuation, separate from planner --outage; -1 -1 disables.
                               Physical time excludes capture lead; OU spectrum requires sampling refinement.
   --dropout-ms MS --dropout-start-ms MS --dropout-every-dwells N
+  --missed-dwells LIST         Sorted unique nonnegative receiver dwell indices (at most4096); requires --fhss.
+                              Erases received I/Q after channel/noise/frontend; physical state continues.
+  --minimum-observed-fraction F  Run-mode coverage gate in (0,1], default0.9; does not alter evidence thresholds.
   --fhss                      Source envelope only; no physical RF-retuning claim.
   --burst-wait-tiles N         Silent tile waits within this one-bit v3 observation.
   --seed N --epoch UTC | --now --trials N --signal-bit 0|1 --no-encrypt
@@ -325,6 +347,11 @@ Examples:
         else if (key == "--audio-error-ms") {o.audio_error_seconds=number(need(),"audio error milliseconds")*.001;o.audio_error_explicit=true;}
         else if (key == "--margin") {o.margin=number(need(),"search/spread margin");o.margin_explicit=true;}
         else if (key == "--nominal-if-hz") o.nominal_if_hz=number(need(),"nominal conversion IF");
+        else if (key == "--arrival-prior-seconds") {
+            const auto low=number(need(),"physical arrival minimum");
+            const auto high=number(need(),"physical arrival maximum");
+            o.arrival_prior_seconds=std::array<double,2>{low,high};
+        }
         else if (key == "--spread-preset") o.spread_preset=std::string(need());
         else if (key == "--spread-delay-ms") o.spread_delay_ms=number(need(),"physical spread delay");
         else if (key == "--spread-doppler-hz") o.spread_doppler_hz=number(need(),"physical spread Doppler");
@@ -373,6 +400,8 @@ Examples:
         else if (key == "--dropout-ms") o.dropout_ms=number(need(),"dropout milliseconds");
         else if (key == "--dropout-start-ms") o.dropout_start_ms=number(need(),"dropout start milliseconds");
         else if (key == "--dropout-every-dwells") o.dropout_every_dwells=bounded_integer<std::size_t>(need(),"dropout period");
+        else if (key == "--missed-dwells") o.missed_dwells=list<std::uint64_t>(need(),"missed receiver dwell",4096);
+        else if (key == "--minimum-observed-fraction") o.minimum_observed_fraction=number(need(),"minimum observed fraction");
         else if (key == "--channel") o.channel = need();
         else if (key == "--control") o.control = need();
         else if (key == "--output") o.output = need();
@@ -447,6 +476,13 @@ Examples:
         throw std::invalid_argument("probabilities must be in (0,1) and time inputs positive");
     if (!(o.start_step > 0 && o.frequency_step > 0 && o.start_low <= o.start_high && o.frequency_low <= o.frequency_high))
         throw std::invalid_argument("invalid acquisition grid");
+    if(o.arrival_prior_seconds&&(*o.arrival_prior_seconds)[0]>(*o.arrival_prior_seconds)[1])
+        throw std::invalid_argument("physical arrival prior endpoints must be ordered");
+    if(!(o.minimum_observed_fraction>0&&o.minimum_observed_fraction<=1))
+        throw std::invalid_argument("minimum observed fraction must be in (0,1]");
+    if(!o.missed_dwells.empty()&&(!o.fhss||
+        std::adjacent_find(o.missed_dwells.begin(),o.missed_dwells.end(),std::greater_equal<>{})!=o.missed_dwells.end()))
+        throw std::invalid_argument("missed receiver dwells require --fhss and strictly ascending unique indices");
     if (!(o.timing_loss_db >= 1e-6 && o.timing_loss_db <= 60) || !std::isfinite(o.timing_loss_db))
         throw std::invalid_argument("timing recommendation loss must be finite and in [0.000001,60] dB");
     for(const auto x:{o.phase_diffusion,o.white_fm,o.random_walk_fm,o.flicker_fm,o.white_pm,
@@ -694,6 +730,7 @@ double timing_grid_step(const Geometry& g,double loss_db) {
 
 void json_configuration(std::ostream& out,const Options& o,const Format& f,const Geometry& g) {
     const auto r=resolve_configuration(o);const auto calendar=whole_bit_calendar(o,f,g);
+    const auto arrival=initial_arrival_bounds(o,r);
     const auto timing_step=timing_grid_step(g,o.timing_loss_db);
     const auto rate_step=1e6*timing_step/g.bit_seconds;
     const auto frequency_step=1/(4*g.bit_seconds);
@@ -725,6 +762,18 @@ void json_configuration(std::ostream& out,const Options& o,const Format& f,const
         calendar_half=static_cast<double>(map->half_width_samples/effective_sample_rate(f));
         calendar_center=static_cast<double>(map->origin_samples/effective_sample_rate(f));
     }
+    if(o.arrival_prior_seconds){
+        // This uniform physical prior replaces only the initial clock/audio
+        // timing draw. Keep its search estimate separate from the timestamp
+        // helper's causal-audio coordinate shift.
+        double ratio=clock_bound*1e-6;
+        if(!r.active)for(const auto clock:o.clocks_ppm)ratio=std::max(ratio,o.margin*std::abs(clock)*1e-6);
+        const auto support=static_cast<double>(g.source_samples)/effective_sample_rate(f);
+        calendar_center=r.arrival_center;
+        calendar_half=(r.arrival_half+ratio*(support+std::abs(r.arrival_center)))/(1-ratio);
+        if(!std::isfinite(calendar_half)||ratio>=1)
+            throw std::invalid_argument("explicit arrival prior calendar exceeds numeric range");
+    }
     const auto [clock_min,clock_max]=std::minmax_element(o.clocks_ppm.begin(),o.clocks_ppm.end());
     const auto count=[](long double span,long double step){return std::ceil(span/step)+1;};
     const auto supplied_timing=std::floor((o.start_high-o.start_low)/o.start_step+1e-9)+1;
@@ -734,6 +783,7 @@ void json_configuration(std::ostream& out,const Options& o,const Format& f,const
        <<",\"base_oscillator\":";json_string(out,r.base_id);out<<",\"shift_oscillator\":";json_string(out,r.shift_id);
     out<<",\"topology\":\"independent audio and RF references; effective relative preset accuracy split symmetrically between TX and RX\""
        <<",\"nominal_conversion_if_hz\":"<<o.nominal_if_hz<<",\"rf_center_hz\":"<<o.rf_hz
+       <<",\"frequency_parameter_scope\":\"RF and conversion-IF values multiply oscillator errors; they do not render an absolute baseband center or implement a shared audio/RF oscillator\""
        <<",\"base_nominal_relative_bound_ppm\":"<<r.base_ppm<<",\"shift_nominal_relative_bound_ppm\":"<<r.rf_ppm
        <<",\"base_per_endpoint_bound_ppm\":"<<r.base_ppm/2<<",\"shift_per_endpoint_bound_ppm\":"<<r.rf_ppm/2
        <<",\"exact_relative_audio_ratio_bound_ppm\":"<<r.clock_bound_ppm
@@ -769,12 +819,23 @@ void json_configuration(std::ostream& out,const Options& o,const Format& f,const
        <<",\"initial_arrival_center_seconds\":"<<r.arrival_center<<",\"initial_arrival_half_width_seconds\":"<<r.arrival_half
        <<",\"full_observation_calendar_half_width_seconds\":"<<calendar_half
        <<",\"calendar_timestamp_center_seconds\":"<<calendar_center
-       <<",\"calendar_timestamp_audio_center_shift_seconds\":"<<(r.clock?o.audio_error_seconds/2:0)
+       <<",\"calendar_timestamp_audio_center_shift_seconds\":"<<(r.clock&&!o.arrival_prior_seconds?o.audio_error_seconds/2:0)
        <<",\"calendar_timestamp_center_shift_applied_to_raw_samples\":false"
-       <<",\"initial_arrival_bounds_seconds\":["<<r.arrival_center-r.arrival_half<<','<<r.arrival_center+r.arrival_half<<']'
-       <<",\"timing_convention\":\"raw samples use offset + TX lag - RX lag with both lags causal [0,Audio], giving zero-centered +/-Audio relative lag; the calendar timestamp helper has a separate +Audio/2 coordinate center; region is total width and UTC clock bounds are per station\""
-       <<",\"truth_selection\":";
-    json_string(out,r.active?"physical endpoint/clock draws independent of public search; inactive UTC policy means fixed zero initial timing; explicit truth frequency/drift and keyed epoch offset remain independent":"legacy manual mode draws timing/frequency/clock/drift from declared ranges");
+       <<",\"initial_arrival_bounds_seconds\":["<<arrival[0]<<','<<arrival[1]<<']'
+       <<",\"explicit_arrival_prior\":"<<(o.arrival_prior_seconds?"true":"false")
+       <<",\"initial_arrival_prior_source\":";
+    json_string(out,o.arrival_prior_seconds?"explicit uniform physical arrival prior; replaces clock/audio initial timing only":
+        r.active?(r.clock?"configured independent clock/audio draws":"configured inactive clock policy: fixed zero timing"):
+        "legacy manual timing draw from public --start range");
+    out<<",\"explicit_arrival_seed_domain\":\"channel seed XOR 0x94d049bb133111eb; independent mt19937_64 stream\""
+       <<",\"timing_convention\":";
+    json_string(out,o.arrival_prior_seconds?
+        "explicit uniform initial physical arrival relative to source support; clock/audio timing draw replaced, endpoint clock-rate and oscillator models preserved":
+        "raw samples use offset + TX lag - RX lag with both lags causal [0,Audio], giving zero-centered +/-Audio relative lag; the calendar timestamp helper has a separate +Audio/2 coordinate center; region is total width and UTC clock bounds are per station");
+    out<<",\"truth_selection\":";
+    json_string(out,o.arrival_prior_seconds?
+        "initial timing is uniform on the explicit physical prior, drawn from a domain-separated channel-seed stream independent of --start; other configured/legacy draws are unchanged":
+        r.active?"physical endpoint/clock draws independent of public search; inactive UTC policy means fixed zero initial timing; explicit truth frequency/drift and keyed epoch offset remain independent":"legacy manual mode draws timing/frequency/clock/drift from declared ranges");
     out<<",\"truth_epoch_offset_seconds\":"<<o.truth_epoch_offset<<",\"receiver_pattern_epoch\":"<<f.epoch
        <<",\"transmitter_pattern_epoch\":"<<offset_epoch(f.epoch,o.truth_epoch_offset)
        <<",\"epoch_address_scope\":\"explicit independent keyed-epoch offset; PC timing draws do not silently choose a crypto epoch\""
@@ -784,7 +845,7 @@ void json_configuration(std::ostream& out,const Options& o,const Format& f,const
     out<<",\"public_search\":{\"timing_bounds_seconds\":["<<o.start_low<<','<<o.start_high<<"],\"frequency_bounds_hz\":["<<o.frequency_low<<','<<o.frequency_high
        <<"],\"clock_bounds_ppm\":["<<*clock_min<<','<<*clock_max<<"],\"epoch_alternatives\":"<<o.epoch_offsets.size()
        <<",\"estimated_hypotheses\":"<<supplied_bank<<",\"materialization_cap\":10000"
-       <<",\"covers_initial_timing_prior\":"<<(o.start_low<=r.arrival_center-r.arrival_half&&o.start_high>=r.arrival_center+r.arrival_half?"true":"false")
+       <<",\"covers_initial_timing_prior\":"<<(o.start_low<=arrival[0]&&o.start_high>=arrival[1]?"true":"false")
        <<",\"covers_static_oscillator_frequency_prior\":"<<(o.frequency_low<=-r.frequency_bound_hz+o.truth_frequency_hz&&o.frequency_high>=r.frequency_bound_hz+o.truth_frequency_hz?"true":"false")
        <<",\"covers_audio_clock_prior\":"<<(*clock_min<=-r.clock_bound_ppm&&*clock_max>=r.clock_bound_ppm?"true":"false")
        <<",\"covers_suggested_epochs\":"<<(epoch_covered?"true":"false")<<'}'
@@ -824,7 +885,15 @@ void json_configuration(std::ostream& out,const Options& o,const Format& f,const
     coordinate("support_begin",calendar.support_begin);coordinate("payload_begin",calendar.payload_begin);
     coordinate("payload_end",calendar.payload_end);coordinate("support_end",calendar.support_end);coordinate("next_support_begin",calendar.next_support);
     out<<",\"next_support_formula\":\"ceil_UTC_30s(max(support_end + wait_symbols*whole_useful_bit_samples, support_begin + 60s))\""
-       <<",\"scope\":\"one-bit source renders this slot only; successor is public calendar metadata, not three internal wait tiles or multi-bit runtime support\"}}";
+       <<",\"scope\":\"one-bit source renders this slot only; successor is public calendar metadata, not three internal wait tiles or multi-bit runtime support\"}"
+       <<",\"receiver_observation\":{\"missed_dwell_indices\":[";
+    for(std::size_t i=0;i<o.missed_dwells.size();++i){if(i)out<<',';out<<o.missed_dwells[i];}
+    out<<"],\"maximum_missed_dwell_indices\":4096,\"dwell_seconds\":"<<f.dwell_seconds
+       <<",\"public_calendar_origin_seconds\":"<<static_cast<double>(g.calendar_origin_sample)/effective_sample_rate(f)
+       <<",\"missed_dwell_calendar\":\"floor((n/(Fs*RX_clock_scale) - capture_lead_seconds + retune_offset_seconds - calendar_origin_sample/Fs)/dwell_seconds); only nonnegative public receiver dwell indices are maskable\""
+       <<",\"erasure_stage\":\"after physical channel, noise and frontend; output I/Q and validity become zero while all physical state advances\""
+       <<",\"physical_rf_retuning\":false,\"minimum_observed_fraction\":"<<o.minimum_observed_fraction
+       <<",\"coverage_policy_scope\":\"C++ run receiver only; complete-calendar requirement and likelihood thresholds remain unchanged; external scorers declare their own coverage policy\"}}";
 }
 void print_configuration(const Options& o) {
     const auto f=format_for(o);const auto g=geometry(f);
@@ -882,7 +951,9 @@ void json_provenance(std::ostream& out,const Options& o,const Format& f,const Ge
     out<<",\"physical_rf_retuning\":false,\"spread_inputs\":";json_spread_inputs(out,o,resolve_configuration(o));
     out<<",\"path_evolution\":";json_path_evolution(out,o);out<<'}'
        <<",\"source_hash_note\":\"source and binary hashes must be bound externally to this uncommitted study build\"";
-    if(configured_physics(o)||path_evolution_active(o)||o.truth_epoch_offset||o.nominal_if_hz!=1500||effective_sample_rate(f)<64||o.seconds>7*86400.){out<<",\"resolved_configuration\":";json_configuration(out,o,f,g);}
+    if(configured_physics(o)||path_evolution_active(o)||o.arrival_prior_seconds||!o.missed_dwells.empty()||
+       o.minimum_observed_fraction!=.9||o.truth_epoch_offset||o.nominal_if_hz!=1500||effective_sample_rate(f)<64||o.seconds>7*86400.){
+        out<<",\"resolved_configuration\":";json_configuration(out,o,f,g);}
     const auto& front=o.frontend;
     auto converter=[&](const ConverterConfig& c){
         out<<"{\"nominal_bits\":"<<c.nominal_bits<<",\"effective_bits\":"<<(c.effective_bits>0?c.effective_bits:c.nominal_bits)
@@ -1063,7 +1134,12 @@ void print_plan(const Options& o) {
         <<",\"estimated_operations\":"<<result.estimated_operations
         <<",\"estimated_workspace_bytes\":"<<result.estimated_workspace_bytes
         <<",\"assumptions_supported\":"<<(result.status==statistics::PlannerStatus::conditional_model_bound?"true":"false")
-        <<",\"assumption_note\":\"conditional only on caller-supplied retained-energy, wrong-codeword projection, outage, and white-noise bounds, plus fixed-rank bank if selected; this CLI has no empirical calibration\"}\n";
+        <<",\"assumption_note\":\"conditional only on caller-supplied retained-energy, wrong-codeword projection, outage, and white-noise bounds, plus fixed-rank bank if selected; this CLI has no empirical calibration\"";
+    if(o.arrival_prior_seconds||!o.missed_dwells.empty()||o.minimum_observed_fraction!=.9){
+        std::cout<<",\"simulation_controls_not_planner_certificates\":true,\"resolved_configuration\":";
+        json_configuration(std::cout,o,format,shape);
+    }
+    std::cout<<"}\n";
 }
 
 void json_candidate(std::ostream& out, const Candidate& c) {
@@ -1192,9 +1268,22 @@ StreamChannelConfig channel_config(const Options& o,const Format& base,const Geo
         channel_cfg.effects.static_doppler_hz=o.truth_frequency_hz*rx+
             physical_drift*(pad+channel_cfg.effects.timing_offset_seconds);
     }
+    if(o.arrival_prior_seconds){
+        // Preserve every old draw and its ordering. A separate stream from
+        // the same physical channel root makes this timing independent of
+        // public acquisition grids and of optional endpoint/policy draws.
+        std::mt19937_64 arrival_rng(seed^0x94d049bb133111ebULL);
+        const auto old_arrival=channel_cfg.effects.timing_offset_seconds;
+        channel_cfg.effects.timing_offset_seconds=std::uniform_real_distribution<double>(
+            (*o.arrival_prior_seconds)[0],(*o.arrival_prior_seconds)[1])(arrival_rng);
+        const auto physical_drift=(channel_cfg.effects.tx.rf_drift_ppm_per_second-
+            channel_cfg.effects.rx.rf_drift_ppm_per_second)*o.rf_hz*1e-6;
+        channel_cfg.effects.static_doppler_hz+=physical_drift*(channel_cfg.effects.timing_offset_seconds-old_arrival);
+    }
     channel_cfg.effects.dropout_ms=o.dropout_ms;
     channel_cfg.effects.dropout_start_ms=o.dropout_start_ms;
     channel_cfg.effects.dropout_every_n_dwells=o.dropout_every_dwells;
+    channel_cfg.missed_receiver_dwell_indices=o.missed_dwells;
     channel_cfg.tx_spectrum.white_fm_hz_sqrt_seconds=o.white_fm/std::sqrt(2.);
     channel_cfg.rx_spectrum.white_fm_hz_sqrt_seconds=o.white_fm/std::sqrt(2.);
     channel_cfg.tx_spectrum.random_walk_fm_hz_per_sqrt_second=o.random_walk_fm/std::sqrt(2.);
@@ -1256,8 +1345,9 @@ ObservationCalendar observation_calendar(const Options& o,const Format& f,const 
     const double physical_fs_max=static_cast<double>(fs*rx_max);
     const long double source_seconds=static_cast<long double>(g.source_samples)/effective_sample_rate(f);
     const auto delay=std::max(resolved.spread_delay_ms*.001,o.basis=="two-ray"?o.tap_delay_ms*.001:0.);
-    const auto start_low=resolved.active?std::min(o.start_low,resolved.arrival_center-resolved.arrival_half):o.start_low;
-    const auto start_high=resolved.active?std::max(o.start_high,resolved.arrival_center+resolved.arrival_half):o.start_high;
+    const auto arrival=initial_arrival_bounds(o,resolved);
+    const auto start_low=std::min(o.start_low,arrival[0]);
+    const auto start_high=std::max(o.start_high,arrival[1]);
     ObservationCalendar c;c.pad=std::max(0.,-start_low)+.05;
     long double selective_tail=std::ceil(o.selective_tail_floor_seconds*physical_fs_max);
     long double selective_memory=0;
@@ -1297,7 +1387,8 @@ ObservationCalendar observation_calendar(const Options& o,const Format& f,const 
     }
     const long double history_samples=std::ceil(resolved.spread_delay_ms*.001L*fs*tx_max)+64;
     const long double channel_bytes=65536+history_samples*sizeof(Complex)+selective_memory+
-        gaussian_bytes+static_cast<long double>(o.flicker_bands)*4*sizeof(double);
+        gaussian_bytes+static_cast<long double>(o.flicker_bands)*4*sizeof(double)+
+        static_cast<long double>(o.missed_dwells.capacity())*sizeof(std::uint64_t);
     if(!std::isfinite(channel_bytes)||channel_bytes>std::numeric_limits<std::size_t>::max())
         throw std::invalid_argument("public channel workspace bound overflows");
     c.channel_working_bytes=static_cast<std::size_t>(std::ceil(channel_bytes));
@@ -1338,6 +1429,7 @@ void run(const Options& o) {
         rc.log_family_hypotheses=std::log(static_cast<double>(rc.candidates.size()))+
             std::log(std::ceil(o.horizon/o.attempt_spacing))+std::log(static_cast<double>(o.duration_alternatives));
         rc.family_false_admission_probability=o.false_probability;
+        rc.minimum_observed_fraction=o.minimum_observed_fraction;
         StreamingReceiver receiver(rc,rxkey);
         std::vector<Complex> samples(o.chunk); std::vector<std::uint8_t> validity(o.chunk);
         auto last_progress=Clock::now();
@@ -1427,7 +1519,7 @@ std::uint64_t offset_epoch(std::uint64_t epoch,std::int64_t offset) {
 
 void export_basis(const Options& o) {
     if(o.output.empty())throw std::invalid_argument("--output directory is required for --mode export");
-    if(o.dropout_ms>0)throw std::invalid_argument("GPU export with erased observations is unsupported; use --mode run for selected erasures");
+    if(o.dropout_ms>0||!o.missed_dwells.empty())throw std::invalid_argument("GPU export with erased observations is unsupported; use run or validity-aware sampled/statistics exports for selected erasures");
     const auto f=format_for(o);const auto g=geometry(f);
     const auto key_seed=o.key_seed.value_or(o.seed),channel_seed=o.channel_seed.value_or(o.seed);
     const auto txkey=key_for(key_seed,0);
@@ -1797,8 +1889,9 @@ void export_stats(const Options& o) {
     if(!gram||!mean||!intervals||!valid_rows||!energy||(o.stats_noisy&&(!observation||!received_energy)))throw std::runtime_error("failed writing export-stats files");
     auto size_of=[&](const std::string& n){return std::filesystem::file_size(directory/(n+".partial"));};
     const auto resolved=resolve_configuration(o);
-    const auto arrival_low=pad+(resolved.active?resolved.arrival_center-resolved.arrival_half:o.start_low);
-    const auto arrival_high=pad+(resolved.active?resolved.arrival_center+resolved.arrival_half:o.start_high);
+    const auto arrival=initial_arrival_bounds(o,resolved);
+    const auto arrival_low=pad+arrival[0];
+    const auto arrival_high=pad+arrival[1];
     const auto rx_clock_half=resolved.oscillators?resolved.base_ppm*.5e-6:0.;
     const std::array<double,4> physical_arrival_bounds{
         arrival_low*(1-rx_clock_half),arrival_low*(1+rx_clock_half),
@@ -2087,8 +2180,9 @@ void export_group_stats(const Options& o) {
 
     auto size_of=[&](const std::string& name){return std::filesystem::file_size(directory/(name+".partial"));};
     const auto resolved=resolve_configuration(o);const auto rx_clock_half=resolved.oscillators?resolved.base_ppm*.5e-6:0.;
-    const auto arrival_low=pad+(resolved.active?std::min(o.start_low,resolved.arrival_center-resolved.arrival_half):o.start_low);
-    const auto arrival_high=pad+(resolved.active?std::max(o.start_high,resolved.arrival_center+resolved.arrival_half):o.start_high);
+    const auto arrival=initial_arrival_bounds(o,resolved);
+    const auto arrival_low=pad+arrival[0];
+    const auto arrival_high=pad+arrival[1];
     const auto physical_arrival_bounds=std::array<double,4>{arrival_low*(1-rx_clock_half),arrival_low*(1+rx_clock_half),
         arrival_high*(1-rx_clock_half),arrival_high*(1+rx_clock_half)};
     const auto [arrival_bound_low,arrival_bound_high]=std::minmax_element(physical_arrival_bounds.begin(),physical_arrival_bounds.end());

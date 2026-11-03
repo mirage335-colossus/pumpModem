@@ -1,0 +1,227 @@
+{
+  "schema": "triad-harmonic-public-basis-diagnostic-v1",
+  "scope": "Independent finite cubic-FIR harmonic expansion of retained public shaped templates; no actual channel observation or acquisition. No new physical receiver qualification.",
+  "basis_sha256": "376f2fe4cfc30b7da313a88bf80ab7cc291b4f774c42cc713c54441a1401f09a",
+  "basis_shape": [
+    4,
+    19199,
+    2
+  ],
+  "used_candidates": [
+    2,
+    3
+  ],
+  "sample_rate": 2048,
+  "spacing": 75.0,
+  "D": 30.0,
+  "input_samples": 19199,
+  "full_output_samples": 19219,
+  "columns": 26,
+  "rank": [
+    26,
+    26
+  ],
+  "smallest_relative_singular": [
+    0.13659821958234578,
+    0.14072437715300112
+  ],
+  "maximum_interbit_canonical_correlation": 0.256376726211539,
+  "samples_per_bit_depth": 64,
+  "results": [
+    {
+      "each_depth": 0,
+      "cases": [
+        {
+          "bit": 0,
+          "nominal_rank2_energy_fraction": [
+            0.9999999999999922,
+            1.0000000000000007,
+            1.0000000000000087
+          ],
+          "expanded_projection_relative_residual_max": 7.933606052396097e-15,
+          "wrongbit_expanded_energy_fraction": [
+            0.014619140268762184,
+            0.01892066613354606,
+            0.022227432016732884
+          ]
+        },
+        {
+          "bit": 1,
+          "nominal_rank2_energy_fraction": [
+            0.9999999999999921,
+            0.9999999999999997,
+            1.0000000000000056
+          ],
+          "expanded_projection_relative_residual_max": 8.494978566707238e-15,
+          "wrongbit_expanded_energy_fraction": [
+            0.009107642476190782,
+            0.014843008357176562,
+            0.020003541862283827
+          ]
+        }
+      ]
+    },
+    {
+      "each_depth": 0.01,
+      "cases": [
+        {
+          "bit": 0,
+          "nominal_rank2_energy_fraction": [
+            0.9998975387250797,
+            0.9999036239262382,
+            0.9999127925524377
+          ],
+          "expanded_projection_relative_residual_max": 8.708415405245794e-15,
+          "wrongbit_expanded_energy_fraction": [
+            0.014546424842984998,
+            0.019004234198757602,
+            0.02243590554191183
+          ]
+        },
+        {
+          "bit": 1,
+          "nominal_rank2_energy_fraction": [
+            0.9998984189759393,
+            0.9999034831749432,
+            0.9999148320122322
+          ],
+          "expanded_projection_relative_residual_max": 1.0057170627776062e-14,
+          "wrongbit_expanded_energy_fraction": [
+            0.009145482204492862,
+            0.015206011695506012,
+            0.020103095078007175
+          ]
+        }
+      ]
+    },
+    {
+      "each_depth": 0.25,
+      "cases": [
+        {
+          "bit": 0,
+          "nominal_rank2_energy_fraction": [
+            0.9391358680259161,
+            0.944329131592321,
+            0.9573797022357672
+          ],
+          "expanded_projection_relative_residual_max": 1.0934653277890214e-14,
+          "wrongbit_expanded_energy_fraction": [
+            0.01364070180993292,
+            0.0178429193218439,
+            0.027560097746219845
+          ]
+        },
+        {
+          "bit": 1,
+          "nominal_rank2_energy_fraction": [
+            0.9385870048259741,
+            0.9435354431911083,
+            0.9552123704313523
+          ],
+          "expanded_projection_relative_residual_max": 9.603007015999579e-15,
+          "wrongbit_expanded_energy_fraction": [
+            0.009195572118404926,
+            0.014854172473889447,
+            0.023212072216406886
+          ]
+        }
+      ]
+    },
+    {
+      "each_depth": 0.65,
+      "cases": [
+        {
+          "bit": 0,
+          "nominal_rank2_energy_fraction": [
+            0.6355798862700016,
+            0.7105637894473129,
+            0.7822977910839419
+          ],
+          "expanded_projection_relative_residual_max": 9.467445682915028e-15,
+          "wrongbit_expanded_energy_fraction": [
+            0.010876976329141768,
+            0.017429923419719332,
+            0.031711360538547576
+          ]
+        },
+        {
+          "bit": 1,
+          "nominal_rank2_energy_fraction": [
+            0.6415057476491246,
+            0.7100818229462748,
+            0.7750104265900088
+          ],
+          "expanded_projection_relative_residual_max": 9.363885082572666e-15,
+          "wrongbit_expanded_energy_fraction": [
+            0.009149058957185636,
+            0.015165365695488271,
+            0.026106392530720817
+          ]
+        }
+      ]
+    }
+  ],
+  "ideal_known_noise_projector_presence_thresholds": [
+    {
+      "rank": 1,
+      "pd": 0.99,
+      "alpha": 0.0001,
+      "required_projected_energy_snr": 21.28050380048999
+    },
+    {
+      "rank": 1,
+      "pd": 0.9,
+      "alpha": 0.01,
+      "required_projected_energy_snr": 8.713344533717443
+    },
+    {
+      "rank": 2,
+      "pd": 0.99,
+      "alpha": 0.0001,
+      "required_projected_energy_snr": 23.917117657243946
+    },
+    {
+      "rank": 2,
+      "pd": 0.9,
+      "alpha": 0.01,
+      "required_projected_energy_snr": 10.368476669051876
+    },
+    {
+      "rank": 26,
+      "pd": 0.99,
+      "alpha": 0.0001,
+      "required_projected_energy_snr": 46.68281640141816
+    },
+    {
+      "rank": 26,
+      "pd": 0.9,
+      "alpha": 0.01,
+      "required_projected_energy_snr": 24.016979096267523
+    },
+    {
+      "rank": 72,
+      "pd": 0.99,
+      "alpha": 0.0001,
+      "required_projected_energy_snr": 67.38565735699042
+    },
+    {
+      "rank": 72,
+      "pd": 0.9,
+      "alpha": 0.01,
+      "required_projected_energy_snr": 36.318448711531765
+    },
+    {
+      "rank": 960,
+      "pd": 0.99,
+      "alpha": 0.0001,
+      "required_projected_energy_snr": 203.86947454617626
+    },
+    {
+      "rank": 960,
+      "pd": 0.9,
+      "alpha": 0.01,
+      "required_projected_energy_snr": 117.61046260542747
+    }
+  ],
+  "elapsed_seconds": 1.5639666700153612
+}

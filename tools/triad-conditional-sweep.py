@@ -116,8 +116,8 @@ def memory_preflight(ws,args,candidates):
     window=0;window_retained=0
     if 'gaussian-window-ucb' in args.receiver_methods:
         w=min(b,args.window_blocks);dimension=w*k;full,remainder=divmod(b,args.window_blocks)
-        stored=candidates*(full*args.window_blocks**2+remainder**2)*k*k*16+candidates*b*k*8
-        preparation=stored+6*b*candidates*k*k*16+24*dimension*dimension*16+b*8
+        stored=candidates*(full*args.window_blocks**2+remainder**2)*k*k*16+candidates*b*k*8+candidates*b*k*k*16
+        preparation=stored+14*b*candidates*k*k*16+24*dimension*dimension*16+b*8
         scoring=stored+160*t*candidates*dimension+64*candidates*dimension**2+64*t*candidates
         window=max(preparation,scoring)+3*b*candidates*k*k*16
         window_retained=stored+2*b*candidates*k*k*16
@@ -220,14 +220,15 @@ def score_prepared(prepared,args,method,receiver_cache=None):
         sums=np.zeros((t,c,k,k),np.complex128);correction=np.zeros_like(sums)
         for item in G:
             adjusted=item-correction;updated=sums+adjusted;correction=(updated-sums)-adjusted;sums=updated
-        w,det=static.whiten_channel(r.reshape(b,t*c,k),sums.reshape(t*c,k,k),args.tap_prior.stationary_power)
+        whitening_diagnostics={}
+        w,det=static.whiten_channel(r.reshape(b,t*c,k),sums.reshape(t*c,k,k),args.tap_prior.stationary_power,diagnostics=whitening_diagnostics)
         meta=prepared.metadata;dt=meta['block_samples']/meta['sample_rate']
         nfft,bins,frequencies=static.grid_for(b,dt,meta['sample_count']/meta['sample_rate'],args.frequency_bound)
         R=static.frequency_correlations(w,prepared.centers_seconds,dt,nfft,bins,device=args.device,precision=args.precision)
         R=R.reshape(len(bins),t,c,k);det=det.reshape(t,c)
         scores=np.concatenate([static.scores_from_correlations(R[:,j],det[j],prepared.labels) for j in range(t)],axis=0)
         details={'channel_prior':'static Gaussian coefficients; --coherence applies only to the OU receivers','frequency_grid':'existing outward-rounded uniform FFT grid','frequency_count':len(bins),'frequency_endpoints_hz':[float(frequencies[0]),float(frequencies[-1])],
-                 'arithmetic':'FP64 CPU channel whitening and evidence; selected bulk FFT width'}
+                 'arithmetic':'FP64 CPU channel whitening and evidence; selected bulk FFT width','whitening':whitening_diagnostics}
     else:
         rr=torch.as_tensor(r,device=args.device);gg=torch.as_tensor(G,device=args.device)
         if method=='gaussian-ou-ucb':

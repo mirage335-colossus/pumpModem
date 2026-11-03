@@ -16,7 +16,7 @@ from scipy.special import gammaincinv, logsumexp
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/"tools"))
 from triad_group_acquire import (AcquisitionConfig, GroupedWorkspace, WorkspaceError,
-    bit_mixture, decision, main, prepare_group_tile, score_workspace)
+    bit_mixture, decision, main, parse_args, prepare_group_tile, score_workspace)
 from triad_gaussian_window import PreparedWindowedGaussian
 from triad_noise_likelihood import whole_bank_residual, variance_upper_confidence
 
@@ -77,6 +77,15 @@ def write_fixture(directory, data, sample_rate=128.):
 class GroupAcquisitionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):torch.set_num_threads(1)
+
+    def test_explicit_default_sized_window_is_a_valid_cli_choice(self):
+        args=parse_args(['fixture','--doppler-width-hz','0','--window-blocks','16'])
+        self.assertEqual(args.window_blocks,16)
+        self.assertIsNone(args.window_seconds)
+        args=parse_args(['fixture','--doppler-width-hz','0','--window-seconds','.0625'])
+        self.assertEqual(args.window_seconds,.0625)
+        self.assertEqual(args.window_blocks,16)
+
 
     def test_group_residual_matches_raw_qr_with_erasure_and_rank_deficiency(self):
         data=fixture(rank_deficient=True,erased=True)

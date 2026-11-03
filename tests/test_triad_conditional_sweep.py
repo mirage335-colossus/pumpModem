@@ -40,8 +40,15 @@ class ConditionalTests(unittest.TestCase):
             path=self.workspace(temp);args=self.args(path,Path(temp)/'unused.json')
             design,_=study.load_design(study.BlockWorkspace(path),args)
             prepared,_=study.draw_batch(design,args,0.,71,8,'signal')
-            scores={m:study.score_prepared(prepared,args,m)[0] for m in study.METHODS[:3]}
-            for method in study.METHODS[1:3]:np.testing.assert_allclose(scores[method],scores['static-fft-ucb'],atol=2e-12,rtol=2e-12)
+            reference,details=study.score_prepared(prepared,args,'static-fft-ucb')
+            # Match the static path's explicit conservative numerical-noise
+            # envelope in the independent OU references; keep strict parity.
+            inflation=details['whitening']['numerical_noise_inflation']
+            adjusted=prepared._replace(correlations=prepared.correlations/inflation,
+                grams=prepared.grams/inflation,variance_upper=prepared.variance_upper*inflation)
+            for method in study.METHODS[1:3]:
+                actual,_=study.score_prepared(adjusted,args,method)
+                np.testing.assert_allclose(actual,reference,atol=2e-12,rtol=2e-12)
             self.assertEqual(prepared.correlations.shape,(4,8,2,2));self.assertEqual(prepared.grams.shape,(4,8,2,2,2))
             self.assertFalse(hasattr(prepared,'mean'));self.assertFalse(hasattr(prepared,'truth'))
             self.assertNotIn('injected_noise_variance_simulation_only',prepared.metadata)

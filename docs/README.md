@@ -8,6 +8,10 @@ assumptions and limits before applying their findings.
 the [development workflow](triad-development-workflow.md). It maps the efficient
 simulation tools, evidence-backed receiver choices, small runnable diagnostics,
 workspace reuse and proportionate testing before larger sampled campaigns.
+The current [broad configuration study](validation-data/triad-v3/2026-11-03-broad/README.md)
+separates unsupported configurations, capture limits, incomplete acquisition and
+receiver failures. It also records corrected high-C/N₀ numerical failures;
+consult it before reusing earlier noise-admission results.
 
 **Developing Robust simulation software:** start with the
 [Doppler/delay spread and frequency-selective amplitude modulation guide](channel-models.md).

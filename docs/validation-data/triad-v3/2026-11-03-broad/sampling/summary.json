@@ -1,0 +1,50 @@
+{
+  "acceptance": {
+    "complex_gain_error_limit": 0.01,
+    "energy_error_limit_db": 0.1,
+    "pass_complex_gain_error": true,
+    "pass_energy_error": true
+  },
+  "differential_response_ranges": {
+    "adjacent_amplitude_difference_rms": [
+      0.226288496730094,
+      0.9208410680525736
+    ],
+    "adjacent_complex_response_difference_rms": [
+      0.9228000736094655,
+      1.1283188381014768
+    ],
+    "adjacent_phase_difference_rms_rad": [
+      0.781086238855061,
+      1.017881441493453
+    ]
+  },
+  "limitations": [
+    "One fixed modulation seed; 48 deterministic profiles are not 48 independent physical channel trials.",
+    "The selected rates and Fs make dispersive delays integral; this conclusion does not generalize to arbitrary spacing or Fs.",
+    "Both Doppler-shifted triplet offsets are tested separately, with three simultaneous tones per profile; no carrier-label separation is applied by the operator.",
+    "No shaped data, noise, excess-delay ray composition, stochastic oscillator, receiver compression or admission test is performed.",
+    "Finite-vs-ideal energy agreement is a stage-specific interpolation result, not a sensitivity or total emitted-bandwidth certificate."
+  ],
+  "minimum_tested_line_nyquist_margin_hz": 0.12086666666666666,
+  "profiles": 48,
+  "results_sha256": "d430c9c12a74196b60abae345b645f3ac40e81d3a765f75edd13ad82d828f491",
+  "schema": "triad-long-rate-selective-refinement-v1",
+  "scope": "Continuous sampled selective FIR and deterministic tone/sideband response only",
+  "source_sha256": {
+    "docs/validation-data/triad-v3/2026-11-03-broad/sampling/long_rate_probe.cpp": "80f0a96feab718f36287d4c66b2eee4ca2918dc3369ddd835ca6dee5c52d9d9d",
+    "docs/validation-data/triad-v3/2026-11-03-broad/sampling/summarize.py": "1311de4096e486010ca62b069524371ad21ae4ffe03226f86fbe32a536319e91",
+    "src/channel_perturbation.hpp": "fae3b1b345e3dc19c8b85a5010e4434530bd0a34d595dd4de8cd55349d8d879a"
+  },
+  "worst_errors": {
+    "finite_vs_ideal_adjacent_difference_rms": 6.612781124223846e-13,
+    "finite_vs_ideal_amplitude_rms": 4.3904950323739503e-13,
+    "finite_vs_ideal_complex_rms": 6.436228592942239e-13,
+    "finite_vs_ideal_phase_rms_rad": 1.2316657938590424e-12,
+    "individual_energy_error_db": 3.201567188957031e-13,
+    "sideband_amplitude_abs_error": 1.7552626019323725e-13,
+    "simultaneous_energy_error_db": 1.9527631197704504e-13,
+    "simultaneous_vs_ideal_relative_error": 3.8406314996385223e-13,
+    "simultaneous_vs_isolated_relative_error": 1.7758200230592558e-16
+  }
+}

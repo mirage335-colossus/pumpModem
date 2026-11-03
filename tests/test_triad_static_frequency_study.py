@@ -31,10 +31,12 @@ class StaticFrequencyTests(unittest.TestCase):
             r=(A.conj().T@y)[None,None,:];G=(A.conj().T@A)[None,:,:]
             w,det=study.whiten_channel(r,G,powers)
             actual=np.sum(np.abs(w)**2)-det[0]
-            covariance=np.eye(n)+A@np.diag(powers)@A.conj().T
+            inflation=np.nextafter(1+k*8*np.finfo(float).eps/1e-10,np.inf)
+            covariance=np.eye(n)+A@np.diag(powers)@A.conj().T/inflation
             L=np.linalg.cholesky(covariance)
-            z=np.linalg.solve(L,y)
-            expected=np.vdot(y,y).real-np.vdot(z,z).real-2*np.log(np.diag(L).real).sum()
+            normalized_y=y/np.sqrt(inflation)
+            z=np.linalg.solve(L,normalized_y)
+            expected=np.vdot(normalized_y,normalized_y).real-np.vdot(z,z).real-2*np.log(np.diag(L).real).sum()
             self.assertAlmostEqual(actual,expected,places=12)
 
     def test_density_is_normalized_under_independent_raw_complex_noise(self):
@@ -43,6 +45,46 @@ class StaticFrequencyTests(unittest.TestCase):
         w,det=study.whiten_channel(r,G)
         values=np.exp(np.abs(w[:,0,:])**2@np.ones(2)-det[0])
         self.assertLess(abs(float(values.mean())-1),.002)
+
+    def test_rank_one_large_gram_preserves_noise_and_signal_likelihood(self):
+        # Two identical physical columns are one observable random channel.
+        # Adding I to this Gram loses I above FP64 resolution; the observable
+        # projection must instead agree with the independent scalar density.
+        rng=np.random.default_rng(20261103)
+        for gain in (1e6,1e10):
+            a=cn(rng,(13,))*gain
+            energy=float(np.vdot(a,a).real)
+            powers=np.asarray([.3,.7])
+            for h in (0.,.8+.2j):
+                y=a*h+cn(rng,(13,))
+                r0=np.vdot(a,y)
+                r=np.asarray([[[r0,r0]]])
+                G=np.full((1,2,2),energy,dtype=np.complex128)
+                diagnostic={}
+                w,det=study.whiten_channel(r,G,powers,diagnostics=diagnostic)
+                actual=float(np.sum(abs(w)**2)-det[0])
+                inflation=np.nextafter(1+2*8*np.finfo(float).eps/1e-10,np.inf)
+                information=energy/inflation
+                expected=float(abs(r0/np.sqrt(inflation*energy))**2
+                    *(information/(1+information))-np.log1p(information))
+                self.assertEqual(diagnostic['numerical_noise_inflation'],inflation)
+                np.testing.assert_allclose(actual,expected,rtol=2e-14,atol=2e-12)
+                self.assertEqual(diagnostic['retained_ranks'],[1])
+                self.assertEqual(w[0,0,1],0)
+                self.assertLess(diagnostic['maximum_covariance_consistency_error'],1e-12)
+                if h==0:self.assertLess(actual,0)
+
+    def test_unresolved_gram_modes_are_reported_and_not_scored(self):
+        G=np.asarray([np.diag([1e20,1e8]),np.zeros((2,2))],dtype=np.complex128)
+        r=np.asarray([[[1e10,1e12],[0.,0.]]],dtype=np.complex128)
+        diagnostic={}
+        w,det=study.whiten_channel(r,G,diagnostics=diagnostic)
+        self.assertEqual(diagnostic['retained_ranks'],[1,0])
+        self.assertEqual(diagnostic['discarded_gram_eigenvalues'],[[1e8],[0.,0.]])
+        self.assertTrue(np.isfinite(w).all())
+        self.assertEqual(w[0,0,1],0)
+        self.assertEqual(float(np.sum(abs(w[0,1])**2)-det[1]),0)
+        self.assertIn('lose information',diagnostic['rank_scope'])
 
     def test_fft_matches_direct_actual_centers_including_partial_last_block(self):
         rng=np.random.default_rng(14)

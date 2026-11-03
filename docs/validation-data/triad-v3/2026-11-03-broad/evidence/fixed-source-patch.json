@@ -1,0 +1,28 @@
+{
+  "base_archive_sha256": "a848c046c55c8e0b0a851462869f8a5fddd27e570aff6ceb5d6a965cdfbad6ec",
+  "files": {
+    "docs/validation-data/triad-v3/2026-11-03-broad/acquisition/README.md": "f4f5778aa037af638f4335e7b3f45213ed092d3acd1aaf17fc4a9e8096509ea7",
+    "docs/validation-data/triad-v3/2026-11-03-broad/acquisition/prepare.py": "fba382fa30a9d637311dc7cc9f9dddff436d3dc821ce0389b09513ef21e9b6bf",
+    "docs/validation-data/triad-v3/2026-11-03-broad/acquisition/run.py": "865f8f9df3fc0d49591e36a8da81051e1c85ec621fa069237a003cffaafff875",
+    "docs/validation-data/triad-v3/2026-11-03-broad/acquisition/test_plan.py": "9c99f75dc1869acf8a512fe2ddb15e75f240eaca3e8b5b61943a0defc3b70818",
+    "docs/validation-data/triad-v3/2026-11-03-broad/reproduction/README.md": "fe12d4d96389b9db21141627902ac1cf8722f6f9507201f702a24527f60041e5",
+    "docs/validation-data/triad-v3/2026-11-03-broad/reproduction/analyze.py": "cc1afaa1f02a68206d20c82c81cb521289a2776591e9bd709e64cc6eecbe361f",
+    "docs/validation-data/triad-v3/2026-11-03-broad/reproduction/inputs/physical-cases.json": "2c0e0b66f86dc54dc28fd6921a114cadf95ba42ecc54cee944951da21c084354",
+    "docs/validation-data/triad-v3/2026-11-03-broad/reproduction/make_plan.py": "4c0e6a80e120b9b22edf6f52a35de5d1d36b7eac66efcca6565ddcdd439f67c0",
+    "docs/validation-data/triad-v3/2026-11-03-broad/reproduction/run_plan.py": "a5016ee74b6db474af8caf01f93f4260c5e5516255ab5d43dc0209c4093dc268",
+    "docs/validation-data/triad-v3/2026-11-03-broad/reproduction/test_plan.py": "bf1bea5043f6882a22a2784815ec6aea8c981fac018b71aaf8ba6d0652efdbad",
+    "docs/validation-data/triad-v3/2026-11-03-broad/rescore/README.md": "9c1c29e39b734fe015b36dcd7ba5e4abf5880018c181721973082a502b9a6bd6",
+    "docs/validation-data/triad-v3/2026-11-03-broad/rescore/analyze.py": "764f9f5e4375af62aa3b24b2fc18062ee59cc37d59c1614a1e486e44b61fa5bb",
+    "docs/validation-data/triad-v3/2026-11-03-broad/rescore/prepare.py": "f49beb7e45e3e776049df66e84d8efe00ce51ac461b2b1ed5c6b10ef63cd4268",
+    "docs/validation-data/triad-v3/2026-11-03-broad/rescore/run.py": "950fbc0f80dac4df34229146764e0513817ee93138244ad2ac9a89f08618ab99",
+    "docs/validation-data/triad-v3/2026-11-03-broad/rescore/test_plan.py": "3d3ddc6ddf845c5728bdaf775c4e08691b8f54b4a21fa78c3bcca09760bedf30",
+    "tests/test_triad_conditional_sweep.py": "9adacfcee436c6aee0b6dbea7ec424e8fc65fe4048edf4a9cf2abbf967fc57fa",
+    "tests/test_triad_gaussian_window.py": "759753879cd9889dbea0d92b5f5a1b3a82c3edea6ba384d08873a7f904b05059",
+    "tests/test_triad_static_frequency_study.py": "73c609d183dfacf03e22426d9defac30be386f48ce35cb08b92942fc5811c34d",
+    "tools/triad-conditional-sweep.py": "19d1a733674645dd2d27bb28bce3bad89168c7667679d6f2d79891d37e168073",
+    "tools/triad-static-frequency-study.py": "d1b75e9b49de21041558e97ee1daff2ba07a1fd18a123bc8a6cb928f1052e11b",
+    "tools/triad_gaussian_window.py": "0e262ea3cc793073602701ec96e441a4fef3f378a56fb624771b651d8a8fd4fa",
+    "tools/triad_group_acquire.py": "3b14b436df6649b7706bbd6c5177c66d8d992fb6d4b84703bd1660b4d17a56b9"
+  },
+  "schema": "triad-broad-numerical-source-patch-v1"
+}

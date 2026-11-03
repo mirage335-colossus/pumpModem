@@ -1,0 +1,55 @@
+{
+  "accepted_overlay_files": {
+    "docs/validation-data/triad-v3/2026-11-03-broad/acquisition/coarse_fhss.py": "6ca07e5ec7355b6e798c6f9503ccc7a702d4fc7479f339588fb33dd883260149",
+    "docs/validation-data/triad-v3/2026-11-03-broad/acquisition/global_reblock.py": "633af9a7410a18894a2411c6384626d83c2e81074061cb442c1c6e06a53bf8c4",
+    "docs/validation-data/triad-v3/2026-11-03-broad/acquisition/sensitivity.py": "530b8c43583911e3f1caee525749967c162e402bdbbac5e09d3c1d0fd7a7ddb9",
+    "docs/validation-data/triad-v3/2026-11-03-broad/long_followup/prepare.py": "ade2904dafa6c7ece63c46a801bcf5c67ac14415db87b94225cbbb873d1bf919",
+    "docs/validation-data/triad-v3/2026-11-03-broad/long_followup/run.py": "8a647842f8239a0c73f2d3683bda48f44c8c020079f66cc0be5f5ee5e60b2041",
+    "docs/validation-data/triad-v3/2026-11-03-broad/long_followup/test_plan.py": "05bb83c3cf5be04cbd8f9285f9a6742f72a0b9b9ab4be80bbced6c59d1a1c7b0",
+    "docs/validation-data/triad-v3/2026-11-03-broad/reproduction/analyze.py": "cc1afaa1f02a68206d20c82c81cb521289a2776591e9bd709e64cc6eecbe361f",
+    "docs/validation-data/triad-v3/2026-11-03-broad/reproduction/run_plan.py": "a5016ee74b6db474af8caf01f93f4260c5e5516255ab5d43dc0209c4093dc268",
+    "docs/validation-data/triad-v3/2026-11-03-broad/rescore/analyze.py": "764f9f5e4375af62aa3b24b2fc18062ee59cc37d59c1614a1e486e44b61fa5bb",
+    "docs/validation-data/triad-v3/2026-11-03-broad/rescore/prepare.py": "f49beb7e45e3e776049df66e84d8efe00ce51ac461b2b1ed5c6b10ef63cd4268",
+    "docs/validation-data/triad-v3/2026-11-03-broad/rescore/run.py": "950fbc0f80dac4df34229146764e0513817ee93138244ad2ac9a89f08618ab99",
+    "docs/validation-data/triad-v3/2026-11-03-broad/rescore/test_plan.py": "3d3ddc6ddf845c5728bdaf775c4e08691b8f54b4a21fa78c3bcca09760bedf30",
+    "tools/triad-cfo-batch-study.py": "5c7fb6f8b0ad8cadeaae8591d9fb0e3d489fb5eb4c14962faf800ad46a661665",
+    "tools/triad-conditional-sweep.py": "19d1a733674645dd2d27bb28bce3bad89168c7667679d6f2d79891d37e168073",
+    "tools/triad-noise-study.py": "960040dc2a9a00910185a5b79f8af8c84410ffd3b8b7327256399543f396a621",
+    "tools/triad-rbpf-study.py": "34a9797ed7119dcf6545b6be759b8f506cbdaf6ac9ece886b82fa699cd5d085f",
+    "tools/triad-static-frequency-study.py": "d1b75e9b49de21041558e97ee1daff2ba07a1fd18a123bc8a6cb928f1052e11b",
+    "tools/triad_bounded_run.py": "f117d6be27d38d055f5ab65af2f850c038501badd16cb5f524b5388530218cf2",
+    "tools/triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba",
+    "tools/triad_gaussian_window.py": "0e262ea3cc793073602701ec96e441a4fef3f378a56fb624771b651d8a8fd4fa",
+    "tools/triad_group_acquire.py": "dee47cbe71041fb5a4023cac54f1d2391db7198f85606c40dbef8a0e260911d1",
+    "tools/triad_noise_likelihood.py": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110",
+    "tools/triad_phase_frequency.py": "48ee569b1d467b2d7b6fd55088764bd28dd11e0bfecb5974622a318fbb408585",
+    "tools/triad_rbpf.py": "d4b64c3a830acd3bd15433421da0e003ba1aa9810bf1dd904c57082d94c3bd54",
+    "tools/triad_state_workspace.py": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923"
+  },
+  "accepted_overlay_sha256": "e1913bfabd4809338e4164e8526a495c4d7b3a7417a7e2ad86b996b5f29eba0c",
+  "exact_tested_binary_sha256": "dbb26468125a1528301707fb6f86e809a8c8c287e4e13f7be54a8e067498c389",
+  "inventories": [
+    {
+      "file_count": 7573,
+      "file_inventory_sha256": "aed5955da46359fe724f3bc0319c75cec9ca8f9b6eb8193afa24801180cf4098",
+      "local_inventory_sha256": "d43bc0bc1f6b910c682e5c17a389a4be4ad72bc5fec9bc493bdb1c887753c539",
+      "matched_every_file": true,
+      "remote_inventory_sha256": "e1e5085975f0f9dc458096870a824907c5420b381cc197734117367187c44d0a",
+      "total_bytes": 5333090337,
+      "variant": "original"
+    },
+    {
+      "file_count": 8262,
+      "file_inventory_sha256": "6b57de2d5f74f7fc32e375b7561dd698547da5f90435d0a86173cbd7d8d04fa3",
+      "local_inventory_sha256": "def6fee903ad0abfe343d8abd88e37e508ff950b58ac5da7ab45a9ac3b4802b6",
+      "matched_every_file": true,
+      "remote_inventory_sha256": "4716108731af73d0a5bf2653d31e5989278f79cb2f9a3c1bdda192ba67350f11",
+      "total_bytes": 5224066735,
+      "variant": "fixed"
+    }
+  ],
+  "local_root": "local-evidence/triad-broad-coverage",
+  "schema": "triad-broad-evidence-preservation-v1",
+  "scope": "Complete scientific evidence directories copied before ephemeral Pod removal. Large raw evidence is ignored local storage, not guaranteed in a fresh Git checkout. Provider credentials, SSH/account state and billing are excluded.",
+  "source_archive_sha256": "a848c046c55c8e0b0a851462869f8a5fddd27e570aff6ceb5d6a965cdfbad6ec"
+}

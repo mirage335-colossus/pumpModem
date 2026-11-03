@@ -316,6 +316,13 @@ StreamChannelConfig checked_config(const StreamChannelConfig& cfg, const Format&
             std::isfinite(cfg.selective_model.center_hz) &&
             finite_nonnegative(cfg.selective_tail_floor_seconds),
             "invalid versioned selective modulation model");
+    require(cfg.missed_receiver_dwell_indices.size() <= 4096,
+            "receiver missed-dwell schedule exceeds its 4096-entry bound");
+    require(cfg.missed_receiver_dwell_indices.empty() || format.fhss || cfg.effects.fhss,
+            "receiver missed-dwell indices require a public FHSS dwell calendar");
+    for (std::size_t i = 1; i < cfg.missed_receiver_dwell_indices.size(); ++i)
+        require(cfg.missed_receiver_dwell_indices[i - 1] < cfg.missed_receiver_dwell_indices[i],
+                "receiver missed-dwell indices must be strictly increasing and unique");
     if (effective_sample_rate(format) < 64) {
         const auto fast_spectrum = [](const OscillatorSpectrum& s) {
             return s.white_fm_hz_sqrt_seconds != 0 || s.random_walk_fm_hz_per_sqrt_second != 0 ||
@@ -493,6 +500,7 @@ struct StreamingChannel::Impl {
         // covers allocator metadata for the bounded number of allocations.
         stats.working_bytes = sizeof(*this) + 4096 + history_count * sizeof(Complex) +
             effects.hop_offsets_hz.capacity() * sizeof(double) + prefix_count * sizeof(long double) +
+            config.missed_receiver_dwell_indices.capacity() * sizeof(std::uint64_t) +
             spectrum_values * 2 * sizeof(double) +
             (gaussian_path ? gaussian_path->working_bytes() : 0) +
             stats.path_gaussian_fir_coefficients.capacity()*sizeof(double) +
@@ -748,8 +756,13 @@ struct StreamingChannel::Impl {
         }
         // Preserve the established envelope-only experiment coordinates;
         // actual retuning uses windows measured from the RF dwell calendar.
+        const auto receiver_dwell = dwell_index(receive_calendar, effects.dwell_seconds);
+        const bool missed_dwell = receiver_dwell >= 0 &&
+            std::binary_search(config.missed_receiver_dwell_indices.begin(),
+                               config.missed_receiver_dwell_indices.end(),
+                               static_cast<std::uint64_t>(receiver_dwell));
         erased = dropout_at(effects, effects.fhss ?
-            static_cast<double>(physical_time - hop_origin_seconds) : t);
+            static_cast<double>(physical_time - hop_origin_seconds) : t) || missed_dwell;
         if (erased) { propagated = {}; ++stats.erased_samples; }
         stats.observed_energy += std::norm(propagated);
         ++stats.samples;

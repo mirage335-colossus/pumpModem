@@ -5,6 +5,13 @@
 simulation recipes, evidence-backed receiver choices and scope-based validation.
 Start with its small diagnostics before reproducing a full dated campaign.
 
+**Current configuration and failure map:** the
+[broad study](validation-data/triad-v3/2026-11-03-broad/README.md) covers the requested
+rate/oscillator/spread/modulation axes with a factorized validity census and
+selected sampled experiments. It records explicit arrival priors, missed-dwell
+controls, corrected observable-subspace likelihoods and long coherent versus
+short-window comparisons. A census pass is not a demonstrated reception.
+
 The [noise-calibration and configuration-diversity extension](triad-noise-calibration.md)
 documents the common-scale and independent-residual likelihoods, their explicit
 noise assumptions, and the tighter clock/oscillator configuration study.

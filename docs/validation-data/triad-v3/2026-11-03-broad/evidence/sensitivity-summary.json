@@ -1,0 +1,2935 @@
+{
+  "counts": {
+    "completed": 24
+  },
+  "limitations": [
+    "Paired selected captures, not independent validation or a reliability estimate.",
+    "All public timing groups retained. Frequency/clock/epoch dimensions are not silently added.",
+    "Global model assumes constant two-ray coefficients after declared deterministic path phases; strong stochastic evolution can invalidate it.",
+    "Short-window summaries are independently recounted from source-bound baseline receipt scores; global NPZ arrays are also verified here."
+  ],
+  "plan_sha256": "9defcfbdb1da051ebbd12ff0d0b7184c0b3044afd8436757bb0aa63d459ed722",
+  "receipt_sha256": "e7c89068fe853f42f6bf403ff31b7fdd62f123829036107ad51741f89e542b00",
+  "rows": [
+    {
+      "bit": 0,
+      "case": "spread-hf-worst-cn-6",
+      "cn0_db_hz": -6,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-cn-6-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -0.2999544026122649,
+        -0.0598193713809021
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.005079723661765456,
+        "read_reblock_seconds": 0.011456347070634365,
+        "residual_calibration_seconds": 0.17980027943849564,
+        "score_seconds": 0.002322802785784006,
+        "total_receiver_seconds": 0.19969054404646158
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "spread-hf-worst-cn-6",
+      "cn0_db_hz": -6,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-cn-6-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -0.2999544026122649,
+        -0.0598193713809021
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.005079723661765456,
+        "read_reblock_seconds": 0.011456347070634365,
+        "residual_calibration_seconds": 0.17980027943849564,
+        "score_seconds": 0.002322802785784006,
+        "total_receiver_seconds": 0.19969054404646158
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "spread-hf-worst-cn-6",
+      "cn0_db_hz": -6,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-cn-6-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -0.15393802496700637,
+        -0.1652293134353302
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.6453541298396885,
+        "read_reblock_seconds": 0.010810011997818947,
+        "residual_calibration_seconds": 0.45925632887519896,
+        "score_seconds": 0.06111258710734546,
+        "total_receiver_seconds": 1.1815996430814266
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "spread-hf-worst-cn-6",
+      "cn0_db_hz": -6,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-cn-6-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -0.15393802496700637,
+        -0.1652293134353302
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.6453541298396885,
+        "read_reblock_seconds": 0.010810011997818947,
+        "residual_calibration_seconds": 0.45925632887519896,
+        "score_seconds": 0.06111258710734546,
+        "total_receiver_seconds": 1.1815996430814266
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "spread-hf-worst-cn-6",
+      "cn0_db_hz": -6,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-cn-6-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -0.30675229687034644,
+        -0.08276023867641236
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.0052199752535671,
+        "read_reblock_seconds": 0.009780113119632006,
+        "residual_calibration_seconds": 0.18233035528101027,
+        "score_seconds": 0.0023695712443441153,
+        "total_receiver_seconds": 0.20075129391625524
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "spread-hf-worst-cn-6",
+      "cn0_db_hz": -6,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-cn-6-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -0.30675229687034644,
+        -0.08276023867641236
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.0052199752535671,
+        "read_reblock_seconds": 0.009780113119632006,
+        "residual_calibration_seconds": 0.18233035528101027,
+        "score_seconds": 0.0023695712443441153,
+        "total_receiver_seconds": 0.20075129391625524
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "spread-hf-worst-cn-6",
+      "cn0_db_hz": -6,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-cn-6-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -0.15179398771168096,
+        -0.1659328105434108
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.6526434032712132,
+        "read_reblock_seconds": 0.008461716119199991,
+        "residual_calibration_seconds": 0.4543181606568396,
+        "score_seconds": 0.062205390771850944,
+        "total_receiver_seconds": 1.1826791111379862
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "spread-hf-worst-cn-6",
+      "cn0_db_hz": -6,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-cn-6-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -0.15179398771168096,
+        -0.1659328105434108
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.6526434032712132,
+        "read_reblock_seconds": 0.008461716119199991,
+        "residual_calibration_seconds": 0.4543181606568396,
+        "score_seconds": 0.062205390771850944,
+        "total_receiver_seconds": 1.1826791111379862
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 1,
+      "case": "spread-hf-worst-cn-6",
+      "cn0_db_hz": -6,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-cn-6-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -0.3417158395442659,
+        -0.4467810181563374
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.005138074047863483,
+        "read_reblock_seconds": 0.009267942048609257,
+        "residual_calibration_seconds": 0.18312003137543797,
+        "score_seconds": 0.002334453398361802,
+        "total_receiver_seconds": 0.2008825410157442
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 1,
+      "case": "spread-hf-worst-cn-6",
+      "cn0_db_hz": -6,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-cn-6-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -0.3417158395442659,
+        -0.4467810181563374
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.005138074047863483,
+        "read_reblock_seconds": 0.009267942048609257,
+        "residual_calibration_seconds": 0.18312003137543797,
+        "score_seconds": 0.002334453398361802,
+        "total_receiver_seconds": 0.2008825410157442
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 1,
+      "case": "spread-hf-worst-cn-6",
+      "cn0_db_hz": -6,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-cn-6-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -0.13609937306404873,
+        -0.1643770546066481
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.7988779593724757,
+        "read_reblock_seconds": 0.010015349136665463,
+        "residual_calibration_seconds": 0.5064804523717612,
+        "score_seconds": 0.07447095587849617,
+        "total_receiver_seconds": 1.3960920779500157
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 1,
+      "case": "spread-hf-worst-cn-6",
+      "cn0_db_hz": -6,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-cn-6-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -0.13609937306404873,
+        -0.1643770546066481
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.7988779593724757,
+        "read_reblock_seconds": 0.010015349136665463,
+        "residual_calibration_seconds": 0.5064804523717612,
+        "score_seconds": 0.07447095587849617,
+        "total_receiver_seconds": 1.3960920779500157
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "spread-hf-worst-cn0",
+      "cn0_db_hz": 0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-cn0-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -1.128612507551189,
+        -0.5332577838855599
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.005202664295211434,
+        "read_reblock_seconds": 0.010108994785696268,
+        "residual_calibration_seconds": 0.18206428177654743,
+        "score_seconds": 0.002358101774007082,
+        "total_receiver_seconds": 0.20070700510405004
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "spread-hf-worst-cn0",
+      "cn0_db_hz": 0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-cn0-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -1.128612507551189,
+        -0.5332577838855599
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.005202664295211434,
+        "read_reblock_seconds": 0.010108994785696268,
+        "residual_calibration_seconds": 0.18206428177654743,
+        "score_seconds": 0.002358101774007082,
+        "total_receiver_seconds": 0.20070700510405004
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "spread-hf-worst-cn0",
+      "cn0_db_hz": 0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-cn0-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -0.6070128499167744,
+        -0.6663118310782101
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.6491616922430694,
+        "read_reblock_seconds": 0.007547038607299328,
+        "residual_calibration_seconds": 0.43236852856352925,
+        "score_seconds": 0.05977834016084671,
+        "total_receiver_seconds": 1.152748106047511
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "spread-hf-worst-cn0",
+      "cn0_db_hz": 0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-cn0-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -0.6070128499167744,
+        -0.6663118310782101
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.6491616922430694,
+        "read_reblock_seconds": 0.007547038607299328,
+        "residual_calibration_seconds": 0.43236852856352925,
+        "score_seconds": 0.05977834016084671,
+        "total_receiver_seconds": 1.152748106047511
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "spread-hf-worst-cn0",
+      "cn0_db_hz": 0,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-cn0-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -0.28726626402271727,
+        -0.6173892396719634
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.005197273334488273,
+        "read_reblock_seconds": 0.010793541790917516,
+        "residual_calibration_seconds": 0.18430322827771306,
+        "score_seconds": 0.002394104143604636,
+        "total_receiver_seconds": 0.20370972389355302
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "spread-hf-worst-cn0",
+      "cn0_db_hz": 0,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-cn0-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -0.28726626402271727,
+        -0.6173892396719634
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.005197273334488273,
+        "read_reblock_seconds": 0.010793541790917516,
+        "residual_calibration_seconds": 0.18430322827771306,
+        "score_seconds": 0.002394104143604636,
+        "total_receiver_seconds": 0.20370972389355302
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "spread-hf-worst-cn0",
+      "cn0_db_hz": 0,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-cn0-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -0.5640743859260979,
+        -0.6449428384163642
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.6500805348623544,
+        "read_reblock_seconds": 0.008715584175661206,
+        "residual_calibration_seconds": 0.4857736530248076,
+        "score_seconds": 0.05998425814323127,
+        "total_receiver_seconds": 1.2094514099881053
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "spread-hf-worst-cn0",
+      "cn0_db_hz": 0,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-cn0-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -0.5640743859260979,
+        -0.6449428384163642
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.6500805348623544,
+        "read_reblock_seconds": 0.008715584175661206,
+        "residual_calibration_seconds": 0.4857736530248076,
+        "score_seconds": 0.05998425814323127,
+        "total_receiver_seconds": 1.2094514099881053
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 1,
+      "case": "spread-hf-worst-cn0",
+      "cn0_db_hz": 0,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-cn0-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -1.3267354074479845,
+        -0.011623553951099375
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.0052618542686104774,
+        "read_reblock_seconds": 0.013627774780616164,
+        "residual_calibration_seconds": 0.19232023297809064,
+        "score_seconds": 0.0024498512502759695,
+        "total_receiver_seconds": 0.21505846502259374
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 1,
+      "case": "spread-hf-worst-cn0",
+      "cn0_db_hz": 0,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-cn0-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -1.3267354074479845,
+        -0.011623553951099375
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.0052618542686104774,
+        "read_reblock_seconds": 0.013627774780616164,
+        "residual_calibration_seconds": 0.19232023297809064,
+        "score_seconds": 0.0024498512502759695,
+        "total_receiver_seconds": 0.21505846502259374
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 1,
+      "case": "spread-hf-worst-cn0",
+      "cn0_db_hz": 0,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-cn0-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -0.4921072830651019,
+        -0.6384427575828466
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.651100764516741,
+        "read_reblock_seconds": 0.009680904913693666,
+        "residual_calibration_seconds": 0.4526180634275079,
+        "score_seconds": 0.06102808704599738,
+        "total_receiver_seconds": 1.1792497511487454
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 1,
+      "case": "spread-hf-worst-cn0",
+      "cn0_db_hz": 0,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-cn0-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -0.4921072830651019,
+        -0.6384427575828466
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.651100764516741,
+        "read_reblock_seconds": 0.009680904913693666,
+        "residual_calibration_seconds": 0.4526180634275079,
+        "score_seconds": 0.06102808704599738,
+        "total_receiver_seconds": 1.1792497511487454
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "spread-hf-worst-cn12",
+      "cn0_db_hz": 12,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-cn12-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -5.4764126180787365,
+        -4.599343137916115
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.00515126739628613,
+        "read_reblock_seconds": 0.010088035138323903,
+        "residual_calibration_seconds": 0.19809089647606015,
+        "score_seconds": 0.0023861618246883154,
+        "total_receiver_seconds": 0.2168933970388025
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "spread-hf-worst-cn12",
+      "cn0_db_hz": 12,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-cn12-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -5.4764126180787365,
+        -4.599343137916115
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.00515126739628613,
+        "read_reblock_seconds": 0.010088035138323903,
+        "residual_calibration_seconds": 0.19809089647606015,
+        "score_seconds": 0.0023861618246883154,
+        "total_receiver_seconds": 0.2168933970388025
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "spread-hf-worst-cn12",
+      "cn0_db_hz": 12,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-cn12-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -19.80463922615666,
+        -19.414841181083766
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.6505224348511547,
+        "read_reblock_seconds": 0.007344840792939067,
+        "residual_calibration_seconds": 0.4385588662698865,
+        "score_seconds": 0.06057318556122482,
+        "total_receiver_seconds": 1.1613798621110618
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "spread-hf-worst-cn12",
+      "cn0_db_hz": 12,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-cn12-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -19.80463922615666,
+        -19.414841181083766
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.6505224348511547,
+        "read_reblock_seconds": 0.007344840792939067,
+        "residual_calibration_seconds": 0.4385588662698865,
+        "score_seconds": 0.06057318556122482,
+        "total_receiver_seconds": 1.1613798621110618
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "spread-hf-worst-cn12",
+      "cn0_db_hz": 12,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-cn12-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        111.79150677231397,
+        -4.652353284902327
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.005128365242853761,
+        "read_reblock_seconds": 0.009853210300207138,
+        "residual_calibration_seconds": 0.20701205753721297,
+        "score_seconds": 0.002378123113885522,
+        "total_receiver_seconds": 0.22536755609326065
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "spread-hf-worst-cn12",
+      "cn0_db_hz": 12,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-cn12-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        111.79150677231397,
+        -4.652353284902327
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.005128365242853761,
+        "read_reblock_seconds": 0.009853210300207138,
+        "residual_calibration_seconds": 0.20701205753721297,
+        "score_seconds": 0.002378123113885522,
+        "total_receiver_seconds": 0.22536755609326065
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "spread-hf-worst-cn12",
+      "cn0_db_hz": 12,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-cn12-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        14.403468340817883,
+        -12.111719597893536
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.6525499443523586,
+        "read_reblock_seconds": 0.00824102177284658,
+        "residual_calibration_seconds": 0.4575402964837849,
+        "score_seconds": 0.06106839491985738,
+        "total_receiver_seconds": 1.1842052899301052
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "spread-hf-worst-cn12",
+      "cn0_db_hz": 12,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-cn12-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        14.403468340817883,
+        -12.111719597893536
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.6525499443523586,
+        "read_reblock_seconds": 0.00824102177284658,
+        "residual_calibration_seconds": 0.4575402964837849,
+        "score_seconds": 0.06106839491985738,
+        "total_receiver_seconds": 1.1842052899301052
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 1,
+      "case": "spread-hf-worst-cn12",
+      "cn0_db_hz": 12,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-cn12-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -5.277084116670533,
+        124.10237641919
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.005190893309190869,
+        "read_reblock_seconds": 0.010813402011990547,
+        "residual_calibration_seconds": 0.18931062472984195,
+        "score_seconds": 0.0024031316861510277,
+        "total_receiver_seconds": 0.20876815193332732
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 1,
+      "case": "spread-hf-worst-cn12",
+      "cn0_db_hz": 12,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-cn12-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -5.277084116670533,
+        124.10237641919
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.005190893309190869,
+        "read_reblock_seconds": 0.010813402011990547,
+        "residual_calibration_seconds": 0.18931062472984195,
+        "score_seconds": 0.0024031316861510277,
+        "total_receiver_seconds": 0.20876815193332732
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 1,
+      "case": "spread-hf-worst-cn12",
+      "cn0_db_hz": 12,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-cn12-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -9.844022078846491,
+        32.5154972980223
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.6462823385372758,
+        "read_reblock_seconds": 0.009502029977738857,
+        "residual_calibration_seconds": 0.4450212372466922,
+        "score_seconds": 0.05980677343904972,
+        "total_receiver_seconds": 1.1656593650113791
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 1,
+      "case": "spread-hf-worst-cn12",
+      "cn0_db_hz": 12,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-cn12-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -9.844022078846491,
+        32.5154972980223
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.6462823385372758,
+        "read_reblock_seconds": 0.009502029977738857,
+        "residual_calibration_seconds": 0.4450212372466922,
+        "score_seconds": 0.05980677343904972,
+        "total_receiver_seconds": 1.1656593650113791
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "spread-hf-worst-cn6",
+      "cn0_db_hz": 6,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-cn6-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -2.9929670466784115,
+        -2.1845848368578564
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.00510960747487843,
+        "read_reblock_seconds": 0.009097123984247446,
+        "residual_calibration_seconds": 0.17480867938138545,
+        "score_seconds": 0.0024431608617305756,
+        "total_receiver_seconds": 0.19245390105061233
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "spread-hf-worst-cn6",
+      "cn0_db_hz": 6,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-cn6-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -2.9929670466784115,
+        -2.1845848368578564
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.00510960747487843,
+        "read_reblock_seconds": 0.009097123984247446,
+        "residual_calibration_seconds": 0.17480867938138545,
+        "score_seconds": 0.0024431608617305756,
+        "total_receiver_seconds": 0.19245390105061233
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "spread-hf-worst-cn6",
+      "cn0_db_hz": 6,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-cn6-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -2.7370731971489235,
+        -2.8799795631434892
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.6600240513216704,
+        "read_reblock_seconds": 0.01026313379406929,
+        "residual_calibration_seconds": 0.46327714971266687,
+        "score_seconds": 0.06245511816814542,
+        "total_receiver_seconds": 1.2026367881335318
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "spread-hf-worst-cn6",
+      "cn0_db_hz": 6,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-cn6-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -2.7370731971489235,
+        -2.8799795631434892
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.6600240513216704,
+        "read_reblock_seconds": 0.01026313379406929,
+        "residual_calibration_seconds": 0.46327714971266687,
+        "score_seconds": 0.06245511816814542,
+        "total_receiver_seconds": 1.2026367881335318
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "spread-hf-worst-cn6",
+      "cn0_db_hz": 6,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-cn6-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        18.01904765534998,
+        -2.318172676354738
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.005282320315018296,
+        "read_reblock_seconds": 0.010518457740545273,
+        "residual_calibration_seconds": 0.19107761955820024,
+        "score_seconds": 0.0024305330589413643,
+        "total_receiver_seconds": 0.21039285813458264
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "spread-hf-worst-cn6",
+      "cn0_db_hz": 6,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-cn6-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        18.01904765534998,
+        -2.318172676354738
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.005282320315018296,
+        "read_reblock_seconds": 0.010518457740545273,
+        "residual_calibration_seconds": 0.19107761955820024,
+        "score_seconds": 0.0024305330589413643,
+        "total_receiver_seconds": 0.21039285813458264
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "spread-hf-worst-cn6",
+      "cn0_db_hz": 6,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-cn6-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -1.9104918000651625,
+        -2.2125283688749553
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.6518189108464867,
+        "read_reblock_seconds": 0.007676166947931051,
+        "residual_calibration_seconds": 0.428410500055179,
+        "score_seconds": 0.05977212265133858,
+        "total_receiver_seconds": 1.1518259840086102
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "spread-hf-worst-cn6",
+      "cn0_db_hz": 6,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-cn6-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -1.9104918000651625,
+        -2.2125283688749553
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.6518189108464867,
+        "read_reblock_seconds": 0.007676166947931051,
+        "residual_calibration_seconds": 0.428410500055179,
+        "score_seconds": 0.05977212265133858,
+        "total_receiver_seconds": 1.1518259840086102
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 1,
+      "case": "spread-hf-worst-cn6",
+      "cn0_db_hz": 6,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-cn6-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -3.2248399420825997,
+        22.922020937442625
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.005162655143067241,
+        "read_reblock_seconds": 0.010457779513671994,
+        "residual_calibration_seconds": 0.17426840658299625,
+        "score_seconds": 0.0023473629262298346,
+        "total_receiver_seconds": 0.19323642482049763
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 1,
+      "case": "spread-hf-worst-cn6",
+      "cn0_db_hz": 6,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-cn6-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -3.2248399420825997,
+        22.922020937442625
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.005162655143067241,
+        "read_reblock_seconds": 0.010457779513671994,
+        "residual_calibration_seconds": 0.17426840658299625,
+        "score_seconds": 0.0023473629262298346,
+        "total_receiver_seconds": 0.19323642482049763
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 1,
+      "case": "spread-hf-worst-cn6",
+      "cn0_db_hz": 6,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-cn6-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -1.0059001270205972,
+        -2.028346052767662
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.6475220241118222,
+        "read_reblock_seconds": 0.007516996003687382,
+        "residual_calibration_seconds": 0.4457614831626415,
+        "score_seconds": 0.05985004408285022,
+        "total_receiver_seconds": 1.1649568900465965
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 1,
+      "case": "spread-hf-worst-cn6",
+      "cn0_db_hz": 6,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-cn6-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -1.0059001270205972,
+        -2.028346052767662
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.6475220241118222,
+        "read_reblock_seconds": 0.007516996003687382,
+        "residual_calibration_seconds": 0.4457614831626415,
+        "score_seconds": 0.05985004408285022,
+        "total_receiver_seconds": 1.1649568900465965
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "timing-margin-default-1-cn-6",
+      "cn0_db_hz": -6,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-cn-6-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -0.511113143609844,
+        -0.5449768582338068
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.034494966035708785,
+        "read_reblock_seconds": 0.005691948113963008,
+        "residual_calibration_seconds": 0.21664940798655152,
+        "score_seconds": 0.015711051411926746,
+        "total_receiver_seconds": 0.27425039815716445
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "timing-margin-default-1-cn-6",
+      "cn0_db_hz": -6,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-cn-6-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -0.511113143609844,
+        -0.5449768582338068
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.034494966035708785,
+        "read_reblock_seconds": 0.005691948113963008,
+        "residual_calibration_seconds": 0.21664940798655152,
+        "score_seconds": 0.015711051411926746,
+        "total_receiver_seconds": 0.27425039815716445
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "timing-margin-default-1-cn-6",
+      "cn0_db_hz": -6,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-cn-6-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -0.47511418705037567,
+        -0.47838250876340815
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.294645581394434,
+        "read_reblock_seconds": 0.004087119596078992,
+        "residual_calibration_seconds": 0.33157860371284187,
+        "score_seconds": 0.043444881681352854,
+        "total_receiver_seconds": 0.6757974741049111
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "timing-margin-default-1-cn-6",
+      "cn0_db_hz": -6,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-cn-6-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -0.47511418705037567,
+        -0.47838250876340815
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.294645581394434,
+        "read_reblock_seconds": 0.004087119596078992,
+        "residual_calibration_seconds": 0.33157860371284187,
+        "score_seconds": 0.043444881681352854,
+        "total_receiver_seconds": 0.6757974741049111
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "timing-margin-default-1-cn-6",
+      "cn0_db_hz": -6,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-cn-6-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -0.48853991551679155,
+        -0.5202358781988847
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.03431389504112303,
+        "read_reblock_seconds": 0.005099725443869829,
+        "residual_calibration_seconds": 0.23146428749896586,
+        "score_seconds": 0.01574737043119967,
+        "total_receiver_seconds": 0.2883814729284495
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "timing-margin-default-1-cn-6",
+      "cn0_db_hz": -6,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-cn-6-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -0.48853991551679155,
+        -0.5202358781988847
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.03431389504112303,
+        "read_reblock_seconds": 0.005099725443869829,
+        "residual_calibration_seconds": 0.23146428749896586,
+        "score_seconds": 0.01574737043119967,
+        "total_receiver_seconds": 0.2883814729284495
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "timing-margin-default-1-cn-6",
+      "cn0_db_hz": -6,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-cn-6-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -0.4798341589735875,
+        -0.4620900307189322
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.3024047198705375,
+        "read_reblock_seconds": 0.003638436086475849,
+        "residual_calibration_seconds": 0.32849736185744405,
+        "score_seconds": 0.04354998958297074,
+        "total_receiver_seconds": 0.6800660078879446
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "timing-margin-default-1-cn-6",
+      "cn0_db_hz": -6,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-cn-6-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -0.4798341589735875,
+        -0.4620900307189322
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.3024047198705375,
+        "read_reblock_seconds": 0.003638436086475849,
+        "residual_calibration_seconds": 0.32849736185744405,
+        "score_seconds": 0.04354998958297074,
+        "total_receiver_seconds": 0.6800660078879446
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 1,
+      "case": "timing-margin-default-1-cn-6",
+      "cn0_db_hz": -6,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-cn-6-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -0.60586230166391,
+        -0.3611754022601117
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.03435593470931053,
+        "read_reblock_seconds": 0.005074636545032263,
+        "residual_calibration_seconds": 0.22191430279053748,
+        "score_seconds": 0.015722395153716207,
+        "total_receiver_seconds": 0.278724798001349
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 1,
+      "case": "timing-margin-default-1-cn-6",
+      "cn0_db_hz": -6,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-cn-6-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -0.60586230166391,
+        -0.3611754022601117
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.03435593470931053,
+        "read_reblock_seconds": 0.005074636545032263,
+        "residual_calibration_seconds": 0.22191430279053748,
+        "score_seconds": 0.015722395153716207,
+        "total_receiver_seconds": 0.278724798001349
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 1,
+      "case": "timing-margin-default-1-cn-6",
+      "cn0_db_hz": -6,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-cn-6-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -0.5938217852087968,
+        -0.6125402092079009
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.2975850831717253,
+        "read_reblock_seconds": 0.004281248198822141,
+        "residual_calibration_seconds": 0.3703873665072024,
+        "score_seconds": 0.04666770971380174,
+        "total_receiver_seconds": 0.7212474949192256
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 1,
+      "case": "timing-margin-default-1-cn-6",
+      "cn0_db_hz": -6,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-cn-6-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -0.5938217852087968,
+        -0.6125402092079009
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.2975850831717253,
+        "read_reblock_seconds": 0.004281248198822141,
+        "residual_calibration_seconds": 0.3703873665072024,
+        "score_seconds": 0.04666770971380174,
+        "total_receiver_seconds": 0.7212474949192256
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "timing-margin-default-1-cn0",
+      "cn0_db_hz": 0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-cn0-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -1.7405298630898605,
+        -1.7885178654734917
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.034880751045420766,
+        "read_reblock_seconds": 0.005283372476696968,
+        "residual_calibration_seconds": 0.22839746344834566,
+        "score_seconds": 0.01586363068781793,
+        "total_receiver_seconds": 0.2862285759765655
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "timing-margin-default-1-cn0",
+      "cn0_db_hz": 0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-cn0-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -1.7405298630898605,
+        -1.7885178654734917
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.034880751045420766,
+        "read_reblock_seconds": 0.005283372476696968,
+        "residual_calibration_seconds": 0.22839746344834566,
+        "score_seconds": 0.01586363068781793,
+        "total_receiver_seconds": 0.2862285759765655
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "timing-margin-default-1-cn0",
+      "cn0_db_hz": 0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-cn0-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -1.6414105712887332,
+        -1.777898195274962
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.2952500900719315,
+        "read_reblock_seconds": 0.0036068884655833244,
+        "residual_calibration_seconds": 0.34591321274638176,
+        "score_seconds": 0.04307869961485267,
+        "total_receiver_seconds": 0.6898448299616575
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "timing-margin-default-1-cn0",
+      "cn0_db_hz": 0,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-cn0-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -1.6414105712887332,
+        -1.777898195274962
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.2952500900719315,
+        "read_reblock_seconds": 0.0036068884655833244,
+        "residual_calibration_seconds": 0.34591321274638176,
+        "score_seconds": 0.04307869961485267,
+        "total_receiver_seconds": 0.6898448299616575
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "timing-margin-default-1-cn0",
+      "cn0_db_hz": 0,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-cn0-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -0.5185955285959274,
+        -1.6324193040819006
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.03436814295127988,
+        "read_reblock_seconds": 0.004966172855347395,
+        "residual_calibration_seconds": 0.22448334260843694,
+        "score_seconds": 0.015883727930486202,
+        "total_receiver_seconds": 0.28141965297982097
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "timing-margin-default-1-cn0",
+      "cn0_db_hz": 0,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-cn0-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -0.5185955285959274,
+        -1.6324193040819006
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.03436814295127988,
+        "read_reblock_seconds": 0.004966172855347395,
+        "residual_calibration_seconds": 0.22448334260843694,
+        "score_seconds": 0.015883727930486202,
+        "total_receiver_seconds": 0.28141965297982097
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "timing-margin-default-1-cn0",
+      "cn0_db_hz": 0,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-cn0-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -1.2978781530414452,
+        -1.3325720449620198
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.2949015493504703,
+        "read_reblock_seconds": 0.00356897315941751,
+        "residual_calibration_seconds": 0.3615973030682653,
+        "score_seconds": 0.04291058541275561,
+        "total_receiver_seconds": 0.7048697769641876
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "timing-margin-default-1-cn0",
+      "cn0_db_hz": 0,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-cn0-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -1.2978781530414452,
+        -1.3325720449620198
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.2949015493504703,
+        "read_reblock_seconds": 0.00356897315941751,
+        "residual_calibration_seconds": 0.3615973030682653,
+        "score_seconds": 0.04291058541275561,
+        "total_receiver_seconds": 0.7048697769641876
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 1,
+      "case": "timing-margin-default-1-cn0",
+      "cn0_db_hz": 0,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-cn0-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -1.7820339838569543,
+        13.330745275642279
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.035005689365789294,
+        "read_reblock_seconds": 0.005093486746773124,
+        "residual_calibration_seconds": 0.2182232344057411,
+        "score_seconds": 0.01591989817097783,
+        "total_receiver_seconds": 0.27601282205432653
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 1,
+      "case": "timing-margin-default-1-cn0",
+      "cn0_db_hz": 0,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-cn0-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -1.7820339838569543,
+        13.330745275642279
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.035005689365789294,
+        "read_reblock_seconds": 0.005093486746773124,
+        "residual_calibration_seconds": 0.2182232344057411,
+        "score_seconds": 0.01591989817097783,
+        "total_receiver_seconds": 0.27601282205432653
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 1,
+      "case": "timing-margin-default-1-cn0",
+      "cn0_db_hz": 0,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-cn0-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -1.890470788726212,
+        7.378897463175309
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.2952793121803552,
+        "read_reblock_seconds": 0.0037327720783650875,
+        "residual_calibration_seconds": 0.35020338580943644,
+        "score_seconds": 0.043439198983833194,
+        "total_receiver_seconds": 0.6947517008520663
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 1,
+      "case": "timing-margin-default-1-cn0",
+      "cn0_db_hz": 0,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-cn0-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -1.890470788726212,
+        7.378897463175309
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.2952793121803552,
+        "read_reblock_seconds": 0.0037327720783650875,
+        "residual_calibration_seconds": 0.35020338580943644,
+        "score_seconds": 0.043439198983833194,
+        "total_receiver_seconds": 0.6947517008520663
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "timing-margin-default-1-cn12",
+      "cn0_db_hz": 12,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-cn12-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -6.466143964069969,
+        -6.5205322086807485
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.034258820582181215,
+        "read_reblock_seconds": 0.005172885721549392,
+        "residual_calibration_seconds": 0.22149696992710233,
+        "score_seconds": 0.01572234556078911,
+        "total_receiver_seconds": 0.27825623704120517
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "timing-margin-default-1-cn12",
+      "cn0_db_hz": 12,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-cn12-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -6.466143964069969,
+        -6.5205322086807485
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.034258820582181215,
+        "read_reblock_seconds": 0.005172885721549392,
+        "residual_calibration_seconds": 0.22149696992710233,
+        "score_seconds": 0.01572234556078911,
+        "total_receiver_seconds": 0.27825623704120517
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "timing-margin-default-1-cn12",
+      "cn0_db_hz": 12,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-cn12-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -10.693833780094751,
+        -10.622243498366254
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.29677582159638405,
+        "read_reblock_seconds": 0.0036206517834216356,
+        "residual_calibration_seconds": 0.32910714484751225,
+        "score_seconds": 0.04349740641191602,
+        "total_receiver_seconds": 0.674904772080481
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "timing-margin-default-1-cn12",
+      "cn0_db_hz": 12,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-cn12-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -10.693833780094751,
+        -10.622243498366254
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.29677582159638405,
+        "read_reblock_seconds": 0.0036206517834216356,
+        "residual_calibration_seconds": 0.32910714484751225,
+        "score_seconds": 0.04349740641191602,
+        "total_receiver_seconds": 0.674904772080481
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "timing-margin-default-1-cn12",
+      "cn0_db_hz": 12,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-cn12-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        180.55206108394046,
+        11.953405540906179
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.033963500522077084,
+        "read_reblock_seconds": 0.005025249440222979,
+        "residual_calibration_seconds": 0.23168811365030706,
+        "score_seconds": 0.015564158093184233,
+        "total_receiver_seconds": 0.2879527921322733
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "timing-margin-default-1-cn12",
+      "cn0_db_hz": 12,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-cn12-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        180.55206108394046,
+        11.953405540906179
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.033963500522077084,
+        "read_reblock_seconds": 0.005025249440222979,
+        "residual_calibration_seconds": 0.23168811365030706,
+        "score_seconds": 0.015564158093184233,
+        "total_receiver_seconds": 0.2879527921322733
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "timing-margin-default-1-cn12",
+      "cn0_db_hz": 12,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-cn12-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        172.22331482888836,
+        17.07486761221123
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.2947255445178598,
+        "read_reblock_seconds": 0.003519469639286399,
+        "residual_calibration_seconds": 0.32784501602873206,
+        "score_seconds": 0.042964515974745154,
+        "total_receiver_seconds": 0.6709718920756131
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "timing-margin-default-1-cn12",
+      "cn0_db_hz": 12,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-cn12-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        172.22331482888836,
+        17.07486761221123
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.2947255445178598,
+        "read_reblock_seconds": 0.003519469639286399,
+        "residual_calibration_seconds": 0.32784501602873206,
+        "score_seconds": 0.042964515974745154,
+        "total_receiver_seconds": 0.6709718920756131
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 1,
+      "case": "timing-margin-default-1-cn12",
+      "cn0_db_hz": 12,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-cn12-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        16.483693451959986,
+        261.4213135795144
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.034519108943641186,
+        "read_reblock_seconds": 0.005601942073553801,
+        "residual_calibration_seconds": 0.23109871265478432,
+        "score_seconds": 0.015596523880958557,
+        "total_receiver_seconds": 0.28840228193439543
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 1,
+      "case": "timing-margin-default-1-cn12",
+      "cn0_db_hz": 12,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-cn12-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        16.483693451959986,
+        261.4213135795144
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.034519108943641186,
+        "read_reblock_seconds": 0.005601942073553801,
+        "residual_calibration_seconds": 0.23109871265478432,
+        "score_seconds": 0.015596523880958557,
+        "total_receiver_seconds": 0.28840228193439543
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 1,
+      "case": "timing-margin-default-1-cn12",
+      "cn0_db_hz": 12,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-cn12-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        47.921906189986196,
+        249.85973507969862
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.2937833901960403,
+        "read_reblock_seconds": 0.004085291875526309,
+        "residual_calibration_seconds": 0.3339087963104248,
+        "score_seconds": 0.04377242713235319,
+        "total_receiver_seconds": 0.6776019870303571
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 1,
+      "case": "timing-margin-default-1-cn12",
+      "cn0_db_hz": 12,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-cn12-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        47.921906189986196,
+        249.85973507969862
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.2937833901960403,
+        "read_reblock_seconds": 0.004085291875526309,
+        "residual_calibration_seconds": 0.3339087963104248,
+        "score_seconds": 0.04377242713235319,
+        "total_receiver_seconds": 0.6776019870303571
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "timing-margin-default-1-cn6",
+      "cn0_db_hz": 6,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-cn6-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -3.8854377256242505,
+        -3.938504974798702
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.03412957931868732,
+        "read_reblock_seconds": 0.005043362034484744,
+        "residual_calibration_seconds": 0.21760537684895098,
+        "score_seconds": 0.015619689365848899,
+        "total_receiver_seconds": 0.2740779519081116
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "timing-margin-default-1-cn6",
+      "cn0_db_hz": 6,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-cn6-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -3.8854377256242505,
+        -3.938504974798702
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.03412957931868732,
+        "read_reblock_seconds": 0.005043362034484744,
+        "residual_calibration_seconds": 0.21760537684895098,
+        "score_seconds": 0.015619689365848899,
+        "total_receiver_seconds": 0.2740779519081116
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "timing-margin-default-1-cn6",
+      "cn0_db_hz": 6,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-cn6-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -4.9677388497506625,
+        -5.251495585371153
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.2934860712848604,
+        "read_reblock_seconds": 0.003881045151501894,
+        "residual_calibration_seconds": 0.3480375832878053,
+        "score_seconds": 0.043499082094058394,
+        "total_receiver_seconds": 0.6909217380452901
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "timing-margin-default-1-cn6",
+      "cn0_db_hz": 6,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-cn6-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -4.9677388497506625,
+        -5.251495585371153
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.2934860712848604,
+        "read_reblock_seconds": 0.003881045151501894,
+        "residual_calibration_seconds": 0.3480375832878053,
+        "score_seconds": 0.043499082094058394,
+        "total_receiver_seconds": 0.6909217380452901
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "timing-margin-default-1-cn6",
+      "cn0_db_hz": 6,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-cn6-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        33.423740224421884,
+        -3.011020005873387
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.03433376247994602,
+        "read_reblock_seconds": 0.005212645977735519,
+        "residual_calibration_seconds": 0.24301497940905392,
+        "score_seconds": 0.015661513898521662,
+        "total_receiver_seconds": 0.29996171803213656
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "timing-margin-default-1-cn6",
+      "cn0_db_hz": 6,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-cn6-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        33.423740224421884,
+        -3.011020005873387
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.03433376247994602,
+        "read_reblock_seconds": 0.005212645977735519,
+        "residual_calibration_seconds": 0.24301497940905392,
+        "score_seconds": 0.015661513898521662,
+        "total_receiver_seconds": 0.29996171803213656
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "timing-margin-default-1-cn6",
+      "cn0_db_hz": 6,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-cn6-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        26.875760825818357,
+        -1.7398255333417252
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.29774349206127226,
+        "read_reblock_seconds": 0.003609228180721402,
+        "residual_calibration_seconds": 0.32442455366253853,
+        "score_seconds": 0.04285406437702477,
+        "total_receiver_seconds": 0.6705599990673363
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "timing-margin-default-1-cn6",
+      "cn0_db_hz": 6,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-cn6-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        26.875760825818357,
+        -1.7398255333417252
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.29774349206127226,
+        "read_reblock_seconds": 0.003609228180721402,
+        "residual_calibration_seconds": 0.32442455366253853,
+        "score_seconds": 0.04285406437702477,
+        "total_receiver_seconds": 0.6705599990673363
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 1,
+      "case": "timing-margin-default-1-cn6",
+      "cn0_db_hz": 6,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-cn6-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -2.5732074088859784,
+        68.6028659566273
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.03444060613401234,
+        "read_reblock_seconds": 0.005779968807473779,
+        "residual_calibration_seconds": 0.2168826931156218,
+        "score_seconds": 0.01606378168798983,
+        "total_receiver_seconds": 0.2748302570544183
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 1,
+      "case": "timing-margin-default-1-cn6",
+      "cn0_db_hz": 6,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-cn6-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -2.5732074088859784,
+        68.6028659566273
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.03444060613401234,
+        "read_reblock_seconds": 0.005779968807473779,
+        "residual_calibration_seconds": 0.2168826931156218,
+        "score_seconds": 0.01606378168798983,
+        "total_receiver_seconds": 0.2748302570544183
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 1,
+      "case": "timing-margin-default-1-cn6",
+      "cn0_db_hz": 6,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-cn6-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        3.3094888365389528,
+        58.70056194647598
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.2977392403408885,
+        "read_reblock_seconds": 0.004266497911885381,
+        "residual_calibration_seconds": 0.3319981840904802,
+        "score_seconds": 0.04275880451314151,
+        "total_receiver_seconds": 0.6787449039984494
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 1,
+      "case": "timing-margin-default-1-cn6",
+      "cn0_db_hz": 6,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-cn6-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        3.3094888365389528,
+        58.70056194647598
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.2977392403408885,
+        "read_reblock_seconds": 0.004266497911885381,
+        "residual_calibration_seconds": 0.3319981840904802,
+        "score_seconds": 0.04275880451314151,
+        "total_receiver_seconds": 0.6787449039984494
+      },
+      "variant": "short-window"
+    }
+  ],
+  "schema": "triad-broad-acquisition-summary-v1",
+  "scorer_source": {
+    "tools/triad_gaussian_window.py": "0e262ea3cc793073602701ec96e441a4fef3f378a56fb624771b651d8a8fd4fa",
+    "tools/triad_group_acquire.py": "dee47cbe71041fb5a4023cac54f1d2391db7198f85606c40dbef8a0e260911d1",
+    "tools/triad_noise_likelihood.py": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110",
+    "tools/triad_state_workspace.py": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923"
+  },
+  "summarizer_source_sha256": "64743fcf149f860348eaab0217acbea267ad16b946018afa0b7571977770cd02"
+}

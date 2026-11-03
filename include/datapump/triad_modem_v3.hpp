@@ -174,6 +174,13 @@ struct StreamChannelConfig {
     // Optional public fixed observation calendar. Extends zero-input draining
     // after the natural complete channel endpoint; never truncates any tail.
     std::uint64_t minimum_capture_samples = 0;
+    // Whole receiver dwell indices deliberately absent from captured I/Q.
+    // Index 0 starts at the public source calendar origin, measured with the
+    // receiver's nominal .4-s schedule and retune offset. These erase only
+    // delivered observations after every physical channel/noise/frontend
+    // state has advanced. They do not gate the source or attenuate the path.
+    // Keep strictly ascending/unique; hard bound prevents unbounded metadata.
+    std::vector<std::uint64_t> missed_receiver_dwell_indices;
     double signal_gain = 1;
     // Absolute variance E|n|² of final complex sample noise. effects.snr_db
     // is unused: a stream is never normalized using its future whole power.

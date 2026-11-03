@@ -10,6 +10,49 @@ reception contracts are in the [v3 study](triad-v3.md); this page describes how
 to make the next bounded development decision without replaying old campaigns
 by default.
 
+**Start new configuration work with the
+[broad coverage and failure map](validation-data/triad-v3/2026-11-03-broad/README.md).**
+Run `tools/triad-coverage.py` or the factorized census before exporting waveforms;
+use `tools/triad_factor_native_inputs.py` to regenerate small source-matched
+native census inputs. The 2.50-billion-coordinate count is an algebraic
+configuration census, not a reception campaign. Zero RF shift and shared
+baseband/RF clock topology remain unsupported by this isolated CLI; automatic
+1-MHz/30-MHz rate geometry exceeds its current bounds. Low-rate FHSS can lack
+any complete pattern cells inside the protected dwell aperture.
+
+The broad study corrected numerical false admissions in both static and
+Gaussian-window receivers by projecting onto observable Gram modes and using
+small whitened SVD fits. FP32 bulk operations remain available; sensitive small
+preparation and evidence reductions are explicitly FP64. Keep the rank-loss,
+noise-inflation and arithmetic diagnostics when reusing these helpers. Do not
+copy the earlier high-C/N₀ Cholesky/null-mode implementation or infer a physical
+sensitivity limit from its failures. Noise-only calibration does not prevent
+structured wrong-key admissions; those remain a separate reported limitation.
+The [raw-sample diagnosis](validation-data/triad-v3/2026-11-03-broad/evidence/wrong-key-diagnosis.md)
+shows how an oversampled narrowband wrong-key waveform can be almost fully
+absorbed by very short nuisance fits. Its local residual is not a covariance
+model for the remaining colored interference. Do not diagnose that result as
+a cryptographic failure or fix it by weakening the Gaussian-noise threshold.
+
+For stable-ray `B=0` models with sufficiently small residual phase evolution,
+compare whole-observation complex accumulation with short-window fitting before
+adding nuisance dimensions. `triad_group_acquire.py --reblock BLOCK_COUNT
+--window-blocks 1 --doppler-width-hz 0` reuses every public timing group and its
+complex statistics for the former comparison. Read `BLOCK_COUNT` from the public
+workspace manifest. It is a constant-coefficient channel model, not a general
+tracking solution for renewed fading or free-running oscillators. Do not prune
+the timing bank using truth alignment. The sampled timing comparison recovered
+ten selected signal captures and rejected five nulls with both complete-bank
+methods; nominal-timing misses were not sensitivity boundaries.
+
+The 850-day exports and the large conditional CPU/GPU batch are optional research
+recipes, never default regression tests. Start with the small affected Python
+checks and isolated 14-test triad group. Conditional redraws reuse a physical
+path; they do not replace independent channel validation. Record source hashes,
+completed conditions in failed jobs, actual elapsed/sample calendars, post-erasure
+energy and the complete attempted denominator. Keep actual GPU throughput
+separate from GPU availability or theoretical operation counts.
+
 **Selective-model version warning:** the detailed 2026-11-02 selective
 campaign used `legacy-allpass-v1`. Its receiver results remain valid for that
 simulated operator, but do not establish strong differential added-modulation

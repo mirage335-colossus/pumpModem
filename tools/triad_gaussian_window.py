@@ -25,7 +25,7 @@ import torch
 class _Window:
     first: int
     stop: int
-    transform: np.ndarray  # [candidate, flattened block/tap, covariance mode]
+    transform: np.ndarray  # [candidate, whitened block/tap, covariance mode]
     eigenvalues: np.ndarray  # [candidate, covariance mode]
 
 
@@ -58,15 +58,17 @@ class PreparedWindowedGaussian:
     A receiver may use an independent whole-bank residual variance upper bound
     as variance_scale. Its Gaussian assumptions and failure-budget allocation
     belong to the caller. Conditioned on an upper bound covering true stationary
-    white noise, these normalized Gaussian integrals have null expectation <=1.
+    white noise, these normalized Gaussian integrals have null expectation <=1
+    in exact arithmetic. Numerical residual guards and regression checks do not
+    constitute a floating-point rare-event proof.
     Independence of the alternative's windows does not assert independence of
     the physical signal. No threshold, anytime rule or physical-end rule is
     supplied here. A different chosen scale for each BLOCK is unsupported by
     this stationary-scaling reuse interface.
 
-    Preparation/eigenvalues and evidence reductions use FP64. Optional FP32
-    covers correlation/transform GEMM only. Caller observations, framework and
-    solver workspaces are outside the explicit-array memory bound.
+    Preparation, small block whitening/scaling and evidence reductions use
+    FP64. Optional FP32 covers the bounded, whitened-observation/mode GEMM.
+    Caller observations, framework and solver workspaces are outside the explicit-array memory bound.
     """
 
     def __init__(self, grams, centers_seconds, *, doppler_width_hz: float,
@@ -100,9 +102,10 @@ class PreparedWindowedGaussian:
         # are bounded by the largest window rather than observation duration.
         stored = self.candidates * squares * self.taps**2 * 16
         stored += self.candidates * self.blocks * self.taps * 8
-        input_and_checks = 6 * math.prod(shape) * 16
+        input_and_checks = 14 * math.prod(shape) * 16
         temporary = 24 * dimension**2 * 16
         prior_key_bytes = 2 * min(self.window_blocks, self.blocks) * 8
+        stored += math.prod(shape) * 16  # Cached small observation whiteners.
         self.preparation_array_bound_bytes = stored + input_and_checks + temporary + self.blocks * 8 + prior_key_bytes
         if self.preparation_array_bound_bytes > self.memory_limit_bytes:
             raise MemoryError("Gaussian window preparation exceeds explicit-array memory limit")
@@ -123,10 +126,44 @@ class PreparedWindowedGaussian:
         if np.any(values[..., 0] < -relative_tolerance * scale):
             raise ValueError("observation Gram is not positive semidefinite")
         self.maximum_relative_gram_repair = float(np.max(np.maximum(-values[..., 0], 0) / scale))
-        if np.any(values < 0):
-            G = (vectors * np.maximum(values, 0)[..., None, :]) @ vectors.conj().swapaxes(-1, -2)
+        # Project only unresolved observation modes. Unlike truncating Q,
+        # this is an explicit lower-dimensional observation experiment. The
+        # same retained modes define its whitening and signal covariance.
+        values = np.maximum(values, 0)
+        cutoff = relative_tolerance * np.maximum(values[..., -1:], np.finfo(float).tiny)
+        keep_observation = values > cutoff
+        retained_values = np.where(keep_observation, values, 0.)
+        inverse_root = np.zeros_like(values)
+        np.divide(1., np.sqrt(values), out=inverse_root, where=keep_observation)
+        self._whitener = inverse_root[..., :, None] * vectors.conj().swapaxes(-1, -2)
+        gram_root = np.sqrt(retained_values)[..., :, None] * vectors.conj().swapaxes(-1, -2)
+        covariance = self._whitener @ G @ self._whitener.conj().swapaxes(-1, -2)
+        expected = np.zeros_like(covariance)
+        diagonal = np.arange(self.taps)
+        expected[..., diagonal, diagonal] = keep_observation
+        self.maximum_whitening_covariance_error = float(np.max(abs(covariance - expected)))
+        self.whitening_error_limit = 8 * np.finfo(float).eps / relative_tolerance
+        if self.maximum_whitening_covariance_error > self.whitening_error_limit:
+            raise ValueError("observation whitening is numerically unresolved")
+        # The checked maximum-entry residual bounds the covariance operator
+        # error by taps*limit. Inflate conservatively and scale the observation
+        # and alternative together; never change only a denominator or a mode.
+        self.whitening_variance_inflation = math.nextafter(
+            1 + self.taps * self.whitening_error_limit, math.inf)
+        if not math.isfinite(self.whitening_variance_inflation):
+            raise ValueError("observation rank tolerance cannot resolve a finite noise envelope")
+        safety_root = math.sqrt(self.whitening_variance_inflation)
+        self._whitener /= safety_root
+        gram_root /= safety_root
+        self.observable_rank_min = int(keep_observation.sum(-1).min())
+        self.observable_rank_max = int(keep_observation.sum(-1).max())
+        self.discarded_observation_modes = int(np.sum(~keep_observation))
+        removed = np.where(keep_observation, 0., values).sum(-1)
+        self.maximum_relative_discarded_gram_trace = float(np.max(
+            removed / np.maximum(values.sum(-1), np.finfo(float).tiny)))
         self.maximum_relative_prior_repair = 0.
         self.maximum_relative_information_repair = 0.
+        self.maximum_mode_orthogonality_error = 0.
         windows = []
         prior_time_key = None
         root = None
@@ -139,40 +176,48 @@ class PreparedWindowedGaussian:
             # irregular windows and partial tails never grow an unbounded cache.
             if time_key != prior_time_key:
                 root = None  # Release the previous dense factor before replacing it.
-                argument = math.pi * self.doppler_width_hz * (time[:, None] - time[None, :])
-                with np.errstate(over="ignore"):
-                    correlation = np.exp(-.5 * argument**2)
-                Q = np.kron(correlation, np.diag(powers))
-                q, u = np.linalg.eigh(Q)
-                qscale = max(float(abs(q).max()), np.finfo(float).tiny)
-                if q[0] < -relative_tolerance * qscale:
-                    raise ValueError("Gaussian prior covariance lost positive semidefiniteness")
-                self.maximum_relative_prior_repair = max(self.maximum_relative_prior_repair, max(0., -float(q[0])) / qscale)
-                keep = q > 0
-                root = u[:, keep] * np.sqrt(q[keep])[None, :]
-                prior_time_key = time_key
-                del argument, correlation, Q, q, u, keep
+                if self.doppler_width_hz == 0:
+                    # Exactly constant taps have rank <= taps, even for long
+                    # windows. An eigensolve invents tiny positive modes here.
+                    root = np.tile(np.diag(np.sqrt(powers)), (len(time), 1))
+                    root = root[:, np.asarray(powers) > 0]
+                    prior_time_key = time_key
+                else:
+                    argument = math.pi * self.doppler_width_hz * (time[:, None] - time[None, :])
+                    with np.errstate(over="ignore"):
+                        correlation = np.exp(-.5 * argument**2)
+                    Q = np.kron(correlation, np.diag(powers))
+                    q, u = np.linalg.eigh(Q)
+                    qscale = max(float(abs(q).max()), np.finfo(float).tiny)
+                    if q[0] < -relative_tolerance * qscale:
+                        raise ValueError("Gaussian prior covariance lost positive semidefiniteness")
+                    self.maximum_relative_prior_repair = max(self.maximum_relative_prior_repair, max(0., -float(q[0])) / qscale)
+                    keep = q > 0
+                    root = u[:, keep] * np.sqrt(q[keep])[None, :]
+                    prior_time_key = time_key
+                    del argument, correlation, Q, q, u, keep
             n, rank = root.shape
             transform = np.empty((self.candidates, n, rank), np.complex128)
             spectrum = np.empty((self.candidates, rank), np.float64)
             for candidate in range(self.candidates):
-                block_gram = np.zeros((n, n), np.complex128)
-                for local, gram in enumerate(G[first:stop, candidate]):
-                    lo = local * self.taps
-                    block_gram[lo:lo + self.taps, lo:lo + self.taps] = gram
-                information = root.conj().T @ block_gram @ root
-                information = (information + information.conj().T) * .5
                 if rank:
-                    lam, rotation = np.linalg.eigh(information)
-                    lscale = max(float(abs(lam).max()), np.finfo(float).tiny)
-                    if lam[0] < -relative_tolerance * lscale:
-                        raise ValueError("Gaussian information lost positive semidefiniteness")
-                    self.maximum_relative_information_repair = max(self.maximum_relative_information_repair, max(0., -float(lam[0])) / lscale)
-                    spectrum[candidate] = np.maximum(lam, 0)
-                    transform[candidate] = root @ rotation
+                    weighted = np.empty((n, rank), np.complex128)
+                    for local, block_root in enumerate(gram_root[first:stop, candidate]):
+                        lo = local * self.taps
+                        weighted[lo:lo + self.taps] = block_root @ root[lo:lo + self.taps]
+                    # Do not square this design into an information Gram:
+                    # eigensolver clipping can leave a nonzero transform with
+                    # zero modeled noise energy at extreme noise scales.
+                    modes, singular, _ = np.linalg.svd(weighted, full_matrices=False)
+                    spectrum[candidate] = singular**2
+                    transform[candidate] = modes
+                    error = float(np.max(abs(modes.conj().T @ modes - np.eye(rank))))
+                    self.maximum_mode_orthogonality_error = max(self.maximum_mode_orthogonality_error, error)
+                    if error > 64 * np.finfo(float).eps * max(n, 1):
+                        raise ValueError("Gaussian covariance modes are numerically unresolved")
             windows.append(_Window(first, stop, transform, spectrum))
         self._windows = tuple(windows)
-        self.owned_factor_bytes = sum(w.transform.nbytes + w.eigenvalues.nbytes for w in windows)
+        self.owned_factor_bytes = self._whitener.nbytes + sum(w.transform.nbytes + w.eigenvalues.nbytes for w in windows)
         self.maximum_window_dimension = dimension
         self.maximum_window_rank = max(w.transform.shape[-1] for w in windows)
 
@@ -223,19 +268,24 @@ class PreparedWindowedGaussian:
         dtype = torch.complex64 if precision == "fp32" else torch.complex128
         total = torch.zeros((trials, self.candidates), dtype=torch.float64, device=target)
         for window in self._windows:
-            observation = torch.as_tensor(correlations[window.first:window.stop], dtype=dtype, device=target)
+            observation = torch.as_tensor(correlations[window.first:window.stop], dtype=torch.complex128, device=target)
             if not bool(torch.isfinite(observation).all()):
                 raise ValueError("nonfinite Gaussian window observations")
-            flat = observation.permute(2, 1, 0, 3).reshape(self.candidates, trials, -1)
+            whitener = torch.as_tensor(self._whitener[window.first:window.stop],
+                                       dtype=torch.complex128, device=target)
+            white = torch.matmul(observation.permute(0, 2, 1, 3),
+                                 whitener.transpose(-1, -2)).permute(0, 2, 1, 3)
+            scale = torch.sqrt(alpha)[None, :, :, None]
+            white = white * scale if correlations_scaled else white / scale
+            # Cast only after whitening and noise scaling: the bulk operands
+            # then have unit noise scale instead of amplifying tiny null modes.
+            flat = white.to(dtype).permute(2, 1, 0, 3).reshape(self.candidates, trials, -1)
             factor = torch.as_tensor(window.transform, dtype=dtype, device=target)
             z = torch.bmm(flat, factor.conj()).permute(1, 0, 2)
             power = z.real.to(torch.float64).square() + z.imag.to(torch.float64).square()
             lam = torch.as_tensor(window.eigenvalues, dtype=torch.float64, device=target)[None]
             denominator = alpha[..., None] + lam
-            if correlations_scaled:
-                quadratic = (power * (alpha[..., None] / denominator)).sum(-1)
-            else:
-                quadratic = ((power / alpha[..., None]) / denominator).sum(-1)
+            quadratic = (power * (lam / denominator)).sum(-1)
             determinant = torch.log1p(lam / alpha[..., None]).sum(-1)
             total += quadratic - determinant
         if not bool(torch.isfinite(total).all()):
@@ -255,8 +305,18 @@ class PreparedWindowedGaussian:
             "maximum_relative_gram_repair": self.maximum_relative_gram_repair,
             "maximum_relative_prior_repair": self.maximum_relative_prior_repair,
             "maximum_relative_information_repair": self.maximum_relative_information_repair,
-            "preparation_arithmetic": "CPU complex128/float64 PSD square roots and information eigensolves; no covariance inverse",
-            "score_arithmetic": "explicit complex64/128 correlation GEMM; FP64 weights, squares, determinant and evidence",
+            "observable_rank_min": self.observable_rank_min,
+            "observable_rank_max": self.observable_rank_max,
+            "discarded_observation_modes": self.discarded_observation_modes,
+            "observable_relative_rank_tolerance": self.relative_tolerance,
+            "maximum_relative_discarded_gram_trace": self.maximum_relative_discarded_gram_trace,
+            "maximum_whitening_covariance_error": self.maximum_whitening_covariance_error,
+            "whitening_error_limit": self.whitening_error_limit,
+            "whitening_variance_inflation": self.whitening_variance_inflation,
+            "maximum_mode_orthogonality_error": self.maximum_mode_orthogonality_error,
+            "preparation_arithmetic": "CPU complex128/float64 observation whitening, PSD prior roots and rectangular SVD; exact constant-tap root at B=0",
+            "score_arithmetic": "FP64 small block whitening/scaling on selected device; explicit complex64/128 bounded mode GEMM; FP64 weights, squares, determinant and evidence",
+            "rank_scope": "fixed projection removes observation Gram eigenmodes <= relative tolerance times block maximum; no extra truncation of positive prior modes; omitted information and numerical residuals are reported",
             "variance_scope": "one stationary chosen variance/reference ratio per trial/candidate, not per block; independent bound and its failure budget are caller responsibilities",
             "model_scope": "normalized independent-window proper-complex Gaussian coefficient alternative with physical-center Gaussian covariance; not a full matched Gaussian-FIR receiver or anytime admission rule",
             "sampling_scope": "block-center coefficient approximation and independent-window boundaries require physical sampling/window refinement",

@@ -10,6 +10,7 @@
 #include <limits>
 #include <memory>
 #include <numbers>
+#include <numeric>
 #include <stdexcept>
 #include <vector>
 
@@ -529,6 +530,140 @@ void erasure_and_noise_checks() {
     const double measured = static_cast<double>(energy / noise.size());
     check(measured > 1.8 && measured < 2.2,
           "absolute complex noise variance does not match E|n|^2");
+}
+
+void missed_receiver_dwell_checks() {
+    auto f = fixture_format();
+    const auto key = fixture_key();
+    f.fhss = true;
+    f.quiet_seconds = .012;
+    f.ramp_seconds = .008;
+
+    auto make_config = [&](std::size_t chunk) {
+        StreamChannelConfig cfg;
+        cfg.effects.sample_rate = f.sample_rate;
+        cfg.effects.occupied_bandwidth_hz = geometry(f).occupied_bandwidth_hz;
+        cfg.effects.rf_hz = 30e6;
+        cfg.effects.capture_lead_seconds = .043;
+        cfg.effects.retune_offset_seconds = .071;
+        cfg.effects.rx.audio_ppm = 37;
+        cfg.effects.rx.rf_ppm = -.00008;
+        cfg.effects.rx.phase_noise_rad_per_sqrt_second = .0005;
+        cfg.effects.noise_enabled = true;
+        cfg.effects.seed = 0x7612abc9;
+        cfg.effects.spread_delay_ms = .5;
+        cfg.effects.spread_doppler_hz = .1;
+        cfg.effects.perturbation_slow_depth = .01;
+        cfg.effects.perturbation_fast_depth = .01;
+        cfg.complex_noise_variance = .025;
+        cfg.maximum_chunk_samples = chunk;
+        return cfg;
+    };
+    struct Observation {
+        std::vector<Complex> samples;
+        std::vector<std::uint8_t> validity;
+        StreamChannelReport report;
+    };
+    auto observe = [&](StreamChannelConfig cfg, std::size_t chunk) {
+        PatternSource source(f, key, 1);
+        StreamingChannel channel(source, cfg);
+        Observation result;
+        result.samples.resize(static_cast<std::size_t>(channel.total_samples()));
+        result.validity.resize(result.samples.size());
+        for (std::size_t cursor = 0; cursor < result.samples.size();) {
+            const auto take = std::min(chunk, result.samples.size() - cursor);
+            const auto count = channel.read(std::span(result.samples).subspan(cursor, take),
+                                            std::span(result.validity).subspan(cursor, take));
+            check(count == take, "missed-dwell capture ended early");
+            cursor += count;
+        }
+        result.report = channel.report();
+        return result;
+    };
+
+    // The empty schedule remains an exact same-seed bypass.
+    auto baseline_cfg = make_config(311);
+    const auto baseline = observe(baseline_cfg, 311);
+    auto empty_cfg = baseline_cfg;
+    empty_cfg.missed_receiver_dwell_indices.clear();
+    const auto empty = observe(empty_cfg, 311);
+    check(empty.samples == baseline.samples,
+          "empty missed-dwell schedule changed the established sample stream");
+    check(std::all_of(empty.validity.begin(), empty.validity.end(),
+                      [](std::uint8_t v) { return v == 1; }),
+          "empty missed-dwell schedule marked rows absent");
+
+    // Lose the first two adjacent public receive dwells, plus a middle and a
+    // later dwell. Source origin, capture lead, audio error and retune offset
+    // all contribute through the public receiver calendar, never TX truth.
+    auto erased_cfg = make_config(127);
+    erased_cfg.missed_receiver_dwell_indices = {0, 1, 7, 22};
+    const auto erased = observe(erased_cfg, 127);
+    check(erased.report.working_bytes >= baseline.report.working_bytes +
+          erased_cfg.missed_receiver_dwell_indices.size() * sizeof(std::uint64_t),
+          "channel workspace omitted the owned missed-dwell schedule");
+    auto erased_cfg_large = erased_cfg;
+    erased_cfg_large.maximum_chunk_samples = 2048;
+    const auto erased_large = observe(erased_cfg_large, 2048);
+    check(erased.samples == erased_large.samples && erased.validity == erased_large.validity,
+          "missed-dwell schedule depends on channel chunk size");
+    check(erased.report.erased_samples == erased.report.samples -
+          std::accumulate(erased.validity.begin(), erased.validity.end(), std::uint64_t{0}),
+          "channel report did not count scheduled missing samples");
+
+    const auto rx_scale = 1 + erased_cfg.effects.rx.audio_ppm * 1e-6;
+    const auto calendar_origin_seconds =
+        static_cast<double>(geometry(f).calendar_origin_sample) / f.sample_rate;
+    const auto dwell_seconds = f.dwell_seconds;
+    bool saw_erased = false, saw_valid_before_or_between = false;
+    for (std::size_t n = 0; n < erased.samples.size(); ++n) {
+        const double t = static_cast<double>(static_cast<long double>(n) /
+            (static_cast<long double>(f.sample_rate) * rx_scale) -
+            erased_cfg.effects.capture_lead_seconds + erased_cfg.effects.retune_offset_seconds -
+            calendar_origin_seconds);
+        const auto d = t < 0 ? std::int64_t{-1} :
+            static_cast<std::int64_t>(std::floor(t / dwell_seconds));
+        const bool expected_erased = d >= 0 &&
+            std::binary_search(erased_cfg.missed_receiver_dwell_indices.begin(),
+                               erased_cfg.missed_receiver_dwell_indices.end(),
+                               static_cast<std::uint64_t>(d));
+        check((erased.validity[n] == 0) == expected_erased,
+              "missed dwell rows do not align to the public receiver calendar");
+        if (expected_erased) {
+            saw_erased = true;
+            check(erased.samples[n] == Complex{}, "missed receiver row is not zero-filled");
+        } else {
+            saw_valid_before_or_between = true;
+            check(erased.samples[n] == baseline.samples[n],
+                  "post-erasure channel/noise/frontend state differs from uninterrupted capture");
+        }
+    }
+    check(saw_erased && saw_valid_before_or_between,
+          "missed-dwell fixture did not contain both absent and observed rows");
+
+    auto no_fhss = make_config(311);
+    f.fhss = false;
+    PatternSource unsupported_source(f, key, 1);
+    no_fhss.missed_receiver_dwell_indices = {1};
+    rejects([&] { StreamingChannel unsupported(unsupported_source, no_fhss); },
+            "missed dwell accepted without a public FHSS calendar");
+    f.fhss = true;
+
+    for (const auto invalid : {std::vector<std::uint64_t>{2, 2},
+                                std::vector<std::uint64_t>{3, 1}}) {
+        auto bad = make_config(311);
+        bad.missed_receiver_dwell_indices = invalid;
+        PatternSource bad_source(f, key, 1);
+        rejects([&] { StreamingChannel rejected(bad_source, bad); },
+                "duplicate or unsorted missed dwell schedule was accepted");
+    }
+    auto over_limit = make_config(311);
+    over_limit.missed_receiver_dwell_indices.resize(4097);
+    std::iota(over_limit.missed_receiver_dwell_indices.begin(),
+              over_limit.missed_receiver_dwell_indices.end(), std::uint64_t{0});
+    PatternSource bounded_source(f, key, 1);
+    rejects([&] { StreamingChannel rejected(bounded_source, over_limit); },
+            "unbounded missed-dwell schedule was accepted");
 }
 
 void path_evolution_deterministic_checks() {
@@ -1361,6 +1496,7 @@ int main() {
         independent_seed_root_checks();
         physical_hop_origin_checks();
         erasure_and_noise_checks();
+        missed_receiver_dwell_checks();
         path_evolution_deterministic_checks();
         path_ou_statistics_checks();
         low_rate_path_configuration_checks();

@@ -3,6 +3,7 @@
 import json
 import math
 import pathlib
+import struct
 import subprocess
 import sys
 import tempfile
@@ -40,7 +41,95 @@ def check(condition, message):
         raise AssertionError(message)
 
 
+def observation_control_checks():
+    wide = configure("--clock-sync", "default", "--arrival-prior-seconds", "-7.035", "7.035",
+                     "--start", "-7.035", "7.035", "1.005")
+    check(wide["explicit_arrival_prior"], "explicit physical arrival prior omitted")
+    check(wide["initial_arrival_bounds_seconds"] == [-7.035, 7.035], "wide arrival bounds changed")
+    near(wide["initial_arrival_half_width_seconds"], 7.035, "wide arrival prior collapsed")
+    check(wide["public_search"]["covers_initial_timing_prior"], "covered wide prior marked uncovered")
+    check(not configure("--arrival-prior-seconds", "-7.035", "7.035")["public_search"]["covers_initial_timing_prior"],
+          "known-alignment search falsely covers wide physical arrival prior")
+    zero = configure("--arrival-prior-seconds", "0", "0")
+    check(zero["public_search"]["covers_initial_timing_prior"], "degenerate known arrival prior rejected")
+    near(zero["calendar_timestamp_audio_center_shift_seconds"], 0, "overridden audio lag still shifted calendar")
+    check(not configure("--clock-sync", "default")["explicit_arrival_prior"], "legacy default changed silently")
+    for invalid in (("--arrival-prior-seconds", "1", "-1"), ("--arrival-prior-seconds", "nan", "1"),
+                    ("--arrival-prior-seconds", "0", "inf"), ("--minimum-observed-fraction", "-0.01"),
+                    ("--minimum-observed-fraction", "0"),
+                    ("--minimum-observed-fraction", "1.01"), ("--missed-dwells", "0"),
+                    ("--fhss", "--missed-dwells", "1,1"), ("--fhss", "--missed-dwells", "2,1"),
+                    ("--fhss", "--missed-dwells", "-1"), ("--fhss", "--missed-dwells", "0,"),
+                    ("--fhss", "--missed-dwells", ",0")):
+        rejected = invoke("--mode", "configure", *COMMON, *invalid, ok=False)
+        if "--missed-dwells" in invalid:
+            check("missed receiver dwell" in rejected.stderr, "invalid erasure list failed for an unrelated reason")
+    rejected = invoke("--mode", "configure", *COMMON, "--fhss", "--missed-dwells", ",".join(map(str, range(4097))), ok=False)
+    check("missed receiver dwell" in rejected.stderr, "oversized erasure list failed for an unrelated reason")
+    check(len(configure("--rate", "1200", "--sample-rate", "960", "--fhss", "--missed-dwells", ",".join(map(str, range(4096))))
+              ["receiver_observation"]["missed_dwell_indices"]) == 4096, "declared erasure-list limit is not usable")
+
+    physical = (*COMMON, "--clock-sync", "default", "--spread-preset", "none",
+                "--selective-perturbation", "off", "--phase-diffusion", "0", "--threads", "1")
+    with tempfile.TemporaryDirectory() as root:
+        manifests = []
+        for label, search in (("nominal", ("0", "0", "1")), ("wide", ("-3", "3", "3"))):
+            destination = pathlib.Path(root)/label
+            invoke("--mode", "export-stats", *physical, "--arrival-prior-seconds", "-2.5", "-2.5",
+                   "--truth-frequency-hz", ".2", "--truth-frequency-drift", ".01", "--start", *search,
+                   "--output", str(destination))
+            manifests.append(json.loads((destination/"manifest.json").read_text()))
+        check(manifests[0]["endpoint_truth"] == manifests[1]["endpoint_truth"],
+              "explicit arrival prior or search bank changed endpoint oscillator draws")
+        for manifest in manifests:
+            rx_scale = 1+manifest["endpoint_truth"]["rx_audio_ppm"]*1e-6
+            truth = manifest["selected_truth_arrival_seconds_simulation_only"]
+            near(truth/rx_scale-manifest["capture_lead_seconds"], -2.5,
+                 "public search selected the explicit physical arrival")
+            endpoint = manifest["endpoint_truth"]
+            tx_scale = 1+endpoint["tx_audio_ppm"]*1e-6
+            cfg = manifest["resolved_configuration"]
+            expected_cfo = .2 + (cfg["rf_center_hz"]*(endpoint["tx_rf_ppm"]-endpoint["rx_rf_ppm"])*1e-6 +
+                                 cfg["nominal_conversion_if_hz"]*(tx_scale-rx_scale))/rx_scale
+            near(manifest["selected_truth_frequency_hz_simulation_only"], expected_cfo,
+                 "arrival override moved drift reference")
+            low, high = manifest["initial_physical_arrival_bounds_capture_seconds"]
+            check(low <= truth <= high, "physical arrival is outside exported conservative bounds")
+            check(truth >= 0, "negative physical prior was clipped at capture start")
+
+        erased_args = (*physical, "--rate", "1200", "--sample-rate", "960", "--fhss", "--arrival-prior-seconds", "0", "0", "--cn0", "80",
+                       "--block-seconds", "4", "--missed-dwells", "0,1,7,19")
+        gated = rows(invoke("--mode", "run", *erased_args, "--minimum-observed-fraction", "1"))[0]
+        admitted = rows(invoke("--mode", "run", *erased_args, "--minimum-observed-fraction", ".5"))[0]
+        check(gated["complete_observation"] and admitted["complete_observation"], "erasure policy changed complete-calendar handling")
+        check(gated["missing_samples"] > 0 and gated["missing_samples"] == admitted["missing_samples"], "coverage gate changed erasures")
+        near(gated["score"], admitted["score"], "coverage gate changed evidence")
+        near(gated["threshold"], admitted["threshold"], "coverage gate changed threshold")
+        check(not gated["accepted"] and admitted["correct"], "coverage gate was ignored or silently changed likelihood acceptance")
+        for mode in ("export-sampled", "export-stats", "export-group-stats"):
+            destination = pathlib.Path(root)/mode
+            extra = ("--stats-noisy",) if mode != "export-sampled" else ()
+            invoke("--mode", mode, *erased_args, *extra, "--output", str(destination))
+            manifest = json.loads((destination/"manifest.json").read_text())
+            controls = manifest["resolved_configuration"]["receiver_observation"]
+            check(controls["missed_dwell_indices"] == [0, 1, 7, 19], "export lost receiver erasure schedule")
+            check(not controls["physical_rf_retuning"], "envelope experiment claimed RF retuning")
+            if mode == "export-sampled":
+                validity = (destination/manifest["validity_file"]).read_bytes()
+                valid_count = sum(validity)
+                observation = (destination/manifest["observation_file"]).read_bytes()
+                check(all(valid or struct.unpack_from("<dd", observation, 16*i) == (0., 0.)
+                          for i, valid in enumerate(validity)), "missing I/Q is not zero in sampled export")
+            else:
+                raw = (destination/manifest["valid_rows_file"]).read_bytes()
+                valid_count = sum(value[0] for value in struct.iter_unpack("<Q", raw))
+            check(manifest["sample_count"]-valid_count == gated["missing_samples"],
+                  "sampled/statistics modes disagree on erased row count")
+        invoke("--mode", "export", *erased_args, "--output", str(pathlib.Path(root)/"unsupported"), ok=False)
+
+
 def main():
+    observation_control_checks()
     configured_selective = configure()["selective_channel"]
     check(configured_selective["model"] == "dispersive-dft-v1",
           "isolated v3 does not default to corrected selective channel model")

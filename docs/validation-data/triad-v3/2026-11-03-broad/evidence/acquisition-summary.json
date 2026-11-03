@@ -1,0 +1,1843 @@
+{
+  "counts": {
+    "completed": 15
+  },
+  "limitations": [
+    "Paired selected captures, not independent validation or a reliability estimate.",
+    "All public timing groups retained. Frequency/clock/epoch dimensions are not silently added.",
+    "Global model assumes constant two-ray coefficients after declared deterministic path phases; strong stochastic evolution can invalidate it.",
+    "Short-window summaries are independently recounted from source-bound baseline receipt scores; global NPZ arrays are also verified here."
+  ],
+  "plan_sha256": "9a1d431479dbde2e131902b4287bb2de5bc2060f8e52070dd253009d39815e6a",
+  "receipt_sha256": "e599cbe978b5df25fa7fbf23a18e3b423f05af8c4fe936cbe542c148cbaed02c",
+  "rows": [
+    {
+      "bit": 0,
+      "case": "rate-360",
+      "cn0_db_hz": 20,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-rate-360-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -5.6103795237642675,
+        -5.1360044948063885
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.005401871167123318,
+        "read_reblock_seconds": 0.0010628371965140104,
+        "residual_calibration_seconds": 0.2705411878414452,
+        "score_seconds": 0.0025758184492588043,
+        "total_receiver_seconds": 0.2807557808700949
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "rate-360",
+      "cn0_db_hz": 20,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-rate-360-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -5.6103795237642675,
+        -5.1360044948063885
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.005401871167123318,
+        "read_reblock_seconds": 0.0010628371965140104,
+        "residual_calibration_seconds": 0.2705411878414452,
+        "score_seconds": 0.0025758184492588043,
+        "total_receiver_seconds": 0.2807557808700949
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "rate-360",
+      "cn0_db_hz": 20,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-rate-360-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -47.64185628354176,
+        -42.391905263549006
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.15246414206922054,
+        "read_reblock_seconds": 0.000732543645426631,
+        "residual_calibration_seconds": 0.2112485256511718,
+        "score_seconds": 0.016734554897993803,
+        "total_receiver_seconds": 0.38282396318390965
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "rate-360",
+      "cn0_db_hz": 20,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-rate-360-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -47.64185628354176,
+        -42.391905263549006
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.15246414206922054,
+        "read_reblock_seconds": 0.000732543645426631,
+        "residual_calibration_seconds": 0.2112485256511718,
+        "score_seconds": 0.016734554897993803,
+        "total_receiver_seconds": 0.38282396318390965
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "rate-360",
+      "cn0_db_hz": 20,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-rate-360-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        697.8786285753137,
+        -3.8950150103819174
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.005051665240898728,
+        "read_reblock_seconds": 0.0009707903955131769,
+        "residual_calibration_seconds": 0.2590950003359467,
+        "score_seconds": 0.0023791235871613026,
+        "total_receiver_seconds": 0.2686629050876945
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "rate-360",
+      "cn0_db_hz": 20,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-rate-360-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        697.8786285753137,
+        -3.8950150103819174
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.005051665240898728,
+        "read_reblock_seconds": 0.0009707903955131769,
+        "residual_calibration_seconds": 0.2590950003359467,
+        "score_seconds": 0.0023791235871613026,
+        "total_receiver_seconds": 0.2686629050876945
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "rate-360",
+      "cn0_db_hz": 20,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-rate-360-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        635.4997652375337,
+        -34.86868236643875
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.15407100808806717,
+        "read_reblock_seconds": 0.0007550339214503765,
+        "residual_calibration_seconds": 0.20923936902545393,
+        "score_seconds": 0.01682977075688541,
+        "total_receiver_seconds": 0.3825214288663119
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "rate-360",
+      "cn0_db_hz": 20,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-rate-360-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        635.4997652375337,
+        -34.86868236643875
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.15407100808806717,
+        "read_reblock_seconds": 0.0007550339214503765,
+        "residual_calibration_seconds": 0.20923936902545393,
+        "score_seconds": 0.01682977075688541,
+        "total_receiver_seconds": 0.3825214288663119
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 1,
+      "case": "rate-360",
+      "cn0_db_hz": 20,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-rate-360-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -4.0593567239558315,
+        618.6511561341131
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.00521530513651669,
+        "read_reblock_seconds": 0.0009508926887065172,
+        "residual_calibration_seconds": 0.2690324685536325,
+        "score_seconds": 0.0024125713389366865,
+        "total_receiver_seconds": 0.27879340993240476
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 1,
+      "case": "rate-360",
+      "cn0_db_hz": 20,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-rate-360-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -4.0593567239558315,
+        618.6511561341131
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.00521530513651669,
+        "read_reblock_seconds": 0.0009508926887065172,
+        "residual_calibration_seconds": 0.2690324685536325,
+        "score_seconds": 0.0024125713389366865,
+        "total_receiver_seconds": 0.27879340993240476
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 1,
+      "case": "rate-360",
+      "cn0_db_hz": 20,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-rate-360-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -35.22642512833087,
+        552.9329028562125
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.15337700117379427,
+        "read_reblock_seconds": 0.0007401150651276112,
+        "residual_calibration_seconds": 0.21366232843138278,
+        "score_seconds": 0.016870079562067986,
+        "total_receiver_seconds": 0.386215423932299
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 1,
+      "case": "rate-360",
+      "cn0_db_hz": 20,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-rate-360-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -35.22642512833087,
+        552.9329028562125
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.15337700117379427,
+        "read_reblock_seconds": 0.0007401150651276112,
+        "residual_calibration_seconds": 0.21366232843138278,
+        "score_seconds": 0.016870079562067986,
+        "total_receiver_seconds": 0.386215423932299
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "spread-hf-worst",
+      "cn0_db_hz": 20,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -9.07667265793797,
+        -8.178895127052973
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.005132654681801796,
+        "read_reblock_seconds": 0.008946297457441688,
+        "residual_calibration_seconds": 0.1832089750096202,
+        "score_seconds": 0.002320952946320176,
+        "total_receiver_seconds": 0.20077691902406514
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "spread-hf-worst",
+      "cn0_db_hz": 20,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -9.07667265793797,
+        -8.178895127052973
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.005132654681801796,
+        "read_reblock_seconds": 0.008946297457441688,
+        "residual_calibration_seconds": 0.1832089750096202,
+        "score_seconds": 0.002320952946320176,
+        "total_receiver_seconds": 0.20077691902406514
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "spread-hf-worst",
+      "cn0_db_hz": 20,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -137.50149390643992,
+        -135.55506879808033
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.6517654259223491,
+        "read_reblock_seconds": 0.008098978083580732,
+        "residual_calibration_seconds": 0.4451965077314526,
+        "score_seconds": 0.05910349125042558,
+        "total_receiver_seconds": 1.169102411950007
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "spread-hf-worst",
+      "cn0_db_hz": 20,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -137.50149390643992,
+        -135.55506879808033
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.6517654259223491,
+        "read_reblock_seconds": 0.008098978083580732,
+        "residual_calibration_seconds": 0.4451965077314526,
+        "score_seconds": 0.05910349125042558,
+        "total_receiver_seconds": 1.169102411950007
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "spread-hf-worst",
+      "cn0_db_hz": 20,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        808.9912286300122,
+        -6.684648572573827
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.0049714576452970505,
+        "read_reblock_seconds": 0.009206432150676847,
+        "residual_calibration_seconds": 0.18468412361107767,
+        "score_seconds": 0.0022820548620074987,
+        "total_receiver_seconds": 0.20215769112110138
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "spread-hf-worst",
+      "cn0_db_hz": 20,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        808.9912286300122,
+        -6.684648572573827
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.0049714576452970505,
+        "read_reblock_seconds": 0.009206432150676847,
+        "residual_calibration_seconds": 0.18468412361107767,
+        "score_seconds": 0.0022820548620074987,
+        "total_receiver_seconds": 0.20215769112110138
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "spread-hf-worst",
+      "cn0_db_hz": 20,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        540.2405711456453,
+        -48.88385343024078
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.6545305603649467,
+        "read_reblock_seconds": 0.008161586942151189,
+        "residual_calibration_seconds": 0.4339331449009478,
+        "score_seconds": 0.058995882980525494,
+        "total_receiver_seconds": 1.1604006378911436
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "spread-hf-worst",
+      "cn0_db_hz": 20,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        540.2405711456453,
+        -48.88385343024078
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.6545305603649467,
+        "read_reblock_seconds": 0.008161586942151189,
+        "residual_calibration_seconds": 0.4339331449009478,
+        "score_seconds": 0.058995882980525494,
+        "total_receiver_seconds": 1.1604006378911436
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 1,
+      "case": "spread-hf-worst",
+      "cn0_db_hz": 20,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -4.401461172618488,
+        843.5621089705916
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.005197362042963505,
+        "read_reblock_seconds": 0.0103427330031991,
+        "residual_calibration_seconds": 0.1799266403540969,
+        "score_seconds": 0.0023629730567336082,
+        "total_receiver_seconds": 0.19891180703416467
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 1,
+      "case": "spread-hf-worst",
+      "cn0_db_hz": 20,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -4.401461172618488,
+        843.5621089705916
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.005197362042963505,
+        "read_reblock_seconds": 0.0103427330031991,
+        "residual_calibration_seconds": 0.1799266403540969,
+        "score_seconds": 0.0023629730567336082,
+        "total_receiver_seconds": 0.19891180703416467
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 1,
+      "case": "spread-hf-worst",
+      "cn0_db_hz": 20,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -24.64641355131809,
+        595.9097664939059
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.6544703929685056,
+        "read_reblock_seconds": 0.008256813045591116,
+        "residual_calibration_seconds": 0.4378309773746878,
+        "score_seconds": 0.05920927948318422,
+        "total_receiver_seconds": 1.164577763993293
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 1,
+      "case": "spread-hf-worst",
+      "cn0_db_hz": 20,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 109,
+      "job_id": "set0-acquire-spread-hf-worst-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -24.64641355131809,
+        595.9097664939059
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.6544703929685056,
+        "read_reblock_seconds": 0.008256813045591116,
+        "residual_calibration_seconds": 0.4378309773746878,
+        "score_seconds": 0.05920927948318422,
+        "total_receiver_seconds": 1.164577763993293
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "timing-margin-default-1",
+      "cn0_db_hz": 20,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -10.096381863865895,
+        -10.151143842555996
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.03399021760560572,
+        "read_reblock_seconds": 0.005052693421021104,
+        "residual_calibration_seconds": 0.21905484539456666,
+        "score_seconds": 0.01534464512951672,
+        "total_receiver_seconds": 0.27519863308407366
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "timing-margin-default-1",
+      "cn0_db_hz": 20,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -10.096381863865895,
+        -10.151143842555996
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.03399021760560572,
+        "read_reblock_seconds": 0.005052693421021104,
+        "residual_calibration_seconds": 0.21905484539456666,
+        "score_seconds": 0.01534464512951672,
+        "total_receiver_seconds": 0.27519863308407366
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "timing-margin-default-1",
+      "cn0_db_hz": 20,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -19.720880484308,
+        -18.624909308848377
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.29969066684134305,
+        "read_reblock_seconds": 0.003867639461532235,
+        "residual_calibration_seconds": 0.33084405143745244,
+        "score_seconds": 0.04357460769824684,
+        "total_receiver_seconds": 0.6800042500253767
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "timing-margin-default-1",
+      "cn0_db_hz": 20,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -19.720880484308,
+        -18.624909308848377
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.29969066684134305,
+        "read_reblock_seconds": 0.003867639461532235,
+        "residual_calibration_seconds": 0.33084405143745244,
+        "score_seconds": 0.04357460769824684,
+        "total_receiver_seconds": 0.6800042500253767
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "timing-margin-default-1",
+      "cn0_db_hz": 20,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        897.566374065796,
+        98.20637863964384
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.038200115552172065,
+        "read_reblock_seconds": 0.005657828412950039,
+        "residual_calibration_seconds": 0.23353329789824784,
+        "score_seconds": 0.018300351919606328,
+        "total_receiver_seconds": 0.2976678479462862
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "timing-margin-default-1",
+      "cn0_db_hz": 20,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        897.566374065796,
+        98.20637863964384
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.038200115552172065,
+        "read_reblock_seconds": 0.005657828412950039,
+        "residual_calibration_seconds": 0.23353329789824784,
+        "score_seconds": 0.018300351919606328,
+        "total_receiver_seconds": 0.2976678479462862
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "timing-margin-default-1",
+      "cn0_db_hz": 20,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        959.7844411500355,
+        174.39194085013602
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.29939455399289727,
+        "read_reblock_seconds": 0.0036712500732392073,
+        "residual_calibration_seconds": 0.3312413215171546,
+        "score_seconds": 0.04311569966375828,
+        "total_receiver_seconds": 0.6795097598806024
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "timing-margin-default-1",
+      "cn0_db_hz": 20,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        959.7844411500355,
+        174.39194085013602
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.29939455399289727,
+        "read_reblock_seconds": 0.0036712500732392073,
+        "residual_calibration_seconds": 0.3312413215171546,
+        "score_seconds": 0.04311569966375828,
+        "total_receiver_seconds": 0.6795097598806024
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 1,
+      "case": "timing-margin-default-1",
+      "cn0_db_hz": 20,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        111.09680363569777,
+        1098.87254359665
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.03505995823070407,
+        "read_reblock_seconds": 0.005322942277416587,
+        "residual_calibration_seconds": 0.2452776983845979,
+        "score_seconds": 0.015949467895552516,
+        "total_receiver_seconds": 0.3035760789643973
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 1,
+      "case": "timing-margin-default-1",
+      "cn0_db_hz": 20,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        111.09680363569777,
+        1098.87254359665
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.03505995823070407,
+        "read_reblock_seconds": 0.005322942277416587,
+        "residual_calibration_seconds": 0.2452776983845979,
+        "score_seconds": 0.015949467895552516,
+        "total_receiver_seconds": 0.3035760789643973
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 1,
+      "case": "timing-margin-default-1",
+      "cn0_db_hz": 20,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        281.47301780431246,
+        1177.332022016801
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.29731410928070545,
+        "read_reblock_seconds": 0.003602220444008708,
+        "residual_calibration_seconds": 0.3271352199371904,
+        "score_seconds": 0.042641665786504745,
+        "total_receiver_seconds": 0.6728275639470667
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 1,
+      "case": "timing-margin-default-1",
+      "cn0_db_hz": 20,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 837,
+      "job_id": "set0-acquire-timing-margin-default-1-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        281.47301780431246,
+        1177.332022016801
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.29731410928070545,
+        "read_reblock_seconds": 0.003602220444008708,
+        "residual_calibration_seconds": 0.3271352199371904,
+        "score_seconds": 0.042641665786504745,
+        "total_receiver_seconds": 0.6728275639470667
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "erasures-none",
+      "cn0_db_hz": 20,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 455,
+      "job_id": "set1-acquire-erasures-none-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        1254.7656115682623,
+        -3.1044934901746846
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.01964867301285267,
+        "read_reblock_seconds": 0.05445034964941442,
+        "residual_calibration_seconds": 0.21180991269648075,
+        "score_seconds": 0.009050514083355665,
+        "total_receiver_seconds": 0.29658395098522305
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "erasures-none",
+      "cn0_db_hz": 20,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 455,
+      "job_id": "set1-acquire-erasures-none-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        1254.7656115682623,
+        -3.1044934901746846
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.01964867301285267,
+        "read_reblock_seconds": 0.05445034964941442,
+        "residual_calibration_seconds": 0.21180991269648075,
+        "score_seconds": 0.009050514083355665,
+        "total_receiver_seconds": 0.29658395098522305
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "erasures-none",
+      "cn0_db_hz": 20,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 455,
+      "job_id": "set1-acquire-erasures-none-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        867.3119956438451,
+        -579.4892565820935
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 9.215225704247132,
+        "read_reblock_seconds": 0.034756965935230255,
+        "residual_calibration_seconds": 1.4991225958801806,
+        "score_seconds": 2.0611204353626817,
+        "total_receiver_seconds": 12.844399904133752
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "erasures-none",
+      "cn0_db_hz": 20,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 455,
+      "job_id": "set1-acquire-erasures-none-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        867.3119956438451,
+        -579.4892565820935
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 9.215225704247132,
+        "read_reblock_seconds": 0.034756965935230255,
+        "residual_calibration_seconds": 1.4991225958801806,
+        "score_seconds": 2.0611204353626817,
+        "total_receiver_seconds": 12.844399904133752
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "erasures-cycle-edge",
+      "cn0_db_hz": 20,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 455,
+      "job_id": "set2-acquire-erasures-cycle-edge-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -11.466328411809581,
+        -10.845854694210344
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.019292135490104556,
+        "read_reblock_seconds": 0.05306743271648884,
+        "residual_calibration_seconds": 0.196233416441828,
+        "score_seconds": 0.008931348333135247,
+        "total_receiver_seconds": 0.27896049711853266
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "erasures-cycle-edge",
+      "cn0_db_hz": 20,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 455,
+      "job_id": "set2-acquire-erasures-cycle-edge-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -11.466328411809581,
+        -10.845854694210344
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.019292135490104556,
+        "read_reblock_seconds": 0.05306743271648884,
+        "residual_calibration_seconds": 0.196233416441828,
+        "score_seconds": 0.008931348333135247,
+        "total_receiver_seconds": 0.27896049711853266
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "erasures-cycle-edge",
+      "cn0_db_hz": 20,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 455,
+      "job_id": "set2-acquire-erasures-cycle-edge-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -616.3944784216743,
+        -619.9948810189603
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 8.920791138662025,
+        "read_reblock_seconds": 0.03321378189139068,
+        "residual_calibration_seconds": 1.512532861204818,
+        "score_seconds": 1.9879431761801243,
+        "total_receiver_seconds": 12.462994648842141
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "erasures-cycle-edge",
+      "cn0_db_hz": 20,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 455,
+      "job_id": "set2-acquire-erasures-cycle-edge-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -616.3944784216743,
+        -619.9948810189603
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 8.920791138662025,
+        "read_reblock_seconds": 0.03321378189139068,
+        "residual_calibration_seconds": 1.512532861204818,
+        "score_seconds": 1.9879431761801243,
+        "total_receiver_seconds": 12.462994648842141
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "erasures-cycle-edge",
+      "cn0_db_hz": 20,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 455,
+      "job_id": "set2-acquire-erasures-cycle-edge-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        1210.231584183022,
+        -4.65701163950788
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.020625270903110504,
+        "read_reblock_seconds": 0.05391377583146095,
+        "residual_calibration_seconds": 0.2025644958484918,
+        "score_seconds": 0.00997129431925714,
+        "total_receiver_seconds": 0.2886651400476694
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "erasures-cycle-edge",
+      "cn0_db_hz": 20,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 455,
+      "job_id": "set2-acquire-erasures-cycle-edge-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        1210.231584183022,
+        -4.65701163950788
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.020625270903110504,
+        "read_reblock_seconds": 0.05391377583146095,
+        "residual_calibration_seconds": 0.2025644958484918,
+        "score_seconds": 0.00997129431925714,
+        "total_receiver_seconds": 0.2886651400476694
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "erasures-cycle-edge",
+      "cn0_db_hz": 20,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 455,
+      "job_id": "set2-acquire-erasures-cycle-edge-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        835.502710136622,
+        -576.0935819089659
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 8.9311210536398,
+        "read_reblock_seconds": 0.032058843644335866,
+        "residual_calibration_seconds": 1.5145574731286615,
+        "score_seconds": 2.008619617205113,
+        "total_receiver_seconds": 12.510236583882943
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "erasures-cycle-edge",
+      "cn0_db_hz": 20,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 455,
+      "job_id": "set2-acquire-erasures-cycle-edge-b0-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        835.502710136622,
+        -576.0935819089659
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 8.9311210536398,
+        "read_reblock_seconds": 0.032058843644335866,
+        "residual_calibration_seconds": 1.5145574731286615,
+        "score_seconds": 2.008619617205113,
+        "total_receiver_seconds": 12.510236583882943
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 1,
+      "case": "erasures-cycle-edge",
+      "cn0_db_hz": 20,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 455,
+      "job_id": "set2-acquire-erasures-cycle-edge-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        22.32717819644053,
+        2472.7220599517527
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.019424660596996546,
+        "read_reblock_seconds": 0.05017934227362275,
+        "residual_calibration_seconds": 0.19320689095184207,
+        "score_seconds": 0.008849311387166381,
+        "total_receiver_seconds": 0.2730522060301155
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 1,
+      "case": "erasures-cycle-edge",
+      "cn0_db_hz": 20,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 455,
+      "job_id": "set2-acquire-erasures-cycle-edge-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        22.32717819644053,
+        2472.7220599517527
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.019424660596996546,
+        "read_reblock_seconds": 0.05017934227362275,
+        "residual_calibration_seconds": 0.19320689095184207,
+        "score_seconds": 0.008849311387166381,
+        "total_receiver_seconds": 0.2730522060301155
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 1,
+      "case": "erasures-cycle-edge",
+      "cn0_db_hz": 20,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 455,
+      "job_id": "set2-acquire-erasures-cycle-edge-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -543.6677764031019,
+        1759.132689163744
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 8.871759056579322,
+        "read_reblock_seconds": 0.033560238080099225,
+        "residual_calibration_seconds": 1.521877549123019,
+        "score_seconds": 2.015053384937346,
+        "total_receiver_seconds": 12.451149909058586
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 1,
+      "case": "erasures-cycle-edge",
+      "cn0_db_hz": 20,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 455,
+      "job_id": "set2-acquire-erasures-cycle-edge-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -543.6677764031019,
+        1759.132689163744
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 8.871759056579322,
+        "read_reblock_seconds": 0.033560238080099225,
+        "residual_calibration_seconds": 1.521877549123019,
+        "score_seconds": 2.015053384937346,
+        "total_receiver_seconds": 12.451149909058586
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "erasures-none",
+      "cn0_db_hz": 20,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 455,
+      "job_id": "set2-acquire-erasures-none-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -11.486269648188635,
+        -10.733366149592854
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.01936040073633194,
+        "read_reblock_seconds": 0.045679275412112474,
+        "residual_calibration_seconds": 0.1979856814723462,
+        "score_seconds": 0.008841021917760372,
+        "total_receiver_seconds": 0.273455967893824
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "erasures-none",
+      "cn0_db_hz": 20,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 455,
+      "job_id": "set2-acquire-erasures-none-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -11.486269648188635,
+        -10.733366149592854
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.01936040073633194,
+        "read_reblock_seconds": 0.045679275412112474,
+        "residual_calibration_seconds": 0.1979856814723462,
+        "score_seconds": 0.008841021917760372,
+        "total_receiver_seconds": 0.273455967893824
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 0,
+      "case": "erasures-none",
+      "cn0_db_hz": 20,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 455,
+      "job_id": "set2-acquire-erasures-none-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -619.719164640974,
+        -627.4092847770797
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 9.018389041302726,
+        "read_reblock_seconds": 0.028490934520959854,
+        "residual_calibration_seconds": 1.4991959964390844,
+        "score_seconds": 2.047272047493607,
+        "total_receiver_seconds": 12.60642151790671
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 0,
+      "case": "erasures-none",
+      "cn0_db_hz": 20,
+      "control": "null",
+      "counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "groups": 455,
+      "job_id": "set2-acquire-erasures-none-b0-null",
+      "nominal_timing_counts": {
+        "false_admitted": 0,
+        "not_admitted": 1
+      },
+      "scores": [
+        -619.719164640974,
+        -627.4092847770797
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 9.018389041302726,
+        "read_reblock_seconds": 0.028490934520959854,
+        "residual_calibration_seconds": 1.4991959964390844,
+        "score_seconds": 2.047272047493607,
+        "total_receiver_seconds": 12.60642151790671
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 1,
+      "case": "erasures-none",
+      "cn0_db_hz": 20,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 455,
+      "job_id": "set2-acquire-erasures-none-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        23.714958238426647,
+        2540.8514489588506
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 0.019132635090500116,
+        "read_reblock_seconds": 0.04692853847518563,
+        "residual_calibration_seconds": 0.18624306796118617,
+        "score_seconds": 0.00874973158352077,
+        "total_receiver_seconds": 0.26249706000089645
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 1,
+      "case": "erasures-none",
+      "cn0_db_hz": 20,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 455,
+      "job_id": "set2-acquire-erasures-none-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        23.714958238426647,
+        2540.8514489588506
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 0.019132635090500116,
+        "read_reblock_seconds": 0.04692853847518563,
+        "residual_calibration_seconds": 0.18624306796118617,
+        "score_seconds": 0.00874973158352077,
+        "total_receiver_seconds": 0.26249706000089645
+      },
+      "variant": "global"
+    },
+    {
+      "bit": 1,
+      "case": "erasures-none",
+      "cn0_db_hz": 20,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 455,
+      "job_id": "set2-acquire-erasures-none-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -557.4507027171379,
+        1815.0205922160178
+      ],
+      "target": "strict",
+      "timing": {
+        "factor_preparation_seconds": 9.073587412247434,
+        "read_reblock_seconds": 0.033031181432306767,
+        "residual_calibration_seconds": 1.4949414066504687,
+        "score_seconds": 2.078044534428045,
+        "total_receiver_seconds": 12.68985831993632
+      },
+      "variant": "short-window"
+    },
+    {
+      "bit": 1,
+      "case": "erasures-none",
+      "cn0_db_hz": 20,
+      "control": "signal",
+      "counts": {
+        "correct_admitted": 1,
+        "missed": 0,
+        "wrong_admitted": 0
+      },
+      "groups": 455,
+      "job_id": "set2-acquire-erasures-none-b1-signal",
+      "nominal_timing_counts": {
+        "correct_admitted": 0,
+        "missed": 1,
+        "wrong_admitted": 0
+      },
+      "scores": [
+        -557.4507027171379,
+        1815.0205922160178
+      ],
+      "target": "relaxed",
+      "timing": {
+        "factor_preparation_seconds": 9.073587412247434,
+        "read_reblock_seconds": 0.033031181432306767,
+        "residual_calibration_seconds": 1.4949414066504687,
+        "score_seconds": 2.078044534428045,
+        "total_receiver_seconds": 12.68985831993632
+      },
+      "variant": "short-window"
+    }
+  ],
+  "schema": "triad-broad-acquisition-summary-v1",
+  "scorer_source": {
+    "tools/triad_gaussian_window.py": "0e262ea3cc793073602701ec96e441a4fef3f378a56fb624771b651d8a8fd4fa",
+    "tools/triad_group_acquire.py": "dee47cbe71041fb5a4023cac54f1d2391db7198f85606c40dbef8a0e260911d1",
+    "tools/triad_noise_likelihood.py": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110",
+    "tools/triad_state_workspace.py": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923"
+  },
+  "summarizer_source_sha256": "64743fcf149f860348eaab0217acbea267ad16b946018afa0b7571977770cd02"
+}

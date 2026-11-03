@@ -178,28 +178,79 @@ def prepare(workspace, mapping, reference, delta):
         "pooled_complex_dof":dof,"variance_upper_over_reference":upper,"valid_complex_samples":valid_total}
 
 
-def whiten_channel(r, gram, prior_powers=None):
-    """CPU FP64 Cholesky preparation; r is [blocks,candidates,taps]."""
-    r = torch.as_tensor(np.asarray(r),dtype=torch.complex128)
-    G = torch.as_tensor(np.asarray(gram),dtype=torch.complex128)
+def whiten_channel(r, gram, prior_powers=None, *, diagnostics=None):
+    """CPU FP64 observable-space factors; selected FFT arithmetic is unchanged.
+
+    Project onto resolved eigenmodes of the summed observation Gram before
+    marginalizing the Gaussian channel. This uses the residual calibrator's
+    1e-10 relative rank policy; discarded modes are an explicit information
+    reduction, not a claim to resolve every channel direction at high SNR.
+    No prior-precision diagonal is added to a potentially enormous Gram.
+    A fixed, tiny noise inflation covers the checked observable-whitening
+    error for the represented Gram; it is not a physical noise estimate or
+    a rigorous bound on every subsequent floating-point operation.
+    """
+    r = np.asarray(r,dtype=np.complex128)
+    G = np.asarray(gram,dtype=np.complex128)
     if r.ndim != 3 or G.shape != (r.shape[1],r.shape[2],r.shape[2]):
         raise ValueError("channel statistic shapes differ")
-    if not bool(torch.isfinite(r).all()) or not bool(torch.isfinite(G).all()):
+    if not np.isfinite(r).all() or not np.isfinite(G).all():
         raise ValueError("channel statistics must be finite")
     k = r.shape[-1]
-    powers = torch.full((k,),1/k,dtype=torch.float64) if prior_powers is None else torch.as_tensor(prior_powers,dtype=torch.float64)
-    if powers.shape != (k,) or not bool(torch.isfinite(powers).all()) or bool((powers<=0).any()):
+    powers = np.full(k,1/k) if prior_powers is None else np.asarray(prior_powers,dtype=np.float64)
+    if powers.shape != (k,) or not np.isfinite(powers).all() or np.any(powers<=0):
         raise ValueError("channel prior powers must be positive finite")
-    scale = G.abs().amax().clamp_min(torch.finfo(torch.float64).tiny)
-    if bool(((G-G.mH).abs().amax()>1e-10*scale)):
+    scale = np.maximum(np.max(np.abs(G),axis=(-2,-1)),np.finfo(float).tiny)
+    if np.any(np.max(np.abs(G-G.conj().swapaxes(-2,-1)),axis=(-2,-1))>1e-10*scale):
         raise ValueError("channel Gram is not Hermitian")
-    G = (G+G.mH)*.5
-    if bool((torch.linalg.eigvalsh(G)[...,0]<-1e-10*scale).any()):
+    G = (G+G.conj().swapaxes(-2,-1))*.5
+    values,vectors = np.linalg.eigh(G)
+    if np.any(values[:,0]<-1e-10*scale):
         raise ValueError("channel Gram is not PSD")
-    L = torch.linalg.cholesky(G+torch.diag(1/powers))
-    w = torch.linalg.solve_triangular(L,r.permute(1,2,0),upper=False).permute(2,0,1).contiguous()
-    determinant = 2*L.diagonal(dim1=-2,dim2=-1).real.log().sum(-1)+powers.log().sum()
-    return w.numpy(),determinant.numpy()
+    rank_rtol=1e-10
+    thresholds = np.maximum(values[:,-1],0.)*rank_rtol
+    whitening_error_limit=8*np.finfo(float).eps/rank_rtol
+    noise_inflation=float(np.nextafter(1+k*whitening_error_limit,np.inf))
+    keep = values>thresholds[:,None]
+    w = np.zeros_like(r)
+    determinant = np.zeros(r.shape[1],dtype=np.float64)
+    errors=[];conditions=[];spectra=[]
+    for c in range(r.shape[1]):
+        d=values[c,keep[c]];V=vectors[c][:,keep[c]]
+        spectra.append(values[c,~keep[c]].tolist())
+        if not len(d):
+            errors.append(0.);conditions.append(1.);continue
+        # x = diag(1/sqrt(d)) V.H r has unit noise covariance. The prior
+        # mean in these coordinates is W h, W=diag(sqrt(d)) V.H.
+        root=np.sqrt(d)
+        P=V.conj().T/root[:,None]
+        W=root[:,None]*V.conj().T
+        covariance=P@G[c]@P.conj().T
+        error=float(np.max(np.abs(covariance-np.eye(len(d)))))
+        if not math.isfinite(error) or error>whitening_error_limit:
+            raise ValueError("observable channel whitening covariance is unresolved")
+        # An entrywise error <=limit in <=k dimensions gives a spectral
+        # upper bound 1+k*limit. Inflate data AND channel design consistently
+        # so the checked represented-noise covariance is bounded by I.
+        P=P/np.sqrt(noise_inflation)
+        W=W/np.sqrt(noise_inflation)
+        U,singular,_=np.linalg.svd(W*np.sqrt(powers)[None,:],full_matrices=False)
+        information=singular*singular
+        weights=information/(1.+information)
+        transform=(P.conj().T@U)*np.sqrt(weights)[None,:]
+        w[:,c,:len(d)]=r[:,c,:]@transform.conj()
+        determinant[c]=np.log1p(information).sum(dtype=np.float64)
+        errors.append(error);conditions.append(float(d[-1]/d[0]))
+    if not np.isfinite(w).all() or not np.isfinite(determinant).all():
+        raise ValueError("observable channel whitening became nonfinite")
+    if diagnostics is not None:
+        diagnostics.update(method="observable Gram projection and small SVD",
+            rank_relative_tolerance=rank_rtol,retained_ranks=keep.sum(axis=1).tolist(),
+            whitening_error_limit=whitening_error_limit,numerical_noise_inflation=noise_inflation,
+            discarded_gram_eigenvalues=spectra,retained_gram_conditions=conditions,
+            maximum_covariance_consistency_error=max(errors,default=0.),
+            rank_scope="Fixed public-design projection; discarded modes lose information. No full-rank claim for unresolved directions.")
+    return w,determinant
 
 
 def frequency_correlations(r, centers, dt, nfft, bins, *, implementation="fft",device="cpu",precision="fp64"):
@@ -313,7 +364,8 @@ def run(args):
             for method in args.methods:
                 t0=time.perf_counter()
                 r,g=(projected/upper,G[1]/upper) if method.endswith("-ucb") else (raw,G[0])
-                w,determinant=whiten_channel(r,g)
+                whitening_diagnostics={}
+                w,determinant=whiten_channel(r,g,diagnostics=whitening_diagnostics)
                 whitening=time.perf_counter()-t0
                 if args.device.startswith("cuda"):torch.cuda.synchronize(args.device)
                 t0=time.perf_counter()
@@ -322,7 +374,7 @@ def run(args):
                 if args.device.startswith("cuda"):torch.cuda.synchronize(args.device)
                 inference=time.perf_counter()-t0
                 arrays[f"path{path_index:05d}_{control}_{method}"]=scores
-                row["methods"][method]={"counts":classify(scores,truth,args.budget.log_threshold,control),"threshold":args.budget.log_threshold,"bit_log_scores":scores[0].tolist(),"cpu_fp64_whitening_seconds":whitening,"transfer_fft_and_scoring_seconds":inference}
+                row["methods"][method]={"counts":classify(scores,truth,args.budget.log_threshold,control),"threshold":args.budget.log_threshold,"bit_log_scores":scores[0].tolist(),"cpu_fp64_whitening_seconds":whitening,"whitening":whitening_diagnostics,"transfer_fft_and_scoring_seconds":inference}
             row.update(status="completed",truth_bit_simulation_only=truth if control=="signal" else None,
                 reference_variance=reference,calibration=calibration,cpu_fp64_preparation_seconds=preparation,
                 memory_bound_bytes=bound,sampled_seconds=ws.sample_count/ws.sample_rate,block_count=ws.block_count,
@@ -342,7 +394,7 @@ def run(args):
         "summary_by_control":{control:{method:summary(captures,method,control) for method in args.methods} for control in CONTROLS if any(c["control"]==control for c in captures)},
         "failed_physical_capture_records":sum(c["status"]!="completed" for c in captures),"scores_file":scores_path.name,"scores_sha256":sha256(scores_path),"wall_seconds_joint":time.perf_counter()-started,
         "host":{"python":platform.python_version(),"numpy":np.__version__,"torch":torch.__version__,"device":args.device,"threads":torch.get_num_threads()},
-        "arithmetic":{"rank_residual_energy_gram_cholesky_whitening":"CPU FP64; whitening includes all retained block correlations","fft_gemm_bulk":args.precision,"phase_arguments":"FP64 then cast to bulk width","quadratic_and_evidence_reductions":"FP64","tf32_allowed":False},
+        "arithmetic":{"rank_residual_energy_gram_observable_whitening":"CPU FP64; small Gram eigenprojection/SVD and all retained block correlations","fft_gemm_bulk":args.precision,"phase_arguments":"FP64 then cast to bulk width","quadratic_and_evidence_reductions":"FP64","tf32_allowed":False},
         "limitations":["static Gaussian tap coefficients and constant CFO, approximated as one common phase per exported block","actual observations only; one constant unknown white proper-complex noise variance for pooled UCB","frequency, timing, epoch and bit alternatives are normalized finite mixtures; no continuous-grid or arbitrary channel guarantee","wrong-key signal admissions are empirical controls, not Gaussian noise-only null qualification; the Gaussian null bound does not cover wrong-key signals","K9 score family is separate from earlier K7 results unless their score gates are corrected; the shared calibration allocation does not depend on K","CPU preparation streams full-bank statistics; retained selected correlations and FFT workspace grow with observation length within the declared memory cap"]}
     if args.device.startswith("cuda"):result["cuda_memory"]={"maximum_allocated_bytes":torch.cuda.max_memory_allocated(args.device),"maximum_reserved_bytes":torch.cuda.max_memory_reserved(args.device)}
     args.output.write_text(json.dumps(result,indent=2,allow_nan=False)+"\n")
