@@ -269,6 +269,28 @@ class GaussianWindowTests(unittest.TestCase):
         np.testing.assert_array_equal(zero.score(np.zeros_like(correlations), variance_scale=1e-20), 0.)
         self.assertEqual(zero.observable_rank_max, 0)
 
+    def test_single_block_batched_svd_matches_raw_covariance_with_rank_and_power_edges(self):
+        rng=np.random.default_rng(81173)
+        A=.32*cn(rng,(1,31,5,2));A[0,::5,:,1]=(.4+.7j)*A[0,::5,:,0];A[0,0]=0.
+        y=cn(rng,(1,4,5))
+        G=np.einsum("bcni,bcnj->bcij",A.conj(),A)
+        r=np.einsum("bcnk,btn->btck",A.conj(),y)
+        centers=np.asarray([32.])
+        scales=np.asarray([.01,1.,100.,1e4])[:,None]
+        for powers in ((.7,.3),(1.,0.),(0.,0.)):
+            with self.subTest(powers=powers):
+                with patch("triad_gaussian_window.np.linalg.svd",wraps=np.linalg.svd) as svd:
+                    plan=prepare_windowed_gaussian(G,centers,doppler_width_hz=.2,window_blocks=1,stationary_power=powers)
+                self.assertEqual(svd.call_count,int(any(powers)))
+                if any(powers):self.assertEqual(svd.call_args.args[0].shape,(31,2,sum(p>0 for p in powers)))
+                expected=dense_raw_oracle(A,y,centers,.2,1,powers,scales*plan.whitening_variance_inflation)
+                np.testing.assert_allclose(plan.score(r,variance_scale=scales).numpy(),expected,rtol=2e-11,atol=2e-11)
+                self.assertGreater(plan.single_block_batched_svd_work_bytes,0)
+                self.assertEqual(plan.diagnostics()['single_block_batched_svd_work_bytes'],plan.single_block_batched_svd_work_bytes)
+                with self.assertRaises(MemoryError):
+                    prepare_windowed_gaussian(G,centers,doppler_width_hz=.2,window_blocks=1,stationary_power=powers,
+                        memory_limit_bytes=plan.preparation_array_bound_bytes-1)
+
     def test_input_failures_and_memory_preflight(self):
         _, _, G, r, time = fixture()
         for kwargs in ({"window_blocks": 0}, {"doppler_width_hz": -.1},

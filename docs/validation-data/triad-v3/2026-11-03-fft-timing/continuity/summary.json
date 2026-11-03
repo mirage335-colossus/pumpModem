@@ -1,0 +1,3518 @@
+{
+  "archived_probe_sha256": "854d7bdccd11fa2e0a8b4b4a60a998c78da1cecbb00baf980466f2fbda1fc910",
+  "calibration": {
+    "attempts_per_day": 1440,
+    "calibration_segments": 2,
+    "duration_alternatives": 8,
+    "historical_selection_scope": "The three historical baselines use different reblocking/frequency calibration families. This review does not assert a joint best-of-nine daily bound from selection_methods16/calibration_segments2.",
+    "method_scope": "Six separate score alternatives,not a six-model likelihood mixture. Every model mixes its complete timing\u00d7CFO bank. All six new models share the same reblock4 residual calibration for each capture.",
+    "null_scope": "Stationary proper-complex white Gaussian H0 and a genuinely predeclared finite family; no adaptive stopping,unbounded continued tuning,wrong-key or correct-bit guarantee.",
+    "relaxed_gate": 17.422746023037703,
+    "score_method_slots": 16,
+    "strict_gate": 22.72106338958574
+  },
+  "case_baselines": [
+    {
+      "case": "loss-random25-validation-11-b1-signal",
+      "cn0_db_hz": 6,
+      "control": "signal",
+      "original_results": {
+        "global": {
+          "bit_log_likelihoods": [
+            -4.011270785145717,
+            9.722932231298632
+          ],
+          "calibration_alpha": null,
+          "decisions": {
+            "control": "signal",
+            "raw_wrong_rejected": {
+              "relaxed": false,
+              "strict": false
+            },
+            "relaxed": {
+              "accepted": false,
+              "bit": 1,
+              "correct_admitted": 0,
+              "log_threshold": 17.422746023037703,
+              "missed": 1,
+              "opposite_bit_margin": 13.734203016444349,
+              "score": 9.722932231298632,
+              "wrong_admitted": 0
+            },
+            "strict": {
+              "accepted": false,
+              "bit": 1,
+              "correct_admitted": 0,
+              "log_threshold": 22.72106338958574,
+              "missed": 1,
+              "opposite_bit_margin": 13.734203016444349,
+              "score": 9.722932231298632,
+              "wrong_admitted": 0
+            },
+            "truth_bit": 1
+          },
+          "frequency_offsets_hz": [
+            0.0
+          ],
+          "nominal_window_seconds": 46.28125,
+          "path": "local-evidence/triad-extension/remote/additional-physical-reports/validation-schedule-6-rescored/scores/rescore-global-loss-random25-validation-11-b1-signal.json",
+          "phase_power_loss_bound_db": 0.01,
+          "reblock": 1481,
+          "receiver_seconds": 0.2870971830561757,
+          "receiver_source_sha256": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+          "relaxed": {
+            "accepted": false,
+            "bit": 1,
+            "log_threshold": 17.422746023037703,
+            "opposite_bit_margin": 13.734203016444349,
+            "score": 9.722932231298632
+          },
+          "report_sha256": "893ddccc6cac1d53697f6cc66d8d2405b6b99461ce3382d23ada792c9c86e6d7",
+          "strict": {
+            "accepted": false,
+            "bit": 1,
+            "log_threshold": 22.72106338958574,
+            "opposite_bit_margin": 13.734203016444349,
+            "score": 9.722932231298632
+          },
+          "window_blocks": 1
+        },
+        "global-frequency": {
+          "bit_log_likelihoods": [
+            -3.7676542389329857,
+            9.067170891713092
+          ],
+          "calibration_alpha": null,
+          "decisions": {
+            "control": "signal",
+            "raw_wrong_rejected": {
+              "relaxed": false,
+              "strict": false
+            },
+            "relaxed": {
+              "accepted": false,
+              "bit": 1,
+              "correct_admitted": 0,
+              "log_threshold": 17.422746023037703,
+              "missed": 1,
+              "opposite_bit_margin": 12.834825130646077,
+              "score": 9.067170891713092,
+              "wrong_admitted": 0
+            },
+            "strict": {
+              "accepted": false,
+              "bit": 1,
+              "correct_admitted": 0,
+              "log_threshold": 22.72106338958574,
+              "missed": 1,
+              "opposite_bit_margin": 12.834825130646077,
+              "score": 9.067170891713092,
+              "wrong_admitted": 0
+            },
+            "truth_bit": 1
+          },
+          "frequency_offsets_hz": [
+            -0.0030001725001500084,
+            0.0,
+            0.0030001725001500084
+          ],
+          "nominal_window_seconds": 46.28125,
+          "path": "local-evidence/triad-extension/remote/additional-physical-reports/validation-schedule-6-rescored/scores/rescore-global-frequency-loss-random25-validation-11-b1-signal.json",
+          "phase_power_loss_bound_db": 0.01,
+          "reblock": 1481,
+          "receiver_seconds": 0.49684285814873874,
+          "receiver_source_sha256": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+          "relaxed": {
+            "accepted": false,
+            "bit": 1,
+            "log_threshold": 17.422746023037703,
+            "opposite_bit_margin": 12.834825130646077,
+            "score": 9.067170891713092
+          },
+          "report_sha256": "99b8ff57fe368174e47fca2716f7879e3dea792b268502ee030cf7340cbed3a3",
+          "strict": {
+            "accepted": false,
+            "bit": 1,
+            "log_threshold": 22.72106338958574,
+            "opposite_bit_margin": 12.834825130646077,
+            "score": 9.067170891713092
+          },
+          "window_blocks": 1
+        },
+        "window": {
+          "bit_log_likelihoods": [
+            -1.6575938727693034,
+            -2.3613622839207853
+          ],
+          "calibration_alpha": null,
+          "decisions": {
+            "control": "signal",
+            "raw_wrong_rejected": {
+              "relaxed": true,
+              "strict": true
+            },
+            "relaxed": {
+              "accepted": false,
+              "bit": 0,
+              "correct_admitted": 0,
+              "log_threshold": 17.422746023037703,
+              "missed": 1,
+              "opposite_bit_margin": 0.7037684111514819,
+              "score": -1.6575938727693034,
+              "wrong_admitted": 0
+            },
+            "strict": {
+              "accepted": false,
+              "bit": 0,
+              "correct_admitted": 0,
+              "log_threshold": 22.72106338958574,
+              "missed": 1,
+              "opposite_bit_margin": 0.7037684111514819,
+              "score": -1.6575938727693034,
+              "wrong_admitted": 0
+            },
+            "truth_bit": 1
+          },
+          "frequency_offsets_hz": [
+            0.0
+          ],
+          "nominal_window_seconds": 0.0625,
+          "path": "local-evidence/triad-extension/remote/additional-physical-reports/validation-schedule-6-rescored/scores/rescore-window-loss-random25-validation-11-b1-signal.json",
+          "phase_power_loss_bound_db": 0.01,
+          "reblock": 1,
+          "receiver_seconds": 12.984018823131919,
+          "receiver_source_sha256": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+          "relaxed": {
+            "accepted": false,
+            "bit": 0,
+            "log_threshold": 17.422746023037703,
+            "opposite_bit_margin": 0.7037684111514819,
+            "score": -1.6575938727693034
+          },
+          "report_sha256": "5aea7c234d6d4bc54f8a0798f415a0be9217e30524238fdfe24f8bccdff02c91",
+          "strict": {
+            "accepted": false,
+            "bit": 0,
+            "log_threshold": 22.72106338958574,
+            "opposite_bit_margin": 0.7037684111514819,
+            "score": -1.6575938727693034
+          },
+          "window_blocks": 2
+        }
+      }
+    },
+    {
+      "case": "none-am65-validation-07-b1-signal",
+      "cn0_db_hz": 12,
+      "control": "signal",
+      "original_results": {
+        "global": {
+          "bit_log_likelihoods": [
+            1.9988265858603091,
+            130.38881877747136
+          ],
+          "calibration_alpha": null,
+          "decisions": {
+            "control": "signal",
+            "raw_wrong_rejected": {
+              "relaxed": false,
+              "strict": false
+            },
+            "relaxed": {
+              "accepted": true,
+              "bit": 1,
+              "correct_admitted": 1,
+              "log_threshold": 17.422746023037703,
+              "missed": 0,
+              "opposite_bit_margin": 128.38999219161104,
+              "score": 130.38881877747136,
+              "wrong_admitted": 0
+            },
+            "strict": {
+              "accepted": true,
+              "bit": 1,
+              "correct_admitted": 1,
+              "log_threshold": 22.72106338958574,
+              "missed": 0,
+              "opposite_bit_margin": 128.38999219161104,
+              "score": 130.38881877747136,
+              "wrong_admitted": 0
+            },
+            "truth_bit": 1
+          },
+          "frequency_offsets_hz": [
+            0.0
+          ],
+          "nominal_window_seconds": 19.40625,
+          "path": "local-evidence/triad-extension/remote/physical-reports/validation-light-12-rescored/scores/rescore-global-none-am65-validation-07-b1-signal.json",
+          "phase_power_loss_bound_db": 0.01,
+          "reblock": 621,
+          "receiver_seconds": 0.178313251119107,
+          "receiver_source_sha256": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+          "relaxed": {
+            "accepted": true,
+            "bit": 1,
+            "log_threshold": 17.422746023037703,
+            "opposite_bit_margin": 128.38999219161104,
+            "score": 130.38881877747136
+          },
+          "report_sha256": "db5ab89d59fb338fe48a879f5eb97890adad023391b9d01ad13f24b598021ad2",
+          "strict": {
+            "accepted": true,
+            "bit": 1,
+            "log_threshold": 22.72106338958574,
+            "opposite_bit_margin": 128.38999219161104,
+            "score": 130.38881877747136
+          },
+          "window_blocks": 1
+        },
+        "global-frequency": {
+          "bit_log_likelihoods": [
+            1.9375401979309852,
+            130.23846471063317
+          ],
+          "calibration_alpha": null,
+          "decisions": {
+            "control": "signal",
+            "raw_wrong_rejected": {
+              "relaxed": false,
+              "strict": false
+            },
+            "relaxed": {
+              "accepted": true,
+              "bit": 1,
+              "correct_admitted": 1,
+              "log_threshold": 17.422746023037703,
+              "missed": 0,
+              "opposite_bit_margin": 128.30092451270218,
+              "score": 130.23846471063317,
+              "wrong_admitted": 0
+            },
+            "strict": {
+              "accepted": true,
+              "bit": 1,
+              "correct_admitted": 1,
+              "log_threshold": 22.72106338958574,
+              "missed": 0,
+              "opposite_bit_margin": 128.30092451270218,
+              "score": 130.23846471063317,
+              "wrong_admitted": 0
+            },
+            "truth_bit": 1
+          },
+          "frequency_offsets_hz": [
+            -0.0030001725001500084,
+            0.0,
+            0.0030001725001500084
+          ],
+          "nominal_window_seconds": 19.40625,
+          "path": "local-evidence/triad-extension/remote/physical-reports/validation-light-12-rescored/scores/rescore-global-frequency-none-am65-validation-07-b1-signal.json",
+          "phase_power_loss_bound_db": 0.01,
+          "reblock": 621,
+          "receiver_seconds": 0.18201886885799468,
+          "receiver_source_sha256": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+          "relaxed": {
+            "accepted": true,
+            "bit": 1,
+            "log_threshold": 17.422746023037703,
+            "opposite_bit_margin": 128.30092451270218,
+            "score": 130.23846471063317
+          },
+          "report_sha256": "b52834c7d3961c1e3ae00bd7007d619a3fb832917ce6906224e4ca3299868a65",
+          "strict": {
+            "accepted": true,
+            "bit": 1,
+            "log_threshold": 22.72106338958574,
+            "opposite_bit_margin": 128.30092451270218,
+            "score": 130.23846471063317
+          },
+          "window_blocks": 1
+        },
+        "window": {
+          "bit_log_likelihoods": [
+            50.213344020113546,
+            44.30325247523785
+          ],
+          "calibration_alpha": null,
+          "decisions": {
+            "control": "signal",
+            "raw_wrong_rejected": {
+              "relaxed": false,
+              "strict": false
+            },
+            "relaxed": {
+              "accepted": true,
+              "bit": 0,
+              "correct_admitted": 0,
+              "log_threshold": 17.422746023037703,
+              "missed": 0,
+              "opposite_bit_margin": 5.910091544875698,
+              "score": 50.213344020113546,
+              "wrong_admitted": 1
+            },
+            "strict": {
+              "accepted": true,
+              "bit": 0,
+              "correct_admitted": 0,
+              "log_threshold": 22.72106338958574,
+              "missed": 0,
+              "opposite_bit_margin": 5.910091544875698,
+              "score": 50.213344020113546,
+              "wrong_admitted": 1
+            },
+            "truth_bit": 1
+          },
+          "frequency_offsets_hz": [
+            0.0
+          ],
+          "nominal_window_seconds": 0.0625,
+          "path": "local-evidence/triad-extension/remote/physical-reports/validation-light-12-rescored/scores/rescore-window-none-am65-validation-07-b1-signal.json",
+          "phase_power_loss_bound_db": 0.01,
+          "reblock": 1,
+          "receiver_seconds": 0.2749743671156466,
+          "receiver_source_sha256": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+          "relaxed": {
+            "accepted": true,
+            "bit": 0,
+            "log_threshold": 17.422746023037703,
+            "opposite_bit_margin": 5.910091544875698,
+            "score": 50.213344020113546
+          },
+          "report_sha256": "3edaa3357c186d5e7858a2b3ced64019ff64436ee4956421264bc176f0bda767",
+          "strict": {
+            "accepted": true,
+            "bit": 0,
+            "log_threshold": 22.72106338958574,
+            "opposite_bit_margin": 5.910091544875698,
+            "score": 50.213344020113546
+          },
+          "window_blocks": 2
+        }
+      }
+    },
+    {
+      "case": "none-am65-validation-40-b0-null",
+      "cn0_db_hz": 12,
+      "control": "null",
+      "original_results": {
+        "global": {
+          "bit_log_likelihoods": [
+            -3.2287823404400617,
+            -4.263356447436125
+          ],
+          "calibration_alpha": null,
+          "decisions": {
+            "control": "null",
+            "raw_wrong_rejected": {
+              "relaxed": false,
+              "strict": false
+            },
+            "relaxed": {
+              "accepted": false,
+              "bit": 0,
+              "false_admitted": 0,
+              "log_threshold": 17.422746023037703,
+              "not_admitted": 1,
+              "opposite_bit_margin": 1.0345741069960637,
+              "score": -3.2287823404400617
+            },
+            "strict": {
+              "accepted": false,
+              "bit": 0,
+              "false_admitted": 0,
+              "log_threshold": 22.72106338958574,
+              "not_admitted": 1,
+              "opposite_bit_margin": 1.0345741069960637,
+              "score": -3.2287823404400617
+            },
+            "truth_bit": 0
+          },
+          "frequency_offsets_hz": [
+            0.0
+          ],
+          "nominal_window_seconds": 19.40625,
+          "path": "local-evidence/triad-extension/remote/physical-reports/validation-light-12-rescored/scores/rescore-global-none-am65-validation-40-b0-null.json",
+          "phase_power_loss_bound_db": 0.01,
+          "reblock": 621,
+          "receiver_seconds": 0.18151354603469372,
+          "receiver_source_sha256": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+          "relaxed": {
+            "accepted": false,
+            "bit": 0,
+            "log_threshold": 17.422746023037703,
+            "opposite_bit_margin": 1.0345741069960637,
+            "score": -3.2287823404400617
+          },
+          "report_sha256": "a52dd39ebb81c7a2673dd44d3a2950e8cabd3ff7b2359df313ce255cfe05e7ed",
+          "strict": {
+            "accepted": false,
+            "bit": 0,
+            "log_threshold": 22.72106338958574,
+            "opposite_bit_margin": 1.0345741069960637,
+            "score": -3.2287823404400617
+          },
+          "window_blocks": 1
+        },
+        "global-frequency": {
+          "bit_log_likelihoods": [
+            -3.2141151142162663,
+            -4.26450620003467
+          ],
+          "calibration_alpha": null,
+          "decisions": {
+            "control": "null",
+            "raw_wrong_rejected": {
+              "relaxed": false,
+              "strict": false
+            },
+            "relaxed": {
+              "accepted": false,
+              "bit": 0,
+              "false_admitted": 0,
+              "log_threshold": 17.422746023037703,
+              "not_admitted": 1,
+              "opposite_bit_margin": 1.0503910858184033,
+              "score": -3.2141151142162663
+            },
+            "strict": {
+              "accepted": false,
+              "bit": 0,
+              "false_admitted": 0,
+              "log_threshold": 22.72106338958574,
+              "not_admitted": 1,
+              "opposite_bit_margin": 1.0503910858184033,
+              "score": -3.2141151142162663
+            },
+            "truth_bit": 0
+          },
+          "frequency_offsets_hz": [
+            -0.0030001725001500084,
+            0.0,
+            0.0030001725001500084
+          ],
+          "nominal_window_seconds": 19.40625,
+          "path": "local-evidence/triad-extension/remote/physical-reports/validation-light-12-rescored/scores/rescore-global-frequency-none-am65-validation-40-b0-null.json",
+          "phase_power_loss_bound_db": 0.01,
+          "reblock": 621,
+          "receiver_seconds": 0.21718661091290414,
+          "receiver_source_sha256": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+          "relaxed": {
+            "accepted": false,
+            "bit": 0,
+            "log_threshold": 17.422746023037703,
+            "opposite_bit_margin": 1.0503910858184033,
+            "score": -3.2141151142162663
+          },
+          "report_sha256": "c3de298d2575c8dfd8f11980d75d212edd64534333ddff06630863649f98e1ca",
+          "strict": {
+            "accepted": false,
+            "bit": 0,
+            "log_threshold": 22.72106338958574,
+            "opposite_bit_margin": 1.0503910858184033,
+            "score": -3.2141151142162663
+          },
+          "window_blocks": 1
+        },
+        "window": {
+          "bit_log_likelihoods": [
+            -40.94036649393291,
+            -31.180546979002173
+          ],
+          "calibration_alpha": null,
+          "decisions": {
+            "control": "null",
+            "raw_wrong_rejected": {
+              "relaxed": false,
+              "strict": false
+            },
+            "relaxed": {
+              "accepted": false,
+              "bit": 1,
+              "false_admitted": 0,
+              "log_threshold": 17.422746023037703,
+              "not_admitted": 1,
+              "opposite_bit_margin": 9.75981951493074,
+              "score": -31.180546979002173
+            },
+            "strict": {
+              "accepted": false,
+              "bit": 1,
+              "false_admitted": 0,
+              "log_threshold": 22.72106338958574,
+              "not_admitted": 1,
+              "opposite_bit_margin": 9.75981951493074,
+              "score": -31.180546979002173
+            },
+            "truth_bit": 0
+          },
+          "frequency_offsets_hz": [
+            0.0
+          ],
+          "nominal_window_seconds": 0.0625,
+          "path": "local-evidence/triad-extension/remote/physical-reports/validation-light-12-rescored/scores/rescore-window-none-am65-validation-40-b0-null.json",
+          "phase_power_loss_bound_db": 0.01,
+          "reblock": 1,
+          "receiver_seconds": 0.2929955869913101,
+          "receiver_source_sha256": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+          "relaxed": {
+            "accepted": false,
+            "bit": 1,
+            "log_threshold": 17.422746023037703,
+            "opposite_bit_margin": 9.75981951493074,
+            "score": -31.180546979002173
+          },
+          "report_sha256": "fc56a2973936a9fc47d38dc6eb3a69f9c81046bbf996c93e6d56572af7432cf3",
+          "strict": {
+            "accepted": false,
+            "bit": 1,
+            "log_threshold": 22.72106338958574,
+            "opposite_bit_margin": 9.75981951493074,
+            "score": -31.180546979002173
+          },
+          "window_blocks": 2
+        }
+      }
+    },
+    {
+      "case": "none-am65-validation-41-b1-wrong-key",
+      "cn0_db_hz": 12,
+      "control": "wrong-key",
+      "original_results": {
+        "global": {
+          "bit_log_likelihoods": [
+            -4.58582059015345,
+            -2.4915636112187505
+          ],
+          "calibration_alpha": null,
+          "decisions": {
+            "control": "wrong-key",
+            "raw_wrong_rejected": {
+              "relaxed": false,
+              "strict": false
+            },
+            "relaxed": {
+              "accepted": false,
+              "bit": 1,
+              "false_admitted": 0,
+              "log_threshold": 17.422746023037703,
+              "not_admitted": 1,
+              "opposite_bit_margin": 2.094256978934699,
+              "score": -2.4915636112187505
+            },
+            "strict": {
+              "accepted": false,
+              "bit": 1,
+              "false_admitted": 0,
+              "log_threshold": 22.72106338958574,
+              "not_admitted": 1,
+              "opposite_bit_margin": 2.094256978934699,
+              "score": -2.4915636112187505
+            },
+            "truth_bit": 1
+          },
+          "frequency_offsets_hz": [
+            0.0
+          ],
+          "nominal_window_seconds": 19.40625,
+          "path": "local-evidence/triad-extension/remote/physical-reports/validation-light-12-rescored/scores/rescore-global-none-am65-validation-41-b1-wrong-key.json",
+          "phase_power_loss_bound_db": 0.01,
+          "reblock": 621,
+          "receiver_seconds": 0.2116490970365703,
+          "receiver_source_sha256": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+          "relaxed": {
+            "accepted": false,
+            "bit": 1,
+            "log_threshold": 17.422746023037703,
+            "opposite_bit_margin": 2.094256978934699,
+            "score": -2.4915636112187505
+          },
+          "report_sha256": "41bf448427a4596c1113263ef291d11109e56b04b0ae32a8046c89caecd33830",
+          "strict": {
+            "accepted": false,
+            "bit": 1,
+            "log_threshold": 22.72106338958574,
+            "opposite_bit_margin": 2.094256978934699,
+            "score": -2.4915636112187505
+          },
+          "window_blocks": 1
+        },
+        "global-frequency": {
+          "bit_log_likelihoods": [
+            -4.58372796937479,
+            -2.5015656493791516
+          ],
+          "calibration_alpha": null,
+          "decisions": {
+            "control": "wrong-key",
+            "raw_wrong_rejected": {
+              "relaxed": false,
+              "strict": false
+            },
+            "relaxed": {
+              "accepted": false,
+              "bit": 1,
+              "false_admitted": 0,
+              "log_threshold": 17.422746023037703,
+              "not_admitted": 1,
+              "opposite_bit_margin": 2.0821623199956383,
+              "score": -2.5015656493791516
+            },
+            "strict": {
+              "accepted": false,
+              "bit": 1,
+              "false_admitted": 0,
+              "log_threshold": 22.72106338958574,
+              "not_admitted": 1,
+              "opposite_bit_margin": 2.0821623199956383,
+              "score": -2.5015656493791516
+            },
+            "truth_bit": 1
+          },
+          "frequency_offsets_hz": [
+            -0.0030001725001500084,
+            0.0,
+            0.0030001725001500084
+          ],
+          "nominal_window_seconds": 19.40625,
+          "path": "local-evidence/triad-extension/remote/physical-reports/validation-light-12-rescored/scores/rescore-global-frequency-none-am65-validation-41-b1-wrong-key.json",
+          "phase_power_loss_bound_db": 0.01,
+          "reblock": 621,
+          "receiver_seconds": 0.1734398880507797,
+          "receiver_source_sha256": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+          "relaxed": {
+            "accepted": false,
+            "bit": 1,
+            "log_threshold": 17.422746023037703,
+            "opposite_bit_margin": 2.0821623199956383,
+            "score": -2.5015656493791516
+          },
+          "report_sha256": "d312903cb6f4cfb311e9de9f6809acc3c7f86c932f50492473e2a9f42eda6643",
+          "strict": {
+            "accepted": false,
+            "bit": 1,
+            "log_threshold": 22.72106338958574,
+            "opposite_bit_margin": 2.0821623199956383,
+            "score": -2.5015656493791516
+          },
+          "window_blocks": 1
+        },
+        "window": {
+          "bit_log_likelihoods": [
+            23.020733405537158,
+            28.06820708590712
+          ],
+          "calibration_alpha": null,
+          "decisions": {
+            "control": "wrong-key",
+            "raw_wrong_rejected": {
+              "relaxed": false,
+              "strict": false
+            },
+            "relaxed": {
+              "accepted": true,
+              "bit": 1,
+              "false_admitted": 1,
+              "log_threshold": 17.422746023037703,
+              "not_admitted": 0,
+              "opposite_bit_margin": 5.047473680369961,
+              "score": 28.06820708590712
+            },
+            "strict": {
+              "accepted": true,
+              "bit": 1,
+              "false_admitted": 1,
+              "log_threshold": 22.72106338958574,
+              "not_admitted": 0,
+              "opposite_bit_margin": 5.047473680369961,
+              "score": 28.06820708590712
+            },
+            "truth_bit": 1
+          },
+          "frequency_offsets_hz": [
+            0.0
+          ],
+          "nominal_window_seconds": 0.0625,
+          "path": "local-evidence/triad-extension/remote/physical-reports/validation-light-12-rescored/scores/rescore-window-none-am65-validation-41-b1-wrong-key.json",
+          "phase_power_loss_bound_db": 0.01,
+          "reblock": 1,
+          "receiver_seconds": 0.31490228208713233,
+          "receiver_source_sha256": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+          "relaxed": {
+            "accepted": true,
+            "bit": 1,
+            "log_threshold": 17.422746023037703,
+            "opposite_bit_margin": 5.047473680369961,
+            "score": 28.06820708590712
+          },
+          "report_sha256": "e74b221db839aa9a7a864de6a7b2859bd58f6c0621b5baa166a1172aad184cd5",
+          "strict": {
+            "accepted": true,
+            "bit": 1,
+            "log_threshold": 22.72106338958574,
+            "opposite_bit_margin": 5.047473680369961,
+            "score": 28.06820708590712
+          },
+          "window_blocks": 2
+        }
+      }
+    },
+    {
+      "case": "shared-microwave-am65-validation-41-b1-wrong-key",
+      "cn0_db_hz": 12,
+      "control": "wrong-key",
+      "original_results": {
+        "global": {
+          "bit_log_likelihoods": [
+            -3.717430155243724,
+            -0.5463686393918745
+          ],
+          "calibration_alpha": null,
+          "decisions": {
+            "control": "wrong-key",
+            "raw_wrong_rejected": {
+              "relaxed": false,
+              "strict": false
+            },
+            "relaxed": {
+              "accepted": false,
+              "bit": 1,
+              "false_admitted": 0,
+              "log_threshold": 17.422746023037703,
+              "not_admitted": 1,
+              "opposite_bit_margin": 3.171061515851849,
+              "score": -0.5463686393918745
+            },
+            "strict": {
+              "accepted": false,
+              "bit": 1,
+              "false_admitted": 0,
+              "log_threshold": 22.72106338958574,
+              "not_admitted": 1,
+              "opposite_bit_margin": 3.171061515851849,
+              "score": -0.5463686393918745
+            },
+            "truth_bit": 1
+          },
+          "frequency_offsets_hz": [
+            0.0
+          ],
+          "nominal_window_seconds": 19.40625,
+          "path": "local-evidence/triad-extension/remote/physical-reports/validation-light-12-rescored/scores/rescore-global-shared-microwave-am65-validation-41-b1-wrong-key.json",
+          "phase_power_loss_bound_db": 0.02,
+          "reblock": 621,
+          "receiver_seconds": 0.2021525998134166,
+          "receiver_source_sha256": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+          "relaxed": {
+            "accepted": false,
+            "bit": 1,
+            "log_threshold": 17.422746023037703,
+            "opposite_bit_margin": 3.171061515851849,
+            "score": -0.5463686393918745
+          },
+          "report_sha256": "023614eb341c8bd5ee5e8164a3544ea754b366610d6936553062d1fe99dead43",
+          "strict": {
+            "accepted": false,
+            "bit": 1,
+            "log_threshold": 22.72106338958574,
+            "opposite_bit_margin": 3.171061515851849,
+            "score": -0.5463686393918745
+          },
+          "window_blocks": 1
+        },
+        "global-frequency": {
+          "bit_log_likelihoods": [
+            -0.4178127360414017,
+            1.8050766132703178
+          ],
+          "calibration_alpha": null,
+          "decisions": {
+            "control": "wrong-key",
+            "raw_wrong_rejected": {
+              "relaxed": false,
+              "strict": false
+            },
+            "relaxed": {
+              "accepted": false,
+              "bit": 1,
+              "false_admitted": 0,
+              "log_threshold": 17.422746023037703,
+              "not_admitted": 1,
+              "opposite_bit_margin": 2.2228893493117194,
+              "score": 1.8050766132703178
+            },
+            "strict": {
+              "accepted": false,
+              "bit": 1,
+              "false_admitted": 0,
+              "log_threshold": 22.72106338958574,
+              "not_admitted": 1,
+              "opposite_bit_margin": 2.2228893493117194,
+              "score": 1.8050766132703178
+            },
+            "truth_bit": 1
+          },
+          "frequency_offsets_hz": [
+            -0.5800001725289999,
+            -0.5671112798061333,
+            -0.5542223870832667,
+            -0.5413334943603999,
+            -0.5284446016375333,
+            -0.5155557089146666,
+            -0.5026668161918,
+            -0.4897779234689333,
+            -0.4768890307460666,
+            -0.46400013802319995,
+            -0.4511112453003333,
+            -0.4382223525774666,
+            -0.42533345985459997,
+            -0.4124445671317333,
+            -0.39955567440886663,
+            -0.386666781686,
+            -0.3737778889631333,
+            -0.3608889962402666,
+            -0.34800010351739996,
+            -0.3351112107945333,
+            -0.3222223180716666,
+            -0.3093334253488,
+            -0.2964445326259333,
+            -0.28355563990306665,
+            -0.2706667471802,
+            -0.2577778544573333,
+            -0.24488896173446667,
+            -0.23200006901159997,
+            -0.21911117628873333,
+            -0.20622228356586664,
+            -0.193333390843,
+            -0.1804444981201333,
+            -0.16755560539726666,
+            -0.15466671267440002,
+            -0.14177781995153332,
+            -0.12888892722866668,
+            -0.11600003450579999,
+            -0.10311114178293335,
+            -0.09022224906006665,
+            -0.07733335633719995,
+            -0.06444446361433331,
+            -0.05155557089146667,
+            -0.03866667816860003,
+            -0.025777785445733392,
+            -0.01288889272286664,
+            0.0,
+            0.012888892722866665,
+            0.02577778544573333,
+            0.03866667816859999,
+            0.05155557089146666,
+            0.06444446361433333,
+            0.07733335633719998,
+            0.09022224906006665,
+            0.10311114178293332,
+            0.11600003450579999,
+            0.12888892722866666,
+            0.14177781995153332,
+            0.15466671267439996,
+            0.16755560539726663,
+            0.1804444981201333,
+            0.19333339084299997,
+            0.20622228356586664,
+            0.2191111762887333,
+            0.23200006901159997,
+            0.24488896173446664,
+            0.2577778544573333,
+            0.27066674718019995,
+            0.28355563990306665,
+            0.2964445326259333,
+            0.30933342534879993,
+            0.3222223180716666,
+            0.33511121079453327,
+            0.34800010351739996,
+            0.3608889962402666,
+            0.3737778889631333,
+            0.38666678168599994,
+            0.39955567440886663,
+            0.4124445671317333,
+            0.4253334598545999,
+            0.4382223525774666,
+            0.45111124530033325,
+            0.46400013802319995,
+            0.4768890307460666,
+            0.4897779234689333,
+            0.5026668161918,
+            0.5155557089146666,
+            0.5284446016375333,
+            0.5413334943603999,
+            0.5542223870832665,
+            0.5671112798061333,
+            0.5800001725289999
+          ],
+          "nominal_window_seconds": 19.40625,
+          "path": "local-evidence/triad-extension/remote/physical-reports/validation-light-12-rescored/scores/rescore-global-frequency-shared-microwave-am65-validation-41-b1-wrong-key.json",
+          "phase_power_loss_bound_db": 0.02,
+          "reblock": 621,
+          "receiver_seconds": 0.25783147499896586,
+          "receiver_source_sha256": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+          "relaxed": {
+            "accepted": false,
+            "bit": 1,
+            "log_threshold": 17.422746023037703,
+            "opposite_bit_margin": 2.2228893493117194,
+            "score": 1.8050766132703178
+          },
+          "report_sha256": "0ad4d4cf57c20850b372fb9b28c4a16ba1f918b28decc5bbb968c7eea786d124",
+          "strict": {
+            "accepted": false,
+            "bit": 1,
+            "log_threshold": 22.72106338958574,
+            "opposite_bit_margin": 2.2228893493117194,
+            "score": 1.8050766132703178
+          },
+          "window_blocks": 1
+        },
+        "window": {
+          "bit_log_likelihoods": [
+            49.796289938451814,
+            40.54489194868486
+          ],
+          "calibration_alpha": null,
+          "decisions": {
+            "control": "wrong-key",
+            "raw_wrong_rejected": {
+              "relaxed": false,
+              "strict": false
+            },
+            "relaxed": {
+              "accepted": true,
+              "bit": 0,
+              "false_admitted": 1,
+              "log_threshold": 17.422746023037703,
+              "not_admitted": 0,
+              "opposite_bit_margin": 9.251397989766957,
+              "score": 49.796289938451814
+            },
+            "strict": {
+              "accepted": true,
+              "bit": 0,
+              "false_admitted": 1,
+              "log_threshold": 22.72106338958574,
+              "not_admitted": 0,
+              "opposite_bit_margin": 9.251397989766957,
+              "score": 49.796289938451814
+            },
+            "truth_bit": 1
+          },
+          "frequency_offsets_hz": [
+            0.0
+          ],
+          "nominal_window_seconds": 0.0625,
+          "path": "local-evidence/triad-extension/remote/physical-reports/validation-light-12-rescored/scores/rescore-window-shared-microwave-am65-validation-41-b1-wrong-key.json",
+          "phase_power_loss_bound_db": 0.02,
+          "reblock": 1,
+          "receiver_seconds": 0.24389675888232887,
+          "receiver_source_sha256": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+          "relaxed": {
+            "accepted": true,
+            "bit": 0,
+            "log_threshold": 17.422746023037703,
+            "opposite_bit_margin": 9.251397989766957,
+            "score": 49.796289938451814
+          },
+          "report_sha256": "583a6e29635ef2555e563e30cb5bfd3c290996466636d5c8690a64c1122675f8",
+          "strict": {
+            "accepted": true,
+            "bit": 0,
+            "log_threshold": 22.72106338958574,
+            "opposite_bit_margin": 9.251397989766957,
+            "score": 49.796289938451814
+          },
+          "window_blocks": 2
+        }
+      }
+    }
+  ],
+  "conclusion": "The screen recovers selected short-window failures but does not beat existing whole-observation reception on these captures. The random25 miss persists. No new receiver algorithm or default is justified by this five-capture screen.",
+  "counts": {
+    "fixed_captures": 5,
+    "models_per_capture": 6,
+    "null_captures": 1,
+    "receiver_jobs_failed": 0,
+    "signal_captures": 2,
+    "unique_completed_receiver_jobs": 30,
+    "wrong_key_captures": 2
+  },
+  "limitations": [
+    "Cases were chosen after failures; the six choices are fixed for this small screen,not prospective independent qualification.",
+    "Reblocking4 changes the retained projection and noise-residual family as well as coefficient center spacing. Comparing new0.5/2/4s models with old62.5ms windows is not a pure duration ablation.",
+    "B=0.2Hz is a receiver Gaussian-coefficient width,not a change to physical ray separation or added modulation. No physical samples/noise/seeds were regenerated.",
+    "All six new models include the public CFO bank; historical window and zero-CFO global did not. Use historical global-frequency as the acquisition-matched comparison.",
+    "One null and two wrong-key captures,each reused six times,do not become18 independent controls.",
+    "Report array bounds are not observed peak RSS. No GPU acceleration or ordinary receiver integration is demonstrated."
+  ],
+  "pilot_history": {
+    "notice": "Current probe source states that a harness-only field-name mismatch was corrected and retained pilot status rewritten. Original invalid-status snapshot and exact initial error notice were not available to this independent review.",
+    "original_status_snapshot_available": false,
+    "pilot_case": "none-am65-validation-40-b0-null",
+    "receiver_exit_code": 0,
+    "retained_then_revalidated": true,
+    "scope": "The pilot receiver ran once and exited0. Revalidation reused its unchanged score; it is one of30 jobs,not an independent second run.",
+    "score_report_sha256": "600d465780c834fb7073c942f63a28707bda85db6663af0d435108d021d290c4"
+  },
+  "provenance_sha256": {
+    "local-evidence/triad-continuity/probe.py": "854d7bdccd11fa2e0a8b4b4a60a998c78da1cecbb00baf980466f2fbda1fc910",
+    "local-evidence/triad-continuity/restore-receipt.json": "0f12f3fac74686f370a24274973d8997ea46fd9e9a2a232d55abe246a58d374d",
+    "local-evidence/triad-continuity/scores/loss-random25-validation-11-b1-signal--width-0-window-16.json": "a65ebba00506d223d6dda5cd40dc07989c4f865c30f20524556729c5ee0e9d5c",
+    "local-evidence/triad-continuity/scores/loss-random25-validation-11-b1-signal--width-0-window-16.status.json": "9cd9273b2f378527448f433a37892cd4bfd475afc98859c825a25773268f8221",
+    "local-evidence/triad-continuity/scores/loss-random25-validation-11-b1-signal--width-0-window-32.json": "eb6ad43b11057ece906578ef06c6af845500f3e54bbe25f029db424dc31abf8d",
+    "local-evidence/triad-continuity/scores/loss-random25-validation-11-b1-signal--width-0-window-32.status.json": "9019993658b4e4a7dfd66ccd0321a4df191950f9d42f4cea43d7ea7be060f931",
+    "local-evidence/triad-continuity/scores/loss-random25-validation-11-b1-signal--width-0-window-4.json": "c6897b23e30799be37f95da57b82ce47991c9459d4f06a58a0ac3c46c00d1fbd",
+    "local-evidence/triad-continuity/scores/loss-random25-validation-11-b1-signal--width-0-window-4.status.json": "ad235872af263211c2352b997208e4a793c59323121fc1b946e01aabc73380b8",
+    "local-evidence/triad-continuity/scores/loss-random25-validation-11-b1-signal--width-0.2-window-16.json": "c50172cac7e2677886567829858abfca56102fe78a2850a567fccac4b472ebc4",
+    "local-evidence/triad-continuity/scores/loss-random25-validation-11-b1-signal--width-0.2-window-16.status.json": "f1e3b8064140bbdaed17bd12244e77432d8e9602babf4e772bb651a1ba03a580",
+    "local-evidence/triad-continuity/scores/loss-random25-validation-11-b1-signal--width-0.2-window-32.json": "031d5d1593e2766039f5c1649844a6ddd3138b2a9bf61af3afc2f60d7a79d087",
+    "local-evidence/triad-continuity/scores/loss-random25-validation-11-b1-signal--width-0.2-window-32.status.json": "15889415b8fc231688244662b0292bb69d4300f7ad8ae042b84150d080583054",
+    "local-evidence/triad-continuity/scores/loss-random25-validation-11-b1-signal--width-0.2-window-4.json": "6d0e7489faeefb8f46b1b47710ad6a6fff99917b9ac3adc9103843a1fb067dc0",
+    "local-evidence/triad-continuity/scores/loss-random25-validation-11-b1-signal--width-0.2-window-4.status.json": "36148b7490a7dd4ca8a9c29106c0f529f9e98996d66c0bb3395b879c7c55e01b",
+    "local-evidence/triad-continuity/scores/none-am65-validation-07-b1-signal--width-0-window-16.json": "305de138d657978c017d6e523c01be0f15e511e04dfb7671fe58f8d81cf2ed7e",
+    "local-evidence/triad-continuity/scores/none-am65-validation-07-b1-signal--width-0-window-16.status.json": "05f257ec8d48303d3efe285378200706ef7cb986ff98f527eff86bb9b08d01ab",
+    "local-evidence/triad-continuity/scores/none-am65-validation-07-b1-signal--width-0-window-32.json": "dac925cf1b67c4b2b55bf70810d5d22982e10936f24c3f17a7d9021ff0a6479a",
+    "local-evidence/triad-continuity/scores/none-am65-validation-07-b1-signal--width-0-window-32.status.json": "178d8e9a675a0c04d46f733b7cddcd55ddec6d8b39edc1c76ff18c77c4312a8a",
+    "local-evidence/triad-continuity/scores/none-am65-validation-07-b1-signal--width-0-window-4.json": "0d23cb2e4bdc594132c37a87e1983c5d2ec1764b4678b38315ccf85cccb8c193",
+    "local-evidence/triad-continuity/scores/none-am65-validation-07-b1-signal--width-0-window-4.status.json": "573b0bf5b603e9817fd9fec5f17808392992eea71550afd3480079222f1a5356",
+    "local-evidence/triad-continuity/scores/none-am65-validation-07-b1-signal--width-0.2-window-16.json": "5250784cc6e87edeaad3d20a04c1af1f05671251beccea4082922b5c7c1e0651",
+    "local-evidence/triad-continuity/scores/none-am65-validation-07-b1-signal--width-0.2-window-16.status.json": "5c4a1cd55a23ba3ca015b107000d9d8ebd9deccedbc66ddf5776db2a2348146b",
+    "local-evidence/triad-continuity/scores/none-am65-validation-07-b1-signal--width-0.2-window-32.json": "e23f14b31964fa717704632b6237fede6c74a1d10d42f643ca86cf4db5307954",
+    "local-evidence/triad-continuity/scores/none-am65-validation-07-b1-signal--width-0.2-window-32.status.json": "20ba2e5a4c301576e32edd99f285503db87f924854457b8e1d5569fc1bbb242e",
+    "local-evidence/triad-continuity/scores/none-am65-validation-07-b1-signal--width-0.2-window-4.json": "1b9715d2ec8d41ffb0565318ae903218b1f58a0f0684a1399b809649bb6fe48c",
+    "local-evidence/triad-continuity/scores/none-am65-validation-07-b1-signal--width-0.2-window-4.status.json": "d0cae94ddf9b5b050b8d92d05c8380cb97b1e49a1ab23579e6888462254403da",
+    "local-evidence/triad-continuity/scores/none-am65-validation-40-b0-null--width-0-window-16.json": "3c438f991a9a978db475056f5a49a181770d648e25f7f7eb5fcf0a78c551f16c",
+    "local-evidence/triad-continuity/scores/none-am65-validation-40-b0-null--width-0-window-16.status.json": "7c86b268ce1453496547c132d5f3ec6a62c6bb980a487c19b7b20b330fe581ae",
+    "local-evidence/triad-continuity/scores/none-am65-validation-40-b0-null--width-0-window-32.json": "4a23e67b1ecfb098127520f3456cb174a339282421dd21ebe9ff8486dedf2da2",
+    "local-evidence/triad-continuity/scores/none-am65-validation-40-b0-null--width-0-window-32.status.json": "6f69f974a4b5d699a00b51755067ab550d6d2ace06228682aafd63024d619b8e",
+    "local-evidence/triad-continuity/scores/none-am65-validation-40-b0-null--width-0-window-4.json": "600d465780c834fb7073c942f63a28707bda85db6663af0d435108d021d290c4",
+    "local-evidence/triad-continuity/scores/none-am65-validation-40-b0-null--width-0-window-4.status.json": "397c41fa1c7916589bc9ace9ea964094bc859a36eb9a2414ee1ef93d3169f795",
+    "local-evidence/triad-continuity/scores/none-am65-validation-40-b0-null--width-0.2-window-16.json": "96016a9cbcf2ac66edcd430bcaaec805f9284dd8ebcb711656b5696510975a83",
+    "local-evidence/triad-continuity/scores/none-am65-validation-40-b0-null--width-0.2-window-16.status.json": "0fb8bdfb4d88e61b063d419d8823e38e9c7426c692dec85df3049298e8bcf434",
+    "local-evidence/triad-continuity/scores/none-am65-validation-40-b0-null--width-0.2-window-32.json": "3f59c6942932e1e44e54a88c69a082ebb4b9ef11657c1a211f5a79fdc565b9be",
+    "local-evidence/triad-continuity/scores/none-am65-validation-40-b0-null--width-0.2-window-32.status.json": "e1950a8902189c10de151de16cd3df729f8d12bdec430f17a393e7a6d70519f2",
+    "local-evidence/triad-continuity/scores/none-am65-validation-40-b0-null--width-0.2-window-4.json": "5f50d110d65cbe376efbc224dd34cf0532bed8db06cd7e851e6aae9995a0b43c",
+    "local-evidence/triad-continuity/scores/none-am65-validation-40-b0-null--width-0.2-window-4.status.json": "19c335231141390534af8fd10f9384b8ba189150668f267556cc95438c7439cd",
+    "local-evidence/triad-continuity/scores/none-am65-validation-41-b1-wrong-key--width-0-window-16.json": "e6c3435829c6cc217f72e6b80fae3aa02dfecddaf0241b038b32a06f02e62efb",
+    "local-evidence/triad-continuity/scores/none-am65-validation-41-b1-wrong-key--width-0-window-16.status.json": "3d94504b5bab2d798f0b50d3e4e27965ab61ad0705db57a74cbc8926bda12257",
+    "local-evidence/triad-continuity/scores/none-am65-validation-41-b1-wrong-key--width-0-window-32.json": "3178b73416ed145788b464e5930c675f9206c8c426e1adf0dc124d3d389cfe84",
+    "local-evidence/triad-continuity/scores/none-am65-validation-41-b1-wrong-key--width-0-window-32.status.json": "546fe225ddf88f12c942733e5e43f1cb0d503b86da4aa6347af76e5123be3b25",
+    "local-evidence/triad-continuity/scores/none-am65-validation-41-b1-wrong-key--width-0-window-4.json": "878d6ced098370047a70203c5dcb17527373d06328dfc2fdf2ca514ce81e5e50",
+    "local-evidence/triad-continuity/scores/none-am65-validation-41-b1-wrong-key--width-0-window-4.status.json": "b59d8d7efea86e86d1aa9d3617bb375251e03bedee7bb1bc3fa4b4e4fcf1a7fe",
+    "local-evidence/triad-continuity/scores/none-am65-validation-41-b1-wrong-key--width-0.2-window-16.json": "4eeeccfbdaab4541348e0378e853ea6e147f20e49cafdd90a63424d9299e7b76",
+    "local-evidence/triad-continuity/scores/none-am65-validation-41-b1-wrong-key--width-0.2-window-16.status.json": "015e071124d339f1bd49fc1c3335d9f7c5dccedb857ce6bc8cdf696171410b96",
+    "local-evidence/triad-continuity/scores/none-am65-validation-41-b1-wrong-key--width-0.2-window-32.json": "5716a531f7ee64ad01b3b76b077b838ca70a557fc359d96d1bc1b17a4f499b14",
+    "local-evidence/triad-continuity/scores/none-am65-validation-41-b1-wrong-key--width-0.2-window-32.status.json": "e15a6d46f55f4e51a7ad7c5419572bbc13dc2af5f1c83da3542d9060daf9bb72",
+    "local-evidence/triad-continuity/scores/none-am65-validation-41-b1-wrong-key--width-0.2-window-4.json": "5a414361301c5e0f20af017ef7dd884591929119221448ab6600f02087ccef0a",
+    "local-evidence/triad-continuity/scores/none-am65-validation-41-b1-wrong-key--width-0.2-window-4.status.json": "5d397ddde9203c4e621b80cee247b8ffcc0ae41360c9d43e227913453e85b6e0",
+    "local-evidence/triad-continuity/scores/shared-microwave-am65-validation-41-b1-wrong-key--width-0-window-16.json": "585ff86fc1094be782846fbad4a63a227a17c2d326dfb4306b8ee469af351364",
+    "local-evidence/triad-continuity/scores/shared-microwave-am65-validation-41-b1-wrong-key--width-0-window-16.status.json": "7c489bbd88102817f8f07028736e19a6f9e48d980277caf19bed72db4f1a34e9",
+    "local-evidence/triad-continuity/scores/shared-microwave-am65-validation-41-b1-wrong-key--width-0-window-32.json": "193940b8865c88724157497cec2bc160bc6597673b84cbfeec02948c509e775d",
+    "local-evidence/triad-continuity/scores/shared-microwave-am65-validation-41-b1-wrong-key--width-0-window-32.status.json": "4f41da2b6abc0b6664b0b63d809b9ccdcb09464dceaa968ff769a7f73518ff13",
+    "local-evidence/triad-continuity/scores/shared-microwave-am65-validation-41-b1-wrong-key--width-0-window-4.json": "a16ce1da87266a1e968db1cab76ca81249c4a653ddd721486f6d2735b9d535d8",
+    "local-evidence/triad-continuity/scores/shared-microwave-am65-validation-41-b1-wrong-key--width-0-window-4.status.json": "fcc680aa3bf9af35b003638c7ef272811d7fb80979086178b197acc2d822213e",
+    "local-evidence/triad-continuity/scores/shared-microwave-am65-validation-41-b1-wrong-key--width-0.2-window-16.json": "54e624f0746aab03f9115f1e4e6ca10e3bc39d949224c551c6ab0d9e08bc175a",
+    "local-evidence/triad-continuity/scores/shared-microwave-am65-validation-41-b1-wrong-key--width-0.2-window-16.status.json": "2fc85141e0375d6d9c3b8bb6917263ea9354d24e31982f790b6f70190fcdbaa6",
+    "local-evidence/triad-continuity/scores/shared-microwave-am65-validation-41-b1-wrong-key--width-0.2-window-32.json": "f795ec1e9feb3dff41ab476d6c332b3cac53fb855efade50ef3426d75704e009",
+    "local-evidence/triad-continuity/scores/shared-microwave-am65-validation-41-b1-wrong-key--width-0.2-window-32.status.json": "f598733bff6111035c9efb4c6d5be2ef0d590554feafdb7e6399767eb0397790",
+    "local-evidence/triad-continuity/scores/shared-microwave-am65-validation-41-b1-wrong-key--width-0.2-window-4.json": "caebeee5a31be003f9730fc1a4f6a432f8e6f539c426161d6cfed4b8d974e34f",
+    "local-evidence/triad-continuity/scores/shared-microwave-am65-validation-41-b1-wrong-key--width-0.2-window-4.status.json": "728f29aa7d286e40e3aaff5e6a214e7ff772a5cc2deb1bf9aea3b4519d53bf14",
+    "local-evidence/triad-continuity/summary.json": "daa1b4c38d037f74894676eaf0a899d454b4973d3001fe1d8b6badbbc37a0263",
+    "local-evidence/triad-extension/remote/additional-physical-reports/validation-schedule-6-rescored/scores/rescore-global-frequency-loss-random25-validation-11-b1-signal.json": "99b8ff57fe368174e47fca2716f7879e3dea792b268502ee030cf7340cbed3a3",
+    "local-evidence/triad-extension/remote/additional-physical-reports/validation-schedule-6-rescored/scores/rescore-global-loss-random25-validation-11-b1-signal.json": "893ddccc6cac1d53697f6cc66d8d2405b6b99461ce3382d23ada792c9c86e6d7",
+    "local-evidence/triad-extension/remote/additional-physical-reports/validation-schedule-6-rescored/scores/rescore-window-loss-random25-validation-11-b1-signal.json": "5aea7c234d6d4bc54f8a0798f415a0be9217e30524238fdfe24f8bccdff02c91",
+    "local-evidence/triad-extension/remote/physical-reports/validation-light-12-rescore-manifest.json": "ff8f240b48f21f12ef69ec9e15ea4dc913409253dca4a0958ab87323d46fc2cd",
+    "local-evidence/triad-extension/remote/physical-reports/validation-light-12-rescored/scores/rescore-global-frequency-none-am65-validation-07-b1-signal.json": "b52834c7d3961c1e3ae00bd7007d619a3fb832917ce6906224e4ca3299868a65",
+    "local-evidence/triad-extension/remote/physical-reports/validation-light-12-rescored/scores/rescore-global-frequency-none-am65-validation-40-b0-null.json": "c3de298d2575c8dfd8f11980d75d212edd64534333ddff06630863649f98e1ca",
+    "local-evidence/triad-extension/remote/physical-reports/validation-light-12-rescored/scores/rescore-global-frequency-none-am65-validation-41-b1-wrong-key.json": "d312903cb6f4cfb311e9de9f6809acc3c7f86c932f50492473e2a9f42eda6643",
+    "local-evidence/triad-extension/remote/physical-reports/validation-light-12-rescored/scores/rescore-global-frequency-shared-microwave-am65-validation-41-b1-wrong-key.json": "0ad4d4cf57c20850b372fb9b28c4a16ba1f918b28decc5bbb968c7eea786d124",
+    "local-evidence/triad-extension/remote/physical-reports/validation-light-12-rescored/scores/rescore-global-none-am65-validation-07-b1-signal.json": "db5ab89d59fb338fe48a879f5eb97890adad023391b9d01ad13f24b598021ad2",
+    "local-evidence/triad-extension/remote/physical-reports/validation-light-12-rescored/scores/rescore-global-none-am65-validation-40-b0-null.json": "a52dd39ebb81c7a2673dd44d3a2950e8cabd3ff7b2359df313ce255cfe05e7ed",
+    "local-evidence/triad-extension/remote/physical-reports/validation-light-12-rescored/scores/rescore-global-none-am65-validation-41-b1-wrong-key.json": "41bf448427a4596c1113263ef291d11109e56b04b0ae32a8046c89caecd33830",
+    "local-evidence/triad-extension/remote/physical-reports/validation-light-12-rescored/scores/rescore-global-shared-microwave-am65-validation-41-b1-wrong-key.json": "023614eb341c8bd5ee5e8164a3544ea754b366610d6936553062d1fe99dead43",
+    "local-evidence/triad-extension/remote/physical-reports/validation-light-12-rescored/scores/rescore-window-none-am65-validation-07-b1-signal.json": "3edaa3357c186d5e7858a2b3ced64019ff64436ee4956421264bc176f0bda767",
+    "local-evidence/triad-extension/remote/physical-reports/validation-light-12-rescored/scores/rescore-window-none-am65-validation-40-b0-null.json": "fc56a2973936a9fc47d38dc6eb3a69f9c81046bbf996c93e6d56572af7432cf3",
+    "local-evidence/triad-extension/remote/physical-reports/validation-light-12-rescored/scores/rescore-window-none-am65-validation-41-b1-wrong-key.json": "e74b221db839aa9a7a864de6a7b2859bd58f6c0621b5baa166a1172aad184cd5",
+    "local-evidence/triad-extension/remote/physical-reports/validation-light-12-rescored/scores/rescore-window-shared-microwave-am65-validation-41-b1-wrong-key.json": "583a6e29635ef2555e563e30cb5bfd3c290996466636d5c8690a64c1122675f8"
+  },
+  "restore_receipt": {
+    "archive_hardlinks_seen": 3199,
+    "archive_inventory_sha256": "525e01cf8281e2483af95e9ef608b749358c4d286ac3d29bf5d4124bfdf65740",
+    "archive_payload_members_seen": 8635,
+    "archive_regular_bytes_seen": 28532930047,
+    "archive_sha256": "fcedba8e0c40d48a3e06fed83250552619f8e992f125353c850d092de41702cf",
+    "archive_verification_sha256": "ffe6bd83bcb58254576b9f61ce993e6dabd1d896821d4473f50eca503c3d84fc",
+    "completed_utc": "2026-11-03T06:03:35.163723+00:00",
+    "elapsed_seconds": 22.637945498980116,
+    "files": [
+      {
+        "sha256": "fe40461b8a98c924ceb1b93c78bbca97bf2822b1fabba63bfd70ec2752609231",
+        "size_bytes": 1041152,
+        "workspace_path": "validation-schedule-6/workspaces/loss-random25-validation-11-b1-signal/manifest.json"
+      },
+      {
+        "sha256": "805cf89372b5f45e808253bd9658ee606c7e6dac476430a52821dd9a7e490a19",
+        "size_bytes": 172506880,
+        "workspace_path": "validation-schedule-6/workspaces/loss-random25-validation-11-b1-signal/group_gram.c128"
+      },
+      {
+        "sha256": "a9757bf64702d3e376904e8027cf5ca7ff5cad2bdfb17ab7b8b18bb680559de2",
+        "size_bytes": 43126720,
+        "workspace_path": "validation-schedule-6/workspaces/loss-random25-validation-11-b1-signal/group_observation.c128"
+      },
+      {
+        "sha256": "f43dacaf69a02e7ef41b853387fb8f246add7e89d6077a3555d60d1e8fc5e953",
+        "size_bytes": 11848,
+        "workspace_path": "validation-schedule-6/workspaces/loss-random25-validation-11-b1-signal/received_energy.f64"
+      },
+      {
+        "sha256": "50bb842ff953d81d753d47117d66c1a026020b505e0ae5c7751e3610133143b9",
+        "size_bytes": 23696,
+        "workspace_path": "validation-schedule-6/workspaces/loss-random25-validation-11-b1-signal/intervals.u64"
+      },
+      {
+        "sha256": "ce39e88c174cdc4dddc6eb92c83665408902ae7b872929936230745640e4e34b",
+        "size_bytes": 11848,
+        "workspace_path": "validation-schedule-6/workspaces/loss-random25-validation-11-b1-signal/valid_rows.u64"
+      },
+      {
+        "sha256": "584362db086e8621b5e3b962adbc658b74fdfc65f2370caa5fa14f2bc0ac9429",
+        "size_bytes": 35476,
+        "workspace_path": "validation-light-12/workspaces/none-am65-validation-07-b1-signal/manifest.json"
+      },
+      {
+        "sha256": "de2decc798ad35a3a0c7f91a4e48c96f011f85a3c8111e9bbf8cd369d3604602",
+        "size_bytes": 278208,
+        "workspace_path": "validation-light-12/workspaces/none-am65-validation-07-b1-signal/group_gram.c128"
+      },
+      {
+        "sha256": "9f4e926a1b514482000fa71752c9977e959a1edc02ad647f74f6aef8abd5feb3",
+        "size_bytes": 139104,
+        "workspace_path": "validation-light-12/workspaces/none-am65-validation-07-b1-signal/group_observation.c128"
+      },
+      {
+        "sha256": "9c6e7fbb4c482f355f24c73b7ffe3f9ec04b3bc6257dfffe1d8545c5a61dd717",
+        "size_bytes": 4968,
+        "workspace_path": "validation-light-12/workspaces/none-am65-validation-07-b1-signal/received_energy.f64"
+      },
+      {
+        "sha256": "39264bd78fdcc6b1a2eb994e3f36faaf7dd97a2c8b8e34097115be0ff7f2a4e5",
+        "size_bytes": 9936,
+        "workspace_path": "validation-light-12/workspaces/none-am65-validation-07-b1-signal/intervals.u64"
+      },
+      {
+        "sha256": "49b2d41ea01718f0ee030ef30e5dd8a0c95377aabadd5c892bf01efb468209a9",
+        "size_bytes": 4968,
+        "workspace_path": "validation-light-12/workspaces/none-am65-validation-07-b1-signal/valid_rows.u64"
+      },
+      {
+        "sha256": "5f98b6ca26cbe9e65442a1d8897695bb7e236bd95a8e320eabd0519fdbd09139",
+        "size_bytes": 35403,
+        "workspace_path": "validation-light-12/workspaces/none-am65-validation-40-b0-null/manifest.json"
+      },
+      {
+        "sha256": "ddbd4a95266bd6585c864301d7baf1e5d567ced84e6243c8f76eebfb57f27989",
+        "size_bytes": 278208,
+        "workspace_path": "validation-light-12/workspaces/none-am65-validation-40-b0-null/group_gram.c128"
+      },
+      {
+        "sha256": "6f8876c00a35a09525f41c3523872ff548830ce964729e7d1add490efb2d44ef",
+        "size_bytes": 139104,
+        "workspace_path": "validation-light-12/workspaces/none-am65-validation-40-b0-null/group_observation.c128"
+      },
+      {
+        "sha256": "1d072caadacdf7822d0e99c8b8998d2e66e6c4dd12012ab8436ed388dd9ada35",
+        "size_bytes": 4968,
+        "workspace_path": "validation-light-12/workspaces/none-am65-validation-40-b0-null/received_energy.f64"
+      },
+      {
+        "sha256": "39264bd78fdcc6b1a2eb994e3f36faaf7dd97a2c8b8e34097115be0ff7f2a4e5",
+        "size_bytes": 9936,
+        "workspace_path": "validation-light-12/workspaces/none-am65-validation-40-b0-null/intervals.u64"
+      },
+      {
+        "sha256": "49b2d41ea01718f0ee030ef30e5dd8a0c95377aabadd5c892bf01efb468209a9",
+        "size_bytes": 4968,
+        "workspace_path": "validation-light-12/workspaces/none-am65-validation-40-b0-null/valid_rows.u64"
+      },
+      {
+        "sha256": "e5933d545531d931d001e92cc4a96041990f272155c9554aaf4d776044662229",
+        "size_bytes": 35481,
+        "workspace_path": "validation-light-12/workspaces/none-am65-validation-41-b1-wrong-key/manifest.json"
+      },
+      {
+        "sha256": "70564075b9ed001018628568d91b9f7a7d04b045223f1efa3d5a650175a22eb8",
+        "size_bytes": 278208,
+        "workspace_path": "validation-light-12/workspaces/none-am65-validation-41-b1-wrong-key/group_gram.c128"
+      },
+      {
+        "sha256": "16368a436428449d7469c4a289c55052115126a7f72ce9d274578369838560aa",
+        "size_bytes": 139104,
+        "workspace_path": "validation-light-12/workspaces/none-am65-validation-41-b1-wrong-key/group_observation.c128"
+      },
+      {
+        "sha256": "fde9441eb050331ff771eff2a85a40c41879d55bc48c233ed141f2eab6b6348a",
+        "size_bytes": 4968,
+        "workspace_path": "validation-light-12/workspaces/none-am65-validation-41-b1-wrong-key/received_energy.f64"
+      },
+      {
+        "sha256": "39264bd78fdcc6b1a2eb994e3f36faaf7dd97a2c8b8e34097115be0ff7f2a4e5",
+        "size_bytes": 9936,
+        "workspace_path": "validation-light-12/workspaces/none-am65-validation-41-b1-wrong-key/intervals.u64"
+      },
+      {
+        "sha256": "49b2d41ea01718f0ee030ef30e5dd8a0c95377aabadd5c892bf01efb468209a9",
+        "size_bytes": 4968,
+        "workspace_path": "validation-light-12/workspaces/none-am65-validation-41-b1-wrong-key/valid_rows.u64"
+      },
+      {
+        "sha256": "51f69d126412160b3ded05a40dbf7121012e52e5fe60505eb687b3f7349265c7",
+        "size_bytes": 35466,
+        "workspace_path": "validation-light-12/workspaces/shared-microwave-am65-validation-41-b1-wrong-key/manifest.json"
+      },
+      {
+        "sha256": "a0c7371a181df112f4dbcf0669a48004079022cfe7cc8e5b5fdcb389259d0f2d",
+        "size_bytes": 278208,
+        "workspace_path": "validation-light-12/workspaces/shared-microwave-am65-validation-41-b1-wrong-key/group_gram.c128"
+      },
+      {
+        "sha256": "cd4b0d47d133f0e857e148f7e346b1f3cf4b3062eff214f70466541fc83f1660",
+        "size_bytes": 139104,
+        "workspace_path": "validation-light-12/workspaces/shared-microwave-am65-validation-41-b1-wrong-key/group_observation.c128"
+      },
+      {
+        "sha256": "9ae75f08f1171dc46e87202ef6186c1b603dcfa120d2dc67cffc46bdf7ad9ad3",
+        "size_bytes": 4968,
+        "workspace_path": "validation-light-12/workspaces/shared-microwave-am65-validation-41-b1-wrong-key/received_energy.f64"
+      },
+      {
+        "sha256": "39264bd78fdcc6b1a2eb994e3f36faaf7dd97a2c8b8e34097115be0ff7f2a4e5",
+        "size_bytes": 9936,
+        "workspace_path": "validation-light-12/workspaces/shared-microwave-am65-validation-41-b1-wrong-key/intervals.u64"
+      },
+      {
+        "sha256": "49b2d41ea01718f0ee030ef30e5dd8a0c95377aabadd5c892bf01efb468209a9",
+        "size_bytes": 4968,
+        "workspace_path": "validation-light-12/workspaces/shared-microwave-am65-validation-41-b1-wrong-key/valid_rows.u64"
+      }
+    ],
+    "full_archive_extracted": false,
+    "memory_policy": "1 MiB reads; stream tar/zstd; selected files only",
+    "metadata_sha256": "09b0528f0f16f9a433afb70e6566021d4b7059747cb8edf0a43818445e5d1111",
+    "requested_files_per_workspace": [
+      "manifest.json",
+      "group_gram.c128",
+      "group_observation.c128",
+      "received_energy.f64",
+      "intervals.u64",
+      "valid_rows.u64"
+    ],
+    "requested_workspaces": [
+      "validation-schedule-6/workspaces/loss-random25-validation-11-b1-signal",
+      "validation-light-12/workspaces/none-am65-validation-07-b1-signal",
+      "validation-light-12/workspaces/none-am65-validation-40-b0-null",
+      "validation-light-12/workspaces/none-am65-validation-41-b1-wrong-key",
+      "validation-light-12/workspaces/shared-microwave-am65-validation-41-b1-wrong-key"
+    ],
+    "restore_script_sha256": "9a4ef1d2605027e83aa98ceea04b7654d5e0338d7fe7e827e8aefb698e405b3b",
+    "restored_file_count": 30,
+    "restored_logical_bytes": 218612706,
+    "restored_root": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-continuity/restored",
+    "schema": "triad-selected-group-workspace-restore-v1",
+    "scope": "Restored selected group statistics only. No receiver scores were recomputed; sample waveforms and clean means were not restored.",
+    "selected_hashes_verified_in_archive": 24,
+    "status": "restored-and-verified"
+  },
+  "review_checks": {
+    "all_outcomes_independently_recounted": true,
+    "all_six_models_share_identical_per_capture_residual_calibration": true,
+    "all_timing_and_frequency_groups_preserved": true,
+    "baseline_reports_bound": 15,
+    "gamma_variance_ucb_max_absolute_discrepancy": 0.0,
+    "known_noise_variance_override_absent": true,
+    "mixture_logsumexp_max_absolute_discrepancy": 0.0,
+    "new_reports_and_statuses_bound": 30,
+    "restored_files_rehashed": 30,
+    "restored_logical_bytes_rehashed": 218612706
+  },
+  "review_completed_utc": "2026-11-03T06:34:24.524380+00:00",
+  "rows": [
+    {
+      "allowed_phase_loss_db": 0.01,
+      "arithmetic": {
+        "bulk": "fp32",
+        "device": "cpu",
+        "finish": "FP64 residual pooling, variance quantiles, likelihood weights/logdet/evidence and bit mixtures",
+        "preparation": "CPU complex128/float64 rank projection, observation whitening, prior roots and rectangular SVD",
+        "tf32_allowed": false,
+        "window_whitening": "FP64 small block whitening/scaling on selected device before bounded bulk mode GEMM"
+      },
+      "base_groups": 455,
+      "calibration_delta_per_group": 1.5898453398453396e-12,
+      "case": "loss-random25-validation-11-b1-signal",
+      "child_elapsed_seconds": 25.371455879008863,
+      "cn0_db_hz": 6,
+      "control": "signal",
+      "effective_groups": 1365,
+      "explicit_array_bound_bytes": 30474824,
+      "frequency_offsets_hz": [
+        -0.0030001725001500084,
+        0.0,
+        0.0030001725001500084
+      ],
+      "known_noise_diagnostic": null,
+      "model": {
+        "doppler_width_hz": 0.0,
+        "nominal_window_seconds": 0.5,
+        "original_block_seconds": 0.03125,
+        "reblock": 4,
+        "window_blocks": 4
+      },
+      "outcomes": {
+        "relaxed": {
+          "correct_admitted": 0,
+          "missed": 1,
+          "wrong_admitted": 0
+        },
+        "strict": {
+          "correct_admitted": 0,
+          "missed": 1,
+          "wrong_admitted": 0
+        }
+      },
+      "phase_loss_bound_db": 3.7677021088524194e-07,
+      "receiver_seconds": 23.595790590014076,
+      "scores": [
+        -7.3595727870344385,
+        -6.2959497191367255
+      ],
+      "variance_ucb_range": [
+        1047.6742083366564,
+        1049.307664538745
+      ],
+      "winning_bit": 1
+    },
+    {
+      "allowed_phase_loss_db": 0.01,
+      "arithmetic": {
+        "bulk": "fp32",
+        "device": "cpu",
+        "finish": "FP64 residual pooling, variance quantiles, likelihood weights/logdet/evidence and bit mixtures",
+        "preparation": "CPU complex128/float64 rank projection, observation whitening, prior roots and rectangular SVD",
+        "tf32_allowed": false,
+        "window_whitening": "FP64 small block whitening/scaling on selected device before bounded bulk mode GEMM"
+      },
+      "base_groups": 455,
+      "calibration_delta_per_group": 1.5898453398453396e-12,
+      "case": "loss-random25-validation-11-b1-signal",
+      "child_elapsed_seconds": 15.678676128009101,
+      "cn0_db_hz": 6,
+      "control": "signal",
+      "effective_groups": 1365,
+      "explicit_array_bound_bytes": 35365640,
+      "frequency_offsets_hz": [
+        -0.0030001725001500084,
+        0.0,
+        0.0030001725001500084
+      ],
+      "known_noise_diagnostic": null,
+      "model": {
+        "doppler_width_hz": 0.0,
+        "nominal_window_seconds": 2.0,
+        "original_block_seconds": 0.03125,
+        "reblock": 4,
+        "window_blocks": 16
+      },
+      "outcomes": {
+        "relaxed": {
+          "correct_admitted": 0,
+          "missed": 1,
+          "wrong_admitted": 0
+        },
+        "strict": {
+          "correct_admitted": 0,
+          "missed": 1,
+          "wrong_admitted": 0
+        }
+      },
+      "phase_loss_bound_db": 3.7677021088524194e-07,
+      "receiver_seconds": 13.973081050004112,
+      "scores": [
+        -13.788020548466392,
+        -2.7607920508066632
+      ],
+      "variance_ucb_range": [
+        1047.6742083366564,
+        1049.307664538745
+      ],
+      "winning_bit": 1
+    },
+    {
+      "allowed_phase_loss_db": 0.01,
+      "arithmetic": {
+        "bulk": "fp32",
+        "device": "cpu",
+        "finish": "FP64 residual pooling, variance quantiles, likelihood weights/logdet/evidence and bit mixtures",
+        "preparation": "CPU complex128/float64 rank projection, observation whitening, prior roots and rectangular SVD",
+        "tf32_allowed": false,
+        "window_whitening": "FP64 small block whitening/scaling on selected device before bounded bulk mode GEMM"
+      },
+      "base_groups": 455,
+      "calibration_delta_per_group": 1.5898453398453396e-12,
+      "case": "loss-random25-validation-11-b1-signal",
+      "child_elapsed_seconds": 13.37985767700593,
+      "cn0_db_hz": 6,
+      "control": "signal",
+      "effective_groups": 1365,
+      "explicit_array_bound_bytes": 42411016,
+      "frequency_offsets_hz": [
+        -0.0030001725001500084,
+        0.0,
+        0.0030001725001500084
+      ],
+      "known_noise_diagnostic": null,
+      "model": {
+        "doppler_width_hz": 0.0,
+        "nominal_window_seconds": 4.0,
+        "original_block_seconds": 0.03125,
+        "reblock": 4,
+        "window_blocks": 32
+      },
+      "outcomes": {
+        "relaxed": {
+          "correct_admitted": 0,
+          "missed": 1,
+          "wrong_admitted": 0
+        },
+        "strict": {
+          "correct_admitted": 0,
+          "missed": 1,
+          "wrong_admitted": 0
+        }
+      },
+      "phase_loss_bound_db": 3.7677021088524194e-07,
+      "receiver_seconds": 11.487040277017513,
+      "scores": [
+        -9.985251337847883,
+        1.717179055422962
+      ],
+      "variance_ucb_range": [
+        1047.6742083366564,
+        1049.307664538745
+      ],
+      "winning_bit": 1
+    },
+    {
+      "allowed_phase_loss_db": 0.01,
+      "arithmetic": {
+        "bulk": "fp32",
+        "device": "cpu",
+        "finish": "FP64 residual pooling, variance quantiles, likelihood weights/logdet/evidence and bit mixtures",
+        "preparation": "CPU complex128/float64 rank projection, observation whitening, prior roots and rectangular SVD",
+        "tf32_allowed": false,
+        "window_whitening": "FP64 small block whitening/scaling on selected device before bounded bulk mode GEMM"
+      },
+      "base_groups": 455,
+      "calibration_delta_per_group": 1.5898453398453396e-12,
+      "case": "loss-random25-validation-11-b1-signal",
+      "child_elapsed_seconds": 31.16734305699356,
+      "cn0_db_hz": 6,
+      "control": "signal",
+      "effective_groups": 1365,
+      "explicit_array_bound_bytes": 30474824,
+      "frequency_offsets_hz": [
+        -0.0030001725001500084,
+        0.0,
+        0.0030001725001500084
+      ],
+      "known_noise_diagnostic": null,
+      "model": {
+        "doppler_width_hz": 0.2,
+        "nominal_window_seconds": 0.5,
+        "original_block_seconds": 0.03125,
+        "reblock": 4,
+        "window_blocks": 4
+      },
+      "outcomes": {
+        "relaxed": {
+          "correct_admitted": 0,
+          "missed": 1,
+          "wrong_admitted": 0
+        },
+        "strict": {
+          "correct_admitted": 0,
+          "missed": 1,
+          "wrong_admitted": 0
+        }
+      },
+      "phase_loss_bound_db": 3.7677021088524194e-07,
+      "receiver_seconds": 27.714186464989325,
+      "scores": [
+        -7.211876646940163,
+        -6.163032889007194
+      ],
+      "variance_ucb_range": [
+        1047.6742083366564,
+        1049.307664538745
+      ],
+      "winning_bit": 1
+    },
+    {
+      "allowed_phase_loss_db": 0.01,
+      "arithmetic": {
+        "bulk": "fp32",
+        "device": "cpu",
+        "finish": "FP64 residual pooling, variance quantiles, likelihood weights/logdet/evidence and bit mixtures",
+        "preparation": "CPU complex128/float64 rank projection, observation whitening, prior roots and rectangular SVD",
+        "tf32_allowed": false,
+        "window_whitening": "FP64 small block whitening/scaling on selected device before bounded bulk mode GEMM"
+      },
+      "base_groups": 455,
+      "calibration_delta_per_group": 1.5898453398453396e-12,
+      "case": "loss-random25-validation-11-b1-signal",
+      "child_elapsed_seconds": 24.07963495099102,
+      "cn0_db_hz": 6,
+      "control": "signal",
+      "effective_groups": 1365,
+      "explicit_array_bound_bytes": 35365640,
+      "frequency_offsets_hz": [
+        -0.0030001725001500084,
+        0.0,
+        0.0030001725001500084
+      ],
+      "known_noise_diagnostic": null,
+      "model": {
+        "doppler_width_hz": 0.2,
+        "nominal_window_seconds": 2.0,
+        "original_block_seconds": 0.03125,
+        "reblock": 4,
+        "window_blocks": 16
+      },
+      "outcomes": {
+        "relaxed": {
+          "correct_admitted": 0,
+          "missed": 1,
+          "wrong_admitted": 0
+        },
+        "strict": {
+          "correct_admitted": 0,
+          "missed": 1,
+          "wrong_admitted": 0
+        }
+      },
+      "phase_loss_bound_db": 3.7677021088524194e-07,
+      "receiver_seconds": 22.307096065982478,
+      "scores": [
+        -12.43388375099534,
+        -1.0383031699416447
+      ],
+      "variance_ucb_range": [
+        1047.6742083366564,
+        1049.307664538745
+      ],
+      "winning_bit": 1
+    },
+    {
+      "allowed_phase_loss_db": 0.01,
+      "arithmetic": {
+        "bulk": "fp32",
+        "device": "cpu",
+        "finish": "FP64 residual pooling, variance quantiles, likelihood weights/logdet/evidence and bit mixtures",
+        "preparation": "CPU complex128/float64 rank projection, observation whitening, prior roots and rectangular SVD",
+        "tf32_allowed": false,
+        "window_whitening": "FP64 small block whitening/scaling on selected device before bounded bulk mode GEMM"
+      },
+      "base_groups": 455,
+      "calibration_delta_per_group": 1.5898453398453396e-12,
+      "case": "loss-random25-validation-11-b1-signal",
+      "child_elapsed_seconds": 29.28957160099526,
+      "cn0_db_hz": 6,
+      "control": "signal",
+      "effective_groups": 1365,
+      "explicit_array_bound_bytes": 42411016,
+      "frequency_offsets_hz": [
+        -0.0030001725001500084,
+        0.0,
+        0.0030001725001500084
+      ],
+      "known_noise_diagnostic": null,
+      "model": {
+        "doppler_width_hz": 0.2,
+        "nominal_window_seconds": 4.0,
+        "original_block_seconds": 0.03125,
+        "reblock": 4,
+        "window_blocks": 32
+      },
+      "outcomes": {
+        "relaxed": {
+          "correct_admitted": 0,
+          "missed": 1,
+          "wrong_admitted": 0
+        },
+        "strict": {
+          "correct_admitted": 0,
+          "missed": 1,
+          "wrong_admitted": 0
+        }
+      },
+      "phase_loss_bound_db": 3.7677021088524194e-07,
+      "receiver_seconds": 27.152074760990217,
+      "scores": [
+        -12.382134892019948,
+        0.5878640196397003
+      ],
+      "variance_ucb_range": [
+        1047.6742083366564,
+        1049.307664538745
+      ],
+      "winning_bit": 1
+    },
+    {
+      "allowed_phase_loss_db": 0.01,
+      "arithmetic": {
+        "bulk": "fp32",
+        "device": "cpu",
+        "finish": "FP64 residual pooling, variance quantiles, likelihood weights/logdet/evidence and bit mixtures",
+        "preparation": "CPU complex128/float64 rank projection, observation whitening, prior roots and rectangular SVD",
+        "tf32_allowed": false,
+        "window_whitening": "FP64 small block whitening/scaling on selected device before bounded bulk mode GEMM"
+      },
+      "base_groups": 7,
+      "calibration_delta_per_group": 1.0333994708994707e-10,
+      "case": "none-am65-validation-07-b1-signal",
+      "child_elapsed_seconds": 1.994192746002227,
+      "cn0_db_hz": 12,
+      "control": "signal",
+      "effective_groups": 21,
+      "explicit_array_bound_bytes": 6710624,
+      "frequency_offsets_hz": [
+        -0.0030001725001500084,
+        0.0,
+        0.0030001725001500084
+      ],
+      "known_noise_diagnostic": null,
+      "model": {
+        "doppler_width_hz": 0.0,
+        "nominal_window_seconds": 0.5,
+        "original_block_seconds": 0.03125,
+        "reblock": 4,
+        "window_blocks": 4
+      },
+      "outcomes": {
+        "relaxed": {
+          "correct_admitted": 1,
+          "missed": 0,
+          "wrong_admitted": 0
+        },
+        "strict": {
+          "correct_admitted": 1,
+          "missed": 0,
+          "wrong_admitted": 0
+        }
+      },
+      "phase_loss_bound_db": 3.7677021088524194e-07,
+      "receiver_seconds": 0.4270604240009561,
+      "scores": [
+        -1.3176436447035087,
+        95.5980961910772
+      ],
+      "variance_ucb_range": [
+        265.00014896282454,
+        265.2528820009808
+      ],
+      "winning_bit": 1
+    },
+    {
+      "allowed_phase_loss_db": 0.01,
+      "arithmetic": {
+        "bulk": "fp32",
+        "device": "cpu",
+        "finish": "FP64 residual pooling, variance quantiles, likelihood weights/logdet/evidence and bit mixtures",
+        "preparation": "CPU complex128/float64 rank projection, observation whitening, prior roots and rectangular SVD",
+        "tf32_allowed": false,
+        "window_whitening": "FP64 small block whitening/scaling on selected device before bounded bulk mode GEMM"
+      },
+      "base_groups": 7,
+      "calibration_delta_per_group": 1.0333994708994707e-10,
+      "case": "none-am65-validation-07-b1-signal",
+      "child_elapsed_seconds": 1.949232018989278,
+      "cn0_db_hz": 12,
+      "control": "signal",
+      "effective_groups": 21,
+      "explicit_array_bound_bytes": 8713760,
+      "frequency_offsets_hz": [
+        -0.0030001725001500084,
+        0.0,
+        0.0030001725001500084
+      ],
+      "known_noise_diagnostic": null,
+      "model": {
+        "doppler_width_hz": 0.0,
+        "nominal_window_seconds": 2.0,
+        "original_block_seconds": 0.03125,
+        "reblock": 4,
+        "window_blocks": 16
+      },
+      "outcomes": {
+        "relaxed": {
+          "correct_admitted": 1,
+          "missed": 0,
+          "wrong_admitted": 0
+        },
+        "strict": {
+          "correct_admitted": 1,
+          "missed": 0,
+          "wrong_admitted": 0
+        }
+      },
+      "phase_loss_bound_db": 3.7677021088524194e-07,
+      "receiver_seconds": 0.36427731899311766,
+      "scores": [
+        10.701083429094457,
+        117.99354186339303
+      ],
+      "variance_ucb_range": [
+        265.00014896282454,
+        265.2528820009808
+      ],
+      "winning_bit": 1
+    },
+    {
+      "allowed_phase_loss_db": 0.01,
+      "arithmetic": {
+        "bulk": "fp32",
+        "device": "cpu",
+        "finish": "FP64 residual pooling, variance quantiles, likelihood weights/logdet/evidence and bit mixtures",
+        "preparation": "CPU complex128/float64 rank projection, observation whitening, prior roots and rectangular SVD",
+        "tf32_allowed": false,
+        "window_whitening": "FP64 small block whitening/scaling on selected device before bounded bulk mode GEMM"
+      },
+      "base_groups": 7,
+      "calibration_delta_per_group": 1.0333994708994707e-10,
+      "case": "none-am65-validation-07-b1-signal",
+      "child_elapsed_seconds": 2.100451398990117,
+      "cn0_db_hz": 12,
+      "control": "signal",
+      "effective_groups": 21,
+      "explicit_array_bound_bytes": 12072736,
+      "frequency_offsets_hz": [
+        -0.0030001725001500084,
+        0.0,
+        0.0030001725001500084
+      ],
+      "known_noise_diagnostic": null,
+      "model": {
+        "doppler_width_hz": 0.0,
+        "nominal_window_seconds": 4.0,
+        "original_block_seconds": 0.03125,
+        "reblock": 4,
+        "window_blocks": 32
+      },
+      "outcomes": {
+        "relaxed": {
+          "correct_admitted": 1,
+          "missed": 0,
+          "wrong_admitted": 0
+        },
+        "strict": {
+          "correct_admitted": 1,
+          "missed": 0,
+          "wrong_admitted": 0
+        }
+      },
+      "phase_loss_bound_db": 3.7677021088524194e-07,
+      "receiver_seconds": 0.3911112920031883,
+      "scores": [
+        13.505677870519687,
+        126.46630415138918
+      ],
+      "variance_ucb_range": [
+        265.00014896282454,
+        265.2528820009808
+      ],
+      "winning_bit": 1
+    },
+    {
+      "allowed_phase_loss_db": 0.01,
+      "arithmetic": {
+        "bulk": "fp32",
+        "device": "cpu",
+        "finish": "FP64 residual pooling, variance quantiles, likelihood weights/logdet/evidence and bit mixtures",
+        "preparation": "CPU complex128/float64 rank projection, observation whitening, prior roots and rectangular SVD",
+        "tf32_allowed": false,
+        "window_whitening": "FP64 small block whitening/scaling on selected device before bounded bulk mode GEMM"
+      },
+      "base_groups": 7,
+      "calibration_delta_per_group": 1.0333994708994707e-10,
+      "case": "none-am65-validation-07-b1-signal",
+      "child_elapsed_seconds": 2.094288469001185,
+      "cn0_db_hz": 12,
+      "control": "signal",
+      "effective_groups": 21,
+      "explicit_array_bound_bytes": 6710624,
+      "frequency_offsets_hz": [
+        -0.0030001725001500084,
+        0.0,
+        0.0030001725001500084
+      ],
+      "known_noise_diagnostic": null,
+      "model": {
+        "doppler_width_hz": 0.2,
+        "nominal_window_seconds": 0.5,
+        "original_block_seconds": 0.03125,
+        "reblock": 4,
+        "window_blocks": 4
+      },
+      "outcomes": {
+        "relaxed": {
+          "correct_admitted": 1,
+          "missed": 0,
+          "wrong_admitted": 0
+        },
+        "strict": {
+          "correct_admitted": 1,
+          "missed": 0,
+          "wrong_admitted": 0
+        }
+      },
+      "phase_loss_bound_db": 3.7677021088524194e-07,
+      "receiver_seconds": 0.46484909098944627,
+      "scores": [
+        0.13088706984429077,
+        95.66072855515858
+      ],
+      "variance_ucb_range": [
+        265.00014896282454,
+        265.2528820009808
+      ],
+      "winning_bit": 1
+    },
+    {
+      "allowed_phase_loss_db": 0.01,
+      "arithmetic": {
+        "bulk": "fp32",
+        "device": "cpu",
+        "finish": "FP64 residual pooling, variance quantiles, likelihood weights/logdet/evidence and bit mixtures",
+        "preparation": "CPU complex128/float64 rank projection, observation whitening, prior roots and rectangular SVD",
+        "tf32_allowed": false,
+        "window_whitening": "FP64 small block whitening/scaling on selected device before bounded bulk mode GEMM"
+      },
+      "base_groups": 7,
+      "calibration_delta_per_group": 1.0333994708994707e-10,
+      "case": "none-am65-validation-07-b1-signal",
+      "child_elapsed_seconds": 2.1036368680070154,
+      "cn0_db_hz": 12,
+      "control": "signal",
+      "effective_groups": 21,
+      "explicit_array_bound_bytes": 8713760,
+      "frequency_offsets_hz": [
+        -0.0030001725001500084,
+        0.0,
+        0.0030001725001500084
+      ],
+      "known_noise_diagnostic": null,
+      "model": {
+        "doppler_width_hz": 0.2,
+        "nominal_window_seconds": 2.0,
+        "original_block_seconds": 0.03125,
+        "reblock": 4,
+        "window_blocks": 16
+      },
+      "outcomes": {
+        "relaxed": {
+          "correct_admitted": 1,
+          "missed": 0,
+          "wrong_admitted": 0
+        },
+        "strict": {
+          "correct_admitted": 1,
+          "missed": 0,
+          "wrong_admitted": 0
+        }
+      },
+      "phase_loss_bound_db": 3.7677021088524194e-07,
+      "receiver_seconds": 0.4267823190020863,
+      "scores": [
+        6.3524682828167744,
+        118.79799106434126
+      ],
+      "variance_ucb_range": [
+        265.00014896282454,
+        265.2528820009808
+      ],
+      "winning_bit": 1
+    },
+    {
+      "allowed_phase_loss_db": 0.01,
+      "arithmetic": {
+        "bulk": "fp32",
+        "device": "cpu",
+        "finish": "FP64 residual pooling, variance quantiles, likelihood weights/logdet/evidence and bit mixtures",
+        "preparation": "CPU complex128/float64 rank projection, observation whitening, prior roots and rectangular SVD",
+        "tf32_allowed": false,
+        "window_whitening": "FP64 small block whitening/scaling on selected device before bounded bulk mode GEMM"
+      },
+      "base_groups": 7,
+      "calibration_delta_per_group": 1.0333994708994707e-10,
+      "case": "none-am65-validation-07-b1-signal",
+      "child_elapsed_seconds": 2.271641824976541,
+      "cn0_db_hz": 12,
+      "control": "signal",
+      "effective_groups": 21,
+      "explicit_array_bound_bytes": 12072736,
+      "frequency_offsets_hz": [
+        -0.0030001725001500084,
+        0.0,
+        0.0030001725001500084
+      ],
+      "known_noise_diagnostic": null,
+      "model": {
+        "doppler_width_hz": 0.2,
+        "nominal_window_seconds": 4.0,
+        "original_block_seconds": 0.03125,
+        "reblock": 4,
+        "window_blocks": 32
+      },
+      "outcomes": {
+        "relaxed": {
+          "correct_admitted": 1,
+          "missed": 0,
+          "wrong_admitted": 0
+        },
+        "strict": {
+          "correct_admitted": 1,
+          "missed": 0,
+          "wrong_admitted": 0
+        }
+      },
+      "phase_loss_bound_db": 3.7677021088524194e-07,
+      "receiver_seconds": 0.4949347689980641,
+      "scores": [
+        8.945040121742698,
+        121.37213978531483
+      ],
+      "variance_ucb_range": [
+        265.00014896282454,
+        265.2528820009808
+      ],
+      "winning_bit": 1
+    },
+    {
+      "allowed_phase_loss_db": 0.01,
+      "arithmetic": {
+        "bulk": "fp32",
+        "device": "cpu",
+        "finish": "FP64 residual pooling, variance quantiles, likelihood weights/logdet/evidence and bit mixtures",
+        "preparation": "CPU complex128/float64 rank projection, observation whitening, prior roots and rectangular SVD",
+        "tf32_allowed": false,
+        "window_whitening": "FP64 small block whitening/scaling on selected device before bounded bulk mode GEMM"
+      },
+      "base_groups": 7,
+      "calibration_delta_per_group": 1.0333994708994707e-10,
+      "case": "none-am65-validation-40-b0-null",
+      "child_elapsed_seconds": 2.2161873300210573,
+      "cn0_db_hz": 12,
+      "control": "null",
+      "effective_groups": 21,
+      "explicit_array_bound_bytes": 6710624,
+      "frequency_offsets_hz": [
+        -0.0030001725001500084,
+        0.0,
+        0.0030001725001500084
+      ],
+      "known_noise_diagnostic": null,
+      "model": {
+        "doppler_width_hz": 0.0,
+        "nominal_window_seconds": 0.5,
+        "original_block_seconds": 0.03125,
+        "reblock": 4,
+        "window_blocks": 4
+      },
+      "outcomes": {
+        "relaxed": {
+          "false_admitted": 0,
+          "not_admitted": 1
+        },
+        "strict": {
+          "false_admitted": 0,
+          "not_admitted": 1
+        }
+      },
+      "phase_loss_bound_db": 3.7677021088524194e-07,
+      "receiver_seconds": 0.42456907901214436,
+      "scores": [
+        -31.405703758358673,
+        -28.732375787503244
+      ],
+      "variance_ucb_range": [
+        264.27614028882886,
+        264.39401073027324
+      ],
+      "winning_bit": 1
+    },
+    {
+      "allowed_phase_loss_db": 0.01,
+      "arithmetic": {
+        "bulk": "fp32",
+        "device": "cpu",
+        "finish": "FP64 residual pooling, variance quantiles, likelihood weights/logdet/evidence and bit mixtures",
+        "preparation": "CPU complex128/float64 rank projection, observation whitening, prior roots and rectangular SVD",
+        "tf32_allowed": false,
+        "window_whitening": "FP64 small block whitening/scaling on selected device before bounded bulk mode GEMM"
+      },
+      "base_groups": 7,
+      "calibration_delta_per_group": 1.0333994708994707e-10,
+      "case": "none-am65-validation-40-b0-null",
+      "child_elapsed_seconds": 2.1046406410168856,
+      "cn0_db_hz": 12,
+      "control": "null",
+      "effective_groups": 21,
+      "explicit_array_bound_bytes": 8713760,
+      "frequency_offsets_hz": [
+        -0.0030001725001500084,
+        0.0,
+        0.0030001725001500084
+      ],
+      "known_noise_diagnostic": null,
+      "model": {
+        "doppler_width_hz": 0.0,
+        "nominal_window_seconds": 2.0,
+        "original_block_seconds": 0.03125,
+        "reblock": 4,
+        "window_blocks": 16
+      },
+      "outcomes": {
+        "relaxed": {
+          "false_admitted": 0,
+          "not_admitted": 1
+        },
+        "strict": {
+          "false_admitted": 0,
+          "not_admitted": 1
+        }
+      },
+      "phase_loss_bound_db": 3.7677021088524194e-07,
+      "receiver_seconds": 0.3947767910140101,
+      "scores": [
+        -16.03582780493769,
+        -14.71614582751858
+      ],
+      "variance_ucb_range": [
+        264.27614028882886,
+        264.39401073027324
+      ],
+      "winning_bit": 1
+    },
+    {
+      "allowed_phase_loss_db": 0.01,
+      "arithmetic": {
+        "bulk": "fp32",
+        "device": "cpu",
+        "finish": "FP64 residual pooling, variance quantiles, likelihood weights/logdet/evidence and bit mixtures",
+        "preparation": "CPU complex128/float64 rank projection, observation whitening, prior roots and rectangular SVD",
+        "tf32_allowed": false,
+        "window_whitening": "FP64 small block whitening/scaling on selected device before bounded bulk mode GEMM"
+      },
+      "base_groups": 7,
+      "calibration_delta_per_group": 1.0333994708994707e-10,
+      "case": "none-am65-validation-40-b0-null",
+      "child_elapsed_seconds": 2.1136669140250888,
+      "cn0_db_hz": 12,
+      "control": "null",
+      "effective_groups": 21,
+      "explicit_array_bound_bytes": 12072736,
+      "frequency_offsets_hz": [
+        -0.0030001725001500084,
+        0.0,
+        0.0030001725001500084
+      ],
+      "known_noise_diagnostic": null,
+      "model": {
+        "doppler_width_hz": 0.0,
+        "nominal_window_seconds": 4.0,
+        "original_block_seconds": 0.03125,
+        "reblock": 4,
+        "window_blocks": 32
+      },
+      "outcomes": {
+        "relaxed": {
+          "false_admitted": 0,
+          "not_admitted": 1
+        },
+        "strict": {
+          "false_admitted": 0,
+          "not_admitted": 1
+        }
+      },
+      "phase_loss_bound_db": 3.7677021088524194e-07,
+      "receiver_seconds": 0.3809562159876805,
+      "scores": [
+        -12.161801213410481,
+        -13.207214596249948
+      ],
+      "variance_ucb_range": [
+        264.27614028882886,
+        264.39401073027324
+      ],
+      "winning_bit": 0
+    },
+    {
+      "allowed_phase_loss_db": 0.01,
+      "arithmetic": {
+        "bulk": "fp32",
+        "device": "cpu",
+        "finish": "FP64 residual pooling, variance quantiles, likelihood weights/logdet/evidence and bit mixtures",
+        "preparation": "CPU complex128/float64 rank projection, observation whitening, prior roots and rectangular SVD",
+        "tf32_allowed": false,
+        "window_whitening": "FP64 small block whitening/scaling on selected device before bounded bulk mode GEMM"
+      },
+      "base_groups": 7,
+      "calibration_delta_per_group": 1.0333994708994707e-10,
+      "case": "none-am65-validation-40-b0-null",
+      "child_elapsed_seconds": 2.294571045000339,
+      "cn0_db_hz": 12,
+      "control": "null",
+      "effective_groups": 21,
+      "explicit_array_bound_bytes": 6710624,
+      "frequency_offsets_hz": [
+        -0.0030001725001500084,
+        0.0,
+        0.0030001725001500084
+      ],
+      "known_noise_diagnostic": null,
+      "model": {
+        "doppler_width_hz": 0.2,
+        "nominal_window_seconds": 0.5,
+        "original_block_seconds": 0.03125,
+        "reblock": 4,
+        "window_blocks": 4
+      },
+      "outcomes": {
+        "relaxed": {
+          "false_admitted": 0,
+          "not_admitted": 1
+        },
+        "strict": {
+          "false_admitted": 0,
+          "not_admitted": 1
+        }
+      },
+      "phase_loss_bound_db": 3.7677021088524194e-07,
+      "receiver_seconds": 0.46794732700800523,
+      "scores": [
+        -31.14626488013919,
+        -29.085503725049666
+      ],
+      "variance_ucb_range": [
+        264.27614028882886,
+        264.39401073027324
+      ],
+      "winning_bit": 1
+    },
+    {
+      "allowed_phase_loss_db": 0.01,
+      "arithmetic": {
+        "bulk": "fp32",
+        "device": "cpu",
+        "finish": "FP64 residual pooling, variance quantiles, likelihood weights/logdet/evidence and bit mixtures",
+        "preparation": "CPU complex128/float64 rank projection, observation whitening, prior roots and rectangular SVD",
+        "tf32_allowed": false,
+        "window_whitening": "FP64 small block whitening/scaling on selected device before bounded bulk mode GEMM"
+      },
+      "base_groups": 7,
+      "calibration_delta_per_group": 1.0333994708994707e-10,
+      "case": "none-am65-validation-40-b0-null",
+      "child_elapsed_seconds": 2.3255892989982385,
+      "cn0_db_hz": 12,
+      "control": "null",
+      "effective_groups": 21,
+      "explicit_array_bound_bytes": 8713760,
+      "frequency_offsets_hz": [
+        -0.0030001725001500084,
+        0.0,
+        0.0030001725001500084
+      ],
+      "known_noise_diagnostic": null,
+      "model": {
+        "doppler_width_hz": 0.2,
+        "nominal_window_seconds": 2.0,
+        "original_block_seconds": 0.03125,
+        "reblock": 4,
+        "window_blocks": 16
+      },
+      "outcomes": {
+        "relaxed": {
+          "false_admitted": 0,
+          "not_admitted": 1
+        },
+        "strict": {
+          "false_admitted": 0,
+          "not_admitted": 1
+        }
+      },
+      "phase_loss_bound_db": 3.7677021088524194e-07,
+      "receiver_seconds": 0.4726707770023495,
+      "scores": [
+        -19.607520747118436,
+        -18.587401241628637
+      ],
+      "variance_ucb_range": [
+        264.27614028882886,
+        264.39401073027324
+      ],
+      "winning_bit": 1
+    },
+    {
+      "allowed_phase_loss_db": 0.01,
+      "arithmetic": {
+        "bulk": "fp32",
+        "device": "cpu",
+        "finish": "FP64 residual pooling, variance quantiles, likelihood weights/logdet/evidence and bit mixtures",
+        "preparation": "CPU complex128/float64 rank projection, observation whitening, prior roots and rectangular SVD",
+        "tf32_allowed": false,
+        "window_whitening": "FP64 small block whitening/scaling on selected device before bounded bulk mode GEMM"
+      },
+      "base_groups": 7,
+      "calibration_delta_per_group": 1.0333994708994707e-10,
+      "case": "none-am65-validation-40-b0-null",
+      "child_elapsed_seconds": 2.1184076579811517,
+      "cn0_db_hz": 12,
+      "control": "null",
+      "effective_groups": 21,
+      "explicit_array_bound_bytes": 12072736,
+      "frequency_offsets_hz": [
+        -0.0030001725001500084,
+        0.0,
+        0.0030001725001500084
+      ],
+      "known_noise_diagnostic": null,
+      "model": {
+        "doppler_width_hz": 0.2,
+        "nominal_window_seconds": 4.0,
+        "original_block_seconds": 0.03125,
+        "reblock": 4,
+        "window_blocks": 32
+      },
+      "outcomes": {
+        "relaxed": {
+          "false_admitted": 0,
+          "not_admitted": 1
+        },
+        "strict": {
+          "false_admitted": 0,
+          "not_admitted": 1
+        }
+      },
+      "phase_loss_bound_db": 3.7677021088524194e-07,
+      "receiver_seconds": 0.44230434199562296,
+      "scores": [
+        -18.778538974644242,
+        -15.530477198853351
+      ],
+      "variance_ucb_range": [
+        264.27614028882886,
+        264.39401073027324
+      ],
+      "winning_bit": 1
+    },
+    {
+      "allowed_phase_loss_db": 0.01,
+      "arithmetic": {
+        "bulk": "fp32",
+        "device": "cpu",
+        "finish": "FP64 residual pooling, variance quantiles, likelihood weights/logdet/evidence and bit mixtures",
+        "preparation": "CPU complex128/float64 rank projection, observation whitening, prior roots and rectangular SVD",
+        "tf32_allowed": false,
+        "window_whitening": "FP64 small block whitening/scaling on selected device before bounded bulk mode GEMM"
+      },
+      "base_groups": 7,
+      "calibration_delta_per_group": 1.0333994708994707e-10,
+      "case": "none-am65-validation-41-b1-wrong-key",
+      "child_elapsed_seconds": 2.046769353997661,
+      "cn0_db_hz": 12,
+      "control": "wrong-key",
+      "effective_groups": 21,
+      "explicit_array_bound_bytes": 6710624,
+      "frequency_offsets_hz": [
+        -0.0030001725001500084,
+        0.0,
+        0.0030001725001500084
+      ],
+      "known_noise_diagnostic": null,
+      "model": {
+        "doppler_width_hz": 0.0,
+        "nominal_window_seconds": 0.5,
+        "original_block_seconds": 0.03125,
+        "reblock": 4,
+        "window_blocks": 4
+      },
+      "outcomes": {
+        "relaxed": {
+          "false_admitted": 0,
+          "not_admitted": 1
+        },
+        "strict": {
+          "false_admitted": 0,
+          "not_admitted": 1
+        }
+      },
+      "phase_loss_bound_db": 3.7677021088524194e-07,
+      "receiver_seconds": 0.4808424049988389,
+      "scores": [
+        -10.66844478407863,
+        5.266147352039251
+      ],
+      "variance_ucb_range": [
+        265.16806573478726,
+        265.3787342139498
+      ],
+      "winning_bit": 1
+    },
+    {
+      "allowed_phase_loss_db": 0.01,
+      "arithmetic": {
+        "bulk": "fp32",
+        "device": "cpu",
+        "finish": "FP64 residual pooling, variance quantiles, likelihood weights/logdet/evidence and bit mixtures",
+        "preparation": "CPU complex128/float64 rank projection, observation whitening, prior roots and rectangular SVD",
+        "tf32_allowed": false,
+        "window_whitening": "FP64 small block whitening/scaling on selected device before bounded bulk mode GEMM"
+      },
+      "base_groups": 7,
+      "calibration_delta_per_group": 1.0333994708994707e-10,
+      "case": "none-am65-validation-41-b1-wrong-key",
+      "child_elapsed_seconds": 2.046726672007935,
+      "cn0_db_hz": 12,
+      "control": "wrong-key",
+      "effective_groups": 21,
+      "explicit_array_bound_bytes": 8713760,
+      "frequency_offsets_hz": [
+        -0.0030001725001500084,
+        0.0,
+        0.0030001725001500084
+      ],
+      "known_noise_diagnostic": null,
+      "model": {
+        "doppler_width_hz": 0.0,
+        "nominal_window_seconds": 2.0,
+        "original_block_seconds": 0.03125,
+        "reblock": 4,
+        "window_blocks": 16
+      },
+      "outcomes": {
+        "relaxed": {
+          "false_admitted": 0,
+          "not_admitted": 1
+        },
+        "strict": {
+          "false_admitted": 0,
+          "not_admitted": 1
+        }
+      },
+      "phase_loss_bound_db": 3.7677021088524194e-07,
+      "receiver_seconds": 0.37656456499826163,
+      "scores": [
+        -6.965139599073447,
+        -0.475951809143746
+      ],
+      "variance_ucb_range": [
+        265.16806573478726,
+        265.3787342139498
+      ],
+      "winning_bit": 1
+    },
+    {
+      "allowed_phase_loss_db": 0.01,
+      "arithmetic": {
+        "bulk": "fp32",
+        "device": "cpu",
+        "finish": "FP64 residual pooling, variance quantiles, likelihood weights/logdet/evidence and bit mixtures",
+        "preparation": "CPU complex128/float64 rank projection, observation whitening, prior roots and rectangular SVD",
+        "tf32_allowed": false,
+        "window_whitening": "FP64 small block whitening/scaling on selected device before bounded bulk mode GEMM"
+      },
+      "base_groups": 7,
+      "calibration_delta_per_group": 1.0333994708994707e-10,
+      "case": "none-am65-validation-41-b1-wrong-key",
+      "child_elapsed_seconds": 2.0904889829980675,
+      "cn0_db_hz": 12,
+      "control": "wrong-key",
+      "effective_groups": 21,
+      "explicit_array_bound_bytes": 12072736,
+      "frequency_offsets_hz": [
+        -0.0030001725001500084,
+        0.0,
+        0.0030001725001500084
+      ],
+      "known_noise_diagnostic": null,
+      "model": {
+        "doppler_width_hz": 0.0,
+        "nominal_window_seconds": 4.0,
+        "original_block_seconds": 0.03125,
+        "reblock": 4,
+        "window_blocks": 32
+      },
+      "outcomes": {
+        "relaxed": {
+          "false_admitted": 0,
+          "not_admitted": 1
+        },
+        "strict": {
+          "false_admitted": 0,
+          "not_admitted": 1
+        }
+      },
+      "phase_loss_bound_db": 3.7677021088524194e-07,
+      "receiver_seconds": 0.397989040997345,
+      "scores": [
+        -7.41179894670427,
+        -7.044159594628795
+      ],
+      "variance_ucb_range": [
+        265.16806573478726,
+        265.3787342139498
+      ],
+      "winning_bit": 1
+    },
+    {
+      "allowed_phase_loss_db": 0.01,
+      "arithmetic": {
+        "bulk": "fp32",
+        "device": "cpu",
+        "finish": "FP64 residual pooling, variance quantiles, likelihood weights/logdet/evidence and bit mixtures",
+        "preparation": "CPU complex128/float64 rank projection, observation whitening, prior roots and rectangular SVD",
+        "tf32_allowed": false,
+        "window_whitening": "FP64 small block whitening/scaling on selected device before bounded bulk mode GEMM"
+      },
+      "base_groups": 7,
+      "calibration_delta_per_group": 1.0333994708994707e-10,
+      "case": "none-am65-validation-41-b1-wrong-key",
+      "child_elapsed_seconds": 2.007822304003639,
+      "cn0_db_hz": 12,
+      "control": "wrong-key",
+      "effective_groups": 21,
+      "explicit_array_bound_bytes": 6710624,
+      "frequency_offsets_hz": [
+        -0.0030001725001500084,
+        0.0,
+        0.0030001725001500084
+      ],
+      "known_noise_diagnostic": null,
+      "model": {
+        "doppler_width_hz": 0.2,
+        "nominal_window_seconds": 0.5,
+        "original_block_seconds": 0.03125,
+        "reblock": 4,
+        "window_blocks": 4
+      },
+      "outcomes": {
+        "relaxed": {
+          "false_admitted": 0,
+          "not_admitted": 1
+        },
+        "strict": {
+          "false_admitted": 0,
+          "not_admitted": 1
+        }
+      },
+      "phase_loss_bound_db": 3.7677021088524194e-07,
+      "receiver_seconds": 0.42093052400741726,
+      "scores": [
+        -9.932730225321416,
+        6.911589979515751
+      ],
+      "variance_ucb_range": [
+        265.16806573478726,
+        265.3787342139498
+      ],
+      "winning_bit": 1
+    },
+    {
+      "allowed_phase_loss_db": 0.01,
+      "arithmetic": {
+        "bulk": "fp32",
+        "device": "cpu",
+        "finish": "FP64 residual pooling, variance quantiles, likelihood weights/logdet/evidence and bit mixtures",
+        "preparation": "CPU complex128/float64 rank projection, observation whitening, prior roots and rectangular SVD",
+        "tf32_allowed": false,
+        "window_whitening": "FP64 small block whitening/scaling on selected device before bounded bulk mode GEMM"
+      },
+      "base_groups": 7,
+      "calibration_delta_per_group": 1.0333994708994707e-10,
+      "case": "none-am65-validation-41-b1-wrong-key",
+      "child_elapsed_seconds": 2.0118931149772834,
+      "cn0_db_hz": 12,
+      "control": "wrong-key",
+      "effective_groups": 21,
+      "explicit_array_bound_bytes": 8713760,
+      "frequency_offsets_hz": [
+        -0.0030001725001500084,
+        0.0,
+        0.0030001725001500084
+      ],
+      "known_noise_diagnostic": null,
+      "model": {
+        "doppler_width_hz": 0.2,
+        "nominal_window_seconds": 2.0,
+        "original_block_seconds": 0.03125,
+        "reblock": 4,
+        "window_blocks": 16
+      },
+      "outcomes": {
+        "relaxed": {
+          "false_admitted": 0,
+          "not_admitted": 1
+        },
+        "strict": {
+          "false_admitted": 0,
+          "not_admitted": 1
+        }
+      },
+      "phase_loss_bound_db": 3.7677021088524194e-07,
+      "receiver_seconds": 0.39489022598718293,
+      "scores": [
+        -3.4378100392073145,
+        -1.3475340218764857
+      ],
+      "variance_ucb_range": [
+        265.16806573478726,
+        265.3787342139498
+      ],
+      "winning_bit": 1
+    },
+    {
+      "allowed_phase_loss_db": 0.01,
+      "arithmetic": {
+        "bulk": "fp32",
+        "device": "cpu",
+        "finish": "FP64 residual pooling, variance quantiles, likelihood weights/logdet/evidence and bit mixtures",
+        "preparation": "CPU complex128/float64 rank projection, observation whitening, prior roots and rectangular SVD",
+        "tf32_allowed": false,
+        "window_whitening": "FP64 small block whitening/scaling on selected device before bounded bulk mode GEMM"
+      },
+      "base_groups": 7,
+      "calibration_delta_per_group": 1.0333994708994707e-10,
+      "case": "none-am65-validation-41-b1-wrong-key",
+      "child_elapsed_seconds": 2.089890452014515,
+      "cn0_db_hz": 12,
+      "control": "wrong-key",
+      "effective_groups": 21,
+      "explicit_array_bound_bytes": 12072736,
+      "frequency_offsets_hz": [
+        -0.0030001725001500084,
+        0.0,
+        0.0030001725001500084
+      ],
+      "known_noise_diagnostic": null,
+      "model": {
+        "doppler_width_hz": 0.2,
+        "nominal_window_seconds": 4.0,
+        "original_block_seconds": 0.03125,
+        "reblock": 4,
+        "window_blocks": 32
+      },
+      "outcomes": {
+        "relaxed": {
+          "false_admitted": 0,
+          "not_admitted": 1
+        },
+        "strict": {
+          "false_admitted": 0,
+          "not_admitted": 1
+        }
+      },
+      "phase_loss_bound_db": 3.7677021088524194e-07,
+      "receiver_seconds": 0.44020147700211965,
+      "scores": [
+        -3.078604937252299,
+        -0.9613830638003091
+      ],
+      "variance_ucb_range": [
+        265.16806573478726,
+        265.3787342139498
+      ],
+      "winning_bit": 1
+    },
+    {
+      "allowed_phase_loss_db": 0.02,
+      "arithmetic": {
+        "bulk": "fp32",
+        "device": "cpu",
+        "finish": "FP64 residual pooling, variance quantiles, likelihood weights/logdet/evidence and bit mixtures",
+        "preparation": "CPU complex128/float64 rank projection, observation whitening, prior roots and rectangular SVD",
+        "tf32_allowed": false,
+        "window_whitening": "FP64 small block whitening/scaling on selected device before bounded bulk mode GEMM"
+      },
+      "base_groups": 7,
+      "calibration_delta_per_group": 3.4068114425257278e-12,
+      "case": "shared-microwave-am65-validation-41-b1-wrong-key",
+      "child_elapsed_seconds": 5.683917704009218,
+      "cn0_db_hz": 12,
+      "control": "wrong-key",
+      "effective_groups": 637,
+      "explicit_array_bound_bytes": 6779616,
+      "frequency_offsets_hz": [
+        -0.5800001725289999,
+        -0.5671112798061333,
+        -0.5542223870832667,
+        -0.5413334943603999,
+        -0.5284446016375333,
+        -0.5155557089146666,
+        -0.5026668161918,
+        -0.4897779234689333,
+        -0.4768890307460666,
+        -0.46400013802319995,
+        -0.4511112453003333,
+        -0.4382223525774666,
+        -0.42533345985459997,
+        -0.4124445671317333,
+        -0.39955567440886663,
+        -0.386666781686,
+        -0.3737778889631333,
+        -0.3608889962402666,
+        -0.34800010351739996,
+        -0.3351112107945333,
+        -0.3222223180716666,
+        -0.3093334253488,
+        -0.2964445326259333,
+        -0.28355563990306665,
+        -0.2706667471802,
+        -0.2577778544573333,
+        -0.24488896173446667,
+        -0.23200006901159997,
+        -0.21911117628873333,
+        -0.20622228356586664,
+        -0.193333390843,
+        -0.1804444981201333,
+        -0.16755560539726666,
+        -0.15466671267440002,
+        -0.14177781995153332,
+        -0.12888892722866668,
+        -0.11600003450579999,
+        -0.10311114178293335,
+        -0.09022224906006665,
+        -0.07733335633719995,
+        -0.06444446361433331,
+        -0.05155557089146667,
+        -0.03866667816860003,
+        -0.025777785445733392,
+        -0.01288889272286664,
+        0.0,
+        0.012888892722866665,
+        0.02577778544573333,
+        0.03866667816859999,
+        0.05155557089146666,
+        0.06444446361433333,
+        0.07733335633719998,
+        0.09022224906006665,
+        0.10311114178293332,
+        0.11600003450579999,
+        0.12888892722866666,
+        0.14177781995153332,
+        0.15466671267439996,
+        0.16755560539726663,
+        0.1804444981201333,
+        0.19333339084299997,
+        0.20622228356586664,
+        0.2191111762887333,
+        0.23200006901159997,
+        0.24488896173446664,
+        0.2577778544573333,
+        0.27066674718019995,
+        0.28355563990306665,
+        0.2964445326259333,
+        0.30933342534879993,
+        0.3222223180716666,
+        0.33511121079453327,
+        0.34800010351739996,
+        0.3608889962402666,
+        0.3737778889631333,
+        0.38666678168599994,
+        0.39955567440886663,
+        0.4124445671317333,
+        0.4253334598545999,
+        0.4382223525774666,
+        0.45111124530033325,
+        0.46400013802319995,
+        0.4768890307460666,
+        0.4897779234689333,
+        0.5026668161918,
+        0.5155557089146666,
+        0.5284446016375333,
+        0.5413334943603999,
+        0.5542223870832665,
+        0.5671112798061333,
+        0.5800001725289999
+      ],
+      "known_noise_diagnostic": null,
+      "model": {
+        "doppler_width_hz": 0.0,
+        "nominal_window_seconds": 0.5,
+        "original_block_seconds": 0.03125,
+        "reblock": 4,
+        "window_blocks": 4
+      },
+      "outcomes": {
+        "relaxed": {
+          "false_admitted": 0,
+          "not_admitted": 1
+        },
+        "strict": {
+          "false_admitted": 0,
+          "not_admitted": 1
+        }
+      },
+      "phase_loss_bound_db": 0.014088837894943355,
+      "receiver_seconds": 3.8990484600071795,
+      "scores": [
+        13.566721683131455,
+        5.644909789925226
+      ],
+      "variance_ucb_range": [
+        264.97345756833533,
+        265.16685664898284
+      ],
+      "winning_bit": 0
+    },
+    {
+      "allowed_phase_loss_db": 0.02,
+      "arithmetic": {
+        "bulk": "fp32",
+        "device": "cpu",
+        "finish": "FP64 residual pooling, variance quantiles, likelihood weights/logdet/evidence and bit mixtures",
+        "preparation": "CPU complex128/float64 rank projection, observation whitening, prior roots and rectangular SVD",
+        "tf32_allowed": false,
+        "window_whitening": "FP64 small block whitening/scaling on selected device before bounded bulk mode GEMM"
+      },
+      "base_groups": 7,
+      "calibration_delta_per_group": 3.4068114425257278e-12,
+      "case": "shared-microwave-am65-validation-41-b1-wrong-key",
+      "child_elapsed_seconds": 3.73286777298199,
+      "cn0_db_hz": 12,
+      "control": "wrong-key",
+      "effective_groups": 637,
+      "explicit_array_bound_bytes": 8782752,
+      "frequency_offsets_hz": [
+        -0.5800001725289999,
+        -0.5671112798061333,
+        -0.5542223870832667,
+        -0.5413334943603999,
+        -0.5284446016375333,
+        -0.5155557089146666,
+        -0.5026668161918,
+        -0.4897779234689333,
+        -0.4768890307460666,
+        -0.46400013802319995,
+        -0.4511112453003333,
+        -0.4382223525774666,
+        -0.42533345985459997,
+        -0.4124445671317333,
+        -0.39955567440886663,
+        -0.386666781686,
+        -0.3737778889631333,
+        -0.3608889962402666,
+        -0.34800010351739996,
+        -0.3351112107945333,
+        -0.3222223180716666,
+        -0.3093334253488,
+        -0.2964445326259333,
+        -0.28355563990306665,
+        -0.2706667471802,
+        -0.2577778544573333,
+        -0.24488896173446667,
+        -0.23200006901159997,
+        -0.21911117628873333,
+        -0.20622228356586664,
+        -0.193333390843,
+        -0.1804444981201333,
+        -0.16755560539726666,
+        -0.15466671267440002,
+        -0.14177781995153332,
+        -0.12888892722866668,
+        -0.11600003450579999,
+        -0.10311114178293335,
+        -0.09022224906006665,
+        -0.07733335633719995,
+        -0.06444446361433331,
+        -0.05155557089146667,
+        -0.03866667816860003,
+        -0.025777785445733392,
+        -0.01288889272286664,
+        0.0,
+        0.012888892722866665,
+        0.02577778544573333,
+        0.03866667816859999,
+        0.05155557089146666,
+        0.06444446361433333,
+        0.07733335633719998,
+        0.09022224906006665,
+        0.10311114178293332,
+        0.11600003450579999,
+        0.12888892722866666,
+        0.14177781995153332,
+        0.15466671267439996,
+        0.16755560539726663,
+        0.1804444981201333,
+        0.19333339084299997,
+        0.20622228356586664,
+        0.2191111762887333,
+        0.23200006901159997,
+        0.24488896173446664,
+        0.2577778544573333,
+        0.27066674718019995,
+        0.28355563990306665,
+        0.2964445326259333,
+        0.30933342534879993,
+        0.3222223180716666,
+        0.33511121079453327,
+        0.34800010351739996,
+        0.3608889962402666,
+        0.3737778889631333,
+        0.38666678168599994,
+        0.39955567440886663,
+        0.4124445671317333,
+        0.4253334598545999,
+        0.4382223525774666,
+        0.45111124530033325,
+        0.46400013802319995,
+        0.4768890307460666,
+        0.4897779234689333,
+        0.5026668161918,
+        0.5155557089146666,
+        0.5284446016375333,
+        0.5413334943603999,
+        0.5542223870832665,
+        0.5671112798061333,
+        0.5800001725289999
+      ],
+      "known_noise_diagnostic": null,
+      "model": {
+        "doppler_width_hz": 0.0,
+        "nominal_window_seconds": 2.0,
+        "original_block_seconds": 0.03125,
+        "reblock": 4,
+        "window_blocks": 16
+      },
+      "outcomes": {
+        "relaxed": {
+          "false_admitted": 0,
+          "not_admitted": 1
+        },
+        "strict": {
+          "false_admitted": 0,
+          "not_admitted": 1
+        }
+      },
+      "phase_loss_bound_db": 0.014088837894943355,
+      "receiver_seconds": 2.075107687007403,
+      "scores": [
+        -3.1429890278662045,
+        -4.051997021626501
+      ],
+      "variance_ucb_range": [
+        264.97345756833533,
+        265.16685664898284
+      ],
+      "winning_bit": 0
+    },
+    {
+      "allowed_phase_loss_db": 0.02,
+      "arithmetic": {
+        "bulk": "fp32",
+        "device": "cpu",
+        "finish": "FP64 residual pooling, variance quantiles, likelihood weights/logdet/evidence and bit mixtures",
+        "preparation": "CPU complex128/float64 rank projection, observation whitening, prior roots and rectangular SVD",
+        "tf32_allowed": false,
+        "window_whitening": "FP64 small block whitening/scaling on selected device before bounded bulk mode GEMM"
+      },
+      "base_groups": 7,
+      "calibration_delta_per_group": 3.4068114425257278e-12,
+      "case": "shared-microwave-am65-validation-41-b1-wrong-key",
+      "child_elapsed_seconds": 3.280536520993337,
+      "cn0_db_hz": 12,
+      "control": "wrong-key",
+      "effective_groups": 637,
+      "explicit_array_bound_bytes": 12141728,
+      "frequency_offsets_hz": [
+        -0.5800001725289999,
+        -0.5671112798061333,
+        -0.5542223870832667,
+        -0.5413334943603999,
+        -0.5284446016375333,
+        -0.5155557089146666,
+        -0.5026668161918,
+        -0.4897779234689333,
+        -0.4768890307460666,
+        -0.46400013802319995,
+        -0.4511112453003333,
+        -0.4382223525774666,
+        -0.42533345985459997,
+        -0.4124445671317333,
+        -0.39955567440886663,
+        -0.386666781686,
+        -0.3737778889631333,
+        -0.3608889962402666,
+        -0.34800010351739996,
+        -0.3351112107945333,
+        -0.3222223180716666,
+        -0.3093334253488,
+        -0.2964445326259333,
+        -0.28355563990306665,
+        -0.2706667471802,
+        -0.2577778544573333,
+        -0.24488896173446667,
+        -0.23200006901159997,
+        -0.21911117628873333,
+        -0.20622228356586664,
+        -0.193333390843,
+        -0.1804444981201333,
+        -0.16755560539726666,
+        -0.15466671267440002,
+        -0.14177781995153332,
+        -0.12888892722866668,
+        -0.11600003450579999,
+        -0.10311114178293335,
+        -0.09022224906006665,
+        -0.07733335633719995,
+        -0.06444446361433331,
+        -0.05155557089146667,
+        -0.03866667816860003,
+        -0.025777785445733392,
+        -0.01288889272286664,
+        0.0,
+        0.012888892722866665,
+        0.02577778544573333,
+        0.03866667816859999,
+        0.05155557089146666,
+        0.06444446361433333,
+        0.07733335633719998,
+        0.09022224906006665,
+        0.10311114178293332,
+        0.11600003450579999,
+        0.12888892722866666,
+        0.14177781995153332,
+        0.15466671267439996,
+        0.16755560539726663,
+        0.1804444981201333,
+        0.19333339084299997,
+        0.20622228356586664,
+        0.2191111762887333,
+        0.23200006901159997,
+        0.24488896173446664,
+        0.2577778544573333,
+        0.27066674718019995,
+        0.28355563990306665,
+        0.2964445326259333,
+        0.30933342534879993,
+        0.3222223180716666,
+        0.33511121079453327,
+        0.34800010351739996,
+        0.3608889962402666,
+        0.3737778889631333,
+        0.38666678168599994,
+        0.39955567440886663,
+        0.4124445671317333,
+        0.4253334598545999,
+        0.4382223525774666,
+        0.45111124530033325,
+        0.46400013802319995,
+        0.4768890307460666,
+        0.4897779234689333,
+        0.5026668161918,
+        0.5155557089146666,
+        0.5284446016375333,
+        0.5413334943603999,
+        0.5542223870832665,
+        0.5671112798061333,
+        0.5800001725289999
+      ],
+      "known_noise_diagnostic": null,
+      "model": {
+        "doppler_width_hz": 0.0,
+        "nominal_window_seconds": 4.0,
+        "original_block_seconds": 0.03125,
+        "reblock": 4,
+        "window_blocks": 32
+      },
+      "outcomes": {
+        "relaxed": {
+          "false_admitted": 0,
+          "not_admitted": 1
+        },
+        "strict": {
+          "false_admitted": 0,
+          "not_admitted": 1
+        }
+      },
+      "phase_loss_bound_db": 0.014088837894943355,
+      "receiver_seconds": 1.7114069300005212,
+      "scores": [
+        -0.3050995005001589,
+        1.1425518314792846
+      ],
+      "variance_ucb_range": [
+        264.97345756833533,
+        265.16685664898284
+      ],
+      "winning_bit": 1
+    },
+    {
+      "allowed_phase_loss_db": 0.02,
+      "arithmetic": {
+        "bulk": "fp32",
+        "device": "cpu",
+        "finish": "FP64 residual pooling, variance quantiles, likelihood weights/logdet/evidence and bit mixtures",
+        "preparation": "CPU complex128/float64 rank projection, observation whitening, prior roots and rectangular SVD",
+        "tf32_allowed": false,
+        "window_whitening": "FP64 small block whitening/scaling on selected device before bounded bulk mode GEMM"
+      },
+      "base_groups": 7,
+      "calibration_delta_per_group": 3.4068114425257278e-12,
+      "case": "shared-microwave-am65-validation-41-b1-wrong-key",
+      "child_elapsed_seconds": 5.931900224997662,
+      "cn0_db_hz": 12,
+      "control": "wrong-key",
+      "effective_groups": 637,
+      "explicit_array_bound_bytes": 6779616,
+      "frequency_offsets_hz": [
+        -0.5800001725289999,
+        -0.5671112798061333,
+        -0.5542223870832667,
+        -0.5413334943603999,
+        -0.5284446016375333,
+        -0.5155557089146666,
+        -0.5026668161918,
+        -0.4897779234689333,
+        -0.4768890307460666,
+        -0.46400013802319995,
+        -0.4511112453003333,
+        -0.4382223525774666,
+        -0.42533345985459997,
+        -0.4124445671317333,
+        -0.39955567440886663,
+        -0.386666781686,
+        -0.3737778889631333,
+        -0.3608889962402666,
+        -0.34800010351739996,
+        -0.3351112107945333,
+        -0.3222223180716666,
+        -0.3093334253488,
+        -0.2964445326259333,
+        -0.28355563990306665,
+        -0.2706667471802,
+        -0.2577778544573333,
+        -0.24488896173446667,
+        -0.23200006901159997,
+        -0.21911117628873333,
+        -0.20622228356586664,
+        -0.193333390843,
+        -0.1804444981201333,
+        -0.16755560539726666,
+        -0.15466671267440002,
+        -0.14177781995153332,
+        -0.12888892722866668,
+        -0.11600003450579999,
+        -0.10311114178293335,
+        -0.09022224906006665,
+        -0.07733335633719995,
+        -0.06444446361433331,
+        -0.05155557089146667,
+        -0.03866667816860003,
+        -0.025777785445733392,
+        -0.01288889272286664,
+        0.0,
+        0.012888892722866665,
+        0.02577778544573333,
+        0.03866667816859999,
+        0.05155557089146666,
+        0.06444446361433333,
+        0.07733335633719998,
+        0.09022224906006665,
+        0.10311114178293332,
+        0.11600003450579999,
+        0.12888892722866666,
+        0.14177781995153332,
+        0.15466671267439996,
+        0.16755560539726663,
+        0.1804444981201333,
+        0.19333339084299997,
+        0.20622228356586664,
+        0.2191111762887333,
+        0.23200006901159997,
+        0.24488896173446664,
+        0.2577778544573333,
+        0.27066674718019995,
+        0.28355563990306665,
+        0.2964445326259333,
+        0.30933342534879993,
+        0.3222223180716666,
+        0.33511121079453327,
+        0.34800010351739996,
+        0.3608889962402666,
+        0.3737778889631333,
+        0.38666678168599994,
+        0.39955567440886663,
+        0.4124445671317333,
+        0.4253334598545999,
+        0.4382223525774666,
+        0.45111124530033325,
+        0.46400013802319995,
+        0.4768890307460666,
+        0.4897779234689333,
+        0.5026668161918,
+        0.5155557089146666,
+        0.5284446016375333,
+        0.5413334943603999,
+        0.5542223870832665,
+        0.5671112798061333,
+        0.5800001725289999
+      ],
+      "known_noise_diagnostic": null,
+      "model": {
+        "doppler_width_hz": 0.2,
+        "nominal_window_seconds": 0.5,
+        "original_block_seconds": 0.03125,
+        "reblock": 4,
+        "window_blocks": 4
+      },
+      "outcomes": {
+        "relaxed": {
+          "false_admitted": 0,
+          "not_admitted": 1
+        },
+        "strict": {
+          "false_admitted": 0,
+          "not_admitted": 1
+        }
+      },
+      "phase_loss_bound_db": 0.014088837894943355,
+      "receiver_seconds": 4.38345237399335,
+      "scores": [
+        15.015960376175297,
+        6.266271630195675
+      ],
+      "variance_ucb_range": [
+        264.97345756833533,
+        265.16685664898284
+      ],
+      "winning_bit": 0
+    },
+    {
+      "allowed_phase_loss_db": 0.02,
+      "arithmetic": {
+        "bulk": "fp32",
+        "device": "cpu",
+        "finish": "FP64 residual pooling, variance quantiles, likelihood weights/logdet/evidence and bit mixtures",
+        "preparation": "CPU complex128/float64 rank projection, observation whitening, prior roots and rectangular SVD",
+        "tf32_allowed": false,
+        "window_whitening": "FP64 small block whitening/scaling on selected device before bounded bulk mode GEMM"
+      },
+      "base_groups": 7,
+      "calibration_delta_per_group": 3.4068114425257278e-12,
+      "case": "shared-microwave-am65-validation-41-b1-wrong-key",
+      "child_elapsed_seconds": 4.948506626999006,
+      "cn0_db_hz": 12,
+      "control": "wrong-key",
+      "effective_groups": 637,
+      "explicit_array_bound_bytes": 8782752,
+      "frequency_offsets_hz": [
+        -0.5800001725289999,
+        -0.5671112798061333,
+        -0.5542223870832667,
+        -0.5413334943603999,
+        -0.5284446016375333,
+        -0.5155557089146666,
+        -0.5026668161918,
+        -0.4897779234689333,
+        -0.4768890307460666,
+        -0.46400013802319995,
+        -0.4511112453003333,
+        -0.4382223525774666,
+        -0.42533345985459997,
+        -0.4124445671317333,
+        -0.39955567440886663,
+        -0.386666781686,
+        -0.3737778889631333,
+        -0.3608889962402666,
+        -0.34800010351739996,
+        -0.3351112107945333,
+        -0.3222223180716666,
+        -0.3093334253488,
+        -0.2964445326259333,
+        -0.28355563990306665,
+        -0.2706667471802,
+        -0.2577778544573333,
+        -0.24488896173446667,
+        -0.23200006901159997,
+        -0.21911117628873333,
+        -0.20622228356586664,
+        -0.193333390843,
+        -0.1804444981201333,
+        -0.16755560539726666,
+        -0.15466671267440002,
+        -0.14177781995153332,
+        -0.12888892722866668,
+        -0.11600003450579999,
+        -0.10311114178293335,
+        -0.09022224906006665,
+        -0.07733335633719995,
+        -0.06444446361433331,
+        -0.05155557089146667,
+        -0.03866667816860003,
+        -0.025777785445733392,
+        -0.01288889272286664,
+        0.0,
+        0.012888892722866665,
+        0.02577778544573333,
+        0.03866667816859999,
+        0.05155557089146666,
+        0.06444446361433333,
+        0.07733335633719998,
+        0.09022224906006665,
+        0.10311114178293332,
+        0.11600003450579999,
+        0.12888892722866666,
+        0.14177781995153332,
+        0.15466671267439996,
+        0.16755560539726663,
+        0.1804444981201333,
+        0.19333339084299997,
+        0.20622228356586664,
+        0.2191111762887333,
+        0.23200006901159997,
+        0.24488896173446664,
+        0.2577778544573333,
+        0.27066674718019995,
+        0.28355563990306665,
+        0.2964445326259333,
+        0.30933342534879993,
+        0.3222223180716666,
+        0.33511121079453327,
+        0.34800010351739996,
+        0.3608889962402666,
+        0.3737778889631333,
+        0.38666678168599994,
+        0.39955567440886663,
+        0.4124445671317333,
+        0.4253334598545999,
+        0.4382223525774666,
+        0.45111124530033325,
+        0.46400013802319995,
+        0.4768890307460666,
+        0.4897779234689333,
+        0.5026668161918,
+        0.5155557089146666,
+        0.5284446016375333,
+        0.5413334943603999,
+        0.5542223870832665,
+        0.5671112798061333,
+        0.5800001725289999
+      ],
+      "known_noise_diagnostic": null,
+      "model": {
+        "doppler_width_hz": 0.2,
+        "nominal_window_seconds": 2.0,
+        "original_block_seconds": 0.03125,
+        "reblock": 4,
+        "window_blocks": 16
+      },
+      "outcomes": {
+        "relaxed": {
+          "false_admitted": 0,
+          "not_admitted": 1
+        },
+        "strict": {
+          "false_admitted": 0,
+          "not_admitted": 1
+        }
+      },
+      "phase_loss_bound_db": 0.014088837894943355,
+      "receiver_seconds": 3.301224425988039,
+      "scores": [
+        4.059462529129345,
+        -1.294060196441034
+      ],
+      "variance_ucb_range": [
+        264.97345756833533,
+        265.16685664898284
+      ],
+      "winning_bit": 0
+    },
+    {
+      "allowed_phase_loss_db": 0.02,
+      "arithmetic": {
+        "bulk": "fp32",
+        "device": "cpu",
+        "finish": "FP64 residual pooling, variance quantiles, likelihood weights/logdet/evidence and bit mixtures",
+        "preparation": "CPU complex128/float64 rank projection, observation whitening, prior roots and rectangular SVD",
+        "tf32_allowed": false,
+        "window_whitening": "FP64 small block whitening/scaling on selected device before bounded bulk mode GEMM"
+      },
+      "base_groups": 7,
+      "calibration_delta_per_group": 3.4068114425257278e-12,
+      "case": "shared-microwave-am65-validation-41-b1-wrong-key",
+      "child_elapsed_seconds": 5.471969098987756,
+      "cn0_db_hz": 12,
+      "control": "wrong-key",
+      "effective_groups": 637,
+      "explicit_array_bound_bytes": 12141728,
+      "frequency_offsets_hz": [
+        -0.5800001725289999,
+        -0.5671112798061333,
+        -0.5542223870832667,
+        -0.5413334943603999,
+        -0.5284446016375333,
+        -0.5155557089146666,
+        -0.5026668161918,
+        -0.4897779234689333,
+        -0.4768890307460666,
+        -0.46400013802319995,
+        -0.4511112453003333,
+        -0.4382223525774666,
+        -0.42533345985459997,
+        -0.4124445671317333,
+        -0.39955567440886663,
+        -0.386666781686,
+        -0.3737778889631333,
+        -0.3608889962402666,
+        -0.34800010351739996,
+        -0.3351112107945333,
+        -0.3222223180716666,
+        -0.3093334253488,
+        -0.2964445326259333,
+        -0.28355563990306665,
+        -0.2706667471802,
+        -0.2577778544573333,
+        -0.24488896173446667,
+        -0.23200006901159997,
+        -0.21911117628873333,
+        -0.20622228356586664,
+        -0.193333390843,
+        -0.1804444981201333,
+        -0.16755560539726666,
+        -0.15466671267440002,
+        -0.14177781995153332,
+        -0.12888892722866668,
+        -0.11600003450579999,
+        -0.10311114178293335,
+        -0.09022224906006665,
+        -0.07733335633719995,
+        -0.06444446361433331,
+        -0.05155557089146667,
+        -0.03866667816860003,
+        -0.025777785445733392,
+        -0.01288889272286664,
+        0.0,
+        0.012888892722866665,
+        0.02577778544573333,
+        0.03866667816859999,
+        0.05155557089146666,
+        0.06444446361433333,
+        0.07733335633719998,
+        0.09022224906006665,
+        0.10311114178293332,
+        0.11600003450579999,
+        0.12888892722866666,
+        0.14177781995153332,
+        0.15466671267439996,
+        0.16755560539726663,
+        0.1804444981201333,
+        0.19333339084299997,
+        0.20622228356586664,
+        0.2191111762887333,
+        0.23200006901159997,
+        0.24488896173446664,
+        0.2577778544573333,
+        0.27066674718019995,
+        0.28355563990306665,
+        0.2964445326259333,
+        0.30933342534879993,
+        0.3222223180716666,
+        0.33511121079453327,
+        0.34800010351739996,
+        0.3608889962402666,
+        0.3737778889631333,
+        0.38666678168599994,
+        0.39955567440886663,
+        0.4124445671317333,
+        0.4253334598545999,
+        0.4382223525774666,
+        0.45111124530033325,
+        0.46400013802319995,
+        0.4768890307460666,
+        0.4897779234689333,
+        0.5026668161918,
+        0.5155557089146666,
+        0.5284446016375333,
+        0.5413334943603999,
+        0.5542223870832665,
+        0.5671112798061333,
+        0.5800001725289999
+      ],
+      "known_noise_diagnostic": null,
+      "model": {
+        "doppler_width_hz": 0.2,
+        "nominal_window_seconds": 4.0,
+        "original_block_seconds": 0.03125,
+        "reblock": 4,
+        "window_blocks": 32
+      },
+      "outcomes": {
+        "relaxed": {
+          "false_admitted": 0,
+          "not_admitted": 1
+        },
+        "strict": {
+          "false_admitted": 0,
+          "not_admitted": 1
+        }
+      },
+      "phase_loss_bound_db": 0.014088837894943355,
+      "receiver_seconds": 3.9039371969993226,
+      "scores": [
+        -0.46007094723340103,
+        -0.34389050031084967
+      ],
+      "variance_ucb_range": [
+        264.97345756833533,
+        265.16685664898284
+      ],
+      "winning_bit": 1
+    }
+  ],
+  "schema": "triad-continuity-independent-review-v1",
+  "scope": "Post-failure paired diagnostics on five retained captures; no independent reception qualification, receiver changes or new waveform exports.",
+  "source_identity": {
+    "audit_time_dependency_sha256": {
+      "tools/triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba",
+      "tools/triad_gaussian_window.py": "0e262ea3cc793073602701ec96e441a4fef3f378a56fb624771b651d8a8fd4fa",
+      "tools/triad_group_acquire.py": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+      "tools/triad_noise_likelihood.py": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110",
+      "tools/triad_state_workspace.py": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923"
+    },
+    "later_observed_gaussian_window_sha256": "b22fe002864922e44bc7e10000672a163353818f610c4882bae5d62cfe1cf883",
+    "later_source_change": "Coordinator confirmed an expected concurrent B1-only batched-SVD change,0e262e... to b22fe002...,after the initial review. This screen uses4/16/32 blocks per window. No scores were rerun; historical closure remains the identity of this record.",
+    "matching_initial_audit_and_historical_closure": true,
+    "old_source_variant_closure_sha256": {
+      "tools/triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba",
+      "tools/triad_gaussian_window.py": "0e262ea3cc793073602701ec96e441a4fef3f378a56fb624771b651d8a8fd4fa",
+      "tools/triad_group_acquire.py": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+      "tools/triad_noise_likelihood.py": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110",
+      "tools/triad_state_workspace.py": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923"
+    },
+    "receiver_entrypoint_sha256": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+    "scope": "Every new score binds the receiver entrypoint. The initial audit-time helper files matched the original source-variant closure. A later concurrent helper edit is separately recorded; the probe did not bind helpers immediately before/after execution,so no contemporaneous loaded-code attestation is claimed."
+  },
+  "timing": {
+    "max_parallel_jobs": 2,
+    "pilot_child_elapsed_seconds": 2.2161873300210573,
+    "resumed_batch_elapsed_seconds": 103.83834544700221,
+    "resumed_plus_pilot_child_seconds": 106.05453277702327,
+    "scope": "103.838s is the resumed batch clock and excludes the already-retained pilot. Adding its2.216s child gives106.055s, excluding harness-failure/debugging interval; child sums are not wall time.",
+    "sum_receiver_seconds": 153.16710426699137,
+    "sum_unique_child_elapsed_seconds": 205.99633433498093,
+    "threads_per_child": 1
+  },
+  "worker_summary_sha256": "daa1b4c38d037f74894676eaf0a899d454b4973d3001fe1d8b6badbbc37a0263"
+}

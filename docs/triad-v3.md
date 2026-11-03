@@ -15,6 +15,16 @@ The subsequent [configuration and acquisition extension](validation-data/triad-v
 adds direct zero-shift and shared-clock simulation, an explicit independent
 modulation timescale, and block-statistic frequency reuse. Its measured coverage
 and remaining gaps are separate from the historical census.
+The newer [sampled FFT acquisition study](validation-data/triad-v3/2026-11-03-fft-timing/README.md)
+reuses one actual-noisy sampled base group across a complete integer-arrival/CFO
+bank. It retains fixed clock/epoch, one fractional timing anchor and a static
+two-tap channel; all declared alternatives enter the normalized likelihood.
+Its bounded public FP64 edge refinement and exact one-block SVD batching reduce
+cost without changing the retained pilot scores. The
+[continuity followup](validation-data/triad-v3/2026-11-03-fft-timing/continuity/README.md)
+supports existing global/continuity choices on selected controls, with no new
+weak-signal gain over global reception. These are scoped CPU/algorithm results,
+not general acquisition, GPU acceleration or reliability claims.
 
 The [noise-calibration and configuration-diversity extension](triad-noise-calibration.md)
 documents the common-scale and independent-residual likelihoods, their explicit
@@ -253,6 +263,22 @@ coupled two-ray bases can be compared; arbitrary per-carrier tap fits are
 explicitly unsupported because they can absorb the pattern. Search is
 exhaustive only over the finite bank supplied by the caller, not continuous
 timing/frequency or arbitrary channel paths.
+
+For the native two-ray grouped export, four candidates per synchronization group
+(flat/two-ray × both bits) consume the 10,000-candidate budget. The effective
+limit is therefore 2,500 groups; the separate 10,000 native and 5,000 Python group
+checks do not increase it. The sampled FFT path described above starts with one
+base group and uses its own declared timing/CFO limits instead.
+
+Do not equate `--clock-sync default` with a several-second arrival search. With
+the configured CLI policy it is inactive without FHSS (`[0,0]` absent an
+explicit prior) and gives ±0.09 seconds with FHSS. The studied wide prior uses
+`--arrival-prior-seconds -7.035 7.035`; the explicit 10-ms/1-ms/0-ms policy with
+70-ms audio error gives ±0.0905 seconds. Physical-prior and public-bank metadata
+are separate. Burst tests must likewise verify realized gaps: with FHSS enabled,
+the rate-1,200, Added-×1, eight-second request has only one tile and no internal
+wait, whereas the 40-second request with three internal wait tiles spans
+149.6 seconds.
 
 The sampled channel starts from the shaped transmit waveform and preserves
 state through reads. It supports the shared two-ray `SpreadRay` and the

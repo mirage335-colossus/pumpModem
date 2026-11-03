@@ -1,0 +1,55 @@
+{
+  "scope": "Independent read-only audit; no signal export or receiver rerun. Original raw sampled arrays were not available locally. Paired grouped bytes were rehashed and their projections independently recomputed.",
+  "audits": [
+    {
+      "id": "A850-best-trial2-signal",
+      "paired_grouped_files_rehashed": {
+        "group_gram.c128": "155cb7e06c8d403f13482f0e22efbd89b157500d70acc0c12f8afda2c8a432b4",
+        "group_mean.c128": "75e3ee6eaec6b57cd5c5cd7792436ecf7c8fd4fb55fc4672c9c62a8fe7a5b455",
+        "intervals.u64": "49362b268006ff23d145eab38c929926a1fb3060d702935397e862abbf80c571",
+        "valid_rows.u64": "06231649034fa3049b6f6f8fe8506c34d0ab780257ff6461f70e78ed5bc07f28",
+        "signal_energy.f64": "d2ca7769a606da0c4895ea6df110ad1ffe56da2724ffc2fdea9f5602db2de771",
+        "group_observation.c128": "b6ae859734b1e5c39816cb9f620f85e999939b450ee5065b395bb7c6fd8174d8",
+        "received_energy.f64": "2ec699ecea65769e30cbcce4bf617aacec9ff0b98752a1c4bd8365f2da8412f3",
+        "manifest.json": "e3e200ba6e8d4dc04443104c34ad1562783fe8bd756b3fbe4c1c5733df021e43"
+      },
+      "paired_grouped_bytes": 27482,
+      "original_score_sha256_verified": "4248e321575df410a66ab03a8ad8c32dc6962a69f49e0f49d851d8858f5bb008",
+      "original_capture_record_sha256_verified": "4646285cdf60da2b71ca17ce4891dd533329fd8d87aef93278fb050e509bd8b4",
+      "projection_check": "Full-rank complex linear solve r^H solve(G,r) independently matched both eigenspace projection results; rank2 and loss in dB matched.",
+      "original_raw_byte_audit_performed_by_this_review": false
+    },
+    {
+      "id": "A850-best-trial27-signal",
+      "paired_grouped_files_rehashed": {
+        "group_gram.c128": "e942a0369f5b385db3078f35499dccf9b60efc76a3aa414d13b7dcee0cd733dd",
+        "group_mean.c128": "f801750711c2b5759fb3f27873b7db01b82094f4f02253aef90bf81842fa2698",
+        "intervals.u64": "49362b268006ff23d145eab38c929926a1fb3060d702935397e862abbf80c571",
+        "valid_rows.u64": "06231649034fa3049b6f6f8fe8506c34d0ab780257ff6461f70e78ed5bc07f28",
+        "signal_energy.f64": "775cd89dce8b97785e3df518af917932077310c30152a6e61c52243894345c68",
+        "group_observation.c128": "9b3b0a3f432ea632a2b4aa395e401c76eee1d7fa99aede86f6120d91f174a7cd",
+        "received_energy.f64": "090a55946e0058587c4772078237a87e76c19bdfc5a262c8513a9657dfe2270f",
+        "manifest.json": "76de27cf2611e43b33c500d2dc5738e5587e0cba6aa8fbe67c4ef3e9c2d0302d"
+      },
+      "paired_grouped_bytes": 27484,
+      "original_score_sha256_verified": "d949d74bf97581531c1eecc284866ad625e639837526ea692a6e9dcaa929aa4b",
+      "original_capture_record_sha256_verified": "47c261107ad9edbeba80763b63be28f0023f6a3bff64d5b1de47e2b9f955d3d1",
+      "projection_check": "Full-rank complex linear solve r^H solve(G,r) independently matched both eigenspace projection results; rank2 and loss in dB matched.",
+      "original_raw_byte_audit_performed_by_this_review": false
+    }
+  ],
+  "promoted_file_sha256": {
+    "diagnostic.py": "ad0fe717665d79b4271aee893a3d96912bd7206e694aa270f9c058c48dff5b16",
+    "plan.json": "0541a84609ba3569808a0fd028384650b1d3783a35001823b6dad3d15fd55c34",
+    "result.json": "e515934cdfdfcee30f22887a3bd8ebb7c8afb46cfebabb7cea8df1b6cb02ec53"
+  },
+  "provenance_file_sha256": {
+    "A850-best-trial2-signal-export.json": "142aa277e3f6b5f8700016a39837fb1bc91ace6a030361c48a2083dba9429840",
+    "A850-best-trial2-signal-grouped-manifest.json": "e3e200ba6e8d4dc04443104c34ad1562783fe8bd756b3fbe4c1c5733df021e43",
+    "A850-best-trial2-signal-original-score.json": "4248e321575df410a66ab03a8ad8c32dc6962a69f49e0f49d851d8858f5bb008",
+    "A850-best-trial27-signal-export.json": "771f61be1399c743a5f1204baf450387da832b0a99cdec8d2b2cf4a1d51bf410",
+    "A850-best-trial27-signal-grouped-manifest.json": "76de27cf2611e43b33c500d2dc5738e5587e0cba6aa8fbe67c4ef3e9c2d0302d",
+    "A850-best-trial27-signal-original-score.json": "d949d74bf97581531c1eecc284866ad625e639837526ea692a6e9dcaa929aa4b"
+  },
+  "original_raw_scope": "The executed diagnostic reports remote hashing of the original basis/observation/mask and raw-dot agreement with paired native statistics. Independent preservation verification of original raw bytes is a separate record; metadata matching in this review is not a substitute."
+}

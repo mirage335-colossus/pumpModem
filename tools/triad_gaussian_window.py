@@ -106,7 +106,14 @@ class PreparedWindowedGaussian:
         temporary = 24 * dimension**2 * 16
         prior_key_bytes = 2 * min(self.window_blocks, self.blocks) * 8
         stored += math.prod(shape) * 16  # Cached small observation whiteners.
-        self.preparation_array_bound_bytes = stored + input_and_checks + temporary + self.blocks * 8 + prior_key_bytes
+        # Single-block windows use a batched rectangular SVD. Charge its
+        # weighted design, modes/VH and spectrum before allocating any batch;
+        # multi-block windows retain the existing bounded per-candidate path.
+        has_single_block_window = self.window_blocks == 1 or self.blocks % self.window_blocks == 1
+        self.single_block_batched_svd_work_bytes = (self.candidates *
+            (3*self.taps**2*16+self.taps*8) if has_single_block_window else 0)
+        self.preparation_array_bound_bytes = (stored + input_and_checks + temporary + self.blocks * 8 +
+            prior_key_bytes + self.single_block_batched_svd_work_bytes)
         if self.preparation_array_bound_bytes > self.memory_limit_bytes:
             raise MemoryError("Gaussian window preparation exceeds explicit-array memory limit")
 
@@ -199,8 +206,20 @@ class PreparedWindowedGaussian:
             n, rank = root.shape
             transform = np.empty((self.candidates, n, rank), np.complex128)
             spectrum = np.empty((self.candidates, rank), np.float64)
-            for candidate in range(self.candidates):
-                if rank:
+            if rank and stop-first == 1:
+                # One physical block has no temporal coupling to assemble.
+                # Batched SVD executes the identical rectangular factorization
+                # for all fixed candidates without hundreds of tiny calls.
+                weighted = gram_root[first] @ root
+                modes, singular, _ = np.linalg.svd(weighted, full_matrices=False)
+                spectrum[:] = singular**2
+                transform[:] = modes
+                error = float(np.max(abs(modes.conj().swapaxes(-1, -2) @ modes - np.eye(rank))))
+                self.maximum_mode_orthogonality_error = max(self.maximum_mode_orthogonality_error, error)
+                if error > 64 * np.finfo(float).eps * max(n, 1):
+                    raise ValueError("Gaussian covariance modes are numerically unresolved")
+            elif rank:
+                for candidate in range(self.candidates):
                     weighted = np.empty((n, rank), np.complex128)
                     for local, block_root in enumerate(gram_root[first:stop, candidate]):
                         lo = local * self.taps
@@ -302,6 +321,7 @@ class PreparedWindowedGaussian:
             "maximum_window_rank": self.maximum_window_rank,
             "owned_factor_bytes": self.owned_factor_bytes,
             "preparation_array_bound_bytes": self.preparation_array_bound_bytes,
+            "single_block_batched_svd_work_bytes": self.single_block_batched_svd_work_bytes,
             "maximum_relative_gram_repair": self.maximum_relative_gram_repair,
             "maximum_relative_prior_repair": self.maximum_relative_prior_repair,
             "maximum_relative_information_repair": self.maximum_relative_information_repair,

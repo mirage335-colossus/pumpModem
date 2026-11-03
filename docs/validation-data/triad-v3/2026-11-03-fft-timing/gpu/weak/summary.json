@@ -1,0 +1,692 @@
+{
+  "scope": "Postselected closest-to-strict-threshold signal in each of three completed cohorts; arithmetic diagnosis only, not new independent receptions or altered cohort decisions. CPU/GPU mixed precision is explicit in each report.",
+  "driver_sha256": "95b2510d998dfc50278c2bb5e98500f0d763b5f46e90327c593e65d3f31c60a5",
+  "plan_sha256": "3f011e6555e3ec8313b2dfaef0fdeb435123e69ca46d6dc4e72471da4319a307",
+  "source_before": {
+    "include/datapump/triad_modem_v3.hpp": "1ddd8e851950036f03e6a903ed7ba4746392ffe8623f49685df04f029c4aff48",
+    "src/channel_perturbation.hpp": "fae3b1b345e3dc19c8b85a5010e4434530bd0a34d595dd4de8cd55349d8d879a",
+    "src/channel_spread.hpp": "bf98698d574869acb79645fa143af7ae563a2f542868e77c672d89d4fb16bdb0",
+    "src/triad_gaussian_fading.hpp": "97f26b082d7d68123952bde7ccb9f97148c5977cf741cf6c15c76e77fcc20944",
+    "src/triad_modem_v3.cpp": "cb6cac016e57edcd4f6ebc70f09c68cc47380e3b772cdbe047d7a3b93e9b434c",
+    "src/triad_receiver_v3.cpp": "ff7409c55f2c62dbb833f1ae24a7b4aab103607aaf2f66945ea585e1e3ba3e2f",
+    "src/triad_simulation_stream.cpp": "afaa1267c36fcd330151174f6f08b6fb401a7f702c660964071ef24b6e82a70d",
+    "src/tuning.cpp": "228578b2dc33b72e657d646d956ccb51aefbbabde1af730ef83a15e6785cb01e",
+    "src/tuning_presets.cpp": "31e1ac552bea10b24036f959485241532066e6aa343931c04a46a65e8734b293",
+    "tools/triad-long.cpp": "dbbdbfa055e7a93a86702ef571f45afa3c7040ed873cf993e4cae384b661b282",
+    "tools/triad_fft_acquire.py": "f91265b9d0a6915848be62e2b687982b2b07109d534a8487e137c73377d5b94b",
+    "tools/triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba",
+    "tools/triad_gaussian_window.py": "b22fe002864922e44bc7e10000672a163353818f610c4882bae5d62cfe1cf883",
+    "tools/triad_group_acquire.py": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+    "tools/triad_noise_likelihood.py": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110",
+    "tools/triad_state_workspace.py": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923"
+  },
+  "source_after": {
+    "include/datapump/triad_modem_v3.hpp": "1ddd8e851950036f03e6a903ed7ba4746392ffe8623f49685df04f029c4aff48",
+    "src/channel_perturbation.hpp": "fae3b1b345e3dc19c8b85a5010e4434530bd0a34d595dd4de8cd55349d8d879a",
+    "src/channel_spread.hpp": "bf98698d574869acb79645fa143af7ae563a2f542868e77c672d89d4fb16bdb0",
+    "src/triad_gaussian_fading.hpp": "97f26b082d7d68123952bde7ccb9f97148c5977cf741cf6c15c76e77fcc20944",
+    "src/triad_modem_v3.cpp": "cb6cac016e57edcd4f6ebc70f09c68cc47380e3b772cdbe047d7a3b93e9b434c",
+    "src/triad_receiver_v3.cpp": "ff7409c55f2c62dbb833f1ae24a7b4aab103607aaf2f66945ea585e1e3ba3e2f",
+    "src/triad_simulation_stream.cpp": "afaa1267c36fcd330151174f6f08b6fb401a7f702c660964071ef24b6e82a70d",
+    "src/tuning.cpp": "228578b2dc33b72e657d646d956ccb51aefbbabde1af730ef83a15e6785cb01e",
+    "src/tuning_presets.cpp": "31e1ac552bea10b24036f959485241532066e6aa343931c04a46a65e8734b293",
+    "tools/triad-long.cpp": "dbbdbfa055e7a93a86702ef571f45afa3c7040ed873cf993e4cae384b661b282",
+    "tools/triad_fft_acquire.py": "f91265b9d0a6915848be62e2b687982b2b07109d534a8487e137c73377d5b94b",
+    "tools/triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba",
+    "tools/triad_gaussian_window.py": "b22fe002864922e44bc7e10000672a163353818f610c4882bae5d62cfe1cf883",
+    "tools/triad_group_acquire.py": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+    "tools/triad_noise_likelihood.py": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110",
+    "tools/triad_state_workspace.py": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923"
+  },
+  "source_stable": true,
+  "selected_ids": [
+    "A850-best-trial27-signal",
+    "B425-best-trial1-signal",
+    "C850-moderate-trial2-signal"
+  ],
+  "records": [
+    {
+      "id": "A850-best-trial27-signal",
+      "variant": "cpu64",
+      "argv": [
+        "/tmp/triad-fft-env/bin/python",
+        "/workspace/triad/tools/triad_fft_acquire.py",
+        "/workspace/triad/results/followup/workspaces/A850-best-trial27-signal",
+        "--lag-max-seconds",
+        "0.181000000002",
+        "--lag-step-samples",
+        "1",
+        "--frequency-offset-grid",
+        "-5.00000000025e-14",
+        "5.00000000025e-14",
+        "3.3861273019164287e-09",
+        "--group-tile",
+        "512",
+        "--memory-mib",
+        "4096",
+        "--device",
+        "cpu",
+        "--precision",
+        "fp64",
+        "--attempts-per-day",
+        "1440",
+        "--duration-alternatives",
+        "8",
+        "--selection-methods",
+        "16",
+        "--evaluate-simulation",
+        "--output",
+        "/workspace/triad/results/weak-precision/A850-best-trial27-signal-cpu64.json"
+      ],
+      "returncode": 0,
+      "wall_seconds": 4.642044206848368,
+      "status_sha256": "91f504b3edab05f01d8cb9b2e087c8d401a8e7112ddf5bce02d82581d2acd202",
+      "status": {
+        "cancel_signal": null,
+        "cancelled": false,
+        "child_exit_code": 0,
+        "declared_max_seconds": 120.0,
+        "elapsed_seconds": 4.612666911212727,
+        "exit_code": 0,
+        "log": "/workspace/triad/results/weak-precision/A850-best-trial27-signal-cpu64.log",
+        "log_created": true,
+        "maximum_cleanup_overhead_seconds": 7.0,
+        "outcome": "completed",
+        "schema": "triad-bounded-run-v1",
+        "term_grace_seconds": 3.0,
+        "termination": {
+          "group_empty": true,
+          "kill_sent": false,
+          "term_sent": false
+        },
+        "timed_out": false,
+        "timeout_seconds": 120.0
+      },
+      "reference_bit_ll": [
+        -5.537468972535063,
+        21.377302647991023
+      ],
+      "reference_outcomes": {
+        "relaxed": {
+          "correct_admitted": 1,
+          "missed": 0,
+          "wrong_admitted": 0
+        },
+        "strict": {
+          "correct_admitted": 0,
+          "missed": 1,
+          "wrong_admitted": 0
+        }
+      },
+      "score_sha256": "70a85c6d6f87a09db0b03585095214cff5b1b2f12ab2e062bd10995d0d825fb2",
+      "bit_ll": [
+        -5.537468575166201,
+        21.377309597260016
+      ],
+      "outcomes": {
+        "strict": {
+          "correct_admitted": 0,
+          "wrong_admitted": 0,
+          "missed": 1
+        },
+        "relaxed": {
+          "correct_admitted": 1,
+          "wrong_admitted": 0,
+          "missed": 0
+        }
+      },
+      "input_hashes": {
+        "manifest.json": "43bb24c4266c7f44877c0de2d49ea4d3cfb94c28aae1c94b0e159cc9ec3efaf1",
+        "basis.c128": "b41b3a1211277cd938b287d97f9dc7abe645f98c2a776a24cbe2cf1d300045a1",
+        "observation.c128": "4aeeb443f2faa2624e58f38c6c67202ba17651c06cfa001d611fa5c235a12f4a",
+        "validity.u8": "64aacdb73fe9147f01633a6e52806c67636f9a261225da13af1c6f515132aa30"
+      },
+      "source": "f91265b9d0a6915848be62e2b687982b2b07109d534a8487e137c73377d5b94b",
+      "dependencies": {
+        "triad_group_acquire.py": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+        "triad_gaussian_window.py": "b22fe002864922e44bc7e10000672a163353818f610c4882bae5d62cfe1cf883",
+        "triad_noise_likelihood.py": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110",
+        "triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba",
+        "triad_state_workspace.py": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923"
+      },
+      "max_abs_mixture_error_against_original_fp32": 6.9492689931394125e-06,
+      "decisions_unchanged": true
+    },
+    {
+      "id": "A850-best-trial27-signal",
+      "variant": "cuda32",
+      "argv": [
+        "/tmp/triad-fft-env/bin/python",
+        "/workspace/triad/tools/triad_fft_acquire.py",
+        "/workspace/triad/results/followup/workspaces/A850-best-trial27-signal",
+        "--lag-max-seconds",
+        "0.181000000002",
+        "--lag-step-samples",
+        "1",
+        "--frequency-offset-grid",
+        "-5.00000000025e-14",
+        "5.00000000025e-14",
+        "3.3861273019164287e-09",
+        "--group-tile",
+        "512",
+        "--memory-mib",
+        "4096",
+        "--device",
+        "cuda",
+        "--precision",
+        "fp32",
+        "--attempts-per-day",
+        "1440",
+        "--duration-alternatives",
+        "8",
+        "--selection-methods",
+        "16",
+        "--evaluate-simulation",
+        "--output",
+        "/workspace/triad/results/weak-precision/A850-best-trial27-signal-cuda32.json"
+      ],
+      "returncode": 0,
+      "wall_seconds": 2.788945795968175,
+      "status_sha256": "008f48e0472db44a7be661b150afd274017998ad2aa00010aa86d9773634d67d",
+      "status": {
+        "cancel_signal": null,
+        "cancelled": false,
+        "child_exit_code": 0,
+        "declared_max_seconds": 120.0,
+        "elapsed_seconds": 2.7579976429697126,
+        "exit_code": 0,
+        "log": "/workspace/triad/results/weak-precision/A850-best-trial27-signal-cuda32.log",
+        "log_created": true,
+        "maximum_cleanup_overhead_seconds": 7.0,
+        "outcome": "completed",
+        "schema": "triad-bounded-run-v1",
+        "term_grace_seconds": 3.0,
+        "termination": {
+          "group_empty": true,
+          "kill_sent": false,
+          "term_sent": false
+        },
+        "timed_out": false,
+        "timeout_seconds": 120.0
+      },
+      "reference_bit_ll": [
+        -5.537468972535063,
+        21.377302647991023
+      ],
+      "reference_outcomes": {
+        "relaxed": {
+          "correct_admitted": 1,
+          "missed": 0,
+          "wrong_admitted": 0
+        },
+        "strict": {
+          "correct_admitted": 0,
+          "missed": 1,
+          "wrong_admitted": 0
+        }
+      },
+      "score_sha256": "15df6e8e8601012c14550cac4afe0d0bd477f87a735dd71af3eb6617bbdf45c6",
+      "bit_ll": [
+        -5.537468814435403,
+        21.377302750253996
+      ],
+      "outcomes": {
+        "strict": {
+          "correct_admitted": 0,
+          "wrong_admitted": 0,
+          "missed": 1
+        },
+        "relaxed": {
+          "correct_admitted": 1,
+          "wrong_admitted": 0,
+          "missed": 0
+        }
+      },
+      "input_hashes": {
+        "manifest.json": "43bb24c4266c7f44877c0de2d49ea4d3cfb94c28aae1c94b0e159cc9ec3efaf1",
+        "basis.c128": "b41b3a1211277cd938b287d97f9dc7abe645f98c2a776a24cbe2cf1d300045a1",
+        "observation.c128": "4aeeb443f2faa2624e58f38c6c67202ba17651c06cfa001d611fa5c235a12f4a",
+        "validity.u8": "64aacdb73fe9147f01633a6e52806c67636f9a261225da13af1c6f515132aa30"
+      },
+      "source": "f91265b9d0a6915848be62e2b687982b2b07109d534a8487e137c73377d5b94b",
+      "dependencies": {
+        "triad_group_acquire.py": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+        "triad_gaussian_window.py": "b22fe002864922e44bc7e10000672a163353818f610c4882bae5d62cfe1cf883",
+        "triad_noise_likelihood.py": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110",
+        "triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba",
+        "triad_state_workspace.py": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923"
+      },
+      "max_abs_mixture_error_against_original_fp32": 1.5809965958624161e-07,
+      "decisions_unchanged": true
+    },
+    {
+      "id": "B425-best-trial1-signal",
+      "variant": "cpu64",
+      "argv": [
+        "/tmp/triad-fft-env/bin/python",
+        "/workspace/triad/tools/triad_fft_acquire.py",
+        "/workspace/triad/results/followup/workspaces/B425-best-trial1-signal",
+        "--lag-max-seconds",
+        "0.181000000002",
+        "--lag-step-samples",
+        "1",
+        "--frequency-offset-grid",
+        "-5.00000000025e-14",
+        "5.00000000025e-14",
+        "6.762851365295254e-09",
+        "--group-tile",
+        "512",
+        "--memory-mib",
+        "4096",
+        "--device",
+        "cpu",
+        "--precision",
+        "fp64",
+        "--attempts-per-day",
+        "1440",
+        "--duration-alternatives",
+        "8",
+        "--selection-methods",
+        "16",
+        "--evaluate-simulation",
+        "--output",
+        "/workspace/triad/results/weak-precision/B425-best-trial1-signal-cpu64.json"
+      ],
+      "returncode": 0,
+      "wall_seconds": 4.315505811944604,
+      "status_sha256": "1d0af323b057731f2346f85c4eb678b4cfdd09c78f4443f35083fbc81890b63b",
+      "status": {
+        "cancel_signal": null,
+        "cancelled": false,
+        "child_exit_code": 0,
+        "declared_max_seconds": 120.0,
+        "elapsed_seconds": 4.28730065911077,
+        "exit_code": 0,
+        "log": "/workspace/triad/results/weak-precision/B425-best-trial1-signal-cpu64.log",
+        "log_created": true,
+        "maximum_cleanup_overhead_seconds": 7.0,
+        "outcome": "completed",
+        "schema": "triad-bounded-run-v1",
+        "term_grace_seconds": 3.0,
+        "termination": {
+          "group_empty": true,
+          "kill_sent": false,
+          "term_sent": false
+        },
+        "timed_out": false,
+        "timeout_seconds": 120.0
+      },
+      "reference_bit_ll": [
+        -3.620474698229163,
+        22.224194938504834
+      ],
+      "reference_outcomes": {
+        "relaxed": {
+          "correct_admitted": 1,
+          "missed": 0,
+          "wrong_admitted": 0
+        },
+        "strict": {
+          "correct_admitted": 0,
+          "missed": 1,
+          "wrong_admitted": 0
+        }
+      },
+      "score_sha256": "904cd97de9979069f70f90b45845d242fcd220c0a3eb47085d4fb18608eb0f65",
+      "bit_ll": [
+        -3.6204735720567673,
+        22.22420072054191
+      ],
+      "outcomes": {
+        "strict": {
+          "correct_admitted": 0,
+          "wrong_admitted": 0,
+          "missed": 1
+        },
+        "relaxed": {
+          "correct_admitted": 1,
+          "wrong_admitted": 0,
+          "missed": 0
+        }
+      },
+      "input_hashes": {
+        "manifest.json": "afeb9a47bfeadd580110dd4e7b1bab25dd119e1f98eb41048d9f9e3ab6285fc4",
+        "basis.c128": "4f7f603da6fe9b2279c59f7ba304f629c46f8dc3c9a9fb3d300df75754993086",
+        "observation.c128": "a9c6560b45ade752056110d0ee17743667cf97a1d619c8a6b193e811752cf9e4",
+        "validity.u8": "9a4dd4c2a88a8b392bf218fd27d9bf9306758495a9d444ae7b53664bc1678391"
+      },
+      "source": "f91265b9d0a6915848be62e2b687982b2b07109d534a8487e137c73377d5b94b",
+      "dependencies": {
+        "triad_group_acquire.py": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+        "triad_gaussian_window.py": "b22fe002864922e44bc7e10000672a163353818f610c4882bae5d62cfe1cf883",
+        "triad_noise_likelihood.py": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110",
+        "triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba",
+        "triad_state_workspace.py": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923"
+      },
+      "max_abs_mixture_error_against_original_fp32": 5.7820370749084304e-06,
+      "decisions_unchanged": true
+    },
+    {
+      "id": "B425-best-trial1-signal",
+      "variant": "cuda32",
+      "argv": [
+        "/tmp/triad-fft-env/bin/python",
+        "/workspace/triad/tools/triad_fft_acquire.py",
+        "/workspace/triad/results/followup/workspaces/B425-best-trial1-signal",
+        "--lag-max-seconds",
+        "0.181000000002",
+        "--lag-step-samples",
+        "1",
+        "--frequency-offset-grid",
+        "-5.00000000025e-14",
+        "5.00000000025e-14",
+        "6.762851365295254e-09",
+        "--group-tile",
+        "512",
+        "--memory-mib",
+        "4096",
+        "--device",
+        "cuda",
+        "--precision",
+        "fp32",
+        "--attempts-per-day",
+        "1440",
+        "--duration-alternatives",
+        "8",
+        "--selection-methods",
+        "16",
+        "--evaluate-simulation",
+        "--output",
+        "/workspace/triad/results/weak-precision/B425-best-trial1-signal-cuda32.json"
+      ],
+      "returncode": 0,
+      "wall_seconds": 4.165766034973785,
+      "status_sha256": "4a67b0123f3527c29edb0fbf1a979375ff172db7412c6fc5eecbeebb891b8093",
+      "status": {
+        "cancel_signal": null,
+        "cancelled": false,
+        "child_exit_code": 0,
+        "declared_max_seconds": 120.0,
+        "elapsed_seconds": 4.136643284931779,
+        "exit_code": 0,
+        "log": "/workspace/triad/results/weak-precision/B425-best-trial1-signal-cuda32.log",
+        "log_created": true,
+        "maximum_cleanup_overhead_seconds": 7.0,
+        "outcome": "completed",
+        "schema": "triad-bounded-run-v1",
+        "term_grace_seconds": 3.0,
+        "termination": {
+          "group_empty": true,
+          "kill_sent": false,
+          "term_sent": false
+        },
+        "timed_out": false,
+        "timeout_seconds": 120.0
+      },
+      "reference_bit_ll": [
+        -3.620474698229163,
+        22.224194938504834
+      ],
+      "reference_outcomes": {
+        "relaxed": {
+          "correct_admitted": 1,
+          "missed": 0,
+          "wrong_admitted": 0
+        },
+        "strict": {
+          "correct_admitted": 0,
+          "missed": 1,
+          "wrong_admitted": 0
+        }
+      },
+      "score_sha256": "ec70d2c8db7c6afc03c31ce5a443a491860e76ffe15e73c8f0b3093ab1923dc1",
+      "bit_ll": [
+        -3.6204744329711387,
+        22.22419126358439
+      ],
+      "outcomes": {
+        "strict": {
+          "correct_admitted": 0,
+          "wrong_admitted": 0,
+          "missed": 1
+        },
+        "relaxed": {
+          "correct_admitted": 1,
+          "wrong_admitted": 0,
+          "missed": 0
+        }
+      },
+      "input_hashes": {
+        "manifest.json": "afeb9a47bfeadd580110dd4e7b1bab25dd119e1f98eb41048d9f9e3ab6285fc4",
+        "basis.c128": "4f7f603da6fe9b2279c59f7ba304f629c46f8dc3c9a9fb3d300df75754993086",
+        "observation.c128": "a9c6560b45ade752056110d0ee17743667cf97a1d619c8a6b193e811752cf9e4",
+        "validity.u8": "9a4dd4c2a88a8b392bf218fd27d9bf9306758495a9d444ae7b53664bc1678391"
+      },
+      "source": "f91265b9d0a6915848be62e2b687982b2b07109d534a8487e137c73377d5b94b",
+      "dependencies": {
+        "triad_group_acquire.py": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+        "triad_gaussian_window.py": "b22fe002864922e44bc7e10000672a163353818f610c4882bae5d62cfe1cf883",
+        "triad_noise_likelihood.py": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110",
+        "triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba",
+        "triad_state_workspace.py": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923"
+      },
+      "max_abs_mixture_error_against_original_fp32": 3.6749204426200777e-06,
+      "decisions_unchanged": true
+    },
+    {
+      "id": "C850-moderate-trial2-signal",
+      "variant": "cpu64",
+      "argv": [
+        "/tmp/triad-fft-env/bin/python",
+        "/workspace/triad/tools/triad_fft_acquire.py",
+        "/workspace/triad/results/followup/workspaces/C850-moderate-trial2-signal",
+        "--lag-max-seconds",
+        "0.181000000002",
+        "--lag-step-samples",
+        "1",
+        "--frequency-offset-grid",
+        "-5.00000000025e-14",
+        "5.00000000025e-14",
+        "3.386244716374644e-09",
+        "--group-tile",
+        "512",
+        "--memory-mib",
+        "4096",
+        "--device",
+        "cpu",
+        "--precision",
+        "fp64",
+        "--attempts-per-day",
+        "1440",
+        "--duration-alternatives",
+        "8",
+        "--selection-methods",
+        "16",
+        "--evaluate-simulation",
+        "--output",
+        "/workspace/triad/results/weak-precision/C850-moderate-trial2-signal-cpu64.json"
+      ],
+      "returncode": 0,
+      "wall_seconds": 9.354114872869104,
+      "status_sha256": "1786019ae2e7eee886db03ab656259c395f475a30dde3678d3a7e262fa52c7ae",
+      "status": {
+        "cancel_signal": null,
+        "cancelled": false,
+        "child_exit_code": 0,
+        "declared_max_seconds": 120.0,
+        "elapsed_seconds": 9.324661948019639,
+        "exit_code": 0,
+        "log": "/workspace/triad/results/weak-precision/C850-moderate-trial2-signal-cpu64.log",
+        "log_created": true,
+        "maximum_cleanup_overhead_seconds": 7.0,
+        "outcome": "completed",
+        "schema": "triad-bounded-run-v1",
+        "term_grace_seconds": 3.0,
+        "termination": {
+          "group_empty": true,
+          "kill_sent": false,
+          "term_sent": false
+        },
+        "timed_out": false,
+        "timeout_seconds": 120.0
+      },
+      "reference_bit_ll": [
+        22.811879705719765,
+        -6.134083418326222
+      ],
+      "reference_outcomes": {
+        "relaxed": {
+          "correct_admitted": 1,
+          "missed": 0,
+          "wrong_admitted": 0
+        },
+        "strict": {
+          "correct_admitted": 1,
+          "missed": 0,
+          "wrong_admitted": 0
+        }
+      },
+      "score_sha256": "8816aa220d865f52a881b653d12cc67a1bcad4b10e1845dcc08bbef6a48b73fb",
+      "bit_ll": [
+        22.811886323140786,
+        -6.134082873521756
+      ],
+      "outcomes": {
+        "strict": {
+          "correct_admitted": 1,
+          "wrong_admitted": 0,
+          "missed": 0
+        },
+        "relaxed": {
+          "correct_admitted": 1,
+          "wrong_admitted": 0,
+          "missed": 0
+        }
+      },
+      "input_hashes": {
+        "manifest.json": "d1626235542c7fb57b6613db0b04ead5ffeabd619ce3a912d47f32d0e2a6e845",
+        "basis.c128": "d1b929399de1db3d2d131619d23417f517001c1d79584e753fd8a425336532bc",
+        "observation.c128": "a74ec58833567a17dc835ddc83a025c898faf62601488735d7aae1520f661fc9",
+        "validity.u8": "923eb247a8156ad80cc58f03533a6aa38f4f7bffafc85e49d3b676eefd464d0a"
+      },
+      "source": "f91265b9d0a6915848be62e2b687982b2b07109d534a8487e137c73377d5b94b",
+      "dependencies": {
+        "triad_group_acquire.py": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+        "triad_gaussian_window.py": "b22fe002864922e44bc7e10000672a163353818f610c4882bae5d62cfe1cf883",
+        "triad_noise_likelihood.py": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110",
+        "triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba",
+        "triad_state_workspace.py": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923"
+      },
+      "max_abs_mixture_error_against_original_fp32": 6.617421021815062e-06,
+      "decisions_unchanged": true
+    },
+    {
+      "id": "C850-moderate-trial2-signal",
+      "variant": "cuda32",
+      "argv": [
+        "/tmp/triad-fft-env/bin/python",
+        "/workspace/triad/tools/triad_fft_acquire.py",
+        "/workspace/triad/results/followup/workspaces/C850-moderate-trial2-signal",
+        "--lag-max-seconds",
+        "0.181000000002",
+        "--lag-step-samples",
+        "1",
+        "--frequency-offset-grid",
+        "-5.00000000025e-14",
+        "5.00000000025e-14",
+        "3.386244716374644e-09",
+        "--group-tile",
+        "512",
+        "--memory-mib",
+        "4096",
+        "--device",
+        "cuda",
+        "--precision",
+        "fp32",
+        "--attempts-per-day",
+        "1440",
+        "--duration-alternatives",
+        "8",
+        "--selection-methods",
+        "16",
+        "--evaluate-simulation",
+        "--output",
+        "/workspace/triad/results/weak-precision/C850-moderate-trial2-signal-cuda32.json"
+      ],
+      "returncode": 0,
+      "wall_seconds": 10.356539926957339,
+      "status_sha256": "c8fee0d5bddfde25af28a6ee151863f060f220238e4c2b5bb006caa43780f21e",
+      "status": {
+        "cancel_signal": null,
+        "cancelled": false,
+        "child_exit_code": 0,
+        "declared_max_seconds": 120.0,
+        "elapsed_seconds": 10.327172052115202,
+        "exit_code": 0,
+        "log": "/workspace/triad/results/weak-precision/C850-moderate-trial2-signal-cuda32.log",
+        "log_created": true,
+        "maximum_cleanup_overhead_seconds": 7.0,
+        "outcome": "completed",
+        "schema": "triad-bounded-run-v1",
+        "term_grace_seconds": 3.0,
+        "termination": {
+          "group_empty": true,
+          "kill_sent": false,
+          "term_sent": false
+        },
+        "timed_out": false,
+        "timeout_seconds": 120.0
+      },
+      "reference_bit_ll": [
+        22.811879705719765,
+        -6.134083418326222
+      ],
+      "reference_outcomes": {
+        "relaxed": {
+          "correct_admitted": 1,
+          "missed": 0,
+          "wrong_admitted": 0
+        },
+        "strict": {
+          "correct_admitted": 1,
+          "missed": 0,
+          "wrong_admitted": 0
+        }
+      },
+      "score_sha256": "84a1313760ae40c112c0bf3ad850bb0735f7ca1709398e24ceef00d9eb683c6f",
+      "bit_ll": [
+        22.811872890241958,
+        -6.134083047469879
+      ],
+      "outcomes": {
+        "strict": {
+          "correct_admitted": 1,
+          "wrong_admitted": 0,
+          "missed": 0
+        },
+        "relaxed": {
+          "correct_admitted": 1,
+          "wrong_admitted": 0,
+          "missed": 0
+        }
+      },
+      "input_hashes": {
+        "manifest.json": "d1626235542c7fb57b6613db0b04ead5ffeabd619ce3a912d47f32d0e2a6e845",
+        "basis.c128": "d1b929399de1db3d2d131619d23417f517001c1d79584e753fd8a425336532bc",
+        "observation.c128": "a74ec58833567a17dc835ddc83a025c898faf62601488735d7aae1520f661fc9",
+        "validity.u8": "923eb247a8156ad80cc58f03533a6aa38f4f7bffafc85e49d3b676eefd464d0a"
+      },
+      "source": "f91265b9d0a6915848be62e2b687982b2b07109d534a8487e137c73377d5b94b",
+      "dependencies": {
+        "triad_group_acquire.py": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+        "triad_gaussian_window.py": "b22fe002864922e44bc7e10000672a163353818f610c4882bae5d62cfe1cf883",
+        "triad_noise_likelihood.py": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110",
+        "triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba",
+        "triad_state_workspace.py": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923"
+      },
+      "max_abs_mixture_error_against_original_fp32": 6.815477807009529e-06,
+      "decisions_unchanged": true
+    }
+  ],
+  "elapsed_seconds": 35.62631817092188
+}

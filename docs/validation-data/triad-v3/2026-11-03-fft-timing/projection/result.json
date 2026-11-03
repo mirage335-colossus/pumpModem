@@ -1,0 +1,209 @@
+{
+  "schema": "triad-fft-clean-base-projection-v1",
+  "plan_sha256": "0541a84609ba3569808a0fd028384650b1d3783a35001823b6dad3d15fd55c34",
+  "diagnostic_sha256": "ad0fe717665d79b4271aee893a3d96912bd7206e694aa270f9c058c48dff5b16",
+  "receiver_sha256": "f91265b9d0a6915848be62e2b687982b2b07109d534a8487e137c73377d5b94b",
+  "native_binary_sha256": "9cdf82f396d9be9a7d11b66b45b254e5f18b3857f27b08aed58430dce6d8ea47",
+  "cases": [
+    {
+      "id": "A850-best-trial2-signal",
+      "sample_count": 576800,
+      "sample_rate": 0.0078125,
+      "calendar_and_physical_truth_match": true,
+      "native_pass": {
+        "channel_pass_mode": "paired",
+        "basis_synthesis_passes": 1,
+        "worker_threads_used": 1,
+        "bounded_workspace_bytes": 1722448
+      },
+      "total_clean_energy": 453726.9976005418,
+      "total_rho": 58.07705569286935,
+      "noisy_energy_relative_error": 6.352462625225068e-16,
+      "per_bit": [
+        {
+          "bit": 0,
+          "projected_energy": 257778.30386233045,
+          "retained_fraction": 0.5681352558378656,
+          "projected_rho": 32.9956228943783,
+          "representation_loss_db": 2.455482595860535,
+          "rank": 2,
+          "original_vs_grouped_gram_relative_error": 3.883582340977118e-14,
+          "original_vs_grouped_noisy_correlation_normalized_error": 5.246939638125534e-18
+        },
+        {
+          "bit": 1,
+          "projected_energy": 6.335470378264448,
+          "retained_fraction": 1.3963177002401241e-05,
+          "projected_rho": 0.0008109402084178494,
+          "representation_loss_db": 48.55015756667435,
+          "rank": 2,
+          "original_vs_grouped_gram_relative_error": 5.845650121718886e-14,
+          "original_vs_grouped_noisy_correlation_normalized_error": 2.433671543782998e-18
+        }
+      ],
+      "true_bit_simulation_only": 0,
+      "original_fft_scores": [
+        14.41852157674214,
+        -6.815376503904684
+      ],
+      "original_gates": {
+        "relaxed": 17.422746023037703,
+        "strict": 22.72106338958574
+      },
+      "original_outcomes": {
+        "relaxed": {
+          "correct_admitted": 0,
+          "missed": 1,
+          "wrong_admitted": 0
+        },
+        "strict": {
+          "correct_admitted": 0,
+          "missed": 1,
+          "wrong_admitted": 0
+        }
+      },
+      "base_public_group": {
+        "arrival_seconds": 0.04999999999999999,
+        "frequency_hz": 0,
+        "clock_ppm": 0,
+        "epoch_offset_seconds": 0,
+        "frequency_drift_hz_per_second": 0
+      },
+      "grouped_input_sha256": {
+        "group_gram.c128": "155cb7e06c8d403f13482f0e22efbd89b157500d70acc0c12f8afda2c8a432b4",
+        "group_mean.c128": "75e3ee6eaec6b57cd5c5cd7792436ecf7c8fd4fb55fc4672c9c62a8fe7a5b455",
+        "intervals.u64": "49362b268006ff23d145eab38c929926a1fb3060d702935397e862abbf80c571",
+        "valid_rows.u64": "06231649034fa3049b6f6f8fe8506c34d0ab780257ff6461f70e78ed5bc07f28",
+        "signal_energy.f64": "d2ca7769a606da0c4895ea6df110ad1ffe56da2724ffc2fdea9f5602db2de771",
+        "group_observation.c128": "b6ae859734b1e5c39816cb9f620f85e999939b450ee5065b395bb7c6fd8174d8",
+        "received_energy.f64": "2ec699ecea65769e30cbcce4bf617aacec9ff0b98752a1c4bd8365f2da8412f3",
+        "manifest.json": "e3e200ba6e8d4dc04443104c34ad1562783fe8bd756b3fbe4c1c5733df021e43"
+      },
+      "original_input_hashes": [
+        {
+          "bytes": 23920,
+          "name": "manifest.json",
+          "sha256": "03f200e7648e73ec6c0d57d8fd947743e9dc4a49ec27d17407384f7c3461f6ba"
+        },
+        {
+          "bytes": 73830400,
+          "name": "basis.c128",
+          "sha256": "6a38b47193b79347cf6dc43e8739c778e09a3b7fa391bbf8ead1b91a4233dbdb"
+        },
+        {
+          "bytes": 9228800,
+          "name": "observation.c128",
+          "sha256": "4681f42ad1fe013cb3a9a8c4d5ddcb6c1827fed3db9daeda3a03302b1d36dc15"
+        },
+        {
+          "bytes": 576800,
+          "name": "validity.u8",
+          "sha256": "64aacdb73fe9147f01633a6e52806c67636f9a261225da13af1c6f515132aa30"
+        }
+      ]
+    },
+    {
+      "id": "A850-best-trial27-signal",
+      "sample_count": 576800,
+      "sample_rate": 0.0078125,
+      "calendar_and_physical_truth_match": true,
+      "native_pass": {
+        "channel_pass_mode": "paired",
+        "basis_synthesis_passes": 1,
+        "worker_threads_used": 1,
+        "bounded_workspace_bytes": 1722448
+      },
+      "total_clean_energy": 658346.4872177301,
+      "total_rho": 84.26835036386946,
+      "noisy_energy_relative_error": 3.593334894973264e-15,
+      "per_bit": [
+        {
+          "bit": 0,
+          "projected_energy": 25.913933303976222,
+          "retained_fraction": 3.936215018552365e-05,
+          "projected_rho": 0.0033169834629089563,
+          "representation_loss_db": 44.04921185946936,
+          "rank": 2,
+          "original_vs_grouped_gram_relative_error": 4.611844187715331e-14,
+          "original_vs_grouped_noisy_correlation_normalized_error": 1.8060896887031877e-18
+        },
+        {
+          "bit": 1,
+          "projected_energy": 371436.1850862325,
+          "retained_fraction": 0.5641955904647975,
+          "projected_rho": 47.54383169103776,
+          "representation_loss_db": 2.485703124456114,
+          "rank": 2,
+          "original_vs_grouped_gram_relative_error": 1.5169846352809712e-14,
+          "original_vs_grouped_noisy_correlation_normalized_error": 4.199305254239771e-18
+        }
+      ],
+      "true_bit_simulation_only": 1,
+      "original_fft_scores": [
+        -5.537468972535063,
+        21.377302647991023
+      ],
+      "original_gates": {
+        "relaxed": 17.422746023037703,
+        "strict": 22.72106338958574
+      },
+      "original_outcomes": {
+        "relaxed": {
+          "correct_admitted": 1,
+          "missed": 0,
+          "wrong_admitted": 0
+        },
+        "strict": {
+          "correct_admitted": 0,
+          "missed": 1,
+          "wrong_admitted": 0
+        }
+      },
+      "base_public_group": {
+        "arrival_seconds": 0.04999999999999999,
+        "frequency_hz": 0,
+        "clock_ppm": 0,
+        "epoch_offset_seconds": 0,
+        "frequency_drift_hz_per_second": 0
+      },
+      "grouped_input_sha256": {
+        "group_gram.c128": "e942a0369f5b385db3078f35499dccf9b60efc76a3aa414d13b7dcee0cd733dd",
+        "group_mean.c128": "f801750711c2b5759fb3f27873b7db01b82094f4f02253aef90bf81842fa2698",
+        "intervals.u64": "49362b268006ff23d145eab38c929926a1fb3060d702935397e862abbf80c571",
+        "valid_rows.u64": "06231649034fa3049b6f6f8fe8506c34d0ab780257ff6461f70e78ed5bc07f28",
+        "signal_energy.f64": "775cd89dce8b97785e3df518af917932077310c30152a6e61c52243894345c68",
+        "group_observation.c128": "9b3b0a3f432ea632a2b4aa395e401c76eee1d7fa99aede86f6120d91f174a7cd",
+        "received_energy.f64": "090a55946e0058587c4772078237a87e76c19bdfc5a262c8513a9657dfe2270f",
+        "manifest.json": "76de27cf2611e43b33c500d2dc5738e5587e0cba6aa8fbe67c4ef3e9c2d0302d"
+      },
+      "original_input_hashes": [
+        {
+          "bytes": 23930,
+          "name": "manifest.json",
+          "sha256": "43bb24c4266c7f44877c0de2d49ea4d3cfb94c28aae1c94b0e159cc9ec3efaf1"
+        },
+        {
+          "bytes": 73830400,
+          "name": "basis.c128",
+          "sha256": "b41b3a1211277cd938b287d97f9dc7abe645f98c2a776a24cbe2cf1d300045a1"
+        },
+        {
+          "bytes": 9228800,
+          "name": "observation.c128",
+          "sha256": "4aeeb443f2faa2624e58f38c6c67202ba17651c06cfa001d611fa5c235a12f4a"
+        },
+        {
+          "bytes": 576800,
+          "name": "validity.u8",
+          "sha256": "64aacdb73fe9147f01633a6e52806c67636f9a261225da13af1c6f515132aa30"
+        }
+      ]
+    }
+  ],
+  "limits": [
+    "Postdecision simulation evaluation only; no receiver rescore, new candidate or pruning.",
+    "One original public base group, not the complete six-hypothesis FFT bank; small CFO and fractional timing effects are not corrected here.",
+    "Projection energy is a representation diagnostic, not an achievable sensitivity or detection probability.",
+    "Raw original noisy projections, energy, calendar and endpoint parameters are checked against the native paired pass; clean raw samples are not retained."
+  ]
+}

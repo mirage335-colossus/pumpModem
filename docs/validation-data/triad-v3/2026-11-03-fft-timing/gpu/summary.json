@@ -1,0 +1,1586 @@
+{
+  "archived_compare_sha256": "08a037ca6dcffafa7780236bb0a8218c6934d2ef06c85580a174533231b01779",
+  "arithmetic_review": "CUDA fp32 is partial mixed-precision placement: CPU complex128 Gram FFT, phase construction, residual projection/rank and covariance preparation remain; PreparedWindowedGaussian.score also uses complex128 whitening and float64 evidence reductions on the selected device. FP32 observation FFT/products and projected likelihood bulk reject TF32. No precision necessity or fully GPU-resident implementation is established.",
+  "calibration_review": "Strict 1e-4 per day and relaxed 1e-2 per 12 hours are declared stationary proper-complex Gaussian H0 family bounds with 1440 attempts/day, 8 durations, 16 score methods, two bits and separate score/calibration allocations. Every timing/CFO group enters the mixture and residual allocation without group-independence assumption. This signal-only precision comparison does not empirically qualify either tail bound.",
+  "campaign": {
+    "claim_scope": "single-capture cold-start-inclusive CLI comparison; no resident throughput claim",
+    "configuration": {
+      "drift_offsets_hz_per_second": [
+        0.0
+      ],
+      "frequency_offsets_hz": [
+        -0.0030001725001500084,
+        0.0,
+        0.0030001725001500084
+      ],
+      "group_tile": 512,
+      "jobs": [
+        {
+          "device": "cpu",
+          "job": "cpu-fp64-a",
+          "precision": "fp64"
+        },
+        {
+          "device": "cpu",
+          "job": "cpu-fp32-a",
+          "precision": "fp32"
+        },
+        {
+          "device": "cuda",
+          "job": "cuda-fp32-a",
+          "precision": "fp32"
+        },
+        {
+          "device": "cuda",
+          "job": "cuda-fp32-b",
+          "precision": "fp32"
+        },
+        {
+          "device": "cpu",
+          "job": "cpu-fp32-b",
+          "precision": "fp32"
+        },
+        {
+          "device": "cpu",
+          "job": "cpu-fp64-b",
+          "precision": "fp64"
+        }
+      ],
+      "lag_max_seconds": 14.07,
+      "lag_step_samples": 1,
+      "memory_mib": 1024,
+      "retain_full_two_bit_group_scores": true
+    },
+    "input_files": {
+      "basis.c128": "61681d85b642de938d17543160f776e2563699142396372ce0cbf92e9ad344af",
+      "manifest.json": "b60ce336c2ba6af43bd506f1ac451d32ff3ff43b0ef18f02d255bad5b85da7be",
+      "observation.c128": "97b145344f6a7328200465c0b888c8f8e9fe1ed4f7413b5ed8ead5dae14e11ba",
+      "validity.u8": "02c845f7c74a92165e4e4e34b08e3f4c8f15f508f039a57bcd1239cafc4b9cde"
+    },
+    "input_manifest_sha256": "b60ce336c2ba6af43bd506f1ac451d32ff3ff43b0ef18f02d255bad5b85da7be",
+    "receiver_sha256": "f91265b9d0a6915848be62e2b687982b2b07109d534a8487e137c73377d5b94b",
+    "schema": "triad-fft-cpu-gpu-comparison-v1",
+    "source_closure_before": {
+      "tools/triad_fft_acquire.py": "f91265b9d0a6915848be62e2b687982b2b07109d534a8487e137c73377d5b94b",
+      "tools/triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba",
+      "tools/triad_gaussian_window.py": "b22fe002864922e44bc7e10000672a163353818f610c4882bae5d62cfe1cf883",
+      "tools/triad_group_acquire.py": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+      "tools/triad_noise_likelihood.py": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110",
+      "tools/triad_state_workspace.py": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923"
+    },
+    "thread_environment": {
+      "MKL_NUM_THREADS": "1",
+      "NUMEXPR_NUM_THREADS": "1",
+      "OMP_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1"
+    },
+    "versions": {
+      "cuda_available": true,
+      "cuda_devices": [
+        "NVIDIA RTX PRO 6000 Blackwell Workstation Edition"
+      ],
+      "numpy": "2.5.2",
+      "platform": "Linux-6.8.0-147-generic-x86_64-with-glibc2.39",
+      "python": "3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]",
+      "scipy": "1.18.1",
+      "torch": "2.8.0+cu128",
+      "torch_cuda_build": "12.8"
+    }
+  },
+  "campaign_wall_seconds": 31.160206,
+  "comparisons": [
+    {
+      "candidate": "cpu-fp32-a",
+      "gates": {
+        "relaxed": {
+          "accepted_match": true,
+          "bit_match": true,
+          "candidate": {
+            "accepted": true,
+            "bit": 1,
+            "log_threshold": 17.422746023037703,
+            "opposite_bit_margin": 417.08899711594654,
+            "score": 409.9510183927464
+          },
+          "reference": {
+            "accepted": true,
+            "bit": 1,
+            "log_threshold": 17.422746023037703,
+            "opposite_bit_margin": 417.089143030471,
+            "score": 409.9511665205666
+          }
+        },
+        "strict": {
+          "accepted_match": true,
+          "bit_match": true,
+          "candidate": {
+            "accepted": true,
+            "bit": 1,
+            "log_threshold": 22.72106338958574,
+            "opposite_bit_margin": 417.08899711594654,
+            "score": 409.9510183927464
+          },
+          "reference": {
+            "accepted": true,
+            "bit": 1,
+            "log_threshold": 22.72106338958574,
+            "opposite_bit_margin": 417.089143030471,
+            "score": 409.9511665205666
+          }
+        }
+      },
+      "group_count": 172896,
+      "group_winner_index_match_by_bit": [
+        true,
+        true
+      ],
+      "independent_top10_exact_order_match_by_bit": [
+        true,
+        true
+      ],
+      "max_abs_group_ll_difference": 0.00015756422794765967,
+      "max_abs_mixture_ll_difference": 0.00014812782018225334,
+      "max_rel_group_ll_difference": 0.0013834009014003913,
+      "max_rel_mixture_ll_difference": 3.6133040293427734e-07,
+      "mixture_ll_candidate": [
+        -7.137978723200167,
+        409.9510183927464
+      ],
+      "mixture_ll_reference": [
+        -7.137976509904455,
+        409.9511665205666
+      ],
+      "reference": "cpu-fp64-a",
+      "status": "compared",
+      "top10_group_rank_overlap_by_bit": [
+        10,
+        10
+      ]
+    },
+    {
+      "candidate": "cpu-fp32-b",
+      "gates": {
+        "relaxed": {
+          "accepted_match": true,
+          "bit_match": true,
+          "candidate": {
+            "accepted": true,
+            "bit": 1,
+            "log_threshold": 17.422746023037703,
+            "opposite_bit_margin": 417.08899711594654,
+            "score": 409.9510183927464
+          },
+          "reference": {
+            "accepted": true,
+            "bit": 1,
+            "log_threshold": 17.422746023037703,
+            "opposite_bit_margin": 417.089143030471,
+            "score": 409.9511665205666
+          }
+        },
+        "strict": {
+          "accepted_match": true,
+          "bit_match": true,
+          "candidate": {
+            "accepted": true,
+            "bit": 1,
+            "log_threshold": 22.72106338958574,
+            "opposite_bit_margin": 417.08899711594654,
+            "score": 409.9510183927464
+          },
+          "reference": {
+            "accepted": true,
+            "bit": 1,
+            "log_threshold": 22.72106338958574,
+            "opposite_bit_margin": 417.089143030471,
+            "score": 409.9511665205666
+          }
+        }
+      },
+      "group_count": 172896,
+      "group_winner_index_match_by_bit": [
+        true,
+        true
+      ],
+      "independent_top10_exact_order_match_by_bit": [
+        true,
+        true
+      ],
+      "max_abs_group_ll_difference": 0.00015756422794765967,
+      "max_abs_mixture_ll_difference": 0.00014812782018225334,
+      "max_rel_group_ll_difference": 0.0013834009014003913,
+      "max_rel_mixture_ll_difference": 3.6133040293427734e-07,
+      "mixture_ll_candidate": [
+        -7.137978723200167,
+        409.9510183927464
+      ],
+      "mixture_ll_reference": [
+        -7.137976509904455,
+        409.9511665205666
+      ],
+      "reference": "cpu-fp64-b",
+      "status": "compared",
+      "top10_group_rank_overlap_by_bit": [
+        10,
+        10
+      ]
+    },
+    {
+      "candidate": "cuda-fp32-a",
+      "gates": {
+        "relaxed": {
+          "accepted_match": true,
+          "bit_match": true,
+          "candidate": {
+            "accepted": true,
+            "bit": 1,
+            "log_threshold": 17.422746023037703,
+            "opposite_bit_margin": 417.0889123115502,
+            "score": 409.9509315794126
+          },
+          "reference": {
+            "accepted": true,
+            "bit": 1,
+            "log_threshold": 17.422746023037703,
+            "opposite_bit_margin": 417.089143030471,
+            "score": 409.9511665205666
+          }
+        },
+        "strict": {
+          "accepted_match": true,
+          "bit_match": true,
+          "candidate": {
+            "accepted": true,
+            "bit": 1,
+            "log_threshold": 22.72106338958574,
+            "opposite_bit_margin": 417.0889123115502,
+            "score": 409.9509315794126
+          },
+          "reference": {
+            "accepted": true,
+            "bit": 1,
+            "log_threshold": 22.72106338958574,
+            "opposite_bit_margin": 417.089143030471,
+            "score": 409.9511665205666
+          }
+        }
+      },
+      "group_count": 172896,
+      "group_winner_index_match_by_bit": [
+        true,
+        true
+      ],
+      "independent_top10_exact_order_match_by_bit": [
+        true,
+        true
+      ],
+      "max_abs_group_ll_difference": 0.00025000600766134085,
+      "max_abs_mixture_ll_difference": 0.00023494115396260895,
+      "max_rel_group_ll_difference": 0.0014877888435391921,
+      "max_rel_mixture_ll_difference": 5.915168158082485e-07,
+      "mixture_ll_candidate": [
+        -7.137980732137591,
+        409.9509315794126
+      ],
+      "mixture_ll_reference": [
+        -7.137976509904455,
+        409.9511665205666
+      ],
+      "reference": "cpu-fp64-a",
+      "status": "compared",
+      "top10_group_rank_overlap_by_bit": [
+        10,
+        10
+      ]
+    },
+    {
+      "candidate": "cuda-fp32-b",
+      "gates": {
+        "relaxed": {
+          "accepted_match": true,
+          "bit_match": true,
+          "candidate": {
+            "accepted": true,
+            "bit": 1,
+            "log_threshold": 17.422746023037703,
+            "opposite_bit_margin": 417.0889123115502,
+            "score": 409.9509315794126
+          },
+          "reference": {
+            "accepted": true,
+            "bit": 1,
+            "log_threshold": 17.422746023037703,
+            "opposite_bit_margin": 417.089143030471,
+            "score": 409.9511665205666
+          }
+        },
+        "strict": {
+          "accepted_match": true,
+          "bit_match": true,
+          "candidate": {
+            "accepted": true,
+            "bit": 1,
+            "log_threshold": 22.72106338958574,
+            "opposite_bit_margin": 417.0889123115502,
+            "score": 409.9509315794126
+          },
+          "reference": {
+            "accepted": true,
+            "bit": 1,
+            "log_threshold": 22.72106338958574,
+            "opposite_bit_margin": 417.089143030471,
+            "score": 409.9511665205666
+          }
+        }
+      },
+      "group_count": 172896,
+      "group_winner_index_match_by_bit": [
+        true,
+        true
+      ],
+      "independent_top10_exact_order_match_by_bit": [
+        true,
+        true
+      ],
+      "max_abs_group_ll_difference": 0.00025000600766134085,
+      "max_abs_mixture_ll_difference": 0.00023494115396260895,
+      "max_rel_group_ll_difference": 0.0014877888435391921,
+      "max_rel_mixture_ll_difference": 5.915168158082485e-07,
+      "mixture_ll_candidate": [
+        -7.137980732137591,
+        409.9509315794126
+      ],
+      "mixture_ll_reference": [
+        -7.137976509904455,
+        409.9511665205666
+      ],
+      "reference": "cpu-fp64-b",
+      "status": "compared",
+      "top10_group_rank_overlap_by_bit": [
+        10,
+        10
+      ]
+    }
+  ],
+  "geometry": {
+    "base_arrival_seconds": 0.04999999999999982,
+    "base_group_count": 57632,
+    "dimension": 4,
+    "drift_offsets_hz_per_second": [
+      0.0
+    ],
+    "fixed_clock_ppm": 0.0,
+    "fixed_epoch_offset_seconds": 0,
+    "frequency_offsets_hz": [
+      -0.0030001725001500084,
+      0.0,
+      0.0030001725001500084
+    ],
+    "group_count": 172896,
+    "group_order": "drift major, frequency middle, integer arrival lag minor",
+    "lag_sample_range_inclusive": [
+      0,
+      57631
+    ],
+    "lag_step_samples": 1,
+    "mixture": "uniform over every declared timing/frequency/drift group; no pruning",
+    "nfft": 191664,
+    "sample_count": 95656,
+    "sample_rate": 4096.0
+  },
+  "independent_checks": {
+    "all_gates_and_outcomes_match": true,
+    "all_geometry_lists_equal": true,
+    "all_group_ranks_four": true,
+    "bit_scores_per_table": 345792,
+    "full_group_tables_recounted": 6,
+    "groups_per_table": 172896,
+    "input_bytes_rehashed": 13893652,
+    "input_files_rehashed": 4,
+    "known_noise_override_absent": true,
+    "maximum_mixture_reduction_discrepancy": 1.687538997430238e-14,
+    "raw_score_reports_and_statuses_bound": 6,
+    "review_only_no_receiver_rerun": true,
+    "score_error_and_rank_summary_reproduced": true,
+    "source_files_rehashed": 6
+  },
+  "jobs": [
+    {
+      "arithmetic": {
+        "gram_fft": "CPU complex128; substantial bulk work, cached across frequency/drift alternatives",
+        "implicit_fallback": false,
+        "likelihood_bulk": "fp64",
+        "observation_fft_and_products": "complex128",
+        "observation_fft_device": "cpu",
+        "phase_preparation": "CPU longdouble cycle reduction, float64 exponential",
+        "preparation_and_finish": "CPU complex128/float64 residual whitening, ranks, small SVD, budgets and bit mixture",
+        "public_near_edge_refinement": "explicit FP64 raw-dot exception for fixed public groups whose masked Gram is unresolved by FFT",
+        "requested_correlation_precision": "fp64",
+        "tf32_allowed": false
+      },
+      "best_group_public_parameters": {
+        "arrival_seconds": 7.770947265625,
+        "clock_ppm": 0.0,
+        "epoch_offset_seconds": 0,
+        "frequency_drift_hz_per_second": 0.0,
+        "frequency_hz": -0.0030001725001500084
+      },
+      "calibration": {
+        "delta_per_group": 1.2551700958315336e-14,
+        "effective_groups": 172896,
+        "inter_group_independence_assumed": false,
+        "known_noise_variance_diagnostic": null,
+        "rank_histogram": [
+          0,
+          0,
+          0,
+          0,
+          172896
+        ],
+        "relaxed": {
+          "calibration_failure_probability": 0.005,
+          "delta_per_segment": 4.3402777777777775e-07,
+          "fixed_window_log_threshold": 17.422746023037703,
+          "scope": "predeclared family union bound; shared independent whole-bank calibration; no adaptive/anytime extension",
+          "score_probability": 0.005,
+          "total_false_admission_bound": 0.01
+        },
+        "scope": "stationary proper-complex white Gaussian noise; one complete-column union residual per group",
+        "strict": {
+          "calibration_failure_probability": 5e-05,
+          "delta_per_segment": 2.1701388888888887e-09,
+          "fixed_window_log_threshold": 22.72106338958574,
+          "scope": "predeclared family union bound; shared independent whole-bank calibration; no adaptive/anytime extension",
+          "score_probability": 5e-05,
+          "total_false_admission_bound": 0.0001
+        },
+        "variance_upper_over_reference_range": [
+          42.16746855488996,
+          42.36511821826263
+        ]
+      },
+      "command": [
+        "/tmp/triad-fft-env/bin/python",
+        "/workspace/triad/tools/triad_fft_acquire.py",
+        "/workspace/triad-input/local-evidence/triad-fft-timing/wide-pilot/sampled",
+        "--lag-max-seconds",
+        "14.07",
+        "--lag-step-samples",
+        "1",
+        "--frequency-offsets-hz",
+        "-0.0030001725001500084",
+        "0.0",
+        "0.0030001725001500084",
+        "--drift-offsets-hz-per-second",
+        "0",
+        "--group-tile",
+        "512",
+        "--memory-mib",
+        "1024",
+        "--device",
+        "cpu",
+        "--precision",
+        "fp64",
+        "--evaluate-simulation",
+        "--output",
+        "/workspace/triad/results/gpu-comparison/cpu-fp64-a.scores.json"
+      ],
+      "device": "cpu",
+      "group_count": 172896,
+      "job": "cpu-fp64-a",
+      "likelihoods": [
+        -7.137976509904455,
+        409.9511665205666
+      ],
+      "numerical_refinement": {
+        "direct_refined_groups": 0,
+        "exact_zero_column_groups": 0,
+        "exact_zero_whole_groups": 0,
+        "examined_row_work_limit": 2000000,
+        "examined_rows": 0,
+        "fft_resolution_trigger_scale": 2.4937520290328344e-13,
+        "masked_energy_refinement_trigger": 0.0024937520290328344,
+        "observable_relative_tolerance": 1e-10,
+        "retained_rows": 0,
+        "selection": "public support/Gram only; fixed rank tolerance and full family allocation retained",
+        "support_run_lag_operations": 2651072,
+        "support_work_limit": 200000000
+      },
+      "peak_child_rss_bytes": 674443264,
+      "precision": "fp64",
+      "relaxed": {
+        "accepted": true,
+        "bit": 1,
+        "log_threshold": 17.422746023037703,
+        "opposite_bit_margin": 417.089143030471,
+        "score": 409.9511665205666
+      },
+      "resources": {
+        "explicit_array_bound_bytes": 194195496,
+        "group_tile": 512,
+        "memory_limit_bytes": 1073741824,
+        "retained_all_group_scores": true,
+        "scope": "includes input mappings/FFT reserves; excludes Python/Torch runtime and external allocator internals; not process RSS"
+      },
+      "returncode": 0,
+      "schema": "triad-fft-precision-job-v1",
+      "score_file": "/workspace/triad/results/gpu-comparison/cpu-fp64-a.scores.json",
+      "score_sha256": "72d9e662eebfb530fd44357f39a524efb18871353ea14128446261197ec2347b",
+      "simulation_evaluation_only": {
+        "control": "signal",
+        "outcomes": {
+          "relaxed": {
+            "correct_admitted": 1,
+            "missed": 0,
+            "wrong_admitted": 0
+          },
+          "strict": {
+            "correct_admitted": 1,
+            "missed": 0,
+            "wrong_admitted": 0
+          }
+        },
+        "signal_bit": 1
+      },
+      "status": "completed",
+      "status_file_sha256": "51904929075336b8ca20c184fd52caa373350ca266b3c6179c459bab98bd9919",
+      "stderr_log": "/workspace/triad/results/gpu-comparison/cpu-fp64-a.stderr.log",
+      "stdout_log": "/workspace/triad/results/gpu-comparison/cpu-fp64-a.stdout.log",
+      "strict": {
+        "accepted": true,
+        "bit": 1,
+        "log_threshold": 22.72106338958574,
+        "opposite_bit_margin": 417.089143030471,
+        "score": 409.9511665205666
+      },
+      "timeout_seconds": 120,
+      "timing": {
+        "direct_correlation_refinement_seconds": 8.280156180262566e-06,
+        "direct_gram_refinement_seconds": 0.0,
+        "exact_support_seconds": 0.005178115097805858,
+        "gram_fft_seconds": 0.08679374610073864,
+        "observation_fft_seconds": 0.05242733797058463,
+        "public_template_preparation_seconds": 0.04979363619349897,
+        "residual_and_likelihood_seconds": 2.928839987842366,
+        "template_fft_seconds": 0.048941899091005325,
+        "total_preparation_seconds": 0.1923266330268234,
+        "total_receiver_seconds": 2.982106491923332
+      },
+      "wall_seconds": 4.674162
+    },
+    {
+      "arithmetic": {
+        "gram_fft": "CPU complex128; substantial bulk work, cached across frequency/drift alternatives",
+        "implicit_fallback": false,
+        "likelihood_bulk": "fp32",
+        "observation_fft_and_products": "complex64",
+        "observation_fft_device": "cpu",
+        "phase_preparation": "CPU longdouble cycle reduction, float64 exponential",
+        "preparation_and_finish": "CPU complex128/float64 residual whitening, ranks, small SVD, budgets and bit mixture",
+        "public_near_edge_refinement": "explicit FP64 raw-dot exception for fixed public groups whose masked Gram is unresolved by FFT",
+        "requested_correlation_precision": "fp32",
+        "tf32_allowed": false
+      },
+      "best_group_public_parameters": {
+        "arrival_seconds": 7.770947265625,
+        "clock_ppm": 0.0,
+        "epoch_offset_seconds": 0,
+        "frequency_drift_hz_per_second": 0.0,
+        "frequency_hz": -0.0030001725001500084
+      },
+      "calibration": {
+        "delta_per_group": 1.2551700958315336e-14,
+        "effective_groups": 172896,
+        "inter_group_independence_assumed": false,
+        "known_noise_variance_diagnostic": null,
+        "rank_histogram": [
+          0,
+          0,
+          0,
+          0,
+          172896
+        ],
+        "relaxed": {
+          "calibration_failure_probability": 0.005,
+          "delta_per_segment": 4.3402777777777775e-07,
+          "fixed_window_log_threshold": 17.422746023037703,
+          "scope": "predeclared family union bound; shared independent whole-bank calibration; no adaptive/anytime extension",
+          "score_probability": 0.005,
+          "total_false_admission_bound": 0.01
+        },
+        "scope": "stationary proper-complex white Gaussian noise; one complete-column union residual per group",
+        "strict": {
+          "calibration_failure_probability": 5e-05,
+          "delta_per_segment": 2.1701388888888887e-09,
+          "fixed_window_log_threshold": 22.72106338958574,
+          "scope": "predeclared family union bound; shared independent whole-bank calibration; no adaptive/anytime extension",
+          "score_probability": 5e-05,
+          "total_false_admission_bound": 0.0001
+        },
+        "variance_upper_over_reference_range": [
+          42.16746861693487,
+          42.365118218215876
+        ]
+      },
+      "command": [
+        "/tmp/triad-fft-env/bin/python",
+        "/workspace/triad/tools/triad_fft_acquire.py",
+        "/workspace/triad-input/local-evidence/triad-fft-timing/wide-pilot/sampled",
+        "--lag-max-seconds",
+        "14.07",
+        "--lag-step-samples",
+        "1",
+        "--frequency-offsets-hz",
+        "-0.0030001725001500084",
+        "0.0",
+        "0.0030001725001500084",
+        "--drift-offsets-hz-per-second",
+        "0",
+        "--group-tile",
+        "512",
+        "--memory-mib",
+        "1024",
+        "--device",
+        "cpu",
+        "--precision",
+        "fp32",
+        "--evaluate-simulation",
+        "--output",
+        "/workspace/triad/results/gpu-comparison/cpu-fp32-a.scores.json"
+      ],
+      "device": "cpu",
+      "group_count": 172896,
+      "job": "cpu-fp32-a",
+      "likelihoods": [
+        -7.137978723200167,
+        409.9510183927464
+      ],
+      "numerical_refinement": {
+        "direct_refined_groups": 0,
+        "exact_zero_column_groups": 0,
+        "exact_zero_whole_groups": 0,
+        "examined_row_work_limit": 2000000,
+        "examined_rows": 0,
+        "fft_resolution_trigger_scale": 2.4937520290328344e-13,
+        "masked_energy_refinement_trigger": 0.0024937520290328344,
+        "observable_relative_tolerance": 1e-10,
+        "retained_rows": 0,
+        "selection": "public support/Gram only; fixed rank tolerance and full family allocation retained",
+        "support_run_lag_operations": 2651072,
+        "support_work_limit": 200000000
+      },
+      "peak_child_rss_bytes": 661729280,
+      "precision": "fp32",
+      "relaxed": {
+        "accepted": true,
+        "bit": 1,
+        "log_threshold": 17.422746023037703,
+        "opposite_bit_margin": 417.08899711594654,
+        "score": 409.9510183927464
+      },
+      "resources": {
+        "explicit_array_bound_bytes": 194195496,
+        "group_tile": 512,
+        "memory_limit_bytes": 1073741824,
+        "retained_all_group_scores": true,
+        "scope": "includes input mappings/FFT reserves; excludes Python/Torch runtime and external allocator internals; not process RSS"
+      },
+      "returncode": 0,
+      "schema": "triad-fft-precision-job-v1",
+      "score_file": "/workspace/triad/results/gpu-comparison/cpu-fp32-a.scores.json",
+      "score_sha256": "fe8d746c6eb7a434e72c557a649a3919e3f767972bdec43c4243b24506c3f06a",
+      "simulation_evaluation_only": {
+        "control": "signal",
+        "outcomes": {
+          "relaxed": {
+            "correct_admitted": 1,
+            "missed": 0,
+            "wrong_admitted": 0
+          },
+          "strict": {
+            "correct_admitted": 1,
+            "missed": 0,
+            "wrong_admitted": 0
+          }
+        },
+        "signal_bit": 1
+      },
+      "status": "completed",
+      "status_file_sha256": "57258bbd50a5f700d37c75432d2245c983f0d24691e9cccfa31c9cf1465379aa",
+      "stderr_log": "/workspace/triad/results/gpu-comparison/cpu-fp32-a.stderr.log",
+      "stdout_log": "/workspace/triad/results/gpu-comparison/cpu-fp32-a.stdout.log",
+      "strict": {
+        "accepted": true,
+        "bit": 1,
+        "log_threshold": 22.72106338958574,
+        "opposite_bit_margin": 417.08899711594654,
+        "score": 409.9510183927464
+      },
+      "timeout_seconds": 120,
+      "timing": {
+        "direct_correlation_refinement_seconds": 6.290152668952942e-06,
+        "direct_gram_refinement_seconds": 0.0,
+        "exact_support_seconds": 0.00522768497467041,
+        "gram_fft_seconds": 0.05476307403296232,
+        "observation_fft_seconds": 0.04421593598090112,
+        "public_template_preparation_seconds": 0.03131887107156217,
+        "residual_and_likelihood_seconds": 3.0297387479804456,
+        "template_fft_seconds": 0.005173695972189307,
+        "total_preparation_seconds": 0.09792057587765157,
+        "total_receiver_seconds": 3.0746450959704816
+      },
+      "wall_seconds": 4.605457
+    },
+    {
+      "arithmetic": {
+        "gram_fft": "CPU complex128; substantial bulk work, cached across frequency/drift alternatives",
+        "implicit_fallback": false,
+        "likelihood_bulk": "fp32",
+        "observation_fft_and_products": "complex64",
+        "observation_fft_device": "cuda",
+        "phase_preparation": "CPU longdouble cycle reduction, float64 exponential",
+        "preparation_and_finish": "CPU complex128/float64 residual whitening, ranks, small SVD, budgets and bit mixture",
+        "public_near_edge_refinement": "explicit FP64 raw-dot exception for fixed public groups whose masked Gram is unresolved by FFT",
+        "requested_correlation_precision": "fp32",
+        "tf32_allowed": false
+      },
+      "best_group_public_parameters": {
+        "arrival_seconds": 7.770947265625,
+        "clock_ppm": 0.0,
+        "epoch_offset_seconds": 0,
+        "frequency_drift_hz_per_second": 0.0,
+        "frequency_hz": -0.0030001725001500084
+      },
+      "calibration": {
+        "delta_per_group": 1.2551700958315336e-14,
+        "effective_groups": 172896,
+        "inter_group_independence_assumed": false,
+        "known_noise_variance_diagnostic": null,
+        "rank_histogram": [
+          0,
+          0,
+          0,
+          0,
+          172896
+        ],
+        "relaxed": {
+          "calibration_failure_probability": 0.005,
+          "delta_per_segment": 4.3402777777777775e-07,
+          "fixed_window_log_threshold": 17.422746023037703,
+          "scope": "predeclared family union bound; shared independent whole-bank calibration; no adaptive/anytime extension",
+          "score_probability": 0.005,
+          "total_false_admission_bound": 0.01
+        },
+        "scope": "stationary proper-complex white Gaussian noise; one complete-column union residual per group",
+        "strict": {
+          "calibration_failure_probability": 5e-05,
+          "delta_per_segment": 2.1701388888888887e-09,
+          "fixed_window_log_threshold": 22.72106338958574,
+          "scope": "predeclared family union bound; shared independent whole-bank calibration; no adaptive/anytime extension",
+          "score_probability": 5e-05,
+          "total_false_admission_bound": 0.0001
+        },
+        "variance_upper_over_reference_range": [
+          42.16746866642374,
+          42.36511821823808
+        ]
+      },
+      "command": [
+        "/tmp/triad-fft-env/bin/python",
+        "/workspace/triad/tools/triad_fft_acquire.py",
+        "/workspace/triad-input/local-evidence/triad-fft-timing/wide-pilot/sampled",
+        "--lag-max-seconds",
+        "14.07",
+        "--lag-step-samples",
+        "1",
+        "--frequency-offsets-hz",
+        "-0.0030001725001500084",
+        "0.0",
+        "0.0030001725001500084",
+        "--drift-offsets-hz-per-second",
+        "0",
+        "--group-tile",
+        "512",
+        "--memory-mib",
+        "1024",
+        "--device",
+        "cuda",
+        "--precision",
+        "fp32",
+        "--evaluate-simulation",
+        "--output",
+        "/workspace/triad/results/gpu-comparison/cuda-fp32-a.scores.json"
+      ],
+      "device": "cuda",
+      "group_count": 172896,
+      "job": "cuda-fp32-a",
+      "likelihoods": [
+        -7.137980732137591,
+        409.9509315794126
+      ],
+      "numerical_refinement": {
+        "direct_refined_groups": 0,
+        "exact_zero_column_groups": 0,
+        "exact_zero_whole_groups": 0,
+        "examined_row_work_limit": 2000000,
+        "examined_rows": 0,
+        "fft_resolution_trigger_scale": 2.4937520290328344e-13,
+        "masked_energy_refinement_trigger": 0.0024937520290328344,
+        "observable_relative_tolerance": 1e-10,
+        "retained_rows": 0,
+        "selection": "public support/Gram only; fixed rank tolerance and full family allocation retained",
+        "support_run_lag_operations": 2651072,
+        "support_work_limit": 200000000
+      },
+      "peak_child_rss_bytes": 1658908672,
+      "precision": "fp32",
+      "relaxed": {
+        "accepted": true,
+        "bit": 1,
+        "log_threshold": 17.422746023037703,
+        "opposite_bit_margin": 417.0889123115502,
+        "score": 409.9509315794126
+      },
+      "resources": {
+        "explicit_array_bound_bytes": 240177960,
+        "group_tile": 512,
+        "memory_limit_bytes": 1073741824,
+        "retained_all_group_scores": true,
+        "scope": "includes input mappings/FFT reserves; excludes Python/Torch runtime and external allocator internals; not process RSS"
+      },
+      "returncode": 0,
+      "schema": "triad-fft-precision-job-v1",
+      "score_file": "/workspace/triad/results/gpu-comparison/cuda-fp32-a.scores.json",
+      "score_sha256": "cf575f78982193ad2b2190293005641891ca83bebe437e2ca9e96726ba735280",
+      "simulation_evaluation_only": {
+        "control": "signal",
+        "outcomes": {
+          "relaxed": {
+            "correct_admitted": 1,
+            "missed": 0,
+            "wrong_admitted": 0
+          },
+          "strict": {
+            "correct_admitted": 1,
+            "missed": 0,
+            "wrong_admitted": 0
+          }
+        },
+        "signal_bit": 1
+      },
+      "status": "completed",
+      "status_file_sha256": "55ef35c2151ad07b19cdb55ec8dd5ecb5b8c4ecec9321ccc50ac29fef4972a09",
+      "stderr_log": "/workspace/triad/results/gpu-comparison/cuda-fp32-a.stderr.log",
+      "stdout_log": "/workspace/triad/results/gpu-comparison/cuda-fp32-a.stdout.log",
+      "strict": {
+        "accepted": true,
+        "bit": 1,
+        "log_threshold": 22.72106338958574,
+        "opposite_bit_margin": 417.0889123115502,
+        "score": 409.9509315794126
+      },
+      "timeout_seconds": 120,
+      "timing": {
+        "direct_correlation_refinement_seconds": 4.09991480410099e-06,
+        "direct_gram_refinement_seconds": 0.0,
+        "exact_support_seconds": 0.005127617157995701,
+        "gram_fft_seconds": 0.08766308310441673,
+        "observation_fft_seconds": 0.03923181816935539,
+        "public_template_preparation_seconds": 0.08124677580781281,
+        "residual_and_likelihood_seconds": 3.3111289269290864,
+        "template_fft_seconds": 0.32940271799452603,
+        "total_preparation_seconds": 0.5049717519432306,
+        "total_receiver_seconds": 3.3508787259925157
+      },
+      "wall_seconds": 5.356182
+    },
+    {
+      "arithmetic": {
+        "gram_fft": "CPU complex128; substantial bulk work, cached across frequency/drift alternatives",
+        "implicit_fallback": false,
+        "likelihood_bulk": "fp32",
+        "observation_fft_and_products": "complex64",
+        "observation_fft_device": "cuda",
+        "phase_preparation": "CPU longdouble cycle reduction, float64 exponential",
+        "preparation_and_finish": "CPU complex128/float64 residual whitening, ranks, small SVD, budgets and bit mixture",
+        "public_near_edge_refinement": "explicit FP64 raw-dot exception for fixed public groups whose masked Gram is unresolved by FFT",
+        "requested_correlation_precision": "fp32",
+        "tf32_allowed": false
+      },
+      "best_group_public_parameters": {
+        "arrival_seconds": 7.770947265625,
+        "clock_ppm": 0.0,
+        "epoch_offset_seconds": 0,
+        "frequency_drift_hz_per_second": 0.0,
+        "frequency_hz": -0.0030001725001500084
+      },
+      "calibration": {
+        "delta_per_group": 1.2551700958315336e-14,
+        "effective_groups": 172896,
+        "inter_group_independence_assumed": false,
+        "known_noise_variance_diagnostic": null,
+        "rank_histogram": [
+          0,
+          0,
+          0,
+          0,
+          172896
+        ],
+        "relaxed": {
+          "calibration_failure_probability": 0.005,
+          "delta_per_segment": 4.3402777777777775e-07,
+          "fixed_window_log_threshold": 17.422746023037703,
+          "scope": "predeclared family union bound; shared independent whole-bank calibration; no adaptive/anytime extension",
+          "score_probability": 0.005,
+          "total_false_admission_bound": 0.01
+        },
+        "scope": "stationary proper-complex white Gaussian noise; one complete-column union residual per group",
+        "strict": {
+          "calibration_failure_probability": 5e-05,
+          "delta_per_segment": 2.1701388888888887e-09,
+          "fixed_window_log_threshold": 22.72106338958574,
+          "scope": "predeclared family union bound; shared independent whole-bank calibration; no adaptive/anytime extension",
+          "score_probability": 5e-05,
+          "total_false_admission_bound": 0.0001
+        },
+        "variance_upper_over_reference_range": [
+          42.16746866642374,
+          42.36511821823808
+        ]
+      },
+      "command": [
+        "/tmp/triad-fft-env/bin/python",
+        "/workspace/triad/tools/triad_fft_acquire.py",
+        "/workspace/triad-input/local-evidence/triad-fft-timing/wide-pilot/sampled",
+        "--lag-max-seconds",
+        "14.07",
+        "--lag-step-samples",
+        "1",
+        "--frequency-offsets-hz",
+        "-0.0030001725001500084",
+        "0.0",
+        "0.0030001725001500084",
+        "--drift-offsets-hz-per-second",
+        "0",
+        "--group-tile",
+        "512",
+        "--memory-mib",
+        "1024",
+        "--device",
+        "cuda",
+        "--precision",
+        "fp32",
+        "--evaluate-simulation",
+        "--output",
+        "/workspace/triad/results/gpu-comparison/cuda-fp32-b.scores.json"
+      ],
+      "device": "cuda",
+      "group_count": 172896,
+      "job": "cuda-fp32-b",
+      "likelihoods": [
+        -7.137980732137591,
+        409.9509315794126
+      ],
+      "numerical_refinement": {
+        "direct_refined_groups": 0,
+        "exact_zero_column_groups": 0,
+        "exact_zero_whole_groups": 0,
+        "examined_row_work_limit": 2000000,
+        "examined_rows": 0,
+        "fft_resolution_trigger_scale": 2.4937520290328344e-13,
+        "masked_energy_refinement_trigger": 0.0024937520290328344,
+        "observable_relative_tolerance": 1e-10,
+        "retained_rows": 0,
+        "selection": "public support/Gram only; fixed rank tolerance and full family allocation retained",
+        "support_run_lag_operations": 2651072,
+        "support_work_limit": 200000000
+      },
+      "peak_child_rss_bytes": 1634185216,
+      "precision": "fp32",
+      "relaxed": {
+        "accepted": true,
+        "bit": 1,
+        "log_threshold": 17.422746023037703,
+        "opposite_bit_margin": 417.0889123115502,
+        "score": 409.9509315794126
+      },
+      "resources": {
+        "explicit_array_bound_bytes": 240177960,
+        "group_tile": 512,
+        "memory_limit_bytes": 1073741824,
+        "retained_all_group_scores": true,
+        "scope": "includes input mappings/FFT reserves; excludes Python/Torch runtime and external allocator internals; not process RSS"
+      },
+      "returncode": 0,
+      "schema": "triad-fft-precision-job-v1",
+      "score_file": "/workspace/triad/results/gpu-comparison/cuda-fp32-b.scores.json",
+      "score_sha256": "872be427c82bac86507bcbedf707910e2ed512d6a3f182e2894be22e0375d13a",
+      "simulation_evaluation_only": {
+        "control": "signal",
+        "outcomes": {
+          "relaxed": {
+            "correct_admitted": 1,
+            "missed": 0,
+            "wrong_admitted": 0
+          },
+          "strict": {
+            "correct_admitted": 1,
+            "missed": 0,
+            "wrong_admitted": 0
+          }
+        },
+        "signal_bit": 1
+      },
+      "status": "completed",
+      "status_file_sha256": "cd8c0423dd5249653ac0fd355baeca22ca4fe646db6f926ccd3dc6368c183762",
+      "stderr_log": "/workspace/triad/results/gpu-comparison/cuda-fp32-b.stderr.log",
+      "stdout_log": "/workspace/triad/results/gpu-comparison/cuda-fp32-b.stdout.log",
+      "strict": {
+        "accepted": true,
+        "bit": 1,
+        "log_threshold": 22.72106338958574,
+        "opposite_bit_margin": 417.0889123115502,
+        "score": 409.9509315794126
+      },
+      "timeout_seconds": 120,
+      "timing": {
+        "direct_correlation_refinement_seconds": 5.939975380897522e-06,
+        "direct_gram_refinement_seconds": 0.0,
+        "exact_support_seconds": 0.005019488045945764,
+        "gram_fft_seconds": 0.06984204892069101,
+        "observation_fft_seconds": 0.042060717940330505,
+        "public_template_preparation_seconds": 0.03738251398317516,
+        "residual_and_likelihood_seconds": 3.307558123022318,
+        "template_fft_seconds": 0.11600332683883607,
+        "total_preparation_seconds": 0.2296809870749712,
+        "total_receiver_seconds": 3.3501411371398717
+      },
+      "wall_seconds": 5.057883
+    },
+    {
+      "arithmetic": {
+        "gram_fft": "CPU complex128; substantial bulk work, cached across frequency/drift alternatives",
+        "implicit_fallback": false,
+        "likelihood_bulk": "fp32",
+        "observation_fft_and_products": "complex64",
+        "observation_fft_device": "cpu",
+        "phase_preparation": "CPU longdouble cycle reduction, float64 exponential",
+        "preparation_and_finish": "CPU complex128/float64 residual whitening, ranks, small SVD, budgets and bit mixture",
+        "public_near_edge_refinement": "explicit FP64 raw-dot exception for fixed public groups whose masked Gram is unresolved by FFT",
+        "requested_correlation_precision": "fp32",
+        "tf32_allowed": false
+      },
+      "best_group_public_parameters": {
+        "arrival_seconds": 7.770947265625,
+        "clock_ppm": 0.0,
+        "epoch_offset_seconds": 0,
+        "frequency_drift_hz_per_second": 0.0,
+        "frequency_hz": -0.0030001725001500084
+      },
+      "calibration": {
+        "delta_per_group": 1.2551700958315336e-14,
+        "effective_groups": 172896,
+        "inter_group_independence_assumed": false,
+        "known_noise_variance_diagnostic": null,
+        "rank_histogram": [
+          0,
+          0,
+          0,
+          0,
+          172896
+        ],
+        "relaxed": {
+          "calibration_failure_probability": 0.005,
+          "delta_per_segment": 4.3402777777777775e-07,
+          "fixed_window_log_threshold": 17.422746023037703,
+          "scope": "predeclared family union bound; shared independent whole-bank calibration; no adaptive/anytime extension",
+          "score_probability": 0.005,
+          "total_false_admission_bound": 0.01
+        },
+        "scope": "stationary proper-complex white Gaussian noise; one complete-column union residual per group",
+        "strict": {
+          "calibration_failure_probability": 5e-05,
+          "delta_per_segment": 2.1701388888888887e-09,
+          "fixed_window_log_threshold": 22.72106338958574,
+          "scope": "predeclared family union bound; shared independent whole-bank calibration; no adaptive/anytime extension",
+          "score_probability": 5e-05,
+          "total_false_admission_bound": 0.0001
+        },
+        "variance_upper_over_reference_range": [
+          42.16746861693487,
+          42.365118218215876
+        ]
+      },
+      "command": [
+        "/tmp/triad-fft-env/bin/python",
+        "/workspace/triad/tools/triad_fft_acquire.py",
+        "/workspace/triad-input/local-evidence/triad-fft-timing/wide-pilot/sampled",
+        "--lag-max-seconds",
+        "14.07",
+        "--lag-step-samples",
+        "1",
+        "--frequency-offsets-hz",
+        "-0.0030001725001500084",
+        "0.0",
+        "0.0030001725001500084",
+        "--drift-offsets-hz-per-second",
+        "0",
+        "--group-tile",
+        "512",
+        "--memory-mib",
+        "1024",
+        "--device",
+        "cpu",
+        "--precision",
+        "fp32",
+        "--evaluate-simulation",
+        "--output",
+        "/workspace/triad/results/gpu-comparison/cpu-fp32-b.scores.json"
+      ],
+      "device": "cpu",
+      "group_count": 172896,
+      "job": "cpu-fp32-b",
+      "likelihoods": [
+        -7.137978723200167,
+        409.9510183927464
+      ],
+      "numerical_refinement": {
+        "direct_refined_groups": 0,
+        "exact_zero_column_groups": 0,
+        "exact_zero_whole_groups": 0,
+        "examined_row_work_limit": 2000000,
+        "examined_rows": 0,
+        "fft_resolution_trigger_scale": 2.4937520290328344e-13,
+        "masked_energy_refinement_trigger": 0.0024937520290328344,
+        "observable_relative_tolerance": 1e-10,
+        "retained_rows": 0,
+        "selection": "public support/Gram only; fixed rank tolerance and full family allocation retained",
+        "support_run_lag_operations": 2651072,
+        "support_work_limit": 200000000
+      },
+      "peak_child_rss_bytes": 661483520,
+      "precision": "fp32",
+      "relaxed": {
+        "accepted": true,
+        "bit": 1,
+        "log_threshold": 17.422746023037703,
+        "opposite_bit_margin": 417.08899711594654,
+        "score": 409.9510183927464
+      },
+      "resources": {
+        "explicit_array_bound_bytes": 194195496,
+        "group_tile": 512,
+        "memory_limit_bytes": 1073741824,
+        "retained_all_group_scores": true,
+        "scope": "includes input mappings/FFT reserves; excludes Python/Torch runtime and external allocator internals; not process RSS"
+      },
+      "returncode": 0,
+      "schema": "triad-fft-precision-job-v1",
+      "score_file": "/workspace/triad/results/gpu-comparison/cpu-fp32-b.scores.json",
+      "score_sha256": "ddc403389bd1737ca13ba75feca5c86a1a988d1cb39703aaefde982f9696c51a",
+      "simulation_evaluation_only": {
+        "control": "signal",
+        "outcomes": {
+          "relaxed": {
+            "correct_admitted": 1,
+            "missed": 0,
+            "wrong_admitted": 0
+          },
+          "strict": {
+            "correct_admitted": 1,
+            "missed": 0,
+            "wrong_admitted": 0
+          }
+        },
+        "signal_bit": 1
+      },
+      "status": "completed",
+      "status_file_sha256": "45041d17b46d3f7723caac9de0306f654ea9dfb272cf7f319035aca50f988d7c",
+      "stderr_log": "/workspace/triad/results/gpu-comparison/cpu-fp32-b.stderr.log",
+      "stdout_log": "/workspace/triad/results/gpu-comparison/cpu-fp32-b.stdout.log",
+      "strict": {
+        "accepted": true,
+        "bit": 1,
+        "log_threshold": 22.72106338958574,
+        "opposite_bit_margin": 417.08899711594654,
+        "score": 409.9510183927464
+      },
+      "timeout_seconds": 120,
+      "timing": {
+        "direct_correlation_refinement_seconds": 5.540205165743828e-06,
+        "direct_gram_refinement_seconds": 0.0,
+        "exact_support_seconds": 0.005021037999540567,
+        "gram_fft_seconds": 0.058405912946909666,
+        "observation_fft_seconds": 0.0416725326795131,
+        "public_template_preparation_seconds": 0.025122439954429865,
+        "residual_and_likelihood_seconds": 2.96982793090865,
+        "template_fft_seconds": 0.012769307009875774,
+        "total_preparation_seconds": 0.10271398792974651,
+        "total_receiver_seconds": 3.0119740541558713
+      },
+      "wall_seconds": 4.470561
+    },
+    {
+      "arithmetic": {
+        "gram_fft": "CPU complex128; substantial bulk work, cached across frequency/drift alternatives",
+        "implicit_fallback": false,
+        "likelihood_bulk": "fp64",
+        "observation_fft_and_products": "complex128",
+        "observation_fft_device": "cpu",
+        "phase_preparation": "CPU longdouble cycle reduction, float64 exponential",
+        "preparation_and_finish": "CPU complex128/float64 residual whitening, ranks, small SVD, budgets and bit mixture",
+        "public_near_edge_refinement": "explicit FP64 raw-dot exception for fixed public groups whose masked Gram is unresolved by FFT",
+        "requested_correlation_precision": "fp64",
+        "tf32_allowed": false
+      },
+      "best_group_public_parameters": {
+        "arrival_seconds": 7.770947265625,
+        "clock_ppm": 0.0,
+        "epoch_offset_seconds": 0,
+        "frequency_drift_hz_per_second": 0.0,
+        "frequency_hz": -0.0030001725001500084
+      },
+      "calibration": {
+        "delta_per_group": 1.2551700958315336e-14,
+        "effective_groups": 172896,
+        "inter_group_independence_assumed": false,
+        "known_noise_variance_diagnostic": null,
+        "rank_histogram": [
+          0,
+          0,
+          0,
+          0,
+          172896
+        ],
+        "relaxed": {
+          "calibration_failure_probability": 0.005,
+          "delta_per_segment": 4.3402777777777775e-07,
+          "fixed_window_log_threshold": 17.422746023037703,
+          "scope": "predeclared family union bound; shared independent whole-bank calibration; no adaptive/anytime extension",
+          "score_probability": 0.005,
+          "total_false_admission_bound": 0.01
+        },
+        "scope": "stationary proper-complex white Gaussian noise; one complete-column union residual per group",
+        "strict": {
+          "calibration_failure_probability": 5e-05,
+          "delta_per_segment": 2.1701388888888887e-09,
+          "fixed_window_log_threshold": 22.72106338958574,
+          "scope": "predeclared family union bound; shared independent whole-bank calibration; no adaptive/anytime extension",
+          "score_probability": 5e-05,
+          "total_false_admission_bound": 0.0001
+        },
+        "variance_upper_over_reference_range": [
+          42.16746855488996,
+          42.36511821826263
+        ]
+      },
+      "command": [
+        "/tmp/triad-fft-env/bin/python",
+        "/workspace/triad/tools/triad_fft_acquire.py",
+        "/workspace/triad-input/local-evidence/triad-fft-timing/wide-pilot/sampled",
+        "--lag-max-seconds",
+        "14.07",
+        "--lag-step-samples",
+        "1",
+        "--frequency-offsets-hz",
+        "-0.0030001725001500084",
+        "0.0",
+        "0.0030001725001500084",
+        "--drift-offsets-hz-per-second",
+        "0",
+        "--group-tile",
+        "512",
+        "--memory-mib",
+        "1024",
+        "--device",
+        "cpu",
+        "--precision",
+        "fp64",
+        "--evaluate-simulation",
+        "--output",
+        "/workspace/triad/results/gpu-comparison/cpu-fp64-b.scores.json"
+      ],
+      "device": "cpu",
+      "group_count": 172896,
+      "job": "cpu-fp64-b",
+      "likelihoods": [
+        -7.137976509904455,
+        409.9511665205666
+      ],
+      "numerical_refinement": {
+        "direct_refined_groups": 0,
+        "exact_zero_column_groups": 0,
+        "exact_zero_whole_groups": 0,
+        "examined_row_work_limit": 2000000,
+        "examined_rows": 0,
+        "fft_resolution_trigger_scale": 2.4937520290328344e-13,
+        "masked_energy_refinement_trigger": 0.0024937520290328344,
+        "observable_relative_tolerance": 1e-10,
+        "retained_rows": 0,
+        "selection": "public support/Gram only; fixed rank tolerance and full family allocation retained",
+        "support_run_lag_operations": 2651072,
+        "support_work_limit": 200000000
+      },
+      "peak_child_rss_bytes": 669261824,
+      "precision": "fp64",
+      "relaxed": {
+        "accepted": true,
+        "bit": 1,
+        "log_threshold": 17.422746023037703,
+        "opposite_bit_margin": 417.089143030471,
+        "score": 409.9511665205666
+      },
+      "resources": {
+        "explicit_array_bound_bytes": 194195496,
+        "group_tile": 512,
+        "memory_limit_bytes": 1073741824,
+        "retained_all_group_scores": true,
+        "scope": "includes input mappings/FFT reserves; excludes Python/Torch runtime and external allocator internals; not process RSS"
+      },
+      "returncode": 0,
+      "schema": "triad-fft-precision-job-v1",
+      "score_file": "/workspace/triad/results/gpu-comparison/cpu-fp64-b.scores.json",
+      "score_sha256": "db363106f1776c86e8df3599d24c1f82669830d5f01ca090362c71f01e8c139e",
+      "simulation_evaluation_only": {
+        "control": "signal",
+        "outcomes": {
+          "relaxed": {
+            "correct_admitted": 1,
+            "missed": 0,
+            "wrong_admitted": 0
+          },
+          "strict": {
+            "correct_admitted": 1,
+            "missed": 0,
+            "wrong_admitted": 0
+          }
+        },
+        "signal_bit": 1
+      },
+      "status": "completed",
+      "status_file_sha256": "36c74b2404eba57ffb52c589f3600c354572a2eb1b30b6d842f140431a2390b6",
+      "stderr_log": "/workspace/triad/results/gpu-comparison/cpu-fp64-b.stderr.log",
+      "stdout_log": "/workspace/triad/results/gpu-comparison/cpu-fp64-b.stdout.log",
+      "strict": {
+        "accepted": true,
+        "bit": 1,
+        "log_threshold": 22.72106338958574,
+        "opposite_bit_margin": 417.089143030471,
+        "score": 409.9511665205666
+      },
+      "timeout_seconds": 120,
+      "timing": {
+        "direct_correlation_refinement_seconds": 7.969792932271957e-06,
+        "direct_gram_refinement_seconds": 0.0,
+        "exact_support_seconds": 0.005142926936969161,
+        "gram_fft_seconds": 0.08617416420020163,
+        "observation_fft_seconds": 0.05470365611836314,
+        "public_template_preparation_seconds": 0.053005771012976766,
+        "residual_and_likelihood_seconds": 2.918153478531167,
+        "template_fft_seconds": 0.04647066304460168,
+        "total_preparation_seconds": 0.19233508314937353,
+        "total_receiver_seconds": 2.973492404911667
+      },
+      "wall_seconds": 4.623521
+    }
+  ],
+  "limitations": [
+    "One strong signal at 20 dB-Hz, with accepted score about 410 versus strict gate 22.72; no near-threshold, null or wrong-key arithmetic validation.",
+    "Two identical-input repeats per setting are latency/arithmetic replays, not independent correct receptions.",
+    "All groups retained rank four and no edge refinement ran; near-singular or refinement precision behavior is untested here.",
+    "Only one epoch, clock hypothesis, fractional timing branch and zero drift; no renewed-channel or continuous/fractional timing qualification.",
+    "Explicit array bound excludes Python/Torch/driver/allocator overhead; CUDA host RSS exceeds the nominal 1 GiB array budget. VRAM peak is not measured.",
+    "No resident multi-capture throughput, multi-GPU acceleration, long-duration performance or sensitivity-equivalence claim.",
+    "Original campaign driver hash was not recorded in campaign metadata; this review archives the supplied final driver and verifies its commands/status schema against the retained artifacts."
+  ],
+  "paired_cpu32_over_cuda32_cold_cli_speedup": [
+    0.8598395274843162,
+    0.8838798762248948
+  ],
+  "physical_capture": {
+    "actual_elapsed_seconds": 9.200000000000001,
+    "cn0_db_hz": 20,
+    "control": "signal",
+    "export_command_argv": [
+      "build/dev-cli/triad_long",
+      "--mode",
+      "export-sampled",
+      "--seconds",
+      "8",
+      "--rate",
+      "360",
+      "--added",
+      "10",
+      "--sample-rate",
+      "4096",
+      "--rf-hz",
+      "30000000",
+      "--nominal-if-hz",
+      "1725",
+      "--base-oscillator",
+      "gpsdo-ocxo",
+      "--shift-oscillator",
+      "gpsdo-ocxo",
+      "--clock-sync",
+      "default",
+      "--margin",
+      "1",
+      "--spread-preset",
+      "hf-best",
+      "--selective-perturbation",
+      "each-65",
+      "--basis",
+      "two-ray",
+      "--tap-delay-ms",
+      ".5",
+      "--tap-doppler-hz",
+      ".1",
+      "--cn0",
+      "20",
+      "--threads",
+      "1",
+      "--memory-mib",
+      "512",
+      "--export-max-samples",
+      "2000000",
+      "--export-max-mib",
+      "512",
+      "--block",
+      "128",
+      "--seed",
+      "1203101",
+      "--key-seed",
+      "2203101",
+      "--channel-seed",
+      "3203101",
+      "--oscillator-seed",
+      "4203101",
+      "--noise-seed",
+      "5203101",
+      "--frontend-seed",
+      "6203101",
+      "--path-seed",
+      "7203101",
+      "--signal-bit",
+      "1",
+      "--control",
+      "signal",
+      "--start",
+      "-7.035",
+      "-7.035",
+      "1",
+      "--arrival-prior-seconds",
+      "-7.035",
+      "7.035",
+      "--fhss",
+      "--output",
+      "local-evidence/triad-fft-timing/wide-pilot/sampled"
+    ],
+    "fhss_envelope_only": true,
+    "observed_seconds": 23.353515625,
+    "physical_configuration": {
+      "base_oscillator": "gpsdo-ocxo",
+      "margin": 1,
+      "nominal_conversion_if_hz": 1725,
+      "rf_center_hz": 30000000,
+      "selective_perturbation": "each-65",
+      "shift_oscillator": "gpsdo-ocxo",
+      "spread_delay_ms": 0.5,
+      "spread_doppler_hz": 0.1,
+      "spread_preset": "hf-best"
+    },
+    "requested_active_seconds": 8,
+    "sample_count": 95656,
+    "sample_rate": 4096,
+    "signal_bit": 1,
+    "source_format": {
+      "added_interleave": true,
+      "added_symbols": 10,
+      "calendar_origin_sample": 57,
+      "carrier_spacing_hz": 750,
+      "dwell_seconds": 0.4,
+      "encrypted": true,
+      "fine_rate_hz": 600,
+      "inner_rate_hz": 360,
+      "margin_seconds": 0.005,
+      "minimum_inner_coefficients": 64,
+      "occupied_bandwidth_hz": 2250,
+      "payload_fine_cells_per_tile": 3170,
+      "quiet_seconds": 0.055,
+      "ramp_seconds": 0.0005555555555555556,
+      "symbol_ordinal": 0,
+      "tile_count": 1,
+      "tile_seconds": 9.200000000000001,
+      "version": 3
+    }
+  },
+  "provenance_sha256": {
+    "local-evidence/triad-fft-timing/gpu/compare.py": "08a037ca6dcffafa7780236bb0a8218c6934d2ef06c85580a174533231b01779",
+    "local-evidence/triad-fft-timing/gpu/remote/campaign.json": "d247701ddd3dba23af3651c660c1bb2e0375d139fdd83179c079486e0ed7d0f4",
+    "local-evidence/triad-fft-timing/gpu/remote/cpu-fp32-a.scores.json": "fe8d746c6eb7a434e72c557a649a3919e3f767972bdec43c4243b24506c3f06a",
+    "local-evidence/triad-fft-timing/gpu/remote/cpu-fp32-a.status.json": "57258bbd50a5f700d37c75432d2245c983f0d24691e9cccfa31c9cf1465379aa",
+    "local-evidence/triad-fft-timing/gpu/remote/cpu-fp32-a.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "local-evidence/triad-fft-timing/gpu/remote/cpu-fp32-a.stdout.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "local-evidence/triad-fft-timing/gpu/remote/cpu-fp32-b.scores.json": "ddc403389bd1737ca13ba75feca5c86a1a988d1cb39703aaefde982f9696c51a",
+    "local-evidence/triad-fft-timing/gpu/remote/cpu-fp32-b.status.json": "45041d17b46d3f7723caac9de0306f654ea9dfb272cf7f319035aca50f988d7c",
+    "local-evidence/triad-fft-timing/gpu/remote/cpu-fp32-b.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "local-evidence/triad-fft-timing/gpu/remote/cpu-fp32-b.stdout.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "local-evidence/triad-fft-timing/gpu/remote/cpu-fp64-a.scores.json": "72d9e662eebfb530fd44357f39a524efb18871353ea14128446261197ec2347b",
+    "local-evidence/triad-fft-timing/gpu/remote/cpu-fp64-a.status.json": "51904929075336b8ca20c184fd52caa373350ca266b3c6179c459bab98bd9919",
+    "local-evidence/triad-fft-timing/gpu/remote/cpu-fp64-a.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "local-evidence/triad-fft-timing/gpu/remote/cpu-fp64-a.stdout.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "local-evidence/triad-fft-timing/gpu/remote/cpu-fp64-b.scores.json": "db363106f1776c86e8df3599d24c1f82669830d5f01ca090362c71f01e8c139e",
+    "local-evidence/triad-fft-timing/gpu/remote/cpu-fp64-b.status.json": "36c74b2404eba57ffb52c589f3600c354572a2eb1b30b6d842f140431a2390b6",
+    "local-evidence/triad-fft-timing/gpu/remote/cpu-fp64-b.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "local-evidence/triad-fft-timing/gpu/remote/cpu-fp64-b.stdout.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "local-evidence/triad-fft-timing/gpu/remote/cuda-fp32-a.scores.json": "cf575f78982193ad2b2190293005641891ca83bebe437e2ca9e96726ba735280",
+    "local-evidence/triad-fft-timing/gpu/remote/cuda-fp32-a.status.json": "55ef35c2151ad07b19cdb55ec8dd5ecb5b8c4ecec9321ccc50ac29fef4972a09",
+    "local-evidence/triad-fft-timing/gpu/remote/cuda-fp32-a.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "local-evidence/triad-fft-timing/gpu/remote/cuda-fp32-a.stdout.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "local-evidence/triad-fft-timing/gpu/remote/cuda-fp32-b.scores.json": "872be427c82bac86507bcbedf707910e2ed512d6a3f182e2894be22e0375d13a",
+    "local-evidence/triad-fft-timing/gpu/remote/cuda-fp32-b.status.json": "cd8c0423dd5249653ac0fd355baeca22ca4fe646db6f926ccd3dc6368c183762",
+    "local-evidence/triad-fft-timing/gpu/remote/cuda-fp32-b.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "local-evidence/triad-fft-timing/gpu/remote/cuda-fp32-b.stdout.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "local-evidence/triad-fft-timing/gpu/remote/summary.json": "a1499526fc0c2eecacfcf98c1c0f881e0bb64f6eab92f025560eec5ee369d144"
+  },
+  "replays": {
+    "cpu-fp32": {
+      "full_scores_identical": true,
+      "mean_wall_seconds": 4.538009000000001,
+      "wall_seconds": [
+        4.605457,
+        4.470561
+      ]
+    },
+    "cpu-fp64": {
+      "full_scores_identical": true,
+      "mean_wall_seconds": 4.6488415,
+      "wall_seconds": [
+        4.674162,
+        4.623521
+      ]
+    },
+    "cuda-fp32": {
+      "full_scores_identical": true,
+      "mean_wall_seconds": 5.2070325,
+      "wall_seconds": [
+        5.356182,
+        5.057883
+      ]
+    }
+  },
+  "review_setup_note": "Initial read-only review checks stopped before any artifact writes: exact unrounded budget algebra differed from deliberately outward-rounded implementation; a subsequent inline review had a syntax error. The completed check reproduces declared nextafter roundings. No receiver was executed during review.",
+  "sampled_rss_scope": "Runner samples child VmRSS every 25 ms; this is an observed peak, not a guaranteed maximum or VRAM measurement.",
+  "schema": "triad-fft-cpu-gpu-independent-review-v1",
+  "scope": "One retained strong-signal capture, six sequential fresh CLI processes; two arithmetic replays per configuration, not independent receptions or resident throughput.",
+  "source_closure_after": {
+    "tools/triad_fft_acquire.py": "f91265b9d0a6915848be62e2b687982b2b07109d534a8487e137c73377d5b94b",
+    "tools/triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba",
+    "tools/triad_gaussian_window.py": "b22fe002864922e44bc7e10000672a163353818f610c4882bae5d62cfe1cf883",
+    "tools/triad_group_acquire.py": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+    "tools/triad_noise_likelihood.py": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110",
+    "tools/triad_state_workspace.py": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923"
+  },
+  "source_unchanged_during_campaign": true,
+  "timing_review": "Reported total_receiver_seconds starts after workspace preparation. CLI wall includes preparation, imports/startup, input checks and JSON output. Stages are not GPU kernel-event profiles. Two fresh CLI processes per setting share a host/session and can benefit from OS/driver caching."
+}

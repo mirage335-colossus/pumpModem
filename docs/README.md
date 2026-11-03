@@ -17,6 +17,12 @@ adds zero-shift/shared-clock support, independent modulation timescales,
 frequency reuse from retained complex blocks, and the TCXO phase-continuity
 diagnostic. Use its measured scope and remaining failures when selecting a
 receiver; long exports remain optional research, not default regressions.
+For wide timing banks, use the newer
+[sampled FFT acquisition study](validation-data/triad-v3/2026-11-03-fft-timing/README.md).
+It reuses one actual noisy sampled capture across a complete integer-arrival
+and sample-phase CFO bank, with fixed clock/epoch and a static two-tap model.
+Its CPU timing comparison and [continuity followup](validation-data/triad-v3/2026-11-03-fft-timing/continuity/README.md)
+do not establish GPU acceleration or general reception reliability.
 
 **Developing Robust simulation software:** start with the
 [Doppler/delay spread and frequency-selective amplitude modulation guide](channel-models.md).

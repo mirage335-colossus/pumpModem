@@ -1,0 +1,365 @@
+{
+  "schema": "triad-fft-native-sample-parity-v1",
+  "binary_sha256": "9cdf82f396d9be9a7d11b66b45b254e5f18b3857f27b08aed58430dce6d8ea47",
+  "method": "FFT full bank compared to independently exported native direct-arrival templates, explicit raw masked complex128 dot products per lag; actual noisy output compared against native export-group-stats receiver with same 9 hypotheses, one whole-observation block and likelihood calibration",
+  "checks": [
+    {
+      "case": "flat-fractional-ray",
+      "rate_hz": 36,
+      "sample_count": 19604,
+      "lag_count": 9,
+      "fft_source_sha256": "2eb4c48dfae832e748ab687b2a8da60acc41e560f2a3c9adb40cf84b6bad1e29",
+      "fft_sampled_input_hashes": {
+        "manifest.json": "496f822be83b510f0a7d98f5201dc4f478ad87d12f98c134b3887bbf18053430",
+        "basis.c128": "51f516a437dd4de65f81e2f225bc4ff94589f33444695c988ab41bb8981dc4b4",
+        "observation.c128": "5263df6d4f734b361cb6db1f2371aa3bb43badf1c47ed1e673c8486be8e050d0",
+        "validity.u8": "7ae530a250af214757a98e20632aee11c720b9712e4e0d3ca9a90f8b71d81174"
+      },
+      "raw_basis_lag_bank_max_abs_error_gram": 1.8189894035458565e-11,
+      "raw_basis_lag_bank_max_abs_error_correlations": 1.1073967535858778e-11,
+      "per_lag": [
+        {
+          "lag_samples": 0,
+          "arrival_seconds": 0.05,
+          "max_gram_abs_error": 1.4551915228366852e-11,
+          "max_correlation_abs_error": 3.2155493553843714e-12,
+          "valid_samples": 19604
+        },
+        {
+          "lag_samples": 1,
+          "arrival_seconds": 0.0509765625,
+          "max_gram_abs_error": 1.2732925824820995e-11,
+          "max_correlation_abs_error": 3.136191076949608e-12,
+          "valid_samples": 19604
+        },
+        {
+          "lag_samples": 2,
+          "arrival_seconds": 0.051953125,
+          "max_gram_abs_error": 5.4569682106375694e-12,
+          "max_correlation_abs_error": 7.433146462998416e-12,
+          "valid_samples": 19604
+        },
+        {
+          "lag_samples": 3,
+          "arrival_seconds": 0.0529296875,
+          "max_gram_abs_error": 1.2732925824820995e-11,
+          "max_correlation_abs_error": 2.1679356357801316e-12,
+          "valid_samples": 19604
+        },
+        {
+          "lag_samples": 4,
+          "arrival_seconds": 0.05390625,
+          "max_gram_abs_error": 7.275957614183426e-12,
+          "max_correlation_abs_error": 5.577049887717761e-12,
+          "valid_samples": 19604
+        },
+        {
+          "lag_samples": 5,
+          "arrival_seconds": 0.0548828125,
+          "max_gram_abs_error": 1.0913936421275139e-11,
+          "max_correlation_abs_error": 7.339847993438537e-12,
+          "valid_samples": 19604
+        },
+        {
+          "lag_samples": 6,
+          "arrival_seconds": 0.055859375,
+          "max_gram_abs_error": 3.637978807091713e-12,
+          "max_correlation_abs_error": 5.0073857768314244e-12,
+          "valid_samples": 19604
+        },
+        {
+          "lag_samples": 7,
+          "arrival_seconds": 0.0568359375,
+          "max_gram_abs_error": 1.8189894035458565e-11,
+          "max_correlation_abs_error": 7.280452628945293e-12,
+          "valid_samples": 19604
+        },
+        {
+          "lag_samples": 8,
+          "arrival_seconds": 0.0578125,
+          "max_gram_abs_error": 9.094947017729282e-12,
+          "max_correlation_abs_error": 1.1073967535858778e-11,
+          "valid_samples": 19604
+        }
+      ],
+      "full_lattice_max_abs_error_group_bit_loglikelihood": 2.8137492336099967e-12,
+      "full_lattice_max_abs_error_bit_loglikelihood": 2.1884716261411086e-12,
+      "fft_decision": {
+        "strict": {
+          "bit": 1,
+          "accepted": true,
+          "score": 203.1361334029258,
+          "opposite_bit_margin": 202.03076141902858,
+          "log_threshold": 22.72106338958574
+        },
+        "relaxed": {
+          "bit": 1,
+          "accepted": true,
+          "score": 203.1361334029258,
+          "opposite_bit_margin": 202.03076141902858,
+          "log_threshold": 17.422746023037703
+        }
+      },
+      "direct_decision": {
+        "strict": {
+          "bit": 1,
+          "accepted": true,
+          "score": 203.13613340292798,
+          "opposite_bit_margin": 202.03076141903077,
+          "log_threshold": 22.72106338958574
+        },
+        "relaxed": {
+          "bit": 1,
+          "accepted": true,
+          "score": 203.13613340292798,
+          "opposite_bit_margin": 202.03076141903077,
+          "log_threshold": 17.422746023037703
+        }
+      },
+      "checks": {
+        "raw_basis_lag_bank": true,
+        "likelihood_lattice": true,
+        "gate_and_winner": true
+      }
+    },
+    {
+      "case": "hf-Each65-FHSS-burst-rate1200",
+      "rate_hz": 1200,
+      "sample_count": 9177,
+      "lag_count": 9,
+      "fft_source_sha256": "2eb4c48dfae832e748ab687b2a8da60acc41e560f2a3c9adb40cf84b6bad1e29",
+      "fft_sampled_input_hashes": {
+        "manifest.json": "1252b6615effa98ec7c0d822e09e61d29e4663f170ce36d219aa15f2ccc9a3c0",
+        "basis.c128": "6319042640f88bc27ab68dc89c5b64dd88842666b18df4c8db6550c4706b5896",
+        "observation.c128": "a3f2411e658816954b2c79605fb9ce5c172ac92bbab141c492ca845bde114540",
+        "validity.u8": "d62f2c2749a2ec576330731fbdb03c1deab6fb62f90712ef8839a1890ecacaa9"
+      },
+      "raw_basis_lag_bank_max_abs_error_gram": 2.7284841053187847e-12,
+      "raw_basis_lag_bank_max_abs_error_correlations": 9.165725883006586e-13,
+      "per_lag": [
+        {
+          "lag_samples": 0,
+          "arrival_seconds": 0.05,
+          "max_gram_abs_error": 2.7284841053187847e-12,
+          "max_correlation_abs_error": 4.687428401686771e-13,
+          "valid_samples": 7948
+        },
+        {
+          "lag_samples": 1,
+          "arrival_seconds": 0.0509765625,
+          "max_gram_abs_error": 1.8189894035458565e-12,
+          "max_correlation_abs_error": 3.3145124091591355e-13,
+          "valid_samples": 7948
+        },
+        {
+          "lag_samples": 2,
+          "arrival_seconds": 0.051953125,
+          "max_gram_abs_error": 1.8189894035458565e-12,
+          "max_correlation_abs_error": 4.687428401686771e-13,
+          "valid_samples": 7948
+        },
+        {
+          "lag_samples": 3,
+          "arrival_seconds": 0.0529296875,
+          "max_gram_abs_error": 1.8189894035458565e-12,
+          "max_correlation_abs_error": 3.8291925281348796e-13,
+          "valid_samples": 7948
+        },
+        {
+          "lag_samples": 4,
+          "arrival_seconds": 0.05390625,
+          "max_gram_abs_error": 1.8189894035458565e-12,
+          "max_correlation_abs_error": 4.43961293735052e-13,
+          "valid_samples": 7948
+        },
+        {
+          "lag_samples": 5,
+          "arrival_seconds": 0.0548828125,
+          "max_gram_abs_error": 1.8189894035458565e-12,
+          "max_correlation_abs_error": 5.084229945850415e-13,
+          "valid_samples": 7948
+        },
+        {
+          "lag_samples": 6,
+          "arrival_seconds": 0.055859375,
+          "max_gram_abs_error": 2.7284841053187847e-12,
+          "max_correlation_abs_error": 3.4576501834057003e-13,
+          "valid_samples": 7948
+        },
+        {
+          "lag_samples": 7,
+          "arrival_seconds": 0.0568359375,
+          "max_gram_abs_error": 1.8189894035458565e-12,
+          "max_correlation_abs_error": 9.165725883006586e-13,
+          "valid_samples": 7948
+        },
+        {
+          "lag_samples": 8,
+          "arrival_seconds": 0.0578125,
+          "max_gram_abs_error": 1.8189894035458565e-12,
+          "max_correlation_abs_error": 5.123796534383003e-13,
+          "valid_samples": 7948
+        }
+      ],
+      "full_lattice_max_abs_error_group_bit_loglikelihood": 2.2737367544323206e-13,
+      "full_lattice_max_abs_error_bit_loglikelihood": 2.2737367544323206e-13,
+      "fft_decision": {
+        "strict": {
+          "bit": 1,
+          "accepted": true,
+          "score": 70.56183625264288,
+          "opposite_bit_margin": 72.13364919087,
+          "log_threshold": 22.72106338958574
+        },
+        "relaxed": {
+          "bit": 1,
+          "accepted": true,
+          "score": 70.56183625264288,
+          "opposite_bit_margin": 72.13364919087,
+          "log_threshold": 17.422746023037703
+        }
+      },
+      "direct_decision": {
+        "strict": {
+          "bit": 1,
+          "accepted": true,
+          "score": 70.5618362526431,
+          "opposite_bit_margin": 72.13364919087027,
+          "log_threshold": 22.72106338958574
+        },
+        "relaxed": {
+          "bit": 1,
+          "accepted": true,
+          "score": 70.5618362526431,
+          "opposite_bit_margin": 72.13364919087027,
+          "log_threshold": 17.422746023037703
+        }
+      },
+      "checks": {
+        "raw_basis_lag_bank": true,
+        "likelihood_lattice": true,
+        "gate_and_winner": true
+      }
+    },
+    {
+      "case": "hf-Each65-FHSS-burst-rate1200-wait40-wait40",
+      "rate_hz": 1200,
+      "sample_count": 153356,
+      "lag_count": 9,
+      "fft_source_sha256": "415d624bbd44dd593dc29bebc2f511d4b3c4df8f716d50256e1f21d89768d77e",
+      "fft_sampled_input_hashes": {
+        "manifest.json": "5d2ed55271e2323ce348e6cc98a89cbe57cdcca853a75f8dba469c24fec880eb",
+        "basis.c128": "0a92b85dd3de62ce64856107d93b2d5a397e5a68650aae460d8664f836565b12",
+        "observation.c128": "ea7b3c21902867ca49695a93cfdef5f21f35e2403b0d887d4a367045d0ac8861",
+        "validity.u8": "e578cb4e060cb6a4b96dd9cf75f41b2548255586a714343671a791176684d0e5"
+      },
+      "raw_basis_lag_bank_max_abs_error_gram": 2.546585164964199e-11,
+      "raw_basis_lag_bank_max_abs_error_correlations": 1.124982816404825e-11,
+      "per_lag": [
+        {
+          "lag_samples": 0,
+          "arrival_seconds": 0.05,
+          "max_gram_abs_error": 1.4551915228366852e-11,
+          "max_correlation_abs_error": 3.5297886589114624e-12,
+          "valid_samples": 152128
+        },
+        {
+          "lag_samples": 1,
+          "arrival_seconds": 0.0509765625,
+          "max_gram_abs_error": 2.546585164964199e-11,
+          "max_correlation_abs_error": 2.624664462158579e-12,
+          "valid_samples": 152128
+        },
+        {
+          "lag_samples": 2,
+          "arrival_seconds": 0.051953125,
+          "max_gram_abs_error": 1.8189894035458565e-11,
+          "max_correlation_abs_error": 3.885363069147175e-12,
+          "valid_samples": 152128
+        },
+        {
+          "lag_samples": 3,
+          "arrival_seconds": 0.0529296875,
+          "max_gram_abs_error": 7.275957614183426e-12,
+          "max_correlation_abs_error": 4.570154315443183e-12,
+          "valid_samples": 152128
+        },
+        {
+          "lag_samples": 4,
+          "arrival_seconds": 0.05390625,
+          "max_gram_abs_error": 1.4551915228366852e-11,
+          "max_correlation_abs_error": 4.1491802200868404e-12,
+          "valid_samples": 152128
+        },
+        {
+          "lag_samples": 5,
+          "arrival_seconds": 0.0548828125,
+          "max_gram_abs_error": 1.8189894035458565e-11,
+          "max_correlation_abs_error": 2.8760747774580336e-12,
+          "valid_samples": 152128
+        },
+        {
+          "lag_samples": 6,
+          "arrival_seconds": 0.055859375,
+          "max_gram_abs_error": 2.1827872842550278e-11,
+          "max_correlation_abs_error": 5.458152320060346e-12,
+          "valid_samples": 152128
+        },
+        {
+          "lag_samples": 7,
+          "arrival_seconds": 0.0568359375,
+          "max_gram_abs_error": 2.546585164964199e-11,
+          "max_correlation_abs_error": 1.124982816404825e-11,
+          "valid_samples": 152128
+        },
+        {
+          "lag_samples": 8,
+          "arrival_seconds": 0.0578125,
+          "max_gram_abs_error": 1.8189894035458565e-11,
+          "max_correlation_abs_error": 7.346668290394296e-12,
+          "valid_samples": 152128
+        }
+      ],
+      "full_lattice_max_abs_error_group_bit_loglikelihood": 2.1600499167107046e-12,
+      "full_lattice_max_abs_error_bit_loglikelihood": 2.1600499167107046e-12,
+      "fft_decision": {
+        "strict": {
+          "bit": 1,
+          "accepted": true,
+          "score": 619.4720112946436,
+          "opposite_bit_margin": 567.6062416726252,
+          "log_threshold": 22.72106338958574
+        },
+        "relaxed": {
+          "bit": 1,
+          "accepted": true,
+          "score": 619.4720112946436,
+          "opposite_bit_margin": 567.6062416726252,
+          "log_threshold": 17.422746023037703
+        }
+      },
+      "direct_decision": {
+        "strict": {
+          "bit": 1,
+          "accepted": true,
+          "score": 619.4720112946414,
+          "opposite_bit_margin": 567.6062416726237,
+          "log_threshold": 22.72106338958574
+        },
+        "relaxed": {
+          "bit": 1,
+          "accepted": true,
+          "score": 619.4720112946414,
+          "opposite_bit_margin": 567.6062416726237,
+          "log_threshold": 17.422746023037703
+        }
+      },
+      "checks": {
+        "raw_basis_lag_bank": true,
+        "likelihood_lattice": true,
+        "gate_and_winner": true
+      }
+    }
+  ],
+  "status": "passed"
+}

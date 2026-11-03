@@ -1,0 +1,108 @@
+{
+  "campaigns": [
+    {
+      "captures": 136,
+      "input_files": 544,
+      "name": "physical"
+    },
+    {
+      "captures": 16,
+      "input_files": 64,
+      "name": "long"
+    },
+    {
+      "captures": 80,
+      "input_files": 320,
+      "name": "followup"
+    }
+  ],
+  "checks": {
+    "all_input_sha256_and_sizes_match_audited_capture_receipts": true,
+    "all_three_results_and_frozen_plan_hashes_match": true,
+    "archive_member_names_are_relative_without_parent_traversal": true,
+    "campaign_input_logical_bytes": 13483776965,
+    "captures": 232,
+    "compact_provenance_entries_cross_bound": 1627,
+    "extra_campaign_workspace_entries": 0,
+    "gpu_campaign_summary_and_six_score_status_bindings_consistent": true,
+    "input_file_names": [
+      "manifest.json",
+      "basis.c128",
+      "observation.c128",
+      "validity.u8"
+    ],
+    "input_verification_list_exactly_matches_expected_928_entries": true,
+    "inventory_file_count_matches_key_count": true,
+    "inventory_logical_bytes_matches_sum_of_sizes": true,
+    "missing_campaign_workspace_entries": 0,
+    "required_group_omissions_found": 0,
+    "source_path_keys_exactly_match_file_keys": true,
+    "supplemental_compact_files_rehashed": {
+      "clean_projection": 21,
+      "strong_gpu_comparison": 26,
+      "weak_precision_including_driver": 20
+    },
+    "unique_campaign_input_files": 928,
+    "wide_pilot_input_hash_bindings_and_sizes_match": 4
+  },
+  "inventory": {
+    "file_count": 2413,
+    "logical_bytes": 13592331852,
+    "path": "docs/validation-data/triad-v3/2026-11-03-fft-timing/preservation/triad-fft-evidence.inventory.json",
+    "sha256": "7929c63f5f402752468f6e49090eba8b0cae574e5b2e71119939f077ea24472c"
+  },
+  "limits": [
+    "The 928 campaign input arrays/manifests are inventory bindings to audited receipts; this review did not reread their full raw basis/IQ/validity bytes.",
+    "The four wide-pilot raw input bytes were not rehashed in this review; recorded hashes and local sizes were compared.",
+    "Source/native packages are present with expected inventory identities; nested source-archive content and executable bytes were not independently reread here.",
+    "No tar/zstd payload stream, compressed archive digest, hardlink extraction or restored filesystem was verified by this binding audit. Separate archive-byte verification is required.",
+    "Logical byte totals count every scientific pathname, including identical content that may be represented as tar hardlinks; they are not compressed archive sizes.",
+    "This receipt records a completed post-campaign review, not a new experiment, receiver rescore, source change or contemporaneous execution proof."
+  ],
+  "method": [
+    "Constructed expected input paths, SHA-256 and byte sizes from all 232 captures in the independently reviewed initial and followup summaries; compared exact sets and values against files and input_file_records_verified.",
+    "Cross-bound 1627 score/record/status/log/manifest provenance entries to their prior reviewed digests and checked local compact-file sizes. Matched three results and frozen plan digests and native executable identity.",
+    "Rehashed available supplemental strong-GPU, weak-precision and clean-projection compact files; matched their inventory SHA-256 and sizes. Matched the four wide-pilot input digest bindings to the reviewed GPU campaign and their local sizes.",
+    "Checked inventory key counts, logical size sum, source-path key equality, relative member naming and required source/native package entries."
+  ],
+  "recorded_utc": "2026-11-03T07:46:15.495081+00:00",
+  "reference_summaries": [
+    {
+      "path": "docs/validation-data/triad-v3/2026-11-03-fft-timing/physical/summary.json",
+      "sha256": "3a63e02916fc836bff06b416419c2c8a7c418a036b7261bb81dafac0b8db4e29"
+    },
+    {
+      "path": "docs/validation-data/triad-v3/2026-11-03-fft-timing/physical/followup/summary.json",
+      "sha256": "063e2e819fc76e9178026903a21a7c5698efd7eb1171dba1fc61515abbeca905"
+    },
+    {
+      "path": "docs/validation-data/triad-v3/2026-11-03-fft-timing/gpu/summary.json",
+      "sha256": "353e5cc4f256f9138011e48b1b7d662bff984e63e9661160b2253365028aa6f7"
+    }
+  ],
+  "required_preserved_packages": {
+    "ops/triad-fft-source.manifest.json": {
+      "sha256": "5e8af7a6d350fe387fc2917e8757d8a7145f6dcffbc9c3657df4e29f1d4d783d",
+      "size_bytes": 316342
+    },
+    "ops/triad-fft-source.tar.gz": {
+      "sha256": "734d47d2d26d8ab5007d49efe24bd49fb2af04db66a33d5c20eeb4b27bdbe50a",
+      "size_bytes": 10211235
+    },
+    "ops/triad-fft-wide-pilot-sampled.manifest.json": {
+      "sha256": "0a021a9a6ccc342d73f2a63b11404b87afb4a4cbc568ccabea308ebc52029a55",
+      "size_bytes": 1181
+    },
+    "ops/triad-fft-wide-pilot-sampled.tar.gz": {
+      "sha256": "343413aa0c4ae31fbd2428a220ef933f4a3e192fa946272c2e34a8cf7489908e",
+      "size_bytes": 4088649
+    },
+    "ops/triad_long": {
+      "sha256": "9cdf82f396d9be9a7d11b66b45b254e5f18b3857f27b08aed58430dce6d8ea47",
+      "size_bytes": 599920
+    }
+  },
+  "schema": "triad-fft-preservation-binding-review-v1",
+  "scope": "Post-campaign independent compact inventory/receipt consistency review. This is not contemporaneous campaign attestation and does not verify actual archive payload bytes.",
+  "status": "passed"
+}

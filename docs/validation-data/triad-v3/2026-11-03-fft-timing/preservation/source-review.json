@@ -1,0 +1,19 @@
+{
+  "schema": "triad-fft-nested-source-review-v1",
+  "status": "passed",
+  "archive_sha256": "734d47d2d26d8ab5007d49efe24bd49fb2af04db66a33d5c20eeb4b27bdbe50a",
+  "manifest_sha256": "5e8af7a6d350fe387fc2917e8757d8a7145f6dcffbc9c3657df4e29f1d4d783d",
+  "source_members_checked": 1769,
+  "source_bytes_checked": 43065514,
+  "plans_checked": {
+    "local-evidence/triad-fft-timing/campaign/preflight-003/plan.json": "595342c5d9ae4c725c2036cdfe5e83b46d971fa1d0bfc320055642e2f3304425",
+    "local-evidence/triad-fft-timing/campaign/long-preflight-001/plan.json": "a9bd549145b0322b94daf79b9f08fd446323275b63aa198600f4bf347fab7a51",
+    "local-evidence/triad-fft-timing/campaign/long-followup-preflight-002/plan.json": "3f011e6555e3ec8313b2dfaef0fdeb435123e69ca46d6dc4e72471da4319a307"
+  },
+  "closure_files_per_plan": 16,
+  "method": "Read every regular member without extracting; compare bytes and SHA-256 with source manifest, bind archive/manifest to preservation inventory and all three frozen plan source closures.",
+  "limits": [
+    "Uses the original local upload package. Full downloaded-archive byte verification is a separate check.",
+    "Does not claim a reproducible native build; the exact tested executable is separately preserved."
+  ]
+}

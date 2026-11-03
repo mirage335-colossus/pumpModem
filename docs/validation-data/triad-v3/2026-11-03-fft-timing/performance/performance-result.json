@@ -1,0 +1,116 @@
+{
+  "schema": "triad-fft-performance-paired-cpu-v1",
+  "status": "stable source-bound pair; diagnostic performance result only",
+  "comparison": {
+    "bound": {
+      "source_sha256": "98d619f99503354d564e6341d38b9a2ffacfb26f11ca0f595f08ae7d2d30dac6",
+      "dependencies": {
+        "tools/triad_group_acquire.py": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+        "tools/triad_gaussian_window.py": "0e262ea3cc793073602701ec96e441a4fef3f378a56fb624771b651d8a8fd4fa",
+        "tools/triad_noise_likelihood.py": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110",
+        "tools/triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba"
+      },
+      "proof_sha256": "7e21522f751d83a1e6a390883aa363b556ed2f64605fca5fa9e3f62d705fea70",
+      "score_json_sha256": "20a0bd77ec5fdce0b70746987e12c2704e4efb7b087d083a25a2f4872e604e33",
+      "wall_seconds": 17.549850616022013,
+      "child_maximum_rss_kib": 318236,
+      "receiver_seconds": 15.830159025994362,
+      "residual_likelihood_seconds": 15.72254872386111
+    },
+    "batched": {
+      "source_sha256": "f91265b9d0a6915848be62e2b687982b2b07109d534a8487e137c73377d5b94b",
+      "dependencies": {
+        "tools/triad_group_acquire.py": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+        "tools/triad_gaussian_window.py": "b22fe002864922e44bc7e10000672a163353818f610c4882bae5d62cfe1cf883",
+        "tools/triad_noise_likelihood.py": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110",
+        "tools/triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba"
+      },
+      "proof_sha256": "75bce451b588693035a845a40115446c7c8cabd9cae54f850c9176827cdfb73c",
+      "score_json_sha256": "0d728e98e46f40fbf808f49a584246774d36bdbabe45c923514accc1b4876004",
+      "wall_seconds": 7.230790747998981,
+      "child_maximum_rss_kib": 318152,
+      "receiver_seconds": 5.454700483009219,
+      "residual_likelihood_seconds": 5.331016345269745
+    }
+  },
+  "input_sha256": {
+    "manifest.json": "b60ce336c2ba6af43bd506f1ac451d32ff3ff43b0ef18f02d255bad5b85da7be",
+    "basis.c128": "61681d85b642de938d17543160f776e2563699142396372ce0cbf92e9ad344af",
+    "observation.c128": "97b145344f6a7328200465c0b888c8f8e9fe1ed4f7413b5ed8ead5dae14e11ba",
+    "validity.u8": "02c845f7c74a92165e4e4e34b08e3f4c8f15f508f039a57bcd1239cafc4b9cde"
+  },
+  "geometry": {
+    "group_count": 172896,
+    "base_group_count": 57632,
+    "dimension": 4,
+    "sample_count": 95656,
+    "sample_rate": 4096.0,
+    "base_arrival_seconds": 0.04999999999999982,
+    "frequency_offsets_hz": [
+      -0.0030001725001500084,
+      0.0,
+      0.0030001725001500084
+    ],
+    "drift_offsets_hz_per_second": [
+      0.0
+    ],
+    "mixture": "uniform over every declared timing/frequency/drift group; no pruning"
+  },
+  "exact_likelihood_comparison": {
+    "bound_bit_log_likelihoods": [
+      -7.137976509904455,
+      409.9511665205666
+    ],
+    "batched_bit_log_likelihoods": [
+      -7.137976509904455,
+      409.9511665205666
+    ],
+    "exactly_equal": true,
+    "strict_decision_bound": {
+      "bit": 1,
+      "accepted": true,
+      "score": 409.9511665205666,
+      "opposite_bit_margin": 417.089143030471,
+      "log_threshold": 22.72106338958574
+    },
+    "strict_decision_batched": {
+      "bit": 1,
+      "accepted": true,
+      "score": 409.9511665205666,
+      "opposite_bit_margin": 417.089143030471,
+      "log_threshold": 22.72106338958574
+    },
+    "relaxed_decision_bound": {
+      "bit": 1,
+      "accepted": true,
+      "score": 409.9511665205666,
+      "opposite_bit_margin": 417.089143030471,
+      "log_threshold": 17.422746023037703
+    },
+    "relaxed_decision_batched": {
+      "bit": 1,
+      "accepted": true,
+      "score": 409.9511665205666,
+      "opposite_bit_margin": 417.089143030471,
+      "log_threshold": 17.422746023037703
+    },
+    "same_calibration": true,
+    "same_geometry": true,
+    "same_resources": true
+  },
+  "performance_ratios": {
+    "wall_speedup": 2.427099777555959,
+    "receiver_speedup": 2.9021133379006847,
+    "wall_seconds_reduction": 10.319059868023032,
+    "receiver_seconds_reduction": 10.375458542985143,
+    "peak_rss_difference_kib": -84
+  },
+  "source_changes": "The score-batched run changes FFT acquisition and Gaussian-window helper implementations; all other reported dependencies match. Both proof receipts show identical before/after source hashes during their individual runs.",
+  "limitations": [
+    "one sampled workspace, one signal realization, one CPU, and one fixed synchronization bank; timing is not a confidence interval or throughput qualification",
+    "the stable source-bound pair is not the numerical-baseline acceptance for all inputs; pre-batch numerical variants with edge-case failures are superseded and excluded",
+    "original unbound score attempt was excluded because source identity could not be established",
+    "CUDA/GPU path untested; CUDA claims await the separate root campaign",
+    "no reception-rate or false-admission probability estimate"
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "score-bound": {
+    "triad_fft_acquire.py": "98d619f99503354d564e6341d38b9a2ffacfb26f11ca0f595f08ae7d2d30dac6",
+    "triad_group_acquire.py": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+    "triad_gaussian_window.py": "0e262ea3cc793073602701ec96e441a4fef3f378a56fb624771b651d8a8fd4fa",
+    "triad_noise_likelihood.py": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110",
+    "triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba"
+  },
+  "score-batched": {
+    "triad_fft_acquire.py": "f91265b9d0a6915848be62e2b687982b2b07109d534a8487e137c73377d5b94b",
+    "triad_group_acquire.py": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+    "triad_gaussian_window.py": "b22fe002864922e44bc7e10000672a163353818f610c4882bae5d62cfe1cf883",
+    "triad_noise_likelihood.py": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110",
+    "triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba"
+  },
+  "artifact_sha256": {
+    "score-bound-proof.json": "7e21522f751d83a1e6a390883aa363b556ed2f64605fca5fa9e3f62d705fea70",
+    "score-batched-proof.json": "75bce451b588693035a845a40115446c7c8cabd9cae54f850c9176827cdfb73c",
+    "performance-result.json": "7d450f0fd6ba4e43a256b7a10e36e0323cb06fe228b416133ee10bf9f3967173"
+  }
+}

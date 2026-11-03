@@ -1,0 +1,21 @@
+{
+  "scope": "Source and artifact identities for promoted parity evidence. Sampled arrays are intentionally excluded.",
+  "native_binary_sha256": "9cdf82f396d9be9a7d11b66b45b254e5f18b3857f27b08aed58430dce6d8ea47",
+  "fft_receiver_source_by_parity_case": {
+    "flat-fractional-ray": "2eb4c48dfae832e748ab687b2a8da60acc41e560f2a3c9adb40cf84b6bad1e29",
+    "hf-Each65-FHSS-burst-rate1200": "2eb4c48dfae832e748ab687b2a8da60acc41e560f2a3c9adb40cf84b6bad1e29",
+    "hf-Each65-FHSS-burst-rate1200-wait40-wait40": "415d624bbd44dd593dc29bebc2f511d4b3c4df8f716d50256e1f21d89768d77e"
+  },
+  "artifact_sha256": {
+    "parity-result.json": "6a13d2cc6a6424c3159896904b827dbe4a18dabd4fd5d02612265a543b11732f",
+    "geometry-probes.json": "494eddb03ea98010b370f814baf5eb7dc2c8ffc04962fe888f76fbef406addb3",
+    "run_parity.py": "e279eff98d037d4502869e67d26ae721c4bdf7c077271cbfadc1b69994e1e4cd",
+    "run_rate1200.py": "0f4216144bbdf8199ef8ac26f6bd539a60fe5133939f7b9dc85b998ad9e181ab",
+    "run_rate1200_wait40.py": "ec9ce446f1fd58d39d5dd605e85e79385dd97919a312ccb672b32576fc7dd7b0",
+    "run_fft_wait40.py": "e7365d6f0adfb9c75c754295748e26ffdf0f557878fd3f8962bc0812f8b2a36b",
+    "verify_parity.py": "8567e55b10271d49aee7a567a7d7552ef8ed9b755a906dd538e3a6ba7c58ba6b",
+    "burst-evidence.json": "fe8180c7496fb313469cda21191f46e514e38c6ee2274a7fcd7eb82af0774d42",
+    "receiver-run-receipt.json": "9a79bcd9104884c04d15652b61c5b10dd802411c6f0913bde40254a2421677c0",
+    "reviewer-final-source-replay.json": "5f3407592f65c1bb6fd31f276c957f7ac6e92126c90f1f8cc6605a81e207d28c"
+  }
+}

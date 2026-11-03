@@ -1,0 +1,174 @@
+{
+  "format": "triad-fft-actual-acquisition-v1",
+  "mode": "actual-noisy",
+  "method": "whole-observation-coupled-two-ray-gaussian-ucb",
+  "bit_log_likelihoods": [
+    -5.537468972535063,
+    21.377302647991023
+  ],
+  "group_bit_log_likelihoods": null,
+  "strict": {
+    "bit": 1,
+    "accepted": false,
+    "score": 21.377302647991023,
+    "opposite_bit_margin": 26.914771620526086,
+    "log_threshold": 22.72106338958574
+  },
+  "relaxed": {
+    "bit": 1,
+    "accepted": true,
+    "score": 21.377302647991023,
+    "opposite_bit_margin": 26.914771620526086,
+    "log_threshold": 17.422746023037703
+  },
+  "best_scoring_group_for_winning_bit": 5,
+  "best_group_public_parameters": {
+    "arrival_seconds": 128.05,
+    "frequency_hz": 5.00000000025e-14,
+    "clock_ppm": 0.0,
+    "epoch_offset_seconds": 0,
+    "frequency_drift_hz_per_second": 0.0
+  },
+  "best_group_scope": "diagnostic only; all fixed groups enter the uniform mixture",
+  "geometry": {
+    "group_count": 6,
+    "base_group_count": 2,
+    "dimension": 4,
+    "sample_count": 576800,
+    "sample_rate": 0.0078125,
+    "fixed_epoch_offset_seconds": 0,
+    "fixed_clock_ppm": 0.0,
+    "base_arrival_seconds": 0.04999999999999999,
+    "lag_samples": [
+      0,
+      1
+    ],
+    "frequency_offsets_hz": [
+      -5.00000000025e-14,
+      0.0,
+      5.00000000025e-14
+    ],
+    "drift_offsets_hz_per_second": [
+      0.0
+    ],
+    "group_order": "drift major, frequency middle, integer arrival lag minor",
+    "nfft": 1154736,
+    "mixture": "uniform over every declared timing/frequency/drift group; no pruning"
+  },
+  "calibration": {
+    "scope": "stationary proper-complex white Gaussian noise; one complete-column union residual per group",
+    "effective_groups": 6,
+    "delta_per_group": 3.6168981481481476e-10,
+    "strict": {
+      "score_probability": 5e-05,
+      "calibration_failure_probability": 5e-05,
+      "total_false_admission_bound": 0.0001,
+      "delta_per_segment": 2.1701388888888887e-09,
+      "fixed_window_log_threshold": 22.72106338958574,
+      "scope": "predeclared family union bound; shared independent whole-bank calibration; no adaptive/anytime extension"
+    },
+    "relaxed": {
+      "score_probability": 0.005,
+      "calibration_failure_probability": 0.005,
+      "total_false_admission_bound": 0.01,
+      "delta_per_segment": 4.3402777777777775e-07,
+      "fixed_window_log_threshold": 17.422746023037703,
+      "scope": "predeclared family union bound; shared independent whole-bank calibration; no adaptive/anytime extension"
+    },
+    "variance_upper_over_reference_range": [
+      7885.572942239792,
+      7885.58460517008
+    ],
+    "rank_histogram": [
+      0,
+      0,
+      0,
+      0,
+      6
+    ],
+    "inter_group_independence_assumed": false,
+    "known_noise_variance_diagnostic": null
+  },
+  "arithmetic": {
+    "requested_correlation_precision": "fp32",
+    "observation_fft_device": "cpu",
+    "observation_fft_and_products": "complex64",
+    "gram_fft": "CPU complex128; substantial bulk work, cached across frequency/drift alternatives",
+    "phase_preparation": "CPU longdouble cycle reduction, float64 exponential",
+    "preparation_and_finish": "CPU complex128/float64 residual whitening, ranks, small SVD, budgets and bit mixture",
+    "likelihood_bulk": "fp32",
+    "tf32_allowed": false,
+    "implicit_fallback": false,
+    "public_near_edge_refinement": "explicit FP64 raw-dot exception for fixed public groups whose masked Gram is unresolved by FFT"
+  },
+  "numerical_refinement": {
+    "exact_zero_column_groups": 0,
+    "exact_zero_whole_groups": 0,
+    "support_run_lag_operations": 2,
+    "support_work_limit": 200000000,
+    "direct_refined_groups": 0,
+    "examined_rows": 0,
+    "retained_rows": 0,
+    "examined_row_work_limit": 2000000,
+    "fft_resolution_trigger_scale": 2.8619427360477154e-13,
+    "observable_relative_tolerance": 1e-10,
+    "masked_energy_refinement_trigger": 0.002861942736047715,
+    "selection": "public support/Gram only; fixed rank tolerance and full family allocation retained"
+  },
+  "timing": {
+    "public_template_preparation_seconds": 1.2967802081257105,
+    "gram_fft_seconds": 1.2988509789574891,
+    "template_fft_seconds": 0.4005459959153086,
+    "exact_support_seconds": 0.06369728688150644,
+    "direct_gram_refinement_seconds": 0.0,
+    "total_preparation_seconds": 3.1035266669932753,
+    "observation_fft_seconds": 0.8493386218324304,
+    "direct_correlation_refinement_seconds": 8.239876478910446e-06,
+    "residual_and_likelihood_seconds": 0.18110945471562445,
+    "total_receiver_seconds": 1.0306282751262188
+  },
+  "resources": {
+    "explicit_array_bound_bytes": 638055840,
+    "memory_limit_bytes": 1073741824,
+    "group_tile": 2,
+    "retained_all_group_scores": false,
+    "scope": "includes input mappings/FFT reserves; excludes Python/Torch runtime and external allocator internals; not process RSS"
+  },
+  "limits": [
+    "one fixed public epoch and sample-clock hypothesis; one fractional base-arrival branch",
+    "arrival search uses a nonnegative integer sample lattice; continuous/fractional timing loss is unqualified",
+    "one whole-observation static two-ray channel; not a phase tracker or renewed-channel likelihood",
+    "Gaussian-noise calibration does not establish correct-bit or wrong-key rejection",
+    "sampled channel impairments and full masks/tails are retained; physical RF retuning is not added"
+  ],
+  "input_sha256": {
+    "manifest.json": "43bb24c4266c7f44877c0de2d49ea4d3cfb94c28aae1c94b0e159cc9ec3efaf1",
+    "basis.c128": "b41b3a1211277cd938b287d97f9dc7abe645f98c2a776a24cbe2cf1d300045a1",
+    "observation.c128": "4aeeb443f2faa2624e58f38c6c67202ba17651c06cfa001d611fa5c235a12f4a",
+    "validity.u8": "64aacdb73fe9147f01633a6e52806c67636f9a261225da13af1c6f515132aa30"
+  },
+  "receiver_source_sha256": "f91265b9d0a6915848be62e2b687982b2b07109d534a8487e137c73377d5b94b",
+  "dependency_sha256": {
+    "triad_group_acquire.py": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+    "triad_gaussian_window.py": "b22fe002864922e44bc7e10000672a163353818f610c4882bae5d62cfe1cf883",
+    "triad_noise_likelihood.py": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110",
+    "triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba",
+    "triad_state_workspace.py": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923"
+  },
+  "simulation_evaluation_only": {
+    "control": "signal",
+    "signal_bit": 1,
+    "outcomes": {
+      "strict": {
+        "correct_admitted": 0,
+        "wrong_admitted": 0,
+        "missed": 1
+      },
+      "relaxed": {
+        "correct_admitted": 1,
+        "wrong_admitted": 0,
+        "missed": 0
+      }
+    }
+  }
+}

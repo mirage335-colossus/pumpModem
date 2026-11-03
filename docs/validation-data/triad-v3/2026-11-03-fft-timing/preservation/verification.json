@@ -1,0 +1,17 @@
+{
+  "schema": "triad-fft-preservation-verification-v1",
+  "status": "verified",
+  "archive": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-fft-timing/preservation/triad-fft-evidence.tar.zst",
+  "archive_bytes": 9138052300,
+  "archive_sha256": "48ace219ff5f3306453a1de647dabece9dce70b7ae779cabfc9aa4bfc2011238",
+  "inventory_sha256": "7929c63f5f402752468f6e49090eba8b0cae574e5b2e71119939f077ea24472c",
+  "metadata_sha256": "cb89f95422faec0ccfe05d354828da337e3624a4a7343bdd14f82a164db636db",
+  "elapsed_seconds": 44.056,
+  "extracted_payload_bytes": 0,
+  "decompressor_exit_status": 0,
+  "members_verified": 2414,
+  "payload_files_verified": 2413,
+  "logical_bytes_verified": 13592331852,
+  "regular_payload_bytes_verified": 12591707329,
+  "hardlink_aliases_verified": 747
+}

@@ -1,0 +1,11 @@
+{
+  "binary_sha256": "9cdf82f396d9be9a7d11b66b45b254e5f18b3857f27b08aed58430dce6d8ea47",
+  "probes": [
+    {"rate_hz": 36, "fhss": true, "result": "rejected", "stderr": "triad_long: triad v3 FHSS has no protected dwell cells"},
+    {"rate_hz": 72, "fhss": true, "result": "rejected", "stderr": "triad_long: triad v3 FHSS has no protected dwell cells"},
+    {"rate_hz": 360, "fhss": true, "result": "rejected", "stderr": "triad_long: triad v3 FHSS has no protected dwell cells"},
+    {"rate_hz": 640, "fhss": true, "result": "configure passed; exploratory sampled exports retained"},
+    {"rate_hz": 1200, "fhss": true, "result": "configure and sampled parity fixture passed; selected for final parity by root"}
+  ],
+  "scope": "geometry compatibility probes only, not rate sensitivity or FHSS performance"
+}

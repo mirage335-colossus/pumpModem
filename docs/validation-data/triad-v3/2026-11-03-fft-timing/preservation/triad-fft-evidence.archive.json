@@ -1,0 +1,15 @@
+{
+  "archive": "triad-fft-evidence.tar.zst",
+  "archive_sha256": "48ace219ff5f3306453a1de647dabece9dce70b7ae779cabfc9aa4bfc2011238",
+  "archive_size_bytes": 9138052300,
+  "campaign_receipt_count": 3,
+  "completed_utc": "2026-11-03T07:31:12.938209+00:00",
+  "elapsed_seconds": 11.286,
+  "elapsed_total_seconds": 18.213,
+  "hardlink_aliases": 747,
+  "inventory_sha256": "7929c63f5f402752468f6e49090eba8b0cae574e5b2e71119939f077ea24472c",
+  "logical_bytes": 13592331852,
+  "payload_files": 2413,
+  "schema": "triad-fft-preservation-archive-v1",
+  "unique_content_bytes": 12591707329
+}

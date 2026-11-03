@@ -1,0 +1,167 @@
+{
+  "schema": "triad-native-burst-wait-support-v1",
+  "binary_sha256": "9cdf82f396d9be9a7d11b66b45b254e5f18b3857f27b08aed58430dce6d8ea47",
+  "fft_source_sha256": "2eb4c48dfae832e748ab687b2a8da60acc41e560f2a3c9adb40cf84b6bad1e29",
+  "scope": "Public calendar comparison and actual native shaped sampled-basis silence; not yet FFT likelihood parity.",
+  "configure_comparison": {
+    "8s_wait0_elapsed_s": 8.8,
+    "8s_wait3_elapsed_s": 8.8,
+    "conclusion": "internal wait setting has no realized calendar effect because only one private tile; classify earlier 8s rate1200 stress capture as configured-but-inactive burst wait",
+    "40s_wait0_elapsed_s": 44.0,
+    "40s_wait3_elapsed_s": 149.6,
+    "positive_calendar_increase_s": 105.6,
+    "configuration_receipt": "run_rate1200_wait40-configure.log"
+  },
+  "actual_fixture": {
+    "fixture_directory": "local-evidence/triad-fft-timing/native-parity/hf-Each65-FHSS-burst-rate1200-wait40-wait40",
+    "requested_active_seconds": 40,
+    "rate_hz": 1200,
+    "added_symbols": 1,
+    "sample_rate_hz": 1024,
+    "sample_count": 153356,
+    "source_samples": 153277,
+    "actual_elapsed_seconds": 149.60000000000002,
+    "channel_tail_samples": 16,
+    "missed_dwell_indices": [
+      0,
+      187,
+      373
+    ],
+    "raw_basis_sha256": "0a92b85dd3de62ce64856107d93b2d5a397e5a68650aae460d8664f836565b12",
+    "fourier_samples": null
+  },
+  "active_tiles": [
+    {
+      "tile": 0,
+      "start_s": 0.0,
+      "end_s": 8.8,
+      "sample_indices": [
+        0,
+        9011
+      ],
+      "max_abs_basis": 2.2208364066454775,
+      "energy": 12951.613351345608
+    },
+    {
+      "tile": 1,
+      "start_s": 35.2,
+      "end_s": 44.0,
+      "sample_indices": [
+        36045,
+        45056
+      ],
+      "max_abs_basis": 2.1770813193888796,
+      "energy": 12960.191460914186
+    },
+    {
+      "tile": 2,
+      "start_s": 70.4,
+      "end_s": 79.2,
+      "sample_indices": [
+        72090,
+        81100
+      ],
+      "max_abs_basis": 2.2548871429883244,
+      "energy": 12953.886992363765
+    },
+    {
+      "tile": 3,
+      "start_s": 105.60000000000001,
+      "end_s": 114.4,
+      "sample_indices": [
+        108135,
+        117145
+      ],
+      "max_abs_basis": 2.319277266057798,
+      "energy": 12959.552293024573
+    },
+    {
+      "tile": 4,
+      "start_s": 140.8,
+      "end_s": 149.60000000000002,
+      "sample_indices": [
+        144180,
+        153190
+      ],
+      "max_abs_basis": 2.1783825246691086,
+      "energy": 12955.358519325313
+    }
+  ],
+  "wait_silence_interiors": [
+    {
+      "between_tiles": [
+        0,
+        1
+      ],
+      "quiet_interior_s": [
+        9.8,
+        34.2
+      ],
+      "sample_indices": [
+        10036,
+        35020
+      ],
+      "sample_rows": 24984,
+      "max_abs_basis": 0.0,
+      "energy": 0.0,
+      "nonzero_complex_values": 0
+    },
+    {
+      "between_tiles": [
+        1,
+        2
+      ],
+      "quiet_interior_s": [
+        45.0,
+        69.4
+      ],
+      "sample_indices": [
+        46080,
+        71065
+      ],
+      "sample_rows": 24985,
+      "max_abs_basis": 0.0,
+      "energy": 0.0,
+      "nonzero_complex_values": 0
+    },
+    {
+      "between_tiles": [
+        2,
+        3
+      ],
+      "quiet_interior_s": [
+        80.2,
+        104.60000000000001
+      ],
+      "sample_indices": [
+        82125,
+        107110
+      ],
+      "sample_rows": 24985,
+      "max_abs_basis": 0.0,
+      "energy": 0.0,
+      "nonzero_complex_values": 0
+    },
+    {
+      "between_tiles": [
+        3,
+        4
+      ],
+      "quiet_interior_s": [
+        115.4,
+        139.8
+      ],
+      "sample_indices": [
+        118170,
+        143155
+      ],
+      "sample_rows": 24985,
+      "max_abs_basis": 0.0,
+      "energy": 0.0,
+      "nonzero_complex_values": 0
+    }
+  ],
+  "all_silence_interiors_exact_zero": true,
+  "support_interpretation": "Five 8.8s active tiles separated by four groups of three 8.8s private wait tiles. Intervals are relative to the source calendar; interior excludes 1s on each side of each transition. The native shaped template is exactly zero throughout these interiors, after the modeled channel/filter state.",
+  "child_status": {}
+}

@@ -1,0 +1,78 @@
+{
+  "schema": "triad-independent-review-replay-transcription-v1",
+  "created_utc": "2026-11-03T06:40:20.723686+00:00",
+  "record_origin": "Materialized after execution from the retained functions tool stdout for exec session 1205, completion chunk 94857b, exit_code 0. This is a review transcription, not a prebound runner receipt.",
+  "execution_environment": {
+    "python": "/tmp/triad-weak-env/bin/python",
+    "openblas_threads": 1,
+    "omp_threads": 1,
+    "mkl_threads": 1,
+    "torch_threads": 1
+  },
+  "observed_post_run_source_sha256": {
+    "tools/triad_fft_acquire.py": "f91265b9d0a6915848be62e2b687982b2b07109d534a8487e137c73377d5b94b",
+    "tools/triad_gaussian_window.py": "b22fe002864922e44bc7e10000672a163353818f610c4882bae5d62cfe1cf883"
+  },
+  "focused_tests": {
+    "passed": 3,
+    "failed": 0,
+    "reported_seconds": 0.776,
+    "tests": [
+      "test_triad_fft_acquire.TimingFFTTests.test_zero_and_tiny_observed_support_match_exact_public_dots",
+      "test_triad_fft_acquire.TimingFFTTests.test_near_edge_amplitude_sweep_preserves_rank_and_likelihood",
+      "test_triad_gaussian_window.GaussianWindowTests.test_single_block_batched_svd_matches_raw_covariance_with_rank_and_power_edges"
+    ]
+  },
+  "sampled_fixture": "local-evidence/triad-fft-timing/native-parity/hf-Each65-FHSS-burst-rate1200-wait40-wait40/sampled-base",
+  "reference_score_json": "local-evidence/triad-fft-timing/native-parity/hf-Each65-FHSS-burst-rate1200-wait40-wait40/grouped.json",
+  "reference_score_npz": "local-evidence/triad-fft-timing/native-parity/hf-Each65-FHSS-burst-rate1200-wait40-wait40/group-scores.npz",
+  "receiver_configuration": {
+    "lag_samples": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "doppler_width_hz": 0.0,
+    "window_blocks": 1,
+    "group_tile": 9,
+    "memory_limit_bytes": 536870912,
+    "precision": "fp64",
+    "device": "cpu",
+    "frequency_offsets_hz": [
+      0.0
+    ],
+    "drift_offsets_hz_per_second": [
+      0.0
+    ]
+  },
+  "observed_result": {
+    "complete_group_scores_array": "group_scores_0",
+    "complete_group_scores_shape": [
+      9,
+      2
+    ],
+    "maximum_absolute_group_score_error_vs_native_grouped": 2.1600499167107046e-12,
+    "bit_log_likelihoods": [
+      51.8657696220184,
+      619.4720112946436
+    ],
+    "strict_accepted": true,
+    "strict_and_relaxed_bit_and_acceptance_match_reference": true,
+    "direct_refined_groups": 0,
+    "comparison_absolute_tolerance": 5e-10
+  },
+  "acceptance": "Final FFT and Gaussian helper changes accepted for the declared fixed-clock/fixed-epoch single-fractional-anchor whole-observation two-tap scope; original zero-support and intermediate-amplitude failures are covered by the focused checks.",
+  "limits": [
+    "No new waveform or native export was generated.",
+    "No performance or sensitivity qualification follows from this replay.",
+    "Replay used the inherited native-parity fixture; it did not independently hash all input bytes. The workspace loader stat-stability checks completed.",
+    "Source identities shown above were printed after the run and matched the owner-declared freeze; this is not an independent build attestation.",
+    "Numerical refinement trigger remains an engineering resolution guard, not a rigorous implementation-independent FFT error certificate."
+  ]
+}

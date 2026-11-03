@@ -1,0 +1,45 @@
+{
+  "status": "passed",
+  "checks": [
+    "compile3",
+    "preserved_accepted_runner_hash",
+    "default_caps_unchanged",
+    "extended_caps_validated",
+    "seven_invalid_limits_rejected",
+    "retained_actual_guard_identical_to_v1",
+    "actual_sample_and_memory_guards_fail_closed",
+    "80_frozen_capture_denominator_balanced",
+    "new_seed_tuples_disjoint_prior_and_paired_contrasts",
+    "stable_source_binary_and_runner_binding"
+  ],
+  "actual_guard_default": {
+    "sample_count": 95656,
+    "sample_rate": 4096.0,
+    "timing_count": 57632,
+    "frequency_count": 3,
+    "effective_groups": 172896,
+    "nfft": 191664,
+    "cpu_explicit_array_bytes": 191429160,
+    "public_template_support": [
+      [
+        488,
+        37719
+      ],
+      [
+        490,
+        37721
+      ],
+      [
+        488,
+        37719
+      ],
+      [
+        490,
+        37721
+      ]
+    ],
+    "actual_vs_predicted_count_match": true
+  },
+  "plan_sha256": "3f011e6555e3ec8313b2dfaef0fdeb435123e69ca46d6dc4e72471da4319a307",
+  "runner_sha256": "1a4029091dafb236922c7ed388f9a7efc15e2cd285f5af08a451efb1877479f0"
+}

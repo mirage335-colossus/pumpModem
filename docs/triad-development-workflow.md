@@ -10,6 +10,49 @@ reception contracts are in the [v3 study](triad-v3.md); this page describes how
 to make the next bounded development decision without replaying old campaigns
 by default.
 
+**For a large timing bank, start with the
+[sampled FFT acquisition study](validation-data/triad-v3/2026-11-03-fft-timing/README.md).**
+[`tools/triad_fft_acquire.py`](../tools/triad_fft_acquire.py) consumes one
+actual-noisy `export-sampled` capture with one public base synchronization group.
+It reuses the shaped templates across every integer-sample arrival in the
+declared lattice; CFO phase is applied at the original sample times. All declared
+timing/CFO alternatives remain in the normalized likelihood mixture and residual
+calibration. Clock and epoch are fixed, one fractional timing anchor is retained,
+and the channel has two static fitted taps. This is a bounded alternative to
+materializing a large grouped export, not a general phase tracker or continuous
+timing search. The older hyphenated `triad-fft-acquire.py` is a different study.
+
+Near-support-edge FFT Grams use a bounded FP64 public-template refinement when
+their observable rank is unresolved; retain its operation and memory limits.
+Batching the exact one-block-window SVD reduced one 172,896-group CPU pilot from
+17.55 to 7.23 seconds with identical scores. This is a measured preparation
+optimization, not a sensitivity improvement, reliability qualification or GPU
+speedup. Read the source-bound study before extrapolating its cost.
+
+That study also retains a 17-cell physical interaction screen and an independent
+−60-dB-Hz duration comparison. Its primary Each65/OCXO/stable-ray case admitted
+30/32 bits strictly at 853.334 active days, with about 2.5 dB of static-basis
+representation loss in the two misses; half-duration admitted 11/16. These
+point-sampled synthetic results do not qualify 99% reception or arbitrary
+channel evolution. Reuse the saved observations and exact recipes before
+repeating the long exports. Cold-start CUDA was slower on the tested timing
+workload; the precision replays preserved the near-threshold decisions.
+
+Make the physical arrival prior explicit. With the configured CLI policy,
+`--clock-sync default` is inactive with FHSS off and gives `[0,0]` unless another
+prior is supplied; with FHSS on its default interval is ±0.09 seconds. It does
+not mean a several-second prior. Use `--arrival-prior-seconds -7.035 7.035` for
+the studied wide prior, or the 10-ms/1-ms/0-ms policy with 70-ms audio error for
+the tight ±0.0905-second prior. Check native metadata and declare the public
+search bank separately. A nominal-bank miss is not a sensitivity boundary.
+
+Also check that a requested burst wait actually occurs. At rate 1,200 with
+Added ×1 and FHSS enabled, the eight-second request occupies one 8.8-second
+tile, so three internal wait tiles have no effect. The 40-second request with those waits
+instead has a 149.6-second source calendar (44 seconds without waits), including
+four realized inter-tile gaps. Whole-bit `--symbol-burst` is a different calendar
+control. Neither setting alone demonstrates receiver backlog clearance.
+
 **Start new configuration work with the
 [broad coverage and failure map](validation-data/triad-v3/2026-11-03-broad/README.md).**
 Run `tools/triad-coverage.py` or the factorized census before exporting waveforms;
@@ -65,6 +108,13 @@ six fine symbols/s admitted one wrong bit and two wrong-key controls in the
 Noise-only calibration does not certify the chosen bit or authenticate a key.
 Physically constrained continuity should be tried before adding flexible
 per-window nuisance gains.
+The [intermediate continuity-window comparison](validation-data/triad-v3/2026-11-03-fft-timing/continuity/README.md)
+reused five selected captures with six fixed window/width choices. Every choice
+corrected the selected wrong-bit admission and rejected the two wrong-key
+controls, as the existing whole-observation receiver already did. None recovered
+the missed-hop admission. This screen supports trying existing continuity
+settings; it supplies no weak-signal gain over that simpler global receiver and
+no independent reliability sample.
 
 For an hour-scale, maximal-spreading reference, reuse the
 [rate 0.1 / Added ×1000 sensitivity bracket](validation-data/triad-v3/2026-11-03-extension/physical/evidence/frontier-README.md).
@@ -136,9 +186,9 @@ below 1 dB for one stipulated Gaussian model. Use the
 the exact quadratic-form simulation evaluated 4.2 million classification
 trials in about eight seconds on one CPU thread. Large sampled-waveform
 campaigns remain reproducible study evidence, not automatic regression
-prerequisites. The current acquisition campaign searches arrival only;
-frequency, clock drift and keyed-epoch uncertainty need their own declared
-banks and evidence.
+prerequisites. That dated campaign searched arrival only. The later frequency
+and sampled FFT recipes above add declared CFO alternatives; clock-rate and
+keyed-epoch uncertainty still need separate banks and evidence.
 
 Grouped export now shares deterministic template synthesis between separate
 clean/noisy streaming channel instances when the declared memory budget permits.
@@ -150,6 +200,12 @@ its group loop. Batch independent captures within host CPU/memory limits;
 do not multiply outer workers by a presumed inner speedup. Large timing banks
 remain expensive, so inspect group count, sample count and disk estimates before
 launching them. See the extension record for measured scope and remaining limits.
+The current native candidate cap is 10,000. A two-ray group carries four
+candidates (flat/two-ray × both bits), so its effective native grouped-export
+limit is **2,500 synchronization groups**, even though separate native/Python
+group checks mention 10,000/5,000. Those larger checks do not override the
+candidate cap. The sampled FFT path generates its later timing/CFO bank from
+one exported base group and has its own explicit limits.
 
 The same study includes an optional **pattern-consistency postprocessor** for
 structured wrong-key admissions. It compares one fixed bit across windows
@@ -355,6 +411,7 @@ execution path.
 The Python scoring tools require Python with NumPy, SciPy, and PyTorch; CPU
 PyTorch is sufficient for the recipe. Use an isolated environment when the
 system Python is externally managed. The focused suites
+`tests/test_triad_fft_acquire.py`, `tests/test_triad_group_acquire.py`,
 `tests/test_triad_gaussian_window.py`, `tests/test_triad_conditional_sweep.py`,
 and `tests/test_triad_rbpf.py` are not all in the triad CTest group; select the
 affected suite when changing those components. The
@@ -412,6 +469,7 @@ acquisition or long-span evidence.
 
 | Need | Maintained entry points | Scope and limit |
 | --- | --- | --- |
+| Large fixed timing/CFO banks from sampled I/Q | [`triad_fft_acquire.py`](../tools/triad_fft_acquire.py) and [sampled FFT study](validation-data/triad-v3/2026-11-03-fft-timing/README.md) | Reuses one actual-noisy sampled base group across integer lags with exact sample-time CFO phase; fixed clock/epoch, single fractional anchor and static two-tap model. Keep the complete bank and bounded public FP64 edge refinement. |
 | Conditional noise or actual-noisy likelihood comparisons | [`triad-conditional-sweep.py`](../tools/triad-conditional-sweep.py), [`triad_gaussian_window.py`](../tools/triad_gaussian_window.py) | Reuses matching exported statistics; the conditional mode is model-conditional and does not add independent paths. |
 | Static-frequency or phase/OU scoring | [`triad-static-frequency-study.py`](../tools/triad-static-frequency-study.py), [`triad-rbpf-study.py`](../tools/triad-rbpf-study.py) | Actual-noisy modes score saved noisy observations; candidate banks, controls and calibration remain explicit. |
 | Validate and summarize selective correction evidence | [`analyze.py`](validation-data/triad-v3/2026-11-02-selective-correction/reproduction/analyze.py) | Uses bounded `retention_batch.py` by default. It preserves every exported block and row, verifies hashes/ranks/calendars, and separates noiseless projection from receiver admission. Source-bound development, holdout and long-span audits are recorded in the [reproduction guide](validation-data/triad-v3/2026-11-02-selective-correction/reproduction/README.md); analysis speed is not receiver sensitivity evidence. |
