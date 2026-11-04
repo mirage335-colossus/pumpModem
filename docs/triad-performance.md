@@ -20,6 +20,18 @@ Missing models or hardware, engineering warnings, insufficient timing evidence
 and a spent work budget remain visible limitations. Actual correctness,
 source/input integrity, work-count or execution failures remain blocking.
 
+The separate [CPU CI null-blocking experiment](triad-performance-ci-null.md)
+measures all-cause and statistical blocking across same-build A/A runs on CPU
+allocations. Its baseline is excluded, its schedule is fixed without retries,
+and allocation clusters do not establish independent physical hosts. The
+[completed 64-allocation record](validation-data/triad-v3/2026-11-04-ci-null/README.md)
+observed zero all-cause blocks. Its exact one-sided 95% upper bound is 4.57%
+conditional on independent representative allocation clusters; unknown
+physical-host grouping leaves a conservative bound of 95%. This is an
+occasional qualification, not a CI prerequisite or evidence of regression
+detection power. Keep the routine unit-plus-guard workflow unchanged and do not
+repeat the cloud campaign for unaffected changes.
+
 ## Fast guard commands and decision contract
 
 Reuse compatible candidate/reference builds, sampled fixtures and coverage
