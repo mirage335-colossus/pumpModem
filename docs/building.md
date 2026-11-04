@@ -467,9 +467,12 @@ The [isolated receiver performance suite](triad-performance.md) runs in a
 separate normal-CI job unless `devfast` is selected. It uses five-second hardware
 probes and paired abbreviated receiver measurements, preserving the full sample
 and timing geometry and validating full-runtime estimates on held-out work.
-Five minutes per backend remains preferred. The adaptive suite may exceed ten
-minutes when needed to resolve its declared timing precision or qualify a new
-prediction model; its configurable default hard ceiling is thirty minutes.
+The complete routine target and default budget are 25 minutes per backend.
+Sampling stops when the selected slowdown decision resolves, rather than
+chasing a runtime interval width. Normal uses a 15% per-test erroneous-pass
+budget at 30% slowdown; hosted CI explicitly uses 30% at 70% slowdown. Both
+retain a 5% false-regression budget. Qualification of a new prediction model
+is separate and can take longer under an explicit budget.
 Routine source-matched anchor reuse avoids repeating full qualification;
 dependency setup and the narrow `triad_long` build are separate. This job is not
 repeated in every CTest/sanitizer leg. It includes the isolated native v3

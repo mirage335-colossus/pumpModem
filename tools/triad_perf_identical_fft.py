@@ -10,6 +10,7 @@ score. Input generation, process startup and audit hashing are outside it.
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import importlib.util
 import json
@@ -280,6 +281,141 @@ def absolute_comparison(summary, historical_full, *, model_log_allowance, thresh
             "future_model_coverage_qualified": False}
 
 
+def routine_decision(values, historical_full, policy, *, model_log_allowance=0.):
+    """Per-test log-mean slowdown bounds; no width target and no paired data.
+
+    Historical first-three observations are fixed before any historical stopping
+    look. Each one-sided ledger spends half its alpha on that historical bound
+    and half across all declared current looks. Upper and lower directions have
+    their own error budgets.
+    """
+    import numpy as np
+    from scipy.stats import t as student_t
+    current = tuple(values)
+    historical = tuple(historical_full)[:3]
+    if (len(current) not in policy.looks or len(historical) != 3 or
+            any(type(v) not in (int, float) or not math.isfinite(v) or v <= 0
+                for v in (*current, *historical))):
+        raise ValueError("positive current times at a declared look and three historical full times are required")
+    if not math.isfinite(model_log_allowance) or model_log_allowance < 0:
+        raise ValueError("model allowance must be finite and nonnegative")
+    current_log, historical_log = np.log(current), np.log(historical)
+    current_mean, historical_mean = float(np.mean(current_log)), float(np.mean(historical_log))
+    current_se = float(np.std(current_log, ddof=1)/math.sqrt(len(current)))
+    historical_se = float(np.std(historical_log, ddof=1)/math.sqrt(len(historical)))
+    current_alpha = policy.failure_error_budget/(2*len(policy.looks))
+    historical_alpha = policy.failure_error_budget/2
+    current_margin = float(student_t.ppf(1-current_alpha, len(current)-1))*current_se
+    historical_margin = float(student_t.ppf(1-historical_alpha, len(historical)-1))*historical_se
+    pass_current_alpha = policy.pass_error_budget/(2*len(policy.looks))
+    pass_historical_alpha = policy.pass_error_budget/2
+    pass_current_margin = float(student_t.ppf(1-pass_current_alpha, len(current)-1))*current_se
+    pass_historical_margin = float(student_t.ppf(1-pass_historical_alpha, len(historical)-1))*historical_se
+    point_log = current_mean-historical_mean
+    timing_margin = current_margin+historical_margin
+    lower = math.exp(point_log-timing_margin-model_log_allowance)
+    upper = math.exp(point_log+pass_current_margin+pass_historical_margin+model_log_allowance)
+    gate = "pass" if upper <= policy.slowdown_threshold else "performance_regression" if lower > policy.slowdown_threshold else "inconclusive"
+    stop = ("decision_pass" if gate == "pass" else "decision_regression" if gate == "performance_regression"
+            else "sample_limit" if len(current) == policy.looks[-1] else "continue")
+    result = {"point_seconds": math.exp(current_mean), "sample_count": len(current),
+        "timing_mean_confidence_interval_seconds": [math.exp(current_mean-current_margin), math.exp(current_mean+current_margin)],
+        "relative_timing_half_width": math.expm1(current_margin), "log_standard_error": current_se,
+        "timing_precision_reached": None, "stop_reason": stop,
+        "policy": {"stopping_rule": "decision", "looks": list(policy.looks), "alpha": policy.alpha,
+                   "slowdown_threshold": policy.slowdown_threshold, "cross_case_correction": False,
+                   "relative_precision_used_for_stopping": False},
+        "estimand": "geometric mean full resident preparation-plus-score time",
+        "paired_observations_constructed": False, "future_full_execution_interval_qualified": False,
+        "comparison": {"gate": gate, "threshold": policy.slowdown_threshold,
+            "full_time_ratio_interval": [lower, upper],
+            "full_time_ratio_interval_interpretation": "separate one-sided bounds with their declared directional error budgets",
+            "one_sided_upper_slowdown_bound": upper, "one_sided_lower_slowdown_bound": lower,
+            "current_full_seconds": math.exp(current_mean), "historical_full_seconds": math.exp(historical_mean),
+            "absolute_full_seconds_difference": math.exp(current_mean)-math.exp(historical_mean),
+            "per_test_one_sided_confidence": 1-policy.alpha,
+            "upper_ledger": {"family_alpha": policy.alpha, "current_per_look_alpha": current_alpha,
+                             "historical_fixed_alpha": historical_alpha, "current_looks": list(policy.looks)},
+            "lower_ledger": {"family_alpha": policy.alpha, "current_per_look_alpha": current_alpha,
+                             "historical_fixed_alpha": historical_alpha, "separate_from_upper": True},
+            "historical_selection": "fixed first three actual full observations, before the first qualification stopping look",
+            "historical_full_seconds_used": list(historical), "timing_log_margin": timing_margin,
+            "model_log_allowance": model_log_allowance,
+            "model_allowance_scope": "separate historical engineering envelope; not a 95% confidence statement",
+            "scope": "independent historical/current log-mean component bounds; no within-run implementation ratio",
+            "assumptions": "independent stationary normal outer log runtimes; current session independent of historical session",
+            "future_model_coverage_qualified": False}}
+    if policy.pass_alpha is not None or policy.failure_alpha is not None:
+        result["policy"].update(pass_alpha=policy.pass_error_budget, failure_alpha=policy.failure_error_budget)
+        comparison = result["comparison"]
+        comparison.pop("per_test_one_sided_confidence")
+        comparison.update(pass_one_sided_confidence=1-policy.pass_error_budget,
+                          failure_one_sided_confidence=1-policy.failure_error_budget,
+                          pass_timing_log_margin=pass_current_margin+pass_historical_margin,
+                          failure_timing_log_margin=timing_margin)
+        comparison["upper_ledger"].update(family_alpha=policy.pass_error_budget,
+            current_per_look_alpha=pass_current_alpha, historical_fixed_alpha=pass_historical_alpha)
+        comparison["lower_ledger"].update(family_alpha=policy.failure_error_budget)
+    return result
+
+
+def measurement_core_hashes():
+    """Stable bodies a reviewed reporting-only projection cannot change."""
+    selected = {"triad_perf_identical_fft.py": ("RuntimeAudit", "serve", "identity_agreement", "work_receipt",
+                    "scalar_summary", "absolute_comparison", "_qualification", "anchor_valid", "replay_work"),
+                "triad-performance.py": ("ReceiverWorker", "child_environment", "prepare_request", "score_request"),
+                "triad_perf_fft_trace.py": ("measurement_plan", "_fit", "_positive", "_remaining"),
+                "triad_perf_adaptive.py": ("ModelConfirmationPolicy", "model_confirmation_policy", "_log_interval", "qualify_log_residuals")}
+    sources = {name: ast.parse(WORKER.with_name(name).read_text()) for name in selected}
+    found = {}
+    for filename, names in selected.items():
+        for node in sources[filename].body:
+            if isinstance(node, (ast.FunctionDef, ast.ClassDef)) and node.name in names:
+                found[filename+":"+node.name] = hashlib.sha256(ast.dump(node, include_attributes=False).encode()).hexdigest()
+    for node in sources["triad_perf_identical_fft.py"].body:
+        if isinstance(node, ast.FunctionDef) and node.name == "_measure_identical_fft":
+            inner = next(n for n in node.body if isinstance(n, ast.FunctionDef) and n.name == "measure")
+            found["triad_perf_identical_fft.py:_measure_identical_fft.measure"] = hashlib.sha256(ast.dump(inner, include_attributes=False).encode()).hexdigest()
+    if len(found) != 22:
+        raise ValueError("declared measurement body missing")
+    return found
+
+
+def historical_applicability(record, identity, projection=None):
+    """Keep raw proof; optionally apply an explicit, exact reviewed hash map."""
+    if not record or not anchor_valid(record):
+        return {"compatible": False, "reason": "missing or invalid original anchor proof"}
+    if record["identity"] == identity:
+        return {"compatible": True, "method": "exact_identity", "original_anchor_sha256": record["record_sha256"]}
+    if not projection:
+        return {"compatible": False, "reason": "identity changed; no reviewed reporting-only projection"}
+    try:
+        if (projection["schema"] != "triad-identical-fft-reporting-projection-v1" or
+                projection["reviewed_reporting_only"] is not True or
+                projection["unchanged_measurement_core"] != measurement_core_hashes()):
+            raise ValueError("projection lacks matching reviewed measurement bodies")
+        old = record["identity"]["runtime"]["measurement_files"]
+        new = identity["runtime"]["measurement_files"]
+        changes = projection["measurement_files"]
+        different = {name for name in old.keys() | new.keys() if old.get(name) != new.get(name)}
+        if (not different or set(changes) != different or
+                not different <= {"triad_perf_identical_fft.py", "triad_perf_adaptive.py", "triad-performance.py", "triad_perf_fft_trace.py"}):
+            raise ValueError("projection must match only the exact declared reporting-file changes")
+        for name in different:
+            if changes[name] != {"historical_sha256": old[name], "current_sha256": new[name]}:
+                raise ValueError("projection source hashes do not match")
+        projected = json.loads(json.dumps(record["identity"]))
+        projected["runtime"]["measurement_files"] = new
+        if projected != identity:
+            raise ValueError("DSP/runtime/control/input/geometry identity changed outside the reporting projection")
+        return {"compatible": True, "method": "reviewed_reporting_only_projection",
+            "projection_sha256": digest(projection), "original_anchor_sha256": record["record_sha256"],
+            "original_identity_sha256": record["identity_sha256"], "current_identity_sha256": digest(identity),
+            "source_changes": changes, "original_proof_rewritten": False}
+    except (KeyError, ValueError, TypeError, AttributeError):
+        return {"compatible": False, "reason": "reviewed reporting-only projection inapplicable"}
+
+
 def _qualification(errors):
     from triad_perf_adaptive import qualify_log_residuals, model_confirmation_policy
     return qualify_log_residuals(errors, maximum_relative_error=.05,
@@ -436,12 +572,15 @@ def legacy_projection(record, current_legacy_identity, archive_hashes):
 
 
 def _measure_identical_fft(case, workers, precision, device, *, policy, api, deadline,
-                          output, mode="reuse", historical=None, maximum_holds=9):
+                          output, mode="reuse", historical=None, maximum_holds=9,
+                          reporting_projection=None):
     """Measure one stream, with exact-identity eligibility and full-bank proof."""
     from triad_perf_adaptive import model_confirmation_policy
     import triad_perf_fft_trace as trace
     if mode not in ("reuse", "qualify") or maximum_holds not in model_confirmation_policy().looks:
         raise ValueError("invalid identical FFT qualification mode or hold count")
+    if mode == "qualify" and policy.stopping_rule != "precision":
+        raise ValueError("qualification retains the original precision stopping policy")
     output = Path(output)
     start = time.perf_counter()
     target = len(case["frequency_offsets_hz"])
@@ -475,7 +614,9 @@ def _measure_identical_fft(case, workers, precision, device, *, policy, api, dea
         report["status"] = "deduplication_ineligible"
         save(output/"result.json", report)
         return report
-    historical_valid = anchor_valid(historical, report["identity"]) if historical else False
+    applicability = historical_applicability(historical, report["identity"], reporting_projection)
+    report["historical_applicability"] = applicability
+    historical_valid = applicability["compatible"]
     if historical_valid:
         report["historical_anchor_sha256"] = historical["record_sha256"]
     worker = workers["candidate"]
@@ -522,6 +663,15 @@ def _measure_identical_fft(case, workers, precision, device, *, policy, api, dea
             plan = {**plan, "direct": True, "direct_reason": "prospective_full_cost_guard"}
             counts = [target]
     report.update(measurement_plan=plan, discarded_pilot=pilot)
+    model_allowance, individual = 0., 0.
+    if historical_valid and mode == "reuse" and not plan["direct"]:
+        if historical["status"] != "validated":
+            raise ValueError("an abbreviated route requires a validated abbreviated anchor")
+        history_errors = [math.log(r["full_seconds"]/historical["frozen"]["predicted_full_seconds"])
+                          for r in historical["full_runs"]]
+        validation = _qualification(history_errors)
+        model_allowance = max(math.log1p(.10), *(abs(v) for v in validation["log_residual_interval"]))
+        individual = max(model_allowance, *(abs(v) for v in history_errors))
     values = []
     for count in range(1, policy.looks[-1]+1):
         row = measure(counts)
@@ -533,7 +683,26 @@ def _measure_identical_fft(case, workers, precision, device, *, policy, api, dea
         values.append(predicted)
         report["training"].append(row)
         if count in policy.looks:
-            summary = scalar_summary(values, policy)
+            if mode == "reuse" and policy.stopping_rule == "decision":
+                if historical_valid:
+                    summary = routine_decision(values, [r["full_seconds"] for r in historical["full_runs"]],
+                                               policy, model_log_allowance=model_allowance)
+                    if not plan["direct"] and summary["comparison"]["gate"] == "pass":
+                        half = math.log(summary["timing_mean_confidence_interval_seconds"][1]/summary["point_seconds"])
+                        # This is the unchanged historical model applicability
+                        # budget, not a new target for runtime interval width.
+                        possible = model_allowance+half <= math.log1p(.20) and half <= individual
+                        summary["historical_model_applicability_possible"] = possible
+                        if not possible:
+                            summary["stop_reason"] = "sample_limit" if count == policy.looks[-1] else "continue"
+                else:
+                    summary = {"point_seconds": statistics.geometric_mean(values), "sample_count": count,
+                        "stop_reason": "no_applicable_absolute_anchor", "timing_precision_reached": None,
+                        "policy": {"stopping_rule": "decision", "looks": list(policy.looks), "alpha": policy.alpha},
+                        "estimand": "geometric mean full resident preparation-plus-score time",
+                        "paired_observations_constructed": False}
+            else:
+                summary = scalar_summary(values, policy)
             append_receipt(output, "timing-look", summary)
             if summary["stop_reason"] != "continue":
                 break
@@ -545,18 +714,10 @@ def _measure_identical_fft(case, workers, precision, device, *, policy, api, dea
                         "confirmation_policy": model_confirmation_policy().to_dict(),
                         "maximum_holds": maximum_holds,
                         "prediction_frozen_before_validation": True}
-    model_allowance = 0.
     if plan["direct"]:
         report["status"], report["prediction_valid"] = "direct_full", True
         report["full_runs"] = report["training"]
     elif historical_valid and mode == "reuse":
-        if historical["status"] != "validated":
-            raise ValueError("an abbreviated route requires a validated abbreviated anchor")
-        history_errors = [math.log(r["full_seconds"]/historical["frozen"]["predicted_full_seconds"])
-                          for r in historical["full_runs"]]
-        validation = _qualification(history_errors)
-        model_allowance = max(math.log1p(.10), *(abs(v) for v in validation["log_residual_interval"]))
-        individual = max(model_allowance, *(abs(v) for v in history_errors))
         report["frozen"]["conditional_model"] = {"historical_anchor_sha256": historical["record_sha256"],
             "mean_model_log_allowance": model_allowance, "observation_log_allowance": individual,
             "maximum_mean_plus_timing_log_allowance": math.log1p(.20),
@@ -589,11 +750,13 @@ def _measure_identical_fft(case, workers, precision, device, *, policy, api, dea
         if mode == "qualify" and report["qualification"]:
             model_allowance = max(abs(v) for v in report["qualification"]["log_residual_interval"])
     if report["prediction_valid"] and historical_valid:
-        report["comparison"] = absolute_comparison(summary, [r["full_seconds"] for r in historical["full_runs"]],
-                                                    model_log_allowance=model_allowance,
-                                                    threshold=policy.slowdown_threshold,
-                                                    historical_look_count=(len(historical["adaptive"]["policy"]["looks"])
-                                                        if historical["status"] == "direct_full" else len(model_confirmation_policy().looks)))
+        if mode == "reuse" and policy.stopping_rule == "decision":
+            report["comparison"] = summary["comparison"]
+        else:
+            report["comparison"] = absolute_comparison(summary, [r["full_seconds"] for r in historical["full_runs"]],
+                model_log_allowance=model_allowance, threshold=policy.slowdown_threshold,
+                historical_look_count=(len(historical["adaptive"]["policy"]["looks"])
+                    if historical["status"] == "direct_full" else len(model_confirmation_policy().looks)))
     else:
         report["comparison"] = {"gate": "inconclusive", "reason": "no compatible historical absolute baseline or current model unsupported"}
     final_audits = {name: workers[name].request({"action": "audit", "device": device}) for name in SOURCES}
@@ -637,6 +800,12 @@ def main(argv=None):
     parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
     parser.add_argument("--precision", choices=("auto", "fp32", "fp64"), default="auto")
     parser.add_argument("--mode", choices=("qualify", "reuse"), default="reuse")
+    parser.add_argument("--stopping-rule", choices=("decision", "precision"),
+                        help="defaults to decision for reuse and original precision for qualification")
+    parser.add_argument("--regression-profile", choices=("normal", "ci", "strict"), default="normal",
+                        help="routine decision criteria; precision stopping uses historical criteria")
+    parser.add_argument("--reporting-projection", type=Path,
+                        help="reviewed reporting-only hash map; defaults to anchor-directory/reporting-projection.json if present")
     parser.add_argument("--budget-seconds", type=float, default=600.)
     parser.add_argument("--maximum-holds", type=int, choices=(3, 5, 9, 17), default=9)
     parser.add_argument("--looks", default="5,9,17,33")
@@ -649,11 +818,20 @@ def main(argv=None):
         parser.error("controller mode needs reference-root, binary, fixture-cache, case and output")
     if not math.isfinite(args.budget_seconds) or not 0 < args.budget_seconds <= 28800:
         parser.error("invalid deadline")
-    from triad_perf_adaptive import AdaptivePolicy
+    from triad_perf_adaptive import AdaptivePolicy, regression_profile
     from triad_perf_cases import prepare_cases
     from triad_perf_hardware import discover_hardware
     api = load_harness("triad-performance.py", "_triad_identical_controller")
-    policy = AdaptivePolicy(looks=tuple(map(int, args.looks.split(","))), family_count=14)
+    stopping_rule = args.stopping_rule or ("precision" if args.mode == "qualify" else "decision")
+    if args.mode == "qualify" and stopping_rule != "precision":
+        parser.error("qualification requires the original precision stopping policy")
+    policy = AdaptivePolicy(looks=tuple(map(int, args.looks.split(","))), family_count=14,
+                            stopping_rule=stopping_rule,
+                            **(regression_profile(args.regression_profile) if stopping_rule == "decision" else {}))
+    projection_path = args.reporting_projection or (args.anchor_directory/"reporting-projection.json" if args.anchor_directory else None)
+    projection = json.loads(projection_path.read_text()) if projection_path and projection_path.is_file() else None
+    if args.reporting_projection and projection is None:
+        parser.error("explicit reporting projection does not exist")
     output = args.output.resolve(); output.mkdir(parents=True, exist_ok=False)
     deadline = time.monotonic()+args.budget_seconds
     workers, rows = {}, []
@@ -675,7 +853,7 @@ def main(argv=None):
             historical = json.loads(path.read_text()) if path and path.is_file() else None
             value = measure_identical_fft(case, workers, precision, args.device, policy=policy, api=api,
                 deadline=deadline, output=output/case["id"], mode=args.mode, historical=historical,
-                maximum_holds=args.maximum_holds)
+                maximum_holds=args.maximum_holds, reporting_projection=projection)
             save(output/case["id"] / "precision-qualification.json", numeric)
             rows.append(value)
             if path and not path.exists() and anchor_valid(value):

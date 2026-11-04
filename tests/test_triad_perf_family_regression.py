@@ -38,6 +38,7 @@ class PairedSampledTests(unittest.TestCase):
             workers = {name: Worker() for name in regression.SOURCES}
             binaries = dict.fromkeys(regression.SOURCES, binary)
             direct_calls = []
+            candidate_scale = 1.
             out = directory / "qualification"
             def job(worker, binary, profile, case, seed, threads, directory, device, precision,
                     deadline, *, limits=(None,)):
@@ -49,9 +50,10 @@ class PairedSampledTests(unittest.TestCase):
                     return {"generation": {"wall_seconds": .2, "seed": seed},
                             "receiver_runs": [receiver(24, 2.5, True)],
                             "complete_pipeline_wall_seconds": 2.7}
+                scale = candidate_scale if worker is workers["candidate"] else 1.
                 return {"generation": {"wall_seconds": .2, "seed": seed},
-                        "receiver_runs": [receiver(n, .1+.1*n, False) for n in limits],
-                        "training_pipeline_wall_seconds": .2+sum(.1+.1*n for n in limits)}
+                        "receiver_runs": [receiver(n, scale*(.1+.1*n), False) for n in limits],
+                        "training_pipeline_wall_seconds": .2+sum(scale*(.1+.1*n) for n in limits)}
             policy = AdaptivePolicy(looks=(3,))
             with patch.object(sample, "measure_job", job):
                 qualified = regression.measure_case(workers, binaries, case, {}, out,
@@ -66,14 +68,33 @@ class PairedSampledTests(unittest.TestCase):
                 self.assertIsNotNone(regression.load_anchor(anchor, qualified["identity"]))
                 previous = list(direct_calls)
                 out = directory / "routine"
+                routine_policy = AdaptivePolicy(looks=(3, 5), stopping_rule="decision")
                 reused = regression.measure_case(workers, binaries, case, {}, out,
                     device="cpu", precision="fp32", native_threads=1,
-                    deadline=time.monotonic()+30, policy=policy, mode="reuse",
+                    deadline=time.monotonic()+30, policy=routine_policy, mode="reuse",
                     anchor=anchor, seed_offset=400000)
                 self.assertEqual(reused["status"], "historically_supported_conditional")
                 self.assertEqual(reused["comparison"]["gate"], "pass")
+                self.assertEqual(len(reused["training"]), 3)
+                self.assertEqual(reused["adaptive"]["stop_reason"], "provisional_decision_ready_for_full_endpoint")
+                self.assertFalse(reused["comparison"]["confidence_includes_unverified_model_error"])
                 self.assertEqual(len(direct_calls), 8)
                 self.assertNotIn(direct_calls[-1], previous)
+
+                candidate_scale = 1.25
+                out = directory / "inconclusive"
+                unresolved = regression.measure_case(workers, binaries, case, {}, out,
+                    device="cpu", precision="fp32", native_threads=1,
+                    deadline=time.monotonic()+30, policy=routine_policy, mode="reuse",
+                    anchor=anchor, seed_offset=800000)
+                self.assertEqual(unresolved["status"], "unqualified")
+                self.assertEqual(unresolved["comparison"]["gate"], "inconclusive")
+                self.assertFalse(unresolved["prediction_valid"])
+                self.assertEqual(len(unresolved["training"]), 5)
+                self.assertEqual(unresolved["confirmation_stop_reason"],
+                                 "frozen_decision_unresolved_or_endpoint_infeasible")
+                self.assertEqual(unresolved["full_pairs"], [])
+                self.assertEqual(len(direct_calls), 8)
 
                 tampered = json.loads(anchor.read_text())
                 tampered["full_pairs"][0]["candidate"]["receiver_runs"][0]["request_wall_seconds"] *= 2
@@ -82,6 +103,33 @@ class PairedSampledTests(unittest.TestCase):
                 invalid = directory / "invalid.json"
                 sample.write_json(invalid, tampered)
                 self.assertIsNone(regression.load_anchor(invalid, qualified["identity"]))
+
+    def test_direct_routine_stops_on_paired_decision_with_wide_absolute_timings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            binary = directory / "native"
+            binary.write_bytes(b"fixed native")
+            case = {"id": "fixture", "training": [4, 8], "seed": 17}
+            workers = {name: Worker() for name in regression.SOURCES}
+            binaries = dict.fromkeys(regression.SOURCES, binary)
+            def job(worker, binary, profile, case, seed, threads, directory, device, precision,
+                    deadline, *, limits=(None,)):
+                self.assertEqual(limits, (None,))
+                seconds = (seed // 16 % 3 + 1) ** 2
+                return {"generation": {"wall_seconds": .2, "seed": seed},
+                        "receiver_runs": [receiver(24, seconds, True)],
+                        "complete_pipeline_wall_seconds": seconds + .2}
+            with patch.object(sample, "measure_job", job):
+                report = regression.measure_case(workers, binaries, case, {}, directory/"routine",
+                    device="cpu", precision="fp32", native_threads=1,
+                    deadline=time.monotonic()+30, policy=AdaptivePolicy(looks=(3, 5), stopping_rule="decision"),
+                    mode="reuse", seed_offset=1000)
+            self.assertEqual(report["status"], "direct_full")
+            self.assertEqual(report["comparison"]["gate"], "pass")
+            self.assertEqual(report["comparison"]["timing_only_one_sided_bounds"], [1., 1.])
+            self.assertFalse(report["adaptive"]["timing_precision_reached"])
+            self.assertEqual(len(report["training"]), 3)
+            self.assertIn("no applicable historical predictor", report["direct_fallback_reason"])
 
     def test_component_slowdown_cannot_hide_behind_unchanged_total(self):
         fits = {"pipeline": [0., 0., 0.], "generation": [-.2, -.2, -.2], "receiver": [.3, .3, .3]}

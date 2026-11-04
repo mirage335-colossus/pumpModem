@@ -7,8 +7,10 @@ Start with its small diagnostics before reproducing a full dated campaign.
 For computational regressions, use the [bounded performance suite](triad-performance.md).
 It preserves full sample/timing geometry while abbreviating CFO repetitions,
 checks the resulting runtime model on held-out work, and keeps hardware health
-separate from receiver efficiency. Its scope is the isolated Python FFT and
-Gaussian helpers, not ordinary or native receiver throughput qualification.
+separate from receiver efficiency. Its [maintained scope matrix](triad-performance-matrix.md)
+includes isolated native simulation, planning and Python CPU/GPU receiver
+workloads. It distinguishes validated forecasts, direct measurements and
+unresolved regimes. The ordinary Robust receiver remains outside this suite.
 
 **Current configuration and failure map:** the
 [broad study](validation-data/triad-v3/2026-11-03-broad/README.md) covers the requested

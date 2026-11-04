@@ -1,0 +1,238 @@
+{
+  "records": [
+    {
+      "files": [
+        {
+          "bytes": 14919,
+          "expected_sha256": "b8c2c75ebfc0f9f12cc05dae971a5cb3771d37c7470acc827db7023ad09ac637",
+          "name": "manifest.json",
+          "observed_sha256": "b8c2c75ebfc0f9f12cc05dae971a5cb3771d37c7470acc827db7023ad09ac637",
+          "status": "matched retained input"
+        },
+        {
+          "bytes": 9984,
+          "expected_sha256": "6da68a4a960f570f496d6b57ffa786f5c0a1916f7a99c999773ecd6015c649d2",
+          "name": "gram.c128",
+          "observed_sha256": "6da68a4a960f570f496d6b57ffa786f5c0a1916f7a99c999773ecd6015c649d2",
+          "status": "matched retained input"
+        },
+        {
+          "bytes": 2496,
+          "expected_sha256": "1bde8fb749777e7ce839f1e5aed68298932e0ff8bb8f7b33035f2e5ef1d06984",
+          "name": "mean.c128",
+          "observed_sha256": "1bde8fb749777e7ce839f1e5aed68298932e0ff8bb8f7b33035f2e5ef1d06984",
+          "status": "matched retained input"
+        },
+        {
+          "bytes": 624,
+          "expected_sha256": "9b304ae8491f067dd159c8b80f32851d170c2acb68f41e7d5eb7351a12ce39dc",
+          "name": "intervals.u64",
+          "observed_sha256": "9b304ae8491f067dd159c8b80f32851d170c2acb68f41e7d5eb7351a12ce39dc",
+          "status": "matched retained input"
+        },
+        {
+          "bytes": 312,
+          "expected_sha256": "fa98de26d2d1446ef995486affb6643ffd55490f5c18c92647aaf43edcccdbed",
+          "name": "valid_rows.u64",
+          "observed_sha256": "fa98de26d2d1446ef995486affb6643ffd55490f5c18c92647aaf43edcccdbed",
+          "status": "matched retained input"
+        },
+        {
+          "bytes": 312,
+          "expected_sha256": "25a04a3ceaed9ba8e3e42fd047dec53fc121b47008b13fb22ed5eb146d4f9ad9",
+          "name": "signal_energy.f64",
+          "observed_sha256": "25a04a3ceaed9ba8e3e42fd047dec53fc121b47008b13fb22ed5eb146d4f9ad9",
+          "status": "matched retained input"
+        },
+        {
+          "bytes": 2496,
+          "expected_sha256": "26b8134953157f4a4f644d225522d2d02b14713cd4fe24867194cf4f773dfe20",
+          "name": "observation.c128",
+          "observed_sha256": "26b8134953157f4a4f644d225522d2d02b14713cd4fe24867194cf4f773dfe20",
+          "status": "matched retained input"
+        },
+        {
+          "bytes": 312,
+          "expected_sha256": "644aeada33b528896649eb947a40bf69b031ce4302a2fd329a7f2dde5dc9e9c3",
+          "name": "received_energy.f64",
+          "observed_sha256": "644aeada33b528896649eb947a40bf69b031ce4302a2fd329a7f2dde5dc9e9c3",
+          "status": "matched retained input"
+        }
+      ],
+      "fixture": "planner bounds",
+      "source_directory": "local-evidence/triad-performance-complete/actual-delay-001/sampled-stats"
+    },
+    {
+      "files": [
+        {
+          "bytes": 3197184,
+          "expected_sha256": "345f872061c98035c1627b044971336b8030ff02fde3251d9168e2da423166b9",
+          "name": "basis.c128",
+          "observed_sha256": "345f872061c98035c1627b044971336b8030ff02fde3251d9168e2da423166b9",
+          "status": "matched retained input"
+        },
+        {
+          "bytes": 23846,
+          "expected_sha256": "730e06b6ae96d26c285e3439c661c53a6f61d84f0dd874e3d7d916f03395eea0",
+          "name": "manifest.json",
+          "observed_sha256": "730e06b6ae96d26c285e3439c661c53a6f61d84f0dd874e3d7d916f03395eea0",
+          "status": "matched retained input"
+        },
+        {
+          "bytes": 399648,
+          "expected_sha256": "0476a6f6e91b1c364e50cc334fb6980f7eda6b4ae781ae05fc88edba0f7295d7",
+          "name": "observation.c128",
+          "observed_sha256": "0476a6f6e91b1c364e50cc334fb6980f7eda6b4ae781ae05fc88edba0f7295d7",
+          "status": "matched retained input"
+        },
+        {
+          "bytes": 24978,
+          "expected_sha256": "3239a129c933ab69c631d4724616b68d6f0947b48463c06cfdd73d446357d6b4",
+          "name": "validity.u8",
+          "observed_sha256": "3239a129c933ab69c631d4724616b68d6f0947b48463c06cfdd73d446357d6b4",
+          "status": "matched retained input"
+        }
+      ],
+      "fixture": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/broad-hf-timing/b220df4f187da55c0b8b8767cd394db67fa0b2fc7151835496f558dea34104b0/fixture.json",
+      "source_directory": "local-evidence/triad-performance-broader/gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/broad-hf-timing/b220df4f187da55c0b8b8767cd394db67fa0b2fc7151835496f558dea34104b0/workspace"
+    },
+    {
+      "files": [
+        {
+          "bytes": 3056128,
+          "expected_sha256": "1882534711f4cd9d01114946ff5c15173d42942a8e375b7853fa650aa1160565",
+          "name": "basis.c128",
+          "observed_sha256": "1882534711f4cd9d01114946ff5c15173d42942a8e375b7853fa650aa1160565",
+          "status": "matched retained input"
+        },
+        {
+          "bytes": 23457,
+          "expected_sha256": "c218b81bb87347e4f4d08f6e39a77a21afc252f16f11eabfdfcc022ccf77ff60",
+          "name": "manifest.json",
+          "observed_sha256": "c218b81bb87347e4f4d08f6e39a77a21afc252f16f11eabfdfcc022ccf77ff60",
+          "status": "matched retained input"
+        },
+        {
+          "bytes": 382016,
+          "expected_sha256": "1fbad0596c5e4d5826fdb3c246c0baee24c2688a50e6bc8558410b324213bfc1",
+          "name": "observation.c128",
+          "observed_sha256": "1fbad0596c5e4d5826fdb3c246c0baee24c2688a50e6bc8558410b324213bfc1",
+          "status": "matched retained input"
+        },
+        {
+          "bytes": 23876,
+          "expected_sha256": "5121ba6f1afd12c97ae1b8af0f7753d5e9e6343d0443b36107b9d555a1066636",
+          "name": "validity.u8",
+          "observed_sha256": "5121ba6f1afd12c97ae1b8af0f7753d5e9e6343d0443b36107b9d555a1066636",
+          "status": "matched retained input"
+        }
+      ],
+      "fixture": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/free-crystal/e978cbff057117f908ba9ae7f72777f7b210f2890d6a627bae0752f470d92f33/fixture.json",
+      "source_directory": "local-evidence/triad-performance-broader/gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/free-crystal/e978cbff057117f908ba9ae7f72777f7b210f2890d6a627bae0752f470d92f33/workspace"
+    },
+    {
+      "files": [
+        {
+          "bytes": 14926336,
+          "expected_sha256": "3b8c2998c20ef5ed201cc4b57d14b45224390d07ab5a79337dbdbb88b19f1afd",
+          "name": "basis.c128",
+          "observed_sha256": "3b8c2998c20ef5ed201cc4b57d14b45224390d07ab5a79337dbdbb88b19f1afd",
+          "status": "matched retained input"
+        },
+        {
+          "bytes": 23746,
+          "expected_sha256": "71277bbbf5d2cc12839ddf8a09e4879fb2461c4876b838d3435884911eb47847",
+          "name": "manifest.json",
+          "observed_sha256": "71277bbbf5d2cc12839ddf8a09e4879fb2461c4876b838d3435884911eb47847",
+          "status": "matched retained input"
+        },
+        {
+          "bytes": 1865792,
+          "expected_sha256": "d4f0b9e09d718ba12af4d2610421acaf6a6d8e7fd82a6b18310ff2f01f54bb81",
+          "name": "observation.c128",
+          "observed_sha256": "d4f0b9e09d718ba12af4d2610421acaf6a6d8e7fd82a6b18310ff2f01f54bb81",
+          "status": "matched retained input"
+        },
+        {
+          "bytes": 116612,
+          "expected_sha256": "7c14d1f1c96fb26f88f29e873c8b749b2ea4b31cfff61211041b45fc274836c8",
+          "name": "validity.u8",
+          "observed_sha256": "7c14d1f1c96fb26f88f29e873c8b749b2ea4b31cfff61211041b45fc274836c8",
+          "status": "matched retained input"
+        }
+      ],
+      "fixture": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/hf30-fhss-missed/724b5c52e981c67503d580480d01bfe4562fb799f0916f8e122d425396fac8ab/fixture.json",
+      "source_directory": "local-evidence/triad-performance-broader/gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/hf30-fhss-missed/724b5c52e981c67503d580480d01bfe4562fb799f0916f8e122d425396fac8ab/workspace"
+    },
+    {
+      "files": [
+        {
+          "bytes": 1490432,
+          "expected_sha256": "e5cb0d2409cabbef516b8e7fcca1f0d94f8847f2f3e2748e6b4320fe7088dfb2",
+          "name": "basis.c128",
+          "observed_sha256": "e5cb0d2409cabbef516b8e7fcca1f0d94f8847f2f3e2748e6b4320fe7088dfb2",
+          "status": "matched retained input"
+        },
+        {
+          "bytes": 23872,
+          "expected_sha256": "e893adf7f81a161412454b0f66e31ae562f274baf8861acdba4ba0d2d2b48131",
+          "name": "manifest.json",
+          "observed_sha256": "e893adf7f81a161412454b0f66e31ae562f274baf8861acdba4ba0d2d2b48131",
+          "status": "matched retained input"
+        },
+        {
+          "bytes": 186304,
+          "expected_sha256": "cde11de3cef922b7bc957b2f3fd7e484005d31b2fac8987fdec7c08c1aee7f81",
+          "name": "observation.c128",
+          "observed_sha256": "cde11de3cef922b7bc957b2f3fd7e484005d31b2fac8987fdec7c08c1aee7f81",
+          "status": "matched retained input"
+        },
+        {
+          "bytes": 11644,
+          "expected_sha256": "a5d0a4efd677dda9b88236f7bf6b3bccc3f6f6de8926260310ee6204dd74b83e",
+          "name": "validity.u8",
+          "observed_sha256": "a5d0a4efd677dda9b88236f7bf6b3bccc3f6f6de8926260310ee6204dd74b83e",
+          "status": "matched retained input"
+        }
+      ],
+      "fixture": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/narrow-hf-tight/da59c5cd0c871fb082a91f27f10436d18ff3d10f15e0c53d7e4ed0f36c8920f5/fixture.json",
+      "source_directory": "local-evidence/triad-performance-broader/gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/narrow-hf-tight/da59c5cd0c871fb082a91f27f10436d18ff3d10f15e0c53d7e4ed0f36c8920f5/workspace"
+    },
+    {
+      "files": [
+        {
+          "bytes": 73830400,
+          "expected_sha256": "aca34a8105632e17535a1e9e1196ee34e9d07482df84e779faf3f2812917d61a",
+          "name": "basis.c128",
+          "observed_sha256": "aca34a8105632e17535a1e9e1196ee34e9d07482df84e779faf3f2812917d61a",
+          "status": "matched retained input"
+        },
+        {
+          "bytes": 23987,
+          "expected_sha256": "62b458ace71c292fe55692a3bc2ac07c3cc562d05960043f2cb51ce4e273330d",
+          "name": "manifest.json",
+          "observed_sha256": "62b458ace71c292fe55692a3bc2ac07c3cc562d05960043f2cb51ce4e273330d",
+          "status": "matched retained input"
+        },
+        {
+          "bytes": 9228800,
+          "expected_sha256": "51a4a4d15673c2569452dba773502f1ac39ce0965b7f78ae2a2778f0a084d53c",
+          "name": "observation.c128",
+          "observed_sha256": "51a4a4d15673c2569452dba773502f1ac39ce0965b7f78ae2a2778f0a084d53c",
+          "status": "matched retained input"
+        },
+        {
+          "bytes": 576800,
+          "expected_sha256": "64aacdb73fe9147f01633a6e52806c67636f9a261225da13af1c6f515132aa30",
+          "name": "validity.u8",
+          "observed_sha256": "64aacdb73fe9147f01633a6e52806c67636f9a261225da13af1c6f515132aa30",
+          "status": "matched retained input"
+        }
+      ],
+      "fixture": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/vlf-850-day/0701229e4d19b8fbd9670cbda4bc779b9f2c086b19fd5a227210935735055fe8/fixture.json",
+      "source_directory": "local-evidence/triad-performance-broader/gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/vlf-850-day/0701229e4d19b8fbd9670cbda4bc779b9f2c086b19fd5a227210935735055fe8/workspace"
+    }
+  ],
+  "schema": "triad-broader-archive-input-verification-v1",
+  "scope": "Read-only archive-time byte checks against run-recorded digests; no receiver rerun. Physical arrays intentionally not copied; manifests and generation commands are retained."
+}

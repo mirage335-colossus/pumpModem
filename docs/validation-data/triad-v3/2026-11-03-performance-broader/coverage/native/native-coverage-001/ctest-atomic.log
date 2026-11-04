@@ -1,0 +1,6 @@
+build/triad-cov CTest selection: triad_v3_source, triad_v3_channel, triad_v3_receiver, triad_statistics
+1/4 triad_statistics: Passed 0.59 sec
+2/4 triad_v3_receiver: Passed 1.30 sec
+3/4 triad_v3_source: Passed 0.11 sec
+4/4 triad_v3_channel: Passed 14.50 sec
+100% tests passed, 0 tests failed out of 4. Total Test time: 14.51 sec.

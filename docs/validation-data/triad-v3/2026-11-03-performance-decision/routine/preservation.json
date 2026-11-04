@@ -1,0 +1,5634 @@
+{
+  "schema": "triad-decision-routine-preservation-v1",
+  "records": [
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/functional-00/stderr.log",
+      "archive": "cpu-decision-001/functional-00/stderr.log.gz",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "gzip_sha256": "ac73670af3abed54ac6fb4695131f4099be9fbe39d6076c5d0264a6bbdae9d83",
+      "gzip_bytes": 20
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/functional-00/stdout.log",
+      "archive": "cpu-decision-001/functional-00/stdout.log.gz",
+      "sha256": "83baa95108a3e7f7f48f80c599325c5ae71f9188f38c4ef800acb621b1809cf7",
+      "bytes": 724,
+      "gzip_sha256": "69ee8c88cd8827ac6c81624610e142c33b4eeb750db8ac43e91784daf9f737f4",
+      "gzip_bytes": 326
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/functional-01/stderr.log",
+      "archive": "cpu-decision-001/functional-01/stderr.log.gz",
+      "sha256": "72c5337332e545278ba3612ce6662f62ae4e7826b66c1201e672a9bfac3a9798",
+      "bytes": 1320,
+      "gzip_sha256": "c34a810523a8c281a73a69a16bfe260b3721037d49ded6ec188a4d568bbaf2bb",
+      "gzip_bytes": 387
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/functional-01/stdout.log",
+      "archive": "cpu-decision-001/functional-01/stdout.log.gz",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "gzip_sha256": "ac73670af3abed54ac6fb4695131f4099be9fbe39d6076c5d0264a6bbdae9d83",
+      "gzip_bytes": 20
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/functional-02/stderr.log",
+      "archive": "cpu-decision-001/functional-02/stderr.log.gz",
+      "sha256": "f852dfd92613f2d563aa10df70f530e00069a0305aa5f9dcdf1df02f4bc884f1",
+      "bytes": 1714,
+      "gzip_sha256": "6bc14069ac0d7cb77f7228bec91493ab53823dc7f4502dcdd5a91e2508eb371c",
+      "gzip_bytes": 473
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/functional-02/stdout.log",
+      "archive": "cpu-decision-001/functional-02/stdout.log.gz",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "gzip_sha256": "ac73670af3abed54ac6fb4695131f4099be9fbe39d6076c5d0264a6bbdae9d83",
+      "gzip_bytes": 20
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/functional-03/stderr.log",
+      "archive": "cpu-decision-001/functional-03/stderr.log.gz",
+      "sha256": "7db12d92cd6cbb900aa065dbfd385b5948b44d4ed4993f4de05b35b6cc5f1162",
+      "bytes": 1127,
+      "gzip_sha256": "daf17f4d746ddcfa71c11a1eeee2c8248e552a87fc363578e14244b7e905a1fa",
+      "gzip_bytes": 330
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/functional-03/stdout.log",
+      "archive": "cpu-decision-001/functional-03/stdout.log.gz",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "gzip_sha256": "ac73670af3abed54ac6fb4695131f4099be9fbe39d6076c5d0264a6bbdae9d83",
+      "gzip_bytes": 20
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/functional-04/stderr.log",
+      "archive": "cpu-decision-001/functional-04/stderr.log.gz",
+      "sha256": "2c150a829e5af18d5c070292f990d51c8e1d7663eba46d95cef70adf99241525",
+      "bytes": 2193,
+      "gzip_sha256": "610cfb6d5108c2b28d362c3a6e85863b3ed29e041d2da2090ef9f6377c2b618c",
+      "gzip_bytes": 546
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/functional-04/stdout.log",
+      "archive": "cpu-decision-001/functional-04/stdout.log.gz",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "gzip_sha256": "ac73670af3abed54ac6fb4695131f4099be9fbe39d6076c5d0264a6bbdae9d83",
+      "gzip_bytes": 20
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/functional-05/stderr.log",
+      "archive": "cpu-decision-001/functional-05/stderr.log.gz",
+      "sha256": "9c3479dc3059732782188f36532e2b1886df0d81a96e4ef3406dbfc4fbc7c1b9",
+      "bytes": 2920,
+      "gzip_sha256": "6bbe230159662a3e012522c341094ebbe002ed770b71340ba329a0f99c24fb3f",
+      "gzip_bytes": 718
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/functional-05/stdout.log",
+      "archive": "cpu-decision-001/functional-05/stdout.log.gz",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "gzip_sha256": "ac73670af3abed54ac6fb4695131f4099be9fbe39d6076c5d0264a6bbdae9d83",
+      "gzip_bytes": 20
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/functional-06/stderr.log",
+      "archive": "cpu-decision-001/functional-06/stderr.log.gz",
+      "sha256": "ff5dab3a7df3e494b526c458208ee3bea1b178f7ce25523b533710ce7d9f6b12",
+      "bytes": 1260,
+      "gzip_sha256": "3dd3958be9b78ad4f5063657db14f10b1c7481f2ebea9399f5db09ebfe5cbebb",
+      "gzip_bytes": 373
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/functional-06/stdout.log",
+      "archive": "cpu-decision-001/functional-06/stdout.log.gz",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "gzip_sha256": "ac73670af3abed54ac6fb4695131f4099be9fbe39d6076c5d0264a6bbdae9d83",
+      "gzip_bytes": 20
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/functional-07/stderr.log",
+      "archive": "cpu-decision-001/functional-07/stderr.log.gz",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "gzip_sha256": "ac73670af3abed54ac6fb4695131f4099be9fbe39d6076c5d0264a6bbdae9d83",
+      "gzip_bytes": 20
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/functional-07/stdout.log",
+      "archive": "cpu-decision-001/functional-07/stdout.log.gz",
+      "sha256": "f076cb76d142e98b410180963aab2e8ac2a6c859f501b02ea8009061ff0a0792",
+      "bytes": 1193,
+      "gzip_sha256": "470857d45baea95c579d001e6425665022f64abb9d2735dfc4965fd67597d736",
+      "gzip_bytes": 604
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/functional-08/stderr.log",
+      "archive": "cpu-decision-001/functional-08/stderr.log.gz",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "gzip_sha256": "ac73670af3abed54ac6fb4695131f4099be9fbe39d6076c5d0264a6bbdae9d83",
+      "gzip_bytes": 20
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/functional-08/stdout.log",
+      "archive": "cpu-decision-001/functional-08/stdout.log.gz",
+      "sha256": "8ee3eca3ca62ac61ef7c2caef7675e2e2729c4ea123b98489b1dcd47adb2d618",
+      "bytes": 2361,
+      "gzip_sha256": "45750393fad63c25f2856fa64ec3aaf6bc57043419c311c191c165b207059f9a",
+      "gzip_bytes": 590
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/functional-09/stderr.log",
+      "archive": "cpu-decision-001/functional-09/stderr.log.gz",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "gzip_sha256": "ac73670af3abed54ac6fb4695131f4099be9fbe39d6076c5d0264a6bbdae9d83",
+      "gzip_bytes": 20
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/functional-09/stdout.log",
+      "archive": "cpu-decision-001/functional-09/stdout.log.gz",
+      "sha256": "c3d382efa9651b151ae3dea69209408b8e5f07d7480e82d6b6f63875d0e6fb1d",
+      "bytes": 1195,
+      "gzip_sha256": "a169aabe6456976be493f525d7a91bdbd262a78708aade90050dcdc2616f4641",
+      "gzip_bytes": 461
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/functional-10/stderr.log",
+      "archive": "cpu-decision-001/functional-10/stderr.log.gz",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "gzip_sha256": "ac73670af3abed54ac6fb4695131f4099be9fbe39d6076c5d0264a6bbdae9d83",
+      "gzip_bytes": 20
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/functional-10/stdout.log",
+      "archive": "cpu-decision-001/functional-10/stdout.log.gz",
+      "sha256": "bb35a6122f9751fcac05bbae2062195c247eee175d8f6bfa7ef9f11bd2a50fa8",
+      "bytes": 1533,
+      "gzip_sha256": "7ccde81a144b6845c11433f9a5a9b8f7129fd890e51b9fe708bd7f6eac4d64a3",
+      "gzip_bytes": 741
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/functional-11/stderr.log",
+      "archive": "cpu-decision-001/functional-11/stderr.log.gz",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "gzip_sha256": "ac73670af3abed54ac6fb4695131f4099be9fbe39d6076c5d0264a6bbdae9d83",
+      "gzip_bytes": 20
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/functional-11/stdout.log",
+      "archive": "cpu-decision-001/functional-11/stdout.log.gz",
+      "sha256": "c50d43b10d67379b42f4ea0c90d8f1aa9aae15e1f8d74c02ade330cff53faa14",
+      "bytes": 238,
+      "gzip_sha256": "ab597425a374d7ea838a9dccadf6b4c82157c74eccc6c48754af638fc925b4bc",
+      "gzip_bytes": 180
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/functional-12/stderr.log",
+      "archive": "cpu-decision-001/functional-12/stderr.log.gz",
+      "sha256": "2b01cfd91f947a6493980ad4e0212abc266d176aaf480dfdf9bdddfd7f9bcf3f",
+      "bytes": 1292,
+      "gzip_sha256": "0ab7bb984cd4773c8d2a1125bb2deed597a5c0dd625b62b78dc46a55141d41e5",
+      "gzip_bytes": 387
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/functional-12/stdout.log",
+      "archive": "cpu-decision-001/functional-12/stdout.log.gz",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "gzip_sha256": "ac73670af3abed54ac6fb4695131f4099be9fbe39d6076c5d0264a6bbdae9d83",
+      "gzip_bytes": 20
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/functional-13/stderr.log",
+      "archive": "cpu-decision-001/functional-13/stderr.log.gz",
+      "sha256": "1c079a1b4c5b3a5571c3d2c11070c0bae2a18444a4d641c12d2376f52ff555c6",
+      "bytes": 2625,
+      "gzip_sha256": "efc67c2cd454e1a8722381b238b734917ccde1858be1b018f173bfc38e8c2be4",
+      "gzip_bytes": 647
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/functional-13/stdout.log",
+      "archive": "cpu-decision-001/functional-13/stdout.log.gz",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "gzip_sha256": "ac73670af3abed54ac6fb4695131f4099be9fbe39d6076c5d0264a6bbdae9d83",
+      "gzip_bytes": 20
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/functional-14/stderr.log",
+      "archive": "cpu-decision-001/functional-14/stderr.log.gz",
+      "sha256": "2fc9b1b509bb8f7820d866eb12ed52f1d8ab2d7f90e8893f54e854b24e80052f",
+      "bytes": 1474,
+      "gzip_sha256": "9ff7daf8cc7f67c0cedd5b6cfc1cca14795c554a5c9b60681cb7598e2d80caf9",
+      "gzip_bytes": 408
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/functional-14/stdout.log",
+      "archive": "cpu-decision-001/functional-14/stdout.log.gz",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "gzip_sha256": "ac73670af3abed54ac6fb4695131f4099be9fbe39d6076c5d0264a6bbdae9d83",
+      "gzip_bytes": 20
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/functional-15/stderr.log",
+      "archive": "cpu-decision-001/functional-15/stderr.log.gz",
+      "sha256": "d4fdf4f4cf72bb329b8633ff90d624cc5909e48e5718f81eea1e46954b1d8b4a",
+      "bytes": 1938,
+      "gzip_sha256": "1b53f334e0e79fa6446a558935e73579c0b5286beaad026fda79280bdcc40692",
+      "gzip_bytes": 515
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/functional-15/stdout.log",
+      "archive": "cpu-decision-001/functional-15/stdout.log.gz",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "gzip_sha256": "ac73670af3abed54ac6fb4695131f4099be9fbe39d6076c5d0264a6bbdae9d83",
+      "gzip_bytes": 20
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/identical-fft/candidate.stderr.log",
+      "archive": "cpu-decision-001/identical-fft/candidate.stderr.log.gz",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "gzip_sha256": "ac73670af3abed54ac6fb4695131f4099be9fbe39d6076c5d0264a6bbdae9d83",
+      "gzip_bytes": 20
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/identical-fft/free-crystal/forecast.json",
+      "archive": "cpu-decision-001/identical-fft/free-crystal/forecast.json.gz",
+      "sha256": "c5b79966105a2086ea0da710cb32a3a00f04ff3083d1cd56469554c260f3d42f",
+      "bytes": 1452,
+      "gzip_sha256": "8d9fff343c4036d172774c58748cc2cd77731742a0617be2282d73d5c18a0c70",
+      "gzip_bytes": 749
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/identical-fft/free-crystal/observations.jsonl",
+      "archive": "cpu-decision-001/identical-fft/free-crystal/observations.jsonl.gz",
+      "sha256": "eece5707a2bc02f4a35d12131a95cc956b2bb9db8bbddb75c89e58572d8cd8ae",
+      "bytes": 357995,
+      "gzip_sha256": "bf7b7670dd407eb224b96999fd8f862188da13fa6e707b85af1daa73eb6e7036",
+      "gzip_bytes": 89818
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/identical-fft/free-crystal/precision-qualification.json",
+      "archive": "cpu-decision-001/identical-fft/free-crystal/precision-qualification.json.gz",
+      "sha256": "78f36f1b6c2e3212e7ff6cdc35851dc3fe040e4de9037dfb76855df57735b5c2",
+      "bytes": 1718,
+      "gzip_sha256": "f2abe5abb69929464acaf014a01eb3a52ff77e96d67323e9396498e3f905471f",
+      "gzip_bytes": 444
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/identical-fft/free-crystal/result.json",
+      "archive": "cpu-decision-001/identical-fft/free-crystal/result.json.gz",
+      "sha256": "da2c9b6201abf69ec2bba94b789caad0084a77cca5ed22b5210d65636cd5dd20",
+      "bytes": 560461,
+      "gzip_sha256": "e2c115d9f02cc0f384b305f82c8c6387c525237c1c4b6037ff7e52c7da09057b",
+      "gzip_bytes": 142477
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/identical-fft/reference.stderr.log",
+      "archive": "cpu-decision-001/identical-fft/reference.stderr.log.gz",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "gzip_sha256": "ac73670af3abed54ac6fb4695131f4099be9fbe39d6076c5d0264a6bbdae9d83",
+      "gzip_bytes": 20
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/identical-fft/summary.json",
+      "archive": "cpu-decision-001/identical-fft/summary.json.gz",
+      "sha256": "56f09445a06b943f6548610133099e396a7118ff338c55db2ee26257e79c0ee8",
+      "bytes": 251,
+      "gzip_sha256": "eda52c27db32e59edfb4e39d9e45042af513328e44d30b521401546e562fabc7",
+      "gzip_bytes": 181
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/identical-fft-process/stderr.log",
+      "archive": "cpu-decision-001/identical-fft-process/stderr.log.gz",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "gzip_sha256": "ac73670af3abed54ac6fb4695131f4099be9fbe39d6076c5d0264a6bbdae9d83",
+      "gzip_bytes": 20
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/identical-fft-process/stdout.log",
+      "archive": "cpu-decision-001/identical-fft-process/stdout.log.gz",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "gzip_sha256": "ac73670af3abed54ac6fb4695131f4099be9fbe39d6076c5d0264a6bbdae9d83",
+      "gzip_bytes": 20
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/native-fft-process/stderr.log",
+      "archive": "cpu-decision-001/native-fft-process/stderr.log.gz",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "gzip_sha256": "ac73670af3abed54ac6fb4695131f4099be9fbe39d6076c5d0264a6bbdae9d83",
+      "gzip_bytes": 20
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/native-fft-process/stdout.log",
+      "archive": "cpu-decision-001/native-fft-process/stdout.log.gz",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "gzip_sha256": "ac73670af3abed54ac6fb4695131f4099be9fbe39d6076c5d0264a6bbdae9d83",
+      "gzip_bytes": 20
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/native-fft.json",
+      "archive": "cpu-decision-001/native-fft.json.gz",
+      "sha256": "7ca44004061f6959859711dfb1b40c3ca9f3957b817da0a4e909eb6181980a5c",
+      "bytes": 10655594,
+      "gzip_sha256": "8bc71010c418fd78dca23ee6d54ca4b083db76acb72fbf9dbc3b5798a3f4240d",
+      "gzip_bytes": 1405157
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/native-fft.work/candidate.stderr.log",
+      "archive": "cpu-decision-001/native-fft.work/candidate.stderr.log.gz",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "gzip_sha256": "ac73670af3abed54ac6fb4695131f4099be9fbe39d6076c5d0264a6bbdae9d83",
+      "gzip_bytes": 20
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/native-fft.work/executed-paths.json",
+      "archive": "cpu-decision-001/native-fft.work/executed-paths.json.gz",
+      "sha256": "37a6d1eac6db343a1226ba581d20c1de6658ffe817ad81876688cb1cf0d61090",
+      "bytes": 50605,
+      "gzip_sha256": "89de32b09a59bd353bb29f998e9f565f76ec9fa17b66dded3ee21179714a807a",
+      "gzip_bytes": 8720
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/native-fft.work/executed-paths.stderr.log",
+      "archive": "cpu-decision-001/native-fft.work/executed-paths.stderr.log.gz",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "gzip_sha256": "ac73670af3abed54ac6fb4695131f4099be9fbe39d6076c5d0264a6bbdae9d83",
+      "gzip_bytes": 20
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/native-fft.work/native-vlf-low-cn0.prediction-8.json",
+      "archive": "cpu-decision-001/native-fft.work/native-vlf-low-cn0.prediction-8.json.gz",
+      "sha256": "f2d25019d00a0dfcfaffff1dd7174713d149983bd1f44e6e49828ea50843d845",
+      "bytes": 17486,
+      "gzip_sha256": "b173fca034b6dba3766da31f686d7f1c6e73b6d5178bdca9032830331e7d8280",
+      "gzip_bytes": 4401
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/native-fft.work/reference.stderr.log",
+      "archive": "cpu-decision-001/native-fft.work/reference.stderr.log.gz",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "gzip_sha256": "ac73670af3abed54ac6fb4695131f4099be9fbe39d6076c5d0264a6bbdae9d83",
+      "gzip_bytes": 20
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/native-inventory/stderr.log",
+      "archive": "cpu-decision-001/native-inventory/stderr.log.gz",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "gzip_sha256": "ac73670af3abed54ac6fb4695131f4099be9fbe39d6076c5d0264a6bbdae9d83",
+      "gzip_bytes": 20
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/native-inventory/stdout.log",
+      "archive": "cpu-decision-001/native-inventory/stdout.log.gz",
+      "sha256": "774304b7d48429d1f3e588d12c345d286e9d1101086302031e16f185a0fdbc39",
+      "bytes": 3146,
+      "gzip_sha256": "b714166665cb11d1081a8ea9c57ae668889c45e4af951509a36b25e29a90bac8",
+      "gzip_bytes": 478
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/sampled/candidate.stderr.log",
+      "archive": "cpu-decision-001/sampled/candidate.stderr.log.gz",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "gzip_sha256": "ac73670af3abed54ac6fb4695131f4099be9fbe39d6076c5d0264a6bbdae9d83",
+      "gzip_bytes": 20
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/sampled/cfo-batch-tail/result.json",
+      "archive": "cpu-decision-001/sampled/cfo-batch-tail/result.json.gz",
+      "sha256": "6fda93960bb45713e8c2f74dd2cf88c9d123597c242edf3474973ea2dfde31b3",
+      "bytes": 594610,
+      "gzip_sha256": "f6408bab410534ceb228585caf358ec1fd031c10f812f24962c304175b014a46",
+      "gzip_bytes": 74611
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/sampled/gaussian-hour/result.json",
+      "archive": "cpu-decision-001/sampled/gaussian-hour/result.json.gz",
+      "sha256": "7d4748a34042d4d8a82cab16fc5c71910c6cf1ad5f79386f8cb12c81fdcb54b6",
+      "bytes": 148370,
+      "gzip_sha256": "982eeca87e042c4acbe3d78821e0a0fee3256fc2dfcc28a55ac0ba7bd1883cea",
+      "gzip_bytes": 12939
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/sampled/grouped-multitile/result.json",
+      "archive": "cpu-decision-001/sampled/grouped-multitile/result.json.gz",
+      "sha256": "25ad306008a09dc5aa3e31a5e40744e12f8d0a4cbbd2f4a21089c8fc3ebdc0a8",
+      "bytes": 580331,
+      "gzip_sha256": "1df48d42a8f009af9e4b2f5620f8473e96217c8131f8ca2242e5a3b190483556",
+      "gzip_bytes": 105017
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/sampled/phase-optimized-hour/result.json",
+      "archive": "cpu-decision-001/sampled/phase-optimized-hour/result.json.gz",
+      "sha256": "fddb07cc1d23f08d1149300f4c91a9e154da1fb1e71819dde711694a6fceb327",
+      "bytes": 182924,
+      "gzip_sha256": "ed12171b9634c4b8e68392b00cf0769f8c2b76bff087f17a99fd67e1b460bb40",
+      "gzip_bytes": 15251
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/sampled/phase-reference-hour/result.json",
+      "archive": "cpu-decision-001/sampled/phase-reference-hour/result.json.gz",
+      "sha256": "0e6d9536707971b54bfa6e10e1e0a16f712ca602977e8ff31e1ef0da6e42ad21",
+      "bytes": 166797,
+      "gzip_sha256": "20eb4771774eae897251489a6e5f6cd86ccf16e42fa139f96d51ca572853fd38",
+      "gzip_bytes": 14548
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/sampled/ray-frequency-tiles/result.json",
+      "archive": "cpu-decision-001/sampled/ray-frequency-tiles/result.json.gz",
+      "sha256": "eb11e4220b480e47f2c1ca04c49b4fc09db62464a8afeda50c4c333ca6c04dc0",
+      "bytes": 232634,
+      "gzip_sha256": "30672c01a9e4d6bd34feb789df1a92bca6552bd80732cc7dfbd2112b0a1931da",
+      "gzip_bytes": 19366
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/sampled/rbpf-systematic/result.json",
+      "archive": "cpu-decision-001/sampled/rbpf-systematic/result.json.gz",
+      "sha256": "6a580ec9657d0ef4d7982f051e58875f8244b7e06c886c1d82c3760d53ccc71d",
+      "bytes": 255850,
+      "gzip_sha256": "8f2ef2fa00d6411672aefcbd19b5e814b247e47233c662958ce270920602b762",
+      "gzip_bytes": 20381
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/sampled/reference.stderr.log",
+      "archive": "cpu-decision-001/sampled/reference.stderr.log.gz",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "gzip_sha256": "ac73670af3abed54ac6fb4695131f4099be9fbe39d6076c5d0264a6bbdae9d83",
+      "gzip_bytes": 20
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/sampled/state-sampled-smoke/result.json",
+      "archive": "cpu-decision-001/sampled/state-sampled-smoke/result.json.gz",
+      "sha256": "47ca6eccc7598e2edb311911838ad416a54171779921d8ab7cfeeeed1b96ec5f",
+      "bytes": 115058,
+      "gzip_sha256": "99b13355ec0b762b83cdc860d00d25c22c75a9367b652e5a6b2b6e2869512a5b",
+      "gzip_bytes": 12303
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/sampled/static-fft/result.json",
+      "archive": "cpu-decision-001/sampled/static-fft/result.json.gz",
+      "sha256": "2cdd4d4a7c60cc532dc70766b04e534fe0c32fd405db3dc8577e35ed9062fe5f",
+      "bytes": 239975,
+      "gzip_sha256": "838ac2d59ae5b383f9064e5dc3fe681f353f74a7b72d19d292e5054524c91539",
+      "gzip_bytes": 19454
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/sampled/summary.json",
+      "archive": "cpu-decision-001/sampled/summary.json.gz",
+      "sha256": "6459f611a039952aeed17955807c0e22f5efa23eb359b329c369d122cbf76883",
+      "bytes": 1357,
+      "gzip_sha256": "142e0b01a163bc5fb2274a2216d39706d221c6a1f19c81c4856e84fca13a4633",
+      "gzip_bytes": 323
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/sampled-process/stderr.log",
+      "archive": "cpu-decision-001/sampled-process/stderr.log.gz",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "gzip_sha256": "ac73670af3abed54ac6fb4695131f4099be9fbe39d6076c5d0264a6bbdae9d83",
+      "gzip_bytes": 20
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/sampled-process/stdout.log",
+      "archive": "cpu-decision-001/sampled-process/stdout.log.gz",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "gzip_sha256": "ac73670af3abed54ac6fb4695131f4099be9fbe39d6076c5d0264a6bbdae9d83",
+      "gzip_bytes": 20
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001/summary.json",
+      "archive": "cpu-decision-001/summary.json.gz",
+      "sha256": "d53d68d02ad009d08d3b4a0bd8a94f9a3344f23814bb0406f9dcb15348463cd8",
+      "bytes": 176981,
+      "gzip_sha256": "f58639ad77e0151ebc154e3614856c0ef24abb7986b96d06cb74e5ef413527cb",
+      "gzip_bytes": 28540
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001-logs/stderr.log",
+      "archive": "outer-logs/stderr.log.gz",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "gzip_sha256": "ac73670af3abed54ac6fb4695131f4099be9fbe39d6076c5d0264a6bbdae9d83",
+      "gzip_bytes": 20
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/cpu-decision-001-logs/stdout.log",
+      "archive": "outer-logs/stdout.log.gz",
+      "sha256": "3e40476f8b172d7f7b8d3fe04d980c0ddb8e037f7df839a484a2cfd5c8ccd106",
+      "bytes": 165,
+      "gzip_sha256": "333399b75cac672fbd814a4b47113c87d0443c7bdf3428705a18a863753cb2c2",
+      "gzip_bytes": 151
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/replay/cpu-complete-001-decision-replay.json",
+      "archive": "replay/cpu-complete-001-decision-replay.json.gz",
+      "sha256": "fd17839dc4d261e1bfc5e08b1b8e7d0bf2be4e1f58f54e4568900ea26110a747",
+      "bytes": 35524,
+      "gzip_sha256": "02928f9eec765804edfb7c3d71c147ec991d068fbaa353850e84a21b547c40e5",
+      "gzip_bytes": 5367
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/identical-anchors-cpu/free-crystal.identical-anchor.json",
+      "archive": "identical-anchor-inputs/free-crystal.identical-anchor.json.gz",
+      "sha256": "1eab0ac257010f87f6dae014e63f97c77fbf30ab3c0c7c5ce37eb8514fde13b5",
+      "bytes": 1040979,
+      "gzip_sha256": "f992c77530bcfa6e3e7a1778bbce8b087b6646e8dc391d6c3a47496782357f9d",
+      "gzip_bytes": 179283
+    },
+    {
+      "original": "local-evidence/triad-performance-confidence/identical-anchors-cpu/reporting-projection.json",
+      "archive": "identical-anchor-inputs/reporting-projection.json.gz",
+      "sha256": "753101b48a1043a5b4194c09f53b5081e768d44b9bdcfef6e816aa3fb0c4716e",
+      "bytes": 4117,
+      "gzip_sha256": "ef44d79bcbb3a96439c586b638ef3a5e40d63e18268f5d571ca1f6d74f957717",
+      "gzip_bytes": 1984
+    },
+    {
+      "original": "/tmp/triad-confidence-unit.log",
+      "archive": "validation-logs/triad-confidence-unit.log.gz",
+      "sha256": "ddf08e8301f97a0fafb3ea50c450e6f3788e56d7fd8c252aaecb90d70b0966e5",
+      "bytes": 562,
+      "gzip_sha256": "feae3ab3a8c83e9429ce32e7a3dadb4f7ad81ecc1a04728a310f19a44547d398",
+      "gzip_bytes": 154
+    },
+    {
+      "original": "/tmp/triad-confidence-native-fixture.log",
+      "archive": "validation-logs/triad-confidence-native-fixture.log.gz",
+      "sha256": "7efb6465e817f17c86a6ac07bc1b430d5c821f75caa9f5acd00ad899f612c95b",
+      "bytes": 98,
+      "gzip_sha256": "05a99b096a5b528c5e9a1a432826cbba322d6366e71c4fec271787ecbb9d0cca",
+      "gzip_bytes": 51
+    },
+    {
+      "original": "/tmp/triad-confidence-family-final.log",
+      "archive": "validation-logs/triad-confidence-family-final.log.gz",
+      "sha256": "ec5c7a14d020c8e93eee133ecd150e04f42663449263b4b674806c0ee47247b9",
+      "bytes": 104,
+      "gzip_sha256": "e38be3279b0fd24ef6555b5efd493171f17b4ece4ec449460e52fef83574b058",
+      "gzip_bytes": 54
+    },
+    {
+      "original": "/tmp/triad-confidence-staged-final.log",
+      "archive": "validation-logs/triad-confidence-staged-final.log.gz",
+      "sha256": "0e36c75cd751601091a3f10caefd0a3dbd833b7cb65a0bd91ebf3cc652efe406",
+      "bytes": 109,
+      "gzip_sha256": "0c49378b3643db978246f177086b6c1d7a4c3226be4e949ad8d172e838071d20",
+      "gzip_bytes": 55
+    }
+  ],
+  "sources": [
+    {
+      "member": "CMakeLists.txt",
+      "sha256": "bbf6b9e23d0f4341a321697c884186f56a9e824647cd512113a3bb9430934b77",
+      "bytes": 105866,
+      "routine_recorded": true
+    },
+    {
+      "member": "cmake/BuildDependencies.cmake",
+      "sha256": "4061ac0d0080265f7d5de59798eb1afb1199a86ca235d0bb7f8aadba98af35b3",
+      "bytes": 2560,
+      "routine_recorded": true
+    },
+    {
+      "member": "cmake/BuildInfo.cmake",
+      "sha256": "4dea10638bcac9ca73b883230d7e70af04496e2de12ed410a89241cb91eb9b54",
+      "bytes": 6714,
+      "routine_recorded": true
+    },
+    {
+      "member": "cmake/GuiFltk.cmake",
+      "sha256": "c291c1b4590bf200f24b922801e244d0da93fcc2658adfba6fbf2d5ff7b4fd58",
+      "bytes": 3160,
+      "routine_recorded": true
+    },
+    {
+      "member": "cmake/GuiRev.cmake",
+      "sha256": "adfa278ea594a79e7e88b7e2cad82846430c1cc63118511a9ebbebc0991059f7",
+      "bytes": 4152,
+      "routine_recorded": true
+    },
+    {
+      "member": "cmake/GuiShared.cmake",
+      "sha256": "daa982886aeecf9c4ee55a78f28ba3b7722157c4be84da63cf54fc0889683480",
+      "bytes": 2059,
+      "routine_recorded": true
+    },
+    {
+      "member": "cmake/NativeGui.cmake",
+      "sha256": "15ec38e1727c947a03417b9225bb1db886ba4e912f72559175ba35875886b0d1",
+      "bytes": 1277,
+      "routine_recorded": true
+    },
+    {
+      "member": "cmake/Portable.cmake",
+      "sha256": "a57319fa9c20f01e5e1281f8dcd65226d457372dc243bd0a6e085b27269b75fe",
+      "bytes": 10319,
+      "routine_recorded": true
+    },
+    {
+      "member": "cmake/PortableFrontends.cmake",
+      "sha256": "68b6b10487d2c36be74a39907405e539871e4b3022b2d99eed1f60c212ec4697",
+      "bytes": 12161,
+      "routine_recorded": true
+    },
+    {
+      "member": "cmake/RuntimePolicy.cmake",
+      "sha256": "c1618a200dd3b4efe04a44cf3b8234e936fe9e012eb0ae81721a0446e7970481",
+      "bytes": 1373,
+      "routine_recorded": true
+    },
+    {
+      "member": "cmake/SdkBuild.cmake",
+      "sha256": "60a4caf483b6f84b54c90551e217a766dcb58524912b0e900dfcdc4ee1efd992",
+      "bytes": 5096,
+      "routine_recorded": true
+    },
+    {
+      "member": "cmake/SdkRuntime.cmake",
+      "sha256": "e247caa0720d8ee55e99b0b79b6c5330bddd3b6d24e35a6474e19c28a854bd28",
+      "bytes": 4654,
+      "routine_recorded": true
+    },
+    {
+      "member": "cmake/StaticCxxRuntime.cmake",
+      "sha256": "b17ca720136da2f4d80ad6f8bca72bdcc5592521c7b4bf08a52c16ae96a42a53",
+      "bytes": 1679,
+      "routine_recorded": true
+    },
+    {
+      "member": "cmake/Terminfo.cmake",
+      "sha256": "2e13dbf13a01301a92076c18be70f90ea46aa1a1175075651d5a0ba8a38eaea4",
+      "bytes": 1000,
+      "routine_recorded": true
+    },
+    {
+      "member": "cmake/TestGroups.cmake",
+      "sha256": "a46f47257fd8f394218520527949058f3c8e519a93e52d7f2ca5733f087cc155",
+      "bytes": 24024,
+      "routine_recorded": true
+    },
+    {
+      "member": "cmake/VendoredLzma.cmake",
+      "sha256": "f1bf58a5242757974b969bf7f6e720404248028c7514607976af4f0f1356437f",
+      "bytes": 1930,
+      "routine_recorded": true
+    },
+    {
+      "member": "cmake/WasmBuild.cmake",
+      "sha256": "31ecf704f3fd77d76497ec3e985e0fb0e2b9d016abbcf54cab90707259fa2340",
+      "bytes": 1477,
+      "routine_recorded": true
+    },
+    {
+      "member": "cmake/WebFrontends.cmake",
+      "sha256": "6a7bff5f746cb85faf2c84d8790b01b652ea16fd21a1f50956b901c9d73eb15d",
+      "bytes": 9103,
+      "routine_recorded": true
+    },
+    {
+      "member": "cmake/XzReceiveHardening.cmake",
+      "sha256": "6c20dd1ded4c87067b619b46dcdc114457cf615bb7814e6fdff1592b2dff433b",
+      "bytes": 3682,
+      "routine_recorded": true
+    },
+    {
+      "member": "cmake/toolchains/source-sdk.cmake",
+      "sha256": "c4a51ab1488b0a9e4f4a4a4afd415bc5877b812e33372b0c88de5ec1fda94c7e",
+      "bytes": 6537,
+      "routine_recorded": true
+    },
+    {
+      "member": "cmake/toolchains/wasm-sdk.cmake",
+      "sha256": "c8325867ff95f33f5e55262b7a6b8e94fb5b6f22f2bd90a1b94e7921c6657af8",
+      "bytes": 4981,
+      "routine_recorded": true
+    },
+    {
+      "member": "docs/gpu-precision-controls.md",
+      "sha256": "b61dab07377a1f1b676ec262fc44db4069c895a956dc896bb773df70bdbaa207",
+      "bytes": 20772,
+      "routine_recorded": true
+    },
+    {
+      "member": "include/datapump/channel.hpp",
+      "sha256": "9cd33c2eaa7a4bafa533d2d9fc421f3e0344d1d95aa780e366c4369c8db817e7",
+      "bytes": 13885,
+      "routine_recorded": true
+    },
+    {
+      "member": "include/datapump/triad_modem_v3.hpp",
+      "sha256": "1ddd8e851950036f03e6a903ed7ba4746392ffe8623f49685df04f029c4aff48",
+      "bytes": 18454,
+      "routine_recorded": true
+    },
+    {
+      "member": "include/datapump/triad_simulation.hpp",
+      "sha256": "55db1c03f95b6bd9b65bf5e3630a506aba40d1e3dbf473f025218454fbbee34d",
+      "bytes": 4979,
+      "routine_recorded": true
+    },
+    {
+      "member": "include/datapump/triad_statistics.hpp",
+      "sha256": "66363bd20b0b613ca5df115265976052957a78052724a00e1017e15220ede6b1",
+      "bytes": 6296,
+      "routine_recorded": true
+    },
+    {
+      "member": "src/triad_modem_v3.cpp",
+      "sha256": "cb6cac016e57edcd4f6ebc70f09c68cc47380e3b772cdbe047d7a3b93e9b434c",
+      "bytes": 17377,
+      "routine_recorded": true
+    },
+    {
+      "member": "src/triad_receiver_v3.cpp",
+      "sha256": "ff7409c55f2c62dbb833f1ae24a7b4aab103607aaf2f66945ea585e1e3ba3e2f",
+      "bytes": 25438,
+      "routine_recorded": true
+    },
+    {
+      "member": "src/triad_simulation_stream.cpp",
+      "sha256": "afaa1267c36fcd330151174f6f08b6fb401a7f702c660964071ef24b6e82a70d",
+      "bytes": 48985,
+      "routine_recorded": true
+    },
+    {
+      "member": "src/triad_statistics.cpp",
+      "sha256": "18d92c2c51a4057caba6d9de78580305adcd8c038f6e1243ec1a4410f7c00ace",
+      "bytes": 20541,
+      "routine_recorded": true
+    },
+    {
+      "member": "tests/test_triad_cfo_batch.py",
+      "sha256": "f03812407de28cef6854c39df73c25cc66301abb637d8fd4cb40e34b8c16a356",
+      "bytes": 12061,
+      "routine_recorded": true
+    },
+    {
+      "member": "tests/test_triad_fft_acquire.py",
+      "sha256": "7b8c3156ebec580f22da3dae4e9941f502e88a35caf15863b2f3b3b6d066458a",
+      "bytes": 18484,
+      "routine_recorded": true
+    },
+    {
+      "member": "tests/test_triad_gaussian_state.py",
+      "sha256": "386ba03d3d6e850c7b0c6e805a5c9d30f88fdc33d07aeed8e0268cfccbde7da1",
+      "bytes": 8015,
+      "routine_recorded": true
+    },
+    {
+      "member": "tests/test_triad_gaussian_window.py",
+      "sha256": "66783804ee920a46757daa54155d9fd88a9d1ed0d65fbb5d364287ffcafde1f9",
+      "bytes": 20019,
+      "routine_recorded": true
+    },
+    {
+      "member": "tests/test_triad_group_acquire.py",
+      "sha256": "ad4b64bfa40433ed114a55787a55a89a25eed8be43ee02334859fe69151ab17c",
+      "bytes": 26613,
+      "routine_recorded": true
+    },
+    {
+      "member": "tests/test_triad_perf_adaptive.py",
+      "sha256": "8933b15aa5fb182e3b07d48248d3ce86982b04f19c86b78907a300527d1878a3",
+      "bytes": 14549,
+      "routine_recorded": false
+    },
+    {
+      "member": "tests/test_triad_perf_cases.py",
+      "sha256": "fcf3faa51bf00c918c87a8a4e11786b605c88c80772407f2fdd1d19cc8dffb66",
+      "bytes": 6408,
+      "routine_recorded": false
+    },
+    {
+      "member": "tests/test_triad_perf_complete.py",
+      "sha256": "4f24fa54f9e412af2028eb3fa0d6476663f96e43172b793540550ca1f3fc948c",
+      "bytes": 32764,
+      "routine_recorded": false
+    },
+    {
+      "member": "tests/test_triad_perf_conditional.py",
+      "sha256": "a3189ff1a4d0574a0016bdadc69ce87640885d6df8d73163ed5be7c3051cbb70",
+      "bytes": 10972,
+      "routine_recorded": false
+    },
+    {
+      "member": "tests/test_triad_perf_coverage.py",
+      "sha256": "8823e57bc60d2ba7783cb8084b704039d752c5f70c13d9ea0f883ea4b3acd048",
+      "bytes": 8104,
+      "routine_recorded": false
+    },
+    {
+      "member": "tests/test_triad_perf_decision_controls.py",
+      "sha256": "eff06791ee87c9ef75b098e8eaf40b90246fc6f8ebc67a72f14c8bcc08c23a4a",
+      "bytes": 9789,
+      "routine_recorded": false
+    },
+    {
+      "member": "tests/test_triad_perf_decision_policy_controls.py",
+      "sha256": "aad30ccef43589764195cb367fecf8c906b7c69c550b50d849d1f39de1f75133",
+      "bytes": 4470,
+      "routine_recorded": false
+    },
+    {
+      "member": "tests/test_triad_perf_families.py",
+      "sha256": "94cfce74cdf26bbb203e131451dfcbcfec312625d1c8168128993259fda1c20f",
+      "bytes": 8329,
+      "routine_recorded": false
+    },
+    {
+      "member": "tests/test_triad_perf_family_group.py",
+      "sha256": "40edf04b4b98c291b8813e4f20ec22350f6468baa50b6a0a084a1fb9beaaad2f",
+      "bytes": 7378,
+      "routine_recorded": false
+    },
+    {
+      "member": "tests/test_triad_perf_family_other.py",
+      "sha256": "d58c60a7fa309ee8293f55b016e2de5c5633227a70862c8d0286e7498d1e32b3",
+      "bytes": 12517,
+      "routine_recorded": false
+    },
+    {
+      "member": "tests/test_triad_perf_family_regression.py",
+      "sha256": "86147e349245548c78bed9c55c0b58887037d9bd8d1a9b0bd7dd95b1b23bd1a0",
+      "bytes": 11226,
+      "routine_recorded": false
+    },
+    {
+      "member": "tests/test_triad_perf_fft_diagnostic.py",
+      "sha256": "7c51c5c0aadccba76f8a4cd80e41ec998d67bf19c1f0aadf328cf0fcbe7b8ebc",
+      "bytes": 10852,
+      "routine_recorded": false
+    },
+    {
+      "member": "tests/test_triad_perf_fft_trace.py",
+      "sha256": "a6e79857b130849251a3aaf0e963dd244b12a6415eac5609eefff8598df26851",
+      "bytes": 27578,
+      "routine_recorded": false
+    },
+    {
+      "member": "tests/test_triad_perf_hardware.py",
+      "sha256": "721bd0aaf3ec019aa8b63cbde150598158d2775577bf6dfcd05554d5935a2aa9",
+      "bytes": 6112,
+      "routine_recorded": true
+    },
+    {
+      "member": "tests/test_triad_perf_identical_fft.py",
+      "sha256": "a924f066174209e9aab52ff12cb1352b7d20f76848f6c1bd87483644b1f8f19c",
+      "bytes": 19131,
+      "routine_recorded": false
+    },
+    {
+      "member": "tests/test_triad_perf_integration.py",
+      "sha256": "95255191125d9f9f88e14d7e77244ce7438f047ca04ebc75250c94e1ba58974a",
+      "bytes": 13309,
+      "routine_recorded": false
+    },
+    {
+      "member": "tests/test_triad_perf_native.py",
+      "sha256": "2b81715642e79f025e60d0aefc7e5a4a560eeef158701c141846d22db6c35269",
+      "bytes": 19992,
+      "routine_recorded": false
+    },
+    {
+      "member": "tests/test_triad_perf_native_trace.py",
+      "sha256": "116a89fe70d68e0ff8176d5ab0cb0c0a7bea4dea6e4418d90a0af70d9f055ed7",
+      "bytes": 7209,
+      "routine_recorded": false
+    },
+    {
+      "member": "tests/test_triad_perf_paths.py",
+      "sha256": "28787aa1fc90bc43c678a904f67f65465d16757970e066a00b77e84993bfe77e",
+      "bytes": 4300,
+      "routine_recorded": false
+    },
+    {
+      "member": "tests/test_triad_perf_python_coverage.py",
+      "sha256": "c7460e088851b654e093cd915070fa8934a39411f0d4d0e6876bf1da3c2feeba",
+      "bytes": 8249,
+      "routine_recorded": false
+    },
+    {
+      "member": "tests/test_triad_perf_receiver.py",
+      "sha256": "93643a1b036c47360ebe13ad9685cd72d2f6b6d453982492cd006f6745e9925c",
+      "bytes": 5520,
+      "routine_recorded": false
+    },
+    {
+      "member": "tests/test_triad_perf_staged.py",
+      "sha256": "2f76cb7069642a23197b5df08d31d8e057c3b942687156457a1475e6d0314bd7",
+      "bytes": 21272,
+      "routine_recorded": false
+    },
+    {
+      "member": "tests/test_triad_perf_statistics.py",
+      "sha256": "1e7b51977750e2026d55130410fdc7b03767e73bc3014e853d586720493b9c9e",
+      "bytes": 10325,
+      "routine_recorded": false
+    },
+    {
+      "member": "tests/test_triad_perf_sustained.py",
+      "sha256": "8deec99f57af0153393008e923adb93e888a7e03474fcd38c7fe5f89c31a905c",
+      "bytes": 28578,
+      "routine_recorded": false
+    },
+    {
+      "member": "tests/test_triad_perf_telemetry.py",
+      "sha256": "f10edee0250e0ae05be1ddd7f692b20fa1497c93b8cfe387cc390c014d7dfa25",
+      "bytes": 6817,
+      "routine_recorded": false
+    },
+    {
+      "member": "tests/test_triad_performance.py",
+      "sha256": "95aa6298bb5ae03bc7f986c6da0a94d04e2fa68cd33063d6ad90294bd4e9c806",
+      "bytes": 14239,
+      "routine_recorded": false
+    },
+    {
+      "member": "tests/test_triad_performance_workflow.py",
+      "sha256": "917bcde6440ba12a6d98c0f9057b201fb0ad0f7030dc2b233ce66ce61ae8da4a",
+      "bytes": 15014,
+      "routine_recorded": false
+    },
+    {
+      "member": "tests/test_triad_phase_frequency.py",
+      "sha256": "cc4d6f1b9c33fc746bb57791ebd19f3ae496272d11bc7cf6379bfb116b9f7dad",
+      "bytes": 14680,
+      "routine_recorded": true
+    },
+    {
+      "member": "tests/test_triad_phase_optimized.py",
+      "sha256": "2dbb8586c57c57d0d8e98b7066535cd21ee2010cf1ec78ed56ec1d0e4f18982b",
+      "bytes": 14256,
+      "routine_recorded": true
+    },
+    {
+      "member": "tests/test_triad_phase_reduction.py",
+      "sha256": "2d1bf61ebe53494568777439ca9c5b0b4d9badc7597440a82c9bb4175da62ff7",
+      "bytes": 5309,
+      "routine_recorded": true
+    },
+    {
+      "member": "tests/test_triad_phase_tensor.py",
+      "sha256": "9403029b2ab959689b475dd92c10e8da84d633501dd0c1414a0a99d55a4639ae",
+      "bytes": 11522,
+      "routine_recorded": true
+    },
+    {
+      "member": "tests/test_triad_precision_probe.py",
+      "sha256": "7de34739c72121baa230610c197f9ce7a529688fb1f581b8b01d559443498fee",
+      "bytes": 8968,
+      "routine_recorded": true
+    },
+    {
+      "member": "tests/test_triad_ray_frequency.py",
+      "sha256": "982473b034caa7bc550e1acee29dc2d9c8e33c6131e25683abd11bc95fbb89b3",
+      "bytes": 10394,
+      "routine_recorded": true
+    },
+    {
+      "member": "tests/test_triad_rbpf.py",
+      "sha256": "668c624ef439c098a99ff9e33822b6272ea367183865b7caccdafcffbc8c42fa",
+      "bytes": 21465,
+      "routine_recorded": true
+    },
+    {
+      "member": "tests/test_triad_state_workspace.py",
+      "sha256": "b9a0276203bd212b74f8becca1726d56dd6074d8c27c720a14d08cff4b6b0aba",
+      "bytes": 14923,
+      "routine_recorded": true
+    },
+    {
+      "member": "tests/test_triad_static_frequency_study.py",
+      "sha256": "73c609d183dfacf03e22426d9defac30be386f48ce35cb08b92942fc5811c34d",
+      "bytes": 15641,
+      "routine_recorded": true
+    },
+    {
+      "member": "tests/test_triad_statistics.cpp",
+      "sha256": "4af27098ee0be0c0e98ed25a1362c905dfe95b33a98f1711637c02007e5df155",
+      "bytes": 15752,
+      "routine_recorded": true
+    },
+    {
+      "member": "tests/test_triad_v3_channel.cpp",
+      "sha256": "c965233fd03834d952327422dd49ac1e0f750ea97476a3f28bbd280678be7f8c",
+      "bytes": 91267,
+      "routine_recorded": true
+    },
+    {
+      "member": "tests/test_triad_v3_receiver.cpp",
+      "sha256": "16ea0b655e64fc58b971794d95636228a4f5ba1514881303707fcbd03936ca3f",
+      "bytes": 12075,
+      "routine_recorded": true
+    },
+    {
+      "member": "tests/test_triad_v3_source.cpp",
+      "sha256": "49bd097b0ff86321e43e083059cb08f3ee42ab6b324f61222f565d80184d5ad6",
+      "bytes": 16217,
+      "routine_recorded": true
+    },
+    {
+      "member": "tools/triad-cfo-batch-study.py",
+      "sha256": "5c7fb6f8b0ad8cadeaae8591d9fb0e3d489fb5eb4c14962faf800ad46a661665",
+      "bytes": 17359,
+      "routine_recorded": true
+    },
+    {
+      "member": "tools/triad-long.cpp",
+      "sha256": "9b852132edb2c4f53d4c218e73db1314653cd6213a78a49c776869af6dc68877",
+      "bytes": 193472,
+      "routine_recorded": true
+    },
+    {
+      "member": "tools/triad-performance-cases.json",
+      "sha256": "4fe9dfe1ea4f03ea2f2a276cac022597ebdb61dc1fb71c15056b6c6f79d03664",
+      "bytes": 3186,
+      "routine_recorded": true
+    },
+    {
+      "member": "tools/triad-performance-coverage.json",
+      "sha256": "ecf8ed343d8ce50ec1cae6f1145bd1c8058596fc6bb46a3c15d618cbb76b2fe3",
+      "bytes": 80544,
+      "routine_recorded": true
+    },
+    {
+      "member": "tools/triad-performance-families.json",
+      "sha256": "44150970b2b4d9cbed85a058669cdaf6a8dc65f814a36d9f86c3238c2b7a5e6f",
+      "bytes": 11700,
+      "routine_recorded": true
+    },
+    {
+      "member": "tools/triad-performance-native-cases.json",
+      "sha256": "f8d46beae40f2a52013279cdfdea811c6267be621a82431b612fb05708304a8f",
+      "bytes": 7645,
+      "routine_recorded": true
+    },
+    {
+      "member": "tools/triad-performance-paths.json",
+      "sha256": "c67761c6bb61b8d17def9ef4251dc58240b71bf2e57151c52f343dfd874eeba9",
+      "bytes": 5033,
+      "routine_recorded": false
+    },
+    {
+      "member": "tools/triad-performance.py",
+      "sha256": "565e892bed7ffa55971efd9adf11b0377391975b67880f9ddbeed0700b9f1ba7",
+      "bytes": 55988,
+      "routine_recorded": true
+    },
+    {
+      "member": "tools/triad-ray-frequency-study.py",
+      "sha256": "ea3ca2acde8aea75538066e46e3ccae2e36612afac753db6b2d048bd6ff87dd2",
+      "bytes": 22316,
+      "routine_recorded": true
+    },
+    {
+      "member": "tools/triad-rbpf-study.py",
+      "sha256": "34a9797ed7119dcf6545b6be759b8f506cbdaf6ac9ece886b82fa699cd5d085f",
+      "bytes": 23900,
+      "routine_recorded": true
+    },
+    {
+      "member": "tools/triad-state-study.py",
+      "sha256": "3fa7491ae93031ff6bfadc4c9b792659336999effc0508a71cf734ada9250402",
+      "bytes": 19643,
+      "routine_recorded": true
+    },
+    {
+      "member": "tools/triad-static-frequency-study.py",
+      "sha256": "d1b75e9b49de21041558e97ee1daff2ba07a1fd18a123bc8a6cb928f1052e11b",
+      "bytes": 26430,
+      "routine_recorded": true
+    },
+    {
+      "member": "tools/triad_exhaustive_correlation.py",
+      "sha256": "ae02b1f7d85e2d3f8c2c153000f530a411860ff443aeaf674abaa93cf60ab2d4",
+      "bytes": 31265,
+      "routine_recorded": true
+    },
+    {
+      "member": "tools/triad_fft_acquire.py",
+      "sha256": "d4a3c2cc39e0068e6aa6aab27d7ee8eeff6cc7db72a790868fe166c3f1d65843",
+      "bytes": 36590,
+      "routine_recorded": true
+    },
+    {
+      "member": "tools/triad_gaussian_state.py",
+      "sha256": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba",
+      "bytes": 13539,
+      "routine_recorded": true
+    },
+    {
+      "member": "tools/triad_gaussian_window.py",
+      "sha256": "b22fe002864922e44bc7e10000672a163353818f610c4882bae5d62cfe1cf883",
+      "bytes": 22325,
+      "routine_recorded": true
+    },
+    {
+      "member": "tools/triad_group_acquire.py",
+      "sha256": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+      "bytes": 42989,
+      "routine_recorded": true
+    },
+    {
+      "member": "tools/triad_noise_likelihood.py",
+      "sha256": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110",
+      "bytes": 23863,
+      "routine_recorded": true
+    },
+    {
+      "member": "tools/triad_perf_adaptive.py",
+      "sha256": "07e9e243e2e655b17887382712c7ff099855a07d6dc3985c03c430df2a113257",
+      "bytes": 20969,
+      "routine_recorded": false
+    },
+    {
+      "member": "tools/triad_perf_cases.py",
+      "sha256": "3a45f599a3e2d93361a02b74285d2b56b90de3068a6d19cd49fb8092c578e14b",
+      "bytes": 18540,
+      "routine_recorded": false
+    },
+    {
+      "member": "tools/triad_perf_complete.py",
+      "sha256": "f2b43fb3b1cde43215a6eaeef1650061d48033cf4f0faf210869c90d1a1870a0",
+      "bytes": 46645,
+      "routine_recorded": true
+    },
+    {
+      "member": "tools/triad_perf_conditional.py",
+      "sha256": "ff89c20c950e8c422bf60ad91eea15b0fe7d4c3f3c656d26e959cf72b1ab3835",
+      "bytes": 23688,
+      "routine_recorded": false
+    },
+    {
+      "member": "tools/triad_perf_coverage.py",
+      "sha256": "9697a0742d8d1fd724e73c79bf8acce92c2d0861210124646b40868305f49330",
+      "bytes": 26160,
+      "routine_recorded": false
+    },
+    {
+      "member": "tools/triad_perf_decision_controls.py",
+      "sha256": "3c25d2f12693354d3ae65fe3028dbf343bbb6525f9bf263817ee7cf469de188e",
+      "bytes": 27598,
+      "routine_recorded": false
+    },
+    {
+      "member": "tools/triad_perf_decision_policy_controls.py",
+      "sha256": "b2b66694a5be473a9b878533147ab9252b3a45734a8dc7c8b4138e7006e93a55",
+      "bytes": 11545,
+      "routine_recorded": false
+    },
+    {
+      "member": "tools/triad_perf_families.py",
+      "sha256": "65b4bc78aab04b6a854853fe2c052900bd23c5cfc1527ebcfd0a4fe94e78d20f",
+      "bytes": 32918,
+      "routine_recorded": false
+    },
+    {
+      "member": "tools/triad_perf_family_group.py",
+      "sha256": "63b8d3cd6bd473208c9ff4fe3761dd7c1623c70ae12eefc53183dbeea2b4e95b",
+      "bytes": 10479,
+      "routine_recorded": false
+    },
+    {
+      "member": "tools/triad_perf_family_other.py",
+      "sha256": "9763c4d57fbfdc35de7d7f8fa78b17b6d4608745f13d01a77c56f77acbfbe18e",
+      "bytes": 25212,
+      "routine_recorded": false
+    },
+    {
+      "member": "tools/triad_perf_family_regression.py",
+      "sha256": "1a81bc2a9849e16dbf20c3087bd09650e8a1662218191e952fc11b1a1eb31f68",
+      "bytes": 33316,
+      "routine_recorded": true
+    },
+    {
+      "member": "tools/triad_perf_family_state.py",
+      "sha256": "67d750dd41c317b7cb810591de6f88585f7cd3191888e1c0d28ede49b3595c06",
+      "bytes": 7848,
+      "routine_recorded": false
+    },
+    {
+      "member": "tools/triad_perf_fft_diagnostic.py",
+      "sha256": "b763ad4a3a96fdc4139e7a2961a120c40b3bf6f0b2a8d5f4bb677c6beea565e9",
+      "bytes": 19758,
+      "routine_recorded": false
+    },
+    {
+      "member": "tools/triad_perf_fft_trace.py",
+      "sha256": "c1352ad67e484e9540d5840ec538f676f767f1c09e333258a0f3aaa5057c0d3f",
+      "bytes": 43883,
+      "routine_recorded": false
+    },
+    {
+      "member": "tools/triad_perf_hardware.py",
+      "sha256": "74718bc0791dda7ac7ea0b38b8fb79ab7bb1e41c649da9787f2a2645854706b3",
+      "bytes": 45961,
+      "routine_recorded": false
+    },
+    {
+      "member": "tools/triad_perf_identical_fft.py",
+      "sha256": "dab0808958ae35c6417975dcbeb9bb1079a9889cfe1f26ad209a6203bcc04750",
+      "bytes": 53460,
+      "routine_recorded": true
+    },
+    {
+      "member": "tools/triad_perf_native.py",
+      "sha256": "99f96d9e9a2a6546083f47031693437f9dbda31d2e50d3341dd03290e40574ce",
+      "bytes": 46118,
+      "routine_recorded": false
+    },
+    {
+      "member": "tools/triad_perf_paths.py",
+      "sha256": "31e442c1381a2ce3037f6837605d24cad7c2874d6041d487bc5077c23d803699",
+      "bytes": 25795,
+      "routine_recorded": false
+    },
+    {
+      "member": "tools/triad_perf_python_coverage.py",
+      "sha256": "f5cafed148d406230fbda2cd02ac2feb7f22edca268b0d9d08381db6357428bc",
+      "bytes": 21779,
+      "routine_recorded": false
+    },
+    {
+      "member": "tools/triad_perf_receiver.py",
+      "sha256": "fd2fd7109e9dfcd8fe984fc526995a65b4517335cf6d80428a749f13994fcb34",
+      "bytes": 16466,
+      "routine_recorded": false
+    },
+    {
+      "member": "tools/triad_perf_staged.py",
+      "sha256": "4395a3a1bbb6ea11944b1b152003aa362110ece558b427883873765722abda28",
+      "bytes": 62072,
+      "routine_recorded": false
+    },
+    {
+      "member": "tools/triad_perf_statistics.py",
+      "sha256": "64ce887c8c3af9144f1d94adc712fa784bbca17cfa86dcbfe1099dbb2efed64b",
+      "bytes": 23678,
+      "routine_recorded": false
+    },
+    {
+      "member": "tools/triad_perf_sustained.py",
+      "sha256": "c343626798c491fca1bedba2fac97a840177145e3e9a3f56fd5741cc938b5548",
+      "bytes": 36355,
+      "routine_recorded": false
+    },
+    {
+      "member": "tools/triad_perf_telemetry.py",
+      "sha256": "3646802429c1762a661620382ff111f7629640f53e2c3ee015e50d56f6e7bc4b",
+      "bytes": 11688,
+      "routine_recorded": false
+    },
+    {
+      "member": "tools/triad_phase_frequency.py",
+      "sha256": "48ee569b1d467b2d7b6fd55088764bd28dd11e0bfecb5974622a318fbb408585",
+      "bytes": 27838,
+      "routine_recorded": true
+    },
+    {
+      "member": "tools/triad_phase_optimized.py",
+      "sha256": "759b46d536f2daa1d1de2336190ab19153376aca3eeca32847cba5289d2d63ed",
+      "bytes": 19885,
+      "routine_recorded": true
+    },
+    {
+      "member": "tools/triad_phase_reduction.py",
+      "sha256": "b2f762320fbff5a66fa88123711483f9c42721e1765e406b7699c434048ded98",
+      "bytes": 21111,
+      "routine_recorded": true
+    },
+    {
+      "member": "tools/triad_phase_tensor.py",
+      "sha256": "3b1a674ac7ace90ddce72c2773c2d1543bcfe8307d7b65ea965ad03a6525ffda",
+      "bytes": 23317,
+      "routine_recorded": true
+    },
+    {
+      "member": "tools/triad_prepared_observation.py",
+      "sha256": "13d37977620519aaeb457d4ed1163c80d68dca96c8319480de914cae8a6aaec8",
+      "bytes": 12184,
+      "routine_recorded": true
+    },
+    {
+      "member": "tools/triad_rbpf.py",
+      "sha256": "d4b64c3a830acd3bd15433421da0e003ba1aa9810bf1dd904c57082d94c3bd54",
+      "bytes": 24886,
+      "routine_recorded": true
+    },
+    {
+      "member": "tools/triad_state_workspace.py",
+      "sha256": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923",
+      "bytes": 25804,
+      "routine_recorded": true
+    }
+  ],
+  "exclusions": [
+    "IQ/statistic arrays and NPZ files",
+    "temporary capture/calibration directories",
+    "cached waveform exports",
+    "executable binaries"
+  ],
+  "coverage_references": [
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-complete/native-coverage/followup-001/coverage.json",
+      "sha256": "99d34fd366bd636da2a9a6b9565233ee1297d30c8c9eec954e47c00371e740b5",
+      "schema": "datapump.triad.native-gcov-coverage",
+      "status": "source_rows_matched_historical",
+      "mismatched_sources": [],
+      "missing_expected_sources": [],
+      "declared_dependency_status": "matched",
+      "missing_dependency_identities": [],
+      "changed_dependencies": [],
+      "historical_applicability": "declared_source_and_dependency_match",
+      "counter_quality": {
+        "status": "valid",
+        "invalid": [],
+        "unverified": []
+      },
+      "sources": {
+        "src/triad_modem_v3.cpp": {
+          "gcov_branches": {
+            "coverage_status": "counted",
+            "instrumented_outcomes": 302,
+            "invalid_negative_outcomes": 0,
+            "taken_outcomes": 215,
+            "untaken_outcomes": 87
+          },
+          "lines": {
+            "coverage_status": "counted",
+            "executed": 181,
+            "instrumented": 183,
+            "invalid_negative_counts": {},
+            "uncovered_source_lines": [
+              235,
+              236
+            ]
+          },
+          "raw_gcov_json_gz": "raw/triad_modem_v3.gcov.json.gz",
+          "sha256": "cb6cac016e57edcd4f6ebc70f09c68cc47380e3b772cdbe047d7a3b93e9b434c"
+        },
+        "src/triad_receiver_v3.cpp": {
+          "gcov_branches": {
+            "coverage_status": "counted",
+            "instrumented_outcomes": 524,
+            "invalid_negative_outcomes": 0,
+            "taken_outcomes": 326,
+            "untaken_outcomes": 198
+          },
+          "lines": {
+            "coverage_status": "counted",
+            "executed": 185,
+            "instrumented": 188,
+            "invalid_negative_counts": {},
+            "uncovered_source_lines": [
+              267,
+              268,
+              271
+            ]
+          },
+          "raw_gcov_json_gz": "raw/triad_receiver_v3.gcov.json.gz",
+          "sha256": "ff7409c55f2c62dbb833f1ae24a7b4aab103607aaf2f66945ea585e1e3ba3e2f"
+        },
+        "src/triad_simulation_stream.cpp": {
+          "gcov_branches": {
+            "coverage_status": "counted",
+            "instrumented_outcomes": 814,
+            "invalid_negative_outcomes": 0,
+            "taken_outcomes": 580,
+            "untaken_outcomes": 234
+          },
+          "lines": {
+            "coverage_status": "counted",
+            "executed": 558,
+            "instrumented": 560,
+            "invalid_negative_counts": {},
+            "uncovered_source_lines": [
+              806,
+              807
+            ]
+          },
+          "raw_gcov_json_gz": "raw/triad_simulation_stream.gcov.json.gz",
+          "sha256": "afaa1267c36fcd330151174f6f08b6fb401a7f702c660964071ef24b6e82a70d"
+        },
+        "src/triad_statistics.cpp": {
+          "gcov_branches": {
+            "coverage_status": "counted",
+            "instrumented_outcomes": 376,
+            "invalid_negative_outcomes": 0,
+            "taken_outcomes": 241,
+            "untaken_outcomes": 135
+          },
+          "lines": {
+            "coverage_status": "counted",
+            "executed": 242,
+            "instrumented": 244,
+            "invalid_negative_counts": {},
+            "uncovered_source_lines": [
+              365,
+              372
+            ]
+          },
+          "raw_gcov_json_gz": "raw/triad_statistics.gcov.json.gz",
+          "sha256": "18d92c2c51a4057caba6d9de78580305adcd8c038f6e1243ec1a4410f7c00ace"
+        },
+        "tools/triad-long.cpp": {
+          "gcov_branches": {
+            "coverage_status": "counted",
+            "instrumented_outcomes": 5412,
+            "invalid_negative_outcomes": 0,
+            "taken_outcomes": 1723,
+            "untaken_outcomes": 3689
+          },
+          "lines": {
+            "coverage_status": "counted",
+            "executed": 1171,
+            "instrumented": 1805,
+            "invalid_negative_counts": {},
+            "uncovered_source_lines": [
+              133,
+              135,
+              136,
+              137,
+              138,
+              139,
+              140,
+              141,
+              142,
+              143,
+              144,
+              145,
+              146,
+              149,
+              150,
+              155,
+              158,
+              159,
+              160,
+              161,
+              162,
+              163,
+              166,
+              168,
+              169,
+              170,
+              171,
+              172,
+              173,
+              175,
+              179,
+              188,
+              189,
+              190,
+              191,
+              194,
+              195,
+              196,
+              199,
+              213,
+              228,
+              229,
+              230,
+              231,
+              233,
+              234,
+              235,
+              236,
+              238,
+              239,
+              240,
+              241,
+              243,
+              244,
+              245,
+              246,
+              247,
+              249,
+              250,
+              251,
+              252,
+              253,
+              254,
+              255,
+              263,
+              357,
+              365,
+              366,
+              367,
+              368,
+              381,
+              382,
+              459,
+              460,
+              461,
+              462,
+              463,
+              464,
+              465,
+              466,
+              467,
+              468,
+              469,
+              470,
+              471,
+              472,
+              473,
+              474,
+              475,
+              476,
+              477,
+              478,
+              479,
+              480,
+              486,
+              489,
+              493,
+              495,
+              497,
+              505,
+              507,
+              509,
+              511,
+              513,
+              515,
+              518,
+              520,
+              526,
+              534,
+              536,
+              538,
+              540,
+              541,
+              542,
+              544,
+              546,
+              561,
+              566,
+              567,
+              569,
+              571,
+              573,
+              578,
+              579,
+              580,
+              583,
+              587,
+              589,
+              591,
+              617,
+              618,
+              619,
+              620,
+              622,
+              623,
+              626,
+              627,
+              628,
+              630,
+              631,
+              632,
+              633,
+              634,
+              637,
+              638,
+              639,
+              640,
+              641,
+              642,
+              643,
+              644,
+              645,
+              646,
+              647,
+              648,
+              649,
+              650,
+              651,
+              652,
+              670,
+              673,
+              674,
+              675,
+              676,
+              677,
+              678,
+              679,
+              680,
+              681,
+              682,
+              683,
+              684,
+              739,
+              742,
+              743,
+              744,
+              745,
+              746,
+              748,
+              749,
+              750,
+              753,
+              754,
+              755,
+              756,
+              757,
+              761,
+              764,
+              765,
+              767,
+              768,
+              769,
+              770,
+              771,
+              772,
+              773,
+              774,
+              775,
+              776,
+              778,
+              783,
+              784,
+              785,
+              786,
+              787,
+              788,
+              790,
+              791,
+              792,
+              793,
+              794,
+              795,
+              796,
+              798,
+              802,
+              803,
+              804,
+              805,
+              806,
+              807,
+              808,
+              810,
+              811,
+              812,
+              813,
+              814,
+              815,
+              816,
+              817,
+              818,
+              821,
+              822,
+              823,
+              826,
+              827,
+              828,
+              829,
+              830,
+              831,
+              832,
+              833,
+              834,
+              835,
+              836,
+              837,
+              838,
+              839,
+              841,
+              842,
+              843,
+              844,
+              845,
+              846,
+              847,
+              848,
+              849,
+              850,
+              854,
+              856,
+              857,
+              858,
+              859,
+              861,
+              862,
+              863,
+              865,
+              866,
+              867,
+              868,
+              871,
+              873,
+              875,
+              876,
+              877,
+              880,
+              881,
+              884,
+              885,
+              887,
+              888,
+              889,
+              892,
+              893,
+              894,
+              895,
+              897,
+              898,
+              899,
+              901,
+              903,
+              904,
+              905,
+              913,
+              914,
+              915,
+              917,
+              918,
+              919,
+              920,
+              921,
+              923,
+              925,
+              926,
+              927,
+              929,
+              930,
+              931,
+              932,
+              933,
+              934,
+              935,
+              938,
+              939,
+              940,
+              941,
+              944,
+              945,
+              946,
+              948,
+              949,
+              950,
+              951,
+              952,
+              953,
+              1016,
+              1052,
+              1053,
+              1054,
+              1055,
+              1056,
+              1057,
+              1058,
+              1059,
+              1063,
+              1064,
+              1065,
+              1066,
+              1068,
+              1070,
+              1071,
+              1072,
+              1073,
+              1074,
+              1075,
+              1078,
+              1079,
+              1080,
+              1081,
+              1082,
+              1083,
+              1084,
+              1085,
+              1086,
+              1091,
+              1092,
+              1200,
+              1201,
+              1245,
+              1305,
+              1311,
+              1312,
+              1314,
+              1315,
+              1316,
+              1317,
+              1318,
+              1319,
+              1320,
+              1321,
+              1324,
+              1325,
+              1326,
+              1327,
+              1328,
+              1329,
+              1330,
+              1331,
+              1333,
+              1334,
+              1335,
+              1336,
+              1337,
+              1338,
+              1344,
+              1345,
+              1346,
+              1347,
+              1348,
+              1349,
+              1350,
+              1351,
+              1379,
+              1394,
+              1395,
+              1396,
+              1397,
+              1427,
+              1428,
+              1429,
+              1430,
+              1433,
+              1438,
+              1439,
+              1440,
+              1445,
+              1456,
+              1457,
+              1458,
+              1465,
+              1468,
+              1475,
+              1476,
+              1478,
+              1479,
+              1481,
+              1482,
+              1483,
+              1484,
+              1486,
+              1487,
+              1488,
+              1489,
+              1490,
+              1491,
+              1493,
+              1494,
+              1495,
+              1502,
+              1503,
+              1504,
+              1505,
+              1506,
+              1507,
+              1509,
+              1510,
+              1512,
+              1513,
+              1514,
+              1515,
+              1516,
+              1517,
+              1519,
+              1520,
+              1521,
+              1522,
+              1523,
+              1524,
+              1526,
+              1527,
+              1528,
+              1529,
+              1530,
+              1531,
+              1532,
+              1533,
+              1534,
+              1535,
+              1536,
+              1537,
+              1538,
+              1539,
+              1540,
+              1541,
+              1542,
+              1543,
+              1545,
+              1546,
+              1547,
+              1548,
+              1549,
+              1550,
+              1551,
+              1552,
+              1553,
+              1554,
+              1555,
+              1556,
+              1557,
+              1558,
+              1559,
+              1560,
+              1561,
+              1562,
+              1563,
+              1565,
+              1566,
+              1568,
+              1569,
+              1570,
+              1574,
+              1575,
+              1576,
+              1577,
+              1578,
+              1579,
+              1580,
+              1581,
+              1582,
+              1583,
+              1584,
+              1585,
+              1586,
+              1588,
+              1589,
+              1590,
+              1591,
+              1592,
+              1593,
+              1594,
+              1595,
+              1596,
+              1597,
+              1599,
+              1600,
+              1601,
+              1602,
+              1603,
+              1604,
+              1605,
+              1606,
+              1607,
+              1608,
+              1609,
+              1611,
+              1612,
+              1613,
+              1614,
+              1615,
+              1616,
+              1617,
+              1618,
+              1619,
+              1620,
+              1622,
+              1623,
+              1624,
+              1625,
+              1626,
+              1627,
+              1628,
+              1629,
+              1630,
+              1631,
+              1632,
+              1639,
+              1641,
+              1643,
+              1645,
+              1646,
+              1647,
+              1648,
+              1649,
+              1650,
+              1651,
+              1653,
+              1654,
+              1655,
+              1657,
+              1658,
+              1659,
+              1660,
+              1661,
+              1662,
+              1663,
+              1664,
+              1665,
+              1669,
+              1670,
+              1699,
+              1710,
+              1832,
+              1837,
+              1954,
+              2013,
+              2014,
+              2016,
+              2017,
+              2018,
+              2019,
+              2020,
+              2021,
+              2022,
+              2023,
+              2024,
+              2025,
+              2026,
+              2027,
+              2028,
+              2031,
+              2033,
+              2034,
+              2040,
+              2041,
+              2144,
+              2163,
+              2184,
+              2196,
+              2198,
+              2207,
+              2210,
+              2244,
+              2245,
+              2246,
+              2247,
+              2248,
+              2249,
+              2253,
+              2254,
+              2256,
+              2257,
+              2261,
+              2262,
+              2263,
+              2264,
+              2272,
+              2273,
+              2274,
+              2275,
+              2276,
+              2278,
+              2279,
+              2280,
+              2282,
+              2336,
+              2337,
+              2338,
+              2339,
+              2340,
+              2360,
+              2448,
+              2449,
+              2450,
+              2460,
+              2462
+            ]
+          },
+          "raw_gcov_json_gz": "raw/triad-long.gcov.json.gz",
+          "sha256": "9b852132edb2c4f53d4c218e73db1314653cd6213a78a49c776869af6dc68877"
+        }
+      },
+      "original_test_exit_code": null,
+      "reconciliation": null,
+      "scope": "retained instrumented source counters, not a fresh run or semantic coverage proof"
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-complete/python-coverage/attempt-04-dependency-closed/summary.json",
+      "sha256": "a1903287f1a0dd36e7023151d0e268ee5257fb0e4635c0ea946e8298a2cf8a15",
+      "schema": "datapump.triad.python-branch-coverage",
+      "status": "source_rows_matched_historical",
+      "mismatched_sources": [],
+      "missing_expected_sources": [],
+      "declared_dependency_status": "matched",
+      "missing_dependency_identities": [],
+      "changed_dependencies": [],
+      "historical_applicability": "declared_source_and_dependency_match",
+      "counter_quality": {
+        "status": "valid",
+        "invalid": [],
+        "unverified": []
+      },
+      "sources": {
+        "tools/triad-cfo-batch-study.py": {
+          "branches": {
+            "covered_arcs": 43,
+            "executable_arcs": 62,
+            "missing_arcs": [
+              [
+                37,
+                38
+              ],
+              [
+                70,
+                71
+              ],
+              [
+                73,
+                -68
+              ],
+              [
+                97,
+                98
+              ],
+              [
+                109,
+                110
+              ],
+              [
+                120,
+                -77
+              ],
+              [
+                122,
+                123
+              ],
+              [
+                150,
+                151
+              ],
+              [
+                151,
+                -148
+              ],
+              [
+                151,
+                152
+              ],
+              [
+                156,
+                -148
+              ],
+              [
+                164,
+                175
+              ],
+              [
+                165,
+                175
+              ],
+              [
+                166,
+                175
+              ],
+              [
+                171,
+                174
+              ],
+              [
+                172,
+                175
+              ],
+              [
+                177,
+                157
+              ],
+              [
+                185,
+                186
+              ],
+              [
+                199,
+                211
+              ]
+            ]
+          },
+          "lines": {
+            "covered": 167,
+            "executable": 180,
+            "missing": [
+              38,
+              71,
+              72,
+              98,
+              110,
+              123,
+              151,
+              152,
+              153,
+              186,
+              245,
+              246,
+              247
+            ]
+          },
+          "module": "triad-cfo-batch-study.py",
+          "sha256": "5c7fb6f8b0ad8cadeaae8591d9fb0e3d489fb5eb4c14962faf800ad46a661665"
+        },
+        "tools/triad-ray-frequency-study.py": {
+          "branches": {
+            "covered_arcs": 48,
+            "executable_arcs": 76,
+            "missing_arcs": [
+              [
+                84,
+                85
+              ],
+              [
+                92,
+                93
+              ],
+              [
+                94,
+                -82
+              ],
+              [
+                94,
+                88
+              ],
+              [
+                139,
+                -114
+              ],
+              [
+                141,
+                -114
+              ],
+              [
+                149,
+                150
+              ],
+              [
+                160,
+                -156
+              ],
+              [
+                161,
+                -156
+              ],
+              [
+                163,
+                164
+              ],
+              [
+                166,
+                167
+              ],
+              [
+                168,
+                -156
+              ],
+              [
+                169,
+                170
+              ],
+              [
+                209,
+                -156
+              ],
+              [
+                221,
+                -218
+              ],
+              [
+                227,
+                228
+              ],
+              [
+                228,
+                -225
+              ],
+              [
+                228,
+                229
+              ],
+              [
+                231,
+                -225
+              ],
+              [
+                239,
+                286
+              ],
+              [
+                240,
+                286
+              ],
+              [
+                242,
+                243
+              ],
+              [
+                243,
+                244
+              ],
+              [
+                243,
+                286
+              ],
+              [
+                248,
+                286
+              ],
+              [
+                253,
+                254
+              ],
+              [
+                258,
+                286
+              ],
+              [
+                265,
+                286
+              ]
+            ]
+          },
+          "lines": {
+            "covered": 222,
+            "executable": 239,
+            "missing": [
+              78,
+              85,
+              93,
+              94,
+              150,
+              164,
+              167,
+              170,
+              228,
+              229,
+              230,
+              243,
+              244,
+              254,
+              317,
+              318,
+              319
+            ]
+          },
+          "module": "triad-ray-frequency-study.py",
+          "sha256": "ea3ca2acde8aea75538066e46e3ccae2e36612afac753db6b2d048bd6ff87dd2"
+        },
+        "tools/triad-rbpf-study.py": {
+          "branches": {
+            "covered_arcs": 72,
+            "executable_arcs": 92,
+            "missing_arcs": [
+              [
+                72,
+                73
+              ],
+              [
+                84,
+                85
+              ],
+              [
+                87,
+                88
+              ],
+              [
+                89,
+                90
+              ],
+              [
+                91,
+                92
+              ],
+              [
+                123,
+                124
+              ],
+              [
+                128,
+                129
+              ],
+              [
+                132,
+                133
+              ],
+              [
+                142,
+                143
+              ],
+              [
+                149,
+                150
+              ],
+              [
+                152,
+                153
+              ],
+              [
+                194,
+                195
+              ],
+              [
+                238,
+                239
+              ],
+              [
+                259,
+                291
+              ],
+              [
+                261,
+                291
+              ],
+              [
+                265,
+                266
+              ],
+              [
+                268,
+                291
+              ],
+              [
+                279,
+                291
+              ],
+              [
+                294,
+                297
+              ],
+              [
+                326,
+                327
+              ]
+            ]
+          },
+          "lines": {
+            "covered": 225,
+            "executable": 244,
+            "missing": [
+              73,
+              85,
+              88,
+              90,
+              92,
+              124,
+              129,
+              133,
+              143,
+              150,
+              153,
+              195,
+              239,
+              266,
+              267,
+              327,
+              333,
+              334,
+              336
+            ]
+          },
+          "module": "triad-rbpf-study.py",
+          "sha256": "34a9797ed7119dcf6545b6be759b8f506cbdaf6ac9ece886b82fa699cd5d085f"
+        },
+        "tools/triad-state-study.py": {
+          "branches": {
+            "covered_arcs": 7,
+            "executable_arcs": 76,
+            "missing_arcs": [
+              [
+                48,
+                49
+              ],
+              [
+                57,
+                53
+              ],
+              [
+                118,
+                119
+              ],
+              [
+                118,
+                120
+              ],
+              [
+                120,
+                121
+              ],
+              [
+                120,
+                122
+              ],
+              [
+                122,
+                123
+              ],
+              [
+                122,
+                124
+              ],
+              [
+                124,
+                125
+              ],
+              [
+                124,
+                126
+              ],
+              [
+                126,
+                127
+              ],
+              [
+                126,
+                128
+              ],
+              [
+                128,
+                129
+              ],
+              [
+                128,
+                130
+              ],
+              [
+                132,
+                133
+              ],
+              [
+                132,
+                134
+              ],
+              [
+                134,
+                135
+              ],
+              [
+                134,
+                136
+              ],
+              [
+                147,
+                148
+              ],
+              [
+                147,
+                184
+              ],
+              [
+                150,
+                151
+              ],
+              [
+                150,
+                158
+              ],
+              [
+                152,
+                153
+              ],
+              [
+                152,
+                154
+              ],
+              [
+                155,
+                156
+              ],
+              [
+                155,
+                157
+              ],
+              [
+                168,
+                169
+              ],
+              [
+                168,
+                178
+              ],
+              [
+                170,
+                171
+              ],
+              [
+                170,
+                173
+              ],
+              [
+                173,
+                174
+              ],
+              [
+                173,
+                177
+              ],
+              [
+                188,
+                189
+              ],
+              [
+                188,
+                214
+              ],
+              [
+                194,
+                195
+              ],
+              [
+                194,
+                197
+              ],
+              [
+                195,
+                196
+              ],
+              [
+                195,
+                197
+              ],
+              [
+                197,
+                198
+              ],
+              [
+                197,
+                199
+              ],
+              [
+                199,
+                188
+              ],
+              [
+                199,
+                202
+              ],
+              [
+                214,
+                215
+              ],
+              [
+                214,
+                216
+              ],
+              [
+                219,
+                220
+              ],
+              [
+                219,
+                223
+              ],
+              [
+                223,
+                224
+              ],
+              [
+                223,
+                226
+              ],
+              [
+                226,
+                228
+              ],
+              [
+                226,
+                233
+              ],
+              [
+                238,
+                239
+              ],
+              [
+                238,
+                240
+              ],
+              [
+                247,
+                248
+              ],
+              [
+                247,
+                295
+              ],
+              [
+                251,
+                252
+              ],
+              [
+                251,
+                253
+              ],
+              [
+                255,
+                247
+              ],
+              [
+                255,
+                256
+              ],
+              [
+                258,
+                259
+              ],
+              [
+                258,
+                262
+              ],
+              [
+                263,
+                264
+              ],
+              [
+                263,
+                268
+              ],
+              [
+                265,
+                266
+              ],
+              [
+                265,
+                267
+              ],
+              [
+                268,
+                255
+              ],
+              [
+                268,
+                269
+              ],
+              [
+                284,
+                285
+              ],
+              [
+                284,
+                287
+              ],
+              [
+                306,
+                307
+              ]
+            ]
+          },
+          "lines": {
+            "covered": 48,
+            "executable": 225,
+            "missing": [
+              49,
+              81,
+              82,
+              83,
+              84,
+              85,
+              86,
+              87,
+              88,
+              89,
+              90,
+              91,
+              92,
+              94,
+              95,
+              96,
+              97,
+              99,
+              100,
+              101,
+              102,
+              103,
+              104,
+              106,
+              107,
+              108,
+              109,
+              110,
+              111,
+              112,
+              113,
+              115,
+              117,
+              118,
+              119,
+              120,
+              121,
+              122,
+              123,
+              124,
+              125,
+              126,
+              127,
+              128,
+              129,
+              130,
+              131,
+              132,
+              133,
+              134,
+              135,
+              136,
+              141,
+              142,
+              143,
+              144,
+              146,
+              147,
+              148,
+              149,
+              150,
+              151,
+              152,
+              153,
+              154,
+              155,
+              156,
+              157,
+              158,
+              166,
+              167,
+              168,
+              169,
+              170,
+              171,
+              172,
+              173,
+              174,
+              175,
+              177,
+              178,
+              180,
+              184,
+              185,
+              186,
+              187,
+              188,
+              189,
+              190,
+              191,
+              193,
+              194,
+              195,
+              196,
+              197,
+              198,
+              199,
+              202,
+              203,
+              204,
+              206,
+              207,
+              209,
+              210,
+              211,
+              212,
+              213,
+              214,
+              215,
+              216,
+              217,
+              218,
+              219,
+              220,
+              221,
+              222,
+              223,
+              224,
+              225,
+              226,
+              228,
+              229,
+              230,
+              231,
+              233,
+              237,
+              238,
+              239,
+              240,
+              241,
+              242,
+              243,
+              244,
+              245,
+              246,
+              247,
+              248,
+              249,
+              250,
+              251,
+              252,
+              253,
+              254,
+              255,
+              256,
+              257,
+              258,
+              259,
+              260,
+              261,
+              262,
+              263,
+              264,
+              265,
+              266,
+              267,
+              268,
+              269,
+              270,
+              271,
+              280,
+              281,
+              282,
+              284,
+              285,
+              286,
+              287,
+              288,
+              291,
+              292,
+              293,
+              294,
+              295,
+              301,
+              302,
+              303,
+              307
+            ]
+          },
+          "module": "triad-state-study.py",
+          "sha256": "3fa7491ae93031ff6bfadc4c9b792659336999effc0508a71cf734ada9250402"
+        },
+        "tools/triad-static-frequency-study.py": {
+          "branches": {
+            "covered_arcs": 73,
+            "executable_arcs": 106,
+            "missing_arcs": [
+              [
+                63,
+                64
+              ],
+              [
+                65,
+                66
+              ],
+              [
+                69,
+                70
+              ],
+              [
+                73,
+                74
+              ],
+              [
+                75,
+                76
+              ],
+              [
+                77,
+                78
+              ],
+              [
+                88,
+                89
+              ],
+              [
+                93,
+                94
+              ],
+              [
+                97,
+                98
+              ],
+              [
+                105,
+                106
+              ],
+              [
+                143,
+                144
+              ],
+              [
+                146,
+                147
+              ],
+              [
+                195,
+                196
+              ],
+              [
+                197,
+                198
+              ],
+              [
+                201,
+                202
+              ],
+              [
+                204,
+                205
+              ],
+              [
+                208,
+                209
+              ],
+              [
+                230,
+                231
+              ],
+              [
+                244,
+                245
+              ],
+              [
+                260,
+                261
+              ],
+              [
+                276,
+                283
+              ],
+              [
+                284,
+                285
+              ],
+              [
+                297,
+                298
+              ],
+              [
+                327,
+                -325
+              ],
+              [
+                328,
+                329
+              ],
+              [
+                332,
+                -325
+              ],
+              [
+                340,
+                341
+              ],
+              [
+                341,
+                342
+              ],
+              [
+                341,
+                384
+              ],
+              [
+                344,
+                384
+              ],
+              [
+                349,
+                384
+              ],
+              [
+                357,
+                384
+              ],
+              [
+                363,
+                384
+              ]
+            ]
+          },
+          "lines": {
+            "covered": 288,
+            "executable": 319,
+            "missing": [
+              64,
+              66,
+              70,
+              74,
+              76,
+              78,
+              89,
+              94,
+              98,
+              106,
+              144,
+              147,
+              196,
+              198,
+              202,
+              205,
+              209,
+              231,
+              245,
+              261,
+              283,
+              285,
+              298,
+              329,
+              330,
+              341,
+              342,
+              405,
+              406,
+              407,
+              408
+            ]
+          },
+          "module": "triad-static-frequency-study.py",
+          "sha256": "d1b75e9b49de21041558e97ee1daff2ba07a1fd18a123bc8a6cb928f1052e11b"
+        },
+        "tools/triad_fft_acquire.py": {
+          "branches": {
+            "covered_arcs": 136,
+            "executable_arcs": 180,
+            "missing_arcs": [
+              [
+                54,
+                55
+              ],
+              [
+                60,
+                62
+              ],
+              [
+                69,
+                70
+              ],
+              [
+                72,
+                73
+              ],
+              [
+                75,
+                76
+              ],
+              [
+                80,
+                81
+              ],
+              [
+                86,
+                87
+              ],
+              [
+                93,
+                94
+              ],
+              [
+                96,
+                97
+              ],
+              [
+                101,
+                102
+              ],
+              [
+                109,
+                110
+              ],
+              [
+                118,
+                119
+              ],
+              [
+                120,
+                121
+              ],
+              [
+                126,
+                127
+              ],
+              [
+                140,
+                141
+              ],
+              [
+                164,
+                165
+              ],
+              [
+                166,
+                167
+              ],
+              [
+                168,
+                169
+              ],
+              [
+                170,
+                171
+              ],
+              [
+                182,
+                183
+              ],
+              [
+                189,
+                190
+              ],
+              [
+                192,
+                193
+              ],
+              [
+                195,
+                196
+              ],
+              [
+                216,
+                219
+              ],
+              [
+                244,
+                245
+              ],
+              [
+                287,
+                288
+              ],
+              [
+                315,
+                316
+              ],
+              [
+                346,
+                349
+              ],
+              [
+                352,
+                356
+              ],
+              [
+                371,
+                372
+              ],
+              [
+                385,
+                386
+              ],
+              [
+                387,
+                388
+              ],
+              [
+                389,
+                390
+              ],
+              [
+                394,
+                395
+              ],
+              [
+                398,
+                399
+              ],
+              [
+                403,
+                404
+              ],
+              [
+                437,
+                438
+              ],
+              [
+                515,
+                516
+              ],
+              [
+                523,
+                528
+              ],
+              [
+                555,
+                556
+              ],
+              [
+                558,
+                559
+              ],
+              [
+                587,
+                597
+              ],
+              [
+                589,
+                590
+              ],
+              [
+                605,
+                606
+              ]
+            ]
+          },
+          "lines": {
+            "covered": 415,
+            "executable": 470,
+            "missing": [
+              55,
+              57,
+              58,
+              62,
+              70,
+              73,
+              76,
+              81,
+              87,
+              94,
+              97,
+              102,
+              110,
+              119,
+              121,
+              127,
+              141,
+              165,
+              167,
+              169,
+              171,
+              183,
+              190,
+              193,
+              196,
+              219,
+              220,
+              221,
+              222,
+              223,
+              245,
+              288,
+              316,
+              349,
+              350,
+              356,
+              357,
+              358,
+              372,
+              386,
+              388,
+              390,
+              395,
+              399,
+              404,
+              438,
+              516,
+              556,
+              559,
+              590,
+              606,
+              607,
+              608,
+              609,
+              610
+            ]
+          },
+          "module": "triad_fft_acquire",
+          "sha256": "d4a3c2cc39e0068e6aa6aab27d7ee8eeff6cc7db72a790868fe166c3f1d65843"
+        },
+        "tools/triad_gaussian_prepared.py": {
+          "branches": {
+            "covered_arcs": 44,
+            "executable_arcs": 102,
+            "missing_arcs": [
+              [
+                34,
+                35
+              ],
+              [
+                36,
+                37
+              ],
+              [
+                40,
+                41
+              ],
+              [
+                42,
+                43
+              ],
+              [
+                49,
+                50
+              ],
+              [
+                59,
+                60
+              ],
+              [
+                63,
+                64
+              ],
+              [
+                71,
+                72
+              ],
+              [
+                86,
+                87
+              ],
+              [
+                95,
+                96
+              ],
+              [
+                103,
+                104
+              ],
+              [
+                111,
+                112
+              ],
+              [
+                123,
+                124
+              ],
+              [
+                139,
+                140
+              ],
+              [
+                142,
+                143
+              ],
+              [
+                143,
+                144
+              ],
+              [
+                143,
+                145
+              ],
+              [
+                145,
+                146
+              ],
+              [
+                154,
+                155
+              ],
+              [
+                186,
+                187
+              ],
+              [
+                191,
+                192
+              ],
+              [
+                193,
+                194
+              ],
+              [
+                195,
+                196
+              ],
+              [
+                197,
+                198
+              ],
+              [
+                200,
+                201
+              ],
+              [
+                230,
+                231
+              ],
+              [
+                252,
+                253
+              ],
+              [
+                252,
+                254
+              ],
+              [
+                255,
+                256
+              ],
+              [
+                255,
+                257
+              ],
+              [
+                261,
+                262
+              ],
+              [
+                261,
+                263
+              ],
+              [
+                263,
+                264
+              ],
+              [
+                263,
+                265
+              ],
+              [
+                270,
+                271
+              ],
+              [
+                270,
+                272
+              ],
+              [
+                299,
+                300
+              ],
+              [
+                299,
+                301
+              ],
+              [
+                306,
+                307
+              ],
+              [
+                306,
+                308
+              ],
+              [
+                311,
+                -310
+              ],
+              [
+                311,
+                312
+              ],
+              [
+                330,
+                331
+              ],
+              [
+                330,
+                338
+              ],
+              [
+                332,
+                333
+              ],
+              [
+                332,
+                334
+              ],
+              [
+                334,
+                330
+              ],
+              [
+                334,
+                335
+              ],
+              [
+                340,
+                341
+              ],
+              [
+                340,
+                348
+              ],
+              [
+                342,
+                343
+              ],
+              [
+                342,
+                344
+              ],
+              [
+                344,
+                340
+              ],
+              [
+                344,
+                345
+              ],
+              [
+                412,
+                413
+              ],
+              [
+                412,
+                414
+              ],
+              [
+                414,
+                415
+              ],
+              [
+                414,
+                416
+              ]
+            ]
+          },
+          "lines": {
+            "covered": 161,
+            "executable": 300,
+            "missing": [
+              35,
+              37,
+              41,
+              43,
+              50,
+              60,
+              64,
+              72,
+              87,
+              96,
+              104,
+              112,
+              124,
+              140,
+              143,
+              144,
+              146,
+              155,
+              180,
+              181,
+              182,
+              183,
+              187,
+              192,
+              194,
+              196,
+              198,
+              201,
+              231,
+              235,
+              252,
+              253,
+              254,
+              255,
+              256,
+              257,
+              261,
+              262,
+              263,
+              264,
+              265,
+              266,
+              267,
+              268,
+              269,
+              270,
+              271,
+              272,
+              273,
+              274,
+              275,
+              278,
+              279,
+              280,
+              281,
+              282,
+              283,
+              285,
+              286,
+              287,
+              288,
+              289,
+              290,
+              291,
+              292,
+              293,
+              294,
+              296,
+              298,
+              299,
+              300,
+              301,
+              303,
+              304,
+              305,
+              306,
+              307,
+              308,
+              310,
+              311,
+              312,
+              314,
+              315,
+              316,
+              317,
+              318,
+              319,
+              324,
+              325,
+              329,
+              330,
+              331,
+              332,
+              333,
+              334,
+              335,
+              336,
+              338,
+              339,
+              340,
+              341,
+              342,
+              343,
+              344,
+              345,
+              346,
+              348,
+              349,
+              350,
+              351,
+              352,
+              353,
+              354,
+              355,
+              357,
+              358,
+              359,
+              363,
+              364,
+              365,
+              369,
+              370,
+              397,
+              398,
+              402,
+              403,
+              404,
+              405,
+              406,
+              407,
+              408,
+              409,
+              410,
+              411,
+              412,
+              413,
+              414,
+              415,
+              416
+            ]
+          },
+          "module": "triad_gaussian_prepared",
+          "sha256": "c88afdf459521393958c49d801517d79cd158cbe2291e4a48c3eff6931e42875"
+        },
+        "tools/triad_gaussian_state.py": {
+          "branches": {
+            "covered_arcs": 40,
+            "executable_arcs": 56,
+            "missing_arcs": [
+              [
+                45,
+                46
+              ],
+              [
+                71,
+                72
+              ],
+              [
+                74,
+                75
+              ],
+              [
+                99,
+                100
+              ],
+              [
+                134,
+                135
+              ],
+              [
+                138,
+                139
+              ],
+              [
+                140,
+                141
+              ],
+              [
+                146,
+                147
+              ],
+              [
+                152,
+                153
+              ],
+              [
+                167,
+                168
+              ],
+              [
+                179,
+                180
+              ],
+              [
+                185,
+                186
+              ],
+              [
+                204,
+                205
+              ],
+              [
+                211,
+                212
+              ],
+              [
+                218,
+                219
+              ],
+              [
+                220,
+                221
+              ]
+            ]
+          },
+          "lines": {
+            "covered": 142,
+            "executable": 160,
+            "missing": [
+              46,
+              72,
+              75,
+              100,
+              135,
+              139,
+              141,
+              144,
+              145,
+              147,
+              153,
+              168,
+              180,
+              186,
+              205,
+              212,
+              219,
+              221
+            ]
+          },
+          "module": "triad_gaussian_state",
+          "sha256": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba"
+        },
+        "tools/triad_gaussian_window.py": {
+          "branches": {
+            "covered_arcs": 64,
+            "executable_arcs": 90,
+            "missing_arcs": [
+              [
+                39,
+                40
+              ],
+              [
+                40,
+                41
+              ],
+              [
+                40,
+                42
+              ],
+              [
+                43,
+                44
+              ],
+              [
+                87,
+                88
+              ],
+              [
+                90,
+                91
+              ],
+              [
+                93,
+                94
+              ],
+              [
+                122,
+                123
+              ],
+              [
+                126,
+                127
+              ],
+              [
+                153,
+                154
+              ],
+              [
+                160,
+                161
+              ],
+              [
+                199,
+                200
+              ],
+              [
+                219,
+                220
+              ],
+              [
+                235,
+                236
+              ],
+              [
+                246,
+                247
+              ],
+              [
+                248,
+                249
+              ],
+              [
+                250,
+                251
+              ],
+              [
+                257,
+                258
+              ],
+              [
+                259,
+                260
+              ],
+              [
+                262,
+                263
+              ],
+              [
+                264,
+                265
+              ],
+              [
+                265,
+                266
+              ],
+              [
+                265,
+                267
+              ],
+              [
+                274,
+                275
+              ],
+              [
+                278,
+                279
+              ],
+              [
+                310,
+                311
+              ]
+            ]
+          },
+          "lines": {
+            "covered": 204,
+            "executable": 229,
+            "missing": [
+              40,
+              41,
+              42,
+              44,
+              88,
+              91,
+              94,
+              123,
+              127,
+              154,
+              161,
+              200,
+              220,
+              236,
+              247,
+              249,
+              251,
+              258,
+              260,
+              263,
+              265,
+              266,
+              275,
+              279,
+              311
+            ]
+          },
+          "module": "triad_gaussian_window",
+          "sha256": "b22fe002864922e44bc7e10000672a163353818f610c4882bae5d62cfe1cf883"
+        },
+        "tools/triad_group_acquire.py": {
+          "branches": {
+            "covered_arcs": 166,
+            "executable_arcs": 220,
+            "missing_arcs": [
+              [
+                59,
+                60
+              ],
+              [
+                90,
+                91
+              ],
+              [
+                92,
+                95
+              ],
+              [
+                149,
+                157
+              ],
+              [
+                172,
+                173
+              ],
+              [
+                174,
+                176
+              ],
+              [
+                189,
+                190
+              ],
+              [
+                193,
+                194
+              ],
+              [
+                195,
+                196
+              ],
+              [
+                203,
+                204
+              ],
+              [
+                206,
+                207
+              ],
+              [
+                212,
+                213
+              ],
+              [
+                218,
+                219
+              ],
+              [
+                222,
+                223
+              ],
+              [
+                226,
+                227
+              ],
+              [
+                230,
+                231
+              ],
+              [
+                233,
+                234
+              ],
+              [
+                235,
+                236
+              ],
+              [
+                237,
+                238
+              ],
+              [
+                240,
+                241
+              ],
+              [
+                243,
+                244
+              ],
+              [
+                247,
+                249
+              ],
+              [
+                251,
+                216
+              ],
+              [
+                252,
+                253
+              ],
+              [
+                255,
+                256
+              ],
+              [
+                258,
+                259
+              ],
+              [
+                263,
+                264
+              ],
+              [
+                276,
+                277
+              ],
+              [
+                287,
+                288
+              ],
+              [
+                293,
+                294
+              ],
+              [
+                303,
+                304
+              ],
+              [
+                313,
+                314
+              ],
+              [
+                322,
+                323
+              ],
+              [
+                371,
+                372
+              ],
+              [
+                389,
+                390
+              ],
+              [
+                391,
+                392
+              ],
+              [
+                432,
+                433
+              ],
+              [
+                439,
+                440
+              ],
+              [
+                458,
+                459
+              ],
+              [
+                487,
+                488
+              ],
+              [
+                489,
+                490
+              ],
+              [
+                526,
+                527
+              ],
+              [
+                531,
+                532
+              ],
+              [
+                640,
+                641
+              ],
+              [
+                642,
+                643
+              ],
+              [
+                649,
+                650
+              ],
+              [
+                650,
+                651
+              ],
+              [
+                650,
+                652
+              ],
+              [
+                666,
+                680
+              ],
+              [
+                669,
+                670
+              ],
+              [
+                674,
+                678
+              ],
+              [
+                684,
+                689
+              ],
+              [
+                690,
+                695
+              ],
+              [
+                699,
+                700
+              ]
+            ]
+          },
+          "lines": {
+            "covered": 461,
+            "executable": 520,
+            "missing": [
+              60,
+              91,
+              95,
+              169,
+              170,
+              173,
+              176,
+              190,
+              194,
+              196,
+              204,
+              207,
+              213,
+              219,
+              223,
+              227,
+              231,
+              234,
+              236,
+              238,
+              241,
+              244,
+              249,
+              253,
+              256,
+              259,
+              264,
+              277,
+              285,
+              286,
+              288,
+              294,
+              304,
+              314,
+              323,
+              372,
+              390,
+              392,
+              433,
+              440,
+              459,
+              488,
+              490,
+              527,
+              532,
+              641,
+              643,
+              650,
+              651,
+              652,
+              653,
+              670,
+              678,
+              695,
+              700,
+              701,
+              702,
+              703,
+              704
+            ]
+          },
+          "module": "triad_group_acquire",
+          "sha256": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104"
+        },
+        "tools/triad_noise_likelihood.py": {
+          "branches": {
+            "covered_arcs": 75,
+            "executable_arcs": 108,
+            "missing_arcs": [
+              [
+                43,
+                44
+              ],
+              [
+                45,
+                46
+              ],
+              [
+                61,
+                62
+              ],
+              [
+                67,
+                68
+              ],
+              [
+                83,
+                84
+              ],
+              [
+                101,
+                102
+              ],
+              [
+                130,
+                131
+              ],
+              [
+                132,
+                133
+              ],
+              [
+                137,
+                138
+              ],
+              [
+                143,
+                144
+              ],
+              [
+                145,
+                146
+              ],
+              [
+                147,
+                148
+              ],
+              [
+                152,
+                153
+              ],
+              [
+                221,
+                222
+              ],
+              [
+                224,
+                225
+              ],
+              [
+                226,
+                227
+              ],
+              [
+                228,
+                229
+              ],
+              [
+                230,
+                231
+              ],
+              [
+                233,
+                234
+              ],
+              [
+                236,
+                237
+              ],
+              [
+                245,
+                246
+              ],
+              [
+                247,
+                248
+              ],
+              [
+                250,
+                251
+              ],
+              [
+                253,
+                254
+              ],
+              [
+                267,
+                268
+              ],
+              [
+                288,
+                289
+              ],
+              [
+                295,
+                296
+              ],
+              [
+                316,
+                317
+              ],
+              [
+                335,
+                336
+              ],
+              [
+                357,
+                358
+              ],
+              [
+                359,
+                360
+              ],
+              [
+                396,
+                397
+              ],
+              [
+                401,
+                402
+              ]
+            ]
+          },
+          "lines": {
+            "covered": 227,
+            "executable": 268,
+            "missing": [
+              44,
+              46,
+              62,
+              68,
+              84,
+              102,
+              131,
+              133,
+              138,
+              141,
+              142,
+              144,
+              146,
+              148,
+              153,
+              222,
+              225,
+              227,
+              229,
+              231,
+              234,
+              237,
+              238,
+              239,
+              243,
+              244,
+              246,
+              248,
+              251,
+              254,
+              268,
+              289,
+              296,
+              317,
+              336,
+              358,
+              360,
+              366,
+              367,
+              397,
+              402
+            ]
+          },
+          "module": "triad_noise_likelihood",
+          "sha256": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110"
+        },
+        "tools/triad_phase_frequency.py": {
+          "branches": {
+            "covered_arcs": 82,
+            "executable_arcs": 128,
+            "missing_arcs": [
+              [
+                56,
+                57
+              ],
+              [
+                62,
+                63
+              ],
+              [
+                105,
+                106
+              ],
+              [
+                108,
+                109
+              ],
+              [
+                111,
+                112
+              ],
+              [
+                113,
+                114
+              ],
+              [
+                117,
+                118
+              ],
+              [
+                118,
+                119
+              ],
+              [
+                118,
+                120
+              ],
+              [
+                122,
+                123
+              ],
+              [
+                124,
+                125
+              ],
+              [
+                126,
+                127
+              ],
+              [
+                128,
+                129
+              ],
+              [
+                130,
+                131
+              ],
+              [
+                139,
+                140
+              ],
+              [
+                143,
+                144
+              ],
+              [
+                152,
+                153
+              ],
+              [
+                155,
+                156
+              ],
+              [
+                168,
+                169
+              ],
+              [
+                176,
+                177
+              ],
+              [
+                180,
+                182
+              ],
+              [
+                182,
+                183
+              ],
+              [
+                186,
+                187
+              ],
+              [
+                234,
+                235
+              ],
+              [
+                236,
+                245
+              ],
+              [
+                252,
+                253
+              ],
+              [
+                252,
+                254
+              ],
+              [
+                254,
+                255
+              ],
+              [
+                254,
+                256
+              ],
+              [
+                256,
+                257
+              ],
+              [
+                256,
+                259
+              ],
+              [
+                269,
+                270
+              ],
+              [
+                279,
+                280
+              ],
+              [
+                300,
+                301
+              ],
+              [
+                309,
+                314
+              ],
+              [
+                326,
+                327
+              ],
+              [
+                354,
+                355
+              ],
+              [
+                356,
+                358
+              ],
+              [
+                358,
+                359
+              ],
+              [
+                358,
+                360
+              ],
+              [
+                360,
+                361
+              ],
+              [
+                365,
+                366
+              ],
+              [
+                370,
+                371
+              ],
+              [
+                374,
+                375
+              ],
+              [
+                395,
+                396
+              ],
+              [
+                414,
+                416
+              ]
+            ]
+          },
+          "lines": {
+            "covered": 285,
+            "executable": 336,
+            "missing": [
+              57,
+              63,
+              106,
+              109,
+              112,
+              114,
+              118,
+              119,
+              123,
+              125,
+              127,
+              129,
+              131,
+              140,
+              144,
+              153,
+              156,
+              169,
+              177,
+              183,
+              187,
+              235,
+              245,
+              246,
+              247,
+              248,
+              249,
+              250,
+              251,
+              252,
+              253,
+              254,
+              255,
+              256,
+              257,
+              259,
+              260,
+              261,
+              262,
+              270,
+              280,
+              301,
+              327,
+              355,
+              358,
+              359,
+              361,
+              366,
+              371,
+              375,
+              396
+            ]
+          },
+          "module": "triad_phase_frequency",
+          "sha256": "48ee569b1d467b2d7b6fd55088764bd28dd11e0bfecb5974622a318fbb408585"
+        },
+        "tools/triad_phase_optimized.py": {
+          "branches": {
+            "covered_arcs": 15,
+            "executable_arcs": 54,
+            "missing_arcs": [
+              [
+                51,
+                52
+              ],
+              [
+                51,
+                53
+              ],
+              [
+                53,
+                54
+              ],
+              [
+                53,
+                63
+              ],
+              [
+                57,
+                58
+              ],
+              [
+                57,
+                61
+              ],
+              [
+                86,
+                87
+              ],
+              [
+                88,
+                89
+              ],
+              [
+                129,
+                131
+              ],
+              [
+                131,
+                132
+              ],
+              [
+                131,
+                133
+              ],
+              [
+                153,
+                154
+              ],
+              [
+                154,
+                155
+              ],
+              [
+                154,
+                156
+              ],
+              [
+                200,
+                202
+              ],
+              [
+                223,
+                224
+              ],
+              [
+                223,
+                225
+              ],
+              [
+                225,
+                226
+              ],
+              [
+                225,
+                227
+              ],
+              [
+                227,
+                -222
+              ],
+              [
+                227,
+                229
+              ],
+              [
+                263,
+                264
+              ],
+              [
+                263,
+                268
+              ],
+              [
+                268,
+                269
+              ],
+              [
+                268,
+                272
+              ],
+              [
+                273,
+                274
+              ],
+              [
+                273,
+                275
+              ],
+              [
+                291,
+                292
+              ],
+              [
+                291,
+                293
+              ],
+              [
+                309,
+                310
+              ],
+              [
+                309,
+                313
+              ],
+              [
+                320,
+                321
+              ],
+              [
+                320,
+                322
+              ],
+              [
+                329,
+                330
+              ],
+              [
+                329,
+                336
+              ],
+              [
+                332,
+                333
+              ],
+              [
+                332,
+                335
+              ],
+              [
+                336,
+                338
+              ],
+              [
+                336,
+                339
+              ]
+            ]
+          },
+          "lines": {
+            "covered": 80,
+            "executable": 233,
+            "missing": [
+              32,
+              33,
+              34,
+              35,
+              36,
+              37,
+              39,
+              40,
+              45,
+              46,
+              47,
+              48,
+              49,
+              50,
+              51,
+              52,
+              53,
+              54,
+              55,
+              56,
+              57,
+              58,
+              59,
+              60,
+              61,
+              62,
+              63,
+              65,
+              87,
+              89,
+              131,
+              132,
+              133,
+              134,
+              135,
+              136,
+              137,
+              147,
+              148,
+              154,
+              155,
+              202,
+              203,
+              204,
+              205,
+              206,
+              208,
+              210,
+              211,
+              212,
+              213,
+              214,
+              215,
+              216,
+              217,
+              218,
+              219,
+              220,
+              223,
+              224,
+              225,
+              226,
+              227,
+              229,
+              235,
+              236,
+              237,
+              238,
+              239,
+              241,
+              242,
+              243,
+              244,
+              245,
+              246,
+              247,
+              248,
+              249,
+              256,
+              259,
+              262,
+              263,
+              264,
+              265,
+              268,
+              269,
+              270,
+              271,
+              272,
+              273,
+              274,
+              275,
+              276,
+              281,
+              282,
+              284,
+              285,
+              286,
+              287,
+              288,
+              289,
+              290,
+              291,
+              292,
+              293,
+              294,
+              296,
+              297,
+              298,
+              299,
+              300,
+              301,
+              302,
+              303,
+              304,
+              306,
+              307,
+              308,
+              309,
+              310,
+              313,
+              315,
+              316,
+              319,
+              320,
+              321,
+              322,
+              323,
+              324,
+              325,
+              326,
+              327,
+              328,
+              329,
+              330,
+              331,
+              332,
+              333,
+              335,
+              336,
+              338,
+              339,
+              340,
+              341,
+              345,
+              346,
+              347,
+              348,
+              349,
+              350,
+              353,
+              354,
+              371
+            ]
+          },
+          "module": "triad_phase_optimized",
+          "sha256": "759b46d536f2daa1d1de2336190ab19153376aca3eeca32847cba5289d2d63ed"
+        },
+        "tools/triad_prepared_observation.py": {
+          "branches": {
+            "covered_arcs": 24,
+            "executable_arcs": 36,
+            "missing_arcs": [
+              [
+                41,
+                42
+              ],
+              [
+                47,
+                48
+              ],
+              [
+                49,
+                50
+              ],
+              [
+                51,
+                52
+              ],
+              [
+                57,
+                58
+              ],
+              [
+                59,
+                60
+              ],
+              [
+                62,
+                65
+              ],
+              [
+                144,
+                145
+              ],
+              [
+                155,
+                156
+              ],
+              [
+                169,
+                170
+              ],
+              [
+                171,
+                172
+              ],
+              [
+                177,
+                178
+              ]
+            ]
+          },
+          "lines": {
+            "covered": 135,
+            "executable": 152,
+            "missing": [
+              42,
+              48,
+              50,
+              52,
+              55,
+              56,
+              58,
+              60,
+              65,
+              145,
+              156,
+              170,
+              172,
+              175,
+              176,
+              178,
+              234
+            ]
+          },
+          "module": "triad_prepared_observation",
+          "sha256": "13d37977620519aaeb457d4ed1163c80d68dca96c8319480de914cae8a6aaec8"
+        },
+        "tools/triad_rbpf.py": {
+          "branches": {
+            "covered_arcs": 73,
+            "executable_arcs": 98,
+            "missing_arcs": [
+              [
+                85,
+                86
+              ],
+              [
+                87,
+                88
+              ],
+              [
+                91,
+                92
+              ],
+              [
+                93,
+                94
+              ],
+              [
+                99,
+                100
+              ],
+              [
+                101,
+                102
+              ],
+              [
+                103,
+                104
+              ],
+              [
+                132,
+                133
+              ],
+              [
+                181,
+                182
+              ],
+              [
+                197,
+                198
+              ],
+              [
+                206,
+                207
+              ],
+              [
+                208,
+                209
+              ],
+              [
+                211,
+                212
+              ],
+              [
+                265,
+                266
+              ],
+              [
+                267,
+                268
+              ],
+              [
+                269,
+                270
+              ],
+              [
+                271,
+                272
+              ],
+              [
+                277,
+                278
+              ],
+              [
+                292,
+                293
+              ],
+              [
+                301,
+                302
+              ],
+              [
+                307,
+                308
+              ],
+              [
+                334,
+                335
+              ],
+              [
+                341,
+                342
+              ],
+              [
+                343,
+                344
+              ],
+              [
+                345,
+                346
+              ]
+            ]
+          },
+          "lines": {
+            "covered": 214,
+            "executable": 241,
+            "missing": [
+              86,
+              88,
+              92,
+              94,
+              100,
+              102,
+              104,
+              133,
+              182,
+              198,
+              207,
+              209,
+              212,
+              266,
+              268,
+              270,
+              272,
+              275,
+              276,
+              278,
+              293,
+              302,
+              308,
+              335,
+              342,
+              344,
+              346
+            ]
+          },
+          "module": "triad_rbpf",
+          "sha256": "d4b64c3a830acd3bd15433421da0e003ba1aa9810bf1dd904c57082d94c3bd54"
+        },
+        "tools/triad_state_workspace.py": {
+          "branches": {
+            "covered_arcs": 126,
+            "executable_arcs": 182,
+            "missing_arcs": [
+              [
+                82,
+                83
+              ],
+              [
+                84,
+                85
+              ],
+              [
+                86,
+                87
+              ],
+              [
+                94,
+                95
+              ],
+              [
+                96,
+                97
+              ],
+              [
+                98,
+                99
+              ],
+              [
+                102,
+                103
+              ],
+              [
+                104,
+                105
+              ],
+              [
+                112,
+                113
+              ],
+              [
+                126,
+                127
+              ],
+              [
+                133,
+                134
+              ],
+              [
+                138,
+                139
+              ],
+              [
+                142,
+                143
+              ],
+              [
+                146,
+                147
+              ],
+              [
+                159,
+                160
+              ],
+              [
+                164,
+                165
+              ],
+              [
+                167,
+                168
+              ],
+              [
+                170,
+                171
+              ],
+              [
+                173,
+                174
+              ],
+              [
+                176,
+                177
+              ],
+              [
+                179,
+                180
+              ],
+              [
+                181,
+                182
+              ],
+              [
+                184,
+                185
+              ],
+              [
+                195,
+                196
+              ],
+              [
+                197,
+                198
+              ],
+              [
+                200,
+                201
+              ],
+              [
+                207,
+                212
+              ],
+              [
+                226,
+                227
+              ],
+              [
+                229,
+                230
+              ],
+              [
+                248,
+                249
+              ],
+              [
+                266,
+                267
+              ],
+              [
+                269,
+                270
+              ],
+              [
+                271,
+                272
+              ],
+              [
+                273,
+                274
+              ],
+              [
+                279,
+                280
+              ],
+              [
+                281,
+                282
+              ],
+              [
+                283,
+                284
+              ],
+              [
+                287,
+                -265
+              ],
+              [
+                290,
+                291
+              ],
+              [
+                298,
+                299
+              ],
+              [
+                314,
+                315
+              ],
+              [
+                316,
+                317
+              ],
+              [
+                318,
+                319
+              ],
+              [
+                324,
+                325
+              ],
+              [
+                333,
+                334
+              ],
+              [
+                352,
+                353
+              ],
+              [
+                373,
+                374
+              ],
+              [
+                378,
+                379
+              ],
+              [
+                387,
+                388
+              ],
+              [
+                393,
+                394
+              ],
+              [
+                409,
+                410
+              ],
+              [
+                415,
+                416
+              ],
+              [
+                418,
+                419
+              ],
+              [
+                424,
+                425
+              ],
+              [
+                436,
+                437
+              ],
+              [
+                444,
+                445
+              ]
+            ]
+          },
+          "lines": {
+            "covered": 299,
+            "executable": 360,
+            "missing": [
+              75,
+              76,
+              83,
+              85,
+              87,
+              95,
+              97,
+              99,
+              103,
+              105,
+              113,
+              127,
+              134,
+              139,
+              143,
+              147,
+              160,
+              165,
+              168,
+              171,
+              174,
+              177,
+              180,
+              182,
+              185,
+              196,
+              198,
+              201,
+              212,
+              227,
+              230,
+              233,
+              234,
+              249,
+              267,
+              270,
+              272,
+              274,
+              280,
+              282,
+              284,
+              291,
+              299,
+              315,
+              317,
+              319,
+              322,
+              323,
+              325,
+              334,
+              353,
+              374,
+              379,
+              388,
+              394,
+              410,
+              416,
+              419,
+              425,
+              437,
+              445
+            ]
+          },
+          "module": "triad_state_workspace",
+          "sha256": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923"
+        }
+      },
+      "original_test_exit_code": 0,
+      "reconciliation": null,
+      "scope": "retained instrumented source counters, not a fresh run or semantic coverage proof"
+    }
+  ],
+  "validation_scope": {
+    "initial_discovery": "Raw log: 295 tests, 294 passed and one environment-gated skip; 13.104 seconds.",
+    "native_fixture_followup": "Raw log: the skipped native fixture ran explicitly and passed; one test, 0.948 seconds.",
+    "final_family_delta": "Separate final raw logs: six family tests passed in 0.042 seconds; ten staged tests passed in 0.094 seconds. Root reports they were rerun after campaign completion without code edits. These checks are separate from the initial discovery and its one-test followup.",
+    "snapshot_scope": "Current frozen source/test bytes at archival time; the two raw unit logs do not independently bind every test file hash or prove that the initial discovery covered a later delta."
+  },
+  "coverage_reference_checks": [
+    {
+      "original": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-complete/native-coverage/followup-001/coverage.json",
+      "maintained_relative": "../../2026-11-03-performance-complete/coverage/native/followup-001/coverage.json",
+      "sha256": "99d34fd366bd636da2a9a6b9565233ee1297d30c8c9eec954e47c00371e740b5",
+      "original_and_maintained_bytes_matched": true,
+      "fresh_coverage_run": false
+    },
+    {
+      "original": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-complete/python-coverage/attempt-04-dependency-closed/summary.json",
+      "maintained_relative": "../../2026-11-03-performance-complete/coverage/python/attempt-04-dependency-closed/summary.json",
+      "sha256": "a1903287f1a0dd36e7023151d0e268ee5257fb0e4635c0ea946e8298a2cf8a15",
+      "original_and_maintained_bytes_matched": true,
+      "fresh_coverage_run": false
+    }
+  ]
+}

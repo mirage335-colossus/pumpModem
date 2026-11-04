@@ -1,0 +1,41 @@
+{
+  "records": [
+    {
+      "archive": "post-run-final/current-lifecycle-replay-93de7a47-afd35925.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/current-lifecycle-replay-93de7a47-afd35925.json",
+      "raw_bytes": 2294,
+      "raw_sha256": "56c4fb072d0a44382dd65fb667b448b78d34a96a90ba8abc643aa259d2d5776f"
+    },
+    {
+      "archive": "post-run-final/replay-current-lifecycle-93de7a47-afd35925.py.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/replay-current-lifecycle-93de7a47-afd35925.py",
+      "raw_bytes": 1532,
+      "raw_sha256": "40f0a4114b0bba17c217b4fd87dac57ddb7d783f43c82f2bbb9d0ccdac4dc353"
+    }
+  ],
+  "schema": "triad-complete002-final-current-proof-replay-v1",
+  "scope": "Separate original-normal-context proof replay under protocol93de7a47 and mainafd35925; no new receiver kernels, timing samples, complete suite or overwritten result.",
+  "source_archive": "post-run-final/matching-source.tar.gz",
+  "sources": [
+    {
+      "bytes": 1532,
+      "path": "replay-current-lifecycle-93de7a47-afd35925.py",
+      "sha256": "40f0a4114b0bba17c217b4fd87dac57ddb7d783f43c82f2bbb9d0ccdac4dc353"
+    },
+    {
+      "bytes": 1377,
+      "path": "tools/triad-performance-lifecycle.json",
+      "sha256": "eee47f2396e0a230bf95a60029c958041449e37ab7d54872a2a5156a898643d4"
+    },
+    {
+      "bytes": 62784,
+      "path": "tools/triad-performance.py",
+      "sha256": "afd3592550ce6dd57f21ae8b351399baa2459d9e8b3c19511281446bf6bdd5cd"
+    },
+    {
+      "bytes": 73615,
+      "path": "tools/triad_perf_lifecycle.py",
+      "sha256": "93de7a47b360bcb7531e72de5381cdb4b6feb0d10c0c44150697bc62704d7b80"
+    }
+  ]
+}

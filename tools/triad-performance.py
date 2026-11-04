@@ -256,14 +256,15 @@ def numeric_agreement(reference, candidate, *, gaussian=False):
             "allowed_score_error": tolerance, "reasons": reasons}
 
 
-def qualify_fft(case, workers, device):
-    results, eligibility, times = {}, {}, {}
+def qualify_fft(case, workers, device, *, historical_anchor_directory=None):
+    results, eligibility, times, geometry = {}, {}, {}, {}
     count = min(3, len(case["frequency_offsets_hz"]))
     for precision in ("fp64", "fp32"):
         for name in ("reference", "candidate"):
             prep = workers[name].request(prepare_request(case, precision, device))
             score = workers[name].request(score_request(case, count))
             results[(name, precision)] = score
+            geometry[(name, precision)] = prep["geometry"]
             times[(name, precision)] = prep["wall_seconds"] + score["wall_seconds_including_finish"]
     exact = numeric_agreement(results[("reference", "fp64")], results[("candidate", "fp64")])
     if not exact["eligible"]:
@@ -274,12 +275,33 @@ def qualify_fft(case, workers, device):
         checks.append(numeric_agreement(results[("reference", precision)], results[("candidate", precision)]))
         eligibility[precision] = {"eligible": all(c["eligible"] for c in checks), "checks": checks}
     eligible = [p for p in eligibility if eligibility[p]["eligible"]]
-    chosen = min(eligible, key=lambda p: times[("reference", p)] + times[("candidate", p)])
+    fastest = min(eligible, key=lambda p: times[("reference", p)] + times[("candidate", p)])
+    lookups = {}
+    if historical_anchor_directory is not None:
+        from triad_perf_fft_trace import GEOMETRY, _find_anchor, _identity
+        for precision in ("fp32", "fp64"):
+            if precision not in eligible:
+                continue
+            geometries = [{key: geometry[(name, precision)][key] for key in GEOMETRY}
+                          for name in ("reference", "candidate")]
+            if geometries[0] != geometries[1]:
+                lookups[precision] = {"compatible": False, "reason": "paired preparation geometry differs"}
+                continue
+            identity = _identity(case, workers, precision, device, geometries[0])
+            anchor, reason = _find_anchor(historical_anchor_directory, identity)
+            lookups[precision] = {"compatible": anchor is not None,
+                "anchor_path": anchor["path"] if anchor else None, "reason": reason}
+    historical = [precision for precision in ("fp32", "fp64") if lookups.get(precision, {}).get("compatible")]
+    chosen = historical[0] if historical else fastest
     return {"selected": chosen, "alternatives": eligibility,
             "tuning_total_seconds": {p: {n: times[(n, p)] for n in ("reference", "candidate")}
                                      for p in eligibility},
             "selection_frozen_before_prediction_measurements": True,
             "qualification_cfo_count": count,
+            "selection_method": "eligible_exact_historical_precision" if historical else "fastest_eligible_pilot",
+            "fresh_pilot_fastest": fastest, "historical_precision_lookups": lookups,
+            "historical_preference_order": ["fp32", "fp64"],
+            "historical_preference_scope": "stable exact qualified arithmetic; fresh eligible timing alternatives remain reported",
             "scope": "fixed numerical corpus; lower tensor modes have no implemented FFT adapter and are calibration-only"}
 
 
@@ -573,11 +595,48 @@ def endpoint_calibration_guard(value):
             "historical_scatter_is_a_proven_tail_bound": False}
 
 
+def native_direct_overrides(cases, requested, *, binary, threads):
+    """Freeze explicit direct routes without changing any native full work."""
+    from triad_perf_native import _argv, digest
+
+    requested = list(requested)
+    by_id = {case["id"]: case for case in cases}
+    if len(set(requested)) != len(requested):
+        raise SuiteError("native-direct-case IDs must be unique")
+    unknown = set(requested) - by_id.keys()
+    if unknown:
+        raise SuiteError("native-direct-case must select a native case in this run: " + ", ".join(sorted(unknown)))
+    records = {}
+    transformed = []
+    for original in cases:
+        case = dict(original)
+        if case["id"] in requested:
+            if "training_seconds" not in case:
+                raise SuiteError("native-direct-case already uses direct measurement: " + case["id"])
+            del case["training_seconds"]
+            run_arguments = [_argv(binary, row, row["target_seconds"], 1_000_000, threads)
+                             for row in (original, case)]
+            configure_arguments = [_argv(binary, row, row["target_seconds"], 1_000_000, threads, configure=True)
+                                   for row in (original, case)]
+            if run_arguments[0] != run_arguments[1] or configure_arguments[0] != configure_arguments[1]:
+                raise SuiteError("native direct route changed full target arguments")
+            records[case["id"]] = {
+                "id": case["id"], "route": "explicit_direct_full", "removed_fields": ["training_seconds"],
+                "original_case_sha256": digest(original), "transformed_case_sha256": digest(case),
+                "original_case": original, "transformed_case": case,
+                "full_target_equivalence": {"run_argv_equal": True, "configuration_argv_equal": True,
+                    "target_seconds": case["target_seconds"], "run_argv": run_arguments[0],
+                    "configure_argv": configure_arguments[0]},
+                "historical_anchor_read": False, "historical_anchor_written": False}
+        transformed.append(case)
+    return transformed, records
+
+
 def run_backend(args, report):
     """Independent hardware, path witnesses, and source-bound runtime models."""
     from triad_perf_cases import prepare_cases, scenarios
     from triad_perf_hardware import collect_profile
-    from triad_perf_adaptive import AdaptivePolicy
+    from triad_perf_adaptive import AdaptivePolicy, regression_profile
     from triad_perf_fft_trace import measure_fft as measure_fft_trace
     from triad_perf_native import scenarios as native_scenarios, measure_native_case
     from triad_perf_native import identity as native_identity, anchor_compatible, digest
@@ -606,6 +665,9 @@ def run_backend(args, report):
         if unknown:
             raise SuiteError("unknown cases for this profile: " + ", ".join(sorted(unknown)))
         native_cases = [c for c in configured_native if c["id"] in selected]
+        native_cases, direct_overrides = native_direct_overrides(native_cases, args.native_direct_case,
+            binary=args.binary, threads=args.native_threads)
+        report["native_direct_overrides"] = list(direct_overrides.values())
         fft_ids = [c["id"] for c in configured_fft if c["id"] in selected]
         report["full_profile_case_ids"] = all_case_ids
         report["selected_case_ids"] = [name for name in all_case_ids if name in selected]
@@ -634,29 +696,41 @@ def run_backend(args, report):
         if path_process.returncode or not report["executed_path_coverage"]["complete_applicable_coverage"]:
             raise SuiteError("required receiver computational paths did not execute successfully")
 
-        # A focused qualification retains the full profile's multiplicity
-        # budget, so selecting a case cannot silently narrow its intervals.
+        # Qualification keeps its historical multiplicity ledger. Routine
+        # decisions spend alpha per test across fixed looks, independently of
+        # the diagnostic timing-width target and number of selected cases.
         family_count = len(all_case_ids)
-        policy = AdaptivePolicy(relative_precision=args.precision_target, looks=args.looks, family_count=family_count)
+        stopping_rule = args.stopping_rule or ("precision" if args.validation_mode == "qualify" else "decision")
+        policy = AdaptivePolicy(relative_precision=args.precision_target, looks=args.looks,
+                                family_count=family_count, stopping_rule=stopping_rule,
+                                **(regression_profile(args.regression_profile) if stopping_rule == "decision" else {}))
         report["adaptive_policy"] = {"relative_timing_precision": args.precision_target, "looks": list(args.looks),
             "families": family_count, "model_accuracy_is_separate": True,
-            "stop_rule": "first predeclared look meeting precision; confirmed regression; or explicit resource/sample ceiling"}
+            "stopping_rule": stopping_rule, "regression_profile": args.regression_profile if stopping_rule == "decision" else None,
+            "requested_regression_profile": args.regression_profile,
+            "profile_status": "applied_to_routine_decisions" if stopping_rule == "decision" else "disabled_by_precision_stopping",
+            "pass_alpha": policy.pass_error_budget, "failure_alpha": policy.failure_error_budget,
+            "slowdown_threshold": policy.slowdown_threshold,
+            "stop_rule": (f"first predeclared look resolving the {policy.slowdown_threshold:g} slowdown decision; or resource/sample ceiling"
+                          if stopping_rule == "decision" else
+                          "first predeclared look meeting precision; confirmed regression; or resource/sample ceiling")}
 
         def retain_case(value):
             value["endpoint_calibration_guard"] = endpoint_calibration_guard(value)
             report["cases"].append(value)
             comparison = value.get("comparison", {})
+            adaptive = value.get("adaptive", value.get("prediction", {}))
             if value["endpoint_calibration_guard"]["blocking"]:
                 report["failures"].append(value["id"] +
                     ": severe_endpoint_prediction_mismatch; focused calibration required before release")
             if comparison.get("gate") == "performance_regression":
-                report["failures"].append(value["id"] + ": full-runtime slowdown lower bound exceeds 1.30")
+                threshold = comparison.get("threshold", adaptive.get("policy", {}).get("slowdown_threshold", policy.slowdown_threshold))
+                report["failures"].append(value["id"] + f": full-runtime slowdown lower bound exceeds {threshold:g}")
             elif comparison.get("gate") not in ("pass",):
                 report["warnings"].append(value["id"] + ": full-runtime comparison is unresolved")
             if not value.get("prediction_valid", False):
                 report["warnings"].append(value["id"] + ": duration model is invalid or unqualified")
-            adaptive = value.get("adaptive", value.get("prediction", {}))
-            if not adaptive.get("timing_precision_reached", value.get("timing_precision_reached", False)):
+            if stopping_rule == "precision" and not adaptive.get("timing_precision_reached", value.get("timing_precision_reached", False)):
                 report["warnings"].append(value["id"] + ": requested timing precision was not reached")
             atomic_json(output, report)
 
@@ -669,15 +743,25 @@ def run_backend(args, report):
         for case in native_cases:
             remaining(deadline)
             anchor_path = anchor_directory / (case["id"] + ".native-anchor.json")
-            anchor = json.loads(anchor_path.read_text()) if anchor_path.is_file() else None
-            identities = {"reference": native_identity(reference_binary, case, args.native_threads),
-                          "candidate": native_identity(args.binary, case, args.native_threads)}
-            mode = "qualify" if args.validation_mode == "qualify" or (args.validation_mode == "auto" and not anchor_compatible(anchor, identities, case)) else "routine"
+            if case["id"] in direct_overrides:
+                anchor, mode = None, "routine"
+            else:
+                anchor = json.loads(anchor_path.read_text()) if anchor_path.is_file() else None
+                identities = {"reference": native_identity(reference_binary, case, args.native_threads),
+                              "candidate": native_identity(args.binary, case, args.native_threads)}
+                mode = "qualify" if args.validation_mode == "qualify" or (args.validation_mode == "auto" and not anchor_compatible(anchor, identities, case)) else "routine"
             def freeze(value, case_id=case["id"]):
                 atomic_json(working / (case_id + ".prediction-" + str(value["index"]) + ".json"), value)
             measured = measure_native_case(reference_binary, args.binary, case, policy,
                 threads=args.native_threads, deadline=deadline, validation_mode=mode,
                 anchor=anchor, trace_candidate=False, freeze_callback=freeze)
+            if case["id"] in direct_overrides:
+                override = direct_overrides[case["id"]]
+                measured["measurement_override"] = {**override,
+                    "original_measurement_identities": {name: {**identity,
+                        "case_sha256": override["original_case_sha256"]}
+                        for name, identity in measured["identities"].items()},
+                    "transformed_measurement_identities": measured["identities"]}
             # Trace clocks are a separately executed witness, never mixed into
             # reference/candidate timing comparisons on legacy executables.
             if mode == "qualify" and measured.get("anchors", {}).get("validated"):
@@ -708,7 +792,9 @@ def run_backend(args, report):
                 report["warnings"].append("native sustained check unavailable: no independently qualified candidate forecast")
 
         fixture_start = time.perf_counter()
-        cases = prepare_cases(args.binary, output.parent / "triad-performance-fixtures", profile=profile,
+        fixture_directory = args.fixture_cache or output.parent / "triad-performance-fixtures"
+        report["fixture_cache_directory"] = str(fixture_directory)
+        cases = prepare_cases(args.binary, fixture_directory, profile=profile,
                               deadline=deadline, source_root=args.candidate_root, case_ids=fft_ids) if fft_ids else []
         cases = [case for case in cases if case["id"] in selected]
         report["fixture_preparation_seconds"] = time.perf_counter() - fixture_start
@@ -727,7 +813,9 @@ def run_backend(args, report):
                 fft_results = []
                 for case in cases:
                     case["performance_environment"] = environment
-                    qualification = qualify_fft(case, workers, args._backend_worker)
+                    qualification = qualify_fft(case, workers, args._backend_worker,
+                        historical_anchor_directory=anchor_directory / args._backend_worker
+                        if args.validation_mode in ("auto", "reuse") else None)
                     measured = measure_fft_trace(case, workers, qualification["selected"], args._backend_worker,
                         policy=policy, deadline=deadline, api=sys.modules[__name__],
                         anchor_directory=anchor_directory / args._backend_worker, validation_mode=args.validation_mode)
@@ -811,15 +899,23 @@ def parse_args(argv=None):
     p.add_argument("--native-threads", type=int, default=1)
     p.add_argument("--reference-binary", type=Path)
     p.add_argument("--precision-target", type=float, default=.05)
+    p.add_argument("--stopping-rule", choices=("decision", "precision"),
+                   help="routine defaults to a profile-specific one-sided decision; qualification retains historical precision stopping")
+    p.add_argument("--regression-profile", choices=("normal", "ci", "strict"), default="normal",
+                   help="routine decision criteria; precision stopping uses historical criteria")
     p.add_argument("--looks", default="5,9,17,33")
     p.add_argument("--validation-mode", choices=("auto", "qualify", "reuse"), default="auto")
     p.add_argument("--anchor-directory", type=Path)
+    p.add_argument("--fixture-cache", type=Path,
+                   help="retained exact FFT fixture cache shared by qualification and routine runs")
     p.add_argument("--sustained-seconds", type=float, default=None,
                    help="one frozen campaign per eligible native/FFT family; default 60 for sustain, otherwise 0")
     p.add_argument("--baseline-ref", default=BASELINE)
     p.add_argument("--candidate-root", type=Path, default=ROOT)
     p.add_argument("--profile", choices=("ci", "quick", "sustain"), default="ci")
     p.add_argument("--case", action="append", help="focus on one case (repeatable); never counts as complete CI coverage")
+    p.add_argument("--native-direct-case", action="append", default=[],
+                   help="measure this native modeled case directly at its unchanged full target (repeatable)")
     p.add_argument("--hardware-baseline", type=Path)
     p.add_argument("--target-profile", type=Path)
     p.add_argument("--_backend-worker", choices=("cpu", "cuda"), help=argparse.SUPPRESS)
@@ -848,7 +944,20 @@ def parse_args(argv=None):
         args.reference_binary = args.reference_binary.resolve()
     if args.anchor_directory:
         args.anchor_directory = args.anchor_directory.resolve()
+    if args.fixture_cache:
+        args.fixture_cache = args.fixture_cache.resolve()
     args.output = args.output.resolve()
+    if args.native_direct_case:
+        if args.validation_mode == "qualify":
+            p.error("native-direct-case is a routine route and cannot be used with validation-mode qualify")
+        from triad_perf_native import scenarios as native_scenarios
+        selected_native = [case for case in native_scenarios(args.profile)
+                           if not args.case or case["id"] in args.case]
+        try:
+            native_direct_overrides(selected_native, args.native_direct_case,
+                binary=args.binary, threads=args.native_threads)
+        except SuiteError as error:
+            p.error(str(error))
     return args
 
 

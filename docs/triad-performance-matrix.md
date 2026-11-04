@@ -28,16 +28,16 @@ resident FFT cases preserve their full selected sample and search geometry, but
 measure the named offline receiver boundary rather than the entire simulator.
 The [sampled-family manifest](../tools/triad-performance-families.json) now
 declares state, phase, grouped, RBPF, static-frequency, ray-frequency and
-CFO-batch workload IDs. Adapter code and focused functional checks exist for
-some families; case declaration, a passing run, performance-model validation
-and hardware qualification remain separate states. An empty or pending workload
-list is an unresolved coverage obligation, never a pass.
+CFO-batch workload IDs. Each declared sampled family has named direct full-workload timing evidence in
+the routine or companion case campaigns. The latest Blackwell routine completed
+all twelve sampled-family cases and configured extensions. Declaration,
+functional pass, direct timing, prediction validation and hardware qualification
+remain separate states. An empty or pending workload list is unresolved, never a pass.
 
-Native case timing is direct for each named target except `native-vlf-low-cn0`,
-which uses its separately qualified duration model. These are complete-run
-measurements for the declared case/source/hardware; they do not require an
-unrelated extrapolation to count as direct evidence, and they do not generalize
-to unmeasured geometries. The archived full-target native confirmation and
+The latest CPU routine selected direct timing for `native-vlf-low-cn0`; its
+separately qualified duration model remains historical and was not used on that
+route. Direct measurements apply to each named case/source/hardware and do not
+generalize to unmeasured geometries. The archived full-target native confirmation and
 reuse limits are in the
 [performance trace record](validation-data/triad-v3/2026-11-03-performance-trace/README.md).
 
@@ -53,24 +53,57 @@ and [performance guide](triad-performance.md).
 ## Coverage and timing boundaries
 
 Native source line/branch instrumentation and Python arc instrumentation are
-collected separately from timed builds. The current native receipt is the
-reviewed [follow-up capture](validation-data/triad-v3/2026-11-03-performance-complete/coverage/native/followup-001/README.md): nine translation units were built after the pre-build source/header guard; pre/post declared dependency inventories matched; focused CTest checks passed 4/4, regular focused tests passed 2/2, and five valid `triad-long` modes passed (`plan`, `export`, `export-sampled`, `export-stats`, `export-group-stats`). The capture includes source, channel, receiver, statistics and CLI. Receiver rank-zero fallback and Gamma iteration-bound exhaustion were exercised. The four core TUs report 181/183, 558/560, 185/188 and 242/244 executed/instrumented source lines; the CLI reports 1171/1805. All recorded CFG counters are nonnegative. These are compiler CFG outcomes from a dirty worktree, not semantic coverage or release provenance. The prior invalid focused capture remains raw audit history only.
+collected separately from timed builds. The current [native capture](validation-data/triad-v3/2026-11-03-performance-broader/coverage/native/native-coverage-001/README.md)
+rebuilt nine translation units after its guard and matched all 413 declared
+dependencies. Four focused CTests, five valid `triad-long` modes, and seven
+collector tests passed. It covers source, channel, receiver, statistics and CLI;
+receiver rank-zero fallback and Gamma iteration-bound exhaustion were exercised.
+The four core TUs report 181/183, 558/560, 185/188 and 242/244 executed/instrumented
+source lines; the CLI reports 1171/1805. All CFG counters are nonnegative. The
+receipt's frozen matrix hash predates later inventory metadata edits; its source
+and dependency observations remain historical and are not a claim that the
+edited matrix hash matches. These are compiler CFG outcomes from a dirty
+worktree, not semantic coverage or release provenance.
 
-The fresh [dependency-closed Python capture](validation-data/triad-v3/2026-11-03-performance-complete/coverage/python/attempt-04-dependency-closed/README.md) ran all 16 declared test files in one invocation; all exited zero with positive checks in 53.43 seconds. It covers 3573/4476 executable lines and 1088/1666 Python arcs. The wrapper matched all declared dependencies with no missing or changed items. Python arcs exclude NumPy, SciPy, Torch, native-extension and CUDA-kernel internals; this receipt used Torch 2.8.0+cpu, so CUDA-only execution is unavailable here.
-
+The current [Python capture](validation-data/triad-v3/2026-11-03-performance-broader/scientific/README.md)
+ran all 17 selected test files in one invocation; all exited zero in 63.194
+seconds with 43 declared dependencies matched. It includes the Gaussian
+design-bound implementation. The earlier 16-file attempt-04 capture remains
+available as historical evidence, including the original ray comparison failure
+and its corrected test-only oracle. Python arcs exclude NumPy, SciPy, Torch,
+native-extension and CUDA-kernel internals; this current capture used Torch
+2.8.0+cpu, so CUDA-only execution is unavailable here. Its frozen matrix hash
+also predates later inventory metadata edits.
 Coverage and functional checks are separate from timing. The [complete-run wrapper](../tools/triad_perf_complete.py) checks the declared focused tests and can reuse only dependency-matched coverage receipts. It reports unresolved regimes and limitations separately. Empty `required_gaps` means the row's finite named obligation is represented; it is not a universal coverage or qualification claim. The JSON matrix distinguishes required gaps from scope limitations so that an unrequested architecture cross-product is not turned into an artificial completeness gate.
 
-The Python coverage history keeps the original failed attempt. Attempt-02's ray-frequency assertion compared different covariance models. The test now retains the ray raw oracle at `3e-12` and compares the static result against the identical inflated model; the corrected test passed seven checks. Attempt-03 remains a split-run reconciliation; attempt-04 is the fresh passing single capture. No DSP source changed for this test correction.
+The Python coverage history keeps the original failed attempt. Attempt-02's ray-frequency assertion compared different covariance models. The test now retains the ray raw oracle at `3e-12` and compares the static result against the identical inflated model; the corrected test passed seven checks. Attempt-03 remains a split-run reconciliation; attempt-04 was the then-fresh passing capture and is now historical behind the current 17-file capture above. No DSP source changed for this test correction.
 
 The H200 path witness completed 11 applicable declared path contracts in 7.916 seconds; it is not a full-workload timing. Four CUDA phase-family functional files passed; the tensor test included 48.936 seconds of cold JIT. The separate arithmetic/health profile completed in 60.219 seconds: eleven arithmetic cases passed and two FP8 cases were unsupported by the compiler instruction guard. These are functional/capability witnesses, not throughput qualification.
 
 ## Timing evidence and qualification limits
 
-Native complete CLI cases are direct measurements except `native-vlf-low-cn0`, which uses its separately qualified duration model. Direct measurements establish their named source, binary, hardware and case timing; they do not require an unrelated extrapolation and do not generalize to unmeasured geometry. Historical full-target confirmation and reuse limits remain in the [performance trace record](validation-data/triad-v3/2026-11-03-performance-trace/README.md). Resident FFT timing measures full selected preparation and scoring geometry, not waveform/channel generation. The state adapter's outer call combines initialization, updates, transfers and finalization; its nested update timer is contained within that interval and must not be added as a separate stage.
+The latest [confidence-decision run](validation-data/triad-v3/2026-11-03-performance-decision/README.md)
+completed the same 23 CPU target gates in **741.035 seconds**, all passing,
+with 16 functional commands passing and applicable retained coverage receipts.
+That archived run used a per-test one-sided 95% decision at the 1.30 ratio
+threshold. The current normal profile uses 85% at 1.30; the explicit CI profile
+uses 70% at 1.70, each retaining a separate 5% false-regression budget and
+fixed-look error spending. The routine target is 25 minutes. It no longer pursues a 5% runtime
+half-width after that decision resolves. Historical qualification rules and
+failed model evidence is unchanged. GPU lifecycle cold and mixed-campaign
+qualification now exists for one RTX PRO 6000 Blackwell identity. The current
+CPU direct all-nine-family campaign is measured, with its stability flag under
+independent review; broad FFT future coverage is not claimed for its conditional engineering model;
+that is a limitation, not an additional release-blocking gap. The normal-profile
+GPU FHSS decision remains inconclusive. Hosted CI has not run, so whole-scope
+qualification is not established. The older width-driven campaigns below remain
+historical evidence, not routine cost requirements.
 
-The completed CPU campaign measured all 23 declared targets in 2999.858 seconds. All 23 performance gates and prediction-validity outcomes passed, and all 16 functional commands passed. Eleven cases missed the 5% timing-precision target: `native-flat`, `native-vlf-low-cn0`, `native-wrong-key`, `native-frontend`, `native-ou-path`, `narrow-hf-tight`, `broad-hf-timing`, `vlf-850-day`, `gaussian-multiblock`, `grouped-multitile` and `rbpf-systematic`. Nine sampled cases consumed 2120.456 seconds. The run exited with status 2 under its original blocker set: cold-latency scope, inventory/dependency-coverage and hardware-health blockers, plus the then-current 5% warm-precision classification. The wrapper now reports those decisions separately: all 23 performance gates and prediction-validity outcomes passed, while 11 cases still missed the 5% timing-precision goal. The complete campaign archive and per-case evidence are indexed in the [routine archive](validation-data/triad-v3/2026-11-03-performance-complete/routine/README.md). This is not whole-scope qualification.
+Earlier native qualification used the duration model for `native-vlf-low-cn0`; the latest CPU routine explicitly selected `--native-direct-case native-vlf-low-cn0`. A separate stopped savings experiment measured 57.819 s for the abbreviated arm and 46.949 s for the direct arm in its first matched block. These are arm costs, not single-target runtimes; the second abbreviated guard was inconclusive, so the experiment is incomparable and supports no savings claim. Direct measurements establish their named source, binary, hardware and case timing; they do not require an unrelated extrapolation and do not generalize to unmeasured geometry. Historical full-target confirmation and reuse limits remain in the [performance trace record](validation-data/triad-v3/2026-11-03-performance-trace/README.md). Resident FFT timing measures full selected preparation and scoring geometry, not waveform/channel generation. The state adapter's outer call combines initialization, updates, transfers and finalization; its nested update timer is contained within that interval and must not be added as a separate stage.
 
-The independent CPU `free-crystal` same-stack holdout used 33 training samples and five full target holdouts. Its frozen forecast was 20.2642514791 seconds; the five outer full-workflow measurements were 20.2028984060, 19.5922184251, 19.4917547580, 19.8281113570 and 20.4912192290 seconds. The 97.5% relative-mean interval [-4.8870%, +1.5729%] passed the conditional ±5% holdout closure check. Training half-width was 5.3046%, above the 5% target. At that initial qualification no compatible absolute baseline existed, so its comparison gate was inconclusive. The subsequent complete CPU routine reused the new anchor and passed the strict identical-implementation historical check in a 120.954-second enclosing child; its current timing precision reached 3.96%. This does not rewrite the earlier paired-protocol rejection. These are outer `full_seconds`, not the inner score-only timer. The archived FFT identity probe is conditional historical support; its future-coverage claim remains false.
+An earlier width-driven CPU campaign measured all 23 declared targets in 2999.858 seconds. All 23 performance gates and prediction-validity outcomes passed, and all 16 functional commands passed. Eleven cases missed the 5% timing-precision target: `native-flat`, `native-vlf-low-cn0`, `native-wrong-key`, `native-frontend`, `native-ou-path`, `narrow-hf-tight`, `broad-hf-timing`, `vlf-850-day`, `gaussian-multiblock`, `grouped-multitile` and `rbpf-systematic`. Nine sampled cases consumed 2120.456 seconds. The run exited with status 2 under its original blocker set: cold-latency scope, inventory/dependency-coverage and hardware-health blockers, plus the then-current 5% warm-precision classification. The wrapper now reports those decisions separately: all 23 performance gates and prediction-validity outcomes passed, while 11 cases still missed the 5% timing-precision goal. The complete campaign archive and per-case evidence are indexed in the [routine archive](validation-data/triad-v3/2026-11-03-performance-complete/routine/README.md). This is not whole-scope qualification.
+
+The earlier CPU `free-crystal` same-stack holdout used 33 training samples and five full target holdouts. Its frozen forecast was 20.2642514791 seconds; the five outer full-workflow measurements were 20.2028984060, 19.5922184251, 19.4917547580, 19.8281113570 and 20.4912192290 seconds. The 97.5% relative-mean interval [-4.8870%, +1.5729%] passed the conditional ±5% holdout closure check. Training half-width was 5.3046%, above the 5% target. At that initial qualification no compatible absolute baseline existed, so its comparison gate was inconclusive. The subsequent complete CPU routine reused the new anchor and passed the strict identical-implementation historical check in a 120.954-second enclosing child; its current timing precision reached 3.96%. This does not rewrite the earlier paired-protocol rejection. These are outer `full_seconds`, not the inner score-only timer. The archived FFT identity probe is conditional historical support; its future-coverage claim remains false.
 
 GPU evidence is case- and route-specific. GPU family-qualification 002 directly measured all 12 declared cases in 645.067 seconds; every direct case passed its gate and reached the timing-precision target. It does not qualify complete scope or cold latency. The initial GPU attempt's generic-device-index error was a setup failure, preserved separately from receiver results.
 
@@ -80,11 +113,101 @@ CPU staged confirmation left all three attempted cases unqualified. For Gaussian
 
 A single-capture phase-cost diagnostic measured a 0.647 ms late-tail block against a 179–246 ms receiver-cost gap. Its subnormal scan found no correlation with the slowdown, and no DSP precision change followed. The retained CPU AVX2 fallback probe reports ATen capability `AVX2`, while NumPy selected `X86_V3` and `baseline(X86_V2)`; requested MKL, OpenBLAS and oneDNN ceilings are not a verified complete ISA quarantine. See the archived [dispatch record](validation-data/triad-v3/2026-11-03-performance/avx2-dispatch.json.gz).
 
+## Latest routine outcomes
+
+The latest CPU routine completed in 1684.791 seconds (28:05), 184.791 seconds
+over the 25-minute engineering target. In that original run, native/FFT/sampled
+warm-target decisions passed except broad FFT historical-anchor applicability;
+later focused CPU/GPU checks passed one endpoint each, but the routine was not
+rerun after repair.
+The complete CPU campaign report remains incomplete. The CPU direct lifecycle
+run selected five cycles with `--lifecycle-direct-cycles auto`; the fixed default
+is six cycles. Three full reference/candidate campaign pairs had reference
+measurements 104.398, 105.470 and 101.309 seconds and candidate measurements
+102.029, 101.014 and 102.101 seconds. Its six warm spans were 72.515–75.680
+seconds; the one-sided upper ratio was 1.0325645. A reference last/first-quarter
+ratio of 1.14435 remains a stability/environment hold after independent review
+accepted the raw-only classification. Three CPU five-second hardware
+screens also warned at ratios 1.356 (stream), 1.314 (phase complex64) and 1.467
+(phase complex128); these raw observations are not statistically confirmed
+regressions. A raw-only derived replay validates
+the cold plus all-nine-family direct target/work contract; independent review
+verified 21 protected timed/model/proof function bodies unchanged from 5dfa0492 and 12 raw-file hashes and accepted its classification.
+The original exit/report remains unchanged, and the stability/environment hold
+means this is not an original-command pass or a whole-routine pass.
+
+The latest Blackwell GPU routine completed in 1170.758 seconds (19:31), with all
+twelve sampled-family cases and configured extensions passing. The normal-profile
+FHSS interval [1.285225, 1.306855] straddles its 1.30 threshold and is
+inconclusive. The derived CI decision at 1.70 is supported. Neither actual hosted
+CI workflow has run, and the GPU run does not establish a whole-scope pass.
+The final accepted lifecycle-proof replay took 0.479253 seconds and passed its
+source-transfer checks without cold or mixed flags. It ran no receiver kernels
+and did not revise the original report; see the [GPU routine archive](validation-data/triad-v3/2026-11-03-performance-broader/scientific-gpu-complete-002/README.md).
+
+The broad/free FFT cache issue was an identity mismatch in manifest metadata:
+the numerical arrays matched, while timer and temporary-output metadata differed.
+This is not a numerical residual failure. The strict identical FFT route requires
+the exact retained `--fixture-cache`; other routine routes can use the option
+when needed. The legacy FFT reuse route
+prefers an eligible exact-qualified arithmetic format in FP32-then-FP64 order;
+qualification makes a fresh selection. The focused GPU check passed in
+33.771707 seconds ([archived details](validation-data/triad-v3/2026-11-03-performance-broader/scientific-focused-broad-001/README.md)); full reference/candidate runs took 6.261369/6.251684 seconds,
+and the single prediction/full-endpoint checks passed. Its conditional normal
+interval [0.898242, 1.106221] includes the historical engineering allowance and
+does not support a future-coverage claim. The focused CPU check also passed one
+prediction/full endpoint in 206.889412 seconds, with 33 training samples,
+reference/candidate times 12.944703/13.118263 seconds, and conditional interval
+[0.882159, 1.148666]. Both used qualified FP32 and preserved source, fixture and
+anchor identity. These component checks do not establish future coverage or rewrite the
+incomplete CPU routine. Their 206.889 s CPU component plus the original
+1684.791 s routine sum to 1891.681 s (31m32s); this sum includes the original
+failed broad-HF pilot, which was not rerun, and is not a newly measured
+complete-run wall time. No repaired complete routine has
+been measured against the 25-minute target.
+
+For strict identical free-crystal, qualification took 47.034 seconds. One
+randomized pair measured 61.620 seconds direct and 24.258 seconds abbreviated,
+a nominal difference of 37.362 seconds (60.63%) and about a two-use break-even
+after qualification cost. This is one pair, not a repeated savings estimate.
+The initial absolute-baseline gate was inconclusive as expected; the qualified
+anchor remains valid for its exact identity.
+
+## Broader current qualification
+
+The broader archive adds three current evidence groups. The planner/statistics
+adapter completed eight full direct targets in 42.635 seconds, all passing their
+complete-process and nested computation gates. The resource adapter completed
+two full direct paired/sequential regime targets in 14.467 seconds, with both
+upper slowdown bounds below 1.30, exact work counters, and byte parity. The
+older resource forecast remains inconclusive and unapplied; direct measurement
+is the selected current route, so no cross-duration prediction is claimed.
+
+On RTX PRO 6000 Blackwell Workstation 96 GB, GPU lifecycle002 conditionally
+qualified the frozen F+10W mixed-campaign forecast using three full paired holds
+with at least 60 warm seconds each. It also measured process-cold and private
+empty-Triton-cache full-shape starts under its recorded cache contract. This is
+one backend/stack identity. Seven older H200 staged proofs replayed exactly on
+their matching numerical stack; that result is separate and does not transfer
+H200 runtimes to Blackwell.
+
+The historical CPU lifecycle F+6W forecast remains inconclusive: its paired
+interval [0.890392, 0.938725] fell below the [0.90, 1.10] equivalence band. The
+current direct campaign selected five cycles with `auto`; the fixed default is
+six. It retained six warm spans from 72.515 to 75.680 seconds and a one-sided
+upper ratio of 1.0325645. A reference last/first-quarter ratio of 1.14435 remains
+an unresolved stability/environment hold. Independent review accepted the
+raw-only derived replay after verifying 21 protected timed/model/proof function bodies unchanged from 5dfa0492 and 12 raw-file hashes;
+it validates the cold and all-nine-family direct target/work contract, but the original CPU
+routine remains incomplete; this does not validate the historical F+6W forecast.
+The current archive is indexed in the [broader qualification
+record](validation-data/triad-v3/2026-11-03-performance-broader/README.md).
+
 ## Finite gaps and limitations
 
-The JSON inventory separates finite `required_gaps` from `limitations`. Remaining finite gaps are standalone planner/statistics timing, validation of a forecast across a representative implemented resource-regime boundary, and an independently checked mixed-family campaign-throughput forecast. The complete CPU run measures aggregate cost; it does not validate a frozen aggregate prediction. Existing named full targets and preflight/tile-tail checks remain valid, while extrapolation across an unqualified resource boundary is prohibited.
+The JSON inventory separates finite `required_gaps` from `limitations`. Planner and resource rows have accepted direct full-target receipts. The direct CPU lifecycle campaign now has an all-nine-family measurement; independent review accepted its raw-only classification after verifying 21 protected timed/model/proof function bodies unchanged from 5dfa0492 and 12 raw-file hashes. The original report and exit remain unchanged, and the 1.14435 stability/environment hold still prevents calling it a routine pass. The historical CPU F+6W forecast failure remains preserved and unused by direct mode. The 741.035-second decision routine measures aggregate runtime cost, not the frozen mixed-campaign sequence. Existing named full targets and preflight/tile-tail checks remain valid.
 
-Failed CPU staged models and the later H200 graph/tensor reuse failures remain explicit limitations of those prediction routes. Direct full measurements satisfy the named target timing obligation without requiring an abbreviated model. Missing the 5% precision goal remains a separately reported outcome, not an inventory veto or a change to the existing regression gate. The grouped 6/8-to-24 CFO forecast is unqualified; its full direct measurements are valid. The RBPF direct case is one particle-count/resampling point, with no general scaling model claimed.
+The CPU staged forecast failures and GPU graph/tensor routine endpoint outcomes remain attached to those specific prediction routes; earlier H200 staged proofs are retained separately and replayed only on the matching stack. Direct full measurements satisfy named target timing obligations without requiring an abbreviated model. Missing the 5% timing-width diagnostic remains separate from the regression decision. The grouped 6/8-to-24 CFO forecast is unqualified; its full direct measurements are valid. The RBPF direct case is one particle-count/resampling point, with no general scaling model claimed.
 
-Cold full-shape GPU compile/capture costs were not requested in the warm-target contract and remain unqualified; the cold tensor functional JIT timing is not a full-target cold measurement. No exhaustive memory tiers, allocator/spill/OOM sweep, multi-day processor wall, thread/concurrency ladder, all-channel Cartesian product, all-device transfer, or universal cross-library dispatch claim is required or established. Channel interactions outside named representative cases and physical-radio behavior remain limitations. Direct complete measurements remain valid for their named targets even where an extrapolation route or timing-precision target is unqualified.
+GPU lifecycle002 now conditionally qualifies the declared process-cold and private-empty-Triton-cache full-shape checks for the RTX PRO 6000 Blackwell Workstation, with the OS page cache and global driver caches retained. The earlier cold tensor functional JIT timing remains a functional observation, not a full-target cold measurement. This qualification does not transfer to H200, CPU, another software stack, or unmeasured cache state. No exhaustive memory tiers, allocator/spill/OOM sweep, multi-day processor wall, thread/concurrency ladder, all-channel Cartesian product, all-device transfer, or universal cross-library dispatch claim is required or established. Channel interactions outside named representative cases and physical-radio behavior remain limitations. Paired source ratios can cancel common environment slowdowns. Actual-helper synthetic controls demonstrate a hardware warning path, not universal physical detection; selected backend probes do not cover every startup/import/disk activity or all CPU stages of GPU-hosted pipelines. Keep hardware health, functional correctness and model validity separate. Direct complete measurements remain valid for their named targets even where an extrapolation route or timing-precision target is unqualified.
 

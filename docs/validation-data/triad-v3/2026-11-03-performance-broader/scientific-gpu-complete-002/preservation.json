@@ -1,0 +1,2299 @@
+{
+  "exclusions": [
+    "physical arrays",
+    "executables",
+    "private provider metadata",
+    "later GPU diagnostics and later complete runs"
+  ],
+  "records": [
+    {
+      "embedded_in": "records/complete-routine-002/extensions/lifecycle/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-000.json",
+      "json_path": [
+        "cases",
+        0,
+        "cache_precondition"
+      ],
+      "raw_bytes": 513293,
+      "raw_sha256": "32357a086b42abfd5dde889458eeba9964cd50d1a805a1e171e147e531acf0ae"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-reference-40494719144.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/lifecycle/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cold-direct-001.json",
+      "json_path": [
+        "cases",
+        0,
+        "full_pairs",
+        0
+      ],
+      "raw_bytes": 513299,
+      "raw_sha256": "82467706e5e3069e48891c41e82759b0cdc5984ecebb71e825c4d5690b2459fe"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/lifecycle/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cold-direct-002.json",
+      "json_path": [
+        "cases",
+        0,
+        "full_pairs",
+        1
+      ],
+      "raw_bytes": 513298,
+      "raw_sha256": "e550cdf2bdea43825c9efd3660d2c31ae8b86879123919bf6fb9b7cb17656939"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/lifecycle/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cold-direct-003.json",
+      "json_path": [
+        "cases",
+        0,
+        "full_pairs",
+        2
+      ],
+      "raw_bytes": 513292,
+      "raw_sha256": "a6ea7a5ebac3212e95ea94ebb95c713827e2115d60152270460f7a46482ff48e"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cold-direct-candidate-40495719144.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cold-direct-candidate-40496719144.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cold-direct-candidate-40497719144.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cold-direct-reference-40495719144.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cold-direct-reference-40496719144.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cold-direct-reference-40497719144.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/lifecycle/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/result.json",
+      "json_path": [
+        "cases",
+        0
+      ],
+      "raw_bytes": 2517493,
+      "raw_sha256": "f9a03ab453f706d9d7e7d084241cd2857512e132d3e488f319812013c143e744"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/lifecycle/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/lifecycle/mixed-cuda/cache-precondition-000.json",
+      "json_path": [
+        "cases",
+        1,
+        "cache_precondition"
+      ],
+      "raw_bytes": 3086212,
+      "raw_sha256": "3fb51f410b46722a108e2e71e752c18812f12d5f2f099cb5478b060b0fa6ce19"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/lifecycle/mixed-cuda/cache-precondition-candidate-908474612200.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/lifecycle/mixed-cuda/cache-precondition-reference-908474612200.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/lifecycle/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/lifecycle/mixed-cuda/forecast.json",
+      "json_path": [
+        "cases",
+        1,
+        "forecast"
+      ],
+      "raw_bytes": 1287589,
+      "raw_sha256": "857eec5ec211fc14835450b248ec22112c42b04565e472f2fd3d51e9ae232b78"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/lifecycle/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/lifecycle/mixed-cuda/result.json",
+      "json_path": [
+        "cases",
+        1
+      ],
+      "raw_bytes": 33355715,
+      "raw_sha256": "e1ccffb6e2799aeb225523358321a30300baf426f35c5555e1667c8358a65817"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/lifecycle/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/lifecycle/mixed-cuda/training-001.json",
+      "json_path": [
+        "cases",
+        1,
+        "training",
+        0
+      ],
+      "raw_bytes": 3476345,
+      "raw_sha256": "2047997d4f1c3906cb251df306445bcc4c2536b1a8ef08f6484499a0d5fbc485"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/lifecycle/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/lifecycle/mixed-cuda/training-002.json",
+      "json_path": [
+        "cases",
+        1,
+        "training",
+        1
+      ],
+      "raw_bytes": 3476227,
+      "raw_sha256": "a8ddd242cedd4854f52b39828bf165ba735f39d34385d146efe1b214ad10fd32"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/lifecycle/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/lifecycle/mixed-cuda/training-003.json",
+      "json_path": [
+        "cases",
+        1,
+        "training",
+        2
+      ],
+      "raw_bytes": 3476270,
+      "raw_sha256": "49ad0b5a695456da5e9a3ff42ca8c9fbfbd6f3082b7a4cec1130af3486703cc9"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/lifecycle/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/lifecycle/mixed-cuda/training-004.json",
+      "json_path": [
+        "cases",
+        1,
+        "training",
+        3
+      ],
+      "raw_bytes": 3476319,
+      "raw_sha256": "942a74f7188119275f419ddea99a8a9ead9fda2d2212967267e0cf5e349299cc"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/lifecycle/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/lifecycle/mixed-cuda/training-005.json",
+      "json_path": [
+        "cases",
+        1,
+        "training",
+        4
+      ],
+      "raw_bytes": 3476280,
+      "raw_sha256": "c217df0959a27a2042efdc0a5597121d51805de78cab9be878973f87f1fc6a67"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/lifecycle/mixed-cuda/training-candidate-908475612200.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/lifecycle/mixed-cuda/training-candidate-908476612200.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/lifecycle/mixed-cuda/training-candidate-908477612200.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/lifecycle/mixed-cuda/training-candidate-908478612200.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/lifecycle/mixed-cuda/training-candidate-908479612200.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/lifecycle/mixed-cuda/training-reference-908475612200.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/lifecycle/mixed-cuda/training-reference-908476612200.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/lifecycle/mixed-cuda/training-reference-908477612200.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/lifecycle/mixed-cuda/training-reference-908478612200.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/lifecycle/mixed-cuda/training-reference-908479612200.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/lifecycle/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/lifecycle/mixed-cuda/validation-001.json",
+      "json_path": [
+        "cases",
+        1,
+        "full_pairs",
+        0
+      ],
+      "raw_bytes": 6987319,
+      "raw_sha256": "64b5af7a5d1372205570d78438159f5defc9e5ca169dea7df5615917139a4d73"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/lifecycle/mixed-cuda/validation-candidate-908575612200.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/lifecycle/mixed-cuda/validation-reference-908575612200.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/lifecycle/summary.json",
+      "raw_bytes": 39940207,
+      "raw_sha256": "161fae4b0600b79812dd15370e28272d53bd03e729199915e1fcdf1a0e753eb3",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/early-calendar/pair-001-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/early-calendar/pair-001-candidate-raw.json",
+      "raw_bytes": 1457,
+      "raw_sha256": "39875e179163c517c6e436531f5aa476fc60e7a5fd99c23d5c4e365f9ac24a03",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/early-calendar/pair-001-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/early-calendar/pair-001-reference-raw.json",
+      "raw_bytes": 1462,
+      "raw_sha256": "15901816d9c2f13f00c94303748a1eee3480ff75b46c02991f7cc056b355ee66",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/early-calendar/pair-001.json",
+      "json_path": [
+        "cases",
+        0,
+        "pairs",
+        0
+      ],
+      "raw_bytes": 3986,
+      "raw_sha256": "06cd5691e7736462fa5dd62f5bba922d5c6ca8b545febad5108c8cef7c4c8fc4"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/early-calendar/pair-002-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/early-calendar/pair-002-candidate-raw.json",
+      "raw_bytes": 1457,
+      "raw_sha256": "0bdd28e7a2e620fdcc8977b06895d2da1f918664e784b2e477801910ef2cf8ce",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/early-calendar/pair-002-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/early-calendar/pair-002-reference-raw.json",
+      "raw_bytes": 1452,
+      "raw_sha256": "2b3583d284a7ebc06b6123afb48bdef33108d3def019635ad6005be40448ac3c",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/early-calendar/pair-002.json",
+      "json_path": [
+        "cases",
+        0,
+        "pairs",
+        1
+      ],
+      "raw_bytes": 3986,
+      "raw_sha256": "29a7f2291b3844915f63567a8d257d8c9defba7c20d5a977622c157bbe4278f0"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/early-calendar/pair-003-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/early-calendar/pair-003-candidate-raw.json",
+      "raw_bytes": 1457,
+      "raw_sha256": "53b81d65e7e276a81f1c43ad7dca8aea87ec11a485d7d5699856ede64ceff5ae",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/early-calendar/pair-003-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/early-calendar/pair-003-reference-raw.json",
+      "raw_bytes": 1461,
+      "raw_sha256": "0710d10475016e1bb5ca257cc9e4d7ef90668d5aba19eccdaa7a2abde427b07c",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/early-calendar/pair-003.json",
+      "json_path": [
+        "cases",
+        0,
+        "pairs",
+        2
+      ],
+      "raw_bytes": 3985,
+      "raw_sha256": "4ec8fae87d5bfe4ab34cfeffb7921ae60e7ce79c13d331489376a1d574517f08"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/early-calendar/pair-004-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/early-calendar/pair-004-candidate-raw.json",
+      "raw_bytes": 1447,
+      "raw_sha256": "3f6383b88abfa6e88124df6224bf4f3b6dde49b8a1a11caadef5986869004bdc",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/early-calendar/pair-004-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/early-calendar/pair-004-reference-raw.json",
+      "raw_bytes": 1461,
+      "raw_sha256": "30fe6f10c4df640fb614fea91d147215df4f66dc1176b2690ac625845caca502",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/early-calendar/pair-004.json",
+      "json_path": [
+        "cases",
+        0,
+        "pairs",
+        3
+      ],
+      "raw_bytes": 3985,
+      "raw_sha256": "bebf0d5490e05c9f6cc573c8e0198b3bafefc31b80b3bd06f4200c6315cbcae0"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/early-calendar/pair-005-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/early-calendar/pair-005-candidate-raw.json",
+      "raw_bytes": 1458,
+      "raw_sha256": "f294b02cc39465ff98b523495adadb2246275b620dbb1201c7554b53c6b9f3dc",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/early-calendar/pair-005-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/early-calendar/pair-005-reference-raw.json",
+      "raw_bytes": 1461,
+      "raw_sha256": "e53a9125456231fb8c662a19a7e0fd6a8b45ae83476170097320035e3497d280",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/early-calendar/pair-005.json",
+      "json_path": [
+        "cases",
+        0,
+        "pairs",
+        4
+      ],
+      "raw_bytes": 3986,
+      "raw_sha256": "3c2964e57520cd47d219412d17c05b758728ec759127c75b8c1412c80f9aef71"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/early-calendar/result.json",
+      "json_path": [
+        "cases",
+        0
+      ],
+      "raw_bytes": 50327,
+      "raw_sha256": "3bd3bc1f3a1c36f256c35f0b397a733e750ebe40e8b4d21da97985d8db2f777f"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/finite-grids/pair-001-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/finite-grids/pair-001-candidate-raw.json",
+      "raw_bytes": 973,
+      "raw_sha256": "3d2855722aa82562489ae041a8eed6f9557a20c5e8486a136d09b2c35420226f",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/finite-grids/pair-001-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/finite-grids/pair-001-reference-raw.json",
+      "raw_bytes": 976,
+      "raw_sha256": "7a104b7f8f1beeee2134e98cd1f6fb4b0674e3604df26aede0b0224e1abbe113",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/finite-grids/pair-001.json",
+      "json_path": [
+        "cases",
+        1,
+        "pairs",
+        0
+      ],
+      "raw_bytes": 2669,
+      "raw_sha256": "63bc4844fce5293731bf7a8a0f69245b0e7609e210b8dc1fb08dbfa0cb35fba7"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/finite-grids/pair-002-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/finite-grids/pair-002-candidate-raw.json",
+      "raw_bytes": 973,
+      "raw_sha256": "fa1cc7daae00b4833a5346bfb20c6232fa8c664e717285351f9e3a0c33814340",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/finite-grids/pair-002-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/finite-grids/pair-002-reference-raw.json",
+      "raw_bytes": 967,
+      "raw_sha256": "503d21d5ad37653aeded1f55ab331359bf18a37439bd372c074fc25aa96c74dd",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/finite-grids/pair-002.json",
+      "json_path": [
+        "cases",
+        1,
+        "pairs",
+        1
+      ],
+      "raw_bytes": 2670,
+      "raw_sha256": "a43ea175aeaa919a4e13040dddd894280ee4578918f3218979efc8ff4ca19ac9"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/finite-grids/pair-003-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/finite-grids/pair-003-candidate-raw.json",
+      "raw_bytes": 964,
+      "raw_sha256": "b1d9a06ef383afe086d14851eccc432f98771845574b0701d83af9dfcfa52d57",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/finite-grids/pair-003-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/finite-grids/pair-003-reference-raw.json",
+      "raw_bytes": 977,
+      "raw_sha256": "1bd77f60790fbbe895e0db213a2617a4f0d79275a71e157e5d074cf02c2a199b",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/finite-grids/pair-003.json",
+      "json_path": [
+        "cases",
+        1,
+        "pairs",
+        2
+      ],
+      "raw_bytes": 2671,
+      "raw_sha256": "3601367e25b5b23fba26c8f1ef9b7eca1b4e98e861dd48c10d2f7c0b50440e94"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/finite-grids/pair-004-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/finite-grids/pair-004-candidate-raw.json",
+      "raw_bytes": 964,
+      "raw_sha256": "8f5c591c973e2be8aca21c4123e253a213c92fa17a7de5cf231bdad5af46bb35",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/finite-grids/pair-004-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/finite-grids/pair-004-reference-raw.json",
+      "raw_bytes": 968,
+      "raw_sha256": "61fc37a68a9d45767a7bd7b3fc6328f926ea679708eedd6434f465863b26e403",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/finite-grids/pair-004.json",
+      "json_path": [
+        "cases",
+        1,
+        "pairs",
+        3
+      ],
+      "raw_bytes": 2671,
+      "raw_sha256": "c8f627e1ab44a86ab90a8a873968364af31b27f0c43736833e838abd7705a9af"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/finite-grids/pair-005-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/finite-grids/pair-005-candidate-raw.json",
+      "raw_bytes": 963,
+      "raw_sha256": "7920b2ec4576dc4210c1f0545534e94b4a550eee96ac908986999175c2a7e42d",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/finite-grids/pair-005-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/finite-grids/pair-005-reference-raw.json",
+      "raw_bytes": 977,
+      "raw_sha256": "dfe19d71f8508db97967fd1d2376ce560caa8b725075510acd95c388348d7a1f",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/finite-grids/pair-005.json",
+      "json_path": [
+        "cases",
+        1,
+        "pairs",
+        4
+      ],
+      "raw_bytes": 2670,
+      "raw_sha256": "d308a79c825207a543d505eaad450ce1e52829d2a9b5abeaf4fb295aedf8c979"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/finite-grids/result.json",
+      "json_path": [
+        "cases",
+        1
+      ],
+      "raw_bytes": 42667,
+      "raw_sha256": "2753b9eea7ff1dcac4c359f1d4476bf5eca4cce5d939157cd6545c0646dad71d"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/gamma-branches/pair-001-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gamma-branches/pair-001-candidate-raw.json",
+      "raw_bytes": 1768,
+      "raw_sha256": "2cbee85e23a5c24028ed9aba6c33cdcdf467d451133639f9eaa3563af05036ad",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/gamma-branches/pair-001-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gamma-branches/pair-001-reference-raw.json",
+      "raw_bytes": 1771,
+      "raw_sha256": "55c483b041d132ae654cfe36e2646f4be825e1b023fad5a90f4b47881df41c54",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gamma-branches/pair-001.json",
+      "json_path": [
+        "cases",
+        5,
+        "pairs",
+        0
+      ],
+      "raw_bytes": 5028,
+      "raw_sha256": "8bbe1b2e1a734eb36461897e5b79ba8f504982eaf6bb99cad3f8d8790773e5b8"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/gamma-branches/pair-002-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gamma-branches/pair-002-candidate-raw.json",
+      "raw_bytes": 1768,
+      "raw_sha256": "6bd678cf6e8088f2d97e5fa64689985b63ec025a1440aa94f67e840a62ac6583",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/gamma-branches/pair-002-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gamma-branches/pair-002-reference-raw.json",
+      "raw_bytes": 1772,
+      "raw_sha256": "1c1d84f157586a5474cac0c4d93e3d07f0980ee92f5df284be028a60bb15686e",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gamma-branches/pair-002.json",
+      "json_path": [
+        "cases",
+        5,
+        "pairs",
+        1
+      ],
+      "raw_bytes": 5029,
+      "raw_sha256": "021093ea90fde47262c2d33a1a76a739fc8ca26001d645da5ae90076b032280b"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/gamma-branches/pair-003-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gamma-branches/pair-003-candidate-raw.json",
+      "raw_bytes": 1778,
+      "raw_sha256": "4fbbf744de74dc06a2f9969f570c632ee20988a4b9216cc3d190a6795240edf0",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/gamma-branches/pair-003-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gamma-branches/pair-003-reference-raw.json",
+      "raw_bytes": 1772,
+      "raw_sha256": "16be3e0a6011684288d17d4ccb05e08301bdf36906f7d1b63563d8fedbb34baf",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gamma-branches/pair-003.json",
+      "json_path": [
+        "cases",
+        5,
+        "pairs",
+        2
+      ],
+      "raw_bytes": 5029,
+      "raw_sha256": "3c85fdf9327974b3f6242c3fdd56da1fec2dc2a85bce0a39865374c4d8780deb"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/gamma-branches/pair-004-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gamma-branches/pair-004-candidate-raw.json",
+      "raw_bytes": 1767,
+      "raw_sha256": "67fe83f56071adccbb4d409e0f3eb4b60f19a5d60c64ff1bb998082989b28dbc",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/gamma-branches/pair-004-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gamma-branches/pair-004-reference-raw.json",
+      "raw_bytes": 1770,
+      "raw_sha256": "5de16747e8863a37ac11596acdff0de76c2afbec6a0001c7b6b15d76b0be6ef0",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gamma-branches/pair-004.json",
+      "json_path": [
+        "cases",
+        5,
+        "pairs",
+        3
+      ],
+      "raw_bytes": 5026,
+      "raw_sha256": "a32d31d4d9889ce8c95798d835689de1cedf711e711ad6ef6a19226944065250"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/gamma-branches/pair-005-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gamma-branches/pair-005-candidate-raw.json",
+      "raw_bytes": 1766,
+      "raw_sha256": "a1dbb3711e0bff5bb56766a8568dbbd6acd10d0588bbcba6b2f52e2f250644d0",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/gamma-branches/pair-005-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gamma-branches/pair-005-reference-raw.json",
+      "raw_bytes": 1781,
+      "raw_sha256": "ecb2f455deceba345e13f63eb1f7be3e22648465e8ac272b92cde5c4b3bb99aa",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gamma-branches/pair-005.json",
+      "json_path": [
+        "cases",
+        5,
+        "pairs",
+        4
+      ],
+      "raw_bytes": 5026,
+      "raw_sha256": "875188e7b307b346cf56b236739c85f6f5e6838b8496c3653ed35f3405f9294f"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/gamma-branches/pair-006-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gamma-branches/pair-006-candidate-raw.json",
+      "raw_bytes": 1767,
+      "raw_sha256": "d6c03f4bc1f8145568772ce24bb6f7edde9856d70c942cd4839ee47d3d1fe75e",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/gamma-branches/pair-006-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gamma-branches/pair-006-reference-raw.json",
+      "raw_bytes": 1772,
+      "raw_sha256": "cb71b755a4af48d9f87b7852507f68919941060a4819609ce17a5d02f71af667",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gamma-branches/pair-006.json",
+      "json_path": [
+        "cases",
+        5,
+        "pairs",
+        5
+      ],
+      "raw_bytes": 5028,
+      "raw_sha256": "914f782ff68db486de24686431c1750fb47f6f2a13e3d9bbcc914bf5b575f71f"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/gamma-branches/pair-007-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gamma-branches/pair-007-candidate-raw.json",
+      "raw_bytes": 1778,
+      "raw_sha256": "dbec6efc58f28733efa9cbe1050aeb34c0ab02dfff5ce67d6480d2b1d80742da",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/gamma-branches/pair-007-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gamma-branches/pair-007-reference-raw.json",
+      "raw_bytes": 1772,
+      "raw_sha256": "b4ba5b95bf65ac3599385bce2a6fa88b1df23bb5fc3d0a66747fb6c9183d4227",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gamma-branches/pair-007.json",
+      "json_path": [
+        "cases",
+        5,
+        "pairs",
+        6
+      ],
+      "raw_bytes": 5029,
+      "raw_sha256": "ecd37d12f0fb6d4f3fa9b5cbc3277aa07ef95e766d83e0e68176ee9e8f92d2f3"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/gamma-branches/pair-008-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gamma-branches/pair-008-candidate-raw.json",
+      "raw_bytes": 1778,
+      "raw_sha256": "8f403a51d5aeefa243630cbccd3a9cf7fb6db639bb941908b7ea6fb1223448f5",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/gamma-branches/pair-008-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gamma-branches/pair-008-reference-raw.json",
+      "raw_bytes": 1782,
+      "raw_sha256": "3c3b4c6f483b570d4e1568ba2a4d6ab772a580ec7807e1441ec01a36a30bab09",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gamma-branches/pair-008.json",
+      "json_path": [
+        "cases",
+        5,
+        "pairs",
+        7
+      ],
+      "raw_bytes": 5029,
+      "raw_sha256": "b9de9870873dc098efb3bea3a0a38f4d09229071df0643e49a0263581275cd00"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/gamma-branches/pair-009-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gamma-branches/pair-009-candidate-raw.json",
+      "raw_bytes": 1768,
+      "raw_sha256": "08acb171987ec862319edbea9a81b353ef7837d1ea167b0ab17b2c496b270ade",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/gamma-branches/pair-009-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gamma-branches/pair-009-reference-raw.json",
+      "raw_bytes": 1782,
+      "raw_sha256": "4ea5e3d9dd985697731bbb16ae18907fa7f480fd7333c97c0fea713be1bfbf45",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gamma-branches/pair-009.json",
+      "json_path": [
+        "cases",
+        5,
+        "pairs",
+        8
+      ],
+      "raw_bytes": 5029,
+      "raw_sha256": "0a51c7e5fb3c2729688272b3f8ef17313051d57190ab68347ccd7cb99e11315b"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gamma-branches/result.json",
+      "json_path": [
+        "cases",
+        5
+      ],
+      "raw_bytes": 92846,
+      "raw_sha256": "e0a7dbce9e8d0528dcf5887ece82e293daef2dd7317748654b1e953957a2f276"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/gaussian-design-chernoff/pair-001-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gaussian-design-chernoff/pair-001-candidate-raw.json",
+      "raw_bytes": 9209,
+      "raw_sha256": "ca2b1fae9f8635d8ef90d491237391a58682de41d109f25c92480639cd6333e7",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/gaussian-design-chernoff/pair-001-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gaussian-design-chernoff/pair-001-reference-raw.json",
+      "raw_bytes": 9217,
+      "raw_sha256": "21bd0321f7d85e4afbd68ed5ae7ee64c32fb097bd8ef6b367ac7b7a19bbb3e7f",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gaussian-design-chernoff/pair-001.json",
+      "json_path": [
+        "cases",
+        7,
+        "pairs",
+        0
+      ],
+      "raw_bytes": 19621,
+      "raw_sha256": "fe1539df106c87874a103beb04e06ce0e4df6d5cc6ad4bd830c33656f1655204"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/gaussian-design-chernoff/pair-002-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gaussian-design-chernoff/pair-002-candidate-raw.json",
+      "raw_bytes": 9209,
+      "raw_sha256": "651e7e233632d755ef3e2b73fc213c8950ea5a55ec06ba53e827c66940534902",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/gaussian-design-chernoff/pair-002-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gaussian-design-chernoff/pair-002-reference-raw.json",
+      "raw_bytes": 9216,
+      "raw_sha256": "735acb4c12f128d9a7e58e7c939d92d3089699ab0953f9704a5c528e83207733",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gaussian-design-chernoff/pair-002.json",
+      "json_path": [
+        "cases",
+        7,
+        "pairs",
+        1
+      ],
+      "raw_bytes": 19620,
+      "raw_sha256": "d1ceceeb9f65f655be0b61b97bd12f7cf64978c79dd7652c2d79089b384d0442"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/gaussian-design-chernoff/pair-003-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gaussian-design-chernoff/pair-003-candidate-raw.json",
+      "raw_bytes": 9209,
+      "raw_sha256": "4858ac3f8481458625e5ff7ca180eaaf6a33b0eefdcf257b3d2f938183777083",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/gaussian-design-chernoff/pair-003-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gaussian-design-chernoff/pair-003-reference-raw.json",
+      "raw_bytes": 9217,
+      "raw_sha256": "c60f7167d2930ac7b6e9f06ac191c73b8cb5b2886faad82928f3d8533b3ae876",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gaussian-design-chernoff/pair-003.json",
+      "json_path": [
+        "cases",
+        7,
+        "pairs",
+        2
+      ],
+      "raw_bytes": 19621,
+      "raw_sha256": "4aca8e4a125b5cd4e0c990f49e2f88c62940d10459022c6375c85efd1d3fb45b"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/gaussian-design-chernoff/pair-004-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gaussian-design-chernoff/pair-004-candidate-raw.json",
+      "raw_bytes": 9208,
+      "raw_sha256": "e3b54810a866ff54bfeabc5b4aab7ada98483b2bdfbfeb0870305c3c28a76cb3",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/gaussian-design-chernoff/pair-004-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gaussian-design-chernoff/pair-004-reference-raw.json",
+      "raw_bytes": 9216,
+      "raw_sha256": "fed97a8aa21633fd8f79f46263680c065fea963013281f2b6626217e840a936c",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gaussian-design-chernoff/pair-004.json",
+      "json_path": [
+        "cases",
+        7,
+        "pairs",
+        3
+      ],
+      "raw_bytes": 19619,
+      "raw_sha256": "ba7506d302d3b8aedfd04a901a5b7d12960e0d524523509a9e828d4b0f6dfeef"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/gaussian-design-chernoff/pair-005-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gaussian-design-chernoff/pair-005-candidate-raw.json",
+      "raw_bytes": 9209,
+      "raw_sha256": "8d4a2ee005f626b1f0d91b37b961eb3d908ea17e1765be5e8b624abffca0ac61",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/gaussian-design-chernoff/pair-005-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gaussian-design-chernoff/pair-005-reference-raw.json",
+      "raw_bytes": 9216,
+      "raw_sha256": "b5f2f7950308333a6547cee19365d67b776e6d82aacd39c17963790db69f0c50",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gaussian-design-chernoff/pair-005.json",
+      "json_path": [
+        "cases",
+        7,
+        "pairs",
+        4
+      ],
+      "raw_bytes": 19620,
+      "raw_sha256": "8db38b64f36064d99ca735889e348617e0ed8b2fa8aeb23260e633c22740f512"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gaussian-design-chernoff/result.json",
+      "json_path": [
+        "cases",
+        7
+      ],
+      "raw_bytes": 136711,
+      "raw_sha256": "6b50b80eebe4acc02715d9ccc2435c192a233662afdc70e8abedd74ff38a39ef"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/gaussian-design-markov/pair-001-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gaussian-design-markov/pair-001-candidate-raw.json",
+      "raw_bytes": 7417,
+      "raw_sha256": "224429b3e5b922a0602afe920b29216406d99efa28cb7bf8a8d2b11723f17eb8",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/gaussian-design-markov/pair-001-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gaussian-design-markov/pair-001-reference-raw.json",
+      "raw_bytes": 7424,
+      "raw_sha256": "de538c5258541bf86aee16220cc66984b3d9543b1fc2e6d9634a04b7f699815b",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gaussian-design-markov/pair-001.json",
+      "json_path": [
+        "cases",
+        6,
+        "pairs",
+        0
+      ],
+      "raw_bytes": 15700,
+      "raw_sha256": "7b6330c47f8d45df7b1e4056945589758efddef9d579063e01427ed1084511cf"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/gaussian-design-markov/pair-002-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gaussian-design-markov/pair-002-candidate-raw.json",
+      "raw_bytes": 7418,
+      "raw_sha256": "b5a0f263d0dce0686125e72a10cedddb5bbf17e85f51849c7cec1883c90d15f2",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/gaussian-design-markov/pair-002-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gaussian-design-markov/pair-002-reference-raw.json",
+      "raw_bytes": 7426,
+      "raw_sha256": "1b2df499fa7b2122e972fdee5c93553e106239b606df0e03685f16ed216b8489",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gaussian-design-markov/pair-002.json",
+      "json_path": [
+        "cases",
+        6,
+        "pairs",
+        1
+      ],
+      "raw_bytes": 15703,
+      "raw_sha256": "8624f0130f8556f2ff1ccb4513cb3c536e8ffd73e46295b5749f4b8d7402e321"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/gaussian-design-markov/pair-003-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gaussian-design-markov/pair-003-candidate-raw.json",
+      "raw_bytes": 7417,
+      "raw_sha256": "368a5a086947700320b680b394d7d054d5f6a6ef80fcff856bc10aed5d11980d",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/gaussian-design-markov/pair-003-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gaussian-design-markov/pair-003-reference-raw.json",
+      "raw_bytes": 7425,
+      "raw_sha256": "82072dbf67bbd7e94ac0f2d9f9e2fd584e7446bf2dc0efbaefd9468997581d1f",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gaussian-design-markov/pair-003.json",
+      "json_path": [
+        "cases",
+        6,
+        "pairs",
+        2
+      ],
+      "raw_bytes": 15701,
+      "raw_sha256": "fb91796fc9c5af95d1cbd9fe69044aa386bc5d508de41c602cf315e6c5ea63d6"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/gaussian-design-markov/pair-004-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gaussian-design-markov/pair-004-candidate-raw.json",
+      "raw_bytes": 7418,
+      "raw_sha256": "267f0fab7ea86e47a1184d27768cf1eb1de3f7b834424dcb44e14b4a1ccd77a7",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/gaussian-design-markov/pair-004-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gaussian-design-markov/pair-004-reference-raw.json",
+      "raw_bytes": 7426,
+      "raw_sha256": "2e476955bfff228d3dc13e6cadc2ec0b000c37e8573e7f231b192a9bf8729f7c",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gaussian-design-markov/pair-004.json",
+      "json_path": [
+        "cases",
+        6,
+        "pairs",
+        3
+      ],
+      "raw_bytes": 15703,
+      "raw_sha256": "5426f23a911b45ba6e3ff68624831fbc438817c30c71a8c2abb5bb78b849dc77"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/gaussian-design-markov/pair-005-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gaussian-design-markov/pair-005-candidate-raw.json",
+      "raw_bytes": 7418,
+      "raw_sha256": "ef785169c4fd9fea1aabf114d330df06a187c34018f51081216f6be70426b7b7",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/gaussian-design-markov/pair-005-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gaussian-design-markov/pair-005-reference-raw.json",
+      "raw_bytes": 7426,
+      "raw_sha256": "ee866b994e70d80d5dfb2529a0411f18f156cb32febe544e16cbf5c30ed32e5d",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gaussian-design-markov/pair-005.json",
+      "json_path": [
+        "cases",
+        6,
+        "pairs",
+        4
+      ],
+      "raw_bytes": 15703,
+      "raw_sha256": "89e265a3de45a41492c0435f355c73d4c7b78757f1614407005ac6efbba4d97a"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/gaussian-design-markov/result.json",
+      "json_path": [
+        "cases",
+        6
+      ],
+      "raw_bytes": 114225,
+      "raw_sha256": "0a8bfa76552750f1cf78082bde49eafd1d8eaee7f2c50067efcb41cbe3865163"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/geometry-boundaries/pair-001-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/geometry-boundaries/pair-001-candidate-raw.json",
+      "raw_bytes": 1519,
+      "raw_sha256": "a248a1dea98e688631b0b54a108fb69b978989c3b2471c815bab09c27043ba2d",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/geometry-boundaries/pair-001-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/geometry-boundaries/pair-001-reference-raw.json",
+      "raw_bytes": 1533,
+      "raw_sha256": "c4a2231f510dd579ea0d0f50d701cc8a3ca7e9c7ade1483bd428c0177f76879c",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/geometry-boundaries/pair-001.json",
+      "json_path": [
+        "cases",
+        4,
+        "pairs",
+        0
+      ],
+      "raw_bytes": 4289,
+      "raw_sha256": "1e118504bf8aed7f5fb18ca32c957efb5ec3c0cb9d7a1caa622098844f4ff347"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/geometry-boundaries/pair-002-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/geometry-boundaries/pair-002-candidate-raw.json",
+      "raw_bytes": 1529,
+      "raw_sha256": "486def9936c039a32e4c475a22af6318c278bae1d6319d2b949ae10001b77901",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/geometry-boundaries/pair-002-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/geometry-boundaries/pair-002-reference-raw.json",
+      "raw_bytes": 1532,
+      "raw_sha256": "e16cb0377f91580b10c68de239c83c525e6723f975eb09aea53e5e5444f99c5e",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/geometry-boundaries/pair-002.json",
+      "json_path": [
+        "cases",
+        4,
+        "pairs",
+        1
+      ],
+      "raw_bytes": 4288,
+      "raw_sha256": "a3afb3dbdf73a5749e7494a44e5dab0015b2e3596010253b77a0bf8dd63f9259"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/geometry-boundaries/pair-003-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/geometry-boundaries/pair-003-candidate-raw.json",
+      "raw_bytes": 1529,
+      "raw_sha256": "67dea51baf793965bd9a5c444a787c015961b8ef76e703f04dd43e0a82caff09",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/geometry-boundaries/pair-003-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/geometry-boundaries/pair-003-reference-raw.json",
+      "raw_bytes": 1534,
+      "raw_sha256": "ffbc40ae3c897be8cafd43a744446a283486091e1626f89c8c075d751297c22f",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/geometry-boundaries/pair-003.json",
+      "json_path": [
+        "cases",
+        4,
+        "pairs",
+        2
+      ],
+      "raw_bytes": 4289,
+      "raw_sha256": "165dab945c96474a0ab028d4444fcb8d0a9809e2f49993230d8868b8ddcd3448"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/geometry-boundaries/pair-004-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/geometry-boundaries/pair-004-candidate-raw.json",
+      "raw_bytes": 1518,
+      "raw_sha256": "5137443cb22c7f3e63d9545db7f56f17561d9222962614f005dec9852da0cc14",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/geometry-boundaries/pair-004-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/geometry-boundaries/pair-004-reference-raw.json",
+      "raw_bytes": 1533,
+      "raw_sha256": "b82ddae1e933f07f259ecdec4a70149c9d41e00d3e6023f9a811dcc426131d9b",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/geometry-boundaries/pair-004.json",
+      "json_path": [
+        "cases",
+        4,
+        "pairs",
+        3
+      ],
+      "raw_bytes": 4288,
+      "raw_sha256": "e659ff0d7315f0bcb2ec195fcc9bd5b2309bd1811b5f218a228215cefe810893"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/geometry-boundaries/pair-005-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/geometry-boundaries/pair-005-candidate-raw.json",
+      "raw_bytes": 1529,
+      "raw_sha256": "52ef4c81f09ab5654d8d419c5e2d765eb52a77cf34b2a86de793e2b39b3b27e1",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/geometry-boundaries/pair-005-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/geometry-boundaries/pair-005-reference-raw.json",
+      "raw_bytes": 1533,
+      "raw_sha256": "dc56e701930b4defe95ef75ac737a327dd6a39df47563bf252089663f6c80d45",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/geometry-boundaries/pair-005.json",
+      "json_path": [
+        "cases",
+        4,
+        "pairs",
+        4
+      ],
+      "raw_bytes": 4289,
+      "raw_sha256": "7af5194aa9833793299fb9512d9de1e9762c927bf51bcd9abd0b80f778ce278d"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/geometry-boundaries/pair-006-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/geometry-boundaries/pair-006-candidate-raw.json",
+      "raw_bytes": 1529,
+      "raw_sha256": "ed1f3cc0058eb54d123386288166a3d7aa75323e0b1191d88430912969f4bb3a",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/geometry-boundaries/pair-006-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/geometry-boundaries/pair-006-reference-raw.json",
+      "raw_bytes": 1533,
+      "raw_sha256": "cdf0163c2b98ca6b9a59a54133b8042ec0add2f8aaa2802b2c21e35f7316350e",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/geometry-boundaries/pair-006.json",
+      "json_path": [
+        "cases",
+        4,
+        "pairs",
+        5
+      ],
+      "raw_bytes": 4289,
+      "raw_sha256": "1bf46357582b6182466f52d6bb7c63a72ac2851b73414e76cc53a94bfd833f75"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/geometry-boundaries/pair-007-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/geometry-boundaries/pair-007-candidate-raw.json",
+      "raw_bytes": 1529,
+      "raw_sha256": "a22be0166cfc0a07ef08912d0332ff9baebdd61b2bb1328b12d7099c62cb19de",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/geometry-boundaries/pair-007-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/geometry-boundaries/pair-007-reference-raw.json",
+      "raw_bytes": 1524,
+      "raw_sha256": "79500f7eb9d990c905c9ad59d1480cb37b5c6d918a70277c177316729416b580",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/geometry-boundaries/pair-007.json",
+      "json_path": [
+        "cases",
+        4,
+        "pairs",
+        6
+      ],
+      "raw_bytes": 4290,
+      "raw_sha256": "c6d88e5ce144392d813f58afb314e7124deace8903682e7dcaedbd36c663f199"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/geometry-boundaries/pair-008-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/geometry-boundaries/pair-008-candidate-raw.json",
+      "raw_bytes": 1529,
+      "raw_sha256": "39c7478cc2f91056b37a91b2063c96c80ef601dc01050c5d97e8db958d586fbc",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/geometry-boundaries/pair-008-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/geometry-boundaries/pair-008-reference-raw.json",
+      "raw_bytes": 1533,
+      "raw_sha256": "647b71aad0d0e4888b2ebc09c3f526bc46a552989d6238040f7c7e05fd493994",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/geometry-boundaries/pair-008.json",
+      "json_path": [
+        "cases",
+        4,
+        "pairs",
+        7
+      ],
+      "raw_bytes": 4289,
+      "raw_sha256": "5d5b74b390d8e7c1c80755843379ad54677fd3f9d70d806ae769942a143c1640"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/geometry-boundaries/pair-009-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/geometry-boundaries/pair-009-candidate-raw.json",
+      "raw_bytes": 1529,
+      "raw_sha256": "7f2999b2ecc01bbfa0f18da7aaccf83be520975a1838a9980b91456cac7b9f0b",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/geometry-boundaries/pair-009-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/geometry-boundaries/pair-009-reference-raw.json",
+      "raw_bytes": 1533,
+      "raw_sha256": "2497fe49f7b7a83a9c555a6b9a60c013dcc53bb84298dd9bb4ea359e5c5cd605",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/geometry-boundaries/pair-009.json",
+      "json_path": [
+        "cases",
+        4,
+        "pairs",
+        8
+      ],
+      "raw_bytes": 4287,
+      "raw_sha256": "1712f46e52d63133429d02cb9c92ef79d76ae9398e12a5de5e1aee1a3d474283"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/geometry-boundaries/result.json",
+      "json_path": [
+        "cases",
+        4
+      ],
+      "raw_bytes": 85306,
+      "raw_sha256": "6ee943cbaad363583357d85294f7599c4f80fa7726e6b44d56d77bed5f5ec76a"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/grid-exhaustion/pair-001-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/grid-exhaustion/pair-001-candidate-raw.json",
+      "raw_bytes": 865,
+      "raw_sha256": "e65d09722e58f4504436daeebaa2af1ce22a0827af73c4742502c4b3e90afea4",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/grid-exhaustion/pair-001-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/grid-exhaustion/pair-001-reference-raw.json",
+      "raw_bytes": 869,
+      "raw_sha256": "8715e330d16c913f6c224aa82c21f3e2f3e462fbd7db4f1fbc76a48300ee83c3",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/grid-exhaustion/pair-001.json",
+      "json_path": [
+        "cases",
+        3,
+        "pairs",
+        0
+      ],
+      "raw_bytes": 2349,
+      "raw_sha256": "039091d74e9657e2b4b8c84e650310de95815a0f614fe59413f39e32370e8dbe"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/grid-exhaustion/pair-002-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/grid-exhaustion/pair-002-candidate-raw.json",
+      "raw_bytes": 866,
+      "raw_sha256": "18623a8b05c6fccb43c1fd250131f2b741094f792b3180df62499c438e38a281",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/grid-exhaustion/pair-002-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/grid-exhaustion/pair-002-reference-raw.json",
+      "raw_bytes": 869,
+      "raw_sha256": "e596b970a6da2c2da2045803f840a992f50ce420c2d1f65b63e9d8d653e1f6ee",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/grid-exhaustion/pair-002.json",
+      "json_path": [
+        "cases",
+        3,
+        "pairs",
+        1
+      ],
+      "raw_bytes": 2350,
+      "raw_sha256": "882466953c18b77c19c543b91456408113279eef4148579e88061751e93fee2f"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/grid-exhaustion/pair-003-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/grid-exhaustion/pair-003-candidate-raw.json",
+      "raw_bytes": 866,
+      "raw_sha256": "dfb6f06696bea02cf43917c669c4bcad9d73a22144e760d609af5f09f4eed4cb",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/grid-exhaustion/pair-003-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/grid-exhaustion/pair-003-reference-raw.json",
+      "raw_bytes": 870,
+      "raw_sha256": "8d763a92fd2c8be14f143022673914ffcd451f6adddc0133fc27345fc9930708",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/grid-exhaustion/pair-003.json",
+      "json_path": [
+        "cases",
+        3,
+        "pairs",
+        2
+      ],
+      "raw_bytes": 2351,
+      "raw_sha256": "3859ae852cdcaf10a180f6e5693dac991e8d1198c10e96602cdb6623a66a8d4e"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/grid-exhaustion/pair-004-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/grid-exhaustion/pair-004-candidate-raw.json",
+      "raw_bytes": 866,
+      "raw_sha256": "54b275fde4e509aec5f109ea133a6d50220f59e15ea83931d2b2ffe4cc323ac9",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/grid-exhaustion/pair-004-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/grid-exhaustion/pair-004-reference-raw.json",
+      "raw_bytes": 869,
+      "raw_sha256": "419dfe32a29d3e645ebbc92a103006c2ba47732179561f24bea14f1c9f4ba4a3",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/grid-exhaustion/pair-004.json",
+      "json_path": [
+        "cases",
+        3,
+        "pairs",
+        3
+      ],
+      "raw_bytes": 2350,
+      "raw_sha256": "5b90facc10c47717680584336825157ca757cabb07efd7b8f19b07c68587c7a9"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/grid-exhaustion/pair-005-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/grid-exhaustion/pair-005-candidate-raw.json",
+      "raw_bytes": 865,
+      "raw_sha256": "348a64bc40c284f4f944416c06b2a1fea8d6b596a903798c9cf9763b9f1a5f0f",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/grid-exhaustion/pair-005-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/grid-exhaustion/pair-005-reference-raw.json",
+      "raw_bytes": 869,
+      "raw_sha256": "2a1180ff70dcf56e2437bf59a06f6d7f73e5413592e9415e978be15d0939c8da",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/grid-exhaustion/pair-005.json",
+      "json_path": [
+        "cases",
+        3,
+        "pairs",
+        4
+      ],
+      "raw_bytes": 2349,
+      "raw_sha256": "8655533a7844a26457a59f0c6855b215ef75fe189621ee9329b87abe5bcf302c"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/grid-exhaustion/result.json",
+      "json_path": [
+        "cases",
+        3
+      ],
+      "raw_bytes": 40711,
+      "raw_sha256": "d9f9968df7c439e16ecec2caaf67e4bd60b2aa7bb8ee5fa8bb251163b463b12b"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/plan.json",
+      "json_path": [
+        "plan"
+      ],
+      "raw_bytes": 52346,
+      "raw_sha256": "55b5bc810751deee9c27d0af7a0bad65f1c9943232ffe5a0fc1c2c4fb8488041"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/resource-exits/pair-001-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/resource-exits/pair-001-candidate-raw.json",
+      "raw_bytes": 1354,
+      "raw_sha256": "a0ef1d9d490691969646c3df227184873129a109c0cbafc93f232ecd26e21ace",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/resource-exits/pair-001-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/resource-exits/pair-001-reference-raw.json",
+      "raw_bytes": 1359,
+      "raw_sha256": "3b217bab5e30fde142779e718bb04edd82c076a8a84a5e54d27676d8d419822f",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/resource-exits/pair-001.json",
+      "json_path": [
+        "cases",
+        2,
+        "pairs",
+        0
+      ],
+      "raw_bytes": 3700,
+      "raw_sha256": "37c3b5c559a8704237e139cd8879df66fe6908657f8b5684faa98c409ed82228"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/resource-exits/pair-002-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/resource-exits/pair-002-candidate-raw.json",
+      "raw_bytes": 1354,
+      "raw_sha256": "ee1fedbdc5cb797c6b963e41d30438e36cb4ac06b746df895f58199034fee219",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/resource-exits/pair-002-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/resource-exits/pair-002-reference-raw.json",
+      "raw_bytes": 1358,
+      "raw_sha256": "46b363987bbe2d68f78466be4d8768a5da04800afc5e549ae19a30a09ce902ea",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/resource-exits/pair-002.json",
+      "json_path": [
+        "cases",
+        2,
+        "pairs",
+        1
+      ],
+      "raw_bytes": 3698,
+      "raw_sha256": "9b99f059eaca0550309945ba2e987145c616e157341f51200ce72fade8fe8daa"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/resource-exits/pair-003-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/resource-exits/pair-003-candidate-raw.json",
+      "raw_bytes": 1344,
+      "raw_sha256": "92ed5bf19255c1b2e44eca88194d59c25b121843f4ff2e0043dd7bc5ffcb2c66",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/resource-exits/pair-003-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/resource-exits/pair-003-reference-raw.json",
+      "raw_bytes": 1357,
+      "raw_sha256": "bbe53b577c947f65512c848f388d2f67bbe3367d11272c014149df62d3e6a162",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/resource-exits/pair-003.json",
+      "json_path": [
+        "cases",
+        2,
+        "pairs",
+        2
+      ],
+      "raw_bytes": 3698,
+      "raw_sha256": "159e9b79aa6486b92b6b5ad02c555b90bfc7c027ddeb3efbb145e14c26324f11"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/resource-exits/pair-004-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/resource-exits/pair-004-candidate-raw.json",
+      "raw_bytes": 1344,
+      "raw_sha256": "b92ae43e72fc43a224bb1f693370a0e6caa8b9b6f7e50d114028cb1fc6a3a1e7",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/resource-exits/pair-004-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/resource-exits/pair-004-reference-raw.json",
+      "raw_bytes": 1358,
+      "raw_sha256": "b9c8dc834fdaceb3323f097380aae3c28dc12cf18d01e6947aca93658a4310cc",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/resource-exits/pair-004.json",
+      "json_path": [
+        "cases",
+        2,
+        "pairs",
+        3
+      ],
+      "raw_bytes": 3699,
+      "raw_sha256": "ecc760294d181cfa1ffd2e73a5d5384a944c48ca53f85776001b0f0a28a45f98"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/resource-exits/pair-005-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/resource-exits/pair-005-candidate-raw.json",
+      "raw_bytes": 1354,
+      "raw_sha256": "28fef99723c457fa907487bcbfa8dc16b915bb3820177695a5ff249bb82942b2",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/resource-exits/pair-005-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/resource-exits/pair-005-reference-raw.json",
+      "raw_bytes": 1358,
+      "raw_sha256": "a40d5df25f82e36453d141e152ae40606c4bbd2ef3edf405327850c8ec719cd0",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/resource-exits/pair-005.json",
+      "json_path": [
+        "cases",
+        2,
+        "pairs",
+        4
+      ],
+      "raw_bytes": 3699,
+      "raw_sha256": "39a24dc7f63c757fb8172e3f115a91a8087761ad8a4f6efb2e70c81e0ab77c38"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/resource-exits/pair-006-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/resource-exits/pair-006-candidate-raw.json",
+      "raw_bytes": 1354,
+      "raw_sha256": "06cf03149c6542c1e29a328adc9b5ed7037d1246f1923fefaa270bb6e16e8290",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/resource-exits/pair-006-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/resource-exits/pair-006-reference-raw.json",
+      "raw_bytes": 1358,
+      "raw_sha256": "9d106cd623d0e602b111dc78293be4a6ff483b9f29c20c7179279720e9a3e28d",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/resource-exits/pair-006.json",
+      "json_path": [
+        "cases",
+        2,
+        "pairs",
+        5
+      ],
+      "raw_bytes": 3699,
+      "raw_sha256": "b9e72d13f98d3b7fe8c3a752a91f7b7fa61bd25c24f55ac38eaf74ceccb7ef0e"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/resource-exits/pair-007-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/resource-exits/pair-007-candidate-raw.json",
+      "raw_bytes": 1354,
+      "raw_sha256": "9e85dd3b96f3d5e646a4687b6dccf49aa1521869363e9f88485a731f1a535753",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/resource-exits/pair-007-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/resource-exits/pair-007-reference-raw.json",
+      "raw_bytes": 1348,
+      "raw_sha256": "3724fb931a50349ff215e4c17e1e8dbde902dade3dec14d02e9e7783e001ec1e",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/resource-exits/pair-007.json",
+      "json_path": [
+        "cases",
+        2,
+        "pairs",
+        6
+      ],
+      "raw_bytes": 3699,
+      "raw_sha256": "d04100784b8323ebbf124a2bb771b90a3d1b504cb443493dc6be211a0299e4f3"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/resource-exits/pair-008-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/resource-exits/pair-008-candidate-raw.json",
+      "raw_bytes": 1354,
+      "raw_sha256": "363e493e20333d73a6c672378ba6766ce934c8f641ccbce92d6f995818da6564",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/resource-exits/pair-008-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/resource-exits/pair-008-reference-raw.json",
+      "raw_bytes": 1348,
+      "raw_sha256": "f39bcfd46bf55649e8f087c28c9f1df0d51ed2de7d0657126242eb1bfb9d5763",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/resource-exits/pair-008.json",
+      "json_path": [
+        "cases",
+        2,
+        "pairs",
+        7
+      ],
+      "raw_bytes": 3699,
+      "raw_sha256": "4817a5ff8b13f363f41d9af973878c1d53f48fcb0367874cc0d6cace2b03dda0"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/resource-exits/pair-009-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/resource-exits/pair-009-candidate-raw.json",
+      "raw_bytes": 1353,
+      "raw_sha256": "6018984e414ba07e533284a63a71037c162cdbe71fa64a2891a20f46d84abc63",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/resource-exits/pair-009-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/resource-exits/pair-009-reference-raw.json",
+      "raw_bytes": 1358,
+      "raw_sha256": "42b0ec657a295ab0ed4c436a5a9797f153e4924a308767dce7b16225ac830538",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/resource-exits/pair-009.json",
+      "json_path": [
+        "cases",
+        2,
+        "pairs",
+        8
+      ],
+      "raw_bytes": 3697,
+      "raw_sha256": "50a7df87b0f64c260f2fc29716ccf7a12baf185e26914961df52ba4af0e6f81f"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/resource-exits/result.json",
+      "json_path": [
+        "cases",
+        2
+      ],
+      "raw_bytes": 79041,
+      "raw_sha256": "ef741d16ed99563f7ddbb2803baf8dd0fcc0b90fe2b62aba057b001dc8d7c49a"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/planner/summary.json",
+      "raw_bytes": 812919,
+      "raw_sha256": "0780eb7a16aa87af403f401b7516256622a233feb5c6cb1cd964a2fcff7e4a91",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/resource/direct-observations.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/resource/direct-observations.json",
+      "raw_bytes": 372788,
+      "raw_sha256": "bb76ae23b6181442e04fa108550813823b899e6907f077f15cd48b10ae59fb27",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/extensions/resource/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/resource/frozen-direct.json",
+      "json_path": [
+        "frozen_direct"
+      ],
+      "raw_bytes": 141488,
+      "raw_sha256": "8e75070d12accc27e58cfeec183f3be5483bab15327fe963166fc0e2b6ca53e0"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/resource/progress.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/resource/progress.json",
+      "raw_bytes": 445673,
+      "raw_sha256": "82e75afbdb5b54a2e2b76f43c41239243411683b6431114ef898be5e1f12104c",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/resource/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/resource/report.json",
+      "raw_bytes": 743359,
+      "raw_sha256": "a122d9d4d8f47013eac461d9328bfe15c5af89a0906e5a341788026a58ee0338",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/resource/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/extensions/resource/summary.json",
+      "raw_bytes": 743359,
+      "raw_sha256": "a122d9d4d8f47013eac461d9328bfe15c5af89a0906e5a341788026a58ee0338",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/functional-00/stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/complete-routine-002/functional-00/stdout.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/functional-00/stdout.log",
+      "raw_bytes": 666,
+      "raw_sha256": "243dab124f8ad099a004529cbcce63f978f8b485d9a0934310d5ad9cb5a69840"
+    },
+    {
+      "archive": "records/complete-routine-002/functional-01/stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/functional-01/stderr.log",
+      "raw_bytes": 1320,
+      "raw_sha256": "889fa6e49b7d19cbf20b9a5e31de80345389cfe35c6bebf5ac1c93227cca4849"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/functional-01/stdout.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/complete-routine-002/functional-02/stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/functional-02/stderr.log",
+      "raw_bytes": 1714,
+      "raw_sha256": "ed913a85934f9df9e08d8aeb72779fd57f79b524ab33d40586e63cf8db247cd1"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/functional-02/stdout.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/complete-routine-002/functional-03/stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/functional-03/stderr.log",
+      "raw_bytes": 107,
+      "raw_sha256": "5f08e2fd842252e50953732bb6db028733017f6aa82b795a5cfc56bebf3718e9"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/functional-03/stdout.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/complete-routine-002/functional-04/stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/functional-04/stderr.log",
+      "raw_bytes": 1127,
+      "raw_sha256": "07572ec63f68361e11f2c161b9476aff6327c5db11f7f2101809ca840cb368eb"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/functional-04/stdout.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/complete-routine-002/functional-05/stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/functional-05/stderr.log",
+      "raw_bytes": 2193,
+      "raw_sha256": "8411678ffe2181fe3939937403a8bb3be944db8b7019131e942c572b7f21e686"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/functional-05/stdout.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/complete-routine-002/functional-06/stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/functional-06/stderr.log",
+      "raw_bytes": 2919,
+      "raw_sha256": "4f6780d22be5e4c8c2fe416ca7a334535ca47dd501ffb669765d6c5c4dd7512a"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/functional-06/stdout.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/complete-routine-002/functional-07/stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/functional-07/stderr.log",
+      "raw_bytes": 1260,
+      "raw_sha256": "a5d8138a9c37e93d60f68aaa937efda41236d8367b87a0bde910d4afb3be73e3"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/functional-07/stdout.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/functional-08/stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/complete-routine-002/functional-08/stdout.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/functional-08/stdout.log",
+      "raw_bytes": 1197,
+      "raw_sha256": "f51526c014081b71e2aa896c84c7c57c55db060a7ca10ac5736e4680e6aa9a36"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/functional-09/stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/complete-routine-002/functional-09/stdout.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/functional-09/stdout.log",
+      "raw_bytes": 3110,
+      "raw_sha256": "448c948dd025dea7ff87bcbd2f2816a477d9966959bf84f02c0d6932688a72a0"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/functional-10/stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/complete-routine-002/functional-10/stdout.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/functional-10/stdout.log",
+      "raw_bytes": 11290,
+      "raw_sha256": "8d478bf2c9dcbe6c1113bd1eea6e9a261d5cbf14134b762f957fc2440152b0d8"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/functional-11/stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/complete-routine-002/functional-11/stdout.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/functional-11/stdout.log",
+      "raw_bytes": 45140,
+      "raw_sha256": "0bc56583ae2a1f7d92b2cb4429882a1b1fb6289d94f8b9683ee34ece77421987"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/functional-12/stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/complete-routine-002/functional-12/stdout.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/functional-12/stdout.log",
+      "raw_bytes": 238,
+      "raw_sha256": "c50d43b10d67379b42f4ea0c90d8f1aa9aae15e1f8d74c02ade330cff53faa14"
+    },
+    {
+      "archive": "records/complete-routine-002/functional-13/stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/functional-13/stderr.log",
+      "raw_bytes": 1292,
+      "raw_sha256": "41f3e673b9e739a80313349a9041cdd18ef1df0bb9c0d14358d63aa9137b9004"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/functional-13/stdout.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/complete-routine-002/functional-14/stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/functional-14/stderr.log",
+      "raw_bytes": 2625,
+      "raw_sha256": "248622b81414845729d1eef57c6c4263c277b8dc45e7eeaec4a9eb8c40bf8247"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/functional-14/stdout.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/complete-routine-002/functional-15/stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/functional-15/stderr.log",
+      "raw_bytes": 1474,
+      "raw_sha256": "4f22e80911bee32ec1543c19a855c4d786bec3e502e49e393898c60ff851646b"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/functional-15/stdout.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/complete-routine-002/functional-16/stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/functional-16/stderr.log",
+      "raw_bytes": 1938,
+      "raw_sha256": "dbee09337d27d33986c1aab8d97fa4c145d898efa3efadd82fdaae6060836d10"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/functional-16/stdout.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/lifecycle-process/stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/complete-routine-002/lifecycle-process/stdout.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/lifecycle-process/stdout.log",
+      "raw_bytes": 110,
+      "raw_sha256": "f9b9c434f38765e579a121ae9ee9e50aee3ba810f2f1545f49454a9ba6407120"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/native-fft-process/stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/native-fft-process/stdout.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/complete-routine-002/native-fft.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/native-fft.json",
+      "raw_bytes": 13597090,
+      "raw_sha256": "ae8c3669f98e33c13cd177ecc252376cb21a3d18815ecfa3b64f6f8df4eab8f0",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/native-fft.work/candidate.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/native-fft.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/native-fft.work/executed-paths.json",
+      "json_path": [
+        "executed_path_coverage"
+      ],
+      "raw_bytes": 92339,
+      "raw_sha256": "a511539cfe676b9c7e9a1d7695ecfd968e150b4cb0a8334bf19598a62b8cc04f"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/native-fft.work/executed-paths.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "embedded_in": "records/complete-routine-002/native-fft.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/native-fft.work/native-vlf-low-cn0.prediction-8.json",
+      "json_path": [
+        "cases",
+        2,
+        "frozen_predictions",
+        0
+      ],
+      "raw_bytes": 105098,
+      "raw_sha256": "4cd1c12b09c3c9f5ef44f80dcdfec7755113507e8838a324066b4b364e71b7c0"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/native-fft.work/reference.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/native-inventory/stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/complete-routine-002/native-inventory/stdout.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/native-inventory/stdout.log",
+      "raw_bytes": 2885,
+      "raw_sha256": "343ad94b0d651ce92298421a14fb1dfd0685f063b4d25a2a5c21c19b33d2cee0"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/planner-process/stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/complete-routine-002/planner-process/stdout.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/planner-process/stdout.log",
+      "raw_bytes": 155,
+      "raw_sha256": "8a3f900dc67a0b4485e0fdb997af6f74da08dca984f8ac8d4f07cd2d30c09c73"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/resource-process/stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/complete-routine-002/resource-process/stdout.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/resource-process/stdout.log",
+      "raw_bytes": 143,
+      "raw_sha256": "18561e9686aac514a4fea6942b89d8b8893d186c23a6013706a48bacf9ee433c"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/sampled-process/stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/sampled-process/stdout.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/sampled/candidate.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/complete-routine-002/sampled/cfo-batch-tail/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/sampled/cfo-batch-tail/result.json",
+      "raw_bytes": 790326,
+      "raw_sha256": "a6fb0f544f166c9545802b72faf8ff454d6a511549eaa725bbfffa599ad7fe26",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/sampled/gaussian-hour/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/sampled/gaussian-hour/result.json",
+      "raw_bytes": 346827,
+      "raw_sha256": "e3cf12438314f174c663535a18566343468ebf4e066b4b4bbe99ba8fe633f6dd",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/sampled/grouped-multitile/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/sampled/grouped-multitile/result.json",
+      "raw_bytes": 778888,
+      "raw_sha256": "4076f33f2b5a17c9b1b923524229db04f4fdc69d97f8a00efa4bd43bf460f6d2",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/sampled/phase-graph-hour/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/sampled/phase-graph-hour/result.json",
+      "raw_bytes": 420994,
+      "raw_sha256": "f5a04400af002310abed0cc730e5358449de7668111edfd904d2674b256d4504",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/sampled/phase-optimized-hour/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/sampled/phase-optimized-hour/result.json",
+      "raw_bytes": 383814,
+      "raw_sha256": "453d734eabd216a79887a145ce2ecfb2c2004f4471a24bd41275570491127f3f",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/sampled/phase-reduction-hour/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/sampled/phase-reduction-hour/result.json",
+      "raw_bytes": 440285,
+      "raw_sha256": "896d2094054fac5519cb287a7f97ec51682bfaef4a22188b66374cd449481c99",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/sampled/phase-reference-hour/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/sampled/phase-reference-hour/result.json",
+      "raw_bytes": 365278,
+      "raw_sha256": "98cfbfe6a03a51655ae539211fe2d858f5c278fa4932d2360b46379a4c3f61a1",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/sampled/phase-tensor-hour/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/sampled/phase-tensor-hour/result.json",
+      "raw_bytes": 465833,
+      "raw_sha256": "039da07c749a046acb02724b6cbc3f4ea4857f1605ac9e02f9b15bbf420dba88",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/sampled/ray-frequency-tiles/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/sampled/ray-frequency-tiles/result.json",
+      "raw_bytes": 431118,
+      "raw_sha256": "bfe8bb4d716a6ae585fffa4c035f4612584cce02a25242e2d72365c0cde3bf82",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/sampled/rbpf-systematic/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/sampled/rbpf-systematic/result.json",
+      "raw_bytes": 454363,
+      "raw_sha256": "3ebbcb2cda52a573f64d04b5d5d3ba7fef5b6e702dc1615d4e3137a9d8da5c29",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/extensions/lifecycle/cold-cuda-persistent/cache-precondition-candidate-40494719144.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/sampled/reference.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/complete-routine-002/sampled/state-sampled-smoke/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/sampled/state-sampled-smoke/result.json",
+      "raw_bytes": 313541,
+      "raw_sha256": "22f38c1912cb8aec83ad6a63bc96890bdecbcd4529cfb266d9e999077cf3c802",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/sampled/static-fft/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/sampled/static-fft/result.json",
+      "raw_bytes": 438468,
+      "raw_sha256": "d761ee377e5cece9892ed0ad6e4f60963664babf929c304f477e1e95b4d0fc3e",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/sampled/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/sampled/summary.json",
+      "raw_bytes": 1734,
+      "raw_sha256": "5f9707035b800f647816d4aac1395aa0df3464f029b7df236ed36322a9cc0489",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/complete-routine-002/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/summary.json",
+      "raw_bytes": 188339,
+      "raw_sha256": "4d3c09025eaaabf4ce2c539a43fcc9b37387a401ce8097c1657a2c41bc9ed693",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/invocation.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/complete-routine-002-invocation.json",
+      "raw_bytes": 2127,
+      "raw_sha256": "d7437aadeaa5e08c7e29bc79ed90404d72dbc43ca510526380c2611954b036c9",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/native-build/final-planner-reference-overlay.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/native-build/final-planner-reference-overlay.json",
+      "raw_bytes": 2304,
+      "raw_sha256": "6732235b767d06777e8680da80daf145a0e6eaccd2987e7bb5156b5b125af6a0",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/native-build/original/candidate/CMakeCache.txt.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/native-build/candidate/CMakeCache.txt",
+      "raw_bytes": 35972,
+      "raw_sha256": "1dcf8907079f7f09b0a1b96a8f5ad84cac2f69146be82d37011b3f92bf5c5e2c"
+    },
+    {
+      "archive": "records/native-build/original/candidate/CMakeLists.txt.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/native-build/candidate/CMakeLists.txt",
+      "raw_bytes": 107291,
+      "raw_sha256": "5bf29ee7cc20b1453b9124eaab79948d37744ed70d9444a87218c16d75f9c276"
+    },
+    {
+      "archive": "records/native-build/original/candidate/build.sh.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/native-build/candidate/build.sh",
+      "raw_bytes": 22743,
+      "raw_sha256": "645779c32a1d7fc8d0dbf38b321ff0392010ffb2de3f64a49f22220620029826"
+    },
+    {
+      "archive": "records/native-build/original/candidate/compile_commands.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/native-build/candidate/compile_commands.json",
+      "raw_bytes": 428659,
+      "raw_sha256": "500d5b8883245ea9131b202531bdec6bafb3dba7da20648954e3ee064bbd10a0"
+    },
+    {
+      "archive": "records/native-build/original/provenance.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/native-build/provenance.json",
+      "raw_bytes": 1188,
+      "raw_sha256": "94e3455dd28656f996757839d8228037eb9f617a8e4a5c79819968b2e545c720",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/native-build/original/reference/CMakeCache.txt.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/native-build/reference/CMakeCache.txt",
+      "raw_bytes": 36012,
+      "raw_sha256": "8819d297925f70d52b24c4b79b2767d097e5c6edb9d5fea1f2363015a4ed5582"
+    },
+    {
+      "archive": "records/native-build/original/reference/CMakeLists.txt.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/native-build/reference/CMakeLists.txt",
+      "raw_bytes": 107281,
+      "raw_sha256": "86823623f08850d2bb37cddd28257ebda48e652a37f716cb212999e8324edd50"
+    },
+    {
+      "archive": "records/native-build/original/candidate/build.sh.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/native-build/reference/build.sh",
+      "raw_bytes": 22743,
+      "raw_sha256": "645779c32a1d7fc8d0dbf38b321ff0392010ffb2de3f64a49f22220620029826"
+    },
+    {
+      "archive": "records/native-build/original/reference/compile_commands.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/native-build/reference/compile_commands.json",
+      "raw_bytes": 442107,
+      "raw_sha256": "78b21b6db88f1d4a5ffe91aacabaf9e44d68692ac84dac03a5d02b2180b70cd3"
+    }
+  ],
+  "schema": "triad-gpu-complete-002-archive-v1",
+  "status": "immutable incomplete run; later diagnostics and routes are not merged into this result",
+  "storage": "Exact original bytes reconstructed from identified compact JSON gzip or embedded JSON values with indent=2 and trailing newline; otherwise exact gzip bytes. Every record retains original byte count and SHA256."
+}

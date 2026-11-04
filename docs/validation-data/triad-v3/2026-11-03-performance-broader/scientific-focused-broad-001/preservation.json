@@ -1,0 +1,253 @@
+{
+  "records": [
+    {
+      "archive": "records/focused-broad-cache-repair-script/expected-sources.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/focused-broad-cache-repair-script/expected-sources.json",
+      "raw_bytes": 1442,
+      "raw_sha256": "bf4450441679baa3924a850e019c3adb34342fd19aab81ef5458fbdea6115483",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/focused-broad-cache-repair-script/run.py.gz",
+      "input_path": "local-evidence/triad-performance-broader/focused-broad-cache-repair-script/run.py",
+      "raw_bytes": 11866,
+      "raw_sha256": "5ce758356093cea7e8d3000289fd4af83b93a09e127dbcc3b1c3f99dece9c92a"
+    },
+    {
+      "archive": "records/focused-broad-cpu-001/candidate-responses.jsonl.gz",
+      "input_path": "local-evidence/triad-performance-broader/focused-broad-cpu-001/candidate-responses.jsonl",
+      "raw_bytes": 325523,
+      "raw_sha256": "2d946c76c01643bfbedd50e8622b54ef5367104c40fe5f69408f85c43e68f6c2"
+    },
+    {
+      "archive": "records/focused-broad-cpu-001/candidate.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/focused-broad-cpu-001/candidate.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/focused-broad-cpu-001/case.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/focused-broad-cpu-001/case.json",
+      "raw_bytes": 20293,
+      "raw_sha256": "129c65a81aa511cee41a8e087a5732ae1bbab9cd0720bffa41e66e1942026a60",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/focused-broad-cpu-001/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/focused-broad-cpu-001/endpoint-guard.json",
+      "json_path": [
+        "endpoint_guard"
+      ],
+      "raw_bytes": 280,
+      "raw_sha256": "18b72785cf7c5a4e30c0eaa515994b560ece5dae45b8273f93ce05df3307643e"
+    },
+    {
+      "archive": "records/focused-broad-cpu-001/environment.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/focused-broad-cpu-001/environment.json",
+      "raw_bytes": 10233,
+      "raw_sha256": "de7c7c447755f0273e1716a6795e796c52d866be4b230bc1cc0249e79ee3779a",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/focused-broad-cpu-001/measurement.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/focused-broad-cpu-001/measurement.json",
+      "raw_bytes": 551008,
+      "raw_sha256": "e81adb2c8a1a057530630f5f4bcfab096f25ae142d1bc5741c4a9ff4204dac20",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/focused-broad-cpu-001/plan.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/focused-broad-cpu-001/plan.json",
+      "raw_bytes": 5219,
+      "raw_sha256": "fc0ffd3b1ae4182e950b24abfcc753699e86660ee20430975cb9788eefc27ae2",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/focused-broad-cpu-001/precision-qualification.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/focused-broad-cpu-001/precision-qualification.json",
+      "raw_bytes": 2430,
+      "raw_sha256": "dcb30a1703260e8f9b5fb855b63387432b7b4b93ac6c9c19483f06f239e8b66c",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/focused-broad-cpu-001/preflight.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/focused-broad-cpu-001/preflight.json",
+      "raw_bytes": 62756,
+      "raw_sha256": "684013069ff70ee134eef995ba5b72a337b593442533dbf030243ad5d3c9d33e",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/focused-broad-cpu-001/reference-responses.jsonl.gz",
+      "input_path": "local-evidence/triad-performance-broader/focused-broad-cpu-001/reference-responses.jsonl",
+      "raw_bytes": 325583,
+      "raw_sha256": "d4f9cec92c3986bf6419d4df04ce1e728bd09ed9dbb9c731b46e6278618e6228"
+    },
+    {
+      "archive": "records/focused-broad-cpu-001/candidate.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/focused-broad-cpu-001/reference.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/focused-broad-cpu-001/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/focused-broad-cpu-001/summary.json",
+      "raw_bytes": 2139,
+      "raw_sha256": "cf0dda4c18d3f747eb76e2b0dac43c1593dbeed82d21420b59298e97cb95ee3d",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/focused-broad-cpu-001/workers.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/focused-broad-cpu-001/workers.json",
+      "raw_bytes": 2147,
+      "raw_sha256": "7980b75cddd5e9edab9c734e312c7e52434c3ad8656404ee47b07aa17d162fab",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/focused-broad-cache-repair-script/expected-sources.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/focused-broad-cache-repair-script/expected-sources.json",
+      "raw_bytes": 1442,
+      "raw_sha256": "bf4450441679baa3924a850e019c3adb34342fd19aab81ef5458fbdea6115483",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/focused-broad-cache-repair-script/run.py.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/focused-broad-cache-repair-script/run.py",
+      "raw_bytes": 11866,
+      "raw_sha256": "5ce758356093cea7e8d3000289fd4af83b93a09e127dbcc3b1c3f99dece9c92a"
+    },
+    {
+      "archive": "records/gpu/final-routine/focused-broad-gpu-001/candidate-responses.jsonl.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/focused-broad-gpu-001/candidate-responses.jsonl",
+      "raw_bytes": 73404,
+      "raw_sha256": "c035656d438e6361b2b76410f027ceb1aa9d4147e547841bc3faa559249768fd"
+    },
+    {
+      "archive": "records/focused-broad-cpu-001/candidate.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/focused-broad-gpu-001/candidate.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/gpu/final-routine/focused-broad-gpu-001/case.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/focused-broad-gpu-001/case.json",
+      "raw_bytes": 62689,
+      "raw_sha256": "2a5ca257cd4760ea48db068e019f7099a64c84f26ae07655ef3dd57af9400db2",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/focused-broad-cpu-001/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/focused-broad-gpu-001/endpoint-guard.json",
+      "json_path": [
+        "endpoint_guard"
+      ],
+      "raw_bytes": 280,
+      "raw_sha256": "18b72785cf7c5a4e30c0eaa515994b560ece5dae45b8273f93ce05df3307643e"
+    },
+    {
+      "archive": "records/gpu/final-routine/focused-broad-gpu-001/environment.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/focused-broad-gpu-001/environment.json",
+      "raw_bytes": 95659,
+      "raw_sha256": "75d409775eeaca70c1e04006bec83dbbc9a18db675916945fd8716a77e588d74",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/gpu/final-routine/focused-broad-gpu-001/measurement.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/focused-broad-gpu-001/measurement.json",
+      "raw_bytes": 250172,
+      "raw_sha256": "35cc258da9fe1c3f7f297d6a8d867cabe935ac020287d9c2a62086f21f9d5d44",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/gpu/final-routine/focused-broad-gpu-001/plan.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/focused-broad-gpu-001/plan.json",
+      "raw_bytes": 4310,
+      "raw_sha256": "7874758240d6d2098e216f74cc9294abaebfa13bc4a7da0e520cf8f278689ce6",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/gpu/final-routine/focused-broad-gpu-001/precision-qualification.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/focused-broad-gpu-001/precision-qualification.json",
+      "raw_bytes": 2370,
+      "raw_sha256": "45b38ecb0606048011c46497fa58626cbc0c8ab65f3517ed7bc234d6452b6f97",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/gpu/final-routine/focused-broad-gpu-001/preflight.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/focused-broad-gpu-001/preflight.json",
+      "raw_bytes": 130097,
+      "raw_sha256": "5cc241780243810ed831d5a8401b87eb9d70c35cbd3c9252d429b396c0efdfe5",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/gpu/final-routine/focused-broad-gpu-001/reference-responses.jsonl.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/focused-broad-gpu-001/reference-responses.jsonl",
+      "raw_bytes": 73416,
+      "raw_sha256": "ba50f6d6340741456611a014933f1c8ac15f2bc91243e254f3628975da18ceb3"
+    },
+    {
+      "archive": "records/focused-broad-cpu-001/candidate.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/focused-broad-gpu-001/reference.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/gpu/final-routine/focused-broad-gpu-001/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/focused-broad-gpu-001/summary.json",
+      "raw_bytes": 2138,
+      "raw_sha256": "cf4c48c623b6d9cc885844889dd649a56306d0bf8b7187086eee9954b2a4d39e",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/gpu/final-routine/focused-broad-gpu-001/workers.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/focused-broad-gpu-001/workers.json",
+      "raw_bytes": 2043,
+      "raw_sha256": "828ed037639030a542dafadae4c1f548231943d464d78c4b05d839428d2fcc10",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/gpu/legacy/legacy-anchors/cuda/1793764120402602191-700ad521a6ec37f0.anchor.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/legacy/legacy-anchors/cuda/1793764120402602191-700ad521a6ec37f0.anchor.json",
+      "raw_bytes": 66075,
+      "raw_sha256": "01ae08bb5e92070c332da3a2f1022de16a9abe2268444066db21de272a5112e2",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/gpu/legacy/legacy-anchors/cuda/1793764188002222174-67fce8d7a123f285.anchor.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/legacy/legacy-anchors/cuda/1793764188002222174-67fce8d7a123f285.anchor.json",
+      "raw_bytes": 96749,
+      "raw_sha256": "fe9a2630e1058250e00fa4feaf2fb1d793296455e95c59099957e8c522c12cbb",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/local-evidence/triad-performance-trace/anchors-v3/cpu/1793733773891342651-65211525efe568a7.anchor.json.gz",
+      "input_path": "local-evidence/triad-performance-trace/anchors-v3/cpu/1793733773891342651-65211525efe568a7.anchor.json",
+      "raw_bytes": 48533,
+      "raw_sha256": "4c6fe55133ec27230e4fdb08f9c1e12331be21b0a4dd49e55f877771457469ca",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/local-evidence/triad-performance-trace/anchors-v3/cpu/1793733930949112639-8868fa440aed7993.anchor.json.gz",
+      "input_path": "local-evidence/triad-performance-trace/anchors-v3/cpu/1793733930949112639-8868fa440aed7993.anchor.json",
+      "raw_bytes": 48544,
+      "raw_sha256": "9eb6131d86f52d782c3cfa8a84a4af0bfa99e5d07f922341ef764cc24d884988",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/local-evidence/triad-performance-trace/anchors-v3/cpu/1793734488998787256-38ba83e99ef81717.anchor.json.gz",
+      "input_path": "local-evidence/triad-performance-trace/anchors-v3/cpu/1793734488998787256-38ba83e99ef81717.anchor.json",
+      "raw_bytes": 59167,
+      "raw_sha256": "0adea68473b8c6b40c6e0fd2d328ad3f222ea8d5e5e8297488b82604eea2b8e1",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/local-evidence/triad-performance-trace/anchors-v3/cpu/1793736320242150987-f64ec44f6551af17.anchor.json.gz",
+      "input_path": "local-evidence/triad-performance-trace/anchors-v3/cpu/1793736320242150987-f64ec44f6551af17.anchor.json",
+      "raw_bytes": 59210,
+      "raw_sha256": "8ad145874cb597174d990ed83ea06eaa2c5e4dad5ca7f4aa71cc8e30dc813a94",
+      "storage": "compact_json_reformatted_indent2_newline"
+    }
+  ],
+  "schema": "triad-completed-evidence-archive-v1",
+  "scope": "Completed original records only; arrays, binaries and later-derived conclusions are not substituted.",
+  "storage": "Exact original byte count/SHA256 retained. Identified compact JSON or embedded values reconstruct with indent=2 and trailing newline; other files are exact gzip payloads with zero mtime and empty filename."
+}

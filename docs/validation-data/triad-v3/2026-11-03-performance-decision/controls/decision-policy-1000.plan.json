@@ -1,0 +1,57 @@
+{
+  "schema": "triad-performance-per-test-decision-controls-v1",
+  "policy": {
+    "relative_precision": 0.05,
+    "looks": [
+      5,
+      9,
+      17,
+      33
+    ],
+    "family_count": 1,
+    "alpha": 0.05,
+    "slowdown_threshold": 1.3,
+    "model_allowance_log": 0.0,
+    "stopping_rule": "decision"
+  },
+  "noise": {
+    "kind": "lognormal",
+    "log_sigma": 0.04,
+    "paired_correlation": 0.6,
+    "block_length": 2
+  },
+  "trials_per_factor": 1000,
+  "factors": [
+    1.0,
+    1.29,
+    1.3,
+    1.31,
+    1.6
+  ],
+  "seed": 1913041,
+  "source_sha256": {
+    "triad_perf_decision_policy_controls.py": "b2b66694a5be473a9b878533147ab9252b3a45734a8dc7c8b4138e7006e93a55",
+    "triad_perf_adaptive.py": "07e9e243e2e655b17887382712c7ff099855a07d6dc3985c03c430df2a113257",
+    "triad_perf_decision_controls.py": "3c25d2f12693354d3ae65fe3028dbf343bbb6525f9bf263817ee7cf469de188e",
+    "triad_perf_conditional.py": "ff89c20c950e8c422bf60ad91eea15b0fe7d4c3f3c656d26e959cf72b1ab3835",
+    "triad-performance.py": "565e892bed7ffa55971efd9adf11b0377391975b67880f9ddbeed0700b9f1ba7"
+  },
+  "empirical_provenance": null,
+  "runtime": {
+    "python": "3.13.5 (main, Aug 10 2026, 12:06:59) [GCC 14.2.0]",
+    "numpy": "2.5.4",
+    "scipy": "1.18.1"
+  },
+  "gate_contract": "per test, one-sided alpha .05 in each decision direction across fixed looks5,9,17,33; no whole-suite multiplicity adjustment",
+  "timing_precision_is_not_a_stop_requirement": true,
+  "mean_runtime_estimand": "geometric mean of paired complete-runtime ratios",
+  "interval_scope": "95% pointwise Clopper-Pearson intervals over independent simulated test replications, not simultaneous across factors/outcomes",
+  "assumptions": [
+    "stationary paired lognormal outer runtimes for the parametric generator",
+    "the empirical generator is conditional on a finite measured jitter sample; its uncertainty is not a future hardware bound",
+    "block resampling preserves short serial dependence and therefore stress-tests, rather than proves, the independent-time assumption",
+    "model applicability and hardware health are separate; simulated direct-full timing has no abbreviation model error"
+  ],
+  "qualification_scope": "decision logic simulation only; no receiver speed, mixed-CI-dispatch, or future error-rate qualification",
+  "plan_sha256": "5fcf011f9afd0b1a08d7ba0ffbb28fabb26d34793337f1d6d1706bd512372dc9"
+}

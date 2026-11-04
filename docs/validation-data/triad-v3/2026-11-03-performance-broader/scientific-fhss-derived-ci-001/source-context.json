@@ -1,0 +1,10 @@
+{
+  "binding_source": "../scientific-gpu-complete-002/records/complete-routine-002/native-fft.json.gz",
+  "policy_sha256": "b6a1b25851a8cd98c76134aff90ad0fa980eb6f445ff003c722ad5185b7de202",
+  "scope": "The measured normal report already binds this policy source containing the predeclared CI criterion. No new measurements or normal-decision overwrite.",
+  "source_field": [
+    "harness_sha256",
+    "triad_perf_adaptive.py"
+  ],
+  "source_report_sha256": "ae8c3669f98e33c13cd177ecc252376cb21a3d18815ecfa3b64f6f8df4eab8f0"
+}

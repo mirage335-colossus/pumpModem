@@ -41,6 +41,112 @@ def report():
 
 
 class CompleteSuiteTests(unittest.TestCase):
+    def test_extension_closures_require_the_exact_maintained_mapping(self):
+        matrix = {"rows": [{"row_id": "resource.memory-thresholds", "required_gaps": ["boundary"],
+            "required_extension": {"id": "resource", "gap_ids": ["resource.memory-thresholds"]}},
+            {"row_id": "unmapped", "required_gaps": ["other"]}]}
+        gaps = complete.inventory_gaps(matrix)
+        validation = {"valid": True, "status": "passed", "errors": [],
+                      "gap_ids": ["resource.memory-thresholds", "unmapped"]}
+        receipt = {"validation": validation, "report_sha256": "verified-report", "command": {"status": "passed", "exit_code": 0}}
+        remaining, closed = complete.resolve_extension_gaps(gaps, {"resource": receipt})
+        self.assertEqual([row["id"] for row in remaining], ["unmapped"])
+        self.assertEqual(closed, [{"id": "resource.memory-thresholds", "extension": "resource", "report_sha256": "verified-report"}])
+        for change in ({"valid": False}, {"status": "inconclusive"}, {"status": "not_applicable"},
+                       {"status": "failed"}, {"errors": ["changed source"]}, {"gap_ids": ["unmapped"]}):
+            bad = {**receipt, "validation": {**validation, **change}}
+            self.assertEqual(len(complete.resolve_extension_gaps(gaps, {"resource": bad})[0]), 2)
+        bad_exit = {**receipt, "command": {"status": "failed", "exit_code": 2}}
+        self.assertEqual(len(complete.resolve_extension_gaps(gaps, {"resource": bad_exit})[0]), 2)
+        matrix["rows"][0]["required_extension"]["gap_ids"] = ["unrelated"]
+        with self.assertRaisesRegex(ValueError, "invalid extension mapping"):
+            complete.inventory_gaps(matrix)
+
+    def test_cold_qualification_requires_the_validated_lifecycle_receipt(self):
+        evidence = report()
+        evidence["extensions"] = {"lifecycle": {"command": {"status": "passed", "exit_code": 0}, "validation": {"valid": True, "status": "passed",
+            "errors": [], "gap_ids": [], "cold_latency_qualified": True}}}
+        result = complete.summarize(evidence, legacy(), {}, [])
+        self.assertTrue(result["complete_scope_qualification"])
+        self.assertEqual(result["cold_latency_qualification"], "qualified")
+        evidence["extensions"]["lifecycle"]["validation"]["valid"] = False
+        result = complete.summarize(evidence, legacy(), {}, [])
+        self.assertFalse(result["complete_scope_qualification"])
+        self.assertNotEqual(result["cold_latency_qualification"], "qualified")
+
+    def test_direct_stability_review_preserves_work_and_cold_but_blocks_release(self):
+        evidence = report()
+        gap = "scheduler.concurrency-and-batches"
+        evidence["inventory_unresolved"] = [{"id": gap, "required_extension": {"id": "lifecycle", "gap_ids": [gap]}}]
+        review = {"id": "sustained_stability", "case_ids": ["mixed-cpu"],
+                  "basis": "unchanged last/first warm-cycle diagnostic >1.10; direct timings include variation"}
+        validation = {"valid": True, "status": "passed", "errors": [], "gap_ids": [gap],
+            "cold_latency_qualified": True, "cold_validation": {"valid": True, "status": "passed", "case_ids": ["cold-cpu-phase"], "errors": []},
+            "review_required": [review], "outcomes": {"sustained_observation": "complete", "sustained_stability": "review_required"}}
+        evidence["extensions"] = {"lifecycle": {"command": {"status": "passed", "exit_code": 0}, "validation": validation}}
+        result = complete.summarize(evidence, legacy(), {}, [])
+        self.assertTrue(result["maintained_workload_scope_complete"])
+        self.assertTrue(result["warm_target_decisions_complete"])
+        self.assertEqual(result["cold_latency_qualification"], "qualified")
+        self.assertEqual(result["remaining_inventory_gaps"], [])
+        self.assertEqual(result["release_review_requirements"], [{"extension": "lifecycle", **review}])
+        self.assertFalse(result["complete_scope_qualification"])
+        self.assertEqual(result["status"], "incomplete")
+        self.assertEqual(result["exit_code"], 2)
+        self.assertTrue(any("extension review required: lifecycle/sustained_stability" in b for b in result["scope_blockers"]))
+        degraded = legacy(hardware_health={"status": "raw_hardware_screen", "warning": True, "rows": [{"time_equivalent_ratio": 1.4}]})
+        result = complete.summarize(evidence, degraded, {}, [])
+        self.assertTrue(result["maintained_workload_scope_complete"])
+        self.assertEqual(result["outcomes"]["hardware_health"]["status"], "degraded_screen")
+        self.assertEqual(len(result["release_review_requirements"]), 1)
+
+    def test_independent_cold_proof_survives_only_completed_mixed_local_failure(self):
+        evidence = report()
+        receipt = {"command": {"status": "failed", "exit_code": 2}, "validation": {"valid": False, "status": "inconclusive",
+            "errors": ["mixed-local failure"], "gap_ids": [], "cold_latency_qualified": True,
+            "cold_validation": {"valid": True, "status": "passed", "case_ids": ["cold-cpu-phase"], "errors": []}}}
+        evidence["extensions"] = {"lifecycle": receipt}
+        result = complete.summarize(evidence, legacy(), {}, [])
+        self.assertEqual(result["cold_latency_qualification"], "qualified")
+        self.assertFalse(result["complete_scope_qualification"])
+        self.assertFalse(result["maintained_workload_scope_complete"])
+        for command in ({"status": "timed_out", "exit_code": 2}, {"status": "failed", "exit_code": 1}, {}):
+            self.assertFalse(complete.cold_receipt_qualified({**receipt, "command": command}))
+        receipt["validation"]["cold_validation"]["errors"] = ["source changed"]
+        self.assertFalse(complete.cold_receipt_qualified(receipt))
+
+    def test_extension_failure_and_missing_execution_cannot_hide_behind_core_passes(self):
+        evidence = report()
+        evidence["configured_extensions"] = ["resource", "planner"]
+        evidence["extensions"] = {"resource": {"validation": {"valid": True, "status": "failed",
+            "errors": [], "gap_ids": [], "outcomes": {"performance_regression": "failed"}}}}
+        result = complete.summarize(evidence, legacy(), {}, [])
+        self.assertTrue(result["warm_target_decisions_complete"])
+        self.assertEqual(result["status"], "failed")
+        self.assertFalse(result["complete_scope_qualification"])
+        self.assertTrue(any("planner, resource" in reason for reason in result["scope_blockers"]))
+
+    def test_extension_validation_calls_current_checker_instead_of_trusting_json(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp)/"summary.json"
+            path.write_text(json.dumps({"status": "passed", "complete_scope": True}))
+            spec = {"id": "resource", "module": "triad_perf_resource", "context": {"report_path": str(path)}}
+            expected = {"valid": False, "status": "unqualified", "gap_ids": [], "errors": ["proof mismatch"]}
+            module = Mock()
+            module.validate_routine_report.return_value = expected
+            with patch.object(complete.importlib, "import_module", return_value=module) as load:
+                self.assertEqual(complete.validate_extension_report(spec), expected)
+                load.assert_called_once_with("triad_perf_resource")
+                module.validate_routine_report.assert_called_once_with({"status": "passed", "complete_scope": True}, spec["context"])
+                module.validate_routine_report.return_value = {"status": "passed"}
+                with self.assertRaisesRegex(ValueError, "invalid receipt"):
+                    complete.validate_extension_report(spec)
+                for fields in ({"review_required": None}, {"review_required": [{"id": "missing-fields"}]},
+                               {"cold_validation": {"valid": True, "status": "passed"}}):
+                    module.validate_routine_report.return_value = {**expected, **fields}
+                    with self.assertRaises(ValueError):
+                        complete.validate_extension_report(spec)
+
     def test_new_mapped_test_file_requires_new_coverage_dependency_receipt(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -97,6 +203,26 @@ class CompleteSuiteTests(unittest.TestCase):
         self.assertEqual(result["timing_cases"]["rows"][-1]["comparison"]["full_time_ratio_interval"], [.7774, 1.2686])
         self.assertIn("not a universal", result["warm_decision_statistical_scope"])
         self.assertFalse(result["complete_scope_qualification"])  # Cold proof is still missing.
+
+    def test_decision_policy_reports_per_test_confidence_separately_from_scope(self):
+        evidence = report()
+        evidence["requested_stopping_rule"] = "decision"
+        evidence["regression_profile"] = {"name": "normal", "pass_alpha": .15,
+                                           "failure_alpha": .05, "slowdown_threshold": 1.30}
+        result = complete.summarize(evidence, legacy(), {}, [])
+        self.assertTrue(result["warm_target_decisions_complete"])
+        self.assertFalse(result["complete_scope_qualification"])
+        note = result["warm_decision_statistical_scope"]
+        self.assertIn("per-test one-sided pass alpha=0.15", note)
+        self.assertIn("slowdown ratio 1.3", note)
+        self.assertIn("failure-declaration alpha=0.05", note)
+        self.assertIn("not runtime-width targets or a whole-suite confidence guarantee", note)
+        evidence["regression_profile"] = {"name": "ci", "pass_alpha": .30,
+                                           "failure_alpha": .05, "slowdown_threshold": 1.70}
+        ci = complete.summarize(evidence, legacy(), {}, [])
+        self.assertIn("profile ci", ci["warm_decision_statistical_scope"])
+        self.assertIn("pass alpha=0.3", ci["warm_decision_statistical_scope"])
+        self.assertIn("slowdown ratio 1.7", ci["warm_decision_statistical_scope"])
 
     def test_precise_measurement_does_not_override_invalid_model_or_unresolved_gate(self):
         for row in (case("sampled", prediction_valid=False), case("sampled", comparison={"gate": "inconclusive"})):
@@ -427,7 +553,14 @@ class CompleteSuiteTests(unittest.TestCase):
             self.assertEqual(old[old.index("--validation-mode")+1], "reuse")
             self.assertIn("--_backend-worker", old)
             self.assertEqual(new[new.index("--mode")+1], "reuse")
+            for command in (old, new):
+                self.assertEqual(command[command.index("--stopping-rule")+1], "decision")
+                self.assertEqual(command[command.index("--regression-profile")+1], "normal")
             summary = json.loads((output/"summary.json").read_text())
+            self.assertEqual(summary["requested_stopping_rule"], "decision")
+            self.assertEqual(summary["regression_profile"], {"name": "normal", "pass_alpha": .15,
+                "failure_alpha": .05, "slowdown_threshold": 1.30})
+            self.assertEqual(summary["budget_seconds"], 1500.)
             self.assertFalse(summary["routine_requalifies_models"])
             self.assertFalse(summary["complete_scope_qualification"])
             self.assertEqual(summary["computational_savings"]["status"], "not_established_by_this_run")
@@ -468,15 +601,77 @@ class CompleteSuiteTests(unittest.TestCase):
                 complete.main(["--output", str(output), "--reference-root", str(ROOT), "--binary", str(binary),
                     "--reference-binary", str(binary), "--anchor-directory", str(root/"old"), "--family-route", "staged",
                     "--staged-anchor-directory", str(root/"staged"), "--identical-fft-case", selected_fft,
-                    "--identical-anchor-directory", str(root/"identical"), "--fixture-cache", str(root/"fixtures")])
+                    "--identical-anchor-directory", str(root/"identical"), "--fixture-cache", str(root/"fixtures"),
+                    "--stopping-rule", "precision", "--regression-profile", "ci"])
             self.assertEqual(len(calls), 3)
             self.assertEqual(len({deadline for _, deadline in calls}), 1)
             self.assertEqual([Path(argv[1]).name for argv, _ in calls], ["triad-performance.py", "triad_perf_identical_fft.py", "triad_perf_staged.py"])
             self.assertNotIn(selected_fft, calls[0][0])
+            for argv, _ in calls[:2]:
+                self.assertEqual(argv[argv.index("--fixture-cache")+1], str(root/"fixtures"))
+            for argv, _ in calls:
+                self.assertEqual(argv[argv.index("--stopping-rule")+1], "precision")
+                self.assertEqual(argv[argv.index("--regression-profile")+1], "ci")
             for argv, _ in calls[1:]:
                 self.assertEqual(argv[argv.index("--mode")+1], "reuse")
             summary = json.loads((output/"summary.json").read_text())
+            self.assertEqual(summary["requested_stopping_rule"], "precision")
+            self.assertFalse(summary["core_decision_profile_active"])
+            self.assertEqual(summary["regression_profile"], {"name": "ci", "pass_alpha": .30,
+                "failure_alpha": .05, "slowdown_threshold": 1.70})
             self.assertTrue(summary["warm_target_decisions_complete"])
+            self.assertFalse(summary["complete_scope_qualification"])
+
+    def test_configured_extensions_use_the_shared_deadline_and_current_validators(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            binary = root/"native"
+            binary.write_bytes(b"native")
+            workspace = root/"bounds-workspace"
+            workspace.mkdir()
+            output = root/"out"
+            calls = []
+            def run(argv, **kwargs):
+                calls.append((argv, kwargs["deadline"]))
+                destination = Path(argv[argv.index("--output")+1])
+                if Path(argv[1]).name == "triad-performance.py":
+                    complete.write_json(destination, legacy())
+                else:
+                    destination.mkdir(parents=True, exist_ok=True)
+                    complete.write_json(destination/"summary.json", {"schema": "mocked-extension-or-family"})
+                return {"status": "passed", "exit_code": 0}
+            def checked(spec):
+                self.assertTrue(Path(spec["context"]["report_path"]).is_file())
+                return {"valid": True, "status": "passed", "errors": [], "gap_ids": []}
+            with patch.object(complete, "source_identity", return_value={}), \
+                    patch.object(complete, "execute", side_effect=run), \
+                    patch.object(complete, "validate_extension_report", side_effect=checked) as validate:
+                complete.main(["--output", str(output), "--reference-root", str(ROOT), "--binary", str(binary),
+                    "--reference-binary", str(binary), "--anchor-directory", str(root/"old"), "--family-mode", "direct",
+                    "--lifecycle-anchor-directory", str(root/"life"), "--resource-anchor", str(root/"resource.json"),
+                    "--planner-binary", str(binary), "--planner-reference-binary", str(binary),
+                    "--planner-bounds-workspace", str(workspace), "--regression-profile", "ci",
+                    "--native-direct-case", "native-vlf-low-cn0"])
+            self.assertEqual(len(calls), 5)
+            self.assertEqual(len({deadline for _, deadline in calls}), 1)
+            self.assertEqual(validate.call_count, 3)
+            self.assertEqual(calls[0][0][calls[0][0].index("--native-direct-case")+1], "native-vlf-low-cn0")
+            self.assertTrue(all("--native-direct-case" not in argv for argv, _ in calls[1:]))
+            self.assertEqual([Path(argv[1]).name for argv, _ in calls[2:]],
+                             ["triad_perf_lifecycle.py", "triad_perf_resource.py", "triad_perf_planner.py"])
+            for argv, _ in calls[2:]:
+                self.assertNotIn("qualify", argv)
+                self.assertEqual(argv[argv.index("--regression-profile")+1], "ci")
+            self.assertEqual(calls[2][0][calls[2][0].index("--mode")+1], "reuse")
+            self.assertEqual(calls[3][0][calls[3][0].index("--mode")+1], "routine")
+            self.assertIn("--source-root", calls[3][0])
+            self.assertEqual(calls[4][0][calls[4][0].index("--bounds-workspace")+1], str(workspace))
+            summary = complete.read_json(output/"summary.json")
+            self.assertEqual(set(summary["extensions"]), {"lifecycle", "resource", "planner"})
+            self.assertEqual(summary["native_direct_case_ids"], ["native-vlf-low-cn0"])
+            self.assertEqual(summary["extensions"]["resource"]["context"]["mode"], "routine")
+            self.assertTrue(all(row.get("report_sha256") for row in summary["extensions"].values()))
+            self.assertEqual(summary["extensions"]["planner"]["context"]["bounds_workspace"], str(workspace))
             self.assertFalse(summary["complete_scope_qualification"])
 
     def test_explicit_direct_family_mode_needs_no_unused_anchor(self):
@@ -484,6 +679,73 @@ class CompleteSuiteTests(unittest.TestCase):
             "--reference-binary", "/tmp/not-run", "--anchor-directory", "/tmp/not-run", "--family-mode", "direct"])
         self.assertEqual(args.family_mode, "direct")
         self.assertIsNone(args.family_anchor_directory)
+        self.assertEqual(args.stopping_rule, "decision")
+        self.assertEqual(args.regression_profile, "normal")
+        self.assertEqual(args.budget_seconds, 1500.)
+        self.assertEqual(args.native_direct_case, [])
+
+    def test_native_direct_routes_require_unique_modeled_profile_cases(self):
+        base = ["--output", "/tmp/not-run", "--reference-root", str(ROOT), "--binary", "/tmp/not-run",
+            "--reference-binary", "/tmp/not-run", "--anchor-directory", "/tmp/not-run", "--family-mode", "direct"]
+        cases = complete.read_json(ROOT/"tools/triad-performance-native-cases.json")
+        direct = next(row["id"] for row in cases["cases"] if "training_seconds" not in row)
+        for names in (["not-a-case"], [direct], ["native-vlf-low-cn0"]*2):
+            with patch.object(sys, "stderr"), self.assertRaises(SystemExit):
+                complete.parse_args(base+[item for name in names for item in ("--native-direct-case", name)])
+
+    def test_strict_profile_is_explicit_and_keeps_the_manual_budget(self):
+        args = complete.parse_args(["--output", "/tmp/not-run", "--reference-root", str(ROOT), "--binary", "/tmp/not-run",
+            "--reference-binary", "/tmp/not-run", "--anchor-directory", "/tmp/not-run", "--family-mode", "direct",
+            "--regression-profile", "strict", "--budget-seconds", "3600"])
+        self.assertEqual(args.regression_profile, "strict")
+        self.assertEqual(args.budget_seconds, 3600.)
+
+    def test_resource_direct_needs_no_anchor_and_keeps_optional_history_separate(self):
+        base = ["--output", "/tmp/not-run", "--reference-root", str(ROOT), "--binary", "/tmp/not-run",
+            "--reference-binary", "/tmp/not-run", "--anchor-directory", "/tmp/not-run", "--family-mode", "direct",
+            "--resource-direct"]
+        for history in ([], ["--resource-anchor", "/tmp/historical-anchor.json"]):
+            args = complete.parse_args(base+history)
+            specs = complete.extension_specs(args, ROOT, ROOT, Path("/tmp/native"), Path("/tmp/ref"), Path("/tmp/out"))
+            self.assertEqual(len(specs), 1)
+            spec = specs[0]
+            self.assertEqual(spec["id"], "resource")
+            self.assertEqual(spec["context"]["mode"], "direct")
+            self.assertEqual(spec["arguments"][spec["arguments"].index("--mode")+1], "direct")
+            self.assertEqual("--anchor" in spec["arguments"], bool(history))
+            self.assertEqual("anchor" in spec["context"], bool(history))
+
+    def test_cpu_lifecycle_direct_activates_without_a_model_anchor(self):
+        base = ["--output", "/tmp/not-run", "--reference-root", str(ROOT), "--binary", "/tmp/not-run",
+            "--reference-binary", "/tmp/not-run", "--anchor-directory", "/tmp/not-run", "--family-mode", "direct"]
+        args = complete.parse_args(base+["--lifecycle-mixed-method", "direct"])
+        self.assertIsNone(args.lifecycle_anchor_directory)
+        specs = complete.extension_specs(args, ROOT, ROOT, Path("/tmp/native"), Path("/tmp/ref"), Path("/tmp/out"))
+        self.assertEqual(len(specs), 1)
+        self.assertEqual(specs[0]["context"]["mixed_method"], "direct")
+        self.assertEqual(specs[0]["arguments"][-4:], ["--mixed-method", "direct", "--direct-cycles", "6"])
+        self.assertEqual(specs[0]["context"]["direct_cycles"], 6)
+        self.assertEqual(specs[0]["context"]["anchor_directory"], "/tmp/out/lifecycle-unused-anchors")
+        with patch.object(sys, "stderr"), self.assertRaises(SystemExit):
+            complete.parse_args(base+["--device", "cuda", "--lifecycle-mixed-method", "direct"])
+        args = complete.parse_args(base+["--lifecycle-mixed-method", "direct", "--lifecycle-direct-cycles", "auto"])
+        specs = complete.extension_specs(args, ROOT, ROOT, Path("/tmp/native"), Path("/tmp/ref"), Path("/tmp/out"))
+        self.assertEqual(specs[0]["context"]["direct_cycles"], "auto")
+        self.assertEqual(specs[0]["arguments"][-2:], ["--direct-cycles", "auto"])
+        for value in ("1", "257", "6.0", "nan"):
+            with patch.object(sys, "stderr"), self.assertRaises(SystemExit):
+                complete.parse_args(base+["--lifecycle-mixed-method", "direct", "--lifecycle-direct-cycles", value])
+
+    def test_modeled_gpu_lifecycle_keeps_prior_argv_and_context(self):
+        args = complete.parse_args(["--output", "/tmp/not-run", "--reference-root", str(ROOT), "--binary", "/tmp/not-run",
+            "--reference-binary", "/tmp/not-run", "--anchor-directory", "/tmp/not-run", "--family-mode", "direct",
+            "--device", "cuda", "--lifecycle-anchor-directory", "/tmp/qualified-anchors"])
+        spec = complete.extension_specs(args, ROOT, ROOT, Path("/tmp/native"), Path("/tmp/ref"), Path("/tmp/out"))[0]
+        self.assertEqual(spec["arguments"], ["--candidate-root", str(ROOT), "--reference-root", str(ROOT),
+            "--binary", "/tmp/native", "--reference-binary", "/tmp/ref", "--device", "cuda", "--precision", "fp32",
+            "--threads", "2", "--native-threads", "1", "--mode", "reuse", "--anchor-directory", "/tmp/qualified-anchors"])
+        self.assertNotIn("mixed_method", spec["context"])
+        self.assertEqual(args.lifecycle_mixed_method, "modeled")
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 import json
 import math
 from pathlib import Path
@@ -16,9 +17,11 @@ import time
 import numpy as np
 
 import triad_perf_families as sample
-from triad_perf_adaptive import AdaptivePolicy, model_confirmation_policy, qualify_log_residuals, summarize
+from triad_perf_adaptive import (AdaptivePolicy, model_confirmation_policy, qualify_log_residuals,
+                                 qualification_policy, regression_profile, summarize)
 from triad_perf_conditional import (build_conditional_contract, check_conditional_sentinel,
-                                   conditional_comparison, conditional_model_log_bounds)
+                                   conditional_comparison, conditional_gate_readiness,
+                                   conditional_model_log_bounds, conditional_training_confidence)
 
 
 SOURCES = ("reference", "candidate")
@@ -175,6 +178,8 @@ def measure_case(workers, binaries, case, profile, output, *, device, precision,
                  deadline, policy, mode="auto", anchor=None, maximum_holds=9, sustained_seconds=0.,
                  seed_offset=None):
     """Run paired actual-work measurements, once per preregistered look."""
+    if mode == "qualify":
+        policy = qualification_policy(policy)
     output = Path(output)
     output.mkdir(parents=True, exist_ok=False)
     start = time.perf_counter()
@@ -218,7 +223,10 @@ def measure_case(workers, binaries, case, profile, output, *, device, precision,
             return {**measurements, "pair_id": sample.digest({"seed": seed, "case": case["id"]}),
                     "source_order": list(order), "numeric_agreement": numerical_agreement(measurements, precision)}
 
-        direct = counts is None or mode == "direct"
+        missing_history = mode == "reuse" and historical is None and policy.stopping_rule == "decision"
+        direct = counts is None or mode == "direct" or missing_history
+        if missing_history:
+            report["direct_fallback_reason"] = "no applicable historical predictor; measure full workload directly"
         warmup = pair("warmup", 0, base, (None,) if direct else tuple(counts))
         report["discarded_warmup"] = warmup
         if not direct:
@@ -239,8 +247,28 @@ def measure_case(workers, binaries, case, profile, output, *, device, precision,
                 direct = abbreviation >= .8*full or full < 2.
         report["selected_measurement"] = "direct" if direct else "modeled"
 
+        # An unqualified predictor cannot resolve a routine decision. Keep
+        # fresh model training on its legacy qualification schedule.
+        timing_policy = policy if direct or historical else qualification_policy(policy)
+        decision = timing_policy.stopping_rule == "decision"
+        report["regression_policy"] = {"pass_alpha": timing_policy.pass_error_budget,
+                                      "failure_alpha": timing_policy.failure_error_budget,
+                                      "slowdown_threshold": timing_policy.slowdown_threshold,
+                                      "model_guard_alpha": timing_policy.alpha}
         values = {name: [] for name in SOURCES}
         regimes = _regimes(warmup)
+
+        def conditional_plans(forecast, timing):
+            confidence = conditional_training_confidence(timing_policy, timing)
+            return {stage: build_conditional_contract(
+                historical["residuals"][stage], _stage_training(forecast, report["training"], stage),
+                applicability_key=sample.digest(identity),
+                historical_anchor_ids=historical["historical_pair_ids"],
+                training_pair_ids=[p["pair_id"] for p in report["training"]],
+                timing_confidence=confidence)
+                for stage in STAGES}
+
+        plans = None
         for i in range(policy.looks[-1]):
             row = pair("training", i, base+16*(i+1), (None,) if direct else tuple(counts))
             report["training"].append(row)
@@ -258,8 +286,20 @@ def measure_case(workers, binaries, case, profile, output, *, device, precision,
                 for name in SOURCES:
                     values[name].append(fitted[name]["complete_pipeline_seconds_point"])
             if i+1 in policy.looks:
-                timing = summarize(values["reference"], values["candidate"], policy,
+                timing = summarize(values["reference"], values["candidate"], timing_policy,
                                    model_validation="direct_full" if direct else "unvalidated")
+                if historical and decision and not direct:
+                    plans = conditional_plans(_forecast(report["training"], counts), timing)
+                    ratio = timing["paired_candidate_over_reference"]["timing_only_one_sided_bounds"]
+                    readiness = {}
+                    for stage, plan in plans.items():
+                        stage_ratio = plan["training_forecasts"]["paired"]["timing_mean_confidence_interval_seconds"]
+                        readiness[stage] = conditional_gate_readiness(plan, ratio if stage == "pipeline" else stage_ratio,
+                            slowdown_threshold=policy.slowdown_threshold)
+                    timing["conditional_gate_readiness"] = readiness
+                    if (all(row["sentinel_feasible"] for row in readiness.values()) and
+                            readiness["pipeline"]["provisional_gate"] in ("pass", "performance_regression")):
+                        timing["stop_reason"] = "provisional_decision_ready_for_full_endpoint"
                 report["timing_looks"].append(timing)
                 if timing["stop_reason"] != "continue":
                     break
@@ -268,25 +308,27 @@ def measure_case(workers, binaries, case, profile, output, *, device, precision,
         report["status"] = "direct_full" if direct else "unqualified"
         report["prediction_valid"] = direct
         report["comparison"] = {"gate": timing["performance_gate"] if direct else "inconclusive"}
+        if direct and decision:
+            report["comparison"].update(
+                timing_only_one_sided_bounds=timing["paired_candidate_over_reference"]["timing_only_one_sided_bounds"],
+                pass_one_sided_confidence_across_looks=1-policy.pass_error_budget,
+                failure_one_sided_confidence_across_looks=1-policy.failure_error_budget,
+                confidence_applies_to="paired geometric mean complete-pipeline runtime ratio")
         if not direct:
             forecast = _forecast(report["training"], counts)
             fixed = {"identity_sha256": sample.digest(identity), "forecast": forecast,
                      "confirmation_policy": model_confirmation_policy().to_dict(),
                      "training_pair_ids": [p["pair_id"] for p in report["training"]]}
-            plans = {}
             if historical:
-                for stage in STAGES:
-                    plans[stage] = build_conditional_contract(
-                        historical["residuals"][stage], _stage_training(forecast, report["training"], stage),
-                        applicability_key=fixed["identity_sha256"],
-                        historical_anchor_ids=historical["historical_pair_ids"],
-                        training_pair_ids=fixed["training_pair_ids"],
-                        timing_confidence=timing["policy"]["interval_confidence_per_look"])
+                if plans is None:
+                    plans = conditional_plans(forecast, timing)
                 fixed["conditional_plans"] = plans
             report["frozen"] = {**fixed, "commitment_sha256": sample.digest(fixed)}
             sample.write_json(output/"forecast.json", report["frozen"])
             point = sum(forecast[n]["complete_pipeline_seconds_point"] for n in SOURCES)
-            if historical or mode != "reuse":
+            if historical and decision and timing["stop_reason"] != "provisional_decision_ready_for_full_endpoint":
+                report["confirmation_stop_reason"] = "frozen_decision_unresolved_or_endpoint_infeasible"
+            elif historical or mode != "reuse":
                 for i in range(1 if historical else maximum_holds):
                     if deadline-time.monotonic() < 1.2*point:
                         report["confirmation_stop_reason"] = "deadline"
@@ -321,6 +363,11 @@ def measure_case(workers, binaries, case, profile, output, *, device, precision,
                             ratio = timing["paired_candidate_over_reference"]["timing_mean_confidence_interval_seconds"]
                             report["comparison"] = conditional_comparison(ratio, bounds,
                                                     slowdown_threshold=policy.slowdown_threshold)
+                            if decision:
+                                report["comparison"].update(timing_only_one_sided_bounds=ratio,
+                                    timing_only_pass_confidence_across_looks=1-policy.pass_error_budget,
+                                    timing_only_failure_confidence_across_looks=1-policy.failure_error_budget,
+                                    confidence_includes_unverified_model_error=False)
                             report["status"] = "historically_supported_conditional"
                             report["prediction_valid"] = True
                     elif i+1 in model_confirmation_policy().looks:
@@ -329,11 +376,11 @@ def measure_case(workers, binaries, case, profile, output, *, device, precision,
                         outcome = _status(check)
                         if outcome == "validated":
                             r = residuals["pipeline"]
-                            decision = summarize(values["reference"], values["candidate"], policy,
+                            final_timing = summarize(values["reference"], values["candidate"], timing_policy,
                                 model_validation="validated", reference_model_log_errors=r["reference"],
                                 candidate_model_log_errors=r["candidate"], paired_model_log_errors=r["paired"])
-                            report["adaptive"] = decision
-                            report["comparison"] = {"gate": decision["performance_gate"]}
+                            report["adaptive"] = final_timing
+                            report["comparison"] = {"gate": final_timing["performance_gate"]}
                             report["status"] = "validated"
                             report["prediction_valid"] = True
                             break
@@ -453,6 +500,10 @@ def cli(argv=None):
     parser.add_argument("--native-threads", type=int, default=1)
     parser.add_argument("--budget-seconds", type=float, default=600.)
     parser.add_argument("--looks", default="5,9,17,33")
+    parser.add_argument("--stopping-rule", choices=("decision", "precision"),
+                        help="routine defaults to decision; qualification defaults to precision")
+    parser.add_argument("--regression-profile", choices=("normal", "ci", "strict"), default="normal",
+                        help="routine decision criteria; precision stopping uses historical criteria")
     parser.add_argument("--maximum-holds", type=int, choices=(3,5,9,17), default=9)
     parser.add_argument("--mode", choices=("auto", "reuse", "qualify", "direct"), default="auto")
     parser.add_argument("--sustained-seconds", type=float, default=0.)
@@ -467,7 +518,10 @@ def cli(argv=None):
         parser.error("invalid thread count")
     if not 0 < args.budget_seconds <= 28800 or not 0 <= args.sustained_seconds <= 3600:
         parser.error("invalid suite budget or sustained duration")
-    policy = AdaptivePolicy(looks=tuple(map(int, args.looks.split(","))), family_count=len(cases))
+    stopping_rule = args.stopping_rule or ("precision" if args.mode == "qualify" else "decision")
+    policy = AdaptivePolicy(looks=tuple(map(int, args.looks.split(","))), family_count=len(cases),
+                            stopping_rule=stopping_rule,
+                            **(regression_profile(args.regression_profile) if stopping_rule == "decision" else {}))
     common = runpy.run_path(str(sample.WORKER.with_name("triad-performance.py")))
     factory = common["ReceiverWorker"]
     start = time.perf_counter()

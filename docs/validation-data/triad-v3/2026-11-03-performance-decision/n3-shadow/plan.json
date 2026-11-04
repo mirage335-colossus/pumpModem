@@ -1,0 +1,30 @@
+{
+  "status": "plan_frozen_waiting_for_completion_signal",
+  "comparison": [
+    "cpu-complete-001",
+    "cpu-decision-001"
+  ],
+  "scope": "same 20 already-routed directly observed paired cases only",
+  "unchanged": [
+    "targets",
+    "timers",
+    "routes",
+    "paired ABBA ordering",
+    "all modeled, identical-route, and staged cases"
+  ],
+  "policy_replay": {
+    "stopping_rule": "decision",
+    "looks": [3, 5, 9, 17, 33],
+    "alpha_per_direction": 0.05,
+    "spending": "equal across looks"
+  },
+  "reported_metrics": [
+    "first decision look per case",
+    "sum of omitted actual timer costs relative to look-33 observations",
+    "additional observations required relative to the old look schedule",
+    "unavailable prefixes or any decision disagreement"
+  ],
+  "interpretation_limit": "diagnostic policy-selection estimate only; no requalification and no cross-case claim",
+  "selection_rule": "retain default look 5 unless the alternative independently supports at least 120 seconds absolute timer savings with no unresolved extra sampling or decision disagreement",
+  "execution": "no benchmark, runtime edit, or second full run"
+}

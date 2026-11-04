@@ -1,0 +1,62 @@
+{
+  "build_log_scope": "Original compile/link output copied after the run. Coordinator reports both builds completed successfully. Logs contain no executable digest; the completed-run report independently records adfa35b5 for both final planner executables.",
+  "fft_applicability_metadata": "Pending separate review; no measured forecast-residual failure is inferred from the original applicability guard failures.",
+  "records": [
+    {
+      "archive": "post-run/final-routine/native-build/final-planner-build.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/native-build/final-planner-build.log",
+      "raw_bytes": 139,
+      "raw_sha256": "5d4727a780c66d76db31ec7d6cdac926ce676c999cf0bad249a5fff461fbaf1e"
+    },
+    {
+      "archive": "post-run/final-routine/native-build/final-planner-build.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/native-build/final-reference-planner-build.log",
+      "raw_bytes": 139,
+      "raw_sha256": "5d4727a780c66d76db31ec7d6cdac926ce676c999cf0bad249a5fff461fbaf1e"
+    },
+    {
+      "archive": "post-run/final-routine/current-lifecycle-replay.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/current-lifecycle-replay.json",
+      "raw_bytes": 1381,
+      "raw_sha256": "19de0a90291e37a96fb696686e14fc6d3bb465eb1630f58acaf05cc0a24fc690"
+    },
+    {
+      "archive": "post-run/replay-current-lifecycle-observed.py.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/replay-current-lifecycle-observed.py",
+      "raw_bytes": 1436,
+      "raw_sha256": "0bfacc56c2115170dd60c1bbe4d95084ee7b8627c4299c706d150309409f3166"
+    }
+  ],
+  "replay_boundary": "Observed validate_routine_report call only; not fresh receiver timing or a rerun of the complete suite.",
+  "schema": "triad-complete002-post-run-evidence-v1",
+  "scope": "Separate post-run proof replay and final planner compile/link logs; original complete002 summary, source snapshot, and incomplete outcome are unchanged.",
+  "source_archive": "post-run/matching-replay-source.tar.gz",
+  "source_members": [
+    {
+      "bytes": 1436,
+      "path": "replay-current-lifecycle-observed.py",
+      "sha256": "0bfacc56c2115170dd60c1bbe4d95084ee7b8627c4299c706d150309409f3166"
+    },
+    {
+      "bytes": 1377,
+      "path": "tools/triad-performance-lifecycle.json",
+      "sha256": "eee47f2396e0a230bf95a60029c958041449e37ab7d54872a2a5156a898643d4"
+    },
+    {
+      "bytes": 60675,
+      "path": "tools/triad-performance.py",
+      "sha256": "f59f02a9eca8c2893c7f695d5a5fcafb79cce47c5e36ba7084573840d7052705"
+    },
+    {
+      "bytes": 60154,
+      "path": "tools/triad_perf_complete.py",
+      "sha256": "fcea5f430d4f8740b6fe175d842bd5d72a1840a75767d7b5e29d08e2478beba4"
+    },
+    {
+      "bytes": 65751,
+      "path": "tools/triad_perf_lifecycle.py",
+      "sha256": "5dfa0492f4cd3dac3db262feee8b81f5c076ceeece3c56a210a54d3e58fcb336"
+    }
+  ],
+  "source_scope": "Four current source files byte-matched to the replay receipt, plus the exact observed replay program. Its remaining baseline context is the original archived GPU source set."
+}

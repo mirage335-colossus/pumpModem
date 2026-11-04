@@ -13,7 +13,7 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
-from triad_perf_adaptive import AdaptivePolicy
+from triad_perf_adaptive import AdaptivePolicy, regression_profile
 from triad_perf_fft_trace import (_digest, anchor_valid, anchor_proof_valid, anchor_applicability,
                                   measure_fft, measurement_plan, MEASUREMENT_CONTRACT)
 
@@ -60,10 +60,10 @@ class Worker:
         return value
 
 
-def run(selected=None, workers=None, **kwargs):
+def run(selected=None, workers=None, *, policy=AdaptivePolicy(), **kwargs):
     selected = case() if selected is None else selected
     workers = {"reference": Worker(), "candidate": Worker()} if workers is None else workers
-    return measure_fft(selected, workers, "fp32", "cpu", policy=AdaptivePolicy(),
+    return measure_fft(selected, workers, "fp32", "cpu", policy=policy,
                        deadline=None, api=api, **kwargs)
 
 
@@ -143,6 +143,52 @@ class TraceTests(unittest.TestCase):
             self.assertEqual(counts.count(64), 1)
             self.assertNotIn(16, counts)
 
+    def test_conditional_decision_does_not_chase_timing_width(self):
+        class CommonTimingJitter(Worker):
+            def __init__(self, jitter):
+                super().__init__()
+                self.cycle = -1
+                self.jitter = jitter
+
+            def request(self, request):
+                value = super().request(request)
+                if request["action"] == "prepare":
+                    self.cycle += 1
+                    field = "wall_seconds"
+                else:
+                    field = "wall_seconds_including_finish"
+                value[field] *= (1., 1.-self.jitter, 1.+self.jitter)[self.cycle % 3]
+                return value
+
+        policy = AdaptivePolicy(looks=(3, 5), family_count=12, stopping_rule="decision")
+        with tempfile.TemporaryDirectory() as directory:
+            run(anchor_directory=directory)
+            result = run(workers={name: CommonTimingJitter(.01) for name in ("reference", "candidate")},
+                         anchor_directory=directory, validation_mode="reuse", policy=policy)
+            infeasible = run(workers={name: CommonTimingJitter(.10) for name in ("reference", "candidate")},
+                             anchor_directory=directory, validation_mode="reuse", policy=policy)
+            undecided = run(workers={"reference": Worker(), "candidate": Worker(1.24)},
+                            anchor_directory=directory, validation_mode="reuse", policy=policy)
+        self.assertEqual(result["adaptive"]["sample_count"], 3)
+        self.assertFalse(result["timing_precision_reached"])
+        self.assertEqual(result["adaptive"]["stop_reason"], "conditional_decision_ready_for_endpoint")
+        self.assertFalse(result["adaptive"]["conditional_readiness"]["performance_pass_eligible"])
+        self.assertEqual(result["full_target_measurement_count_per_source"], 1)
+        self.assertTrue(result["prediction_valid"])
+        self.assertEqual(result["comparison"]["gate"], "pass")
+        self.assertEqual(infeasible["adaptive"]["sample_count"], 5)
+        self.assertEqual(infeasible["full_target_measurement_count_per_source"], 0)
+        self.assertFalse(infeasible["prediction_valid"])
+        self.assertEqual(infeasible["comparison"]["gate"], "inconclusive")
+        self.assertEqual(infeasible["anchors"]["conditional_check"]["timing_blockers"],
+                         ["reference", "candidate"])
+        self.assertTrue(undecided["adaptive"]["conditional_readiness"]["sentinel_feasible"])
+        self.assertEqual(undecided["adaptive"]["sample_count"], 5)
+        self.assertEqual(undecided["full_target_measurement_count_per_source"], 0)
+        self.assertFalse(undecided["prediction_valid"])
+        self.assertEqual(undecided["anchors"]["conditional_check"]["reason"],
+                         "decision_inconclusive_at_frozen_look")
+
     def test_hardware_and_source_mismatch_do_not_reuse_anchor(self):
         with tempfile.TemporaryDirectory() as directory:
             run(anchor_directory=directory)
@@ -189,8 +235,10 @@ class TraceTests(unittest.TestCase):
                     run(workers={"reference": Worker(), "candidate": Worker(corruption=corruption)})
 
     def test_auto_qualifies_missing_anchor_and_rejects_invalid_modes(self):
-        result = run(validation_mode="auto")
+        result = run(validation_mode="auto", policy=AdaptivePolicy(stopping_rule="decision", **regression_profile("ci")))
         self.assertTrue(result["prediction_valid"])
+        self.assertEqual(result["adaptive"]["stop_reason"], "precision_reached")
+        self.assertEqual(result["adaptive"]["policy"]["slowdown_threshold"], 1.30)
         self.assertEqual(result["full_target_measurement_count_per_source"], 3)
         with self.assertRaises(ValueError):
             run(validation_mode="silently-assume")
@@ -344,7 +392,9 @@ class TraceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             run(anchor_directory=directory)
             result = run(workers={"reference": Worker(), "candidate": FullOnlySlowdown()},
-                         anchor_directory=directory, validation_mode="reuse")
+                         anchor_directory=directory, validation_mode="reuse",
+                         policy=AdaptivePolicy(stopping_rule="decision"))
+        self.assertEqual(result["adaptive"]["conditional_readiness"]["provisional_gate"], "pass")
         self.assertEqual(result["full_target_measurement_count_per_source"], 1)
         self.assertFalse(result["prediction_valid"])
         self.assertFalse(result["comparison"]["performance_pass_eligible"])

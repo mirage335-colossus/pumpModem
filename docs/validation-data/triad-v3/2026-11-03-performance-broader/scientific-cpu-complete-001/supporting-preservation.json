@@ -1,0 +1,216 @@
+{
+  "records": [
+    {
+      "archive": "supporting/local-evidence/triad-performance-broader/identical-anchors-cpu/free-crystal.identical-anchor.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/identical-anchors-cpu/free-crystal.identical-anchor.json",
+      "raw_bytes": 1040979,
+      "raw_sha256": "1eab0ac257010f87f6dae014e63f97c77fbf30ab3c0c7c5ce37eb8514fde13b5",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "supporting/local-evidence/triad-performance-broader/identical-anchors-cpu/reporting-projection.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/identical-anchors-cpu/reporting-projection.json",
+      "raw_bytes": 4416,
+      "raw_sha256": "c8680393c3120179b7b0886793dcbab8cde77f7da847980af790a243683d4b6f",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "supporting/local-evidence/triad-performance-broader/lifecycle/cpu-complete-001-derived-classification-reviewed.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/lifecycle/cpu-complete-001-derived-classification-reviewed.json",
+      "raw_bytes": 14847,
+      "raw_sha256": "dcda4066c02cc4f6949d9bd906b4be2cc5ac2f5daf80dabeb1ab381e2ef00d02",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "supporting/local-evidence/triad-performance-broader/planner-build/build-evidence.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-build/build-evidence.json",
+      "raw_bytes": 4115,
+      "raw_sha256": "493cdc050d7d06dc1c858f7b810bef7cc1e98eaaea456d449c7fc1e805c0f826",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "supporting/local-evidence/triad-performance-broader/staged-source-reconstruction-001/postchange-triad_perf_staged.py.gz",
+      "input_path": "local-evidence/triad-performance-broader/staged-source-reconstruction-001/postchange-triad_perf_staged.py",
+      "raw_bytes": 65251,
+      "raw_sha256": "0316dcb5f19a34541ad551e20be9bf80c9cd2c7595a237e155c31a86172a7dc7",
+      "storage": "exact_bytes"
+    },
+    {
+      "archive": "supporting/local-evidence/triad-performance-broader/staged-source-reconstruction-001/reconstruct.py.gz",
+      "input_path": "local-evidence/triad-performance-broader/staged-source-reconstruction-001/reconstruct.py",
+      "raw_bytes": 3042,
+      "raw_sha256": "c8fb7180d4c3ba6a9ed758849065c859020b2c3c99a4f581af52583eed9d4796",
+      "storage": "exact_bytes"
+    },
+    {
+      "archive": "supporting/local-evidence/triad-performance-broader/staged-source-reconstruction-001/reconstructed-triad_perf_staged.py.gz",
+      "input_path": "local-evidence/triad-performance-broader/staged-source-reconstruction-001/reconstructed-triad_perf_staged.py",
+      "raw_bytes": 64845,
+      "raw_sha256": "114f5d87d43f6fcf66d1c4144aa1ca24292f35ffaf896d46018f1088d01f7862",
+      "storage": "exact_bytes"
+    },
+    {
+      "archive": "supporting/local-evidence/triad-performance-broader/staged-source-reconstruction-001/reconstruction.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/staged-source-reconstruction-001/reconstruction.json",
+      "raw_bytes": 1285,
+      "raw_sha256": "78696c7bd3ec193171701a2094bbf9d475a202513ed8cfa6e36332060485212a",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "supporting/local-evidence/triad-performance-broader/staged-source-reconstruction-001/recorded-forward-edits.patch.gz",
+      "input_path": "local-evidence/triad-performance-broader/staged-source-reconstruction-001/recorded-forward-edits.patch",
+      "raw_bytes": 2697,
+      "raw_sha256": "64f3b7bf9dcbfbd2cef573e4f90ad2cda84b76d0cb8f7225ca8832705351848a",
+      "storage": "exact_bytes"
+    },
+    {
+      "archive": "supporting/local-evidence/triad-performance-complete/cache-forward-proposal-001/patch.diff.gz",
+      "input_path": "local-evidence/triad-performance-complete/cache-forward-proposal-001/patch.diff",
+      "raw_bytes": 2823,
+      "raw_sha256": "aa2f7772cc8417e8f91d40dff0d38e739c17480da93f392027f98ca9a77a1bc5",
+      "storage": "exact_bytes"
+    },
+    {
+      "archive": "supporting/local-evidence/triad-performance-complete/cache-forward-proposal-001/proposal.json.gz",
+      "input_path": "local-evidence/triad-performance-complete/cache-forward-proposal-001/proposal.json",
+      "raw_bytes": 1410,
+      "raw_sha256": "a372d159f1df27efd518ed3425884a3d7943cf17d77f7c7d4a986555cb4d3635",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "supporting/local-evidence/triad-performance-complete/cache-forward-proposal-001/tools/triad_perf_bootstrap.py.gz",
+      "input_path": "local-evidence/triad-performance-complete/cache-forward-proposal-001/tools/triad_perf_bootstrap.py",
+      "raw_bytes": 29560,
+      "raw_sha256": "b847f425bf50a1aea6114d6816246433104d76805a2d4d86cdc2246d99374860",
+      "storage": "exact_bytes"
+    },
+    {
+      "archive": "supporting/local-evidence/triad-performance-complete/source-reconstruction/bootstrap9418/reconstruction.json.gz",
+      "input_path": "local-evidence/triad-performance-complete/source-reconstruction/bootstrap9418/reconstruction.json",
+      "raw_bytes": 1436,
+      "raw_sha256": "14f4ddd5b077da83f2008fda3255e8d51b89b0c5c2546a05583e07a764dd36c2",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "supporting/local-evidence/triad-performance-complete/source-reconstruction/bootstrap9418/triad_perf_bootstrap.py.gz",
+      "input_path": "local-evidence/triad-performance-complete/source-reconstruction/bootstrap9418/triad_perf_bootstrap.py",
+      "raw_bytes": 29504,
+      "raw_sha256": "9418d9ff01de230641d4aa1e7449609af2ebce9e0960c6c3fec13333ab146baa",
+      "storage": "exact_bytes"
+    },
+    {
+      "archive": "supporting/local-evidence/triad-performance-trace/anchors-v3/cpu/1793733773891342651-65211525efe568a7.anchor.json.gz",
+      "input_path": "local-evidence/triad-performance-trace/anchors-v3/cpu/1793733773891342651-65211525efe568a7.anchor.json",
+      "raw_bytes": 48533,
+      "raw_sha256": "4c6fe55133ec27230e4fdb08f9c1e12331be21b0a4dd49e55f877771457469ca",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "supporting/local-evidence/triad-performance-trace/anchors-v3/cpu/1793733773891342651-65211525efe568a7.prediction.json.gz",
+      "input_path": "local-evidence/triad-performance-trace/anchors-v3/cpu/1793733773891342651-65211525efe568a7.prediction.json",
+      "raw_bytes": 2742,
+      "raw_sha256": "df1d100ccc0e25b8685926e38cc543705cb9982c7ca9eeba8e2e8618d811e5d8",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "supporting/local-evidence/triad-performance-trace/anchors-v3/cpu/1793733930949112639-8868fa440aed7993.anchor.json.gz",
+      "input_path": "local-evidence/triad-performance-trace/anchors-v3/cpu/1793733930949112639-8868fa440aed7993.anchor.json",
+      "raw_bytes": 48544,
+      "raw_sha256": "9eb6131d86f52d782c3cfa8a84a4af0bfa99e5d07f922341ef764cc24d884988",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "supporting/local-evidence/triad-performance-trace/anchors-v3/cpu/1793733930949112639-8868fa440aed7993.prediction.json.gz",
+      "input_path": "local-evidence/triad-performance-trace/anchors-v3/cpu/1793733930949112639-8868fa440aed7993.prediction.json",
+      "raw_bytes": 2726,
+      "raw_sha256": "8f5e911ca6d202cad4b018b2593bb535c6a7eca2568292ecde35b65690973c10",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "supporting/local-evidence/triad-performance-trace/anchors-v3/cpu/1793734488998787256-38ba83e99ef81717.anchor.json.gz",
+      "input_path": "local-evidence/triad-performance-trace/anchors-v3/cpu/1793734488998787256-38ba83e99ef81717.anchor.json",
+      "raw_bytes": 59167,
+      "raw_sha256": "0adea68473b8c6b40c6e0fd2d328ad3f222ea8d5e5e8297488b82604eea2b8e1",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "supporting/local-evidence/triad-performance-trace/anchors-v3/cpu/1793734488998787256-38ba83e99ef81717.prediction.json.gz",
+      "input_path": "local-evidence/triad-performance-trace/anchors-v3/cpu/1793734488998787256-38ba83e99ef81717.prediction.json",
+      "raw_bytes": 2726,
+      "raw_sha256": "4500230c7a6d9b3e02f54444fe83ecf16b22a164d14977c46d5aa3be3e72f609",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "supporting/local-evidence/triad-performance-trace/anchors-v3/cpu/1793736320242150987-f64ec44f6551af17.anchor.json.gz",
+      "input_path": "local-evidence/triad-performance-trace/anchors-v3/cpu/1793736320242150987-f64ec44f6551af17.anchor.json",
+      "raw_bytes": 59210,
+      "raw_sha256": "8ad145874cb597174d990ed83ea06eaa2c5e4dad5ca7f4aa71cc8e30dc813a94",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "supporting/local-evidence/triad-performance-trace/anchors-v3/cpu/1793736320242150987-f64ec44f6551af17.prediction.json.gz",
+      "input_path": "local-evidence/triad-performance-trace/anchors-v3/cpu/1793736320242150987-f64ec44f6551af17.prediction.json",
+      "raw_bytes": 2729,
+      "raw_sha256": "2787e2e3d36258501acb2447e4ec68591661a15dd6cc4592204eb49a68c4f8cf",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "supporting/local-evidence/triad-performance-trace/anchors-v3/cpu/1793737805367802524-21562f421857c6d9.prediction.json.gz",
+      "input_path": "local-evidence/triad-performance-trace/anchors-v3/cpu/1793737805367802524-21562f421857c6d9.prediction.json",
+      "raw_bytes": 11959,
+      "raw_sha256": "8d1b0948192775d884ec11ba1057cf09abda5d80f58bf390b295f1d5b4fc42fd",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "supporting/local-evidence/triad-performance-trace/anchors-v3/cpu/1793737995115567783-f64ec44f6551af17.prediction.json.gz",
+      "input_path": "local-evidence/triad-performance-trace/anchors-v3/cpu/1793737995115567783-f64ec44f6551af17.prediction.json",
+      "raw_bytes": 10590,
+      "raw_sha256": "4dda813f9cf08ec408ea0dbce1d176efca2b9fbcff6100ad88a117fd52ebd4a1",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "supporting/local-evidence/triad-performance-trace/anchors-v3/cpu/1793748647374902449-21562f421857c6d9.prediction.json.gz",
+      "input_path": "local-evidence/triad-performance-trace/anchors-v3/cpu/1793748647374902449-21562f421857c6d9.prediction.json",
+      "raw_bytes": 11953,
+      "raw_sha256": "b3a2d80a569d2d866d012a411b8d8111ebc43eb51346781a1723bd648fa986be",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "supporting/local-evidence/triad-performance-trace/anchors-v3/cpu/1793755599280406943-8f20bcfb7199587c.prediction.json.gz",
+      "input_path": "local-evidence/triad-performance-trace/anchors-v3/cpu/1793755599280406943-8f20bcfb7199587c.prediction.json",
+      "raw_bytes": 11078,
+      "raw_sha256": "514453e4e6ff8f583233e37137f74e76721b7c5bf54ba5f64779b5b111b3e4d9",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "supporting/local-evidence/triad-performance-trace/anchors-v3/cpu/1793769128193932232-8f552e444633b496.prediction.json.gz",
+      "input_path": "local-evidence/triad-performance-trace/anchors-v3/cpu/1793769128193932232-8f552e444633b496.prediction.json",
+      "raw_bytes": 11242,
+      "raw_sha256": "e7f9d65edbbbb5bb97749a822d760d7534fbc4621336bae0901f90782615ccdb",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "supporting/local-evidence/triad-performance-trace/anchors-v3/cpu/1793771809124466702-8f552e444633b496.prediction.json.gz",
+      "input_path": "local-evidence/triad-performance-trace/anchors-v3/cpu/1793771809124466702-8f552e444633b496.prediction.json",
+      "raw_bytes": 12231,
+      "raw_sha256": "e2dd0b588beaae76f810033d8dd642a9ffe6467b790c57716996a1fbe45f15d7",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "supporting/local-evidence/triad-performance-trace/anchors-v3/native-vlf-low-cn0.native-anchor.json.gz",
+      "input_path": "local-evidence/triad-performance-trace/anchors-v3/native-vlf-low-cn0.native-anchor.json",
+      "raw_bytes": 1701206,
+      "raw_sha256": "91ececa517e8393b3a11057fb7fedf79339bd7ea2cd0791fe24d1e066e852c6a",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "supporting/local-evidence/triad-performance-trace/reference-build-provenance.json.gz",
+      "input_path": "local-evidence/triad-performance-trace/reference-build-provenance.json",
+      "raw_bytes": 1220,
+      "raw_sha256": "4f7a1ba47c842f2e765a78406fee232dd14cb9564d8eb142db914225f4c7d22a",
+      "storage": "compact_json_reformatted_indent2_newline"
+    }
+  ],
+  "schema": "triad-separate-supporting-records-v1",
+  "scope": "Retained inputs, exact-source recovery provenance, and a separately reviewed post-run classification. Original measured reports unchanged."
+}

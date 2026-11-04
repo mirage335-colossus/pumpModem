@@ -19,7 +19,7 @@ from scipy.stats import t as student_t
 
 import triad_perf_families as sample
 import triad_perf_family_regression as paired
-from triad_perf_adaptive import AdaptivePolicy, model_confirmation_policy
+from triad_perf_adaptive import AdaptivePolicy, model_confirmation_policy, qualification_policy, regression_profile
 
 
 SCHEMA = "triad-performance-staged-v1"
@@ -33,8 +33,34 @@ CONDITIONAL_FLOOR = .10
 MAX_CONDITIONAL_MEAN = .20
 LEGACY_DRIVER_SHA256 = "b11e2d8df8b0d27d92653d2302a06ff21b4f0b6e4020f1cca13280d81493ad6a"
 LEGACY_SPLIT_DRIVER_SHA256 = "9f3d660016bc56dd6e0c240239fb0bc2587b759cd8ce1eafbd12fac9ddbe2237"
+LEGACY_CAPPED_DRIVER_SHA256 = "f7aa93f7277aae42dbafc0a7cba38f265255ffe1068dba9c9e16bc5d660c2e2c"
+LEGACY_DECISION_DRIVER_SHA256 = "4395a3a1bbb6ea11944b1b152003aa362110ece558b427883873765722abda28"
+LEGACY_PROFILE_DRIVER_SHA256 = "40e80b87b0147b52970ce062b3972e5ec1367d564e206bd8c2912031825846e1"
+LEGACY_NATIVE_DIRECT_DRIVER_SHA256 = "114f5d87d43f6fcf66d1c4144aa1ca24292f35ffaf896d46018f1088d01f7862"
 LEGACY_MODEL_CORE_SHA256 = "6378161e650b8cfbe427a283d231c137085b3f47be62729f9d25384c26110b6f"
 SPLIT_STOP = "independent-stage-look-v2"
+REVIEWED_ROUTINE_DEPENDENCIES = {
+    "triad-performance.py": (
+        "4effb31a1641239deeb933bc5690910e0033ed1a1a47b4418cb70939a4515db3",
+        "afd3592550ce6dd57f21ae8b351399baa2459d9e8b3c19511281446bf6bdd5cd"),
+    "triad_perf_adaptive.py": (
+        "3ad99d54b955e735f0db832bd6ac3afe91b016d993de80909827efd491174106",
+        "b6a1b25851a8cd98c76134aff90ad0fa980eb6f445ff003c722ad5185b7de202"),
+    "triad_perf_family_regression.py": (
+        "6c2bb590bd9e37e8f893aa20e1a04843cdcf6a35feacbbbc8696c1a3ba8ba60d",
+        "28d467b7c2261f0878bb2d4050129743c74f602c3f22d0c23e5f4cf6c990b4df"),
+}
+REVIEWED_DECISION_DEPENDENCIES = {
+    "triad-performance.py": "565e892bed7ffa55971efd9adf11b0377391975b67880f9ddbeed0700b9f1ba7",
+    "triad_perf_adaptive.py": "07e9e243e2e655b17887382712c7ff099855a07d6dc3985c03c430df2a113257",
+    "triad_perf_family_regression.py": "1a81bc2a9849e16dbf20c3087bd09650e8a1662218191e952fc11b1a1eb31f68",
+}
+REVIEWED_PROFILE_DEPENDENCIES = {
+    "triad-performance.py": "2f9378ff437cda7e329e2b5242f6bf0c5760c2c194545683b4c161a32669ca31",
+}
+REVIEWED_NATIVE_DIRECT_DEPENDENCIES = {
+    "triad-performance.py": "f59f02a9eca8c2893c7f695d5a5fcafb79cce47c5e36ba7084573840d7052705",
+}
 
 
 def training_policy(policy):
@@ -209,6 +235,94 @@ def _capped_conditional_blockers(timing, counts, policy):
 def _timing_at(generation, receiver, counts, confidence):
     return compose_timing(_profile_values(generation[:counts["generation"]]),
                           _profile_values(receiver[:counts["receiver"]]), confidence)
+
+
+def _decision_timing(generation, receiver, counts, policy):
+    # Each ratio direction uses two marginal endpoints per stage (reference
+    # and paired difference). Spend once across those four margins and their
+    # declared looks. Adaptive combinations of stages need no extra looks.
+    failure_tail = policy.failure_error_budget / (4 * len(policy.looks))
+    pass_tail = policy.pass_error_budget / (4 * len(policy.looks))
+    lower_timing = _timing_at(generation, receiver, counts, 1 - 2 * failure_tail)
+    timing = (_timing_at(generation, receiver, counts, 1 - 2 * pass_tail)
+              if pass_tail != failure_tail else lower_timing)
+    reference = timing["pipeline"]["reference"]["interval"]
+    difference = timing["pipeline"]["paired_difference"]["interval"]
+    lower_reference = lower_timing["pipeline"]["reference"]["interval"]
+    lower_difference = lower_timing["pipeline"]["paired_difference"]["interval"]
+    # Bounds only need to distinguish ratios above one. This sign handling
+    # uses a fixed reference endpoint for each direction, so selecting an
+    # endpoint after seeing the sign cannot spend unallocated alpha.
+    bounds = ([1 + lower_difference[0] / lower_reference[1] if lower_difference[0] > 0 else 0.,
+               1 + max(0., difference[1]) / reference[0]] if reference[0] > 0 else None)
+    factor = 1 + CONDITIONAL_FLOOR
+    scenario = [bounds[0] / factor, bounds[1] * factor] if bounds is not None else None
+    gate = "inconclusive"
+    if scenario is not None:
+        if scenario[0] > policy.slowdown_threshold:
+            gate = "performance_regression"
+        elif scenario[1] <= policy.slowdown_threshold:
+            gate = "pass"
+    decision = {
+        "provisional_gate": gate,
+        "timing_only_one_sided_bounds": bounds,
+        "timing_only_one_sided_confidence_across_looks": 1 - policy.alpha,
+        "per_direction_alpha_per_margin_and_look": failure_tail,
+        "margins_per_direction": 4,
+        "predeclared_looks_per_stage": list(policy.looks),
+        "model_adjusted_ratio_interval": scenario,
+        "model_engineering_allowance_factor": factor,
+        "confidence_includes_unverified_model_error": False,
+        "future_coverage_qualified": False,
+        "estimand": "ratio of additive arithmetic mean full-pipeline runtimes",
+    }
+    if policy.pass_alpha is not None or policy.failure_alpha is not None:
+        decision.pop("timing_only_one_sided_confidence_across_looks")
+        decision.pop("per_direction_alpha_per_margin_and_look")
+        decision.update(pass_confidence_across_looks=1-policy.pass_error_budget,
+                        failure_confidence_across_looks=1-policy.failure_error_budget,
+                        pass_alpha_per_margin_and_look=pass_tail,
+                        failure_alpha_per_margin_and_look=failure_tail)
+    return timing, decision
+
+
+def _sentinel_blockers(plan):
+    timing = plan["current_timing"]
+    blockers = []
+    for stage in STAGES:
+        row = timing[stage] if stage == "pipeline" else _stage_metrics(timing["stages"][stage])
+        for metric in (*SOURCES, "paired"):
+            interval = row[metric]["interval"]
+            if interval is None or interval[0] <= 0:
+                blockers.append((stage, metric))
+                continue
+            half = max(abs(math.log(x / row[metric]["mean"])) for x in interval)
+            span = math.log(interval[1] / interval[0]) / 2
+            if (half + plan["fixed_mean_model_log_allowance"] > plan["mean_model_plus_timing_limit"] or
+                    span > plan["historical_observation_envelopes"][stage][metric]):
+                blockers.append((stage, metric))
+    return blockers
+
+
+def _next_decision_counts(timing, decision_timing, counts, policy, blockers):
+    next_look = {stage: next((n for n in policy.looks if n > count), None)
+                 for stage, count in counts.items()}
+    available = [stage for stage, n in next_look.items() if n is not None]
+    blocked = {stage for stage, _ in blockers if stage != "pipeline"}
+    if blocked - set(available) or not available:
+        return None
+    if blockers:
+        pending = [stage for stage in available if not blocked or stage in blocked]
+        choice = max(pending, key=lambda stage: _relative_width(_stage_metrics(timing["stages"][stage])))
+    else:
+        # Refine the largest contributor to ratio uncertainty, independent
+        # of the absolute timing diagnostic's legacy width target.
+        def contribution(stage):
+            row = decision_timing["stages"][stage]
+            return sum(row[metric]["interval"][1] - row[metric]["interval"][0]
+                       for metric in ("reference", "paired_difference"))
+        choice = max(available, key=contribution)
+    return {**counts, choice: next_look[choice]}
 
 
 def _replay_split_looks(proof, frozen, policy, confidence):
@@ -515,11 +629,25 @@ def _history_source_applicability(original, current):
     if sample.digest(original) == sample.digest(current):
         return {"method": "exact_measurement_identity"}
     name = Path(__file__).name
-    previous = original["measurement_dependencies"][name]
-    latest = current["measurement_dependencies"][name]
-    normalized = {**original, "measurement_dependencies": {**original["measurement_dependencies"], name: latest}}
+    old_deps, new_deps = (identity["measurement_dependencies"] for identity in (original, current))
+    previous, latest = old_deps[name], new_deps[name]
+    dependencies = {**old_deps, name: latest}
+    reviewed = {}
+    for key, versions in REVIEWED_ROUTINE_DEPENDENCIES.items():
+        transition = (old_deps.get(key), new_deps.get(key))
+        origins = {versions[0], REVIEWED_DECISION_DEPENDENCIES[key], REVIEWED_PROFILE_DEPENDENCIES.get(key),
+                   REVIEWED_NATIVE_DIRECT_DEPENDENCIES.get(key)}
+        origins.discard(None)
+        if transition[0] in origins and transition[1] == versions[1]:
+            dependencies[key] = new_deps[key]
+            reviewed[key] = list(transition)
+    normalized = {**original, "measurement_dependencies": dependencies}
     methods = {LEGACY_DRIVER_SHA256: "b11_stopping_policy_only",
-               LEGACY_SPLIT_DRIVER_SHA256: "9f_routine_effort_only"}
+               LEGACY_SPLIT_DRIVER_SHA256: "9f_routine_effort_only",
+               LEGACY_CAPPED_DRIVER_SHA256: "f7_routine_policy_only",
+               LEGACY_DECISION_DRIVER_SHA256: "4395_regression_profile_only",
+               LEGACY_PROFILE_DRIVER_SHA256: "40e_explicit_native_route_only",
+               LEGACY_NATIVE_DIRECT_DRIVER_SHA256: "114_fixture_cache_and_arithmetic_policy_only"}
     if previous not in methods or sample.digest(normalized) != sample.digest(current):
         return None
     if (EQUIVALENCE, CONDITIONAL_FLOOR, MAX_CONDITIONAL_MEAN) != (.05, .10, .20):
@@ -535,6 +663,7 @@ def _history_source_applicability(original, current):
         return None
     return {"method": methods[previous], "original_driver_sha256": previous,
             "current_driver_sha256": latest, "unchanged_measurement_core_sha256": core,
+            "reviewed_routine_dependency_transitions": reviewed,
             "fresh_endpoint_required": True}
 
 
@@ -726,6 +855,8 @@ def check_sentinel(plan, full):
 
 def staged_case(calibration, case, profile, output, *, policy, mode, anchor=None, maximum_holds=9,
                 sustained_seconds=0.):
+    if mode == "qualify":
+        policy = qualification_policy(policy)
     output = Path(output)
     output.mkdir(parents=True, exist_ok=False)
     started = time.perf_counter()
@@ -747,6 +878,10 @@ def staged_case(calibration, case, profile, output, *, policy, mode, anchor=None
                 "measurement_dependencies": {name: sample.file_sha(driver.with_name(name)) for name in dependencies}}
     history = _historical(anchor, identity) if mode == "reuse" else None
     report = {"schema": SCHEMA, "id": case["id"], "status": "unqualified", "identity": identity,
+              "regression_policy": {"pass_alpha": policy.pass_error_budget,
+                                    "failure_alpha": policy.failure_error_budget,
+                                    "slowdown_threshold": policy.slowdown_threshold,
+                                    "model_guard_alpha": policy.alpha},
               "cached_fixtures": group["cached"], "discarded_receiver_warmup": warmup, "setup": setup,
               "worker_startup_seconds": {name: calibration.workers[name].external_startup_seconds for name in SOURCES},
               "training_looks": [], "full_pairs": [], "confirmation": [], "comparison": {"gate": "inconclusive"},
@@ -756,13 +891,19 @@ def staged_case(calibration, case, profile, output, *, policy, mode, anchor=None
         report["reason"] = "no matching staged arithmetic-mean anchor; routine cannot launch qualification"
     else:
         timing_policy = training_policy(policy)
-        confidence = component_confidence(timing_policy)
+        routine_decision = history is not None and policy.stopping_rule == "decision"
+        confidence = (1 - policy.alpha / (2 * 3 * len(policy.looks)) if routine_decision else
+                      component_confidence(timing_policy))
         sample.write_json(output/"training-policy.json", {"training_policy": timing_policy,
-                          "stopping_policy": SPLIT_STOP, "component_confidence": confidence,
+                          "stopping_policy": "independent-stage-decision-v1" if routine_decision else SPLIT_STOP,
+                          "component_confidence": confidence,
                           "routine_capped_stage_guard_enabled": history is not None,
-                          "scope": "simultaneous marginal looks; stage count choices reuse these bounds"})
+                          "scope": ("per-test two-sided endpoint diagnostics across six marginal stage metrics and their looks"
+                                    if routine_decision else
+                                    "simultaneous marginal looks; stage count choices reuse these bounds")})
         rx, schedule = [], []
         refinement_stop = None
+        decision_looks = []
         counts = {"generation": policy.looks[0], "receiver": policy.looks[0]}
         while counts is not None:
             while len(group["calibration"]) < counts["generation"] or len(rx) < counts["receiver"]:
@@ -778,8 +919,20 @@ def staged_case(calibration, case, profile, output, *, policy, mode, anchor=None
             timing = _timing_at(group["calibration"], rx, counts, confidence)
             report["training_looks"].append(timing)
             schedule.append(counts)
-            next_counts = _next_stage_counts(timing, counts, policy)
-            if history is not None and next_counts is not None:
+            if routine_decision:
+                gate_timing, decision = _decision_timing(group["calibration"], rx, counts, policy)
+                blockers = _sentinel_blockers(conditional_plan(history, timing, identity))
+                decision_looks.append({**decision, "stage_counts": counts, "sentinel_blockers": blockers})
+                if not blockers and decision["provisional_gate"] != "inconclusive":
+                    refinement_stop = {"reason": "provisional_decision_ready_for_full_endpoint", "stage_counts": counts}
+                    break
+                next_counts = _next_decision_counts(timing, gate_timing, counts, policy, blockers)
+                if next_counts is None:
+                    refinement_stop = {"reason": "capped_stage_precludes_conditional_endpoint" if blockers
+                                       else "maximum_samples", "stage_counts": counts}
+            else:
+                next_counts = _next_stage_counts(timing, counts, policy)
+            if history is not None and next_counts is not None and not routine_decision:
                 blockers = _capped_conditional_blockers(timing, counts, policy)
                 if blockers:
                     refinement_stop = {"reason": "capped_stage_precludes_conditional_endpoint",
@@ -800,10 +953,17 @@ def staged_case(calibration, case, profile, output, *, policy, mode, anchor=None
             frozen["conditional_plan"] = conditional_plan(history, timing, identity)
             frozen["routine_refinement_stop"] = refinement_stop
             report["historical_source_applicability"] = history["source_applicability"]
+        if routine_decision:
+            frozen["stopping_policy"] = "independent-stage-decision-v1"
+            frozen["routine_decision_looks"] = decision_looks
         report["frozen"] = {**frozen, "commitment_sha256": sample.digest(frozen)}
         sample.write_json(output/"forecast.json", report["frozen"])
         total = sum(forecast["pipeline"].values())
-        for index in range(1 if history else maximum_holds):
+        holds = 1 if history else maximum_holds
+        if routine_decision and refinement_stop["reason"] != "provisional_decision_ready_for_full_endpoint":
+            holds = 0
+            report["confirmation_stop_reason"] = "frozen_decision_unresolved_or_endpoint_infeasible"
+        for index in range(holds):
             if sample.remaining(calibration.deadline) < 1.2*total:
                 report["reason"] = "full validation no longer fits declared deadline"
                 break
@@ -839,7 +999,11 @@ def staged_case(calibration, case, profile, output, *, policy, mode, anchor=None
         if report["status"] in ("validated", "historically_supported_conditional"):
             report["prediction_valid"] = True
             band = timing["pipeline"]["paired"]["interval"]
-            if band is not None:
+            if policy.stopping_rule == "decision":
+                if not routine_decision:
+                    _, decision = _decision_timing(group["calibration"], rx, schedule[-1], policy)
+                report["comparison"] = {**decision, "gate": decision["provisional_gate"]}
+            elif band is not None:
                 # Same 10% conditional engineering allowance used by the
                 # existing reuse scheme. Keep it separate from timing precision.
                 band = [band[0]/(1+CONDITIONAL_FLOOR), band[1]*(1+CONDITIONAL_FLOOR)]
@@ -877,6 +1041,10 @@ def cli(argv=None):
     parser.add_argument("--native-threads", type=int, default=1)
     parser.add_argument("--budget-seconds", type=float, default=600.)
     parser.add_argument("--looks", default="5,9,17,33")
+    parser.add_argument("--stopping-rule", choices=("decision", "precision"),
+                        help="routine defaults to decision; qualification defaults to precision")
+    parser.add_argument("--regression-profile", choices=("normal", "ci", "strict"), default="normal",
+                        help="routine decision criteria; precision stopping uses historical criteria")
     parser.add_argument("--maximum-holds", type=int, choices=(3,5,9,17), default=9)
     parser.add_argument("--sustained-seconds", type=float, default=0.)
     parser.add_argument("--mode", choices=("reuse", "qualify", "direct"), default="reuse")
@@ -891,8 +1059,11 @@ def cli(argv=None):
     generation_groups = {(case["fixture"], case["captures"]) for case in cases.values()
                          if case["fixture"] in GENERATION_SIBLINGS}
     selected_groups = [(cases[name]["fixture"], cases[name]["captures"]) for name in args.cases]
+    stopping_rule = args.stopping_rule or ("precision" if args.mode == "qualify" else "decision")
     policy = AdaptivePolicy(looks=tuple(map(int, args.looks.split(","))),
-                            family_count=len(cases)+len(generation_groups))
+                            family_count=len(cases)+len(generation_groups),
+                            stopping_rule=stopping_rule,
+                            **(regression_profile(args.regression_profile) if stopping_rule == "decision" else {}))
     common = runpy.run_path(str(sample.WORKER.with_name("triad-performance.py")))
     start = time.perf_counter()
     deadline = time.monotonic()+args.budget_seconds

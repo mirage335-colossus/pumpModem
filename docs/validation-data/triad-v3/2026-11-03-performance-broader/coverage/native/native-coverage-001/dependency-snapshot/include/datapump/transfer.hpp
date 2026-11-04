@@ -1,0 +1,215 @@
+#pragma once
+#include "datapump/crypto.hpp"
+#include "datapump/fhss_schedule.hpp"
+#include "datapump/pattern_pulse.hpp"
+#include "datapump/symbol_schedule.hpp"
+#include "datapump/clock_sync.hpp"
+#include "datapump/modem.hpp"
+#include "datapump/stream_codec.hpp"
+#include "datapump/runtime.hpp"
+#include "datapump/recovery.hpp"
+#include "datapump/streaming_modem.hpp"
+#include "datapump/tuning.hpp"
+#include <functional>
+#include <optional>
+#include <span>
+#include <stop_token>
+
+namespace datapump::transfer {
+struct RepeatPolicy {
+    // Local compose policy only. Tiny distress messages remain repeatable
+    // even when their raw symbols exceed the normal time limit.
+    double maximum_seconds = 2;
+    std::size_t minimum_payload_bytes = 1;
+};
+struct Options {
+    modem::Config modem;
+    std::size_t content_limit = default_memory_limit;
+    std::size_t dsp_workspace_bytes = runtime::default_dsp_workspace_bytes();
+    FecMode fec = FecMode::rs60;
+    bool compression = true;
+    std::optional<Crypto> key;
+    std::uint64_t timestamp = 0;
+    // Optional wall-clock origin of sample zero in a hardware recording.
+    // Without it, offline buffers retain their deterministic prefix origin.
+    std::optional<double> capture_epoch;
+    unsigned search_seconds = 6;
+    std::optional<clock_sync::Policy> clock_sync;
+    // Per-station total audio lag [0,A] after known queue compensation.
+    // Includes provider uncertainty; independent of GPS and propagation.
+    double audio_timing_error_seconds=clock_sync::default_audio_error_seconds;
+    // Manual callers retain their explicit modem profile. Automatic GUI/CLI
+    // receive searches resolve only these targets at the selected band/mode.
+    bool automatic_receive_profiles = false;
+    std::vector<double> receive_targets_db_hz{tuning::default_receive_target_db_hz};
+    tuning::PatternMode receive_pattern_mode = tuning::PatternMode::auto_pattern;
+    RepeatPolicy repeat_policy;
+    // Receiver-only hard-bit search after physical completion. No wire fields.
+    RecoveryOptions recovery_options;
+    // Receive-only logical sample coordinate of the supplied buffer's sample
+    // zero within the original physical capture. This is an offset, not UTC
+    // authority; canonical source epochs/phases and capture_epoch stay fixed.
+    std::uint64_t input_sample_origin_samples = 0;
+    // Receive-only additional arrival uncertainty in the physical recording.
+    // For example a helper-only lead can precede the unchanged keyed source.
+    // This widens start coverage, never the source epoch/phase or END rule.
+    double capture_start_uncertainty_seconds = 0;
+};
+inline bool shared_hop_calendar(const modem::Config& config) {
+    return config.symbol_burst.enabled() || bool(config.fake_hopping) || (config.scheduled_hopping && config.scheduled_hopping->enabled());
+}
+inline std::optional<clock_sync::Policy> effective_clock_sync(const Options& options) {
+    return clock_sync::effective_policy(options.clock_sync,shared_hop_calendar(options.modem));
+}
+// Freeze the same production hop-power policy for message/noise, estimation and
+// playback. Default clock error is a local 10 ms assumption, not UTC qualification.
+// Audio error is nonnegative residual lag [0,A], not symmetric uncertainty.
+inline std::shared_ptr<const modem::FhssPlan> transmit_hopping(
+        const modem::FhssPlan& source,const Options& options) {
+    auto plan=std::make_shared<modem::FhssPlan>(source);
+    plan->power_ramps=true;plan->defer_symbols=false;
+    plan->clock_error_seconds=options.clock_sync?options.clock_sync->accuracy_seconds:.01;
+    plan->peer_clock_error_seconds=plan->clock_error_seconds;
+    plan->audio_error_seconds=options.audio_timing_error_seconds;
+    plan->region_seconds=options.clock_sync?options.clock_sync->region_seconds:0;
+    plan->offset_seconds=options.clock_sync?options.clock_sync->offset_seconds:0;
+    return modem::resolve_fhss_power(*plan,options.modem);
+}
+struct Estimate {
+    std::size_t coded_bytes = 0;
+    std::size_t wire_bits = 0;
+    std::size_t content_bytes = 0;
+    double coded_seconds = 0;
+    double content_seconds = 0;
+    double total_seconds = 0;
+    bool memory_supported = false;
+    bool batch_memory_supported = false;
+    bool repeatable_allowed = false;
+    std::size_t waveform_samples = 0;
+};
+// Exact framing/compression/FEC size and actual quantized modem symbol timing;
+// allocates a stream, never a waveform. Does not enforce repeat_policy.
+Estimate estimate(const Message& message, const Options& options);
+// Optional numeric layout comes from that same encoded stream, avoiding a
+// second full content encoding when presenting a transmission inspection.
+Estimate estimate(const Message& message, const Options& options, StreamLayout* layout);
+// Raw binary has no framing, compression, FEC or authentication. Pattern mode
+// can add a hardware-settling prefix that carries no meaningful bits.
+// Input elements are individual 0/1 bits. Byte estimates are ceil(bits/8)
+// storage equivalents; payload time excludes that prefix, total time includes it.
+Estimate estimate_binary(std::span<const std::uint8_t> bits, const Options& options);
+// Uses the one-bit pattern modem. A selected non-tone key masks
+// MSB-first bits with the symbol-start epoch/local Data position; no tag is added.
+std::unique_ptr<modem::StreamingTransmitter> binary_transmitter(
+    std::span<const std::uint8_t> bits, const Options& options);
+inline constexpr std::size_t short_message_bytes = 16;
+inline constexpr std::size_t short_message_bits = 13 * short_message_bytes;
+// Nonempty text up to and including 16 source bytes uses the fixed dictionary's
+// exact bits, without alignment markers, padding, parity or authentication.
+// Files/screenshots and longer text use fixed 128-byte coded intervals.
+bool uses_raw_message(const Message&) noexcept;
+Bytes message_bits(const Message&, const Options&);
+// Insert one alignment marker before every coded interval, then Data-mask
+// the entire bitstream at its original symbol positions. Raw bits have no markers.
+Bytes message_wire_bits(const Message&, const Options&);
+std::unique_ptr<modem::StreamingTransmitter> message_transmitter(const Message&, const Options&);
+// Symmetric Data masking by symbol-start second and local symbol ordinal,
+// including fragments starting at an arbitrary global bit offset.
+// Without a key the bits are unchanged. Does not authenticate decoded guesses.
+void xor_binary_bits(std::span<std::uint8_t> bits, const Options& options,
+                     std::size_t bit_offset = 0);
+struct RecoverySource;
+struct Received {
+    StreamContent content;
+    modem::Diagnostics diagnostics;
+    std::uint64_t timestamp = 0;
+    Bytes raw_bits; // Bounded diagnostic prefix, not the retained stream.
+    std::size_t observed_bits = 0, missing_symbols = 0;
+    bool stream_complete = false, content_validated = false;
+    // Complete fixed-dictionary interpretation of an unmarked short stream.
+    // This is neither interval validation nor authentication; raw bits remain.
+    bool short_text_decoded = false;
+    std::string error;
+    RecoveryProgress recovery_progress;
+    // A completed physical capture may still need CPU recovery. Copies share
+    // a resumable job; callers must not run the same job concurrently.
+    std::shared_ptr<RecoveryJob> recovery;
+    std::shared_ptr<const RecoverySource> recovery_source;
+};
+// Runs/resumes a physically completed capture off the live/UI thread. Source
+// decoding follows only a unique completed search. Incomplete work stays opaque.
+Received recover_received(Received, std::stop_token stop = {});
+// Consumes immutable bounded physical chunks. Only a physical complete event
+// can seal storage and invoke the application source decoder.
+struct ReceiveStorageQuota {
+    std::size_t limit=0, used=0, reserved=0; // Owned by one serialized receiver bank.
+};
+class StreamReceiver {
+public:
+    // Live's sixteen retained detector streams plus sixteen queued old prefixes.
+    // These are locally bounded candidates, independent of received lengths.
+    static constexpr std::size_t candidate_limit = 32;
+    StreamReceiver(Options, std::uint64_t timestamp,
+                   std::shared_ptr<ReceiveStorageQuota> = {});
+    ~StreamReceiver();
+    StreamReceiver(StreamReceiver&&) noexcept;
+    StreamReceiver& operator=(StreamReceiver&&) noexcept;
+    Received push(modem::PatternBurst, modem::Diagnostics = {});
+    // Only after the detector releases this identity and all its chunks drain.
+    // Releases source quota without interpreting source or fabricating END.
+    void discard(std::uint64_t first_sample, std::uint64_t first_symbol);
+    std::size_t working_bytes() const;
+    std::size_t source_buffer_bytes() const;
+    // Additional retained non-encoded receiver storage beyond working_bytes(),
+    // in that method's accounting units (including its fixed map-node allowance),
+    // not an allocator-overhead bound. Actual supported container capacities are
+    // probed lazily; the scalar cache itself is included in working_bytes().
+    // Covers bounded candidate State/collector/preview/recovery-vector growth
+    // and ONE pre-END pending Received copy. The caller must prove the maximum
+    // combined constellation/waveform CAPACITY bytes supplied by diagnostics.
+    // Live accounts the shared encoded-source promise exactly once separately.
+    // This is not an allocation/COW/transient peak bound. Decoded application
+    // output, codec scratch and post-END recovery jobs keep their own quotas;
+    // in particular, the at-END returned decoded source is not covered here.
+    // Serialize this query with push/discard, as with working_bytes().
+    // Unknown/unsupported geometry or arithmetic/allocation failure returns
+    // nullopt: release optional storage before the unchanged ordinary push.
+    std::optional<std::size_t> retained_growth_bound(std::size_t maximum_diagnostic_capacity_bytes) const;
+    // Helper-only reservation for empty candidates over a finite native PCM
+    // replay. nullopt when any framed source interpretation could be reached.
+    // Native callers supply at most 2048 constellation points and no waveform.
+    std::optional<std::size_t> helper_replay_storage_bound(std::size_t maximum_stream_bits) const;
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
+Received interpret_pattern(modem::PatternBurst, const Options&, std::uint64_t timestamp,
+                           modem::Diagnostics = {});
+using Progress = std::function<void(std::uint64_t)>;
+
+// Separate codec scratch from the amount of application content admitted.
+// Bounds the encoded source memory independently of the decoded output quota.
+std::size_t source_storage_limit(std::size_t content_limit);
+// Capacity for unpacked 0/1 elements, including leading and periodic recovery words.
+// Checked separately from packed codec bytes; actual TX/RX allocations must
+// still fit their independently configured DSP workspace.
+std::size_t pattern_bit_limit(std::size_t content_limit);
+
+modem::Config seeded_config(const Options& options, std::uint64_t timestamp);
+// Packed convenience form; rejects partial bytes instead of adding padding.
+// Use message_wire_bits/message_transmitter for exact short dictionary streams.
+Bytes transmission_wire(const Message& message, const Options& options);
+std::vector<float> transmit(const Message& message, const Options& options,
+                            std::stop_token stop = {});
+// Progress runs synchronously on the caller's thread, before each candidate.
+// Cancellation is checked between candidates and throughout modulation, FFT,
+// and acquisition loops. Individual bounded stream correction/library calls
+// and allocations run to completion. Cancellation during acquisition raises
+// datapump::Error; cancellation after physical completion retains an unfinished
+// recovery job in the returned Received so it can be resumed explicitly.
+Received receive(std::span<const float> samples, const Options& options,
+                 Progress progress = {}, std::stop_token stop = {});
+Received simulate(const Message& message, const Options& options,
+                  const modem::ChannelConfig& channel, Progress progress = {},
+                  std::stop_token stop = {});
+}

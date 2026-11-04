@@ -1,0 +1,5 @@
+Configured the existing atomic coverage profile with the repository wrapper after CMakeLists changed:
+taskset -c 2,4 ./build.sh configure --cli --build-dir build/triad-cov --jobs 2 -- -DDATAPUMP_COMPILER_CACHE=OFF '-DCMAKE_CXX_FLAGS=--coverage -fprofile-update=atomic' -DCMAKE_EXE_LINKER_FLAGS=--coverage -DCMAKE_SHARED_LINKER_FLAGS=--coverage
+Wrote pre-build guard. Removed only the 9 selected TUs' object, gcno and gcda files. Built:
+taskset -c 2,4 cmake --build build/triad-cov --target triad_long test_triad_v3_source test_triad_v3_channel test_triad_v3_receiver test_triad_statistics --parallel 2
+Ran 4 focused CTests; all passed. Ran five tiny CLI modes; all exit 0 and argv/times are in cli-modes.json. Ran parser tests python3 -B tests/test_triad_perf_coverage.py (7/7 passed). Collected fresh gcov report from this rebuilt profile. No production source or test source changed; triad_planner_perf was not built.

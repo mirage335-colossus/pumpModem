@@ -1,0 +1,380 @@
+#pragma once
+#include "datapump/audio.hpp"
+#include "datapump/transfer.hpp"
+#include "datapump/helper_carrier.hpp"
+#include <chrono>
+#include <complex>
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <string>
+#include <vector>
+
+namespace datapump::simulation::detail {struct HelperJointClockProof;}
+namespace datapump::live {
+struct Settings {
+    transfer::Options transfer;
+    // Optional transmit geometry for fixed-interval text and attachments.
+    // Short text (1–16 source bytes), explicit bits and tuning noise use the
+    // base modem. Both share its sample rate, carrier and bandwidth; selecting
+    // a message path never replaces the independently running receiver bank.
+    std::optional<modem::Config> long_message_modem;
+    std::string device = "default";
+    // Mono defaults to the left output. The boolean remains for existing callers.
+    bool mono = true;
+    audio::ChannelMode channel_mode = audio::ChannelMode::left_mono;
+    bool simulation = false;
+    // Keep independent hardware capture and reception active during playback.
+    // A physical cable or acoustic path supplies any local loopback.
+    bool full_duplex = false;
+    double simulation_snr_db = 18;
+    // Display-only offset for simulated spectra. The raw PCM, FFT values and
+    // receiver remain unchanged; an absent value retains the raw dBFS view.
+    std::optional<double> simulation_spectrum_gain_db;
+    double simulation_clock_error_ppm = 100;
+    // Additive conversion/tuning error, separate from sample-clock scaling.
+    double simulation_frequency_offset_hz = 0;
+    double simulation_phase_noise_degrees_per_sqrt_second = .5;
+    // Received content and pending event storage are independent of DSP work.
+    std::size_t content_limit = default_memory_limit;
+    std::size_t dsp_workspace_bytes = transfer.dsp_workspace_bytes;
+    // Compatibility fields: streaming capture no longer retains a duration
+    // window, and simulated media progresses as fast as bounded DSP permits.
+    double receive_buffer_seconds = 30;
+    std::uint64_t simulation_seed = 1;
+    double simulation_speed = 1;
+    std::vector<Crypto> receive_keys;
+    // Hardware playback gain; unity leaves existing normalization unchanged.
+    double transmit_gain = 1.0;
+    bool exclusive = false;
+    // Append optional extension fields to preserve existing aggregate positions.
+    helper::Options helper;
+    // Hardware diagnostic only: exact raw capture rate, zero preserves provider
+    // selection. The GUI exposes 48000 only with --debug; no modem clock changes.
+    std::uint32_t diagnostic_capture_rate_hz = 0;
+    // Effective margin-adjusted propagation spread and additional amplitude
+    // stress, applied in simulation and to outgoing physical Robust DATA.
+    double simulation_spread_delay_ms = 0;
+    double simulation_spread_doppler_hz = 0;
+    double simulation_perturbation_slow_depth = 0;
+    double simulation_perturbation_fast_depth = 0;
+    // Selecting a transmit key restricts reception to matching keyed streams.
+    // Pattern-only raw results carry no separate authentication tag.
+    bool permits_plaintext() const noexcept {
+        return !transfer.key && !transfer.modem.scramble && !transfer.modem.dsss;
+    }
+};
+// Check exactly the settings accepted by Session without changing a live
+// receiver, opening audio hardware, or starting a transmission.
+void validate_settings(const Settings& settings);
+// Workspace geometry after Session's identical structural/value normalization
+// and reservations. Provider capability acceptance is separate at Session /
+// validate_settings; this provider-free calculation cannot grant audio support.
+// Copies bounded settings metadata, opens no device and allocates no capture
+// owner. It does not grant runtime coverage or reception success.
+std::size_t receiver_workspace_capacity(const Settings& settings);
+// Same complete Receiver/control reservation used by Live admission. The key
+// flag denotes actual keyed receive ownership, not merely a requested mode.
+std::size_t receiver_control_margin(const modem::Config& config,bool keyed);
+struct SignalUpdate {
+    std::uint64_t id = 0; // Stable acquisition identity for replacing pending text.
+    double frequency_hz = 0;
+    std::string text;
+    bool validated = false;
+    std::string reception_id;
+    double snr_db = 0;
+    std::size_t received_bytes = 0;
+    std::size_t expected_bytes = 0;
+    std::uint64_t sequence = 0;
+    double virtual_seconds = 0;
+    // Unknown until receiver evidence is available; never inferred from the
+    // synthetic training prefix returned by blind bootstrap acquisition.
+    std::optional<double> preamble_received_percent = std::nullopt;
+    // Available only after physical completion and interval/source validation.
+    std::optional<StreamBitAccuracy> pre_fec_accuracy = std::nullopt;
+    // Raw bits contain decoded observations and zero placeholders for timed
+    // gaps, without a source checksum/MAC or error correction.
+    bool binary = false;
+    bool complete = false;
+    std::size_t received_bits = 0;
+    std::size_t expected_bits = 0;
+    std::optional<double> pattern_score = std::nullopt;
+    std::size_t missing_symbols = 0; // Unobserved symbol slots.
+    StreamFecStats fec_stats;
+    // Exact transport bits retained when a completed short dictionary stream
+    // is presented as text; absent for pending observations and interval data.
+    std::string raw_bits;
+    // A stronger physical hypothesis can revise an earlier interpretation,
+    // including one whose shorter profile had already observed its own end.
+    // Consumers replace older revisions and withdraw superseded rows/content.
+    std::uint64_t revision = 0;
+    std::vector<std::uint64_t> superseded_ids;
+    // Physical completion is independent of the bounded, post-end search.
+    transfer::RecoveryProgress recovery_progress;
+    bool helper_carrier = false;
+};
+enum class ConstellationSource { input, transmitted, received };
+struct PatternScoreObservation {
+    std::uint64_t id = 0;
+    std::chrono::steady_clock::time_point observed_at{};
+    // Receiver's single-symbol admission reference for this observation.
+    // Zero denotes unavailable metadata; never a fabricated receive threshold.
+    double admission_threshold = 0;
+    bool operator==(const PatternScoreObservation&) const = default;
+};
+// Latched for one Session configuration. Healthy input and automatic retries
+// cannot erase evidence of lost reception. Normal score rejection, diagnostic
+// retention and lossless slow simulation do not set these flags.
+struct ReceiverHealth {
+    std::uint64_t input_overruns = 0;
+    std::uint64_t dropped_samples = 0; // Known discarded logical PCM only.
+    bool input_interrupted = false; // Device continuity lost or uncertain.
+    bool search_limited = false; // Required decoder/coverage unavailable, or quota omitted a candidate.
+    bool receiver_reset = false; // Processing error discarded acquisition state.
+    bool failed() const noexcept {
+        return input_overruns || input_interrupted || search_limited || receiver_reset;
+    }
+};
+struct Snapshot {
+    ReceiverHealth receiver_health;
+    // Actual key/profile/epoch receiver instances in the current capture
+    // generation. Admissions include the initial bank and rolling additions;
+    // these are instance counts, not distinct keys or accepted messages.
+    std::size_t receiver_instances = 0, peak_receiver_instances = 0;
+    std::uint64_t receiver_admissions = 0, receiver_retirements = 0;
+    std::uint64_t receiver_bank_builds = 0; // Initial construction plus UTC admission refreshes.
+    std::string receiver_error; // RX eligibility detail, independent of transient/TX errors.
+    audio::TimingQuality clock_timing_quality=audio::TimingQuality::unavailable;
+    double clock_backend_uncertainty_seconds=0;
+    bool clock_window_modeled=false;
+    bool clock_timing_fallback=false;
+    bool transmit_clock_following=false;
+    std::string clock_timing_status;
+    // Actual timestamp model for the qualified PCM currently scored by RX.
+    // Engineering work estimates may consume its bounds, not its moving UTC
+    // anchor. Absence retains ordinary full-search estimation.
+    std::optional<audio::TimePrediction> receiver_timing;
+
+    static constexpr std::size_t pattern_score_limit = 128;
+    static constexpr auto pattern_score_lifetime = std::chrono::seconds(6);
+    std::vector<float> waveform;
+    // Geometry belongs to these captured samples, not the receiver's clock.
+    // Hardware monitoring observes input before receiver rate conversion.
+    std::uint32_t waveform_sample_rate = 0;
+    bool environment_monitor = false;
+    std::vector<double> spectrum_db;
+    // Native monitor FFT bins for display only. Phase is meaningful only for
+    // complete windows within the same uninterrupted sample segment.
+    std::vector<std::complex<float>> spectrum_complex;
+    std::uint64_t spectrum_start_sample=0, spectrum_segment=0;
+    std::size_t spectrum_sample_count=0;
+    std::uint64_t spectrum_revision = 0;
+    double spectrum_bin_hz = 0;
+    // Captured with spectrum_db, including startup noise-bandwidth correction
+    // and replay. Always absent for hardware.
+    std::optional<double> simulation_spectrum_gain_db;
+    std::vector<std::complex<double>> constellation;
+    // Retained receiver hypotheses, not probabilities: real = pattern 0
+    // evidence, imaginary = pattern 1 evidence, both against noise.
+    std::vector<std::complex<double>> pattern_scores;
+    // Stable identities and first-observed presentation times, parallel to
+    // pattern_scores. Repeated retained hypotheses do not refresh their age.
+    std::vector<PatternScoreObservation> pattern_score_observations;
+    // Highest observation allocated at this live/replay position, including
+    // candidates from receivers not selected for the displayed plot.
+    std::uint64_t pattern_score_observation_id = 0;
+    ConstellationSource constellation_source = ConstellationSource::input;
+    std::vector<SignalUpdate> signals;
+    std::vector<transfer::Received> received;
+    // Bounded capture from the actual transmitter. Replay uses its matching
+    // generation frame; idle snapshots retain the last transmission capture.
+    modem::TransmitTrace transmit_trace;
+    std::string status;
+    std::string error;
+    bool running = false;
+    bool transmitting = false;
+    bool transmitting_noise = false; // Continuous tuning noise; fraction has no endpoint.
+    // Local, in-memory hardware safeguards for the currently selected key.
+    // Short/raw and long-message profiles have different prefix durations.
+    double transmit_key_lock_seconds = 0;
+    double long_transmit_key_lock_seconds = 0;
+    double transmit_separation_seconds = 0;
+    bool simulation = false;
+    std::uint64_t sequence = 0;
+    std::uint64_t samples_received = 0;
+    // Hardware capture disposition in the current input revision. These count
+    // actual copied PCM and proof-certified coordinate-only nulls, not modeled
+    // duty cycle or per-candidate FFT omissions.
+    std::uint64_t capture_recorded_samples = 0, capture_certified_null_samples = 0;
+    // Decoder frontier in the current input revision, including certified
+    // coordinate-only nulls after every required consumer has advanced. Capture
+    // ingress and PCM queue sizes are not a substitute for this frontier.
+    // The single-bank sampled Helper simulation reports this same joined
+    // decoder-input coordinate, at the configured logical sample rate.
+    std::uint64_t receiver_input_revision = 0, processed_physical_samples = 0;
+    std::uint64_t queued_physical_samples = 0, decoding_physical_samples = 0;
+    std::size_t buffered_samples = 0;
+    // PCM currently being scored outside the capture queue. Together with
+    // buffered_samples, distinguishes an idle decoder from a popped work block.
+    std::size_t decoding_samples = 0;
+    // Hardware queue + in-flight PCM only, not symbol/lookahead retention.
+    // Oldest age includes bank construction and a synchronous scoring call.
+    double receiver_backlog_seconds = 0, receiver_oldest_input_seconds = 0;
+    bool receiver_behind = false; // >1 s; clears below 0.25 s, independent of workspace
+    double virtual_seconds = 0;
+    double transmission_seconds = 0;
+    // Fraction of transmitted audio generated/played, not receiver work.
+    double transmission_fraction = 0;
+    // Finite simulation is still scoring received samples after TX audio ends.
+    // This never implies physical reception completion.
+    bool simulation_receiving_tail = false;
+    // Steady-clock wall time spent preparing/generating/scoring this simulation.
+    // Updates on snapshot polls even during a synchronous scoring call, freezes
+    // at completion/cancellation, and excludes the presentation replay.
+    double simulation_compute_seconds = 0;
+    bool transmission_finished = true; // CPU/audio work complete; simulation presentation may still be active.
+    bool transmission_cancelled = false;
+    bool transmission_stopping = false; // Graceful finite pulse tail is draining; abort remains available.
+    bool transmission_failed = false; // Failed request is not successful completion; error persists through RX restart.
+    // Completed simulations present training, measured plots and provisional
+    // reception over three wall-clock seconds. Verified signals and received
+    // content are delivered once at the deadline, then plots return live.
+    std::uint64_t transmission_id = 0;
+    bool simulation_replay = false;
+    std::size_t replay_frame_index = 0;
+    std::size_t replay_frame_count = 0;
+    double simulation_sample_fraction = 0;
+    std::uint64_t constellation_dropped = 0;
+    std::uint32_t hardware_sample_rate = 0;
+    // Logical clock of the negotiated converter which supplied this passband.
+    std::uint32_t audio_logical_sample_rate = 0;
+    std::uint32_t audio_minimum_hardware_rate = 0;
+    bool audio_format_capture = true;
+    double audio_passband_hz = 0;
+    std::size_t dsp_buffered_bytes = 0;
+    // A separate bounded post-reception search pool; it never consumes the
+    // waveform/receiver workspace reserved by dsp_buffered_bytes.
+    std::size_t recovery_working_bytes = 0;
+    // Presence measurements are distinct from assistance committed by the
+    // current receiver revision. Enabled helper output alone sets neither flag.
+    std::string helper_status;
+    std::optional<double> helper_frequency_offset_hz;
+    std::optional<double> helper_snr_db;
+    bool helper_frequency_assistance_active = false;
+    bool helper_phase_assistance_active = false;
+    bool helper_timing_assistance_active = false;
+    // Realtime mode sums the same current numeric owners' original/selected
+    // RF-clock pairs. A mixed broad/narrow bank does not imply one common mask.
+    std::uint64_t helper_original_search_pairs = 0;
+    std::uint64_t helper_selected_search_pairs = 0;
+    // Actual joined work, kept separate from prospective planner pair limits.
+    std::uint64_t helper_conditional_jobs = 0;
+    std::uint64_t helper_audit_jobs = 0;
+    std::uint64_t helper_input_view_conditional_jobs = 0;
+    std::size_t helper_input_view_count = 0;
+    // Compact work uses carrier/sample and arrival-lane/sample units. These
+    // counters are deliberately separate from the native FFT job counters.
+    std::uint64_t helper_compact_projected_samples = 0;
+    std::uint64_t helper_compact_lane_samples = 0;
+    std::uint64_t helper_compact_skipped_projected_samples = 0;
+    std::uint64_t helper_compact_skipped_lane_samples = 0;
+    std::uint64_t helper_compact_audit_projected_samples = 0;
+    std::uint64_t helper_compact_audit_lane_samples = 0;
+    std::uint64_t helper_compact_phase_projected_samples = 0;
+    std::uint64_t helper_compact_phase_moment_updates = 0;
+    // Largest admitted initial FFT input aperture, for conservative output
+    // post-roll planning. It is never a payload completion authority.
+    std::uint64_t receiver_initial_fft_input_samples = 0;
+    // Actual active capture, independently of playback's negotiated format.
+    // Nyquist is a hard digital limit, not an external ADC/radio flat-passband
+    // certificate. The converter passband describes logical output only.
+    std::uint32_t capture_raw_sample_rate=0;
+    double capture_raw_nyquist_hz=0,capture_converter_passband_hz=0;
+    audio::CaptureTransportRecipe capture_transport={};
+    // GUI diagnostics have a separate fixed two-slot grant. Leases survive the
+    // last external borrower and never reduce DSP/payload receiver capacity.
+    std::shared_ptr<const simulation::detail::HelperJointClockProof> helper_planner_joint;
+    std::size_t helper_planner_diagnostic_allocator_bytes=0,helper_planner_diagnostic_account_bytes=0;
+    std::size_t helper_planner_diagnostic_slot_bytes=0,helper_planner_diagnostic_occupied_slots=0;
+    std::uint64_t helper_planner_capture_generation=0,helper_planner_provider_identity=0;
+    std::uint64_t helper_planner_receive_revision=0,helper_planner_owner_instance=UINT64_MAX;
+    const char* helper_planner_diagnostic_reason=""; // Static bounded diagnostic text; no snapshot heap.
+};
+
+// Audio callbacks and modem work never run on the caller/UI thread. configure
+// and transmit enqueue work; snapshot drains signal/received events while
+// retaining the current raw plots. No FLTK or GUI objects are accessed here.
+class Session {
+public:
+    // Unix epoch seconds for key admission. An optional clock makes controlled
+    // time sources and deterministic clock-jump tests possible. It must be
+    // thread-safe and return finite, nonnegative values within uint64 range.
+    // With the default provider, ordinary simulation without an explicit
+    // timestamp or Symbol_Burst anchors a channel once, then advances media
+    // epochs by channel sample position rather than receiver wall time.
+    // Injected providers and other timing paths retain their existing behavior.
+    // Plot cadence and cancellation deadlines always use the steady clock.
+    using EpochClock = std::function<double()>;
+    // Independent monotonic presentation clock; never changes modem timing,
+    // key admission, audio pacing or the CPU-bounded simulation trajectory.
+    using ReplayClock = std::function<std::chrono::steady_clock::time_point()>;
+    explicit Session(EpochClock epoch_clock = {}, ReplayClock replay_clock = {});
+    ~Session();
+    Session(const Session&) = delete;
+    Session& operator=(const Session&) = delete;
+    void start(const Settings& settings);
+    void configure(const Settings& settings);
+    void update(const Settings& settings) { configure(settings); }
+    // Apply output routing to the next playback without interrupting reception
+    // or changing audio already being transmitted.
+    void set_mono(bool mono);
+    void set_channel_mode(audio::ChannelMode channels);
+    // Output-only gain changes leave ongoing reception and prepared PCM intact.
+    void set_transmit_gain(double gain);
+    // Future transmissions only; does not replace live receivers or active PCM.
+    void set_helper_callsign(std::string callsign);
+    // Optional GUI request only: allocate one separate bounded diagnostic pool
+    // when helper is enabled. No audio, receiver, DSP loan or wire setting is
+    // changed. Failure simply leaves actual joint Planner evidence unavailable.
+    bool request_helper_planner_diagnostics(std::size_t gui_grant_bytes) const;
+    // Release only idle hardware capture for another local engine. Refuses
+    // pending RX/TX; repeated polls acknowledge actual device closure. Does
+    // not cancel recovery, complete a reception, or change saved settings.
+    bool try_suspend_capture();
+    void resume_capture();
+    // Discard receive history and queued/in-flight acquisition work without
+    // stopping transmission, forgetting key-use epochs, or completing a burst.
+    void clear_received();
+    // Force applies only to this request, bypassing local key/quiet waits.
+    // It never clears previously recorded key use or changes the waveform.
+    void transmit(const Message& message, bool force = false, std::shared_ptr<const modem::FhssPlan> hopping = {});
+    // One 0/1 per element, including leading zeros. Uses streaming APSK and
+    // the selected data key, with no interval coding, preamble or FEC. Raw
+    // simulations pass sampled audio to ordinary blind acquisition. Without
+    // raw discovery framing, no timing/length-assisted raw result is emitted.
+    void transmit_bits(std::span<const std::uint8_t> bits, bool force = false, std::shared_ptr<const modem::FhssPlan> hopping = {});
+    // Continuous noise at the selected carrier/bandwidth and normal signal
+    // level, with fresh temporary private streams. Does not encode a message
+    // or use/register saved keys. Stop with cancel_transmit().
+    // Use the same short/long profile as the current draft; secrets remain temporary.
+    void transmit_noise(std::shared_ptr<const modem::FhssPlan> hopping = {}, bool long_profile = false);
+    // Independent helper only; no Robust payload/noise is added to the output.
+    void transmit_helper(std::shared_ptr<const modem::FhssPlan> hopping = {});
+    // First request finishes already-generated pulse support. Repeating aborts
+    // immediately, as does cancel_transmit(). Before PCM starts it cancels
+    // preparation immediately. Neither operation completes a receiver burst.
+    void finish_transmit();
+    void cancel_transmit();
+    // Resume a retained incomplete search with another configured time budget,
+    // or stop one search without interrupting reception or audio capture.
+    bool resume_recovery(std::uint64_t signal_id);
+    void cancel_recovery(std::uint64_t signal_id);
+    void clear_recoveries();
+    Snapshot snapshot();
+    void stop();
+private:
+    friend std::size_t receiver_control_margin(const modem::Config&,bool);
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
+}

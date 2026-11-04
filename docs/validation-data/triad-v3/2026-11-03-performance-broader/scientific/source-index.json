@@ -1,0 +1,4230 @@
+{
+  "archive": "matching-source.tar.gz",
+  "bindings": [
+    {
+      "json_path": [
+        "sources",
+        "tools/triad-planner-perf.cpp"
+      ],
+      "member": "8ef529a1bc27385f20b44330ec99e71ee4001e74259c628c726093ce2a837672/tools/triad-planner-perf.cpp",
+      "path": "tools/triad-planner-perf.cpp",
+      "record": "planner-build/build-evidence.json",
+      "sha256": "8ef529a1bc27385f20b44330ec99e71ee4001e74259c628c726093ce2a837672"
+    },
+    {
+      "json_path": [
+        "sources",
+        "tools/triad_perf_planner.py"
+      ],
+      "member": "10aa833eaedbbac2c2fe160723a84424b8cbfb04263bd22a09cb7ab180422ffb/tools/triad_perf_planner.py",
+      "path": "tools/triad_perf_planner.py",
+      "record": "planner-build/build-evidence.json",
+      "sha256": "10aa833eaedbbac2c2fe160723a84424b8cbfb04263bd22a09cb7ab180422ffb"
+    },
+    {
+      "json_path": [
+        "sources",
+        "tools/triad-performance-planner.json"
+      ],
+      "member": "a6b25a5c59a5597a353a3f8ea399228fc38aae28e43048e7c49fded5339ae3f0/tools/triad-performance-planner.json",
+      "path": "tools/triad-performance-planner.json",
+      "record": "planner-build/build-evidence.json",
+      "sha256": "a6b25a5c59a5597a353a3f8ea399228fc38aae28e43048e7c49fded5339ae3f0"
+    },
+    {
+      "json_path": [
+        "sources",
+        "tests/test_triad_perf_planner.py"
+      ],
+      "member": "504e6cc54e34b62cb609a49763e220a41ba5d834f395186a6c7344b730e5836b/tests/test_triad_perf_planner.py",
+      "path": "tests/test_triad_perf_planner.py",
+      "record": "planner-build/build-evidence.json",
+      "sha256": "504e6cc54e34b62cb609a49763e220a41ba5d834f395186a6c7344b730e5836b"
+    },
+    {
+      "json_path": [
+        "sources",
+        "CMakeLists.txt"
+      ],
+      "member": "5bf29ee7cc20b1453b9124eaab79948d37744ed70d9444a87218c16d75f9c276/CMakeLists.txt",
+      "path": "CMakeLists.txt",
+      "record": "planner-build/build-evidence.json",
+      "sha256": "5bf29ee7cc20b1453b9124eaab79948d37744ed70d9444a87218c16d75f9c276"
+    },
+    {
+      "json_path": [
+        "sources",
+        "src/triad_statistics.cpp"
+      ],
+      "member": "18d92c2c51a4057caba6d9de78580305adcd8c038f6e1243ec1a4410f7c00ace/src/triad_statistics.cpp",
+      "path": "src/triad_statistics.cpp",
+      "record": "planner-build/build-evidence.json",
+      "sha256": "18d92c2c51a4057caba6d9de78580305adcd8c038f6e1243ec1a4410f7c00ace"
+    },
+    {
+      "json_path": [
+        "sources",
+        "src/triad_modem_v3.cpp"
+      ],
+      "member": "cb6cac016e57edcd4f6ebc70f09c68cc47380e3b772cdbe047d7a3b93e9b434c/src/triad_modem_v3.cpp",
+      "path": "src/triad_modem_v3.cpp",
+      "record": "planner-build/build-evidence.json",
+      "sha256": "cb6cac016e57edcd4f6ebc70f09c68cc47380e3b772cdbe047d7a3b93e9b434c"
+    },
+    {
+      "json_path": [
+        "sources",
+        "include/datapump/triad_statistics.hpp"
+      ],
+      "member": "66363bd20b0b613ca5df115265976052957a78052724a00e1017e15220ede6b1/include/datapump/triad_statistics.hpp",
+      "path": "include/datapump/triad_statistics.hpp",
+      "record": "planner-build/build-evidence.json",
+      "sha256": "66363bd20b0b613ca5df115265976052957a78052724a00e1017e15220ede6b1"
+    },
+    {
+      "json_path": [
+        "sources",
+        "include/datapump/triad_modem_v3.hpp"
+      ],
+      "member": "1ddd8e851950036f03e6a903ed7ba4746392ffe8623f49685df04f029c4aff48/include/datapump/triad_modem_v3.hpp",
+      "path": "include/datapump/triad_modem_v3.hpp",
+      "record": "planner-build/build-evidence.json",
+      "sha256": "1ddd8e851950036f03e6a903ed7ba4746392ffe8623f49685df04f029c4aff48"
+    },
+    {
+      "json_path": [
+        "sources",
+        "include/datapump/triad_modem.hpp"
+      ],
+      "member": "b8b259ec3ed474541f65655a5e124ff7bb9c699387326715112ecde027f6a05c/include/datapump/triad_modem.hpp",
+      "path": "include/datapump/triad_modem.hpp",
+      "record": "planner-build/build-evidence.json",
+      "sha256": "b8b259ec3ed474541f65655a5e124ff7bb9c699387326715112ecde027f6a05c"
+    },
+    {
+      "json_path": [
+        "sources",
+        "include/datapump/triad_simulation.hpp"
+      ],
+      "member": "55db1c03f95b6bd9b65bf5e3630a506aba40d1e3dbf473f025218454fbbee34d/include/datapump/triad_simulation.hpp",
+      "path": "include/datapump/triad_simulation.hpp",
+      "record": "planner-build/build-evidence.json",
+      "sha256": "55db1c03f95b6bd9b65bf5e3630a506aba40d1e3dbf473f025218454fbbee34d"
+    },
+    {
+      "json_path": [
+        "sources",
+        "include/datapump/crypto.hpp"
+      ],
+      "member": "14e681ae6637b453b05fae4125b300e6bc27ec2ec4c2ee449fa3b2ab97214b74/include/datapump/crypto.hpp",
+      "path": "include/datapump/crypto.hpp",
+      "record": "planner-build/build-evidence.json",
+      "sha256": "14e681ae6637b453b05fae4125b300e6bc27ec2ec4c2ee449fa3b2ab97214b74"
+    },
+    {
+      "json_path": [
+        "sources",
+        "include/datapump/pattern_pulse.hpp"
+      ],
+      "member": "f3053ed41fa5cbca182ae4dcf5ff4796b030a3cb15527f617d7a765e7f989312/include/datapump/pattern_pulse.hpp",
+      "path": "include/datapump/pattern_pulse.hpp",
+      "record": "planner-build/build-evidence.json",
+      "sha256": "f3053ed41fa5cbca182ae4dcf5ff4796b030a3cb15527f617d7a765e7f989312"
+    },
+    {
+      "json_path": [
+        "sources",
+        "tools/triad_gaussian_bounds.py"
+      ],
+      "member": "8910b3c64c2ea7072ef43e3e0c5d47ded6f8cbc903ac974162eb5ad285e1de23/tools/triad_gaussian_bounds.py",
+      "path": "tools/triad_gaussian_bounds.py",
+      "record": "planner-build/build-evidence.json",
+      "sha256": "8910b3c64c2ea7072ef43e3e0c5d47ded6f8cbc903ac974162eb5ad285e1de23"
+    },
+    {
+      "json_path": [
+        "sources",
+        "tools/triad_gaussian_state.py"
+      ],
+      "member": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba/tools/triad_gaussian_state.py",
+      "path": "tools/triad_gaussian_state.py",
+      "record": "planner-build/build-evidence.json",
+      "sha256": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba"
+    },
+    {
+      "json_path": [
+        "sources",
+        "tools/triad_state_workspace.py"
+      ],
+      "member": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923/tools/triad_state_workspace.py",
+      "path": "tools/triad_state_workspace.py",
+      "record": "planner-build/build-evidence.json",
+      "sha256": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923"
+    },
+    {
+      "json_path": [
+        "sources",
+        "tools/triad_perf_adaptive.py"
+      ],
+      "member": "b6a1b25851a8cd98c76134aff90ad0fa980eb6f445ff003c722ad5185b7de202/tools/triad_perf_adaptive.py",
+      "path": "tools/triad_perf_adaptive.py",
+      "record": "planner-build/build-evidence.json",
+      "sha256": "b6a1b25851a8cd98c76134aff90ad0fa980eb6f445ff003c722ad5185b7de202"
+    },
+    {
+      "json_path": [
+        "sources",
+        "tools/triad_perf_native.py"
+      ],
+      "member": "2fc046cff685d27fe50e279a3eeeb93798897e221bf72cca30493d6031391894/tools/triad_perf_native.py",
+      "path": "tools/triad_perf_native.py",
+      "record": "planner-build/build-evidence.json",
+      "sha256": "2fc046cff685d27fe50e279a3eeeb93798897e221bf72cca30493d6031391894"
+    },
+    {
+      "json_path": [
+        "sources",
+        "tools/triad_perf_hardware.py"
+      ],
+      "member": "74718bc0791dda7ac7ea0b38b8fb79ab7bb1e41c649da9787f2a2645854706b3/tools/triad_perf_hardware.py",
+      "path": "tools/triad_perf_hardware.py",
+      "record": "planner-build/build-evidence.json",
+      "sha256": "74718bc0791dda7ac7ea0b38b8fb79ab7bb1e41c649da9787f2a2645854706b3"
+    },
+    {
+      "json_path": [
+        "identity",
+        "sources",
+        "candidate",
+        "declared_production_dependencies",
+        "src/triad_statistics.cpp"
+      ],
+      "member": "18d92c2c51a4057caba6d9de78580305adcd8c038f6e1243ec1a4410f7c00ace/src/triad_statistics.cpp",
+      "path": "src/triad_statistics.cpp",
+      "record": "planner-routine-001/plan.json",
+      "sha256": "18d92c2c51a4057caba6d9de78580305adcd8c038f6e1243ec1a4410f7c00ace"
+    },
+    {
+      "json_path": [
+        "identity",
+        "sources",
+        "candidate",
+        "declared_production_dependencies",
+        "src/triad_modem_v3.cpp"
+      ],
+      "member": "cb6cac016e57edcd4f6ebc70f09c68cc47380e3b772cdbe047d7a3b93e9b434c/src/triad_modem_v3.cpp",
+      "path": "src/triad_modem_v3.cpp",
+      "record": "planner-routine-001/plan.json",
+      "sha256": "cb6cac016e57edcd4f6ebc70f09c68cc47380e3b772cdbe047d7a3b93e9b434c"
+    },
+    {
+      "json_path": [
+        "identity",
+        "sources",
+        "candidate",
+        "declared_production_dependencies",
+        "include/datapump/triad_statistics.hpp"
+      ],
+      "member": "66363bd20b0b613ca5df115265976052957a78052724a00e1017e15220ede6b1/include/datapump/triad_statistics.hpp",
+      "path": "include/datapump/triad_statistics.hpp",
+      "record": "planner-routine-001/plan.json",
+      "sha256": "66363bd20b0b613ca5df115265976052957a78052724a00e1017e15220ede6b1"
+    },
+    {
+      "json_path": [
+        "identity",
+        "sources",
+        "candidate",
+        "declared_production_dependencies",
+        "include/datapump/triad_modem_v3.hpp"
+      ],
+      "member": "1ddd8e851950036f03e6a903ed7ba4746392ffe8623f49685df04f029c4aff48/include/datapump/triad_modem_v3.hpp",
+      "path": "include/datapump/triad_modem_v3.hpp",
+      "record": "planner-routine-001/plan.json",
+      "sha256": "1ddd8e851950036f03e6a903ed7ba4746392ffe8623f49685df04f029c4aff48"
+    },
+    {
+      "json_path": [
+        "identity",
+        "sources",
+        "candidate",
+        "declared_production_dependencies",
+        "include/datapump/triad_modem.hpp"
+      ],
+      "member": "b8b259ec3ed474541f65655a5e124ff7bb9c699387326715112ecde027f6a05c/include/datapump/triad_modem.hpp",
+      "path": "include/datapump/triad_modem.hpp",
+      "record": "planner-routine-001/plan.json",
+      "sha256": "b8b259ec3ed474541f65655a5e124ff7bb9c699387326715112ecde027f6a05c"
+    },
+    {
+      "json_path": [
+        "identity",
+        "sources",
+        "candidate",
+        "declared_production_dependencies",
+        "include/datapump/triad_simulation.hpp"
+      ],
+      "member": "55db1c03f95b6bd9b65bf5e3630a506aba40d1e3dbf473f025218454fbbee34d/include/datapump/triad_simulation.hpp",
+      "path": "include/datapump/triad_simulation.hpp",
+      "record": "planner-routine-001/plan.json",
+      "sha256": "55db1c03f95b6bd9b65bf5e3630a506aba40d1e3dbf473f025218454fbbee34d"
+    },
+    {
+      "json_path": [
+        "identity",
+        "sources",
+        "candidate",
+        "declared_production_dependencies",
+        "include/datapump/crypto.hpp"
+      ],
+      "member": "14e681ae6637b453b05fae4125b300e6bc27ec2ec4c2ee449fa3b2ab97214b74/include/datapump/crypto.hpp",
+      "path": "include/datapump/crypto.hpp",
+      "record": "planner-routine-001/plan.json",
+      "sha256": "14e681ae6637b453b05fae4125b300e6bc27ec2ec4c2ee449fa3b2ab97214b74"
+    },
+    {
+      "json_path": [
+        "identity",
+        "sources",
+        "candidate",
+        "declared_production_dependencies",
+        "include/datapump/pattern_pulse.hpp"
+      ],
+      "member": "f3053ed41fa5cbca182ae4dcf5ff4796b030a3cb15527f617d7a765e7f989312/include/datapump/pattern_pulse.hpp",
+      "path": "include/datapump/pattern_pulse.hpp",
+      "record": "planner-routine-001/plan.json",
+      "sha256": "f3053ed41fa5cbca182ae4dcf5ff4796b030a3cb15527f617d7a765e7f989312"
+    },
+    {
+      "json_path": [
+        "identity",
+        "sources",
+        "reference",
+        "declared_production_dependencies",
+        "src/triad_statistics.cpp"
+      ],
+      "member": "18d92c2c51a4057caba6d9de78580305adcd8c038f6e1243ec1a4410f7c00ace/src/triad_statistics.cpp",
+      "path": "src/triad_statistics.cpp",
+      "record": "planner-routine-001/plan.json",
+      "sha256": "18d92c2c51a4057caba6d9de78580305adcd8c038f6e1243ec1a4410f7c00ace"
+    },
+    {
+      "json_path": [
+        "identity",
+        "sources",
+        "reference",
+        "declared_production_dependencies",
+        "src/triad_modem_v3.cpp"
+      ],
+      "member": "cb6cac016e57edcd4f6ebc70f09c68cc47380e3b772cdbe047d7a3b93e9b434c/src/triad_modem_v3.cpp",
+      "path": "src/triad_modem_v3.cpp",
+      "record": "planner-routine-001/plan.json",
+      "sha256": "cb6cac016e57edcd4f6ebc70f09c68cc47380e3b772cdbe047d7a3b93e9b434c"
+    },
+    {
+      "json_path": [
+        "identity",
+        "sources",
+        "reference",
+        "declared_production_dependencies",
+        "include/datapump/triad_statistics.hpp"
+      ],
+      "member": "66363bd20b0b613ca5df115265976052957a78052724a00e1017e15220ede6b1/include/datapump/triad_statistics.hpp",
+      "path": "include/datapump/triad_statistics.hpp",
+      "record": "planner-routine-001/plan.json",
+      "sha256": "66363bd20b0b613ca5df115265976052957a78052724a00e1017e15220ede6b1"
+    },
+    {
+      "json_path": [
+        "identity",
+        "sources",
+        "reference",
+        "declared_production_dependencies",
+        "include/datapump/triad_modem_v3.hpp"
+      ],
+      "member": "1ddd8e851950036f03e6a903ed7ba4746392ffe8623f49685df04f029c4aff48/include/datapump/triad_modem_v3.hpp",
+      "path": "include/datapump/triad_modem_v3.hpp",
+      "record": "planner-routine-001/plan.json",
+      "sha256": "1ddd8e851950036f03e6a903ed7ba4746392ffe8623f49685df04f029c4aff48"
+    },
+    {
+      "json_path": [
+        "identity",
+        "sources",
+        "reference",
+        "declared_production_dependencies",
+        "include/datapump/triad_modem.hpp"
+      ],
+      "member": "b8b259ec3ed474541f65655a5e124ff7bb9c699387326715112ecde027f6a05c/include/datapump/triad_modem.hpp",
+      "path": "include/datapump/triad_modem.hpp",
+      "record": "planner-routine-001/plan.json",
+      "sha256": "b8b259ec3ed474541f65655a5e124ff7bb9c699387326715112ecde027f6a05c"
+    },
+    {
+      "json_path": [
+        "identity",
+        "sources",
+        "reference",
+        "declared_production_dependencies",
+        "include/datapump/triad_simulation.hpp"
+      ],
+      "member": "55db1c03f95b6bd9b65bf5e3630a506aba40d1e3dbf473f025218454fbbee34d/include/datapump/triad_simulation.hpp",
+      "path": "include/datapump/triad_simulation.hpp",
+      "record": "planner-routine-001/plan.json",
+      "sha256": "55db1c03f95b6bd9b65bf5e3630a506aba40d1e3dbf473f025218454fbbee34d"
+    },
+    {
+      "json_path": [
+        "identity",
+        "sources",
+        "reference",
+        "declared_production_dependencies",
+        "include/datapump/crypto.hpp"
+      ],
+      "member": "14e681ae6637b453b05fae4125b300e6bc27ec2ec4c2ee449fa3b2ab97214b74/include/datapump/crypto.hpp",
+      "path": "include/datapump/crypto.hpp",
+      "record": "planner-routine-001/plan.json",
+      "sha256": "14e681ae6637b453b05fae4125b300e6bc27ec2ec4c2ee449fa3b2ab97214b74"
+    },
+    {
+      "json_path": [
+        "identity",
+        "sources",
+        "reference",
+        "declared_production_dependencies",
+        "include/datapump/pattern_pulse.hpp"
+      ],
+      "member": "f3053ed41fa5cbca182ae4dcf5ff4796b030a3cb15527f617d7a765e7f989312/include/datapump/pattern_pulse.hpp",
+      "path": "include/datapump/pattern_pulse.hpp",
+      "record": "planner-routine-001/plan.json",
+      "sha256": "f3053ed41fa5cbca182ae4dcf5ff4796b030a3cb15527f617d7a765e7f989312"
+    },
+    {
+      "json_path": [
+        "identity",
+        "harness",
+        "triad_perf_planner.py"
+      ],
+      "member": "10aa833eaedbbac2c2fe160723a84424b8cbfb04263bd22a09cb7ab180422ffb/tools/triad_perf_planner.py",
+      "path": "tools/triad_perf_planner.py",
+      "record": "planner-routine-001/plan.json",
+      "sha256": "10aa833eaedbbac2c2fe160723a84424b8cbfb04263bd22a09cb7ab180422ffb"
+    },
+    {
+      "json_path": [
+        "identity",
+        "harness",
+        "triad_perf_adaptive.py"
+      ],
+      "member": "b6a1b25851a8cd98c76134aff90ad0fa980eb6f445ff003c722ad5185b7de202/tools/triad_perf_adaptive.py",
+      "path": "tools/triad_perf_adaptive.py",
+      "record": "planner-routine-001/plan.json",
+      "sha256": "b6a1b25851a8cd98c76134aff90ad0fa980eb6f445ff003c722ad5185b7de202"
+    },
+    {
+      "json_path": [
+        "identity",
+        "harness",
+        "triad_perf_native.py"
+      ],
+      "member": "2fc046cff685d27fe50e279a3eeeb93798897e221bf72cca30493d6031391894/tools/triad_perf_native.py",
+      "path": "tools/triad_perf_native.py",
+      "record": "planner-routine-001/plan.json",
+      "sha256": "2fc046cff685d27fe50e279a3eeeb93798897e221bf72cca30493d6031391894"
+    },
+    {
+      "json_path": [
+        "identity",
+        "harness",
+        "triad_perf_hardware.py"
+      ],
+      "member": "74718bc0791dda7ac7ea0b38b8fb79ab7bb1e41c649da9787f2a2645854706b3/tools/triad_perf_hardware.py",
+      "path": "tools/triad_perf_hardware.py",
+      "record": "planner-routine-001/plan.json",
+      "sha256": "74718bc0791dda7ac7ea0b38b8fb79ab7bb1e41c649da9787f2a2645854706b3"
+    },
+    {
+      "json_path": [
+        "identity",
+        "harness",
+        "triad-performance-planner.json"
+      ],
+      "member": "a6b25a5c59a5597a353a3f8ea399228fc38aae28e43048e7c49fded5339ae3f0/tools/triad-performance-planner.json",
+      "path": "tools/triad-performance-planner.json",
+      "record": "planner-routine-001/plan.json",
+      "sha256": "a6b25a5c59a5597a353a3f8ea399228fc38aae28e43048e7c49fded5339ae3f0"
+    },
+    {
+      "json_path": [
+        "input_identity",
+        "pre_sha256",
+        "collector:/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_perf_python_coverage.py"
+      ],
+      "member": "24e4d6173f9ee5755979fc7e7cc827c537d650d9063ed0253e8659b8bb1d7e21/tools/triad_perf_python_coverage.py",
+      "path": "tools/triad_perf_python_coverage.py",
+      "record": "python-coverage-001/summary.json",
+      "sha256": "24e4d6173f9ee5755979fc7e7cc827c537d650d9063ed0253e8659b8bb1d7e21"
+    },
+    {
+      "json_path": [
+        "input_identity",
+        "pre_sha256",
+        "docs/gpu-precision-controls.md"
+      ],
+      "member": "b61dab07377a1f1b676ec262fc44db4069c895a956dc896bb773df70bdbaa207/docs/gpu-precision-controls.md",
+      "path": "docs/gpu-precision-controls.md",
+      "record": "python-coverage-001/summary.json",
+      "sha256": "b61dab07377a1f1b676ec262fc44db4069c895a956dc896bb773df70bdbaa207"
+    },
+    {
+      "json_path": [
+        "input_identity",
+        "pre_sha256",
+        "tests/test_triad_cfo_batch.py"
+      ],
+      "member": "f03812407de28cef6854c39df73c25cc66301abb637d8fd4cb40e34b8c16a356/tests/test_triad_cfo_batch.py",
+      "path": "tests/test_triad_cfo_batch.py",
+      "record": "python-coverage-001/summary.json",
+      "sha256": "f03812407de28cef6854c39df73c25cc66301abb637d8fd4cb40e34b8c16a356"
+    },
+    {
+      "json_path": [
+        "input_identity",
+        "pre_sha256",
+        "tests/test_triad_fft_acquire.py"
+      ],
+      "member": "7b8c3156ebec580f22da3dae4e9941f502e88a35caf15863b2f3b3b6d066458a/tests/test_triad_fft_acquire.py",
+      "path": "tests/test_triad_fft_acquire.py",
+      "record": "python-coverage-001/summary.json",
+      "sha256": "7b8c3156ebec580f22da3dae4e9941f502e88a35caf15863b2f3b3b6d066458a"
+    },
+    {
+      "json_path": [
+        "input_identity",
+        "pre_sha256",
+        "tests/test_triad_gaussian_bounds.py"
+      ],
+      "member": "e67eab9ca20591053197463efb22400e87e09e1808c724ba152ea449ebe8def3/tests/test_triad_gaussian_bounds.py",
+      "path": "tests/test_triad_gaussian_bounds.py",
+      "record": "python-coverage-001/summary.json",
+      "sha256": "e67eab9ca20591053197463efb22400e87e09e1808c724ba152ea449ebe8def3"
+    },
+    {
+      "json_path": [
+        "input_identity",
+        "pre_sha256",
+        "tests/test_triad_gaussian_prepared.py"
+      ],
+      "member": "d59e54477f9a31d4038761d2d0c7a8fe020398d4e9e0d6386c1a1593a2e749c4/tests/test_triad_gaussian_prepared.py",
+      "path": "tests/test_triad_gaussian_prepared.py",
+      "record": "python-coverage-001/summary.json",
+      "sha256": "d59e54477f9a31d4038761d2d0c7a8fe020398d4e9e0d6386c1a1593a2e749c4"
+    },
+    {
+      "json_path": [
+        "input_identity",
+        "pre_sha256",
+        "tests/test_triad_gaussian_state.py"
+      ],
+      "member": "386ba03d3d6e850c7b0c6e805a5c9d30f88fdc33d07aeed8e0268cfccbde7da1/tests/test_triad_gaussian_state.py",
+      "path": "tests/test_triad_gaussian_state.py",
+      "record": "python-coverage-001/summary.json",
+      "sha256": "386ba03d3d6e850c7b0c6e805a5c9d30f88fdc33d07aeed8e0268cfccbde7da1"
+    },
+    {
+      "json_path": [
+        "input_identity",
+        "pre_sha256",
+        "tests/test_triad_gaussian_window.py"
+      ],
+      "member": "66783804ee920a46757daa54155d9fd88a9d1ed0d65fbb5d364287ffcafde1f9/tests/test_triad_gaussian_window.py",
+      "path": "tests/test_triad_gaussian_window.py",
+      "record": "python-coverage-001/summary.json",
+      "sha256": "66783804ee920a46757daa54155d9fd88a9d1ed0d65fbb5d364287ffcafde1f9"
+    },
+    {
+      "json_path": [
+        "input_identity",
+        "pre_sha256",
+        "tests/test_triad_group_acquire.py"
+      ],
+      "member": "ad4b64bfa40433ed114a55787a55a89a25eed8be43ee02334859fe69151ab17c/tests/test_triad_group_acquire.py",
+      "path": "tests/test_triad_group_acquire.py",
+      "record": "python-coverage-001/summary.json",
+      "sha256": "ad4b64bfa40433ed114a55787a55a89a25eed8be43ee02334859fe69151ab17c"
+    },
+    {
+      "json_path": [
+        "input_identity",
+        "pre_sha256",
+        "tests/test_triad_noise_likelihood.py"
+      ],
+      "member": "2c5452df602057d3fc8550a59fda22d2ca6f64f791b5a506b08d5b8079cb65c7/tests/test_triad_noise_likelihood.py",
+      "path": "tests/test_triad_noise_likelihood.py",
+      "record": "python-coverage-001/summary.json",
+      "sha256": "2c5452df602057d3fc8550a59fda22d2ca6f64f791b5a506b08d5b8079cb65c7"
+    },
+    {
+      "json_path": [
+        "input_identity",
+        "pre_sha256",
+        "tests/test_triad_noise_study.py"
+      ],
+      "member": "1b423c98057997398b3fff142aa53bf0d46e524841a58c70ee08084671e7893f/tests/test_triad_noise_study.py",
+      "path": "tests/test_triad_noise_study.py",
+      "record": "python-coverage-001/summary.json",
+      "sha256": "1b423c98057997398b3fff142aa53bf0d46e524841a58c70ee08084671e7893f"
+    },
+    {
+      "json_path": [
+        "input_identity",
+        "pre_sha256",
+        "tests/test_triad_perf_hardware.py"
+      ],
+      "member": "721bd0aaf3ec019aa8b63cbde150598158d2775577bf6dfcd05554d5935a2aa9/tests/test_triad_perf_hardware.py",
+      "path": "tests/test_triad_perf_hardware.py",
+      "record": "python-coverage-001/summary.json",
+      "sha256": "721bd0aaf3ec019aa8b63cbde150598158d2775577bf6dfcd05554d5935a2aa9"
+    },
+    {
+      "json_path": [
+        "input_identity",
+        "pre_sha256",
+        "tests/test_triad_phase_frequency.py"
+      ],
+      "member": "cc4d6f1b9c33fc746bb57791ebd19f3ae496272d11bc7cf6379bfb116b9f7dad/tests/test_triad_phase_frequency.py",
+      "path": "tests/test_triad_phase_frequency.py",
+      "record": "python-coverage-001/summary.json",
+      "sha256": "cc4d6f1b9c33fc746bb57791ebd19f3ae496272d11bc7cf6379bfb116b9f7dad"
+    },
+    {
+      "json_path": [
+        "input_identity",
+        "pre_sha256",
+        "tests/test_triad_phase_optimized.py"
+      ],
+      "member": "2dbb8586c57c57d0d8e98b7066535cd21ee2010cf1ec78ed56ec1d0e4f18982b/tests/test_triad_phase_optimized.py",
+      "path": "tests/test_triad_phase_optimized.py",
+      "record": "python-coverage-001/summary.json",
+      "sha256": "2dbb8586c57c57d0d8e98b7066535cd21ee2010cf1ec78ed56ec1d0e4f18982b"
+    },
+    {
+      "json_path": [
+        "input_identity",
+        "pre_sha256",
+        "tests/test_triad_phase_reduction.py"
+      ],
+      "member": "2d1bf61ebe53494568777439ca9c5b0b4d9badc7597440a82c9bb4175da62ff7/tests/test_triad_phase_reduction.py",
+      "path": "tests/test_triad_phase_reduction.py",
+      "record": "python-coverage-001/summary.json",
+      "sha256": "2d1bf61ebe53494568777439ca9c5b0b4d9badc7597440a82c9bb4175da62ff7"
+    },
+    {
+      "json_path": [
+        "input_identity",
+        "pre_sha256",
+        "tests/test_triad_phase_tensor.py"
+      ],
+      "member": "9403029b2ab959689b475dd92c10e8da84d633501dd0c1414a0a99d55a4639ae/tests/test_triad_phase_tensor.py",
+      "path": "tests/test_triad_phase_tensor.py",
+      "record": "python-coverage-001/summary.json",
+      "sha256": "9403029b2ab959689b475dd92c10e8da84d633501dd0c1414a0a99d55a4639ae"
+    },
+    {
+      "json_path": [
+        "input_identity",
+        "pre_sha256",
+        "tests/test_triad_precision_probe.py"
+      ],
+      "member": "7de34739c72121baa230610c197f9ce7a529688fb1f581b8b01d559443498fee/tests/test_triad_precision_probe.py",
+      "path": "tests/test_triad_precision_probe.py",
+      "record": "python-coverage-001/summary.json",
+      "sha256": "7de34739c72121baa230610c197f9ce7a529688fb1f581b8b01d559443498fee"
+    },
+    {
+      "json_path": [
+        "input_identity",
+        "pre_sha256",
+        "tests/test_triad_prepared_observation.py"
+      ],
+      "member": "e1ff404d5dc487146442bf58038301a9610678e9d36fdcaf186d40b40b0a763b/tests/test_triad_prepared_observation.py",
+      "path": "tests/test_triad_prepared_observation.py",
+      "record": "python-coverage-001/summary.json",
+      "sha256": "e1ff404d5dc487146442bf58038301a9610678e9d36fdcaf186d40b40b0a763b"
+    },
+    {
+      "json_path": [
+        "input_identity",
+        "pre_sha256",
+        "tests/test_triad_ray_frequency.py"
+      ],
+      "member": "982473b034caa7bc550e1acee29dc2d9c8e33c6131e25683abd11bc95fbb89b3/tests/test_triad_ray_frequency.py",
+      "path": "tests/test_triad_ray_frequency.py",
+      "record": "python-coverage-001/summary.json",
+      "sha256": "982473b034caa7bc550e1acee29dc2d9c8e33c6131e25683abd11bc95fbb89b3"
+    },
+    {
+      "json_path": [
+        "input_identity",
+        "pre_sha256",
+        "tests/test_triad_rbpf.py"
+      ],
+      "member": "668c624ef439c098a99ff9e33822b6272ea367183865b7caccdafcffbc8c42fa/tests/test_triad_rbpf.py",
+      "path": "tests/test_triad_rbpf.py",
+      "record": "python-coverage-001/summary.json",
+      "sha256": "668c624ef439c098a99ff9e33822b6272ea367183865b7caccdafcffbc8c42fa"
+    },
+    {
+      "json_path": [
+        "input_identity",
+        "pre_sha256",
+        "tests/test_triad_rbpf_study.py"
+      ],
+      "member": "dbc93c3570719a216ca34d9e10248b8f49f0d25c7ebee1537c0df70a81b28598/tests/test_triad_rbpf_study.py",
+      "path": "tests/test_triad_rbpf_study.py",
+      "record": "python-coverage-001/summary.json",
+      "sha256": "dbc93c3570719a216ca34d9e10248b8f49f0d25c7ebee1537c0df70a81b28598"
+    },
+    {
+      "json_path": [
+        "input_identity",
+        "pre_sha256",
+        "tests/test_triad_state_study.py"
+      ],
+      "member": "6e1bbdf0ef3dd1124d30be9bee8dc804a617ce1e3f615b3f2862f328f5f1bc4a/tests/test_triad_state_study.py",
+      "path": "tests/test_triad_state_study.py",
+      "record": "python-coverage-001/summary.json",
+      "sha256": "6e1bbdf0ef3dd1124d30be9bee8dc804a617ce1e3f615b3f2862f328f5f1bc4a"
+    },
+    {
+      "json_path": [
+        "input_identity",
+        "pre_sha256",
+        "tests/test_triad_state_workspace.py"
+      ],
+      "member": "b9a0276203bd212b74f8becca1726d56dd6074d8c27c720a14d08cff4b6b0aba/tests/test_triad_state_workspace.py",
+      "path": "tests/test_triad_state_workspace.py",
+      "record": "python-coverage-001/summary.json",
+      "sha256": "b9a0276203bd212b74f8becca1726d56dd6074d8c27c720a14d08cff4b6b0aba"
+    },
+    {
+      "json_path": [
+        "input_identity",
+        "pre_sha256",
+        "tests/test_triad_static_frequency_study.py"
+      ],
+      "member": "73c609d183dfacf03e22426d9defac30be386f48ce35cb08b92942fc5811c34d/tests/test_triad_static_frequency_study.py",
+      "path": "tests/test_triad_static_frequency_study.py",
+      "record": "python-coverage-001/summary.json",
+      "sha256": "73c609d183dfacf03e22426d9defac30be386f48ce35cb08b92942fc5811c34d"
+    },
+    {
+      "json_path": [
+        "input_identity",
+        "pre_sha256",
+        "tools/triad-cfo-batch-study.py"
+      ],
+      "member": "5c7fb6f8b0ad8cadeaae8591d9fb0e3d489fb5eb4c14962faf800ad46a661665/tools/triad-cfo-batch-study.py",
+      "path": "tools/triad-cfo-batch-study.py",
+      "record": "python-coverage-001/summary.json",
+      "sha256": "5c7fb6f8b0ad8cadeaae8591d9fb0e3d489fb5eb4c14962faf800ad46a661665"
+    },
+    {
+      "json_path": [
+        "input_identity",
+        "pre_sha256",
+        "tools/triad-noise-study.py"
+      ],
+      "member": "960040dc2a9a00910185a5b79f8af8c84410ffd3b8b7327256399543f396a621/tools/triad-noise-study.py",
+      "path": "tools/triad-noise-study.py",
+      "record": "python-coverage-001/summary.json",
+      "sha256": "960040dc2a9a00910185a5b79f8af8c84410ffd3b8b7327256399543f396a621"
+    },
+    {
+      "json_path": [
+        "input_identity",
+        "pre_sha256",
+        "tools/triad-performance-coverage.json"
+      ],
+      "member": "59c2ed40efea3bcd141ecc4f08579770762d188018ceefb469bdb79ca9900f6a/tools/triad-performance-coverage.json",
+      "path": "tools/triad-performance-coverage.json",
+      "record": "python-coverage-001/summary.json",
+      "sha256": "59c2ed40efea3bcd141ecc4f08579770762d188018ceefb469bdb79ca9900f6a"
+    },
+    {
+      "json_path": [
+        "input_identity",
+        "pre_sha256",
+        "tools/triad-ray-frequency-study.py"
+      ],
+      "member": "ea3ca2acde8aea75538066e46e3ccae2e36612afac753db6b2d048bd6ff87dd2/tools/triad-ray-frequency-study.py",
+      "path": "tools/triad-ray-frequency-study.py",
+      "record": "python-coverage-001/summary.json",
+      "sha256": "ea3ca2acde8aea75538066e46e3ccae2e36612afac753db6b2d048bd6ff87dd2"
+    },
+    {
+      "json_path": [
+        "input_identity",
+        "pre_sha256",
+        "tools/triad-rbpf-study.py"
+      ],
+      "member": "34a9797ed7119dcf6545b6be759b8f506cbdaf6ac9ece886b82fa699cd5d085f/tools/triad-rbpf-study.py",
+      "path": "tools/triad-rbpf-study.py",
+      "record": "python-coverage-001/summary.json",
+      "sha256": "34a9797ed7119dcf6545b6be759b8f506cbdaf6ac9ece886b82fa699cd5d085f"
+    },
+    {
+      "json_path": [
+        "input_identity",
+        "pre_sha256",
+        "tools/triad-state-study.py"
+      ],
+      "member": "3fa7491ae93031ff6bfadc4c9b792659336999effc0508a71cf734ada9250402/tools/triad-state-study.py",
+      "path": "tools/triad-state-study.py",
+      "record": "python-coverage-001/summary.json",
+      "sha256": "3fa7491ae93031ff6bfadc4c9b792659336999effc0508a71cf734ada9250402"
+    },
+    {
+      "json_path": [
+        "input_identity",
+        "pre_sha256",
+        "tools/triad-static-frequency-study.py"
+      ],
+      "member": "d1b75e9b49de21041558e97ee1daff2ba07a1fd18a123bc8a6cb928f1052e11b/tools/triad-static-frequency-study.py",
+      "path": "tools/triad-static-frequency-study.py",
+      "record": "python-coverage-001/summary.json",
+      "sha256": "d1b75e9b49de21041558e97ee1daff2ba07a1fd18a123bc8a6cb928f1052e11b"
+    },
+    {
+      "json_path": [
+        "input_identity",
+        "pre_sha256",
+        "tools/triad_exhaustive_correlation.py"
+      ],
+      "member": "ae02b1f7d85e2d3f8c2c153000f530a411860ff443aeaf674abaa93cf60ab2d4/tools/triad_exhaustive_correlation.py",
+      "path": "tools/triad_exhaustive_correlation.py",
+      "record": "python-coverage-001/summary.json",
+      "sha256": "ae02b1f7d85e2d3f8c2c153000f530a411860ff443aeaf674abaa93cf60ab2d4"
+    },
+    {
+      "json_path": [
+        "input_identity",
+        "pre_sha256",
+        "tools/triad_fft_acquire.py"
+      ],
+      "member": "d4a3c2cc39e0068e6aa6aab27d7ee8eeff6cc7db72a790868fe166c3f1d65843/tools/triad_fft_acquire.py",
+      "path": "tools/triad_fft_acquire.py",
+      "record": "python-coverage-001/summary.json",
+      "sha256": "d4a3c2cc39e0068e6aa6aab27d7ee8eeff6cc7db72a790868fe166c3f1d65843"
+    },
+    {
+      "json_path": [
+        "input_identity",
+        "pre_sha256",
+        "tools/triad_gaussian_bounds.py"
+      ],
+      "member": "8910b3c64c2ea7072ef43e3e0c5d47ded6f8cbc903ac974162eb5ad285e1de23/tools/triad_gaussian_bounds.py",
+      "path": "tools/triad_gaussian_bounds.py",
+      "record": "python-coverage-001/summary.json",
+      "sha256": "8910b3c64c2ea7072ef43e3e0c5d47ded6f8cbc903ac974162eb5ad285e1de23"
+    },
+    {
+      "json_path": [
+        "input_identity",
+        "pre_sha256",
+        "tools/triad_gaussian_prepared.py"
+      ],
+      "member": "c88afdf459521393958c49d801517d79cd158cbe2291e4a48c3eff6931e42875/tools/triad_gaussian_prepared.py",
+      "path": "tools/triad_gaussian_prepared.py",
+      "record": "python-coverage-001/summary.json",
+      "sha256": "c88afdf459521393958c49d801517d79cd158cbe2291e4a48c3eff6931e42875"
+    },
+    {
+      "json_path": [
+        "input_identity",
+        "pre_sha256",
+        "tools/triad_gaussian_state.py"
+      ],
+      "member": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba/tools/triad_gaussian_state.py",
+      "path": "tools/triad_gaussian_state.py",
+      "record": "python-coverage-001/summary.json",
+      "sha256": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba"
+    },
+    {
+      "json_path": [
+        "input_identity",
+        "pre_sha256",
+        "tools/triad_gaussian_window.py"
+      ],
+      "member": "b22fe002864922e44bc7e10000672a163353818f610c4882bae5d62cfe1cf883/tools/triad_gaussian_window.py",
+      "path": "tools/triad_gaussian_window.py",
+      "record": "python-coverage-001/summary.json",
+      "sha256": "b22fe002864922e44bc7e10000672a163353818f610c4882bae5d62cfe1cf883"
+    },
+    {
+      "json_path": [
+        "input_identity",
+        "pre_sha256",
+        "tools/triad_group_acquire.py"
+      ],
+      "member": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104/tools/triad_group_acquire.py",
+      "path": "tools/triad_group_acquire.py",
+      "record": "python-coverage-001/summary.json",
+      "sha256": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104"
+    },
+    {
+      "json_path": [
+        "input_identity",
+        "pre_sha256",
+        "tools/triad_noise_likelihood.py"
+      ],
+      "member": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110/tools/triad_noise_likelihood.py",
+      "path": "tools/triad_noise_likelihood.py",
+      "record": "python-coverage-001/summary.json",
+      "sha256": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110"
+    },
+    {
+      "json_path": [
+        "input_identity",
+        "pre_sha256",
+        "tools/triad_phase_frequency.py"
+      ],
+      "member": "48ee569b1d467b2d7b6fd55088764bd28dd11e0bfecb5974622a318fbb408585/tools/triad_phase_frequency.py",
+      "path": "tools/triad_phase_frequency.py",
+      "record": "python-coverage-001/summary.json",
+      "sha256": "48ee569b1d467b2d7b6fd55088764bd28dd11e0bfecb5974622a318fbb408585"
+    },
+    {
+      "json_path": [
+        "input_identity",
+        "pre_sha256",
+        "tools/triad_phase_optimized.py"
+      ],
+      "member": "759b46d536f2daa1d1de2336190ab19153376aca3eeca32847cba5289d2d63ed/tools/triad_phase_optimized.py",
+      "path": "tools/triad_phase_optimized.py",
+      "record": "python-coverage-001/summary.json",
+      "sha256": "759b46d536f2daa1d1de2336190ab19153376aca3eeca32847cba5289d2d63ed"
+    },
+    {
+      "json_path": [
+        "input_identity",
+        "pre_sha256",
+        "tools/triad_phase_reduction.py"
+      ],
+      "member": "b2f762320fbff5a66fa88123711483f9c42721e1765e406b7699c434048ded98/tools/triad_phase_reduction.py",
+      "path": "tools/triad_phase_reduction.py",
+      "record": "python-coverage-001/summary.json",
+      "sha256": "b2f762320fbff5a66fa88123711483f9c42721e1765e406b7699c434048ded98"
+    },
+    {
+      "json_path": [
+        "input_identity",
+        "pre_sha256",
+        "tools/triad_phase_tensor.py"
+      ],
+      "member": "3b1a674ac7ace90ddce72c2773c2d1543bcfe8307d7b65ea965ad03a6525ffda/tools/triad_phase_tensor.py",
+      "path": "tools/triad_phase_tensor.py",
+      "record": "python-coverage-001/summary.json",
+      "sha256": "3b1a674ac7ace90ddce72c2773c2d1543bcfe8307d7b65ea965ad03a6525ffda"
+    },
+    {
+      "json_path": [
+        "input_identity",
+        "pre_sha256",
+        "tools/triad_prepared_observation.py"
+      ],
+      "member": "13d37977620519aaeb457d4ed1163c80d68dca96c8319480de914cae8a6aaec8/tools/triad_prepared_observation.py",
+      "path": "tools/triad_prepared_observation.py",
+      "record": "python-coverage-001/summary.json",
+      "sha256": "13d37977620519aaeb457d4ed1163c80d68dca96c8319480de914cae8a6aaec8"
+    },
+    {
+      "json_path": [
+        "input_identity",
+        "pre_sha256",
+        "tools/triad_rbpf.py"
+      ],
+      "member": "d4b64c3a830acd3bd15433421da0e003ba1aa9810bf1dd904c57082d94c3bd54/tools/triad_rbpf.py",
+      "path": "tools/triad_rbpf.py",
+      "record": "python-coverage-001/summary.json",
+      "sha256": "d4b64c3a830acd3bd15433421da0e003ba1aa9810bf1dd904c57082d94c3bd54"
+    },
+    {
+      "json_path": [
+        "input_identity",
+        "pre_sha256",
+        "tools/triad_state_workspace.py"
+      ],
+      "member": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923/tools/triad_state_workspace.py",
+      "path": "tools/triad_state_workspace.py",
+      "record": "python-coverage-001/summary.json",
+      "sha256": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "include/datapump/triad_modem_v3.hpp"
+      ],
+      "member": "1ddd8e851950036f03e6a903ed7ba4746392ffe8623f49685df04f029c4aff48/include/datapump/triad_modem_v3.hpp",
+      "path": "include/datapump/triad_modem_v3.hpp",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "1ddd8e851950036f03e6a903ed7ba4746392ffe8623f49685df04f029c4aff48"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "src/channel_perturbation.hpp"
+      ],
+      "member": "fae3b1b345e3dc19c8b85a5010e4434530bd0a34d595dd4de8cd55349d8d879a/src/channel_perturbation.hpp",
+      "path": "src/channel_perturbation.hpp",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "fae3b1b345e3dc19c8b85a5010e4434530bd0a34d595dd4de8cd55349d8d879a"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "src/channel_spread.hpp"
+      ],
+      "member": "bf98698d574869acb79645fa143af7ae563a2f542868e77c672d89d4fb16bdb0/src/channel_spread.hpp",
+      "path": "src/channel_spread.hpp",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "bf98698d574869acb79645fa143af7ae563a2f542868e77c672d89d4fb16bdb0"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "src/triad_gaussian_fading.hpp"
+      ],
+      "member": "97f26b082d7d68123952bde7ccb9f97148c5977cf741cf6c15c76e77fcc20944/src/triad_gaussian_fading.hpp",
+      "path": "src/triad_gaussian_fading.hpp",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "97f26b082d7d68123952bde7ccb9f97148c5977cf741cf6c15c76e77fcc20944"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "src/triad_modem_v3.cpp"
+      ],
+      "member": "cb6cac016e57edcd4f6ebc70f09c68cc47380e3b772cdbe047d7a3b93e9b434c/src/triad_modem_v3.cpp",
+      "path": "src/triad_modem_v3.cpp",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "cb6cac016e57edcd4f6ebc70f09c68cc47380e3b772cdbe047d7a3b93e9b434c"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "src/triad_receiver_v3.cpp"
+      ],
+      "member": "ff7409c55f2c62dbb833f1ae24a7b4aab103607aaf2f66945ea585e1e3ba3e2f/src/triad_receiver_v3.cpp",
+      "path": "src/triad_receiver_v3.cpp",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "ff7409c55f2c62dbb833f1ae24a7b4aab103607aaf2f66945ea585e1e3ba3e2f"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "src/triad_simulation_stream.cpp"
+      ],
+      "member": "afaa1267c36fcd330151174f6f08b6fb401a7f702c660964071ef24b6e82a70d/src/triad_simulation_stream.cpp",
+      "path": "src/triad_simulation_stream.cpp",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "afaa1267c36fcd330151174f6f08b6fb401a7f702c660964071ef24b6e82a70d"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "src/tuning.cpp"
+      ],
+      "member": "228578b2dc33b72e657d646d956ccb51aefbbabde1af730ef83a15e6785cb01e/src/tuning.cpp",
+      "path": "src/tuning.cpp",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "228578b2dc33b72e657d646d956ccb51aefbbabde1af730ef83a15e6785cb01e"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "src/tuning_presets.cpp"
+      ],
+      "member": "31e1ac552bea10b24036f959485241532066e6aa343931c04a46a65e8734b293/src/tuning_presets.cpp",
+      "path": "src/tuning_presets.cpp",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "31e1ac552bea10b24036f959485241532066e6aa343931c04a46a65e8734b293"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad-acquisition-compare.py"
+      ],
+      "member": "d57ebbe2f8eb281ae420be7937281dddbb9ee4009c7fe041e19745a259716a6a/tools/triad-acquisition-compare.py",
+      "path": "tools/triad-acquisition-compare.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "d57ebbe2f8eb281ae420be7937281dddbb9ee4009c7fe041e19745a259716a6a"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad-cfo-batch-study.py"
+      ],
+      "member": "5c7fb6f8b0ad8cadeaae8591d9fb0e3d489fb5eb4c14962faf800ad46a661665/tools/triad-cfo-batch-study.py",
+      "path": "tools/triad-cfo-batch-study.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "5c7fb6f8b0ad8cadeaae8591d9fb0e3d489fb5eb4c14962faf800ad46a661665"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad-conditional-sweep.py"
+      ],
+      "member": "19d1a733674645dd2d27bb28bce3bad89168c7667679d6f2d79891d37e168073/tools/triad-conditional-sweep.py",
+      "path": "tools/triad-conditional-sweep.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "19d1a733674645dd2d27bb28bce3bad89168c7667679d6f2d79891d37e168073"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad-consumer-hardware.py"
+      ],
+      "member": "c2777fffc6838b8e7e07d6a7ad807fe90f17f53737b325587b9db8aa5b181ac0/tools/triad-consumer-hardware.py",
+      "path": "tools/triad-consumer-hardware.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "c2777fffc6838b8e7e07d6a7ad807fe90f17f53737b325587b9db8aa5b181ac0"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad-consumer-profile.py"
+      ],
+      "member": "a997c54226176cd6728e1aea5e43398a6eb7a145c6fd9c611e3c19a4deaae29d/tools/triad-consumer-profile.py",
+      "path": "tools/triad-consumer-profile.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "a997c54226176cd6728e1aea5e43398a6eb7a145c6fd9c611e3c19a4deaae29d"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad-consumer-sustain.py"
+      ],
+      "member": "b5385c2423d6df5fe67635bd1ea545b1ccf8bd3d4137aaf43a82b208c9bb36fc/tools/triad-consumer-sustain.py",
+      "path": "tools/triad-consumer-sustain.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "b5385c2423d6df5fe67635bd1ea545b1ccf8bd3d4137aaf43a82b208c9bb36fc"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad-consumer-tiles.py"
+      ],
+      "member": "1bfe725dba82667a5b838891f959f5cab3ee950e7e3bdac0ca3483f25ba9855f/tools/triad-consumer-tiles.py",
+      "path": "tools/triad-consumer-tiles.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "1bfe725dba82667a5b838891f959f5cab3ee950e7e3bdac0ca3483f25ba9855f"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad-coverage.py"
+      ],
+      "member": "4a7241acab3ba6e4f17bad4e4821e155f7e99064115100313de1bbee438a90e8/tools/triad-coverage.py",
+      "path": "tools/triad-coverage.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "4a7241acab3ba6e4f17bad4e4821e155f7e99064115100313de1bbee438a90e8"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad-detector-study.py"
+      ],
+      "member": "647e63e73b4ee6f0d6ab72f1dfd75f403aa377789798b933b2fb9ccfdbc7caac/tools/triad-detector-study.py",
+      "path": "tools/triad-detector-study.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "647e63e73b4ee6f0d6ab72f1dfd75f403aa377789798b933b2fb9ccfdbc7caac"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad-diversity-export.py"
+      ],
+      "member": "bb871b98d436ab45605ad8127513d92fc25fff0461cc66ed26e3c5967e4a9015/tools/triad-diversity-export.py",
+      "path": "tools/triad-diversity-export.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "bb871b98d436ab45605ad8127513d92fc25fff0461cc66ed26e3c5967e4a9015"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad-examples-summary.py"
+      ],
+      "member": "9d76d728b25e1d49d1cc52ecf12a1a126ba701c2127ce7ccd9df1db7df866880/tools/triad-examples-summary.py",
+      "path": "tools/triad-examples-summary.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "9d76d728b25e1d49d1cc52ecf12a1a126ba701c2127ce7ccd9df1db7df866880"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad-factor-census.py"
+      ],
+      "member": "db9b3ded8d318b6e6dc468b2d2d40bcbf814aefe603ed8224d04e9cc7ef026ef/tools/triad-factor-census.py",
+      "path": "tools/triad-factor-census.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "db9b3ded8d318b6e6dc468b2d2d40bcbf814aefe603ed8224d04e9cc7ef026ef"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad-fft-acquire.py"
+      ],
+      "member": "a5fd5c4033ef33d3c7a0d16798d2955831de5c91659dee5e829578630c5a51a1/tools/triad-fft-acquire.py",
+      "path": "tools/triad-fft-acquire.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "a5fd5c4033ef33d3c7a0d16798d2955831de5c91659dee5e829578630c5a51a1"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad-fp4-campaign.py"
+      ],
+      "member": "4193c6ed98b381e39e5733f76a7d32779af936d88e927cf1857ae23aafe6a01e/tools/triad-fp4-campaign.py",
+      "path": "tools/triad-fp4-campaign.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "4193c6ed98b381e39e5733f76a7d32779af936d88e927cf1857ae23aafe6a01e"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad-fp4-sweep.py"
+      ],
+      "member": "9d43244e2850fae5334d45fa5280c79c5a3eac9f0b34095a73b1b14f576c2d0c/tools/triad-fp4-sweep.py",
+      "path": "tools/triad-fp4-sweep.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "9d43244e2850fae5334d45fa5280c79c5a3eac9f0b34095a73b1b14f576c2d0c"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad-gpu-study.py"
+      ],
+      "member": "3c8922b14e4a340e46a4f6eee1a711b85e1fa6faa3d8b6fa8df4ff4bf39ff806/tools/triad-gpu-study.py",
+      "path": "tools/triad-gpu-study.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "3c8922b14e4a340e46a4f6eee1a711b85e1fa6faa3d8b6fa8df4ff4bf39ff806"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad-link-budget.py"
+      ],
+      "member": "74de2229a69acf7a6462d8f19a113a6f94de40a502b68e8ac9eda30c665cc9c2/tools/triad-link-budget.py",
+      "path": "tools/triad-link-budget.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "74de2229a69acf7a6462d8f19a113a6f94de40a502b68e8ac9eda30c665cc9c2"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad-long.cpp"
+      ],
+      "member": "9b852132edb2c4f53d4c218e73db1314653cd6213a78a49c776869af6dc68877/tools/triad-long.cpp",
+      "path": "tools/triad-long.cpp",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "9b852132edb2c4f53d4c218e73db1314653cd6213a78a49c776869af6dc68877"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad-lowrate-campaign.py"
+      ],
+      "member": "5ab3dcc1f3c2b2e926f10e2a35315f2970507a308dd6631c895cf3de39807eb9/tools/triad-lowrate-campaign.py",
+      "path": "tools/triad-lowrate-campaign.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "5ab3dcc1f3c2b2e926f10e2a35315f2970507a308dd6631c895cf3de39807eb9"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad-noise-batch-study.py"
+      ],
+      "member": "5c0e0a0b78a725131854c38b86c215117860c4d4ca17470164ba710de4ff2213/tools/triad-noise-batch-study.py",
+      "path": "tools/triad-noise-batch-study.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "5c0e0a0b78a725131854c38b86c215117860c4d4ca17470164ba710de4ff2213"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad-noise-study.py"
+      ],
+      "member": "960040dc2a9a00910185a5b79f8af8c84410ffd3b8b7327256399543f396a621/tools/triad-noise-study.py",
+      "path": "tools/triad-noise-study.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "960040dc2a9a00910185a5b79f8af8c84410ffd3b8b7327256399543f396a621"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad-optimization-study.py"
+      ],
+      "member": "47ee069647c996df2a1011b048d4cc23b875fb94f73fccb1614128d833186d05/tools/triad-optimization-study.py",
+      "path": "tools/triad-optimization-study.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "47ee069647c996df2a1011b048d4cc23b875fb94f73fccb1614128d833186d05"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad-optimization-summary.py"
+      ],
+      "member": "fe941d71301007e281a9de369d74640af8482f8e72cde59ed56a37b1eab8d213/tools/triad-optimization-summary.py",
+      "path": "tools/triad-optimization-summary.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "fe941d71301007e281a9de369d74640af8482f8e72cde59ed56a37b1eab8d213"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad-path-study.py"
+      ],
+      "member": "2c57112f61bd377a521a1e3af85d2a31b4d165e5498411d77a4c759f9934340c/tools/triad-path-study.py",
+      "path": "tools/triad-path-study.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "2c57112f61bd377a521a1e3af85d2a31b4d165e5498411d77a4c759f9934340c"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad-performance.py"
+      ],
+      "member": "2f9378ff437cda7e329e2b5242f6bf0c5760c2c194545683b4c161a32669ca31/tools/triad-performance.py",
+      "path": "tools/triad-performance.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "2f9378ff437cda7e329e2b5242f6bf0c5760c2c194545683b4c161a32669ca31"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad-phase-study.py"
+      ],
+      "member": "c548e62067473597ce9fd4dbbed28a35e07e3170b1804247a820eacad9cae1f5/tools/triad-phase-study.py",
+      "path": "tools/triad-phase-study.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "c548e62067473597ce9fd4dbbed28a35e07e3170b1804247a820eacad9cae1f5"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad-profile.py"
+      ],
+      "member": "bd23158caba3c863510679fe76f14b5062e9719eabd633a158f919d2b9964841/tools/triad-profile.py",
+      "path": "tools/triad-profile.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "bd23158caba3c863510679fe76f14b5062e9719eabd633a158f919d2b9964841"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad-ray-frequency-study.py"
+      ],
+      "member": "ea3ca2acde8aea75538066e46e3ccae2e36612afac753db6b2d048bd6ff87dd2/tools/triad-ray-frequency-study.py",
+      "path": "tools/triad-ray-frequency-study.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "ea3ca2acde8aea75538066e46e3ccae2e36612afac753db6b2d048bd6ff87dd2"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad-rbpf-benchmark.py"
+      ],
+      "member": "f78632dc05ab8495cd6dc3ed052ed9040aceeb0a44344938d574ab215689bf0c/tools/triad-rbpf-benchmark.py",
+      "path": "tools/triad-rbpf-benchmark.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "f78632dc05ab8495cd6dc3ed052ed9040aceeb0a44344938d574ab215689bf0c"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad-rbpf-convergence.py"
+      ],
+      "member": "ed60ef2a77fa3ea3604f6db0a2b9f2e2834eebebf68d2b6fd639aedbc271a8a0/tools/triad-rbpf-convergence.py",
+      "path": "tools/triad-rbpf-convergence.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "ed60ef2a77fa3ea3604f6db0a2b9f2e2834eebebf68d2b6fd639aedbc271a8a0"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad-rbpf-study.py"
+      ],
+      "member": "34a9797ed7119dcf6545b6be759b8f506cbdaf6ac9ece886b82fa699cd5d085f/tools/triad-rbpf-study.py",
+      "path": "tools/triad-rbpf-study.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "34a9797ed7119dcf6545b6be759b8f506cbdaf6ac9ece886b82fa699cd5d085f"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad-reblock.py"
+      ],
+      "member": "9b717113fac9124c977c07703ca4485d87bf564ae037b49c550ac6ae7765c893/tools/triad-reblock.py",
+      "path": "tools/triad-reblock.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "9b717113fac9124c977c07703ca4485d87bf564ae037b49c550ac6ae7765c893"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad-resident-campaign.py"
+      ],
+      "member": "410264ac9f779f932031f948de1a5c63939cc66894a03ed1faa6f3fdeb753d0e/tools/triad-resident-campaign.py",
+      "path": "tools/triad-resident-campaign.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "410264ac9f779f932031f948de1a5c63939cc66894a03ed1faa6f3fdeb753d0e"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad-retained-energy.py"
+      ],
+      "member": "5e7d4e775305d876427091180375082eb27f193f6ff37958f918362c3f9b764b/tools/triad-retained-energy.py",
+      "path": "tools/triad-retained-energy.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "5e7d4e775305d876427091180375082eb27f193f6ff37958f918362c3f9b764b"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad-sampling-refinement.py"
+      ],
+      "member": "d3a40c39e0d05cbb49d0b98652513015e731969c484be54d2ef45cbac07cb799/tools/triad-sampling-refinement.py",
+      "path": "tools/triad-sampling-refinement.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "d3a40c39e0d05cbb49d0b98652513015e731969c484be54d2ef45cbac07cb799"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad-scan-workspace.py"
+      ],
+      "member": "c9c2ab61a37233b43887f594e0c871eb96e4f556cec086bce630faeb0fa45136/tools/triad-scan-workspace.py",
+      "path": "tools/triad-scan-workspace.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "c9c2ab61a37233b43887f594e0c871eb96e4f556cec086bce630faeb0fa45136"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad-state-campaign.py"
+      ],
+      "member": "922dbdf53b346ce5061029e6e17a82b1cbf4d04d0dfd73db655cc79e672503fa/tools/triad-state-campaign.py",
+      "path": "tools/triad-state-campaign.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "922dbdf53b346ce5061029e6e17a82b1cbf4d04d0dfd73db655cc79e672503fa"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad-state-study.py"
+      ],
+      "member": "3fa7491ae93031ff6bfadc4c9b792659336999effc0508a71cf734ada9250402/tools/triad-state-study.py",
+      "path": "tools/triad-state-study.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "3fa7491ae93031ff6bfadc4c9b792659336999effc0508a71cf734ada9250402"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad-static-frequency-study.py"
+      ],
+      "member": "d1b75e9b49de21041558e97ee1daff2ba07a1fd18a123bc8a6cb928f1052e11b/tools/triad-static-frequency-study.py",
+      "path": "tools/triad-static-frequency-study.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "d1b75e9b49de21041558e97ee1daff2ba07a1fd18a123bc8a6cb928f1052e11b"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad-stream-study.py"
+      ],
+      "member": "c236f9c6613e80e7786cc604002ad415c609781f8657c7bbb61b1409d4c8f65e/tools/triad-stream-study.py",
+      "path": "tools/triad-stream-study.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "c236f9c6613e80e7786cc604002ad415c609781f8657c7bbb61b1409d4c8f65e"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad-sufficient-study.py"
+      ],
+      "member": "d96210f7408d0c02b717c384e2b9483a0c01ba9c04b1aca150e669a071394236/tools/triad-sufficient-study.py",
+      "path": "tools/triad-sufficient-study.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "d96210f7408d0c02b717c384e2b9483a0c01ba9c04b1aca150e669a071394236"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad-summary.py"
+      ],
+      "member": "b29378f1138590bfa7541c063771127f27df46d436b04f45347ad86273213cc9/tools/triad-summary.py",
+      "path": "tools/triad-summary.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "b29378f1138590bfa7541c063771127f27df46d436b04f45347ad86273213cc9"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad-tensor-diagnostics.py"
+      ],
+      "member": "9219b186bd04a9963293201de1c2a4de1bb73955e9601eb74e7b06bbf745e5a6/tools/triad-tensor-diagnostics.py",
+      "path": "tools/triad-tensor-diagnostics.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "9219b186bd04a9963293201de1c2a4de1bb73955e9601eb74e7b06bbf745e5a6"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_adc_bound.py"
+      ],
+      "member": "74eb4de89a674e325a6cb323d1df95c83d78681b68a71b67467a9bfedc5e5846/tools/triad_adc_bound.py",
+      "path": "tools/triad_adc_bound.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "74eb4de89a674e325a6cb323d1df95c83d78681b68a71b67467a9bfedc5e5846"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_bounded_run.py"
+      ],
+      "member": "f117d6be27d38d055f5ab65af2f850c038501badd16cb5f524b5388530218cf2/tools/triad_bounded_run.py",
+      "path": "tools/triad_bounded_run.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "f117d6be27d38d055f5ab65af2f850c038501badd16cb5f524b5388530218cf2"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_correlation_fusion.py"
+      ],
+      "member": "41216fa6282c648a2e1541c2cc1f8e93ccc73abe65fa2d32d140ee15f7251398/tools/triad_correlation_fusion.py",
+      "path": "tools/triad_correlation_fusion.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "41216fa6282c648a2e1541c2cc1f8e93ccc73abe65fa2d32d140ee15f7251398"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_covariance_reference.py"
+      ],
+      "member": "e6ca43a136d9781b6c0d9883e72d2069302bcf5ef285e7f8c70137b9fe9e31cb/tools/triad_covariance_reference.py",
+      "path": "tools/triad_covariance_reference.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "e6ca43a136d9781b6c0d9883e72d2069302bcf5ef285e7f8c70137b9fe9e31cb"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_coverage_bounds.py"
+      ],
+      "member": "bb4e1cbf161c5f4b5d9af151e995c357ef0444907d31c312a215c19b2b3a0c5b/tools/triad_coverage_bounds.py",
+      "path": "tools/triad_coverage_bounds.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "bb4e1cbf161c5f4b5d9af151e995c357ef0444907d31c312a215c19b2b3a0c5b"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_exhaustive_correlation.py"
+      ],
+      "member": "ae02b1f7d85e2d3f8c2c153000f530a411860ff443aeaf674abaa93cf60ab2d4/tools/triad_exhaustive_correlation.py",
+      "path": "tools/triad_exhaustive_correlation.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "ae02b1f7d85e2d3f8c2c153000f530a411860ff443aeaf674abaa93cf60ab2d4"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_factor_native_inputs.py"
+      ],
+      "member": "f75225cc5c05a717d63ce52074a4e466cec35274cb921f77f53c4d95df808f26/tools/triad_factor_native_inputs.py",
+      "path": "tools/triad_factor_native_inputs.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "f75225cc5c05a717d63ce52074a4e466cec35274cb921f77f53c4d95df808f26"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_fft_acquire.py"
+      ],
+      "member": "d4a3c2cc39e0068e6aa6aab27d7ee8eeff6cc7db72a790868fe166c3f1d65843/tools/triad_fft_acquire.py",
+      "path": "tools/triad_fft_acquire.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "d4a3c2cc39e0068e6aa6aab27d7ee8eeff6cc7db72a790868fe166c3f1d65843"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_fp4_native.py"
+      ],
+      "member": "e9a6811182c57b14d70604fc69894aa58e0c6227c10a6de2db5e5d127a567b3c/tools/triad_fp4_native.py",
+      "path": "tools/triad_fp4_native.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "e9a6811182c57b14d70604fc69894aa58e0c6227c10a6de2db5e5d127a567b3c"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_fp4_representation.py"
+      ],
+      "member": "0f5861ffe646b8e892efdd1abcdcb54e4f168763c5feff1cda119f36ec1cc804/tools/triad_fp4_representation.py",
+      "path": "tools/triad_fp4_representation.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "0f5861ffe646b8e892efdd1abcdcb54e4f168763c5feff1cda119f36ec1cc804"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_gaussian_bounds.py"
+      ],
+      "member": "8910b3c64c2ea7072ef43e3e0c5d47ded6f8cbc903ac974162eb5ad285e1de23/tools/triad_gaussian_bounds.py",
+      "path": "tools/triad_gaussian_bounds.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "8910b3c64c2ea7072ef43e3e0c5d47ded6f8cbc903ac974162eb5ad285e1de23"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_gaussian_prepared.py"
+      ],
+      "member": "c88afdf459521393958c49d801517d79cd158cbe2291e4a48c3eff6931e42875/tools/triad_gaussian_prepared.py",
+      "path": "tools/triad_gaussian_prepared.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "c88afdf459521393958c49d801517d79cd158cbe2291e4a48c3eff6931e42875"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_gaussian_state.py"
+      ],
+      "member": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba/tools/triad_gaussian_state.py",
+      "path": "tools/triad_gaussian_state.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_gaussian_window.py"
+      ],
+      "member": "b22fe002864922e44bc7e10000672a163353818f610c4882bae5d62cfe1cf883/tools/triad_gaussian_window.py",
+      "path": "tools/triad_gaussian_window.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "b22fe002864922e44bc7e10000672a163353818f610c4882bae5d62cfe1cf883"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_group_acquire.py"
+      ],
+      "member": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104/tools/triad_group_acquire.py",
+      "path": "tools/triad_group_acquire.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_noise_likelihood.py"
+      ],
+      "member": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110/tools/triad_noise_likelihood.py",
+      "path": "tools/triad_noise_likelihood.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_perf_adaptive.py"
+      ],
+      "member": "b6a1b25851a8cd98c76134aff90ad0fa980eb6f445ff003c722ad5185b7de202/tools/triad_perf_adaptive.py",
+      "path": "tools/triad_perf_adaptive.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "b6a1b25851a8cd98c76134aff90ad0fa980eb6f445ff003c722ad5185b7de202"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_perf_cases.py"
+      ],
+      "member": "3a45f599a3e2d93361a02b74285d2b56b90de3068a6d19cd49fb8092c578e14b/tools/triad_perf_cases.py",
+      "path": "tools/triad_perf_cases.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "3a45f599a3e2d93361a02b74285d2b56b90de3068a6d19cd49fb8092c578e14b"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_perf_complete.py"
+      ],
+      "member": "33afdca5d7e47769db5552befda0cfe9dc0746d2037c9539c093d99f16d40933/tools/triad_perf_complete.py",
+      "path": "tools/triad_perf_complete.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "33afdca5d7e47769db5552befda0cfe9dc0746d2037c9539c093d99f16d40933"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_perf_conditional.py"
+      ],
+      "member": "ff89c20c950e8c422bf60ad91eea15b0fe7d4c3f3c656d26e959cf72b1ab3835/tools/triad_perf_conditional.py",
+      "path": "tools/triad_perf_conditional.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "ff89c20c950e8c422bf60ad91eea15b0fe7d4c3f3c656d26e959cf72b1ab3835"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_perf_coverage.py"
+      ],
+      "member": "9697a0742d8d1fd724e73c79bf8acce92c2d0861210124646b40868305f49330/tools/triad_perf_coverage.py",
+      "path": "tools/triad_perf_coverage.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "9697a0742d8d1fd724e73c79bf8acce92c2d0861210124646b40868305f49330"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_perf_decision_controls.py"
+      ],
+      "member": "3c25d2f12693354d3ae65fe3028dbf343bbb6525f9bf263817ee7cf469de188e/tools/triad_perf_decision_controls.py",
+      "path": "tools/triad_perf_decision_controls.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "3c25d2f12693354d3ae65fe3028dbf343bbb6525f9bf263817ee7cf469de188e"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_perf_decision_policy_controls.py"
+      ],
+      "member": "69090ec3ec2a302ece7a3c20373b6ada3785be15425d07b9130055a2ccff065e/tools/triad_perf_decision_policy_controls.py",
+      "path": "tools/triad_perf_decision_policy_controls.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "69090ec3ec2a302ece7a3c20373b6ada3785be15425d07b9130055a2ccff065e"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_perf_families.py"
+      ],
+      "member": "65b4bc78aab04b6a854853fe2c052900bd23c5cfc1527ebcfd0a4fe94e78d20f/tools/triad_perf_families.py",
+      "path": "tools/triad_perf_families.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "65b4bc78aab04b6a854853fe2c052900bd23c5cfc1527ebcfd0a4fe94e78d20f"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_perf_family_group.py"
+      ],
+      "member": "63b8d3cd6bd473208c9ff4fe3761dd7c1623c70ae12eefc53183dbeea2b4e95b/tools/triad_perf_family_group.py",
+      "path": "tools/triad_perf_family_group.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "63b8d3cd6bd473208c9ff4fe3761dd7c1623c70ae12eefc53183dbeea2b4e95b"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_perf_family_other.py"
+      ],
+      "member": "9763c4d57fbfdc35de7d7f8fa78b17b6d4608745f13d01a77c56f77acbfbe18e/tools/triad_perf_family_other.py",
+      "path": "tools/triad_perf_family_other.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "9763c4d57fbfdc35de7d7f8fa78b17b6d4608745f13d01a77c56f77acbfbe18e"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_perf_family_regression.py"
+      ],
+      "member": "28d467b7c2261f0878bb2d4050129743c74f602c3f22d0c23e5f4cf6c990b4df/tools/triad_perf_family_regression.py",
+      "path": "tools/triad_perf_family_regression.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "28d467b7c2261f0878bb2d4050129743c74f602c3f22d0c23e5f4cf6c990b4df"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_perf_family_state.py"
+      ],
+      "member": "67d750dd41c317b7cb810591de6f88585f7cd3191888e1c0d28ede49b3595c06/tools/triad_perf_family_state.py",
+      "path": "tools/triad_perf_family_state.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "67d750dd41c317b7cb810591de6f88585f7cd3191888e1c0d28ede49b3595c06"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_perf_fft_diagnostic.py"
+      ],
+      "member": "b763ad4a3a96fdc4139e7a2961a120c40b3bf6f0b2a8d5f4bb677c6beea565e9/tools/triad_perf_fft_diagnostic.py",
+      "path": "tools/triad_perf_fft_diagnostic.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "b763ad4a3a96fdc4139e7a2961a120c40b3bf6f0b2a8d5f4bb677c6beea565e9"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_perf_fft_trace.py"
+      ],
+      "member": "4d383b5722fe79e1b5c49c075944a9a0bcd3839a2e163b1f1a21a4cbce97013b/tools/triad_perf_fft_trace.py",
+      "path": "tools/triad_perf_fft_trace.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "4d383b5722fe79e1b5c49c075944a9a0bcd3839a2e163b1f1a21a4cbce97013b"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_perf_hardware.py"
+      ],
+      "member": "74718bc0791dda7ac7ea0b38b8fb79ab7bb1e41c649da9787f2a2645854706b3/tools/triad_perf_hardware.py",
+      "path": "tools/triad_perf_hardware.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "74718bc0791dda7ac7ea0b38b8fb79ab7bb1e41c649da9787f2a2645854706b3"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_perf_identical_fft.py"
+      ],
+      "member": "65db8bea552f79ffa1da8a5a3e58116225c4c822e8da7e77a9a386ab0680f46b/tools/triad_perf_identical_fft.py",
+      "path": "tools/triad_perf_identical_fft.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "65db8bea552f79ffa1da8a5a3e58116225c4c822e8da7e77a9a386ab0680f46b"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_perf_lifecycle.py"
+      ],
+      "member": "7dd04271a5cd405972f7c2d96447466e2a2aceffe5e2666de0d17ba8dcc4d1ff/tools/triad_perf_lifecycle.py",
+      "path": "tools/triad_perf_lifecycle.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "7dd04271a5cd405972f7c2d96447466e2a2aceffe5e2666de0d17ba8dcc4d1ff"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_perf_native.py"
+      ],
+      "member": "2fc046cff685d27fe50e279a3eeeb93798897e221bf72cca30493d6031391894/tools/triad_perf_native.py",
+      "path": "tools/triad_perf_native.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "2fc046cff685d27fe50e279a3eeeb93798897e221bf72cca30493d6031391894"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_perf_paths.py"
+      ],
+      "member": "31e442c1381a2ce3037f6837605d24cad7c2874d6041d487bc5077c23d803699/tools/triad_perf_paths.py",
+      "path": "tools/triad_perf_paths.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "31e442c1381a2ce3037f6837605d24cad7c2874d6041d487bc5077c23d803699"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_perf_planner.py"
+      ],
+      "member": "fc0da7c11e2795577b17cc3067fa9ca3b9083bace7fba57b2dccef4bcb6b5e86/tools/triad_perf_planner.py",
+      "path": "tools/triad_perf_planner.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "fc0da7c11e2795577b17cc3067fa9ca3b9083bace7fba57b2dccef4bcb6b5e86"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_perf_python_coverage.py"
+      ],
+      "member": "f5cafed148d406230fbda2cd02ac2feb7f22edca268b0d9d08381db6357428bc/tools/triad_perf_python_coverage.py",
+      "path": "tools/triad_perf_python_coverage.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "f5cafed148d406230fbda2cd02ac2feb7f22edca268b0d9d08381db6357428bc"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_perf_receiver.py"
+      ],
+      "member": "fd2fd7109e9dfcd8fe984fc526995a65b4517335cf6d80428a749f13994fcb34/tools/triad_perf_receiver.py",
+      "path": "tools/triad_perf_receiver.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "fd2fd7109e9dfcd8fe984fc526995a65b4517335cf6d80428a749f13994fcb34"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_perf_resource.py"
+      ],
+      "member": "986ec8798642f4572e598f88c6d8f97dd2478686677f2ec148f906958e102084/tools/triad_perf_resource.py",
+      "path": "tools/triad_perf_resource.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "986ec8798642f4572e598f88c6d8f97dd2478686677f2ec148f906958e102084"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_perf_staged.py"
+      ],
+      "member": "40e80b87b0147b52970ce062b3972e5ec1367d564e206bd8c2912031825846e1/tools/triad_perf_staged.py",
+      "path": "tools/triad_perf_staged.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "40e80b87b0147b52970ce062b3972e5ec1367d564e206bd8c2912031825846e1"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_perf_statistics.py"
+      ],
+      "member": "64ce887c8c3af9144f1d94adc712fa784bbca17cfa86dcbfe1099dbb2efed64b/tools/triad_perf_statistics.py",
+      "path": "tools/triad_perf_statistics.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "64ce887c8c3af9144f1d94adc712fa784bbca17cfa86dcbfe1099dbb2efed64b"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_perf_sustained.py"
+      ],
+      "member": "c343626798c491fca1bedba2fac97a840177145e3e9a3f56fd5741cc938b5548/tools/triad_perf_sustained.py",
+      "path": "tools/triad_perf_sustained.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "c343626798c491fca1bedba2fac97a840177145e3e9a3f56fd5741cc938b5548"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_perf_telemetry.py"
+      ],
+      "member": "3646802429c1762a661620382ff111f7629640f53e2c3ee015e50d56f6e7bc4b/tools/triad_perf_telemetry.py",
+      "path": "tools/triad_perf_telemetry.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "3646802429c1762a661620382ff111f7629640f53e2c3ee015e50d56f6e7bc4b"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_phase_frequency.py"
+      ],
+      "member": "48ee569b1d467b2d7b6fd55088764bd28dd11e0bfecb5974622a318fbb408585/tools/triad_phase_frequency.py",
+      "path": "tools/triad_phase_frequency.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "48ee569b1d467b2d7b6fd55088764bd28dd11e0bfecb5974622a318fbb408585"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_phase_gpu_benchmark.py"
+      ],
+      "member": "b599e9d7d6d27dc658879f1e636150c6eb0720db6e9ec1ca6d4dbda157f5d45d/tools/triad_phase_gpu_benchmark.py",
+      "path": "tools/triad_phase_gpu_benchmark.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "b599e9d7d6d27dc658879f1e636150c6eb0720db6e9ec1ca6d4dbda157f5d45d"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_phase_optimized.py"
+      ],
+      "member": "759b46d536f2daa1d1de2336190ab19153376aca3eeca32847cba5289d2d63ed/tools/triad_phase_optimized.py",
+      "path": "tools/triad_phase_optimized.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "759b46d536f2daa1d1de2336190ab19153376aca3eeca32847cba5289d2d63ed"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_phase_prior_diagnostic.py"
+      ],
+      "member": "03c65bdb3daf32fe87817ffad457e402180405132d1c5e154374594fb5f533d0/tools/triad_phase_prior_diagnostic.py",
+      "path": "tools/triad_phase_prior_diagnostic.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "03c65bdb3daf32fe87817ffad457e402180405132d1c5e154374594fb5f533d0"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_phase_reduction.py"
+      ],
+      "member": "b2f762320fbff5a66fa88123711483f9c42721e1765e406b7699c434048ded98/tools/triad_phase_reduction.py",
+      "path": "tools/triad_phase_reduction.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "b2f762320fbff5a66fa88123711483f9c42721e1765e406b7699c434048ded98"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_phase_tensor.py"
+      ],
+      "member": "3b1a674ac7ace90ddce72c2773c2d1543bcfe8307d7b65ea965ad03a6525ffda/tools/triad_phase_tensor.py",
+      "path": "tools/triad_phase_tensor.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "3b1a674ac7ace90ddce72c2773c2d1543bcfe8307d7b65ea965ad03a6525ffda"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_precision_probe.py"
+      ],
+      "member": "e53ee73bf511ee5a38c30a6e80d5985f30f0187a4b1604f7c57978d5dca3f801/tools/triad_precision_probe.py",
+      "path": "tools/triad_precision_probe.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "e53ee73bf511ee5a38c30a6e80d5985f30f0187a4b1604f7c57978d5dca3f801"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_prepared_observation.py"
+      ],
+      "member": "13d37977620519aaeb457d4ed1163c80d68dca96c8319480de914cae8a6aaec8/tools/triad_prepared_observation.py",
+      "path": "tools/triad_prepared_observation.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "13d37977620519aaeb457d4ed1163c80d68dca96c8319480de914cae8a6aaec8"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_rbpf.py"
+      ],
+      "member": "d4b64c3a830acd3bd15433421da0e003ba1aa9810bf1dd904c57082d94c3bd54/tools/triad_rbpf.py",
+      "path": "tools/triad_rbpf.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "d4b64c3a830acd3bd15433421da0e003ba1aa9810bf1dd904c57082d94c3bd54"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_scan_workspace.py"
+      ],
+      "member": "bf0ecb596961951992d13f361150119e04cfb885b703497baa188f942f147dd7/tools/triad_scan_workspace.py",
+      "path": "tools/triad_scan_workspace.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "bf0ecb596961951992d13f361150119e04cfb885b703497baa188f942f147dd7"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_state_workspace.py"
+      ],
+      "member": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923/tools/triad_state_workspace.py",
+      "path": "tools/triad_state_workspace.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_tensor_native.py"
+      ],
+      "member": "0ed9242733ae564aaadf7548a4391ac833aaffd27097e2a966c9931aab990c5e/tools/triad_tensor_native.py",
+      "path": "tools/triad_tensor_native.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "0ed9242733ae564aaadf7548a4391ac833aaffd27097e2a966c9931aab990c5e"
+    },
+    {
+      "json_path": [
+        "candidate",
+        "source_sha256",
+        "tools/triad_tensor_probe.py"
+      ],
+      "member": "90f701183d82c442559909076c424a31fb249566ce7c33dbecf7e04aa169eb84/tools/triad_tensor_probe.py",
+      "path": "tools/triad_tensor_probe.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "90f701183d82c442559909076c424a31fb249566ce7c33dbecf7e04aa169eb84"
+    },
+    {
+      "json_path": [
+        "reference",
+        "source_sha256",
+        "include/datapump/triad_modem_v3.hpp"
+      ],
+      "member": "1ddd8e851950036f03e6a903ed7ba4746392ffe8623f49685df04f029c4aff48/include/datapump/triad_modem_v3.hpp",
+      "path": "include/datapump/triad_modem_v3.hpp",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "1ddd8e851950036f03e6a903ed7ba4746392ffe8623f49685df04f029c4aff48"
+    },
+    {
+      "json_path": [
+        "reference",
+        "source_sha256",
+        "src/channel_perturbation.hpp"
+      ],
+      "member": "fae3b1b345e3dc19c8b85a5010e4434530bd0a34d595dd4de8cd55349d8d879a/src/channel_perturbation.hpp",
+      "path": "src/channel_perturbation.hpp",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "fae3b1b345e3dc19c8b85a5010e4434530bd0a34d595dd4de8cd55349d8d879a"
+    },
+    {
+      "json_path": [
+        "reference",
+        "source_sha256",
+        "src/channel_spread.hpp"
+      ],
+      "member": "bf98698d574869acb79645fa143af7ae563a2f542868e77c672d89d4fb16bdb0/src/channel_spread.hpp",
+      "path": "src/channel_spread.hpp",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "bf98698d574869acb79645fa143af7ae563a2f542868e77c672d89d4fb16bdb0"
+    },
+    {
+      "json_path": [
+        "reference",
+        "source_sha256",
+        "src/triad_gaussian_fading.hpp"
+      ],
+      "member": "97f26b082d7d68123952bde7ccb9f97148c5977cf741cf6c15c76e77fcc20944/src/triad_gaussian_fading.hpp",
+      "path": "src/triad_gaussian_fading.hpp",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "97f26b082d7d68123952bde7ccb9f97148c5977cf741cf6c15c76e77fcc20944"
+    },
+    {
+      "json_path": [
+        "reference",
+        "source_sha256",
+        "src/triad_modem_v3.cpp"
+      ],
+      "member": "cb6cac016e57edcd4f6ebc70f09c68cc47380e3b772cdbe047d7a3b93e9b434c/src/triad_modem_v3.cpp",
+      "path": "src/triad_modem_v3.cpp",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "cb6cac016e57edcd4f6ebc70f09c68cc47380e3b772cdbe047d7a3b93e9b434c"
+    },
+    {
+      "json_path": [
+        "reference",
+        "source_sha256",
+        "src/triad_receiver_v3.cpp"
+      ],
+      "member": "ff7409c55f2c62dbb833f1ae24a7b4aab103607aaf2f66945ea585e1e3ba3e2f/src/triad_receiver_v3.cpp",
+      "path": "src/triad_receiver_v3.cpp",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "ff7409c55f2c62dbb833f1ae24a7b4aab103607aaf2f66945ea585e1e3ba3e2f"
+    },
+    {
+      "json_path": [
+        "reference",
+        "source_sha256",
+        "src/triad_simulation_stream.cpp"
+      ],
+      "member": "afaa1267c36fcd330151174f6f08b6fb401a7f702c660964071ef24b6e82a70d/src/triad_simulation_stream.cpp",
+      "path": "src/triad_simulation_stream.cpp",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "afaa1267c36fcd330151174f6f08b6fb401a7f702c660964071ef24b6e82a70d"
+    },
+    {
+      "json_path": [
+        "reference",
+        "source_sha256",
+        "src/tuning.cpp"
+      ],
+      "member": "228578b2dc33b72e657d646d956ccb51aefbbabde1af730ef83a15e6785cb01e/src/tuning.cpp",
+      "path": "src/tuning.cpp",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "228578b2dc33b72e657d646d956ccb51aefbbabde1af730ef83a15e6785cb01e"
+    },
+    {
+      "json_path": [
+        "reference",
+        "source_sha256",
+        "src/tuning_presets.cpp"
+      ],
+      "member": "31e1ac552bea10b24036f959485241532066e6aa343931c04a46a65e8734b293/src/tuning_presets.cpp",
+      "path": "src/tuning_presets.cpp",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "31e1ac552bea10b24036f959485241532066e6aa343931c04a46a65e8734b293"
+    },
+    {
+      "json_path": [
+        "reference",
+        "source_sha256",
+        "tools/triad-long.cpp"
+      ],
+      "member": "dbbdbfa055e7a93a86702ef571f45afa3c7040ed873cf993e4cae384b661b282/tools/triad-long.cpp",
+      "path": "tools/triad-long.cpp",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "dbbdbfa055e7a93a86702ef571f45afa3c7040ed873cf993e4cae384b661b282"
+    },
+    {
+      "json_path": [
+        "reference",
+        "source_sha256",
+        "tools/triad_fft_acquire.py"
+      ],
+      "member": "d4a3c2cc39e0068e6aa6aab27d7ee8eeff6cc7db72a790868fe166c3f1d65843/tools/triad_fft_acquire.py",
+      "path": "tools/triad_fft_acquire.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "d4a3c2cc39e0068e6aa6aab27d7ee8eeff6cc7db72a790868fe166c3f1d65843"
+    },
+    {
+      "json_path": [
+        "reference",
+        "source_sha256",
+        "tools/triad_gaussian_state.py"
+      ],
+      "member": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba/tools/triad_gaussian_state.py",
+      "path": "tools/triad_gaussian_state.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba"
+    },
+    {
+      "json_path": [
+        "reference",
+        "source_sha256",
+        "tools/triad_gaussian_window.py"
+      ],
+      "member": "b22fe002864922e44bc7e10000672a163353818f610c4882bae5d62cfe1cf883/tools/triad_gaussian_window.py",
+      "path": "tools/triad_gaussian_window.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "b22fe002864922e44bc7e10000672a163353818f610c4882bae5d62cfe1cf883"
+    },
+    {
+      "json_path": [
+        "reference",
+        "source_sha256",
+        "tools/triad_group_acquire.py"
+      ],
+      "member": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104/tools/triad_group_acquire.py",
+      "path": "tools/triad_group_acquire.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104"
+    },
+    {
+      "json_path": [
+        "reference",
+        "source_sha256",
+        "tools/triad_noise_likelihood.py"
+      ],
+      "member": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110/tools/triad_noise_likelihood.py",
+      "path": "tools/triad_noise_likelihood.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110"
+    },
+    {
+      "json_path": [
+        "reference",
+        "source_sha256",
+        "tools/triad_state_workspace.py"
+      ],
+      "member": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923/tools/triad_state_workspace.py",
+      "path": "tools/triad_state_workspace.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923"
+    },
+    {
+      "json_path": [
+        "harness_sha256",
+        "triad-performance-cases.json"
+      ],
+      "member": "4fe9dfe1ea4f03ea2f2a276cac022597ebdb61dc1fb71c15056b6c6f79d03664/tools/triad-performance-cases.json",
+      "path": "tools/triad-performance-cases.json",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "4fe9dfe1ea4f03ea2f2a276cac022597ebdb61dc1fb71c15056b6c6f79d03664"
+    },
+    {
+      "json_path": [
+        "harness_sha256",
+        "triad-performance-coverage.json"
+      ],
+      "member": "8a77e682dfda43d1a5d63bd9c40a03e80da4044c6869ef47f36cb2e8542fc794/tools/triad-performance-coverage.json",
+      "path": "tools/triad-performance-coverage.json",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "8a77e682dfda43d1a5d63bd9c40a03e80da4044c6869ef47f36cb2e8542fc794"
+    },
+    {
+      "json_path": [
+        "harness_sha256",
+        "triad-performance-families.json"
+      ],
+      "member": "44150970b2b4d9cbed85a058669cdaf6a8dc65f814a36d9f86c3238c2b7a5e6f/tools/triad-performance-families.json",
+      "path": "tools/triad-performance-families.json",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "44150970b2b4d9cbed85a058669cdaf6a8dc65f814a36d9f86c3238c2b7a5e6f"
+    },
+    {
+      "json_path": [
+        "harness_sha256",
+        "triad-performance-lifecycle.json"
+      ],
+      "member": "482af707eedc09962b3253c2c146eb0e7204a6e6afcd2dc370f74165d4700de3/tools/triad-performance-lifecycle.json",
+      "path": "tools/triad-performance-lifecycle.json",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "482af707eedc09962b3253c2c146eb0e7204a6e6afcd2dc370f74165d4700de3"
+    },
+    {
+      "json_path": [
+        "harness_sha256",
+        "triad-performance-native-cases.json"
+      ],
+      "member": "f8d46beae40f2a52013279cdfdea811c6267be621a82431b612fb05708304a8f/tools/triad-performance-native-cases.json",
+      "path": "tools/triad-performance-native-cases.json",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "f8d46beae40f2a52013279cdfdea811c6267be621a82431b612fb05708304a8f"
+    },
+    {
+      "json_path": [
+        "harness_sha256",
+        "triad-performance-paths.json"
+      ],
+      "member": "c67761c6bb61b8d17def9ef4251dc58240b71bf2e57151c52f343dfd874eeba9/tools/triad-performance-paths.json",
+      "path": "tools/triad-performance-paths.json",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "c67761c6bb61b8d17def9ef4251dc58240b71bf2e57151c52f343dfd874eeba9"
+    },
+    {
+      "json_path": [
+        "harness_sha256",
+        "triad-performance-planner.json"
+      ],
+      "member": "cb1bd17a71b342e407b93c1793e6ce6aab9cdc9225119818988a1aa6a1256abe/tools/triad-performance-planner.json",
+      "path": "tools/triad-performance-planner.json",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "cb1bd17a71b342e407b93c1793e6ce6aab9cdc9225119818988a1aa6a1256abe"
+    },
+    {
+      "json_path": [
+        "harness_sha256",
+        "triad-performance-resource.json"
+      ],
+      "member": "27ffa4985dd347124fda80adeaa9d38d599d819da7f2fe4c7c3153dc81c8f2ce/tools/triad-performance-resource.json",
+      "path": "tools/triad-performance-resource.json",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "27ffa4985dd347124fda80adeaa9d38d599d819da7f2fe4c7c3153dc81c8f2ce"
+    },
+    {
+      "json_path": [
+        "harness_sha256",
+        "triad-performance.py"
+      ],
+      "member": "2f9378ff437cda7e329e2b5242f6bf0c5760c2c194545683b4c161a32669ca31/tools/triad-performance.py",
+      "path": "tools/triad-performance.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "2f9378ff437cda7e329e2b5242f6bf0c5760c2c194545683b4c161a32669ca31"
+    },
+    {
+      "json_path": [
+        "harness_sha256",
+        "triad_perf_adaptive.py"
+      ],
+      "member": "b6a1b25851a8cd98c76134aff90ad0fa980eb6f445ff003c722ad5185b7de202/tools/triad_perf_adaptive.py",
+      "path": "tools/triad_perf_adaptive.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "b6a1b25851a8cd98c76134aff90ad0fa980eb6f445ff003c722ad5185b7de202"
+    },
+    {
+      "json_path": [
+        "harness_sha256",
+        "triad_perf_cases.py"
+      ],
+      "member": "3a45f599a3e2d93361a02b74285d2b56b90de3068a6d19cd49fb8092c578e14b/tools/triad_perf_cases.py",
+      "path": "tools/triad_perf_cases.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "3a45f599a3e2d93361a02b74285d2b56b90de3068a6d19cd49fb8092c578e14b"
+    },
+    {
+      "json_path": [
+        "harness_sha256",
+        "triad_perf_complete.py"
+      ],
+      "member": "33afdca5d7e47769db5552befda0cfe9dc0746d2037c9539c093d99f16d40933/tools/triad_perf_complete.py",
+      "path": "tools/triad_perf_complete.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "33afdca5d7e47769db5552befda0cfe9dc0746d2037c9539c093d99f16d40933"
+    },
+    {
+      "json_path": [
+        "harness_sha256",
+        "triad_perf_conditional.py"
+      ],
+      "member": "ff89c20c950e8c422bf60ad91eea15b0fe7d4c3f3c656d26e959cf72b1ab3835/tools/triad_perf_conditional.py",
+      "path": "tools/triad_perf_conditional.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "ff89c20c950e8c422bf60ad91eea15b0fe7d4c3f3c656d26e959cf72b1ab3835"
+    },
+    {
+      "json_path": [
+        "harness_sha256",
+        "triad_perf_coverage.py"
+      ],
+      "member": "9697a0742d8d1fd724e73c79bf8acce92c2d0861210124646b40868305f49330/tools/triad_perf_coverage.py",
+      "path": "tools/triad_perf_coverage.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "9697a0742d8d1fd724e73c79bf8acce92c2d0861210124646b40868305f49330"
+    },
+    {
+      "json_path": [
+        "harness_sha256",
+        "triad_perf_decision_controls.py"
+      ],
+      "member": "3c25d2f12693354d3ae65fe3028dbf343bbb6525f9bf263817ee7cf469de188e/tools/triad_perf_decision_controls.py",
+      "path": "tools/triad_perf_decision_controls.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "3c25d2f12693354d3ae65fe3028dbf343bbb6525f9bf263817ee7cf469de188e"
+    },
+    {
+      "json_path": [
+        "harness_sha256",
+        "triad_perf_decision_policy_controls.py"
+      ],
+      "member": "69090ec3ec2a302ece7a3c20373b6ada3785be15425d07b9130055a2ccff065e/tools/triad_perf_decision_policy_controls.py",
+      "path": "tools/triad_perf_decision_policy_controls.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "69090ec3ec2a302ece7a3c20373b6ada3785be15425d07b9130055a2ccff065e"
+    },
+    {
+      "json_path": [
+        "harness_sha256",
+        "triad_perf_families.py"
+      ],
+      "member": "65b4bc78aab04b6a854853fe2c052900bd23c5cfc1527ebcfd0a4fe94e78d20f/tools/triad_perf_families.py",
+      "path": "tools/triad_perf_families.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "65b4bc78aab04b6a854853fe2c052900bd23c5cfc1527ebcfd0a4fe94e78d20f"
+    },
+    {
+      "json_path": [
+        "harness_sha256",
+        "triad_perf_family_group.py"
+      ],
+      "member": "63b8d3cd6bd473208c9ff4fe3761dd7c1623c70ae12eefc53183dbeea2b4e95b/tools/triad_perf_family_group.py",
+      "path": "tools/triad_perf_family_group.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "63b8d3cd6bd473208c9ff4fe3761dd7c1623c70ae12eefc53183dbeea2b4e95b"
+    },
+    {
+      "json_path": [
+        "harness_sha256",
+        "triad_perf_family_other.py"
+      ],
+      "member": "9763c4d57fbfdc35de7d7f8fa78b17b6d4608745f13d01a77c56f77acbfbe18e/tools/triad_perf_family_other.py",
+      "path": "tools/triad_perf_family_other.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "9763c4d57fbfdc35de7d7f8fa78b17b6d4608745f13d01a77c56f77acbfbe18e"
+    },
+    {
+      "json_path": [
+        "harness_sha256",
+        "triad_perf_family_regression.py"
+      ],
+      "member": "28d467b7c2261f0878bb2d4050129743c74f602c3f22d0c23e5f4cf6c990b4df/tools/triad_perf_family_regression.py",
+      "path": "tools/triad_perf_family_regression.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "28d467b7c2261f0878bb2d4050129743c74f602c3f22d0c23e5f4cf6c990b4df"
+    },
+    {
+      "json_path": [
+        "harness_sha256",
+        "triad_perf_family_state.py"
+      ],
+      "member": "67d750dd41c317b7cb810591de6f88585f7cd3191888e1c0d28ede49b3595c06/tools/triad_perf_family_state.py",
+      "path": "tools/triad_perf_family_state.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "67d750dd41c317b7cb810591de6f88585f7cd3191888e1c0d28ede49b3595c06"
+    },
+    {
+      "json_path": [
+        "harness_sha256",
+        "triad_perf_fft_diagnostic.py"
+      ],
+      "member": "b763ad4a3a96fdc4139e7a2961a120c40b3bf6f0b2a8d5f4bb677c6beea565e9/tools/triad_perf_fft_diagnostic.py",
+      "path": "tools/triad_perf_fft_diagnostic.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "b763ad4a3a96fdc4139e7a2961a120c40b3bf6f0b2a8d5f4bb677c6beea565e9"
+    },
+    {
+      "json_path": [
+        "harness_sha256",
+        "triad_perf_fft_trace.py"
+      ],
+      "member": "4d383b5722fe79e1b5c49c075944a9a0bcd3839a2e163b1f1a21a4cbce97013b/tools/triad_perf_fft_trace.py",
+      "path": "tools/triad_perf_fft_trace.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "4d383b5722fe79e1b5c49c075944a9a0bcd3839a2e163b1f1a21a4cbce97013b"
+    },
+    {
+      "json_path": [
+        "harness_sha256",
+        "triad_perf_hardware.py"
+      ],
+      "member": "74718bc0791dda7ac7ea0b38b8fb79ab7bb1e41c649da9787f2a2645854706b3/tools/triad_perf_hardware.py",
+      "path": "tools/triad_perf_hardware.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "74718bc0791dda7ac7ea0b38b8fb79ab7bb1e41c649da9787f2a2645854706b3"
+    },
+    {
+      "json_path": [
+        "harness_sha256",
+        "triad_perf_identical_fft.py"
+      ],
+      "member": "65db8bea552f79ffa1da8a5a3e58116225c4c822e8da7e77a9a386ab0680f46b/tools/triad_perf_identical_fft.py",
+      "path": "tools/triad_perf_identical_fft.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "65db8bea552f79ffa1da8a5a3e58116225c4c822e8da7e77a9a386ab0680f46b"
+    },
+    {
+      "json_path": [
+        "harness_sha256",
+        "triad_perf_lifecycle.py"
+      ],
+      "member": "7dd04271a5cd405972f7c2d96447466e2a2aceffe5e2666de0d17ba8dcc4d1ff/tools/triad_perf_lifecycle.py",
+      "path": "tools/triad_perf_lifecycle.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "7dd04271a5cd405972f7c2d96447466e2a2aceffe5e2666de0d17ba8dcc4d1ff"
+    },
+    {
+      "json_path": [
+        "harness_sha256",
+        "triad_perf_native.py"
+      ],
+      "member": "2fc046cff685d27fe50e279a3eeeb93798897e221bf72cca30493d6031391894/tools/triad_perf_native.py",
+      "path": "tools/triad_perf_native.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "2fc046cff685d27fe50e279a3eeeb93798897e221bf72cca30493d6031391894"
+    },
+    {
+      "json_path": [
+        "harness_sha256",
+        "triad_perf_paths.py"
+      ],
+      "member": "31e442c1381a2ce3037f6837605d24cad7c2874d6041d487bc5077c23d803699/tools/triad_perf_paths.py",
+      "path": "tools/triad_perf_paths.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "31e442c1381a2ce3037f6837605d24cad7c2874d6041d487bc5077c23d803699"
+    },
+    {
+      "json_path": [
+        "harness_sha256",
+        "triad_perf_planner.py"
+      ],
+      "member": "fc0da7c11e2795577b17cc3067fa9ca3b9083bace7fba57b2dccef4bcb6b5e86/tools/triad_perf_planner.py",
+      "path": "tools/triad_perf_planner.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "fc0da7c11e2795577b17cc3067fa9ca3b9083bace7fba57b2dccef4bcb6b5e86"
+    },
+    {
+      "json_path": [
+        "harness_sha256",
+        "triad_perf_python_coverage.py"
+      ],
+      "member": "f5cafed148d406230fbda2cd02ac2feb7f22edca268b0d9d08381db6357428bc/tools/triad_perf_python_coverage.py",
+      "path": "tools/triad_perf_python_coverage.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "f5cafed148d406230fbda2cd02ac2feb7f22edca268b0d9d08381db6357428bc"
+    },
+    {
+      "json_path": [
+        "harness_sha256",
+        "triad_perf_receiver.py"
+      ],
+      "member": "fd2fd7109e9dfcd8fe984fc526995a65b4517335cf6d80428a749f13994fcb34/tools/triad_perf_receiver.py",
+      "path": "tools/triad_perf_receiver.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "fd2fd7109e9dfcd8fe984fc526995a65b4517335cf6d80428a749f13994fcb34"
+    },
+    {
+      "json_path": [
+        "harness_sha256",
+        "triad_perf_resource.py"
+      ],
+      "member": "986ec8798642f4572e598f88c6d8f97dd2478686677f2ec148f906958e102084/tools/triad_perf_resource.py",
+      "path": "tools/triad_perf_resource.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "986ec8798642f4572e598f88c6d8f97dd2478686677f2ec148f906958e102084"
+    },
+    {
+      "json_path": [
+        "harness_sha256",
+        "triad_perf_staged.py"
+      ],
+      "member": "40e80b87b0147b52970ce062b3972e5ec1367d564e206bd8c2912031825846e1/tools/triad_perf_staged.py",
+      "path": "tools/triad_perf_staged.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "40e80b87b0147b52970ce062b3972e5ec1367d564e206bd8c2912031825846e1"
+    },
+    {
+      "json_path": [
+        "harness_sha256",
+        "triad_perf_statistics.py"
+      ],
+      "member": "64ce887c8c3af9144f1d94adc712fa784bbca17cfa86dcbfe1099dbb2efed64b/tools/triad_perf_statistics.py",
+      "path": "tools/triad_perf_statistics.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "64ce887c8c3af9144f1d94adc712fa784bbca17cfa86dcbfe1099dbb2efed64b"
+    },
+    {
+      "json_path": [
+        "harness_sha256",
+        "triad_perf_sustained.py"
+      ],
+      "member": "c343626798c491fca1bedba2fac97a840177145e3e9a3f56fd5741cc938b5548/tools/triad_perf_sustained.py",
+      "path": "tools/triad_perf_sustained.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "c343626798c491fca1bedba2fac97a840177145e3e9a3f56fd5741cc938b5548"
+    },
+    {
+      "json_path": [
+        "harness_sha256",
+        "triad_perf_telemetry.py"
+      ],
+      "member": "3646802429c1762a661620382ff111f7629640f53e2c3ee015e50d56f6e7bc4b/tools/triad_perf_telemetry.py",
+      "path": "tools/triad_perf_telemetry.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "3646802429c1762a661620382ff111f7629640f53e2c3ee015e50d56f6e7bc4b"
+    },
+    {
+      "json_path": [
+        "harness_sha256",
+        "triad_tensor_native.py"
+      ],
+      "member": "0ed9242733ae564aaadf7548a4391ac833aaffd27097e2a966c9931aab990c5e/tools/triad_tensor_native.py",
+      "path": "tools/triad_tensor_native.py",
+      "record": "gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "sha256": "0ed9242733ae564aaadf7548a4391ac833aaffd27097e2a966c9931aab990c5e"
+    },
+    {
+      "json_path": [
+        "source_hashes",
+        "include/datapump/clock_sync.hpp"
+      ],
+      "member": "dae640fd90eaad12afb5ca33ac36109da13db10d684929978df799ad4c7f761e/include/datapump/clock_sync.hpp",
+      "path": "include/datapump/clock_sync.hpp",
+      "record": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/broad-hf-timing/b220df4f187da55c0b8b8767cd394db67fa0b2fc7151835496f558dea34104b0/fixture.json",
+      "sha256": "dae640fd90eaad12afb5ca33ac36109da13db10d684929978df799ad4c7f761e"
+    },
+    {
+      "json_path": [
+        "source_hashes",
+        "include/datapump/pattern_pulse.hpp"
+      ],
+      "member": "f3053ed41fa5cbca182ae4dcf5ff4796b030a3cb15527f617d7a765e7f989312/include/datapump/pattern_pulse.hpp",
+      "path": "include/datapump/pattern_pulse.hpp",
+      "record": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/broad-hf-timing/b220df4f187da55c0b8b8767cd394db67fa0b2fc7151835496f558dea34104b0/fixture.json",
+      "sha256": "f3053ed41fa5cbca182ae4dcf5ff4796b030a3cb15527f617d7a765e7f989312"
+    },
+    {
+      "json_path": [
+        "source_hashes",
+        "include/datapump/triad_modem_v3.hpp"
+      ],
+      "member": "1ddd8e851950036f03e6a903ed7ba4746392ffe8623f49685df04f029c4aff48/include/datapump/triad_modem_v3.hpp",
+      "path": "include/datapump/triad_modem_v3.hpp",
+      "record": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/broad-hf-timing/b220df4f187da55c0b8b8767cd394db67fa0b2fc7151835496f558dea34104b0/fixture.json",
+      "sha256": "1ddd8e851950036f03e6a903ed7ba4746392ffe8623f49685df04f029c4aff48"
+    },
+    {
+      "json_path": [
+        "source_hashes",
+        "src/channel_perturbation.hpp"
+      ],
+      "member": "fae3b1b345e3dc19c8b85a5010e4434530bd0a34d595dd4de8cd55349d8d879a/src/channel_perturbation.hpp",
+      "path": "src/channel_perturbation.hpp",
+      "record": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/broad-hf-timing/b220df4f187da55c0b8b8767cd394db67fa0b2fc7151835496f558dea34104b0/fixture.json",
+      "sha256": "fae3b1b345e3dc19c8b85a5010e4434530bd0a34d595dd4de8cd55349d8d879a"
+    },
+    {
+      "json_path": [
+        "source_hashes",
+        "src/channel_spread.hpp"
+      ],
+      "member": "bf98698d574869acb79645fa143af7ae563a2f542868e77c672d89d4fb16bdb0/src/channel_spread.hpp",
+      "path": "src/channel_spread.hpp",
+      "record": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/broad-hf-timing/b220df4f187da55c0b8b8767cd394db67fa0b2fc7151835496f558dea34104b0/fixture.json",
+      "sha256": "bf98698d574869acb79645fa143af7ae563a2f542868e77c672d89d4fb16bdb0"
+    },
+    {
+      "json_path": [
+        "source_hashes",
+        "src/triad_gaussian_fading.hpp"
+      ],
+      "member": "97f26b082d7d68123952bde7ccb9f97148c5977cf741cf6c15c76e77fcc20944/src/triad_gaussian_fading.hpp",
+      "path": "src/triad_gaussian_fading.hpp",
+      "record": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/broad-hf-timing/b220df4f187da55c0b8b8767cd394db67fa0b2fc7151835496f558dea34104b0/fixture.json",
+      "sha256": "97f26b082d7d68123952bde7ccb9f97148c5977cf741cf6c15c76e77fcc20944"
+    },
+    {
+      "json_path": [
+        "source_hashes",
+        "src/triad_modem_v3.cpp"
+      ],
+      "member": "cb6cac016e57edcd4f6ebc70f09c68cc47380e3b772cdbe047d7a3b93e9b434c/src/triad_modem_v3.cpp",
+      "path": "src/triad_modem_v3.cpp",
+      "record": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/broad-hf-timing/b220df4f187da55c0b8b8767cd394db67fa0b2fc7151835496f558dea34104b0/fixture.json",
+      "sha256": "cb6cac016e57edcd4f6ebc70f09c68cc47380e3b772cdbe047d7a3b93e9b434c"
+    },
+    {
+      "json_path": [
+        "source_hashes",
+        "src/triad_simulation_stream.cpp"
+      ],
+      "member": "afaa1267c36fcd330151174f6f08b6fb401a7f702c660964071ef24b6e82a70d/src/triad_simulation_stream.cpp",
+      "path": "src/triad_simulation_stream.cpp",
+      "record": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/broad-hf-timing/b220df4f187da55c0b8b8767cd394db67fa0b2fc7151835496f558dea34104b0/fixture.json",
+      "sha256": "afaa1267c36fcd330151174f6f08b6fb401a7f702c660964071ef24b6e82a70d"
+    },
+    {
+      "json_path": [
+        "source_hashes",
+        "tools/triad-long.cpp"
+      ],
+      "member": "9b852132edb2c4f53d4c218e73db1314653cd6213a78a49c776869af6dc68877/tools/triad-long.cpp",
+      "path": "tools/triad-long.cpp",
+      "record": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/broad-hf-timing/b220df4f187da55c0b8b8767cd394db67fa0b2fc7151835496f558dea34104b0/fixture.json",
+      "sha256": "9b852132edb2c4f53d4c218e73db1314653cd6213a78a49c776869af6dc68877"
+    },
+    {
+      "json_path": [
+        "source_hashes",
+        "include/datapump/clock_sync.hpp"
+      ],
+      "member": "dae640fd90eaad12afb5ca33ac36109da13db10d684929978df799ad4c7f761e/include/datapump/clock_sync.hpp",
+      "path": "include/datapump/clock_sync.hpp",
+      "record": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/free-crystal/e978cbff057117f908ba9ae7f72777f7b210f2890d6a627bae0752f470d92f33/fixture.json",
+      "sha256": "dae640fd90eaad12afb5ca33ac36109da13db10d684929978df799ad4c7f761e"
+    },
+    {
+      "json_path": [
+        "source_hashes",
+        "include/datapump/pattern_pulse.hpp"
+      ],
+      "member": "f3053ed41fa5cbca182ae4dcf5ff4796b030a3cb15527f617d7a765e7f989312/include/datapump/pattern_pulse.hpp",
+      "path": "include/datapump/pattern_pulse.hpp",
+      "record": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/free-crystal/e978cbff057117f908ba9ae7f72777f7b210f2890d6a627bae0752f470d92f33/fixture.json",
+      "sha256": "f3053ed41fa5cbca182ae4dcf5ff4796b030a3cb15527f617d7a765e7f989312"
+    },
+    {
+      "json_path": [
+        "source_hashes",
+        "include/datapump/triad_modem_v3.hpp"
+      ],
+      "member": "1ddd8e851950036f03e6a903ed7ba4746392ffe8623f49685df04f029c4aff48/include/datapump/triad_modem_v3.hpp",
+      "path": "include/datapump/triad_modem_v3.hpp",
+      "record": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/free-crystal/e978cbff057117f908ba9ae7f72777f7b210f2890d6a627bae0752f470d92f33/fixture.json",
+      "sha256": "1ddd8e851950036f03e6a903ed7ba4746392ffe8623f49685df04f029c4aff48"
+    },
+    {
+      "json_path": [
+        "source_hashes",
+        "src/channel_perturbation.hpp"
+      ],
+      "member": "fae3b1b345e3dc19c8b85a5010e4434530bd0a34d595dd4de8cd55349d8d879a/src/channel_perturbation.hpp",
+      "path": "src/channel_perturbation.hpp",
+      "record": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/free-crystal/e978cbff057117f908ba9ae7f72777f7b210f2890d6a627bae0752f470d92f33/fixture.json",
+      "sha256": "fae3b1b345e3dc19c8b85a5010e4434530bd0a34d595dd4de8cd55349d8d879a"
+    },
+    {
+      "json_path": [
+        "source_hashes",
+        "src/channel_spread.hpp"
+      ],
+      "member": "bf98698d574869acb79645fa143af7ae563a2f542868e77c672d89d4fb16bdb0/src/channel_spread.hpp",
+      "path": "src/channel_spread.hpp",
+      "record": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/free-crystal/e978cbff057117f908ba9ae7f72777f7b210f2890d6a627bae0752f470d92f33/fixture.json",
+      "sha256": "bf98698d574869acb79645fa143af7ae563a2f542868e77c672d89d4fb16bdb0"
+    },
+    {
+      "json_path": [
+        "source_hashes",
+        "src/triad_gaussian_fading.hpp"
+      ],
+      "member": "97f26b082d7d68123952bde7ccb9f97148c5977cf741cf6c15c76e77fcc20944/src/triad_gaussian_fading.hpp",
+      "path": "src/triad_gaussian_fading.hpp",
+      "record": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/free-crystal/e978cbff057117f908ba9ae7f72777f7b210f2890d6a627bae0752f470d92f33/fixture.json",
+      "sha256": "97f26b082d7d68123952bde7ccb9f97148c5977cf741cf6c15c76e77fcc20944"
+    },
+    {
+      "json_path": [
+        "source_hashes",
+        "src/triad_modem_v3.cpp"
+      ],
+      "member": "cb6cac016e57edcd4f6ebc70f09c68cc47380e3b772cdbe047d7a3b93e9b434c/src/triad_modem_v3.cpp",
+      "path": "src/triad_modem_v3.cpp",
+      "record": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/free-crystal/e978cbff057117f908ba9ae7f72777f7b210f2890d6a627bae0752f470d92f33/fixture.json",
+      "sha256": "cb6cac016e57edcd4f6ebc70f09c68cc47380e3b772cdbe047d7a3b93e9b434c"
+    },
+    {
+      "json_path": [
+        "source_hashes",
+        "src/triad_simulation_stream.cpp"
+      ],
+      "member": "afaa1267c36fcd330151174f6f08b6fb401a7f702c660964071ef24b6e82a70d/src/triad_simulation_stream.cpp",
+      "path": "src/triad_simulation_stream.cpp",
+      "record": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/free-crystal/e978cbff057117f908ba9ae7f72777f7b210f2890d6a627bae0752f470d92f33/fixture.json",
+      "sha256": "afaa1267c36fcd330151174f6f08b6fb401a7f702c660964071ef24b6e82a70d"
+    },
+    {
+      "json_path": [
+        "source_hashes",
+        "tools/triad-long.cpp"
+      ],
+      "member": "9b852132edb2c4f53d4c218e73db1314653cd6213a78a49c776869af6dc68877/tools/triad-long.cpp",
+      "path": "tools/triad-long.cpp",
+      "record": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/free-crystal/e978cbff057117f908ba9ae7f72777f7b210f2890d6a627bae0752f470d92f33/fixture.json",
+      "sha256": "9b852132edb2c4f53d4c218e73db1314653cd6213a78a49c776869af6dc68877"
+    },
+    {
+      "json_path": [
+        "source_hashes",
+        "include/datapump/clock_sync.hpp"
+      ],
+      "member": "dae640fd90eaad12afb5ca33ac36109da13db10d684929978df799ad4c7f761e/include/datapump/clock_sync.hpp",
+      "path": "include/datapump/clock_sync.hpp",
+      "record": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/hf30-fhss-missed/724b5c52e981c67503d580480d01bfe4562fb799f0916f8e122d425396fac8ab/fixture.json",
+      "sha256": "dae640fd90eaad12afb5ca33ac36109da13db10d684929978df799ad4c7f761e"
+    },
+    {
+      "json_path": [
+        "source_hashes",
+        "include/datapump/pattern_pulse.hpp"
+      ],
+      "member": "f3053ed41fa5cbca182ae4dcf5ff4796b030a3cb15527f617d7a765e7f989312/include/datapump/pattern_pulse.hpp",
+      "path": "include/datapump/pattern_pulse.hpp",
+      "record": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/hf30-fhss-missed/724b5c52e981c67503d580480d01bfe4562fb799f0916f8e122d425396fac8ab/fixture.json",
+      "sha256": "f3053ed41fa5cbca182ae4dcf5ff4796b030a3cb15527f617d7a765e7f989312"
+    },
+    {
+      "json_path": [
+        "source_hashes",
+        "include/datapump/triad_modem_v3.hpp"
+      ],
+      "member": "1ddd8e851950036f03e6a903ed7ba4746392ffe8623f49685df04f029c4aff48/include/datapump/triad_modem_v3.hpp",
+      "path": "include/datapump/triad_modem_v3.hpp",
+      "record": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/hf30-fhss-missed/724b5c52e981c67503d580480d01bfe4562fb799f0916f8e122d425396fac8ab/fixture.json",
+      "sha256": "1ddd8e851950036f03e6a903ed7ba4746392ffe8623f49685df04f029c4aff48"
+    },
+    {
+      "json_path": [
+        "source_hashes",
+        "src/channel_perturbation.hpp"
+      ],
+      "member": "fae3b1b345e3dc19c8b85a5010e4434530bd0a34d595dd4de8cd55349d8d879a/src/channel_perturbation.hpp",
+      "path": "src/channel_perturbation.hpp",
+      "record": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/hf30-fhss-missed/724b5c52e981c67503d580480d01bfe4562fb799f0916f8e122d425396fac8ab/fixture.json",
+      "sha256": "fae3b1b345e3dc19c8b85a5010e4434530bd0a34d595dd4de8cd55349d8d879a"
+    },
+    {
+      "json_path": [
+        "source_hashes",
+        "src/channel_spread.hpp"
+      ],
+      "member": "bf98698d574869acb79645fa143af7ae563a2f542868e77c672d89d4fb16bdb0/src/channel_spread.hpp",
+      "path": "src/channel_spread.hpp",
+      "record": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/hf30-fhss-missed/724b5c52e981c67503d580480d01bfe4562fb799f0916f8e122d425396fac8ab/fixture.json",
+      "sha256": "bf98698d574869acb79645fa143af7ae563a2f542868e77c672d89d4fb16bdb0"
+    },
+    {
+      "json_path": [
+        "source_hashes",
+        "src/triad_gaussian_fading.hpp"
+      ],
+      "member": "97f26b082d7d68123952bde7ccb9f97148c5977cf741cf6c15c76e77fcc20944/src/triad_gaussian_fading.hpp",
+      "path": "src/triad_gaussian_fading.hpp",
+      "record": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/hf30-fhss-missed/724b5c52e981c67503d580480d01bfe4562fb799f0916f8e122d425396fac8ab/fixture.json",
+      "sha256": "97f26b082d7d68123952bde7ccb9f97148c5977cf741cf6c15c76e77fcc20944"
+    },
+    {
+      "json_path": [
+        "source_hashes",
+        "src/triad_modem_v3.cpp"
+      ],
+      "member": "cb6cac016e57edcd4f6ebc70f09c68cc47380e3b772cdbe047d7a3b93e9b434c/src/triad_modem_v3.cpp",
+      "path": "src/triad_modem_v3.cpp",
+      "record": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/hf30-fhss-missed/724b5c52e981c67503d580480d01bfe4562fb799f0916f8e122d425396fac8ab/fixture.json",
+      "sha256": "cb6cac016e57edcd4f6ebc70f09c68cc47380e3b772cdbe047d7a3b93e9b434c"
+    },
+    {
+      "json_path": [
+        "source_hashes",
+        "src/triad_simulation_stream.cpp"
+      ],
+      "member": "afaa1267c36fcd330151174f6f08b6fb401a7f702c660964071ef24b6e82a70d/src/triad_simulation_stream.cpp",
+      "path": "src/triad_simulation_stream.cpp",
+      "record": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/hf30-fhss-missed/724b5c52e981c67503d580480d01bfe4562fb799f0916f8e122d425396fac8ab/fixture.json",
+      "sha256": "afaa1267c36fcd330151174f6f08b6fb401a7f702c660964071ef24b6e82a70d"
+    },
+    {
+      "json_path": [
+        "source_hashes",
+        "tools/triad-long.cpp"
+      ],
+      "member": "9b852132edb2c4f53d4c218e73db1314653cd6213a78a49c776869af6dc68877/tools/triad-long.cpp",
+      "path": "tools/triad-long.cpp",
+      "record": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/hf30-fhss-missed/724b5c52e981c67503d580480d01bfe4562fb799f0916f8e122d425396fac8ab/fixture.json",
+      "sha256": "9b852132edb2c4f53d4c218e73db1314653cd6213a78a49c776869af6dc68877"
+    },
+    {
+      "json_path": [
+        "source_hashes",
+        "include/datapump/clock_sync.hpp"
+      ],
+      "member": "dae640fd90eaad12afb5ca33ac36109da13db10d684929978df799ad4c7f761e/include/datapump/clock_sync.hpp",
+      "path": "include/datapump/clock_sync.hpp",
+      "record": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/narrow-hf-tight/da59c5cd0c871fb082a91f27f10436d18ff3d10f15e0c53d7e4ed0f36c8920f5/fixture.json",
+      "sha256": "dae640fd90eaad12afb5ca33ac36109da13db10d684929978df799ad4c7f761e"
+    },
+    {
+      "json_path": [
+        "source_hashes",
+        "include/datapump/pattern_pulse.hpp"
+      ],
+      "member": "f3053ed41fa5cbca182ae4dcf5ff4796b030a3cb15527f617d7a765e7f989312/include/datapump/pattern_pulse.hpp",
+      "path": "include/datapump/pattern_pulse.hpp",
+      "record": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/narrow-hf-tight/da59c5cd0c871fb082a91f27f10436d18ff3d10f15e0c53d7e4ed0f36c8920f5/fixture.json",
+      "sha256": "f3053ed41fa5cbca182ae4dcf5ff4796b030a3cb15527f617d7a765e7f989312"
+    },
+    {
+      "json_path": [
+        "source_hashes",
+        "include/datapump/triad_modem_v3.hpp"
+      ],
+      "member": "1ddd8e851950036f03e6a903ed7ba4746392ffe8623f49685df04f029c4aff48/include/datapump/triad_modem_v3.hpp",
+      "path": "include/datapump/triad_modem_v3.hpp",
+      "record": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/narrow-hf-tight/da59c5cd0c871fb082a91f27f10436d18ff3d10f15e0c53d7e4ed0f36c8920f5/fixture.json",
+      "sha256": "1ddd8e851950036f03e6a903ed7ba4746392ffe8623f49685df04f029c4aff48"
+    },
+    {
+      "json_path": [
+        "source_hashes",
+        "src/channel_perturbation.hpp"
+      ],
+      "member": "fae3b1b345e3dc19c8b85a5010e4434530bd0a34d595dd4de8cd55349d8d879a/src/channel_perturbation.hpp",
+      "path": "src/channel_perturbation.hpp",
+      "record": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/narrow-hf-tight/da59c5cd0c871fb082a91f27f10436d18ff3d10f15e0c53d7e4ed0f36c8920f5/fixture.json",
+      "sha256": "fae3b1b345e3dc19c8b85a5010e4434530bd0a34d595dd4de8cd55349d8d879a"
+    },
+    {
+      "json_path": [
+        "source_hashes",
+        "src/channel_spread.hpp"
+      ],
+      "member": "bf98698d574869acb79645fa143af7ae563a2f542868e77c672d89d4fb16bdb0/src/channel_spread.hpp",
+      "path": "src/channel_spread.hpp",
+      "record": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/narrow-hf-tight/da59c5cd0c871fb082a91f27f10436d18ff3d10f15e0c53d7e4ed0f36c8920f5/fixture.json",
+      "sha256": "bf98698d574869acb79645fa143af7ae563a2f542868e77c672d89d4fb16bdb0"
+    },
+    {
+      "json_path": [
+        "source_hashes",
+        "src/triad_gaussian_fading.hpp"
+      ],
+      "member": "97f26b082d7d68123952bde7ccb9f97148c5977cf741cf6c15c76e77fcc20944/src/triad_gaussian_fading.hpp",
+      "path": "src/triad_gaussian_fading.hpp",
+      "record": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/narrow-hf-tight/da59c5cd0c871fb082a91f27f10436d18ff3d10f15e0c53d7e4ed0f36c8920f5/fixture.json",
+      "sha256": "97f26b082d7d68123952bde7ccb9f97148c5977cf741cf6c15c76e77fcc20944"
+    },
+    {
+      "json_path": [
+        "source_hashes",
+        "src/triad_modem_v3.cpp"
+      ],
+      "member": "cb6cac016e57edcd4f6ebc70f09c68cc47380e3b772cdbe047d7a3b93e9b434c/src/triad_modem_v3.cpp",
+      "path": "src/triad_modem_v3.cpp",
+      "record": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/narrow-hf-tight/da59c5cd0c871fb082a91f27f10436d18ff3d10f15e0c53d7e4ed0f36c8920f5/fixture.json",
+      "sha256": "cb6cac016e57edcd4f6ebc70f09c68cc47380e3b772cdbe047d7a3b93e9b434c"
+    },
+    {
+      "json_path": [
+        "source_hashes",
+        "src/triad_simulation_stream.cpp"
+      ],
+      "member": "afaa1267c36fcd330151174f6f08b6fb401a7f702c660964071ef24b6e82a70d/src/triad_simulation_stream.cpp",
+      "path": "src/triad_simulation_stream.cpp",
+      "record": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/narrow-hf-tight/da59c5cd0c871fb082a91f27f10436d18ff3d10f15e0c53d7e4ed0f36c8920f5/fixture.json",
+      "sha256": "afaa1267c36fcd330151174f6f08b6fb401a7f702c660964071ef24b6e82a70d"
+    },
+    {
+      "json_path": [
+        "source_hashes",
+        "tools/triad-long.cpp"
+      ],
+      "member": "9b852132edb2c4f53d4c218e73db1314653cd6213a78a49c776869af6dc68877/tools/triad-long.cpp",
+      "path": "tools/triad-long.cpp",
+      "record": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/narrow-hf-tight/da59c5cd0c871fb082a91f27f10436d18ff3d10f15e0c53d7e4ed0f36c8920f5/fixture.json",
+      "sha256": "9b852132edb2c4f53d4c218e73db1314653cd6213a78a49c776869af6dc68877"
+    },
+    {
+      "json_path": [
+        "source_hashes",
+        "include/datapump/clock_sync.hpp"
+      ],
+      "member": "dae640fd90eaad12afb5ca33ac36109da13db10d684929978df799ad4c7f761e/include/datapump/clock_sync.hpp",
+      "path": "include/datapump/clock_sync.hpp",
+      "record": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/vlf-850-day/0701229e4d19b8fbd9670cbda4bc779b9f2c086b19fd5a227210935735055fe8/fixture.json",
+      "sha256": "dae640fd90eaad12afb5ca33ac36109da13db10d684929978df799ad4c7f761e"
+    },
+    {
+      "json_path": [
+        "source_hashes",
+        "include/datapump/pattern_pulse.hpp"
+      ],
+      "member": "f3053ed41fa5cbca182ae4dcf5ff4796b030a3cb15527f617d7a765e7f989312/include/datapump/pattern_pulse.hpp",
+      "path": "include/datapump/pattern_pulse.hpp",
+      "record": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/vlf-850-day/0701229e4d19b8fbd9670cbda4bc779b9f2c086b19fd5a227210935735055fe8/fixture.json",
+      "sha256": "f3053ed41fa5cbca182ae4dcf5ff4796b030a3cb15527f617d7a765e7f989312"
+    },
+    {
+      "json_path": [
+        "source_hashes",
+        "include/datapump/triad_modem_v3.hpp"
+      ],
+      "member": "1ddd8e851950036f03e6a903ed7ba4746392ffe8623f49685df04f029c4aff48/include/datapump/triad_modem_v3.hpp",
+      "path": "include/datapump/triad_modem_v3.hpp",
+      "record": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/vlf-850-day/0701229e4d19b8fbd9670cbda4bc779b9f2c086b19fd5a227210935735055fe8/fixture.json",
+      "sha256": "1ddd8e851950036f03e6a903ed7ba4746392ffe8623f49685df04f029c4aff48"
+    },
+    {
+      "json_path": [
+        "source_hashes",
+        "src/channel_perturbation.hpp"
+      ],
+      "member": "fae3b1b345e3dc19c8b85a5010e4434530bd0a34d595dd4de8cd55349d8d879a/src/channel_perturbation.hpp",
+      "path": "src/channel_perturbation.hpp",
+      "record": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/vlf-850-day/0701229e4d19b8fbd9670cbda4bc779b9f2c086b19fd5a227210935735055fe8/fixture.json",
+      "sha256": "fae3b1b345e3dc19c8b85a5010e4434530bd0a34d595dd4de8cd55349d8d879a"
+    },
+    {
+      "json_path": [
+        "source_hashes",
+        "src/channel_spread.hpp"
+      ],
+      "member": "bf98698d574869acb79645fa143af7ae563a2f542868e77c672d89d4fb16bdb0/src/channel_spread.hpp",
+      "path": "src/channel_spread.hpp",
+      "record": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/vlf-850-day/0701229e4d19b8fbd9670cbda4bc779b9f2c086b19fd5a227210935735055fe8/fixture.json",
+      "sha256": "bf98698d574869acb79645fa143af7ae563a2f542868e77c672d89d4fb16bdb0"
+    },
+    {
+      "json_path": [
+        "source_hashes",
+        "src/triad_gaussian_fading.hpp"
+      ],
+      "member": "97f26b082d7d68123952bde7ccb9f97148c5977cf741cf6c15c76e77fcc20944/src/triad_gaussian_fading.hpp",
+      "path": "src/triad_gaussian_fading.hpp",
+      "record": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/vlf-850-day/0701229e4d19b8fbd9670cbda4bc779b9f2c086b19fd5a227210935735055fe8/fixture.json",
+      "sha256": "97f26b082d7d68123952bde7ccb9f97148c5977cf741cf6c15c76e77fcc20944"
+    },
+    {
+      "json_path": [
+        "source_hashes",
+        "src/triad_modem_v3.cpp"
+      ],
+      "member": "cb6cac016e57edcd4f6ebc70f09c68cc47380e3b772cdbe047d7a3b93e9b434c/src/triad_modem_v3.cpp",
+      "path": "src/triad_modem_v3.cpp",
+      "record": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/vlf-850-day/0701229e4d19b8fbd9670cbda4bc779b9f2c086b19fd5a227210935735055fe8/fixture.json",
+      "sha256": "cb6cac016e57edcd4f6ebc70f09c68cc47380e3b772cdbe047d7a3b93e9b434c"
+    },
+    {
+      "json_path": [
+        "source_hashes",
+        "src/triad_simulation_stream.cpp"
+      ],
+      "member": "afaa1267c36fcd330151174f6f08b6fb401a7f702c660964071ef24b6e82a70d/src/triad_simulation_stream.cpp",
+      "path": "src/triad_simulation_stream.cpp",
+      "record": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/vlf-850-day/0701229e4d19b8fbd9670cbda4bc779b9f2c086b19fd5a227210935735055fe8/fixture.json",
+      "sha256": "afaa1267c36fcd330151174f6f08b6fb401a7f702c660964071ef24b6e82a70d"
+    },
+    {
+      "json_path": [
+        "source_hashes",
+        "tools/triad-long.cpp"
+      ],
+      "member": "9b852132edb2c4f53d4c218e73db1314653cd6213a78a49c776869af6dc68877/tools/triad-long.cpp",
+      "path": "tools/triad-long.cpp",
+      "record": "gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/vlf-850-day/0701229e4d19b8fbd9670cbda4bc779b9f2c086b19fd5a227210935735055fe8/fixture.json",
+      "sha256": "9b852132edb2c4f53d4c218e73db1314653cd6213a78a49c776869af6dc68877"
+    }
+  ],
+  "members": [
+    {
+      "bytes": 107291,
+      "member": "5bf29ee7cc20b1453b9124eaab79948d37744ed70d9444a87218c16d75f9c276/CMakeLists.txt",
+      "origin": "local-evidence/triad-performance-broader/planner-build/source/CMakeLists.txt",
+      "path": "CMakeLists.txt",
+      "sha256": "5bf29ee7cc20b1453b9124eaab79948d37744ed70d9444a87218c16d75f9c276"
+    },
+    {
+      "bytes": 20772,
+      "member": "b61dab07377a1f1b676ec262fc44db4069c895a956dc896bb773df70bdbaa207/docs/gpu-precision-controls.md",
+      "origin": "docs/gpu-precision-controls.md",
+      "path": "docs/gpu-precision-controls.md",
+      "sha256": "b61dab07377a1f1b676ec262fc44db4069c895a956dc896bb773df70bdbaa207"
+    },
+    {
+      "bytes": 10235,
+      "member": "dae640fd90eaad12afb5ca33ac36109da13db10d684929978df799ad4c7f761e/include/datapump/clock_sync.hpp",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/include/datapump/clock_sync.hpp",
+      "path": "include/datapump/clock_sync.hpp",
+      "sha256": "dae640fd90eaad12afb5ca33ac36109da13db10d684929978df799ad4c7f761e"
+    },
+    {
+      "bytes": 5404,
+      "member": "14e681ae6637b453b05fae4125b300e6bc27ec2ec4c2ee449fa3b2ab97214b74/include/datapump/crypto.hpp",
+      "origin": "local-evidence/triad-performance-broader/planner-build/source/include/datapump/crypto.hpp",
+      "path": "include/datapump/crypto.hpp",
+      "sha256": "14e681ae6637b453b05fae4125b300e6bc27ec2ec4c2ee449fa3b2ab97214b74"
+    },
+    {
+      "bytes": 4921,
+      "member": "f3053ed41fa5cbca182ae4dcf5ff4796b030a3cb15527f617d7a765e7f989312/include/datapump/pattern_pulse.hpp",
+      "origin": "local-evidence/triad-performance-broader/planner-build/source/include/datapump/pattern_pulse.hpp",
+      "path": "include/datapump/pattern_pulse.hpp",
+      "sha256": "f3053ed41fa5cbca182ae4dcf5ff4796b030a3cb15527f617d7a765e7f989312"
+    },
+    {
+      "bytes": 3575,
+      "member": "b8b259ec3ed474541f65655a5e124ff7bb9c699387326715112ecde027f6a05c/include/datapump/triad_modem.hpp",
+      "origin": "local-evidence/triad-performance-broader/planner-build/source/include/datapump/triad_modem.hpp",
+      "path": "include/datapump/triad_modem.hpp",
+      "sha256": "b8b259ec3ed474541f65655a5e124ff7bb9c699387326715112ecde027f6a05c"
+    },
+    {
+      "bytes": 18454,
+      "member": "1ddd8e851950036f03e6a903ed7ba4746392ffe8623f49685df04f029c4aff48/include/datapump/triad_modem_v3.hpp",
+      "origin": "local-evidence/triad-performance-broader/planner-build/source/include/datapump/triad_modem_v3.hpp",
+      "path": "include/datapump/triad_modem_v3.hpp",
+      "sha256": "1ddd8e851950036f03e6a903ed7ba4746392ffe8623f49685df04f029c4aff48"
+    },
+    {
+      "bytes": 4979,
+      "member": "55db1c03f95b6bd9b65bf5e3630a506aba40d1e3dbf473f025218454fbbee34d/include/datapump/triad_simulation.hpp",
+      "origin": "local-evidence/triad-performance-broader/planner-build/source/include/datapump/triad_simulation.hpp",
+      "path": "include/datapump/triad_simulation.hpp",
+      "sha256": "55db1c03f95b6bd9b65bf5e3630a506aba40d1e3dbf473f025218454fbbee34d"
+    },
+    {
+      "bytes": 6296,
+      "member": "66363bd20b0b613ca5df115265976052957a78052724a00e1017e15220ede6b1/include/datapump/triad_statistics.hpp",
+      "origin": "local-evidence/triad-performance-broader/planner-build/source/include/datapump/triad_statistics.hpp",
+      "path": "include/datapump/triad_statistics.hpp",
+      "sha256": "66363bd20b0b613ca5df115265976052957a78052724a00e1017e15220ede6b1"
+    },
+    {
+      "bytes": 11656,
+      "member": "fae3b1b345e3dc19c8b85a5010e4434530bd0a34d595dd4de8cd55349d8d879a/src/channel_perturbation.hpp",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/src/channel_perturbation.hpp",
+      "path": "src/channel_perturbation.hpp",
+      "sha256": "fae3b1b345e3dc19c8b85a5010e4434530bd0a34d595dd4de8cd55349d8d879a"
+    },
+    {
+      "bytes": 3289,
+      "member": "bf98698d574869acb79645fa143af7ae563a2f542868e77c672d89d4fb16bdb0/src/channel_spread.hpp",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/src/channel_spread.hpp",
+      "path": "src/channel_spread.hpp",
+      "sha256": "bf98698d574869acb79645fa143af7ae563a2f542868e77c672d89d4fb16bdb0"
+    },
+    {
+      "bytes": 5100,
+      "member": "97f26b082d7d68123952bde7ccb9f97148c5977cf741cf6c15c76e77fcc20944/src/triad_gaussian_fading.hpp",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/src/triad_gaussian_fading.hpp",
+      "path": "src/triad_gaussian_fading.hpp",
+      "sha256": "97f26b082d7d68123952bde7ccb9f97148c5977cf741cf6c15c76e77fcc20944"
+    },
+    {
+      "bytes": 17377,
+      "member": "cb6cac016e57edcd4f6ebc70f09c68cc47380e3b772cdbe047d7a3b93e9b434c/src/triad_modem_v3.cpp",
+      "origin": "local-evidence/triad-performance-broader/planner-build/source/src/triad_modem_v3.cpp",
+      "path": "src/triad_modem_v3.cpp",
+      "sha256": "cb6cac016e57edcd4f6ebc70f09c68cc47380e3b772cdbe047d7a3b93e9b434c"
+    },
+    {
+      "bytes": 25438,
+      "member": "ff7409c55f2c62dbb833f1ae24a7b4aab103607aaf2f66945ea585e1e3ba3e2f/src/triad_receiver_v3.cpp",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/src/triad_receiver_v3.cpp",
+      "path": "src/triad_receiver_v3.cpp",
+      "sha256": "ff7409c55f2c62dbb833f1ae24a7b4aab103607aaf2f66945ea585e1e3ba3e2f"
+    },
+    {
+      "bytes": 48985,
+      "member": "afaa1267c36fcd330151174f6f08b6fb401a7f702c660964071ef24b6e82a70d/src/triad_simulation_stream.cpp",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/src/triad_simulation_stream.cpp",
+      "path": "src/triad_simulation_stream.cpp",
+      "sha256": "afaa1267c36fcd330151174f6f08b6fb401a7f702c660964071ef24b6e82a70d"
+    },
+    {
+      "bytes": 20541,
+      "member": "18d92c2c51a4057caba6d9de78580305adcd8c038f6e1243ec1a4410f7c00ace/src/triad_statistics.cpp",
+      "origin": "local-evidence/triad-performance-broader/planner-build/source/src/triad_statistics.cpp",
+      "path": "src/triad_statistics.cpp",
+      "sha256": "18d92c2c51a4057caba6d9de78580305adcd8c038f6e1243ec1a4410f7c00ace"
+    },
+    {
+      "bytes": 26856,
+      "member": "228578b2dc33b72e657d646d956ccb51aefbbabde1af730ef83a15e6785cb01e/src/tuning.cpp",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/src/tuning.cpp",
+      "path": "src/tuning.cpp",
+      "sha256": "228578b2dc33b72e657d646d956ccb51aefbbabde1af730ef83a15e6785cb01e"
+    },
+    {
+      "bytes": 3158,
+      "member": "31e1ac552bea10b24036f959485241532066e6aa343931c04a46a65e8734b293/src/tuning_presets.cpp",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/src/tuning_presets.cpp",
+      "path": "src/tuning_presets.cpp",
+      "sha256": "31e1ac552bea10b24036f959485241532066e6aa343931c04a46a65e8734b293"
+    },
+    {
+      "bytes": 12061,
+      "member": "f03812407de28cef6854c39df73c25cc66301abb637d8fd4cb40e34b8c16a356/tests/test_triad_cfo_batch.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tests/test_triad_cfo_batch.py",
+      "path": "tests/test_triad_cfo_batch.py",
+      "sha256": "f03812407de28cef6854c39df73c25cc66301abb637d8fd4cb40e34b8c16a356"
+    },
+    {
+      "bytes": 18484,
+      "member": "7b8c3156ebec580f22da3dae4e9941f502e88a35caf15863b2f3b3b6d066458a/tests/test_triad_fft_acquire.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tests/test_triad_fft_acquire.py",
+      "path": "tests/test_triad_fft_acquire.py",
+      "sha256": "7b8c3156ebec580f22da3dae4e9941f502e88a35caf15863b2f3b3b6d066458a"
+    },
+    {
+      "bytes": 10619,
+      "member": "e67eab9ca20591053197463efb22400e87e09e1808c724ba152ea449ebe8def3/tests/test_triad_gaussian_bounds.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tests/test_triad_gaussian_bounds.py",
+      "path": "tests/test_triad_gaussian_bounds.py",
+      "sha256": "e67eab9ca20591053197463efb22400e87e09e1808c724ba152ea449ebe8def3"
+    },
+    {
+      "bytes": 6323,
+      "member": "d59e54477f9a31d4038761d2d0c7a8fe020398d4e9e0d6386c1a1593a2e749c4/tests/test_triad_gaussian_prepared.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tests/test_triad_gaussian_prepared.py",
+      "path": "tests/test_triad_gaussian_prepared.py",
+      "sha256": "d59e54477f9a31d4038761d2d0c7a8fe020398d4e9e0d6386c1a1593a2e749c4"
+    },
+    {
+      "bytes": 8015,
+      "member": "386ba03d3d6e850c7b0c6e805a5c9d30f88fdc33d07aeed8e0268cfccbde7da1/tests/test_triad_gaussian_state.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tests/test_triad_gaussian_state.py",
+      "path": "tests/test_triad_gaussian_state.py",
+      "sha256": "386ba03d3d6e850c7b0c6e805a5c9d30f88fdc33d07aeed8e0268cfccbde7da1"
+    },
+    {
+      "bytes": 20019,
+      "member": "66783804ee920a46757daa54155d9fd88a9d1ed0d65fbb5d364287ffcafde1f9/tests/test_triad_gaussian_window.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tests/test_triad_gaussian_window.py",
+      "path": "tests/test_triad_gaussian_window.py",
+      "sha256": "66783804ee920a46757daa54155d9fd88a9d1ed0d65fbb5d364287ffcafde1f9"
+    },
+    {
+      "bytes": 26613,
+      "member": "ad4b64bfa40433ed114a55787a55a89a25eed8be43ee02334859fe69151ab17c/tests/test_triad_group_acquire.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tests/test_triad_group_acquire.py",
+      "path": "tests/test_triad_group_acquire.py",
+      "sha256": "ad4b64bfa40433ed114a55787a55a89a25eed8be43ee02334859fe69151ab17c"
+    },
+    {
+      "bytes": 16297,
+      "member": "2c5452df602057d3fc8550a59fda22d2ca6f64f791b5a506b08d5b8079cb65c7/tests/test_triad_noise_likelihood.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tests/test_triad_noise_likelihood.py",
+      "path": "tests/test_triad_noise_likelihood.py",
+      "sha256": "2c5452df602057d3fc8550a59fda22d2ca6f64f791b5a506b08d5b8079cb65c7"
+    },
+    {
+      "bytes": 26001,
+      "member": "1b423c98057997398b3fff142aa53bf0d46e524841a58c70ee08084671e7893f/tests/test_triad_noise_study.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tests/test_triad_noise_study.py",
+      "path": "tests/test_triad_noise_study.py",
+      "sha256": "1b423c98057997398b3fff142aa53bf0d46e524841a58c70ee08084671e7893f"
+    },
+    {
+      "bytes": 6112,
+      "member": "721bd0aaf3ec019aa8b63cbde150598158d2775577bf6dfcd05554d5935a2aa9/tests/test_triad_perf_hardware.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tests/test_triad_perf_hardware.py",
+      "path": "tests/test_triad_perf_hardware.py",
+      "sha256": "721bd0aaf3ec019aa8b63cbde150598158d2775577bf6dfcd05554d5935a2aa9"
+    },
+    {
+      "bytes": 15053,
+      "member": "504e6cc54e34b62cb609a49763e220a41ba5d834f395186a6c7344b730e5836b/tests/test_triad_perf_planner.py",
+      "origin": "local-evidence/triad-performance-broader/planner-build/source/tests/test_triad_perf_planner.py",
+      "path": "tests/test_triad_perf_planner.py",
+      "sha256": "504e6cc54e34b62cb609a49763e220a41ba5d834f395186a6c7344b730e5836b"
+    },
+    {
+      "bytes": 14680,
+      "member": "cc4d6f1b9c33fc746bb57791ebd19f3ae496272d11bc7cf6379bfb116b9f7dad/tests/test_triad_phase_frequency.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tests/test_triad_phase_frequency.py",
+      "path": "tests/test_triad_phase_frequency.py",
+      "sha256": "cc4d6f1b9c33fc746bb57791ebd19f3ae496272d11bc7cf6379bfb116b9f7dad"
+    },
+    {
+      "bytes": 14256,
+      "member": "2dbb8586c57c57d0d8e98b7066535cd21ee2010cf1ec78ed56ec1d0e4f18982b/tests/test_triad_phase_optimized.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tests/test_triad_phase_optimized.py",
+      "path": "tests/test_triad_phase_optimized.py",
+      "sha256": "2dbb8586c57c57d0d8e98b7066535cd21ee2010cf1ec78ed56ec1d0e4f18982b"
+    },
+    {
+      "bytes": 5309,
+      "member": "2d1bf61ebe53494568777439ca9c5b0b4d9badc7597440a82c9bb4175da62ff7/tests/test_triad_phase_reduction.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tests/test_triad_phase_reduction.py",
+      "path": "tests/test_triad_phase_reduction.py",
+      "sha256": "2d1bf61ebe53494568777439ca9c5b0b4d9badc7597440a82c9bb4175da62ff7"
+    },
+    {
+      "bytes": 11522,
+      "member": "9403029b2ab959689b475dd92c10e8da84d633501dd0c1414a0a99d55a4639ae/tests/test_triad_phase_tensor.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tests/test_triad_phase_tensor.py",
+      "path": "tests/test_triad_phase_tensor.py",
+      "sha256": "9403029b2ab959689b475dd92c10e8da84d633501dd0c1414a0a99d55a4639ae"
+    },
+    {
+      "bytes": 8968,
+      "member": "7de34739c72121baa230610c197f9ce7a529688fb1f581b8b01d559443498fee/tests/test_triad_precision_probe.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tests/test_triad_precision_probe.py",
+      "path": "tests/test_triad_precision_probe.py",
+      "sha256": "7de34739c72121baa230610c197f9ce7a529688fb1f581b8b01d559443498fee"
+    },
+    {
+      "bytes": 5973,
+      "member": "e1ff404d5dc487146442bf58038301a9610678e9d36fdcaf186d40b40b0a763b/tests/test_triad_prepared_observation.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tests/test_triad_prepared_observation.py",
+      "path": "tests/test_triad_prepared_observation.py",
+      "sha256": "e1ff404d5dc487146442bf58038301a9610678e9d36fdcaf186d40b40b0a763b"
+    },
+    {
+      "bytes": 10394,
+      "member": "982473b034caa7bc550e1acee29dc2d9c8e33c6131e25683abd11bc95fbb89b3/tests/test_triad_ray_frequency.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tests/test_triad_ray_frequency.py",
+      "path": "tests/test_triad_ray_frequency.py",
+      "sha256": "982473b034caa7bc550e1acee29dc2d9c8e33c6131e25683abd11bc95fbb89b3"
+    },
+    {
+      "bytes": 21465,
+      "member": "668c624ef439c098a99ff9e33822b6272ea367183865b7caccdafcffbc8c42fa/tests/test_triad_rbpf.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tests/test_triad_rbpf.py",
+      "path": "tests/test_triad_rbpf.py",
+      "sha256": "668c624ef439c098a99ff9e33822b6272ea367183865b7caccdafcffbc8c42fa"
+    },
+    {
+      "bytes": 17942,
+      "member": "dbc93c3570719a216ca34d9e10248b8f49f0d25c7ebee1537c0df70a81b28598/tests/test_triad_rbpf_study.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tests/test_triad_rbpf_study.py",
+      "path": "tests/test_triad_rbpf_study.py",
+      "sha256": "dbc93c3570719a216ca34d9e10248b8f49f0d25c7ebee1537c0df70a81b28598"
+    },
+    {
+      "bytes": 1727,
+      "member": "6e1bbdf0ef3dd1124d30be9bee8dc804a617ce1e3f615b3f2862f328f5f1bc4a/tests/test_triad_state_study.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tests/test_triad_state_study.py",
+      "path": "tests/test_triad_state_study.py",
+      "sha256": "6e1bbdf0ef3dd1124d30be9bee8dc804a617ce1e3f615b3f2862f328f5f1bc4a"
+    },
+    {
+      "bytes": 14923,
+      "member": "b9a0276203bd212b74f8becca1726d56dd6074d8c27c720a14d08cff4b6b0aba/tests/test_triad_state_workspace.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tests/test_triad_state_workspace.py",
+      "path": "tests/test_triad_state_workspace.py",
+      "sha256": "b9a0276203bd212b74f8becca1726d56dd6074d8c27c720a14d08cff4b6b0aba"
+    },
+    {
+      "bytes": 15641,
+      "member": "73c609d183dfacf03e22426d9defac30be386f48ce35cb08b92942fc5811c34d/tests/test_triad_static_frequency_study.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tests/test_triad_static_frequency_study.py",
+      "path": "tests/test_triad_static_frequency_study.py",
+      "sha256": "73c609d183dfacf03e22426d9defac30be386f48ce35cb08b92942fc5811c34d"
+    },
+    {
+      "bytes": 22440,
+      "member": "d57ebbe2f8eb281ae420be7937281dddbb9ee4009c7fe041e19745a259716a6a/tools/triad-acquisition-compare.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-acquisition-compare.py",
+      "path": "tools/triad-acquisition-compare.py",
+      "sha256": "d57ebbe2f8eb281ae420be7937281dddbb9ee4009c7fe041e19745a259716a6a"
+    },
+    {
+      "bytes": 17359,
+      "member": "5c7fb6f8b0ad8cadeaae8591d9fb0e3d489fb5eb4c14962faf800ad46a661665/tools/triad-cfo-batch-study.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-cfo-batch-study.py",
+      "path": "tools/triad-cfo-batch-study.py",
+      "sha256": "5c7fb6f8b0ad8cadeaae8591d9fb0e3d489fb5eb4c14962faf800ad46a661665"
+    },
+    {
+      "bytes": 33772,
+      "member": "19d1a733674645dd2d27bb28bce3bad89168c7667679d6f2d79891d37e168073/tools/triad-conditional-sweep.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-conditional-sweep.py",
+      "path": "tools/triad-conditional-sweep.py",
+      "sha256": "19d1a733674645dd2d27bb28bce3bad89168c7667679d6f2d79891d37e168073"
+    },
+    {
+      "bytes": 16288,
+      "member": "c2777fffc6838b8e7e07d6a7ad807fe90f17f53737b325587b9db8aa5b181ac0/tools/triad-consumer-hardware.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-consumer-hardware.py",
+      "path": "tools/triad-consumer-hardware.py",
+      "sha256": "c2777fffc6838b8e7e07d6a7ad807fe90f17f53737b325587b9db8aa5b181ac0"
+    },
+    {
+      "bytes": 12825,
+      "member": "a997c54226176cd6728e1aea5e43398a6eb7a145c6fd9c611e3c19a4deaae29d/tools/triad-consumer-profile.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-consumer-profile.py",
+      "path": "tools/triad-consumer-profile.py",
+      "sha256": "a997c54226176cd6728e1aea5e43398a6eb7a145c6fd9c611e3c19a4deaae29d"
+    },
+    {
+      "bytes": 16107,
+      "member": "b5385c2423d6df5fe67635bd1ea545b1ccf8bd3d4137aaf43a82b208c9bb36fc/tools/triad-consumer-sustain.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-consumer-sustain.py",
+      "path": "tools/triad-consumer-sustain.py",
+      "sha256": "b5385c2423d6df5fe67635bd1ea545b1ccf8bd3d4137aaf43a82b208c9bb36fc"
+    },
+    {
+      "bytes": 15932,
+      "member": "1bfe725dba82667a5b838891f959f5cab3ee950e7e3bdac0ca3483f25ba9855f/tools/triad-consumer-tiles.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-consumer-tiles.py",
+      "path": "tools/triad-consumer-tiles.py",
+      "sha256": "1bfe725dba82667a5b838891f959f5cab3ee950e7e3bdac0ca3483f25ba9855f"
+    },
+    {
+      "bytes": 25040,
+      "member": "4a7241acab3ba6e4f17bad4e4821e155f7e99064115100313de1bbee438a90e8/tools/triad-coverage.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-coverage.py",
+      "path": "tools/triad-coverage.py",
+      "sha256": "4a7241acab3ba6e4f17bad4e4821e155f7e99064115100313de1bbee438a90e8"
+    },
+    {
+      "bytes": 33877,
+      "member": "647e63e73b4ee6f0d6ab72f1dfd75f403aa377789798b933b2fb9ccfdbc7caac/tools/triad-detector-study.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-detector-study.py",
+      "path": "tools/triad-detector-study.py",
+      "sha256": "647e63e73b4ee6f0d6ab72f1dfd75f403aa377789798b933b2fb9ccfdbc7caac"
+    },
+    {
+      "bytes": 15369,
+      "member": "bb871b98d436ab45605ad8127513d92fc25fff0461cc66ed26e3c5967e4a9015/tools/triad-diversity-export.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-diversity-export.py",
+      "path": "tools/triad-diversity-export.py",
+      "sha256": "bb871b98d436ab45605ad8127513d92fc25fff0461cc66ed26e3c5967e4a9015"
+    },
+    {
+      "bytes": 26832,
+      "member": "9d76d728b25e1d49d1cc52ecf12a1a126ba701c2127ce7ccd9df1db7df866880/tools/triad-examples-summary.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-examples-summary.py",
+      "path": "tools/triad-examples-summary.py",
+      "sha256": "9d76d728b25e1d49d1cc52ecf12a1a126ba701c2127ce7ccd9df1db7df866880"
+    },
+    {
+      "bytes": 32675,
+      "member": "db9b3ded8d318b6e6dc468b2d2d40bcbf814aefe603ed8224d04e9cc7ef026ef/tools/triad-factor-census.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-factor-census.py",
+      "path": "tools/triad-factor-census.py",
+      "sha256": "db9b3ded8d318b6e6dc468b2d2d40bcbf814aefe603ed8224d04e9cc7ef026ef"
+    },
+    {
+      "bytes": 26607,
+      "member": "a5fd5c4033ef33d3c7a0d16798d2955831de5c91659dee5e829578630c5a51a1/tools/triad-fft-acquire.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-fft-acquire.py",
+      "path": "tools/triad-fft-acquire.py",
+      "sha256": "a5fd5c4033ef33d3c7a0d16798d2955831de5c91659dee5e829578630c5a51a1"
+    },
+    {
+      "bytes": 49190,
+      "member": "4193c6ed98b381e39e5733f76a7d32779af936d88e927cf1857ae23aafe6a01e/tools/triad-fp4-campaign.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-fp4-campaign.py",
+      "path": "tools/triad-fp4-campaign.py",
+      "sha256": "4193c6ed98b381e39e5733f76a7d32779af936d88e927cf1857ae23aafe6a01e"
+    },
+    {
+      "bytes": 10236,
+      "member": "9d43244e2850fae5334d45fa5280c79c5a3eac9f0b34095a73b1b14f576c2d0c/tools/triad-fp4-sweep.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-fp4-sweep.py",
+      "path": "tools/triad-fp4-sweep.py",
+      "sha256": "9d43244e2850fae5334d45fa5280c79c5a3eac9f0b34095a73b1b14f576c2d0c"
+    },
+    {
+      "bytes": 55490,
+      "member": "3c8922b14e4a340e46a4f6eee1a711b85e1fa6faa3d8b6fa8df4ff4bf39ff806/tools/triad-gpu-study.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-gpu-study.py",
+      "path": "tools/triad-gpu-study.py",
+      "sha256": "3c8922b14e4a340e46a4f6eee1a711b85e1fa6faa3d8b6fa8df4ff4bf39ff806"
+    },
+    {
+      "bytes": 13167,
+      "member": "74de2229a69acf7a6462d8f19a113a6f94de40a502b68e8ac9eda30c665cc9c2/tools/triad-link-budget.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-link-budget.py",
+      "path": "tools/triad-link-budget.py",
+      "sha256": "74de2229a69acf7a6462d8f19a113a6f94de40a502b68e8ac9eda30c665cc9c2"
+    },
+    {
+      "bytes": 193472,
+      "member": "9b852132edb2c4f53d4c218e73db1314653cd6213a78a49c776869af6dc68877/tools/triad-long.cpp",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-long.cpp",
+      "path": "tools/triad-long.cpp",
+      "sha256": "9b852132edb2c4f53d4c218e73db1314653cd6213a78a49c776869af6dc68877"
+    },
+    {
+      "bytes": 187368,
+      "member": "dbbdbfa055e7a93a86702ef571f45afa3c7040ed873cf993e4cae384b661b282/tools/triad-long.cpp",
+      "origin": "local-evidence/triad-performance-trace/reference-source/tools/triad-long.cpp",
+      "path": "tools/triad-long.cpp",
+      "sha256": "dbbdbfa055e7a93a86702ef571f45afa3c7040ed873cf993e4cae384b661b282"
+    },
+    {
+      "bytes": 21374,
+      "member": "5ab3dcc1f3c2b2e926f10e2a35315f2970507a308dd6631c895cf3de39807eb9/tools/triad-lowrate-campaign.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-lowrate-campaign.py",
+      "path": "tools/triad-lowrate-campaign.py",
+      "sha256": "5ab3dcc1f3c2b2e926f10e2a35315f2970507a308dd6631c895cf3de39807eb9"
+    },
+    {
+      "bytes": 28505,
+      "member": "5c0e0a0b78a725131854c38b86c215117860c4d4ca17470164ba710de4ff2213/tools/triad-noise-batch-study.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-noise-batch-study.py",
+      "path": "tools/triad-noise-batch-study.py",
+      "sha256": "5c0e0a0b78a725131854c38b86c215117860c4d4ca17470164ba710de4ff2213"
+    },
+    {
+      "bytes": 58366,
+      "member": "960040dc2a9a00910185a5b79f8af8c84410ffd3b8b7327256399543f396a621/tools/triad-noise-study.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-noise-study.py",
+      "path": "tools/triad-noise-study.py",
+      "sha256": "960040dc2a9a00910185a5b79f8af8c84410ffd3b8b7327256399543f396a621"
+    },
+    {
+      "bytes": 66341,
+      "member": "47ee069647c996df2a1011b048d4cc23b875fb94f73fccb1614128d833186d05/tools/triad-optimization-study.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-optimization-study.py",
+      "path": "tools/triad-optimization-study.py",
+      "sha256": "47ee069647c996df2a1011b048d4cc23b875fb94f73fccb1614128d833186d05"
+    },
+    {
+      "bytes": 40224,
+      "member": "fe941d71301007e281a9de369d74640af8482f8e72cde59ed56a37b1eab8d213/tools/triad-optimization-summary.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-optimization-summary.py",
+      "path": "tools/triad-optimization-summary.py",
+      "sha256": "fe941d71301007e281a9de369d74640af8482f8e72cde59ed56a37b1eab8d213"
+    },
+    {
+      "bytes": 23752,
+      "member": "2c57112f61bd377a521a1e3af85d2a31b4d165e5498411d77a4c759f9934340c/tools/triad-path-study.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-path-study.py",
+      "path": "tools/triad-path-study.py",
+      "sha256": "2c57112f61bd377a521a1e3af85d2a31b4d165e5498411d77a4c759f9934340c"
+    },
+    {
+      "bytes": 3186,
+      "member": "4fe9dfe1ea4f03ea2f2a276cac022597ebdb61dc1fb71c15056b6c6f79d03664/tools/triad-performance-cases.json",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-performance-cases.json",
+      "path": "tools/triad-performance-cases.json",
+      "sha256": "4fe9dfe1ea4f03ea2f2a276cac022597ebdb61dc1fb71c15056b6c6f79d03664"
+    },
+    {
+      "bytes": 84273,
+      "member": "59c2ed40efea3bcd141ecc4f08579770762d188018ceefb469bdb79ca9900f6a/tools/triad-performance-coverage.json",
+      "origin": "docs/validation-data/triad-v3/2026-11-03-performance-broader/coverage/native/native-coverage-001/coverage-matrix.json",
+      "path": "tools/triad-performance-coverage.json",
+      "sha256": "59c2ed40efea3bcd141ecc4f08579770762d188018ceefb469bdb79ca9900f6a"
+    },
+    {
+      "bytes": 82062,
+      "member": "8a77e682dfda43d1a5d63bd9c40a03e80da4044c6869ef47f36cb2e8542fc794/tools/triad-performance-coverage.json",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-performance-coverage.json",
+      "path": "tools/triad-performance-coverage.json",
+      "sha256": "8a77e682dfda43d1a5d63bd9c40a03e80da4044c6869ef47f36cb2e8542fc794"
+    },
+    {
+      "bytes": 11700,
+      "member": "44150970b2b4d9cbed85a058669cdaf6a8dc65f814a36d9f86c3238c2b7a5e6f/tools/triad-performance-families.json",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-performance-families.json",
+      "path": "tools/triad-performance-families.json",
+      "sha256": "44150970b2b4d9cbed85a058669cdaf6a8dc65f814a36d9f86c3238c2b7a5e6f"
+    },
+    {
+      "bytes": 1357,
+      "member": "482af707eedc09962b3253c2c146eb0e7204a6e6afcd2dc370f74165d4700de3/tools/triad-performance-lifecycle.json",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-performance-lifecycle.json",
+      "path": "tools/triad-performance-lifecycle.json",
+      "sha256": "482af707eedc09962b3253c2c146eb0e7204a6e6afcd2dc370f74165d4700de3"
+    },
+    {
+      "bytes": 7645,
+      "member": "f8d46beae40f2a52013279cdfdea811c6267be621a82431b612fb05708304a8f/tools/triad-performance-native-cases.json",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-performance-native-cases.json",
+      "path": "tools/triad-performance-native-cases.json",
+      "sha256": "f8d46beae40f2a52013279cdfdea811c6267be621a82431b612fb05708304a8f"
+    },
+    {
+      "bytes": 5033,
+      "member": "c67761c6bb61b8d17def9ef4251dc58240b71bf2e57151c52f343dfd874eeba9/tools/triad-performance-paths.json",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-performance-paths.json",
+      "path": "tools/triad-performance-paths.json",
+      "sha256": "c67761c6bb61b8d17def9ef4251dc58240b71bf2e57151c52f343dfd874eeba9"
+    },
+    {
+      "bytes": 3032,
+      "member": "a6b25a5c59a5597a353a3f8ea399228fc38aae28e43048e7c49fded5339ae3f0/tools/triad-performance-planner.json",
+      "origin": "local-evidence/triad-performance-broader/planner-build/source/tools/triad-performance-planner.json",
+      "path": "tools/triad-performance-planner.json",
+      "sha256": "a6b25a5c59a5597a353a3f8ea399228fc38aae28e43048e7c49fded5339ae3f0"
+    },
+    {
+      "bytes": 2076,
+      "member": "cb1bd17a71b342e407b93c1793e6ce6aab9cdc9225119818988a1aa6a1256abe/tools/triad-performance-planner.json",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-performance-planner.json",
+      "path": "tools/triad-performance-planner.json",
+      "sha256": "cb1bd17a71b342e407b93c1793e6ce6aab9cdc9225119818988a1aa6a1256abe"
+    },
+    {
+      "bytes": 1324,
+      "member": "27ffa4985dd347124fda80adeaa9d38d599d819da7f2fe4c7c3153dc81c8f2ce/tools/triad-performance-resource.json",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-performance-resource.json",
+      "path": "tools/triad-performance-resource.json",
+      "sha256": "27ffa4985dd347124fda80adeaa9d38d599d819da7f2fe4c7c3153dc81c8f2ce"
+    },
+    {
+      "bytes": 56899,
+      "member": "2f9378ff437cda7e329e2b5242f6bf0c5760c2c194545683b4c161a32669ca31/tools/triad-performance.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-performance.py",
+      "path": "tools/triad-performance.py",
+      "sha256": "2f9378ff437cda7e329e2b5242f6bf0c5760c2c194545683b4c161a32669ca31"
+    },
+    {
+      "bytes": 24139,
+      "member": "c548e62067473597ce9fd4dbbed28a35e07e3170b1804247a820eacad9cae1f5/tools/triad-phase-study.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-phase-study.py",
+      "path": "tools/triad-phase-study.py",
+      "sha256": "c548e62067473597ce9fd4dbbed28a35e07e3170b1804247a820eacad9cae1f5"
+    },
+    {
+      "bytes": 10974,
+      "member": "8ef529a1bc27385f20b44330ec99e71ee4001e74259c628c726093ce2a837672/tools/triad-planner-perf.cpp",
+      "origin": "local-evidence/triad-performance-broader/planner-build/source/tools/triad-planner-perf.cpp",
+      "path": "tools/triad-planner-perf.cpp",
+      "sha256": "8ef529a1bc27385f20b44330ec99e71ee4001e74259c628c726093ce2a837672"
+    },
+    {
+      "bytes": 8919,
+      "member": "bd23158caba3c863510679fe76f14b5062e9719eabd633a158f919d2b9964841/tools/triad-profile.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-profile.py",
+      "path": "tools/triad-profile.py",
+      "sha256": "bd23158caba3c863510679fe76f14b5062e9719eabd633a158f919d2b9964841"
+    },
+    {
+      "bytes": 22316,
+      "member": "ea3ca2acde8aea75538066e46e3ccae2e36612afac753db6b2d048bd6ff87dd2/tools/triad-ray-frequency-study.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-ray-frequency-study.py",
+      "path": "tools/triad-ray-frequency-study.py",
+      "sha256": "ea3ca2acde8aea75538066e46e3ccae2e36612afac753db6b2d048bd6ff87dd2"
+    },
+    {
+      "bytes": 15985,
+      "member": "f78632dc05ab8495cd6dc3ed052ed9040aceeb0a44344938d574ab215689bf0c/tools/triad-rbpf-benchmark.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-rbpf-benchmark.py",
+      "path": "tools/triad-rbpf-benchmark.py",
+      "sha256": "f78632dc05ab8495cd6dc3ed052ed9040aceeb0a44344938d574ab215689bf0c"
+    },
+    {
+      "bytes": 18277,
+      "member": "ed60ef2a77fa3ea3604f6db0a2b9f2e2834eebebf68d2b6fd639aedbc271a8a0/tools/triad-rbpf-convergence.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-rbpf-convergence.py",
+      "path": "tools/triad-rbpf-convergence.py",
+      "sha256": "ed60ef2a77fa3ea3604f6db0a2b9f2e2834eebebf68d2b6fd639aedbc271a8a0"
+    },
+    {
+      "bytes": 23900,
+      "member": "34a9797ed7119dcf6545b6be759b8f506cbdaf6ac9ece886b82fa699cd5d085f/tools/triad-rbpf-study.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-rbpf-study.py",
+      "path": "tools/triad-rbpf-study.py",
+      "sha256": "34a9797ed7119dcf6545b6be759b8f506cbdaf6ac9ece886b82fa699cd5d085f"
+    },
+    {
+      "bytes": 10584,
+      "member": "9b717113fac9124c977c07703ca4485d87bf564ae037b49c550ac6ae7765c893/tools/triad-reblock.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-reblock.py",
+      "path": "tools/triad-reblock.py",
+      "sha256": "9b717113fac9124c977c07703ca4485d87bf564ae037b49c550ac6ae7765c893"
+    },
+    {
+      "bytes": 33758,
+      "member": "410264ac9f779f932031f948de1a5c63939cc66894a03ed1faa6f3fdeb753d0e/tools/triad-resident-campaign.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-resident-campaign.py",
+      "path": "tools/triad-resident-campaign.py",
+      "sha256": "410264ac9f779f932031f948de1a5c63939cc66894a03ed1faa6f3fdeb753d0e"
+    },
+    {
+      "bytes": 13142,
+      "member": "5e7d4e775305d876427091180375082eb27f193f6ff37958f918362c3f9b764b/tools/triad-retained-energy.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-retained-energy.py",
+      "path": "tools/triad-retained-energy.py",
+      "sha256": "5e7d4e775305d876427091180375082eb27f193f6ff37958f918362c3f9b764b"
+    },
+    {
+      "bytes": 26389,
+      "member": "d3a40c39e0d05cbb49d0b98652513015e731969c484be54d2ef45cbac07cb799/tools/triad-sampling-refinement.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-sampling-refinement.py",
+      "path": "tools/triad-sampling-refinement.py",
+      "sha256": "d3a40c39e0d05cbb49d0b98652513015e731969c484be54d2ef45cbac07cb799"
+    },
+    {
+      "bytes": 11477,
+      "member": "c9c2ab61a37233b43887f594e0c871eb96e4f556cec086bce630faeb0fa45136/tools/triad-scan-workspace.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-scan-workspace.py",
+      "path": "tools/triad-scan-workspace.py",
+      "sha256": "c9c2ab61a37233b43887f594e0c871eb96e4f556cec086bce630faeb0fa45136"
+    },
+    {
+      "bytes": 16185,
+      "member": "922dbdf53b346ce5061029e6e17a82b1cbf4d04d0dfd73db655cc79e672503fa/tools/triad-state-campaign.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-state-campaign.py",
+      "path": "tools/triad-state-campaign.py",
+      "sha256": "922dbdf53b346ce5061029e6e17a82b1cbf4d04d0dfd73db655cc79e672503fa"
+    },
+    {
+      "bytes": 19643,
+      "member": "3fa7491ae93031ff6bfadc4c9b792659336999effc0508a71cf734ada9250402/tools/triad-state-study.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-state-study.py",
+      "path": "tools/triad-state-study.py",
+      "sha256": "3fa7491ae93031ff6bfadc4c9b792659336999effc0508a71cf734ada9250402"
+    },
+    {
+      "bytes": 26430,
+      "member": "d1b75e9b49de21041558e97ee1daff2ba07a1fd18a123bc8a6cb928f1052e11b/tools/triad-static-frequency-study.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-static-frequency-study.py",
+      "path": "tools/triad-static-frequency-study.py",
+      "sha256": "d1b75e9b49de21041558e97ee1daff2ba07a1fd18a123bc8a6cb928f1052e11b"
+    },
+    {
+      "bytes": 14590,
+      "member": "c236f9c6613e80e7786cc604002ad415c609781f8657c7bbb61b1409d4c8f65e/tools/triad-stream-study.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-stream-study.py",
+      "path": "tools/triad-stream-study.py",
+      "sha256": "c236f9c6613e80e7786cc604002ad415c609781f8657c7bbb61b1409d4c8f65e"
+    },
+    {
+      "bytes": 18623,
+      "member": "d96210f7408d0c02b717c384e2b9483a0c01ba9c04b1aca150e669a071394236/tools/triad-sufficient-study.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-sufficient-study.py",
+      "path": "tools/triad-sufficient-study.py",
+      "sha256": "d96210f7408d0c02b717c384e2b9483a0c01ba9c04b1aca150e669a071394236"
+    },
+    {
+      "bytes": 14335,
+      "member": "b29378f1138590bfa7541c063771127f27df46d436b04f45347ad86273213cc9/tools/triad-summary.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-summary.py",
+      "path": "tools/triad-summary.py",
+      "sha256": "b29378f1138590bfa7541c063771127f27df46d436b04f45347ad86273213cc9"
+    },
+    {
+      "bytes": 18052,
+      "member": "9219b186bd04a9963293201de1c2a4de1bb73955e9601eb74e7b06bbf745e5a6/tools/triad-tensor-diagnostics.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad-tensor-diagnostics.py",
+      "path": "tools/triad-tensor-diagnostics.py",
+      "sha256": "9219b186bd04a9963293201de1c2a4de1bb73955e9601eb74e7b06bbf745e5a6"
+    },
+    {
+      "bytes": 22062,
+      "member": "74eb4de89a674e325a6cb323d1df95c83d78681b68a71b67467a9bfedc5e5846/tools/triad_adc_bound.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_adc_bound.py",
+      "path": "tools/triad_adc_bound.py",
+      "sha256": "74eb4de89a674e325a6cb323d1df95c83d78681b68a71b67467a9bfedc5e5846"
+    },
+    {
+      "bytes": 15956,
+      "member": "f117d6be27d38d055f5ab65af2f850c038501badd16cb5f524b5388530218cf2/tools/triad_bounded_run.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_bounded_run.py",
+      "path": "tools/triad_bounded_run.py",
+      "sha256": "f117d6be27d38d055f5ab65af2f850c038501badd16cb5f524b5388530218cf2"
+    },
+    {
+      "bytes": 3951,
+      "member": "41216fa6282c648a2e1541c2cc1f8e93ccc73abe65fa2d32d140ee15f7251398/tools/triad_correlation_fusion.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_correlation_fusion.py",
+      "path": "tools/triad_correlation_fusion.py",
+      "sha256": "41216fa6282c648a2e1541c2cc1f8e93ccc73abe65fa2d32d140ee15f7251398"
+    },
+    {
+      "bytes": 20057,
+      "member": "e6ca43a136d9781b6c0d9883e72d2069302bcf5ef285e7f8c70137b9fe9e31cb/tools/triad_covariance_reference.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_covariance_reference.py",
+      "path": "tools/triad_covariance_reference.py",
+      "sha256": "e6ca43a136d9781b6c0d9883e72d2069302bcf5ef285e7f8c70137b9fe9e31cb"
+    },
+    {
+      "bytes": 17116,
+      "member": "bb4e1cbf161c5f4b5d9af151e995c357ef0444907d31c312a215c19b2b3a0c5b/tools/triad_coverage_bounds.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_coverage_bounds.py",
+      "path": "tools/triad_coverage_bounds.py",
+      "sha256": "bb4e1cbf161c5f4b5d9af151e995c357ef0444907d31c312a215c19b2b3a0c5b"
+    },
+    {
+      "bytes": 31265,
+      "member": "ae02b1f7d85e2d3f8c2c153000f530a411860ff443aeaf674abaa93cf60ab2d4/tools/triad_exhaustive_correlation.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_exhaustive_correlation.py",
+      "path": "tools/triad_exhaustive_correlation.py",
+      "sha256": "ae02b1f7d85e2d3f8c2c153000f530a411860ff443aeaf674abaa93cf60ab2d4"
+    },
+    {
+      "bytes": 16696,
+      "member": "f75225cc5c05a717d63ce52074a4e466cec35274cb921f77f53c4d95df808f26/tools/triad_factor_native_inputs.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_factor_native_inputs.py",
+      "path": "tools/triad_factor_native_inputs.py",
+      "sha256": "f75225cc5c05a717d63ce52074a4e466cec35274cb921f77f53c4d95df808f26"
+    },
+    {
+      "bytes": 36590,
+      "member": "d4a3c2cc39e0068e6aa6aab27d7ee8eeff6cc7db72a790868fe166c3f1d65843/tools/triad_fft_acquire.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_fft_acquire.py",
+      "path": "tools/triad_fft_acquire.py",
+      "sha256": "d4a3c2cc39e0068e6aa6aab27d7ee8eeff6cc7db72a790868fe166c3f1d65843"
+    },
+    {
+      "bytes": 30154,
+      "member": "e9a6811182c57b14d70604fc69894aa58e0c6227c10a6de2db5e5d127a567b3c/tools/triad_fp4_native.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_fp4_native.py",
+      "path": "tools/triad_fp4_native.py",
+      "sha256": "e9a6811182c57b14d70604fc69894aa58e0c6227c10a6de2db5e5d127a567b3c"
+    },
+    {
+      "bytes": 7069,
+      "member": "0f5861ffe646b8e892efdd1abcdcb54e4f168763c5feff1cda119f36ec1cc804/tools/triad_fp4_representation.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_fp4_representation.py",
+      "path": "tools/triad_fp4_representation.py",
+      "sha256": "0f5861ffe646b8e892efdd1abcdcb54e4f168763c5feff1cda119f36ec1cc804"
+    },
+    {
+      "bytes": 24355,
+      "member": "8910b3c64c2ea7072ef43e3e0c5d47ded6f8cbc903ac974162eb5ad285e1de23/tools/triad_gaussian_bounds.py",
+      "origin": "local-evidence/triad-performance-broader/planner-build/source/tools/triad_gaussian_bounds.py",
+      "path": "tools/triad_gaussian_bounds.py",
+      "sha256": "8910b3c64c2ea7072ef43e3e0c5d47ded6f8cbc903ac974162eb5ad285e1de23"
+    },
+    {
+      "bytes": 22456,
+      "member": "c88afdf459521393958c49d801517d79cd158cbe2291e4a48c3eff6931e42875/tools/triad_gaussian_prepared.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_gaussian_prepared.py",
+      "path": "tools/triad_gaussian_prepared.py",
+      "sha256": "c88afdf459521393958c49d801517d79cd158cbe2291e4a48c3eff6931e42875"
+    },
+    {
+      "bytes": 13539,
+      "member": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba/tools/triad_gaussian_state.py",
+      "origin": "local-evidence/triad-performance-broader/planner-build/source/tools/triad_gaussian_state.py",
+      "path": "tools/triad_gaussian_state.py",
+      "sha256": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba"
+    },
+    {
+      "bytes": 22325,
+      "member": "b22fe002864922e44bc7e10000672a163353818f610c4882bae5d62cfe1cf883/tools/triad_gaussian_window.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_gaussian_window.py",
+      "path": "tools/triad_gaussian_window.py",
+      "sha256": "b22fe002864922e44bc7e10000672a163353818f610c4882bae5d62cfe1cf883"
+    },
+    {
+      "bytes": 42989,
+      "member": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104/tools/triad_group_acquire.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_group_acquire.py",
+      "path": "tools/triad_group_acquire.py",
+      "sha256": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104"
+    },
+    {
+      "bytes": 23863,
+      "member": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110/tools/triad_noise_likelihood.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_noise_likelihood.py",
+      "path": "tools/triad_noise_likelihood.py",
+      "sha256": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110"
+    },
+    {
+      "bytes": 24754,
+      "member": "b6a1b25851a8cd98c76134aff90ad0fa980eb6f445ff003c722ad5185b7de202/tools/triad_perf_adaptive.py",
+      "origin": "local-evidence/triad-performance-broader/planner-build/source/tools/triad_perf_adaptive.py",
+      "path": "tools/triad_perf_adaptive.py",
+      "sha256": "b6a1b25851a8cd98c76134aff90ad0fa980eb6f445ff003c722ad5185b7de202"
+    },
+    {
+      "bytes": 18540,
+      "member": "3a45f599a3e2d93361a02b74285d2b56b90de3068a6d19cd49fb8092c578e14b/tools/triad_perf_cases.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_perf_cases.py",
+      "path": "tools/triad_perf_cases.py",
+      "sha256": "3a45f599a3e2d93361a02b74285d2b56b90de3068a6d19cd49fb8092c578e14b"
+    },
+    {
+      "bytes": 56643,
+      "member": "33afdca5d7e47769db5552befda0cfe9dc0746d2037c9539c093d99f16d40933/tools/triad_perf_complete.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_perf_complete.py",
+      "path": "tools/triad_perf_complete.py",
+      "sha256": "33afdca5d7e47769db5552befda0cfe9dc0746d2037c9539c093d99f16d40933"
+    },
+    {
+      "bytes": 23688,
+      "member": "ff89c20c950e8c422bf60ad91eea15b0fe7d4c3f3c656d26e959cf72b1ab3835/tools/triad_perf_conditional.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_perf_conditional.py",
+      "path": "tools/triad_perf_conditional.py",
+      "sha256": "ff89c20c950e8c422bf60ad91eea15b0fe7d4c3f3c656d26e959cf72b1ab3835"
+    },
+    {
+      "bytes": 26160,
+      "member": "9697a0742d8d1fd724e73c79bf8acce92c2d0861210124646b40868305f49330/tools/triad_perf_coverage.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_perf_coverage.py",
+      "path": "tools/triad_perf_coverage.py",
+      "sha256": "9697a0742d8d1fd724e73c79bf8acce92c2d0861210124646b40868305f49330"
+    },
+    {
+      "bytes": 27598,
+      "member": "3c25d2f12693354d3ae65fe3028dbf343bbb6525f9bf263817ee7cf469de188e/tools/triad_perf_decision_controls.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_perf_decision_controls.py",
+      "path": "tools/triad_perf_decision_controls.py",
+      "sha256": "3c25d2f12693354d3ae65fe3028dbf343bbb6525f9bf263817ee7cf469de188e"
+    },
+    {
+      "bytes": 12747,
+      "member": "69090ec3ec2a302ece7a3c20373b6ada3785be15425d07b9130055a2ccff065e/tools/triad_perf_decision_policy_controls.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_perf_decision_policy_controls.py",
+      "path": "tools/triad_perf_decision_policy_controls.py",
+      "sha256": "69090ec3ec2a302ece7a3c20373b6ada3785be15425d07b9130055a2ccff065e"
+    },
+    {
+      "bytes": 32918,
+      "member": "65b4bc78aab04b6a854853fe2c052900bd23c5cfc1527ebcfd0a4fe94e78d20f/tools/triad_perf_families.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_perf_families.py",
+      "path": "tools/triad_perf_families.py",
+      "sha256": "65b4bc78aab04b6a854853fe2c052900bd23c5cfc1527ebcfd0a4fe94e78d20f"
+    },
+    {
+      "bytes": 10479,
+      "member": "63b8d3cd6bd473208c9ff4fe3761dd7c1623c70ae12eefc53183dbeea2b4e95b/tools/triad_perf_family_group.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_perf_family_group.py",
+      "path": "tools/triad_perf_family_group.py",
+      "sha256": "63b8d3cd6bd473208c9ff4fe3761dd7c1623c70ae12eefc53183dbeea2b4e95b"
+    },
+    {
+      "bytes": 25212,
+      "member": "9763c4d57fbfdc35de7d7f8fa78b17b6d4608745f13d01a77c56f77acbfbe18e/tools/triad_perf_family_other.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_perf_family_other.py",
+      "path": "tools/triad_perf_family_other.py",
+      "sha256": "9763c4d57fbfdc35de7d7f8fa78b17b6d4608745f13d01a77c56f77acbfbe18e"
+    },
+    {
+      "bytes": 34388,
+      "member": "28d467b7c2261f0878bb2d4050129743c74f602c3f22d0c23e5f4cf6c990b4df/tools/triad_perf_family_regression.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_perf_family_regression.py",
+      "path": "tools/triad_perf_family_regression.py",
+      "sha256": "28d467b7c2261f0878bb2d4050129743c74f602c3f22d0c23e5f4cf6c990b4df"
+    },
+    {
+      "bytes": 7848,
+      "member": "67d750dd41c317b7cb810591de6f88585f7cd3191888e1c0d28ede49b3595c06/tools/triad_perf_family_state.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_perf_family_state.py",
+      "path": "tools/triad_perf_family_state.py",
+      "sha256": "67d750dd41c317b7cb810591de6f88585f7cd3191888e1c0d28ede49b3595c06"
+    },
+    {
+      "bytes": 19758,
+      "member": "b763ad4a3a96fdc4139e7a2961a120c40b3bf6f0b2a8d5f4bb677c6beea565e9/tools/triad_perf_fft_diagnostic.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_perf_fft_diagnostic.py",
+      "path": "tools/triad_perf_fft_diagnostic.py",
+      "sha256": "b763ad4a3a96fdc4139e7a2961a120c40b3bf6f0b2a8d5f4bb677c6beea565e9"
+    },
+    {
+      "bytes": 43877,
+      "member": "4d383b5722fe79e1b5c49c075944a9a0bcd3839a2e163b1f1a21a4cbce97013b/tools/triad_perf_fft_trace.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_perf_fft_trace.py",
+      "path": "tools/triad_perf_fft_trace.py",
+      "sha256": "4d383b5722fe79e1b5c49c075944a9a0bcd3839a2e163b1f1a21a4cbce97013b"
+    },
+    {
+      "bytes": 45961,
+      "member": "74718bc0791dda7ac7ea0b38b8fb79ab7bb1e41c649da9787f2a2645854706b3/tools/triad_perf_hardware.py",
+      "origin": "local-evidence/triad-performance-broader/planner-build/source/tools/triad_perf_hardware.py",
+      "path": "tools/triad_perf_hardware.py",
+      "sha256": "74718bc0791dda7ac7ea0b38b8fb79ab7bb1e41c649da9787f2a2645854706b3"
+    },
+    {
+      "bytes": 55044,
+      "member": "65db8bea552f79ffa1da8a5a3e58116225c4c822e8da7e77a9a386ab0680f46b/tools/triad_perf_identical_fft.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_perf_identical_fft.py",
+      "path": "tools/triad_perf_identical_fft.py",
+      "sha256": "65db8bea552f79ffa1da8a5a3e58116225c4c822e8da7e77a9a386ab0680f46b"
+    },
+    {
+      "bytes": 35861,
+      "member": "7dd04271a5cd405972f7c2d96447466e2a2aceffe5e2666de0d17ba8dcc4d1ff/tools/triad_perf_lifecycle.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_perf_lifecycle.py",
+      "path": "tools/triad_perf_lifecycle.py",
+      "sha256": "7dd04271a5cd405972f7c2d96447466e2a2aceffe5e2666de0d17ba8dcc4d1ff"
+    },
+    {
+      "bytes": 46126,
+      "member": "2fc046cff685d27fe50e279a3eeeb93798897e221bf72cca30493d6031391894/tools/triad_perf_native.py",
+      "origin": "local-evidence/triad-performance-broader/planner-build/source/tools/triad_perf_native.py",
+      "path": "tools/triad_perf_native.py",
+      "sha256": "2fc046cff685d27fe50e279a3eeeb93798897e221bf72cca30493d6031391894"
+    },
+    {
+      "bytes": 25795,
+      "member": "31e442c1381a2ce3037f6837605d24cad7c2874d6041d487bc5077c23d803699/tools/triad_perf_paths.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_perf_paths.py",
+      "path": "tools/triad_perf_paths.py",
+      "sha256": "31e442c1381a2ce3037f6837605d24cad7c2874d6041d487bc5077c23d803699"
+    },
+    {
+      "bytes": 33283,
+      "member": "10aa833eaedbbac2c2fe160723a84424b8cbfb04263bd22a09cb7ab180422ffb/tools/triad_perf_planner.py",
+      "origin": "local-evidence/triad-performance-broader/planner-build/source/tools/triad_perf_planner.py",
+      "path": "tools/triad_perf_planner.py",
+      "sha256": "10aa833eaedbbac2c2fe160723a84424b8cbfb04263bd22a09cb7ab180422ffb"
+    },
+    {
+      "bytes": 16837,
+      "member": "fc0da7c11e2795577b17cc3067fa9ca3b9083bace7fba57b2dccef4bcb6b5e86/tools/triad_perf_planner.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_perf_planner.py",
+      "path": "tools/triad_perf_planner.py",
+      "sha256": "fc0da7c11e2795577b17cc3067fa9ca3b9083bace7fba57b2dccef4bcb6b5e86"
+    },
+    {
+      "bytes": 21842,
+      "member": "24e4d6173f9ee5755979fc7e7cc827c537d650d9063ed0253e8659b8bb1d7e21/tools/triad_perf_python_coverage.py",
+      "origin": "tools/triad_perf_python_coverage.py",
+      "path": "tools/triad_perf_python_coverage.py",
+      "sha256": "24e4d6173f9ee5755979fc7e7cc827c537d650d9063ed0253e8659b8bb1d7e21"
+    },
+    {
+      "bytes": 21779,
+      "member": "f5cafed148d406230fbda2cd02ac2feb7f22edca268b0d9d08381db6357428bc/tools/triad_perf_python_coverage.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_perf_python_coverage.py",
+      "path": "tools/triad_perf_python_coverage.py",
+      "sha256": "f5cafed148d406230fbda2cd02ac2feb7f22edca268b0d9d08381db6357428bc"
+    },
+    {
+      "bytes": 16466,
+      "member": "fd2fd7109e9dfcd8fe984fc526995a65b4517335cf6d80428a749f13994fcb34/tools/triad_perf_receiver.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_perf_receiver.py",
+      "path": "tools/triad_perf_receiver.py",
+      "sha256": "fd2fd7109e9dfcd8fe984fc526995a65b4517335cf6d80428a749f13994fcb34"
+    },
+    {
+      "bytes": 34506,
+      "member": "986ec8798642f4572e598f88c6d8f97dd2478686677f2ec148f906958e102084/tools/triad_perf_resource.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_perf_resource.py",
+      "path": "tools/triad_perf_resource.py",
+      "sha256": "986ec8798642f4572e598f88c6d8f97dd2478686677f2ec148f906958e102084"
+    },
+    {
+      "bytes": 64432,
+      "member": "40e80b87b0147b52970ce062b3972e5ec1367d564e206bd8c2912031825846e1/tools/triad_perf_staged.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_perf_staged.py",
+      "path": "tools/triad_perf_staged.py",
+      "sha256": "40e80b87b0147b52970ce062b3972e5ec1367d564e206bd8c2912031825846e1"
+    },
+    {
+      "bytes": 23678,
+      "member": "64ce887c8c3af9144f1d94adc712fa784bbca17cfa86dcbfe1099dbb2efed64b/tools/triad_perf_statistics.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_perf_statistics.py",
+      "path": "tools/triad_perf_statistics.py",
+      "sha256": "64ce887c8c3af9144f1d94adc712fa784bbca17cfa86dcbfe1099dbb2efed64b"
+    },
+    {
+      "bytes": 36355,
+      "member": "c343626798c491fca1bedba2fac97a840177145e3e9a3f56fd5741cc938b5548/tools/triad_perf_sustained.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_perf_sustained.py",
+      "path": "tools/triad_perf_sustained.py",
+      "sha256": "c343626798c491fca1bedba2fac97a840177145e3e9a3f56fd5741cc938b5548"
+    },
+    {
+      "bytes": 11688,
+      "member": "3646802429c1762a661620382ff111f7629640f53e2c3ee015e50d56f6e7bc4b/tools/triad_perf_telemetry.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_perf_telemetry.py",
+      "path": "tools/triad_perf_telemetry.py",
+      "sha256": "3646802429c1762a661620382ff111f7629640f53e2c3ee015e50d56f6e7bc4b"
+    },
+    {
+      "bytes": 27838,
+      "member": "48ee569b1d467b2d7b6fd55088764bd28dd11e0bfecb5974622a318fbb408585/tools/triad_phase_frequency.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_phase_frequency.py",
+      "path": "tools/triad_phase_frequency.py",
+      "sha256": "48ee569b1d467b2d7b6fd55088764bd28dd11e0bfecb5974622a318fbb408585"
+    },
+    {
+      "bytes": 15051,
+      "member": "b599e9d7d6d27dc658879f1e636150c6eb0720db6e9ec1ca6d4dbda157f5d45d/tools/triad_phase_gpu_benchmark.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_phase_gpu_benchmark.py",
+      "path": "tools/triad_phase_gpu_benchmark.py",
+      "sha256": "b599e9d7d6d27dc658879f1e636150c6eb0720db6e9ec1ca6d4dbda157f5d45d"
+    },
+    {
+      "bytes": 19885,
+      "member": "759b46d536f2daa1d1de2336190ab19153376aca3eeca32847cba5289d2d63ed/tools/triad_phase_optimized.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_phase_optimized.py",
+      "path": "tools/triad_phase_optimized.py",
+      "sha256": "759b46d536f2daa1d1de2336190ab19153376aca3eeca32847cba5289d2d63ed"
+    },
+    {
+      "bytes": 15272,
+      "member": "03c65bdb3daf32fe87817ffad457e402180405132d1c5e154374594fb5f533d0/tools/triad_phase_prior_diagnostic.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_phase_prior_diagnostic.py",
+      "path": "tools/triad_phase_prior_diagnostic.py",
+      "sha256": "03c65bdb3daf32fe87817ffad457e402180405132d1c5e154374594fb5f533d0"
+    },
+    {
+      "bytes": 21111,
+      "member": "b2f762320fbff5a66fa88123711483f9c42721e1765e406b7699c434048ded98/tools/triad_phase_reduction.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_phase_reduction.py",
+      "path": "tools/triad_phase_reduction.py",
+      "sha256": "b2f762320fbff5a66fa88123711483f9c42721e1765e406b7699c434048ded98"
+    },
+    {
+      "bytes": 23317,
+      "member": "3b1a674ac7ace90ddce72c2773c2d1543bcfe8307d7b65ea965ad03a6525ffda/tools/triad_phase_tensor.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_phase_tensor.py",
+      "path": "tools/triad_phase_tensor.py",
+      "sha256": "3b1a674ac7ace90ddce72c2773c2d1543bcfe8307d7b65ea965ad03a6525ffda"
+    },
+    {
+      "bytes": 45742,
+      "member": "e53ee73bf511ee5a38c30a6e80d5985f30f0187a4b1604f7c57978d5dca3f801/tools/triad_precision_probe.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_precision_probe.py",
+      "path": "tools/triad_precision_probe.py",
+      "sha256": "e53ee73bf511ee5a38c30a6e80d5985f30f0187a4b1604f7c57978d5dca3f801"
+    },
+    {
+      "bytes": 12184,
+      "member": "13d37977620519aaeb457d4ed1163c80d68dca96c8319480de914cae8a6aaec8/tools/triad_prepared_observation.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_prepared_observation.py",
+      "path": "tools/triad_prepared_observation.py",
+      "sha256": "13d37977620519aaeb457d4ed1163c80d68dca96c8319480de914cae8a6aaec8"
+    },
+    {
+      "bytes": 24886,
+      "member": "d4b64c3a830acd3bd15433421da0e003ba1aa9810bf1dd904c57082d94c3bd54/tools/triad_rbpf.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_rbpf.py",
+      "path": "tools/triad_rbpf.py",
+      "sha256": "d4b64c3a830acd3bd15433421da0e003ba1aa9810bf1dd904c57082d94c3bd54"
+    },
+    {
+      "bytes": 25067,
+      "member": "bf0ecb596961951992d13f361150119e04cfb885b703497baa188f942f147dd7/tools/triad_scan_workspace.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_scan_workspace.py",
+      "path": "tools/triad_scan_workspace.py",
+      "sha256": "bf0ecb596961951992d13f361150119e04cfb885b703497baa188f942f147dd7"
+    },
+    {
+      "bytes": 25804,
+      "member": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923/tools/triad_state_workspace.py",
+      "origin": "local-evidence/triad-performance-broader/planner-build/source/tools/triad_state_workspace.py",
+      "path": "tools/triad_state_workspace.py",
+      "sha256": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923"
+    },
+    {
+      "bytes": 45550,
+      "member": "0ed9242733ae564aaadf7548a4391ac833aaffd27097e2a966c9931aab990c5e/tools/triad_tensor_native.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_tensor_native.py",
+      "path": "tools/triad_tensor_native.py",
+      "sha256": "0ed9242733ae564aaadf7548a4391ac833aaffd27097e2a966c9931aab990c5e"
+    },
+    {
+      "bytes": 15614,
+      "member": "90f701183d82c442559909076c424a31fb249566ce7c33dbecf7e04aa169eb84/tools/triad_tensor_probe.py",
+      "origin": "local-evidence/triad-performance-broader/gpu/historical-source-snapshot/tools/triad_tensor_probe.py",
+      "path": "tools/triad_tensor_probe.py",
+      "sha256": "90f701183d82c442559909076c424a31fb249566ce7c33dbecf7e04aa169eb84"
+    }
+  ],
+  "schema": "triad-broader-scientific-source-index-v1",
+  "scope": "Exact files bound by archived source/config identities, not a claim of transitive compiler or dynamic import closure."
+}

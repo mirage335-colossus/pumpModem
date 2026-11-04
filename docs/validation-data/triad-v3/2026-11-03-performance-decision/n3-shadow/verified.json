@@ -1,0 +1,19 @@
+{
+  "verified_cases": 20,
+  "operation_timer_sums": {
+    "old_default": 436.4846259627375,
+    "old_shadow": 290.92700811475515,
+    "new_observed": 408.8834693095996,
+    "new_shadow": 321.7841166554135
+  },
+  "new_omitted_operation_seconds": 87.09935265418608,
+  "cost_corrections": [
+    {
+      "case": "gaussian-multiblock",
+      "capture": "new",
+      "reported_seconds": 0.5085085386172463,
+      "recorded_multiplicity_seconds": 0.5569379232474603
+    }
+  ],
+  "no_receiver_or_timing_work_executed": true
+}

@@ -1,0 +1,24 @@
+{
+  "schema": "triad-decision-policy-controls-preservation-v1",
+  "source_members_sha256": {
+    "tools/triad_perf_decision_policy_controls.py": "b2b66694a5be473a9b878533147ab9252b3a45734a8dc7c8b4138e7006e93a55",
+    "tools/triad_perf_adaptive.py": "07e9e243e2e655b17887382712c7ff099855a07d6dc3985c03c430df2a113257",
+    "tools/triad_perf_decision_controls.py": "3c25d2f12693354d3ae65fe3028dbf343bbb6525f9bf263817ee7cf469de188e",
+    "tools/triad_perf_conditional.py": "ff89c20c950e8c422bf60ad91eea15b0fe7d4c3f3c656d26e959cf72b1ab3835",
+    "tools/triad-performance.py": "565e892bed7ffa55971efd9adf11b0377391975b67880f9ddbeed0700b9f1ba7",
+    "tests/test_triad_perf_decision_policy_controls.py": "aad30ccef43589764195cb367fecf8c906b7c69c550b50d849d1f39de1f75133"
+  },
+  "raw_result_sha256": "aedf88f3d8cd8cf3f34a6dd31a59613114763bf1b53beec49f7c8615a3ab809c",
+  "raw_plan_sha256": "735e837a17585cef2a71e66b18faa396daabb4f64fbc91b37db899e2a6e7fca0",
+  "source_scope": "All five sources declared in the frozen plan match byte for byte; test snapshot was preserved after the run. This compact archive is not a complete repository or dependency lock.",
+  "test_evidence": {
+    "command": "taskset -c 6,8 /tmp/triad-weak-env/bin/python -m unittest discover -s tests -p test_triad_perf_decision_policy_controls.py",
+    "tests_passed": 8,
+    "reported_seconds": 0.087,
+    "evidence_scope": "Prior native tool result in this task, not a new test run or stored stdout receipt."
+  },
+  "run_command": "timeout 60s taskset -c 6,8 /tmp/triad-weak-env/bin/python tools/triad_perf_decision_policy_controls.py --output local-evidence/triad-performance-complete/decision-policy-1000.json --trials 1000",
+  "exit_code": 0,
+  "log_scope": "The driver emits no routine stdout; the preserved log is empty. Completion, elapsed time and source checks are in the JSON result.",
+  "exclusions": "No receiver benchmarks, hardware qualification, real delay injection, or empirical residual replay was performed in this new run."
+}

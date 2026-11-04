@@ -467,9 +467,11 @@ def measure_native_case(reference_binary, candidate_binary, case, policy, *, thr
     Absent anchors leave abbreviated forecasts unqualified.
     """
     from triad_perf_adaptive import (MODEL_CONFIRMATION_CONFIDENCE, MODEL_CONFIRMATION_LOOKS,
-                                     model_confirmation_policy, summarize)
+                                     model_confirmation_policy, qualification_policy, summarize)
     if validation_mode not in ("qualify", "routine"):
         raise ValueError("unknown native anchor validation mode")
+    if validation_mode == "qualify" and policy.stopping_rule == "decision":
+        policy = qualification_policy(policy)
     if trace_candidate:
         raise ValueError("candidate-only trace clocks are for run_native diagnostics, outside paired timing")
     binaries = {"reference": Path(reference_binary), "candidate": Path(candidate_binary)}
@@ -524,6 +526,23 @@ def measure_native_case(reference_binary, candidate_binary, case, policy, *, thr
     sampling_started = time.monotonic()
     sampling_stop = None
     fit_instability = None
+    conditional_plan = None
+    readiness = None
+    decision_sampling = policy.stopping_rule == "decision"
+    if routine:
+        from triad_perf_conditional import (build_conditional_contract, check_conditional_sentinel,
+                                            conditional_gate_readiness, conditional_training_confidence)
+
+        applicability_key = digest({name: _measurement_identity(value) for name, value in identities.items()})
+        historical_ids = [f"{anchor['anchor_sha256']}:{hold['actual']['seed']}"
+                          for hold in anchor["full_holdouts"] if hold["source"] == "reference"]
+
+        def build_plan(summary):
+            return build_conditional_contract(anchor["log_errors"], values,
+                applicability_key=applicability_key, historical_anchor_ids=historical_ids,
+                training_pair_ids=[f"native-training:{1_000_000 + 1000*i}" for i in range(len(values["reference"]))],
+                timing_confidence=conditional_training_confidence(adjusted_policy, summary))
+
     reserve_count = 1 if routine else MODEL_CONFIRMATION_LOOKS[0]
     confirmation_plan = ({"initial_pair_wall_estimate_seconds": hold_pair_seconds, "reserved_full_pairs": reserve_count,
                           "scope": "reserve one independent full endpoint" if routine else
@@ -565,12 +584,24 @@ def measure_native_case(reference_binary, candidate_binary, case, policy, *, thr
                                 model_validation="direct_full" if direct else "unvalidated")
             looks.append(summary)
             sampling_stop = summary["stop_reason"]
+            if routine and decision_sampling:
+                conditional_plan = build_plan(summary)
+                readiness = conditional_gate_readiness(conditional_plan,
+                    summary["paired_candidate_over_reference"]["timing_mean_confidence_interval_seconds"],
+                    slowdown_threshold=policy.slowdown_threshold)
+                summary["conditional_readiness"] = readiness
+                if readiness["sentinel_feasible"] and readiness["provisional_gate"] in ("pass", "performance_regression"):
+                    sampling_stop = "conditional_decision_ready_for_endpoint"
+                    break
+                if readiness["provisional_gate"] == "unvalidated":
+                    sampling_stop = "historical_contract_unavailable"
+                    break
             if sampling_stop != "continue":
                 break
             if not direct and validation_duration is None:
                 sampling_stop = "historical_anchor_unavailable"
                 break
-            if (not direct and summary["paired_candidate_over_reference"]["model_adjusted_gate_interval"][0]
+            if (not direct and not decision_sampling and summary["paired_candidate_over_reference"]["model_adjusted_gate_interval"][0]
                     > policy.slowdown_threshold):
                 sampling_stop = "freeze_for_potential_regression_validation"
                 break
@@ -584,7 +615,6 @@ def measure_native_case(reference_binary, candidate_binary, case, policy, *, thr
     frozen = None
     qualification = None
     confirmation_stop = None
-    conditional_plan = None
     conditional_result = None
     conditional_bounds = None
     if not direct and fit_instability is None:
@@ -596,17 +626,12 @@ def measure_native_case(reference_binary, candidate_binary, case, policy, *, thr
                   "validation_plan": confirmation_plan,
                   "frozen_at_unix_seconds": time.time()}
         if routine:
-            from triad_perf_conditional import build_conditional_contract, check_conditional_sentinel
-
-            applicability_key = digest({name: _measurement_identity(value) for name, value in identities.items()})
-            conditional_plan = build_conditional_contract(anchor["log_errors"], values,
-                applicability_key=applicability_key,
-                historical_anchor_ids=[f"{anchor['anchor_sha256']}:{hold['actual']['seed']}"
-                                       for hold in anchor["full_holdouts"] if hold["source"] == "reference"],
-                training_pair_ids=[f"native-training:{1_000_000 + 1000*i}" for i in range(len(values["reference"]))],
-                timing_confidence=looks[-1]["policy"]["interval_confidence_per_look"])
+            if conditional_plan is None:
+                conditional_plan = build_plan(looks[-1])
             frozen["historical_anchor_sha256"] = anchor["anchor_sha256"]
             frozen["conditional_model"] = conditional_plan
+            if readiness is not None:
+                frozen["conditional_readiness"] = readiness
         frozen["sha256"] = digest(frozen)
         if freeze_callback:
             freeze_callback(frozen)
@@ -627,6 +652,13 @@ def measure_native_case(reference_binary, candidate_binary, case, policy, *, thr
                 conditional_result = {"status": confirmation_stop,
                                       "reason": conditional_plan["status"],
                                       "focused_qualification_required": True}
+            elif readiness is not None and not readiness["sentinel_feasible"]:
+                confirmation_stop = "inconclusive_training_uncertainty"
+                conditional_result = {"status": "inconclusive", "reason": confirmation_stop,
+                                      "timing_blockers": readiness["timing_blockers"]}
+            elif readiness is not None and readiness["provisional_gate"] == "inconclusive":
+                confirmation_stop = "decision_inconclusive_at_frozen_look"
+                conditional_result = {"status": "inconclusive", "reason": confirmation_stop}
             elif deadline is not None and time.monotonic() + 1.25*hold_pair_seconds >= deadline:
                 confirmation_stop = "budget_limit"
             else:
@@ -674,6 +706,8 @@ def measure_native_case(reference_binary, candidate_binary, case, policy, *, thr
                           paired_model_log_errors=evidence["paired"])
         if final["performance_gate"] != "performance_regression":
             final["stop_reason"] = sampling_stop
+        if readiness is not None:
+            final["conditional_readiness"] = readiness
         looks[-1] = final
     else:
         state = "invalid"

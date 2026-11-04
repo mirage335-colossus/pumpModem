@@ -1,0 +1,259 @@
+{
+  "records": [
+    {
+      "archive": "records/blackwell-identical-cost-001/invocation.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/blackwell-identical-cost-001/invocation.json",
+      "raw_bytes": 839,
+      "raw_sha256": "6117db23f34a1918e182ea52a2b5dc6f3d16368df51499de6cdeb7872d586dcf",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/blackwell-identical-cost-001/manifest-diff.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/blackwell-identical-cost-001/manifest-diff.json",
+      "raw_bytes": 4903,
+      "raw_sha256": "7f82cb53354fbd00a8dc249cc43c32f310dbad1b675202676ac24a67dde960b3",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/blackwell-identical-cost-001/run.py.gz",
+      "input_path": "local-evidence/triad-performance-broader/blackwell-identical-cost-001/run.py",
+      "raw_bytes": 10427,
+      "raw_sha256": "68940bb276baa378eb0b35e2c72539946213f01d16d99fd7d9dd625ef71ae19e"
+    },
+    {
+      "archive": "records/gpu/final-routine/blackwell-identical-cost-001/abbreviated/candidate.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/blackwell-identical-cost-001/abbreviated/candidate.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "embedded_in": "records/gpu/final-routine/blackwell-identical-cost-001/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/blackwell-identical-cost-001/abbreviated/cost-receipt.json",
+      "json_path": [
+        "arms",
+        "abbreviated"
+      ],
+      "raw_bytes": 2467,
+      "raw_sha256": "08273017ad31cff5414821428bc7d77c8b51c675dc7572f00d6f6078acaf0495"
+    },
+    {
+      "embedded_in": "records/gpu/final-routine/blackwell-identical-cost-001/abbreviated/measurement/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/blackwell-identical-cost-001/abbreviated/measurement/forecast.json",
+      "json_path": [
+        "frozen"
+      ],
+      "raw_bytes": 1452,
+      "raw_sha256": "0dca8207a961ecbfc834663c53ce7e4761e257187c408aa0b45fa25e415721d5"
+    },
+    {
+      "archive": "records/gpu/final-routine/blackwell-identical-cost-001/abbreviated/measurement/observations.jsonl.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/blackwell-identical-cost-001/abbreviated/measurement/observations.jsonl",
+      "raw_bytes": 385239,
+      "raw_sha256": "6b523a98a3f213fba311e79f9b50ff9f286ff8d2c6a623b18aca5bf0948afd52"
+    },
+    {
+      "archive": "records/gpu/final-routine/blackwell-identical-cost-001/abbreviated/measurement/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/blackwell-identical-cost-001/abbreviated/measurement/result.json",
+      "raw_bytes": 680372,
+      "raw_sha256": "33399c8f6284a291cbcecdc129ef8b629f33858f86aa5c08578554ca2c807af3",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/gpu/final-routine/blackwell-identical-cost-001/abbreviated/precision-qualification.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/blackwell-identical-cost-001/abbreviated/precision-qualification.json",
+      "raw_bytes": 1713,
+      "raw_sha256": "b72cf66e5b04d6b739dfac2721f63af63c74e158cd992a147cf3e75f75626868",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/gpu/final-routine/blackwell-identical-cost-001/abbreviated/candidate.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/blackwell-identical-cost-001/abbreviated/reference.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/gpu/final-routine/blackwell-identical-cost-001/case.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/blackwell-identical-cost-001/case.json",
+      "raw_bytes": 40122,
+      "raw_sha256": "e6d4dbfa35a03c382993a4e5433054b75cfb116c972c71ca57dbbae782db75f3",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/gpu/final-routine/blackwell-identical-cost-001/abbreviated/candidate.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/blackwell-identical-cost-001/direct/candidate.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "embedded_in": "records/gpu/final-routine/blackwell-identical-cost-001/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/blackwell-identical-cost-001/direct/cost-receipt.json",
+      "json_path": [
+        "arms",
+        "direct"
+      ],
+      "raw_bytes": 2493,
+      "raw_sha256": "bc6d4d845cf302b41bc9ad1454f89295df0ab281415f564b203f36eb78f8af7c"
+    },
+    {
+      "embedded_in": "records/gpu/final-routine/blackwell-identical-cost-001/direct/measurement/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/blackwell-identical-cost-001/direct/measurement/forecast.json",
+      "json_path": [
+        "frozen"
+      ],
+      "raw_bytes": 1019,
+      "raw_sha256": "47eb17f68e6e3e1e38849210455cad5812592439c4da19078eb8a69094315a9f"
+    },
+    {
+      "archive": "records/gpu/final-routine/blackwell-identical-cost-001/direct/measurement/observations.jsonl.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/blackwell-identical-cost-001/direct/measurement/observations.jsonl",
+      "raw_bytes": 504897,
+      "raw_sha256": "abb2a702152372025576ece954bec0707bb2bffc22e1faa416952f2b9fa12ca6"
+    },
+    {
+      "archive": "records/gpu/final-routine/blackwell-identical-cost-001/direct/measurement/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/blackwell-identical-cost-001/direct/measurement/result.json",
+      "raw_bytes": 1003161,
+      "raw_sha256": "6b79c1798e4d0c7f85e6a7c37e5fd184d2fd0e554f106b9d8f6a279fa47f0a30",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/gpu/final-routine/blackwell-identical-cost-001/direct/precision-qualification.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/blackwell-identical-cost-001/direct/precision-qualification.json",
+      "raw_bytes": 1714,
+      "raw_sha256": "726fbb7937e6c5485576156ad1f0a3e23bd03f1b4bc33dbb2e594c4b76108758",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/gpu/final-routine/blackwell-identical-cost-001/abbreviated/candidate.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/blackwell-identical-cost-001/direct/reference.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/gpu/final-routine/blackwell-identical-cost-001/plan.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/blackwell-identical-cost-001/plan.json",
+      "raw_bytes": 4831,
+      "raw_sha256": "2552e079f5ea6de79d8921fa05ee13fafc55a49806d27f7955c16fc378860ce8",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/gpu/final-routine/blackwell-identical-cost-001/abbreviated/candidate.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/blackwell-identical-cost-001/qualification/candidate.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "embedded_in": "records/gpu/final-routine/blackwell-identical-cost-001/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/blackwell-identical-cost-001/qualification/cost-receipt.json",
+      "json_path": [
+        "qualification"
+      ],
+      "raw_bytes": 750,
+      "raw_sha256": "094026fdecb3a0f007983d04298722d3e1814cff0846019fdf9665cc788ed7f5"
+    },
+    {
+      "embedded_in": "records/gpu/final-routine/blackwell-identical-cost-001/qualification/measurement/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/blackwell-identical-cost-001/qualification/measurement/forecast.json",
+      "json_path": [
+        "frozen"
+      ],
+      "raw_bytes": 1136,
+      "raw_sha256": "37f47b83099434faed60a5b0cd03f783fd6bf267b2f8c6edfa086b2933f7ec4e"
+    },
+    {
+      "archive": "records/gpu/final-routine/blackwell-identical-cost-001/qualification/measurement/observations.jsonl.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/blackwell-identical-cost-001/qualification/measurement/observations.jsonl",
+      "raw_bytes": 546109,
+      "raw_sha256": "e24c4af6b41ce85f7488649907f785b8bab7f4db2210b543166aac4d1691541e"
+    },
+    {
+      "archive": "records/gpu/final-routine/blackwell-identical-cost-001/qualification/measurement/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/blackwell-identical-cost-001/qualification/measurement/result.json",
+      "raw_bytes": 802415,
+      "raw_sha256": "2e8e6328238db35fb789c841bf8d0e72222f68a8c5a356c07608cbd405a73ef8",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/gpu/final-routine/blackwell-identical-cost-001/qualification/precision-qualification.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/blackwell-identical-cost-001/qualification/precision-qualification.json",
+      "raw_bytes": 1714,
+      "raw_sha256": "14d2681007ec4621bdede2ae50e035eebb026c293cd10bcd23a774b0c764e4f1",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/gpu/final-routine/blackwell-identical-cost-001/abbreviated/candidate.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/blackwell-identical-cost-001/qualification/reference.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/gpu/final-routine/blackwell-identical-cost-001/qualification/measurement/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/blackwell-identical-cost-001/same-hardware-anchor.json",
+      "raw_bytes": 802415,
+      "raw_sha256": "2e8e6328238db35fb789c841bf8d0e72222f68a8c5a356c07608cbd405a73ef8",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/gpu/final-routine/blackwell-identical-cost-001/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/blackwell-identical-cost-001/summary.json",
+      "raw_bytes": 7114,
+      "raw_sha256": "46416ecdd75e6be5ff43745ff87e117e72eab05f93d79a8cbcdc17a81e712643",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/gpu/final-routine/triad-performance-fixtures/triad-physical-fixtures/broad-hf-timing/b220df4f187da55c0b8b8767cd394db67fa0b2fc7151835496f558dea34104b0/fixture.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/triad-performance-fixtures/triad-physical-fixtures/broad-hf-timing/b220df4f187da55c0b8b8767cd394db67fa0b2fc7151835496f558dea34104b0/fixture.json",
+      "raw_bytes": 17033,
+      "raw_sha256": "7cde3b4dafa335867b5ace6407f6f174997f455a6e7d24922dc0b66be60845e1",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/gpu/final-routine/triad-performance-fixtures/triad-physical-fixtures/broad-hf-timing/b220df4f187da55c0b8b8767cd394db67fa0b2fc7151835496f558dea34104b0/workspace/manifest.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/triad-performance-fixtures/triad-physical-fixtures/broad-hf-timing/b220df4f187da55c0b8b8767cd394db67fa0b2fc7151835496f558dea34104b0/workspace/manifest.json",
+      "raw_bytes": 23812,
+      "raw_sha256": "dc0ef309b69ea80d8d0197f6db716a052351b9e09f6cef4bdd8f46a9241ad254"
+    },
+    {
+      "archive": "records/gpu/final-routine/triad-performance-fixtures/triad-physical-fixtures/free-crystal/e978cbff057117f908ba9ae7f72777f7b210f2890d6a627bae0752f470d92f33/fixture.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/triad-performance-fixtures/triad-physical-fixtures/free-crystal/e978cbff057117f908ba9ae7f72777f7b210f2890d6a627bae0752f470d92f33/fixture.json",
+      "raw_bytes": 17020,
+      "raw_sha256": "3bd58b42732d222d34b0d25ecbd427fb315fdb977b4fc5956ea349bd5f0bd8ce",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/gpu/final-routine/triad-performance-fixtures/triad-physical-fixtures/free-crystal/e978cbff057117f908ba9ae7f72777f7b210f2890d6a627bae0752f470d92f33/workspace/manifest.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/triad-performance-fixtures/triad-physical-fixtures/free-crystal/e978cbff057117f908ba9ae7f72777f7b210f2890d6a627bae0752f470d92f33/workspace/manifest.json",
+      "raw_bytes": 23432,
+      "raw_sha256": "d80576f4bbb3ad1e0d2c0add7c080663e2e9ec95fb0e2a281e41ba57e814a5c6"
+    },
+    {
+      "archive": "records/gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/broad-hf-timing/b220df4f187da55c0b8b8767cd394db67fa0b2fc7151835496f558dea34104b0/fixture.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/broad-hf-timing/b220df4f187da55c0b8b8767cd394db67fa0b2fc7151835496f558dea34104b0/fixture.json",
+      "raw_bytes": 17033,
+      "raw_sha256": "d11551d5390075a84ea306d128b6503b27db992a6d10a8578d7b843d0584a6f8",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/broad-hf-timing/b220df4f187da55c0b8b8767cd394db67fa0b2fc7151835496f558dea34104b0/workspace/manifest.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/broad-hf-timing/b220df4f187da55c0b8b8767cd394db67fa0b2fc7151835496f558dea34104b0/workspace/manifest.json",
+      "raw_bytes": 23846,
+      "raw_sha256": "730e06b6ae96d26c285e3439c661c53a6f61d84f0dd874e3d7d916f03395eea0"
+    },
+    {
+      "archive": "records/gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/free-crystal/e978cbff057117f908ba9ae7f72777f7b210f2890d6a627bae0752f470d92f33/fixture.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/free-crystal/e978cbff057117f908ba9ae7f72777f7b210f2890d6a627bae0752f470d92f33/fixture.json",
+      "raw_bytes": 17020,
+      "raw_sha256": "563222fe89f0abc70eb6b84ac96ac6601013c48d0bde588d831bc02d567301e3",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/free-crystal/e978cbff057117f908ba9ae7f72777f7b210f2890d6a627bae0752f470d92f33/workspace/manifest.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/free-crystal/e978cbff057117f908ba9ae7f72777f7b210f2890d6a627bae0752f470d92f33/workspace/manifest.json",
+      "raw_bytes": 23457,
+      "raw_sha256": "c218b81bb87347e4f4d08f6e39a77a21afc252f16f11eabfdfcc022ccf77ff60"
+    }
+  ],
+  "schema": "triad-completed-evidence-archive-v1",
+  "scope": "Completed original records only; arrays, binaries and later-derived conclusions are not substituted.",
+  "storage": "Exact original byte count/SHA256 retained. Identified compact JSON or embedded values reconstruct with indent=2 and trailing newline; other files are exact gzip payloads with zero mtime and empty filename."
+}

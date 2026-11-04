@@ -7,7 +7,7 @@ separate input and never shrinks when more timing repetitions are collected.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import math
 import statistics
 from typing import Iterable
@@ -79,8 +79,15 @@ class AdaptivePolicy:
     alpha: float = 0.05
     slowdown_threshold: float = 1.30
     model_allowance_log: float = 0.0
+    # Keep the historical qualification protocol as the default so old
+    # source-bound proof replay does not acquire a different stopping rule.
+    stopping_rule: str = "precision"
+    pass_alpha: float | None = None
+    failure_alpha: float | None = None
 
     def __post_init__(self) -> None:
+        if self.stopping_rule not in ("precision", "decision"):
+            raise ValueError("stopping_rule must be precision or decision")
         if not math.isfinite(self.relative_precision) or not 0. < self.relative_precision < 1.:
             raise ValueError("relative_precision must lie strictly between zero and one")
         if (not isinstance(self.looks, tuple) or not self.looks or
@@ -91,10 +98,39 @@ class AdaptivePolicy:
             raise ValueError("family_count must be a positive integer")
         if not math.isfinite(self.alpha) or not 0. < self.alpha < 1.:
             raise ValueError("alpha must lie strictly between zero and one")
+        for name in ("pass_alpha", "failure_alpha"):
+            value = getattr(self, name)
+            if value is not None and (not math.isfinite(value) or not 0. < value < .5):
+                raise ValueError(f"{name} must lie strictly between zero and one half")
         if not math.isfinite(self.slowdown_threshold) or self.slowdown_threshold <= 1.:
             raise ValueError("slowdown_threshold must be finite and greater than one")
         if not math.isfinite(self.model_allowance_log) or self.model_allowance_log < 0.:
             raise ValueError("model_allowance_log must be finite and nonnegative")
+
+    @property
+    def pass_error_budget(self) -> float:
+        return self.alpha if self.pass_alpha is None else self.pass_alpha
+
+    @property
+    def failure_error_budget(self) -> float:
+        return self.alpha if self.failure_alpha is None else self.failure_alpha
+
+
+def regression_profile(name: str) -> dict[str, float]:
+    """Resolve routine inference controls without changing model qualification."""
+    profiles = {"normal": (.15, 1.30), "ci": (.30, 1.70), "strict": (.05, 1.30)}
+    if name not in profiles:
+        raise ValueError("regression profile must be normal, ci or strict")
+    pass_alpha, threshold = profiles[name]
+    return {"pass_alpha": pass_alpha, "failure_alpha": .05, "slowdown_threshold": threshold}
+
+
+def qualification_policy(policy: AdaptivePolicy) -> AdaptivePolicy:
+    """Retain the original inference protocol when an automatic route qualifies."""
+    threshold = (1.30 if policy.pass_alpha is not None or policy.failure_alpha is not None
+                 else policy.slowdown_threshold)
+    return replace(policy, stopping_rule="precision", pass_alpha=None, failure_alpha=None,
+                   slowdown_threshold=threshold)
 
 
 def next_look(sample_count: int, policy: AdaptivePolicy) -> int | None:
@@ -233,10 +269,23 @@ def summarize(reference_seconds: Iterable[float], candidate_seconds: Iterable[fl
     interval_confidence = 1. - interval_alpha
     gate_alpha = interval_alpha
     gate_confidence = interval_confidence
+    if policy.stopping_rule == "decision":
+        # Each direction has its own per-test error ledger. An upper
+        # endpoint is a one-sided (1-alpha/L) bound; the displayed pair is
+        # NOT a simultaneous 95% two-sided or whole-suite interval.
+        gate_alpha = policy.failure_error_budget / len(policy.looks)
+        gate_confidence = 1. - 2. * gate_alpha
     ref_mean = _log_interval(np.log(ref), interval_confidence)
     cand_mean = _log_interval(np.log(cand), interval_confidence)
     log_ratio = np.log(cand) - np.log(ref)
     pair_mean = _log_interval(log_ratio, gate_confidence)
+    if policy.stopping_rule == "decision" and policy.pass_error_budget != policy.failure_error_budget:
+        upper = _log_interval(log_ratio, 1. - 2. * policy.pass_error_budget / len(policy.looks))
+        for key in ("timing_mean_confidence_interval_seconds", "future_execution_prediction_interval_seconds"):
+            pair_mean[key][1] = upper[key][1]
+        point = pair_mean["point_seconds"]
+        low, high = pair_mean["timing_mean_confidence_interval_seconds"]
+        pair_mean["relative_timing_half_width"] = max(high / point - 1., 1. - low / point)
     ref_model_bound = max(policy.model_allowance_log,
                           float(np.max(np.abs(ref_errors))) if ref_errors.size else 0.)
     cand_model_bound = max(policy.model_allowance_log,
@@ -267,6 +316,12 @@ def summarize(reference_seconds: Iterable[float], candidate_seconds: Iterable[fl
         gate = "inconclusive"
     if gate == "performance_regression":
         stop_reason = "performance_regression"
+    elif policy.stopping_rule == "decision" and gate == "pass":
+        stop_reason = "regression_decision_reached"
+    elif policy.stopping_rule == "decision" and count == policy.looks[-1]:
+        stop_reason = "maximum_samples"
+    elif policy.stopping_rule == "decision":
+        stop_reason = "continue"
     elif precision_reached:
         stop_reason = "precision_reached"
     elif count == policy.looks[-1]:
@@ -274,7 +329,7 @@ def summarize(reference_seconds: Iterable[float], candidate_seconds: Iterable[fl
     else:
         stop_reason = "continue"
 
-    return {
+    result = {
         "schema": "triad-performance-adaptive-v1",
         "sample_count": count,
         "next_look": next_look(count, policy),
@@ -337,4 +392,48 @@ def summarize(reference_seconds: Iterable[float], candidate_seconds: Iterable[fl
             "bounded_model_error_assumption_verified_for_future_runs": False,
         },
     }
+    if policy.stopping_rule == "decision":
+        result["schema"] = "triad-performance-adaptive-decision-v2"
+        result["policy"].update(stopping_rule="decision", per_test_directional_alpha=policy.alpha,
+                                one_sided_confidence_across_looks=1. - policy.alpha)
+        result["policy"]["alpha_allocation"].update(
+            gate_reuses_paired_timing_interval=False,
+            gate_per_direction_per_test_look=gate_alpha,
+            gate_per_direction_total_across_looks=policy.alpha,
+            gate_case_multiplicity_adjustment=False)
+        del result["policy"]["alpha_allocation"]["three_timing_intervals_total_across_all_looks_and_families"]
+        result["policy"]["alpha_allocation"]["reference_candidate_diagnostic_intervals_total"] = 2. * policy.alpha / 3.
+        result["paired_candidate_over_reference"].update(
+            estimand="ratio of geometric mean full-workload runtimes",
+            one_sided_lower_bound=pair_gate[0], one_sided_upper_bound=pair_gate[1],
+            timing_only_one_sided_bounds=pair_mean["timing_mean_confidence_interval_seconds"],
+            mean_runtime_not_individual_execution=True)
+        result["inference"].update(
+            simultaneous_family_scope="reference/candidate timing diagnostics retain their legacy conservative allocation; the paired decision has a separate per-test directional ledger",
+            regression_scope="each test separately: one-sided upper bounds spend alpha across fixed looks; lower bounds use a separate directional ledger",
+            simultaneous_95_percent_suite_or_two_sided_claim=False,
+            confidence_includes_unverified_model_error=False,
+            regression_interval_is_conditional_on_model_envelope=model_validation != "direct_full",
+            timing_width_is_diagnostic_only=True)
+        if policy.pass_alpha is not None or policy.failure_alpha is not None:
+            result["policy"].pop("per_test_directional_alpha", None)
+            result["policy"].pop("one_sided_confidence_across_looks", None)
+            result["policy"].pop("gate_confidence_per_look", None)
+            result["policy"].update(pass_alpha=policy.pass_error_budget,
+                                    failure_alpha=policy.failure_error_budget,
+                                    pass_one_sided_confidence_across_looks=1. - policy.pass_error_budget,
+                                    failure_one_sided_confidence_across_looks=1. - policy.failure_error_budget,
+                                    pass_one_sided_confidence_per_look=1. - policy.pass_error_budget / len(policy.looks),
+                                    failure_one_sided_confidence_per_look=1. - policy.failure_error_budget / len(policy.looks))
+            ledger = result["policy"]["alpha_allocation"]
+            ledger.pop("gate_per_direction_per_test_look", None)
+            ledger.pop("gate_per_direction_total_across_looks", None)
+            ledger.update(gate_pass_per_test_look=policy.pass_error_budget / len(policy.looks),
+                          gate_failure_per_test_look=policy.failure_error_budget / len(policy.looks),
+                          gate_pass_total_across_looks=policy.pass_error_budget,
+                          gate_failure_total_across_looks=policy.failure_error_budget)
+            result["paired_candidate_over_reference"].update(
+                upper_confidence_across_looks=1. - policy.pass_error_budget,
+                lower_confidence_across_looks=1. - policy.failure_error_budget)
+    return result
 

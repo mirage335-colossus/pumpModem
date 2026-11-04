@@ -1,0 +1,14 @@
+{
+  "records": [
+    {
+      "archive": "records/gpu/final-routine/fhss-derived-ci-assessment.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/fhss-derived-ci-assessment.json",
+      "raw_bytes": 1113,
+      "raw_sha256": "85c5e76e3c74283da685904dd654ef1161a9956ad6ad7ba9f8fd4e5ed42076cc",
+      "storage": "compact_json_reformatted_indent2_newline"
+    }
+  ],
+  "schema": "triad-completed-evidence-archive-v1",
+  "scope": "Completed original records only; arrays, binaries and later-derived conclusions are not substituted.",
+  "storage": "Exact original byte count/SHA256 retained. Identified compact JSON or embedded values reconstruct with indent=2 and trailing newline; other files are exact gzip payloads with zero mtime and empty filename."
+}

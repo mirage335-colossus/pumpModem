@@ -11,10 +11,80 @@ from triad_perf_adaptive import (AdaptivePolicy, MODEL_CONFIRMATION_ALPHA,
                                  MODEL_CONFIRMATION_FAMILY_ALPHA,
                                  MODEL_CONFIRMATION_LOOKS, MODEL_CONFIRMATION_PER_LOOK_ALPHA,
                                  MODEL_CONFIRMATION_POLICY, model_confirmation_policy,
-                                 next_look, qualify_log_residuals, summarize)
+                                 next_look, qualification_policy, qualify_log_residuals,
+                                 regression_profile, summarize)
 
 
 class AdaptivePrecisionTests(unittest.TestCase):
+    def test_profiles_separate_acceptance_risk_from_failure_and_model_guards(self):
+        for name, pass_alpha, threshold in (("normal", .15, 1.30), ("ci", .30, 1.70), ("strict", .05, 1.30)):
+            policy = AdaptivePolicy(stopping_rule="decision", **regression_profile(name))
+            self.assertEqual(policy.alpha, .05)
+            self.assertEqual(policy.pass_error_budget, pass_alpha)
+            self.assertEqual(policy.failure_error_budget, .05)
+            self.assertEqual(policy.slowdown_threshold, threshold)
+            result = summarize([10.]*5, [10.]*5, policy, model_validation="direct_full")
+            self.assertEqual(result["policy"]["alpha_allocation"]["gate_pass_total_across_looks"], pass_alpha)
+            self.assertEqual(result["policy"]["alpha_allocation"]["gate_failure_total_across_looks"], .05)
+            original = qualification_policy(policy)
+            self.assertEqual(summarize([10.]*5, [10.]*5, original, model_validation="direct_full"),
+                             summarize([10.]*5, [10.]*5, AdaptivePolicy(), model_validation="direct_full"))
+        with self.assertRaises(ValueError):
+            regression_profile("unknown")
+
+    def test_profile_gates_near_both_slowdown_thresholds(self):
+        for name, threshold in (("normal", 1.30), ("ci", 1.70), ("strict", 1.30)):
+            policy = AdaptivePolicy(stopping_rule="decision", **regression_profile(name))
+            for ratio, expected in ((threshold-.01, "pass"), (threshold+.01, "performance_regression")):
+                result = summarize([10.]*5, [10.*ratio]*5, policy, model_validation="direct_full")
+                self.assertEqual(result["performance_gate"], expected)
+            uncertain = summarize([10.]*5, [10.*threshold*x for x in (.98, .99, 1., 1.01, 1.02)],
+                                  policy, model_validation="direct_full")
+            self.assertEqual(uncertain["performance_gate"], "inconclusive")
+
+    def test_relaxing_pass_budget_preserves_strict_failure_bound(self):
+        reference = [10.]*5
+        candidate = [10.*v for v in (.95, .98, 1., 1.02, 1.05)]
+        results = {name: summarize(reference, candidate,
+            AdaptivePolicy(stopping_rule="decision", **regression_profile(name)), model_validation="direct_full")
+            for name in ("strict", "normal", "ci")}
+        bounds = {name: row["paired_candidate_over_reference"]["timing_only_one_sided_bounds"]
+                  for name, row in results.items()}
+        self.assertEqual(bounds["strict"][0], bounds["normal"][0])
+        self.assertEqual(bounds["normal"][0], bounds["ci"][0])
+        self.assertGreater(bounds["strict"][1], bounds["normal"][1])
+        self.assertGreater(bounds["normal"][1], bounds["ci"][1])
+        from triad_perf_conditional import conditional_training_confidence
+        guards = [conditional_training_confidence(
+            AdaptivePolicy(stopping_rule="decision", **regression_profile(name)), results[name])
+            for name in ("strict", "normal", "ci")]
+        self.assertEqual(guards, [guards[0]]*3)
+
+    def test_decision_stops_on_paired_pass_despite_wide_runtime_intervals(self):
+        values = [8., 9., 10., 11., 12.]
+        policy = AdaptivePolicy(stopping_rule="decision", family_count=23)
+        result = summarize(values, values, policy, model_validation="direct_full")
+        self.assertFalse(result["timing_precision_reached"])
+        self.assertEqual(result["stop_reason"], "regression_decision_reached")
+        self.assertEqual(result["performance_gate"], "pass")
+        self.assertAlmostEqual(result["policy"]["alpha_allocation"]["gate_per_direction_per_test_look"], .0125)
+        self.assertFalse(result["inference"]["simultaneous_95_percent_suite_or_two_sided_claim"])
+
+    def test_decision_is_per_test_and_does_not_stop_on_width(self):
+        reference = [10.] * 5
+        candidate = [12.9, 13.1, 13., 12.95, 13.05]
+        result = summarize(reference, candidate, AdaptivePolicy(stopping_rule="decision"), model_validation="direct_full")
+        many = summarize(reference, candidate, AdaptivePolicy(stopping_rule="decision", family_count=100), model_validation="direct_full")
+        self.assertTrue(result["timing_precision_reached"])
+        self.assertEqual(result["stop_reason"], "continue")
+        self.assertEqual(result["paired_candidate_over_reference"], many["paired_candidate_over_reference"])
+
+    def test_decision_unvalidated_model_never_passes(self):
+        result = summarize([1.] * 5, [1.] * 5, AdaptivePolicy(stopping_rule="decision"))
+        self.assertEqual(result["performance_gate"], "unvalidated")
+        self.assertEqual(result["stop_reason"], "continue")
+        self.assertTrue(result["inference"]["regression_interval_is_conditional_on_model_envelope"])
+
     def test_model_confirmation_policy_is_frozen_and_json_reportable(self):
         policy = model_confirmation_policy()
         self.assertIs(policy, MODEL_CONFIRMATION_POLICY)

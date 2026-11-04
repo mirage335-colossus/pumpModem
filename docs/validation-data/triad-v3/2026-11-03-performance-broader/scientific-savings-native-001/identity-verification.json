@@ -1,0 +1,19 @@
+{
+  "binaries": [
+    {
+      "bytes": 599920,
+      "observed_sha256": "9cdf82f396d9be9a7d11b66b45b254e5f18b3857f27b08aed58430dce6d8ea47",
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-trace/reference-triad_long-gcc142",
+      "recorded_sha256": "9cdf82f396d9be9a7d11b66b45b254e5f18b3857f27b08aed58430dce6d8ea47",
+      "side": "reference"
+    },
+    {
+      "bytes": 608112,
+      "observed_sha256": "862b0431f04a3973ce15e7cff9b9959ed45ca36d626e401352db5cf8630c9c6b",
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/triad_long",
+      "recorded_sha256": "862b0431f04a3973ce15e7cff9b9959ed45ca36d626e401352db5cf8630c9c6b",
+      "side": "candidate"
+    }
+  ],
+  "scope": "Archive-time read-only binary byte checks; no experiment execution"
+}

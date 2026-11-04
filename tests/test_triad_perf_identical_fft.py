@@ -16,7 +16,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 import triad_perf_identical_fft as study
-from triad_perf_adaptive import AdaptivePolicy
+from triad_perf_adaptive import AdaptivePolicy, regression_profile
 
 spec = importlib.util.spec_from_file_location("identical_test_api", ROOT / "tools/triad-performance.py")
 api = importlib.util.module_from_spec(spec); spec.loader.exec_module(api)
@@ -64,13 +64,100 @@ class Worker:
                 "relaxed": {"accepted": False, "bit": 1}, "rank_histogram": [0, 0, 0, 0, groups]}
 
 
-def run(directory, *, mode="qualify", history=None, workers=None, target=64):
+def run(directory, *, mode="qualify", history=None, workers=None, target=64, projection=None):
     workers = workers or {name: Worker(target=target) for name in study.SOURCES}
-    return study.measure_identical_fft(case(target), workers, "fp32", "cpu", policy=AdaptivePolicy(),
-        api=api, deadline=None, output=directory, mode=mode, historical=history, maximum_holds=3)
+    return study.measure_identical_fft(case(target), workers, "fp32", "cpu",
+        policy=AdaptivePolicy(stopping_rule="decision" if mode == "reuse" else "precision"),
+        api=api, deadline=None, output=directory, mode=mode, historical=history, maximum_holds=3,
+        reporting_projection=projection)
 
 
 class IdenticalTests(unittest.TestCase):
+    def test_profiles_keep_absolute_failure_budget_and_thresholds(self):
+        noisy = [9.6, 9.85, 10., 10.15, 10.4]
+        upper = {}
+        lower = {}
+        for name in ("strict", "normal", "ci"):
+            policy = AdaptivePolicy(stopping_rule="decision", **regression_profile(name))
+            for ratio, expected in ((policy.slowdown_threshold-.01, "pass"),
+                                    (policy.slowdown_threshold+.01, "performance_regression")):
+                result = study.routine_decision([10.*ratio]*5, [10.]*3, policy)
+                self.assertEqual(result["comparison"]["gate"], expected)
+            comparison = study.routine_decision(noisy, [10.]*3, policy)["comparison"]
+            self.assertEqual(comparison["upper_ledger"]["family_alpha"], policy.pass_error_budget)
+            self.assertEqual(comparison["lower_ledger"]["family_alpha"], .05)
+            lower[name], upper[name] = comparison["full_time_ratio_interval"]
+        self.assertEqual(lower["strict"], lower["normal"])
+        self.assertEqual(lower["normal"], lower["ci"])
+        self.assertGreater(upper["strict"], upper["normal"])
+        self.assertGreater(upper["normal"], upper["ci"])
+
+    def test_routine_decision_is_per_test_one_sided_not_width_target(self):
+        values = [9.6, 9.85, 10., 10.15, 10.4]
+        policy = AdaptivePolicy(stopping_rule="decision", family_count=14)
+        result = study.routine_decision(values, [10., 10., 10., 999., 999.], policy,
+                                       model_log_allowance=math.log1p(.10))
+        self.assertEqual(result["stop_reason"], "decision_pass")
+        self.assertGreater(result["relative_timing_half_width"], .05)
+        comparison = result["comparison"]
+        self.assertEqual(comparison["per_test_one_sided_confidence"], .95)
+        self.assertEqual(comparison["historical_full_seconds_used"], [10., 10., 10.])
+        self.assertAlmostEqual(comparison["upper_ledger"]["historical_fixed_alpha"]+
+                               len(policy.looks)*comparison["upper_ledger"]["current_per_look_alpha"], .05)
+        self.assertFalse(result["paired_observations_constructed"])
+        self.assertEqual(comparison, study.routine_decision(values, [10.]*3,
+            AdaptivePolicy(stopping_rule="decision", family_count=1), model_log_allowance=math.log1p(.10))["comparison"])
+
+    def test_routine_near_threshold_stays_inconclusive(self):
+        policy = AdaptivePolicy(stopping_rule="decision")
+        for factor, gate in [(1.29, "pass"), (1.31, "performance_regression")]:
+            result = study.routine_decision([10*factor]*5, [10.]*3, policy)
+            self.assertEqual(result["comparison"]["gate"], gate)
+        near = study.routine_decision([12.9*v for v in [.96, .985, 1., 1.015, 1.04]], [10.]*3, policy)
+        self.assertEqual(near["comparison"]["gate"], "inconclusive")
+        self.assertEqual(near["stop_reason"], "continue")
+
+    def test_routine_measurement_stops_before_five_percent_width(self):
+        class JitterWorker(Worker):
+            prepares = 0
+            def request(self, request):
+                if request["action"] == "prepare":
+                    self.factor = [.96, .985, 1., 1.015, 1.04][self.prepares % 5]
+                    self.prepares += 1
+                return super().request(request)
+        with tempfile.TemporaryDirectory() as tmp:
+            history = run(Path(tmp)/"qual")
+            result = run(Path(tmp)/"reuse", mode="reuse", history=history,
+                         workers={name: JitterWorker() for name in study.SOURCES})
+        self.assertEqual(len(result["training"]), 5)
+        self.assertGreater(result["adaptive"]["relative_timing_half_width"], .05)
+        self.assertEqual(result["comparison"]["gate"], "pass")
+        self.assertTrue(result["prediction_valid"])
+
+    def test_reviewed_projection_preserves_proof_and_rejects_changed_work(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workers = {name: Worker() for name in study.SOURCES}
+            for worker in workers.values():
+                worker.audit["measurement_files"]["triad_perf_identical_fft.py"] = "0"*64
+            record = run(Path(tmp)/"qual", workers=workers)
+        original = copy.deepcopy(record)
+        identity = copy.deepcopy(record["identity"])
+        identity["runtime"]["measurement_files"]["triad_perf_identical_fft.py"] = "1"*64
+        projection = {"schema": "triad-identical-fft-reporting-projection-v1", "reviewed_reporting_only": True,
+            "unchanged_measurement_core": study.measurement_core_hashes(),
+            "measurement_files": {"triad_perf_identical_fft.py": {"historical_sha256": "0"*64,
+                                                                "current_sha256": "1"*64}}}
+        self.assertFalse(study.historical_applicability(record, identity)["compatible"])
+        self.assertTrue(study.historical_applicability(record, identity, projection)["compatible"])
+        self.assertEqual(record, original)
+        for field in ("repository_modules", "controls", "numerical_modules"):
+            changed = copy.deepcopy(identity); changed["runtime"][field]["changed"] = True
+            self.assertFalse(study.historical_applicability(record, changed, projection)["compatible"])
+        changed = copy.deepcopy(identity); changed["geometry"]["lags"] += 1
+        self.assertFalse(study.historical_applicability(record, changed, projection)["compatible"])
+        changed = copy.deepcopy(projection); changed["unchanged_measurement_core"][next(iter(changed["unchanged_measurement_core"]))] = "changed"
+        self.assertFalse(study.historical_applicability(record, identity, changed)["compatible"])
+
     def test_actual_module_origins_exempt_only_pinned_harness(self):
         fake_torch = SimpleNamespace(__file__=sys.executable, __version__="test",
             get_num_threads=lambda: 2, get_num_interop_threads=lambda: 2,

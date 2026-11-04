@@ -1,0 +1,64 @@
+{
+  "files": [
+    {
+      "bytes": 802415,
+      "path": "local-evidence/triad-performance-broader/gpu/final-routine/blackwell-identical-cost-001/same-hardware-anchor.json",
+      "sha256": "2e8e6328238db35fb789c841bf8d0e72222f68a8c5a356c07608cbd405a73ef8"
+    },
+    {
+      "bytes": 17020,
+      "path": "local-evidence/triad-performance-broader/gpu/final-routine/triad-performance-fixtures/triad-physical-fixtures/free-crystal/e978cbff057117f908ba9ae7f72777f7b210f2890d6a627bae0752f470d92f33/fixture.json",
+      "sha256": "3bd58b42732d222d34b0d25ecbd427fb315fdb977b4fc5956ea349bd5f0bd8ce"
+    },
+    {
+      "bytes": 23432,
+      "path": "local-evidence/triad-performance-broader/gpu/final-routine/triad-performance-fixtures/triad-physical-fixtures/free-crystal/e978cbff057117f908ba9ae7f72777f7b210f2890d6a627bae0752f470d92f33/workspace/manifest.json",
+      "sha256": "d80576f4bbb3ad1e0d2c0add7c080663e2e9ec95fb0e2a281e41ba57e814a5c6"
+    },
+    {
+      "bytes": 66075,
+      "path": "local-evidence/triad-performance-broader/gpu/legacy/legacy-anchors/cuda/1793764120402602191-700ad521a6ec37f0.anchor.json",
+      "sha256": "01ae08bb5e92070c332da3a2f1022de16a9abe2268444066db21de272a5112e2"
+    },
+    {
+      "bytes": 17033,
+      "path": "local-evidence/triad-performance-broader/gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/broad-hf-timing/b220df4f187da55c0b8b8767cd394db67fa0b2fc7151835496f558dea34104b0/fixture.json",
+      "sha256": "d11551d5390075a84ea306d128b6503b27db992a6d10a8578d7b843d0584a6f8"
+    },
+    {
+      "bytes": 23846,
+      "path": "local-evidence/triad-performance-broader/gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/broad-hf-timing/b220df4f187da55c0b8b8767cd394db67fa0b2fc7151835496f558dea34104b0/workspace/manifest.json",
+      "sha256": "730e06b6ae96d26c285e3439c661c53a6f61d84f0dd874e3d7d916f03395eea0"
+    },
+    {
+      "bytes": 17853,
+      "path": "local-evidence/triad-performance-broader/gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/hf30-fhss-missed/724b5c52e981c67503d580480d01bfe4562fb799f0916f8e122d425396fac8ab/fixture.json",
+      "sha256": "9274b80cd72446328fa332b1df3085b70685d55110ea4e62d375a4f524e74e30"
+    },
+    {
+      "bytes": 23746,
+      "path": "local-evidence/triad-performance-broader/gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/hf30-fhss-missed/724b5c52e981c67503d580480d01bfe4562fb799f0916f8e122d425396fac8ab/workspace/manifest.json",
+      "sha256": "71277bbbf5d2cc12839ddf8a09e4879fb2461c4876b838d3435884911eb47847"
+    },
+    {
+      "bytes": 17056,
+      "path": "local-evidence/triad-performance-broader/gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/narrow-hf-tight/da59c5cd0c871fb082a91f27f10436d18ff3d10f15e0c53d7e4ed0f36c8920f5/fixture.json",
+      "sha256": "1c994fe39f9ac3febbf164ea7e8fdd295bbdc229f4602341bb6a21dafe9764d2"
+    },
+    {
+      "bytes": 23872,
+      "path": "local-evidence/triad-performance-broader/gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/narrow-hf-tight/da59c5cd0c871fb082a91f27f10436d18ff3d10f15e0c53d7e4ed0f36c8920f5/workspace/manifest.json",
+      "sha256": "e893adf7f81a161412454b0f66e31ae562f274baf8861acdba4ba0d2d2b48131"
+    },
+    {
+      "bytes": 17263,
+      "path": "local-evidence/triad-performance-broader/gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/vlf-850-day/0701229e4d19b8fbd9670cbda4bc779b9f2c086b19fd5a227210935735055fe8/fixture.json",
+      "sha256": "594584fbf67985d20fce2135e700bdb07de8245b5e5826dccbaf5af475c66e4d"
+    },
+    {
+      "bytes": 23987,
+      "path": "local-evidence/triad-performance-broader/gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/vlf-850-day/0701229e4d19b8fbd9670cbda4bc779b9f2c086b19fd5a227210935735055fe8/workspace/manifest.json",
+      "sha256": "62b458ace71c292fe55692a3bc2ac07c3cc562d05960043f2cb51ce4e273330d"
+    }
+  ]
+}

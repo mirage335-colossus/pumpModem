@@ -1,0 +1,26 @@
+{
+  "records": [
+    {
+      "bundle": "../scientific-cpu-complete-001",
+      "record": {
+        "archive": "records/cpu-complete-001/native-fft.json.gz",
+        "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/native-fft.json",
+        "raw_bytes": 7337936,
+        "raw_sha256": "69fc068b85ad6277ad9bdc6b6d93afc50a48659b8a664a012c044d68c1f6a1cf",
+        "storage": "compact_json_reformatted_indent2_newline"
+      },
+      "scope": "prior health/measurement context only; no new hardware-health pass"
+    },
+    {
+      "bundle": "../scientific-gpu-complete-002",
+      "record": {
+        "archive": "records/complete-routine-002/native-fft.json.gz",
+        "input_path": "local-evidence/triad-performance-broader/gpu/final-routine/complete-routine-002/native-fft.json",
+        "raw_bytes": 13597090,
+        "raw_sha256": "ae8c3669f98e33c13cd177ecc252376cb21a3d18815ecfa3b64f6f8df4eab8f0",
+        "storage": "compact_json_reformatted_indent2_newline"
+      },
+      "scope": "prior health/measurement context only; no new hardware-health pass"
+    }
+  ]
+}

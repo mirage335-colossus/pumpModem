@@ -159,6 +159,15 @@ explicit budget. Full simulation, resident receiver, startup and sustained
 throughput are different timing targets. Missing coverage or an unqualified
 prediction stays visible even when functional checks pass. Do not repeat the
 historical sensitivity campaigns as routine performance tests.
+Routine sampling defaults to a per-test one-sided 85% decision that rules out
+more than 30% slowdown. The explicit CI profile uses 70% confidence at a 70%
+slowdown threshold; both retain 5% false-regression error. Runtime interval
+width is diagnostic. The routine target is 25 minutes. Stop when that
+decision and the applicable model checks resolve. Preserve the original
+qualification evidence instead of rerunning it to satisfy a diagnostic width.
+The [current measured routine](validation-data/triad-v3/2026-11-03-performance-decision/README.md)
+took 12 minutes 21 seconds for all 23 CPU gates; the remaining scope gaps are
+listed separately.
 
 **Selective-model version warning:** the detailed 2026-11-02 selective
 campaign used `legacy-allpass-v1`. Its receiver results remain valid for that

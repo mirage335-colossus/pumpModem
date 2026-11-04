@@ -12,7 +12,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT/"tools"))
 import triad_perf_families as sample
-from triad_perf_adaptive import AdaptivePolicy
+from triad_perf_adaptive import AdaptivePolicy, regression_profile
 import triad_perf_staged as staged
 
 
@@ -37,6 +37,23 @@ def native_receipt(profile, seed, n, seconds):
 
 
 class StagedTests(unittest.TestCase):
+    def test_profile_directional_decisions_preserve_model_guard(self):
+        for name in ("normal", "ci", "strict"):
+            policy = AdaptivePolicy(looks=(3, 5), stopping_rule="decision", **regression_profile(name))
+            threshold = policy.slowdown_threshold
+            factor = 1+staged.CONDITIONAL_FLOOR
+            cases = ((threshold/factor-.01, "pass"), (threshold/factor+.01, "inconclusive"),
+                     (threshold*factor-.01, "inconclusive"), (threshold*factor+.01, "performance_regression"))
+            for ratio, expected in cases:
+                rows = [{"reference": {"predicted_seconds": 1.},
+                         "candidate": {"predicted_seconds": ratio}} for _ in range(5)]
+                _, decision = staged._decision_timing(rows, rows, {"generation": 3, "receiver": 5}, policy)
+                self.assertEqual(decision["provisional_gate"], expected)
+                self.assertEqual(decision["pass_alpha_per_margin_and_look"]*4*len(policy.looks),
+                                 policy.pass_error_budget)
+                self.assertEqual(decision["failure_alpha_per_margin_and_look"]*4*len(policy.looks), .05)
+                self.assertEqual(staged.training_policy(policy)["alpha"], .05)
+
     def test_compose_arithmetic_means_and_shared_uncertainty_once(self):
         gen = {"reference": [1., 2., 9., 4.], "candidate": [1., 2., 9., 4.]}
         rx = {"reference": [2., 3., 4., 5.], "candidate": [2., 3., 4., 5.]}
@@ -55,6 +72,20 @@ class StagedTests(unittest.TestCase):
         self.assertAlmostEqual(interval["mean"], 2.)
         self.assertAlmostEqual(interval["interval"][0], 2.)
         self.assertAlmostEqual(interval["interval"][1], 2.)
+
+    def test_directional_arithmetic_decision_separates_model_allowance(self):
+        counts = {"generation": 3, "receiver": 5}
+        policy = AdaptivePolicy(looks=(3, 5), family_count=12, stopping_rule="decision")
+        for ratio, expected in ((.95, "pass"), (1.17, "pass"), (1.30, "inconclusive"),
+                                (1.45, "performance_regression")):
+            rows = [{"reference": {"predicted_seconds": 1.},
+                     "candidate": {"predicted_seconds": ratio}} for _ in range(5)]
+            _, decision = staged._decision_timing(rows, rows, counts, policy)
+            self.assertEqual(decision["provisional_gate"], expected)
+            self.assertEqual(decision["timing_only_one_sided_confidence_across_looks"], .95)
+            self.assertEqual(decision["per_direction_alpha_per_margin_and_look"], .05/8)
+            self.assertAlmostEqual(decision["timing_only_one_sided_bounds"][1], max(1., ratio))
+            self.assertFalse(decision["confidence_includes_unverified_model_error"])
 
     def test_full_generation_slowdown_cannot_hide_in_unchanged_pipeline(self):
         full = [{"reference": endpoint(3.5, 1.5), "candidate": endpoint(4.5, .5)} for _ in range(3)]
@@ -192,9 +223,34 @@ class StagedTests(unittest.TestCase):
             self.assertEqual(result["status"], "validated")
             second = Calibration(12)
             anchor = directory/"qualify/result.json"
-            reused = staged.staged_case(second, case, profile, directory/"reuse", policy=policy, mode="reuse", anchor=anchor)
+            routine_policy = AdaptivePolicy(looks=(3, 5), family_count=2, stopping_rule="decision")
+            reused = staged.staged_case(second, case, profile, directory/"reuse", policy=routine_policy,
+                                        mode="reuse", anchor=anchor)
             self.assertEqual(second.full_calls, 1)
             self.assertEqual(reused["status"], "historically_supported_conditional")
+            self.assertEqual(reused["comparison"]["gate"], "pass")
+            self.assertEqual(reused["frozen"]["timing_schedule"], [{"generation": 3, "receiver": 3}])
+            self.assertEqual(reused["frozen"]["routine_refinement_stop"]["reason"],
+                             "provisional_decision_ready_for_full_endpoint")
+
+            class InconclusiveCalibration(Calibration):
+                def receiver_pair(self, group, case, index):
+                    pair = super().receiver_pair(group, case, index)
+                    row = endpoint(3.5, 2.5)
+                    pair["candidate"] = {**row, "predicted_seconds": 2.5,
+                                         "target_work": sample.complete_work_signature(row)}
+                    return pair
+
+            uncertain = InconclusiveCalibration(13)
+            unresolved = staged.staged_case(uncertain, case, profile, directory/"inconclusive",
+                                            policy=routine_policy, mode="reuse", anchor=anchor)
+            self.assertEqual(uncertain.full_calls, 0)
+            self.assertEqual(unresolved["status"], "unqualified")
+            self.assertEqual(unresolved["comparison"]["gate"], "inconclusive")
+            self.assertFalse(unresolved["prediction_valid"])
+            self.assertEqual(unresolved["frozen"]["timing_schedule"][-1], {"generation": 5, "receiver": 5})
+            self.assertEqual(unresolved["confirmation_stop_reason"],
+                             "frozen_decision_unresolved_or_endpoint_infeasible")
 
             def rehash_and_refuse(mutate, name):
                 changed = copy.deepcopy(result)
@@ -243,6 +299,8 @@ class StagedTests(unittest.TestCase):
 
             legacy_split = copy.deepcopy(result)
             legacy_split["identity"]["measurement_dependencies"][driver] = staged.LEGACY_SPLIT_DRIVER_SHA256
+            for name, (previous, _) in staged.REVIEWED_ROUTINE_DEPENDENCIES.items():
+                legacy_split["identity"]["measurement_dependencies"][name] = previous
             frozen = legacy_split["frozen"]
             frozen.pop("commitment_sha256")
             frozen["identity_sha256"] = sample.digest(legacy_split["identity"])
@@ -253,8 +311,38 @@ class StagedTests(unittest.TestCase):
             sample.write_json(path, legacy_split)
             old = staged._historical(path, result["identity"])
             self.assertEqual(old["source_applicability"]["method"], "9f_routine_effort_only")
+            self.assertEqual(set(old["source_applicability"]["reviewed_routine_dependency_transitions"]),
+                             set(staged.REVIEWED_ROUTINE_DEPENDENCIES))
             changed_identity = {**result["identity"], "native_threads": 3}
             self.assertIsNone(staged._historical(path, changed_identity))
+            changed_dependencies = dict(result["identity"]["measurement_dependencies"],
+                                        **{"triad-performance.py": "unreviewed"})
+            self.assertIsNone(staged._historical(path, {**result["identity"],
+                                                       "measurement_dependencies": changed_dependencies}))
+
+            decision_prior = copy.deepcopy(result)
+            decision_prior["identity"]["measurement_dependencies"][driver] = staged.LEGACY_DECISION_DRIVER_SHA256
+            decision_prior["identity"]["measurement_dependencies"].update(staged.REVIEWED_DECISION_DEPENDENCIES)
+            frozen = decision_prior["frozen"]
+            frozen.pop("commitment_sha256")
+            frozen["identity_sha256"] = sample.digest(decision_prior["identity"])
+            frozen["commitment_sha256"] = sample.digest(frozen)
+            decision_prior.pop("record_sha256")
+            decision_prior["record_sha256"] = sample.digest(decision_prior)
+            decision_path = directory/"decision-prior.json"
+            sample.write_json(decision_path, decision_prior)
+            prior = staged._historical(decision_path, result["identity"])
+            self.assertEqual(prior["source_applicability"]["method"], "4395_regression_profile_only")
+            profile_identity = copy.deepcopy(result["identity"])
+            profile_identity["measurement_dependencies"][driver] = staged.LEGACY_PROFILE_DRIVER_SHA256
+            profile_identity["measurement_dependencies"].update(staged.REVIEWED_PROFILE_DEPENDENCIES)
+            mapping = staged._history_source_applicability(profile_identity, result["identity"])
+            self.assertEqual(mapping["method"], "40e_explicit_native_route_only")
+            direct_identity = copy.deepcopy(result["identity"])
+            direct_identity["measurement_dependencies"][driver] = staged.LEGACY_NATIVE_DIRECT_DRIVER_SHA256
+            direct_identity["measurement_dependencies"].update(staged.REVIEWED_NATIVE_DIRECT_DEPENDENCIES)
+            mapping = staged._history_source_applicability(direct_identity, result["identity"])
+            self.assertEqual(mapping["method"], "114_fixture_cache_and_arithmetic_policy_only")
 
             class ExhaustedCalibration(Calibration):
                 def receiver_pair(self, group, case, index):
@@ -281,6 +369,14 @@ class StagedTests(unittest.TestCase):
             self.assertEqual(len(stopped["generation_calibration"]), 3)
             self.assertEqual(exhausted.full_calls, 1)
             self.assertEqual(stopped["status"], "unqualified")
+            exhausted_decision = ExhaustedCalibration(16)
+            skipped = staged.staged_case(exhausted_decision, case, profile, directory/"capped-decision",
+                policy=routine_policy, mode="reuse", anchor=anchor)
+            self.assertEqual(skipped["frozen"]["timing_schedule"][-1], {"generation": 3, "receiver": 5})
+            self.assertEqual(skipped["frozen"]["routine_refinement_stop"]["reason"],
+                             "capped_stage_precludes_conditional_endpoint")
+            self.assertEqual(exhausted_decision.full_calls, 0)
+            self.assertEqual(skipped["status"], "unqualified")
 
 
 if __name__ == "__main__":

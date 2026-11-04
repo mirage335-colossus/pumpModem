@@ -1,0 +1,176 @@
+{
+  "plan_file_sha256": "5ef04c0533ad0897393e668f2cea9419971c0a2623e7b84e59f7ccaea25c3a46",
+  "plan_semantic_sha256": "fda3d09fd143ca310c9e9a67238f34bb8218fc0d9935de27ca52c299bf2bdc65",
+  "records": [
+    {
+      "archive": "records/savings-native-001/block-01-abbreviated.forecast.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/savings-native-001/block-01-abbreviated.forecast.json",
+      "raw_bytes": 20178,
+      "raw_sha256": "6a3f27eaa4593f6647bbc64db63663083a2ad4e6da3a8f759fd6b27bd425c77f",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/savings-native-001/block-01-abbreviated.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/savings-native-001/block-01-abbreviated.json",
+      "raw_bytes": 5375889,
+      "raw_sha256": "973be10d37a427d9697a76da456fb68c2741954f4dd71d3acbe1159050863df8",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/savings-native-001/block-01-abbreviated.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/savings-native-001/block-01-abbreviated.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "storage": "exact_bytes"
+    },
+    {
+      "archive": "records/savings-native-001/block-01-abbreviated.stdout.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/savings-native-001/block-01-abbreviated.stdout.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "storage": "exact_bytes"
+    },
+    {
+      "archive": "records/savings-native-001/block-01-direct.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/savings-native-001/block-01-direct.json",
+      "raw_bytes": 513124,
+      "raw_sha256": "0c5b2894eca35a3caf42bfd1ae09a729dd2337b7484cb975f1c64bede43f6876",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/savings-native-001/block-01-direct.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/savings-native-001/block-01-direct.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "storage": "exact_bytes"
+    },
+    {
+      "archive": "records/savings-native-001/block-01-direct.stdout.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/savings-native-001/block-01-direct.stdout.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "storage": "exact_bytes"
+    },
+    {
+      "archive": "records/savings-native-001/block-02-abbreviated.forecast.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/savings-native-001/block-02-abbreviated.forecast.json",
+      "raw_bytes": 20183,
+      "raw_sha256": "ada1d40c4026541d27a408c50a4aaab56160ec50de453a9dab11dabc1c85d9af",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/savings-native-001/block-02-abbreviated.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/savings-native-001/block-02-abbreviated.json",
+      "raw_bytes": 5372191,
+      "raw_sha256": "5bda40e9fd51497f3fb04c08c9bdd06e4689f7e10d39c3a476f6df3dcd2908f5",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/savings-native-001/block-02-abbreviated.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/savings-native-001/block-02-abbreviated.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "storage": "exact_bytes"
+    },
+    {
+      "archive": "records/savings-native-001/block-02-abbreviated.stdout.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/savings-native-001/block-02-abbreviated.stdout.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "storage": "exact_bytes"
+    },
+    {
+      "archive": "records/savings-native-001/block-02-direct.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/savings-native-001/block-02-direct.json",
+      "raw_bytes": 513120,
+      "raw_sha256": "b538c5a961e2e0eaaaad6f67c3eeae4b897ac345923aa57e5e5454b9884e2609",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/savings-native-001/block-02-direct.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/savings-native-001/block-02-direct.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "storage": "exact_bytes"
+    },
+    {
+      "archive": "records/savings-native-001/block-02-direct.stdout.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/savings-native-001/block-02-direct.stdout.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "storage": "exact_bytes"
+    },
+    {
+      "archive": "records/savings-native-001/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/savings-native-001/summary.json",
+      "raw_bytes": 2971,
+      "raw_sha256": "3e33489f6fe5d489841f23265110c5202d6f4fbd96aea5ddf1adeecff106b9da",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/savings-native-plan-001.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/savings-native-plan-001.json",
+      "raw_bytes": 8550,
+      "raw_sha256": "5ef04c0533ad0897393e668f2cea9419971c0a2623e7b84e59f7ccaea25c3a46",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/savings-native-plan-001.json.freeze-receipt.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/savings-native-plan-001.json.freeze-receipt.json",
+      "raw_bytes": 472,
+      "raw_sha256": "6c66d9235dd5f041f22a929c475c8b4a4e24d2be57350f6f950da21ce2ddf188",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/historical-anchor/native-vlf-low-cn0.native-anchor.json.gz",
+      "input_path": "local-evidence/triad-performance-trace/anchors-v3/native-vlf-low-cn0.native-anchor.json",
+      "raw_bytes": 1701206,
+      "raw_sha256": "91ececa517e8393b3a11057fb7fedf79339bd7ea2cd0791fe24d1e066e852c6a",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/native-build/reference-build-provenance.json.gz",
+      "input_path": "local-evidence/triad-performance-trace/reference-build-provenance.json",
+      "raw_bytes": 1220,
+      "raw_sha256": "4f7a1ba47c842f2e765a78406fee232dd14cb9564d8eb142db914225f4c7d22a",
+      "storage": "compact_json_reformatted_indent2_newline"
+    }
+  ],
+  "schema": "triad-native-savings-stopped-archive-v1",
+  "scope": "Exact completed attempt only; no new direct-route source or active GPU complete-suite result. Gzip headers have empty filenames and zero timestamps.",
+  "source_archive": "matching-source.tar.gz",
+  "source_scope": "Frozen experiment script and the five helper/config files identified by the plan. Native binary identities and historical build provenance retained; executables excluded.",
+  "sources": [
+    {
+      "bytes": 18502,
+      "path": "savings-native-design/experiment.py",
+      "sha256": "d8a594ea45eb8ee2ff775b6747f066943cc3da642f91d62ceca27156c3494cb4"
+    },
+    {
+      "bytes": 7645,
+      "path": "tools/triad-performance-native-cases.json",
+      "sha256": "f8d46beae40f2a52013279cdfdea811c6267be621a82431b612fb05708304a8f"
+    },
+    {
+      "bytes": 24754,
+      "path": "tools/triad_perf_adaptive.py",
+      "sha256": "b6a1b25851a8cd98c76134aff90ad0fa980eb6f445ff003c722ad5185b7de202"
+    },
+    {
+      "bytes": 23688,
+      "path": "tools/triad_perf_conditional.py",
+      "sha256": "ff89c20c950e8c422bf60ad91eea15b0fe7d4c3f3c656d26e959cf72b1ab3835"
+    },
+    {
+      "bytes": 45961,
+      "path": "tools/triad_perf_hardware.py",
+      "sha256": "74718bc0791dda7ac7ea0b38b8fb79ab7bb1e41c649da9787f2a2645854706b3"
+    },
+    {
+      "bytes": 46126,
+      "path": "tools/triad_perf_native.py",
+      "sha256": "2fc046cff685d27fe50e279a3eeeb93798897e221bf72cca30493d6031391894"
+    }
+  ],
+  "status": "incomparable; stopped at second block; no three-block cost interval or savings claim"
+}

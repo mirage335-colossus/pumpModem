@@ -1,0 +1,77 @@
+{
+  "schema": "triad-broader-decision-controls-preservation-v1",
+  "runs": {
+    "normal": {
+      "originals": {
+        "decision-policy-normal-1000.json": {
+          "sha256": "d587111affae8c769396d7c2bf6bc5d25009c1e605ab70abf4cf8783921a07f4",
+          "bytes": 22613
+        },
+        "decision-policy-normal-1000.plan.json": {
+          "sha256": "ffcd01961f378a8089f7fba7fb3c0fae6fce647a566c881bed98e3a03da4dcae",
+          "bytes": 2560
+        },
+        "decision-policy-normal-1000.log": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      },
+      "original_plan_mtime_ns": 1793763563582577460,
+      "original_plan_mtime_utc": "2026-11-04T03:39:23.582577+00:00",
+      "timestamp_scope": "Original local plan file modification time, captured before copying. This is filesystem metadata, not an independent trusted timestamp; the raw frozen plan has no timestamp field and was not edited to add one.",
+      "plan_sha256_field": "835eb4260ad24838b6474f3ba5bfad90ed9519a1e18ca7441203ce48c25b8807",
+      "source_guard_verified": true,
+      "run_command": "timeout 60s taskset -c 6,8 /tmp/triad-weak-env/bin/python tools/triad_perf_decision_policy_controls.py --output local-evidence/triad-performance-complete/decision-policy-normal-1000.json --trials 1000 --regression-profile normal --seed 2913041",
+      "exit_code": 0,
+      "elapsed_seconds": 6.298163912026212
+    },
+    "ci": {
+      "originals": {
+        "decision-policy-ci-1000.json": {
+          "sha256": "a89cdf444cf98079407eb8ffa2fe99904086dd268174e795b4d9ef2841bed48f",
+          "bytes": 22589
+        },
+        "decision-policy-ci-1000.plan.json": {
+          "sha256": "2d41a72c5aa9caac042538d3189522e3e2742485e76805b438e234700b77e884",
+          "bytes": 2554
+        },
+        "decision-policy-ci-1000.log": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      },
+      "original_plan_mtime_ns": 1793763574362865492,
+      "original_plan_mtime_utc": "2026-11-04T03:39:34.362865+00:00",
+      "timestamp_scope": "Original local plan file modification time, captured before copying. This is filesystem metadata, not an independent trusted timestamp; the raw frozen plan has no timestamp field and was not edited to add one.",
+      "plan_sha256_field": "5d33a78b837b090ebac9e27728ec4211d15f3e05dcd063c3bccb79ea115d08f8",
+      "source_guard_verified": true,
+      "run_command": "timeout 60s taskset -c 6,8 /tmp/triad-weak-env/bin/python tools/triad_perf_decision_policy_controls.py --output local-evidence/triad-performance-complete/decision-policy-ci-1000.json --trials 1000 --regression-profile ci --seed 3913041",
+      "exit_code": 0,
+      "elapsed_seconds": 5.585089190979488
+    }
+  },
+  "source_members_sha256": {
+    "tests/test_triad_perf_decision_policy_controls.py": "f69a1504839c74659c4687e03671b6583241b99b0ad5317f1e163f3e7b0ac785",
+    "tools/triad-performance.py": "604d5082870777767c2fa289fa1f3090c05463bb01cbdc57a473563f970cea40",
+    "tools/triad_perf_adaptive.py": "b6a1b25851a8cd98c76134aff90ad0fa980eb6f445ff003c722ad5185b7de202",
+    "tools/triad_perf_conditional.py": "ff89c20c950e8c422bf60ad91eea15b0fe7d4c3f3c656d26e959cf72b1ab3835",
+    "tools/triad_perf_decision_controls.py": "3c25d2f12693354d3ae65fe3028dbf343bbb6525f9bf263817ee7cf469de188e",
+    "tools/triad_perf_decision_policy_controls.py": "69090ec3ec2a302ece7a3c20373b6ada3785be15425d07b9130055a2ccff065e"
+  },
+  "snapshot_scope": "All five source identities in both plans match the archived files; source guards stayed stable during both runs. The test snapshot matches the code checked in this assignment. This is not a complete repository or dependency lock.",
+  "test_receipt": {
+    "command": "taskset -c 6,8 /tmp/triad-weak-env/bin/python -m unittest discover -s tests -p test_triad_perf_decision_policy_controls.py",
+    "tests_passed": 12,
+    "reported_seconds": 0.173,
+    "exit_code": 0,
+    "scope": "Prior native tool result; no stored raw test stdout and no new test run during preservation."
+  },
+  "log_scope": "Both original logs are empty because the driver emits no routine stdout. Raw result JSON retains completion, timing and source checks.",
+  "historical_archive_unchanged": true,
+  "inference_limits": [
+    "Pointwise exact binomial intervals, not simultaneous over factors or profiles.",
+    "Independent stationary lognormal timing generator; not future hardware or receiver error-rate evidence.",
+    "At exact threshold, a pass is a boundary pass and not a false pass.",
+    "Boundary false-regression interval upper endpoints exceed 5%; these finite simulations alone do not establish a <=5% future error rate."
+  ]
+}

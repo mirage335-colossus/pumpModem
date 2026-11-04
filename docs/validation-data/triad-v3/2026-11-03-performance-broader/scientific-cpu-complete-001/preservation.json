@@ -1,0 +1,1737 @@
+{
+  "records": [
+    {
+      "archive": "records/cpu-complete-001-invocation.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001-invocation.json",
+      "raw_bytes": 2160,
+      "raw_sha256": "ca7bc8526151074712aa9afe4d46ffb6ea4cd5860d7a3ebdd19e0a54128bc9b1",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001-invocation.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stdout.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001-invocation.stdout.log",
+      "raw_bytes": 163,
+      "raw_sha256": "632dda6c06a0a74280f0e23ba2026352c9823a3587011d1dbe1f341500759068"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/lifecycle/cold-cpu-phase/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/lifecycle/cold-cpu-phase/cold-direct-001.json",
+      "json_path": [
+        "full_pairs",
+        0
+      ],
+      "raw_bytes": 40072,
+      "raw_sha256": "03376164a8d2ffe402e21af3eb79c2c91d7f83e1aea1a61f08a268edeeb6b558"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/lifecycle/cold-cpu-phase/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/lifecycle/cold-cpu-phase/cold-direct-002.json",
+      "json_path": [
+        "full_pairs",
+        1
+      ],
+      "raw_bytes": 40066,
+      "raw_sha256": "c79b48e747a4fc59f1c6c2d77459ceb07d999ca82a1a577974d92784a0c15ef9"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/lifecycle/cold-cpu-phase/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/lifecycle/cold-cpu-phase/cold-direct-003.json",
+      "json_path": [
+        "full_pairs",
+        2
+      ],
+      "raw_bytes": 40065,
+      "raw_sha256": "04261542cf60093d4a8b6a067b56e33ec1e9f53b4370538bf54f4d89074d00e3"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/lifecycle/cold-cpu-phase/cold-direct-candidate-177781441401.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/lifecycle/cold-cpu-phase/cold-direct-candidate-177782441401.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/lifecycle/cold-cpu-phase/cold-direct-candidate-177783441401.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/lifecycle/cold-cpu-phase/cold-direct-reference-177781441401.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/lifecycle/cold-cpu-phase/cold-direct-reference-177782441401.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/lifecycle/cold-cpu-phase/cold-direct-reference-177783441401.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/lifecycle/cold-cpu-phase/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/lifecycle/cold-cpu-phase/result.json",
+      "raw_bytes": 151721,
+      "raw_sha256": "070e3c69fb332482b5d6c65600b89cb5e8ccabba412ba0325441a84969e6c308",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/lifecycle/mixed-cpu/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/lifecycle/mixed-cpu/direct-discarded-pilot-000.json",
+      "json_path": [
+        "discarded_direct_pilot"
+      ],
+      "raw_bytes": 776663,
+      "raw_sha256": "2bfe417602be4b7de6acbd9fffdada3a6f90d6272306920a25480117528688e9"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/lifecycle/mixed-cpu/direct-discarded-pilot-candidate-414766428175.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/lifecycle/mixed-cpu/direct-discarded-pilot-reference-414766428175.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/lifecycle/mixed-cpu/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/lifecycle/mixed-cpu/direct-work-plan.json",
+      "json_path": [
+        "direct_work_plan"
+      ],
+      "raw_bytes": 333,
+      "raw_sha256": "8f3ba635711dbc93b9a4fc45edff929cd7bd2ed975f8ac9a1100a6e5ad62a1a8"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/lifecycle/mixed-cpu/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/lifecycle/mixed-cpu/mixed-direct-001.json",
+      "json_path": [
+        "full_pairs",
+        0
+      ],
+      "raw_bytes": 1993027,
+      "raw_sha256": "667adfad071a21a8cd9f186109fe2d40791e19402864075afc73c2a8ba8d946f"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/lifecycle/mixed-cpu/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/lifecycle/mixed-cpu/mixed-direct-002.json",
+      "json_path": [
+        "full_pairs",
+        1
+      ],
+      "raw_bytes": 1993233,
+      "raw_sha256": "cbe474e758de769fef5c1050074208d10fddedfd0fe4f870eb45c8712b0253a7"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/lifecycle/mixed-cpu/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/lifecycle/mixed-cpu/mixed-direct-003.json",
+      "json_path": [
+        "full_pairs",
+        2
+      ],
+      "raw_bytes": 1993506,
+      "raw_sha256": "03cce110a99f2bb21f42a8dfe2aab566eed15c6b2019a8b2e095ab9a46168bac"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/lifecycle/mixed-cpu/mixed-direct-candidate-414767428175.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/lifecycle/mixed-cpu/mixed-direct-candidate-414768428175.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/lifecycle/mixed-cpu/mixed-direct-candidate-414769428175.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/lifecycle/mixed-cpu/mixed-direct-reference-414767428175.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/lifecycle/mixed-cpu/mixed-direct-reference-414768428175.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/lifecycle/mixed-cpu/mixed-direct-reference-414769428175.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/lifecycle/mixed-cpu/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/lifecycle/mixed-cpu/result.json",
+      "raw_bytes": 7487303,
+      "raw_sha256": "f4de1edbd83074ef3fa004f005463220a420e65c6f1995751df9133031ba1913",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/lifecycle/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/lifecycle/summary.json",
+      "raw_bytes": 8331284,
+      "raw_sha256": "ae9ce2a3f54182a6b970860a6c327088da6befd95dc56c2ce62c073b7c24a7fa",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/early-calendar/pair-001-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/early-calendar/pair-001-candidate-raw.json",
+      "raw_bytes": 1485,
+      "raw_sha256": "1f164cb31d9b9a27ac111c113a478ce6639ea2bc162ad6597cfb042c40d14a8e",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/early-calendar/pair-001-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/early-calendar/pair-001-reference-raw.json",
+      "raw_bytes": 1507,
+      "raw_sha256": "634799aa62654a3f39298181d5dfaa8f1f3a9f0c5cc363fa95fab78f52c0fe27",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/planner/early-calendar/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/early-calendar/pair-001.json",
+      "json_path": [
+        "pairs",
+        0
+      ],
+      "raw_bytes": 4057,
+      "raw_sha256": "6f731073dba5fd7bf2aa739e26f4529d616210a49f68a4b979d1f9bc6cfa3bb8"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/early-calendar/pair-002-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/early-calendar/pair-002-candidate-raw.json",
+      "raw_bytes": 1476,
+      "raw_sha256": "8c215b52675fadf2d6c03a957013e7e91635bc1d7f7367c5f3ef1e3064c76773",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/early-calendar/pair-002-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/early-calendar/pair-002-reference-raw.json",
+      "raw_bytes": 1507,
+      "raw_sha256": "0c8d5881d4c30e3ecf982f96d819aa1158d5db91ccdd1d8ab2a786aaa4c5a569",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/planner/early-calendar/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/early-calendar/pair-002.json",
+      "json_path": [
+        "pairs",
+        1
+      ],
+      "raw_bytes": 4059,
+      "raw_sha256": "f290aec7095ae47879b269124beb6b7329cac38cba151421240ba2a0964de494"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/early-calendar/pair-003-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/early-calendar/pair-003-candidate-raw.json",
+      "raw_bytes": 1486,
+      "raw_sha256": "362a91441e992f165a97fa5ef59f37b31823a20b12e0374fbf7ed133a76480ef",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/early-calendar/pair-003-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/early-calendar/pair-003-reference-raw.json",
+      "raw_bytes": 1496,
+      "raw_sha256": "742500d2809c8e0a6afef6d4c321aaa53af97846ccf8690bdcd4205b515f74c4",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/planner/early-calendar/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/early-calendar/pair-003.json",
+      "json_path": [
+        "pairs",
+        2
+      ],
+      "raw_bytes": 4058,
+      "raw_sha256": "f26c72c2c6430838f5752b316b8cd60efe3693dc1be743b442b88854ab04d072"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/early-calendar/pair-004-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/early-calendar/pair-004-candidate-raw.json",
+      "raw_bytes": 1486,
+      "raw_sha256": "376a6bffd15454c3364bd25724b95ea3b74558bddfe3353d9bd3412693f6cdcd",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/early-calendar/pair-004-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/early-calendar/pair-004-reference-raw.json",
+      "raw_bytes": 1497,
+      "raw_sha256": "b56c59aeb2927d0d7a00279277785fa93dc64d218e170cf3536a50e6622c522d",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/planner/early-calendar/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/early-calendar/pair-004.json",
+      "json_path": [
+        "pairs",
+        3
+      ],
+      "raw_bytes": 4060,
+      "raw_sha256": "a51865a13b861bb0e822dc586c0d75718c2112aa1c5fb3425787d4b7c3e09f89"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/early-calendar/pair-005-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/early-calendar/pair-005-candidate-raw.json",
+      "raw_bytes": 1486,
+      "raw_sha256": "d9e9f9a765032272095b59c593aad6341217f177fdfe359c11c656dae983e448",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/early-calendar/pair-005-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/early-calendar/pair-005-reference-raw.json",
+      "raw_bytes": 1507,
+      "raw_sha256": "0e0d99a9b8d40dbcf057691f47981042ec4508eef139114b84ad824385566269",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/planner/early-calendar/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/early-calendar/pair-005.json",
+      "json_path": [
+        "pairs",
+        4
+      ],
+      "raw_bytes": 4060,
+      "raw_sha256": "b83b574a1954f5c3c482f7ec5265f263b61b9ec09adbc148de992d35f64e16d5"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/early-calendar/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/early-calendar/result.json",
+      "raw_bytes": 50673,
+      "raw_sha256": "5d5d2ec009ed1dc72285d567820eeaf31d06867db391129a66d7c1f63021c3ef",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/finite-grids/pair-001-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/finite-grids/pair-001-candidate-raw.json",
+      "raw_bytes": 1003,
+      "raw_sha256": "e5a6152d431063b57339d0410d6273a997d44ab1f637512a18c6d4365e07ed29",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/finite-grids/pair-001-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/finite-grids/pair-001-reference-raw.json",
+      "raw_bytes": 1024,
+      "raw_sha256": "859a29801281960459adc6c5a6afa3de77f72efb04249682fed217cf51592351",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/planner/finite-grids/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/finite-grids/pair-001.json",
+      "json_path": [
+        "pairs",
+        0
+      ],
+      "raw_bytes": 2745,
+      "raw_sha256": "6118fc6343094e957b83b5d629f4ebf846afaf17a7c3c9690efc576effbcfa4b"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/finite-grids/pair-002-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/finite-grids/pair-002-candidate-raw.json",
+      "raw_bytes": 1003,
+      "raw_sha256": "264355c9265ebe1d937bbde69b8c2688b7a994a51494e7e9d606193ec4c9d549",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/finite-grids/pair-002-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/finite-grids/pair-002-reference-raw.json",
+      "raw_bytes": 1014,
+      "raw_sha256": "0bf1745c575c3b641ca8a9c38b5be47a333d477cb517787ca2fddaf30042f1ac",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/planner/finite-grids/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/finite-grids/pair-002.json",
+      "json_path": [
+        "pairs",
+        1
+      ],
+      "raw_bytes": 2746,
+      "raw_sha256": "5c534f9b33f2a2a3558e2bb5513c831880903a31a0c7270b8bc5bd71f9a5c37c"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/finite-grids/pair-003-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/finite-grids/pair-003-candidate-raw.json",
+      "raw_bytes": 1002,
+      "raw_sha256": "23f5698b8d16e0ea1ed53cf76f43df59cef2e6a090fabfff083deb84b719277b",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/finite-grids/pair-003-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/finite-grids/pair-003-reference-raw.json",
+      "raw_bytes": 1023,
+      "raw_sha256": "e3d72d6fd55ac50c6ec2152de74bf89b9d3b4d33ddac42dbdbc9f4d25911f756",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/planner/finite-grids/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/finite-grids/pair-003.json",
+      "json_path": [
+        "pairs",
+        2
+      ],
+      "raw_bytes": 2744,
+      "raw_sha256": "1567ca5bf7ccf3e409c6aecb204b1fd70808e881b0da9d2490430c62828ca39e"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/finite-grids/pair-004-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/finite-grids/pair-004-candidate-raw.json",
+      "raw_bytes": 1004,
+      "raw_sha256": "ab16f0efbc66a93a5808ed8bb7f82c64a70708853ba33dc2e469348f34a53e84",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/finite-grids/pair-004-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/finite-grids/pair-004-reference-raw.json",
+      "raw_bytes": 1014,
+      "raw_sha256": "06a78de4c41023c9ba4022ceac1012c35cf4c83a3c72c548059a971878b22173",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/planner/finite-grids/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/finite-grids/pair-004.json",
+      "json_path": [
+        "pairs",
+        3
+      ],
+      "raw_bytes": 2747,
+      "raw_sha256": "b817eb2bd26a538610654dcf8db8752f83ab2b285342788440d8025c8c5ad01c"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/finite-grids/pair-005-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/finite-grids/pair-005-candidate-raw.json",
+      "raw_bytes": 992,
+      "raw_sha256": "6d2d231666d59e7c1e68fad981262232893405d846bddaf90d796ec186169fa9",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/finite-grids/pair-005-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/finite-grids/pair-005-reference-raw.json",
+      "raw_bytes": 1024,
+      "raw_sha256": "abb403ae0c2ac73c3a191d8f8634d64c862d11f6b98f1b51b97db9a53c0b7de1",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/planner/finite-grids/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/finite-grids/pair-005.json",
+      "json_path": [
+        "pairs",
+        4
+      ],
+      "raw_bytes": 2745,
+      "raw_sha256": "9bae14024a00fe4936560f64a6f1e1ff311d6eb211558957dd56e8d965b22658"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/finite-grids/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/finite-grids/result.json",
+      "raw_bytes": 43045,
+      "raw_sha256": "88b99df7becd9cd83cebed9c1abbbebe02c12dc105742825fcd7e35dc3c7fd74",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/gamma-branches/pair-001-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/gamma-branches/pair-001-candidate-raw.json",
+      "raw_bytes": 1806,
+      "raw_sha256": "f3bfe24d9db429e6952061c5ce3b8d9c6cec36162d76b943d284d67736b0a664",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/gamma-branches/pair-001-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/gamma-branches/pair-001-reference-raw.json",
+      "raw_bytes": 1826,
+      "raw_sha256": "f665ecdbd12ae9be907246d90b933a31075167b00d63beade70c543ad3f5a028",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/planner/gamma-branches/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/gamma-branches/pair-001.json",
+      "json_path": [
+        "pairs",
+        0
+      ],
+      "raw_bytes": 5100,
+      "raw_sha256": "020370d97e898dfa02a6099ee39ed3779b48359c9783e263e6166958b3a7795a"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/gamma-branches/pair-002-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/gamma-branches/pair-002-candidate-raw.json",
+      "raw_bytes": 1807,
+      "raw_sha256": "c0ca192c7f927b8506d4247b297ffc1fa35d834466db9eb1a07325acdd0797bc",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/gamma-branches/pair-002-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/gamma-branches/pair-002-reference-raw.json",
+      "raw_bytes": 1827,
+      "raw_sha256": "7216a9d28022c5722bb8d9bb3dafda81aafb6669995addf1110e4ab20ac5c030",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/planner/gamma-branches/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/gamma-branches/pair-002.json",
+      "json_path": [
+        "pairs",
+        1
+      ],
+      "raw_bytes": 5103,
+      "raw_sha256": "fe9dc9c19837b4e62ee5f54a4778e6d6a7d259f80886391d231bd364dc32a2a7"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/gamma-branches/pair-003-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/gamma-branches/pair-003-candidate-raw.json",
+      "raw_bytes": 1796,
+      "raw_sha256": "af76384de5ea0b43dce59f0880100cfa022814ca268104961f8d7059e3321f6b",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/gamma-branches/pair-003-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/gamma-branches/pair-003-reference-raw.json",
+      "raw_bytes": 1827,
+      "raw_sha256": "51fc93466ee1086a9216e87303777eb7b494eff72be341e724969c279670b20f",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/planner/gamma-branches/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/gamma-branches/pair-003.json",
+      "json_path": [
+        "pairs",
+        2
+      ],
+      "raw_bytes": 5102,
+      "raw_sha256": "37231662442a78e5e38f6e5e49fef85a344ba9dc3bf192234e6805be407f2c67"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/gamma-branches/pair-004-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/gamma-branches/pair-004-candidate-raw.json",
+      "raw_bytes": 1807,
+      "raw_sha256": "abbcbb920b51e993eee3eff564b050de4dbb452e0e409c5655c35fcc80859af8",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/gamma-branches/pair-004-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/gamma-branches/pair-004-reference-raw.json",
+      "raw_bytes": 1828,
+      "raw_sha256": "27abd74de501e00eb2544d36b47188df16e16e20a4bbced18ebb99b961d3326a",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/planner/gamma-branches/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/gamma-branches/pair-004.json",
+      "json_path": [
+        "pairs",
+        3
+      ],
+      "raw_bytes": 5104,
+      "raw_sha256": "9fe09b6d22f95aee68274e409f2affe709a329b6edf305cdf7e63fa39e6e3ae2"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/gamma-branches/pair-005-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/gamma-branches/pair-005-candidate-raw.json",
+      "raw_bytes": 1796,
+      "raw_sha256": "d1763578b0f5040eb1f8611e593cd242aa4b1d58a7a1a200d019dddfaf35477d",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/gamma-branches/pair-005-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/gamma-branches/pair-005-reference-raw.json",
+      "raw_bytes": 1827,
+      "raw_sha256": "2d8dfb7d10db362ad446a2addcaa33d95e812851d9d47eca04c5bef1ce011e17",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/planner/gamma-branches/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/gamma-branches/pair-005.json",
+      "json_path": [
+        "pairs",
+        4
+      ],
+      "raw_bytes": 5102,
+      "raw_sha256": "16715ce99cc0d82efb4dd1c4956d9fe807b15162b8c0a74f4575f8fbdaa5e3ba"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/gamma-branches/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/gamma-branches/result.json",
+      "raw_bytes": 56670,
+      "raw_sha256": "9355c5341e330ae1a7e55a26350648fe89bf5091d8fdff5f27d0396ee70c65a1",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/gaussian-design-chernoff/pair-001-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/gaussian-design-chernoff/pair-001-candidate-raw.json",
+      "raw_bytes": 9321,
+      "raw_sha256": "2750ccfcf0bdece06417872ffc160dd54b2a7f0c08d4bcd154eb60c8bfebf9b6",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/gaussian-design-chernoff/pair-001-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/gaussian-design-chernoff/pair-001-reference-raw.json",
+      "raw_bytes": 9433,
+      "raw_sha256": "e6689afb022bb51caf411d8e4f124274599007d3e117643d45167a78e99a1b2f",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/planner/gaussian-design-chernoff/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/gaussian-design-chernoff/pair-001.json",
+      "json_path": [
+        "pairs",
+        0
+      ],
+      "raw_bytes": 19949,
+      "raw_sha256": "2525c8f050ddc35ef10d74e8410c5911392b0124001028c2a409ee970e576e6e"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/gaussian-design-chernoff/pair-002-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/gaussian-design-chernoff/pair-002-candidate-raw.json",
+      "raw_bytes": 9322,
+      "raw_sha256": "1291eb17ad7978f57a4cd3603c016419441ed16fcbca83354ca720fbf3be261a",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/gaussian-design-chernoff/pair-002-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/gaussian-design-chernoff/pair-002-reference-raw.json",
+      "raw_bytes": 9434,
+      "raw_sha256": "e8afa21ff03266cae83a0392e7091f26ed44b1e79dcada991c69cba9007d7291",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/planner/gaussian-design-chernoff/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/gaussian-design-chernoff/pair-002.json",
+      "json_path": [
+        "pairs",
+        1
+      ],
+      "raw_bytes": 19951,
+      "raw_sha256": "b2c520a9c3a8e2d3a59a5a581d93f485f14159f493182b91158cf610f22cbabb"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/gaussian-design-chernoff/pair-003-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/gaussian-design-chernoff/pair-003-candidate-raw.json",
+      "raw_bytes": 9321,
+      "raw_sha256": "0fd88b2ac984269df76d0fa8aafd1b2fdf2e4fb08fd0ef78f560b5f29e2f2dc8",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/gaussian-design-chernoff/pair-003-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/gaussian-design-chernoff/pair-003-reference-raw.json",
+      "raw_bytes": 9434,
+      "raw_sha256": "5146f65ef3a0544773a44f02ab9be7dad06ba11fbf9c8397b05404563993a0bc",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/planner/gaussian-design-chernoff/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/gaussian-design-chernoff/pair-003.json",
+      "json_path": [
+        "pairs",
+        2
+      ],
+      "raw_bytes": 19950,
+      "raw_sha256": "468a63aa838e72cdc44665c282612e55e101956fdaf7e2ab1edd10d0d6fabe19"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/gaussian-design-chernoff/pair-004-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/gaussian-design-chernoff/pair-004-candidate-raw.json",
+      "raw_bytes": 9321,
+      "raw_sha256": "8ecd43302848794a448c7fd8fae50d1319589736275e9777e5b180a2341ef95b",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/gaussian-design-chernoff/pair-004-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/gaussian-design-chernoff/pair-004-reference-raw.json",
+      "raw_bytes": 9433,
+      "raw_sha256": "a0a094e1cdde4ab82f977f22b898b20f89e88a7bf55b4dec05737135480e973d",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/planner/gaussian-design-chernoff/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/gaussian-design-chernoff/pair-004.json",
+      "json_path": [
+        "pairs",
+        3
+      ],
+      "raw_bytes": 19949,
+      "raw_sha256": "e129df066ed61a9166ff305cd0322a9ad645f3dff7fe69853c125ae92f5082ad"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/gaussian-design-chernoff/pair-005-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/gaussian-design-chernoff/pair-005-candidate-raw.json",
+      "raw_bytes": 9322,
+      "raw_sha256": "c6389c4f1cd380343bb1cac89f0346df61ca6371930cf22dd720ba9ef1e3cb8e",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/gaussian-design-chernoff/pair-005-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/gaussian-design-chernoff/pair-005-reference-raw.json",
+      "raw_bytes": 9433,
+      "raw_sha256": "635105e9b66e8a50496eee44fc74ca4dad25b8d4491855e6be06128be9338a0a",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/planner/gaussian-design-chernoff/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/gaussian-design-chernoff/pair-005.json",
+      "json_path": [
+        "pairs",
+        4
+      ],
+      "raw_bytes": 19950,
+      "raw_sha256": "2874bbbc8cf550ec2aba996546c98279c7760d7a11fd08be11a28982efb7bebf"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/gaussian-design-chernoff/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/gaussian-design-chernoff/result.json",
+      "raw_bytes": 138323,
+      "raw_sha256": "5dcb22fc20d5f38fed9a7179a0535ea0b3c2fd919132bc7d839b3718466d75ef",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/gaussian-design-markov/pair-001-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/gaussian-design-markov/pair-001-candidate-raw.json",
+      "raw_bytes": 7531,
+      "raw_sha256": "69a907670662e864fe2236d6fffade0ebd33d0a7e6bf5b812613551abc4b00bd",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/gaussian-design-markov/pair-001-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/gaussian-design-markov/pair-001-reference-raw.json",
+      "raw_bytes": 7643,
+      "raw_sha256": "850a924e679f1c52043973eeff06d86dc2d0e4faacec874018177446d03ffada",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/planner/gaussian-design-markov/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/gaussian-design-markov/pair-001.json",
+      "json_path": [
+        "pairs",
+        0
+      ],
+      "raw_bytes": 16033,
+      "raw_sha256": "11e9a0922efecad4f2dffd1c1e5d010c8bd252ed020a1b02299aa8dd7c014a23"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/gaussian-design-markov/pair-002-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/gaussian-design-markov/pair-002-candidate-raw.json",
+      "raw_bytes": 7530,
+      "raw_sha256": "4e47e3d8fe8b21a634927a71289272639f6043606850916f0a452e689b8517a0",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/gaussian-design-markov/pair-002-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/gaussian-design-markov/pair-002-reference-raw.json",
+      "raw_bytes": 7642,
+      "raw_sha256": "09d5af4acc700c453c869738a8f4fafeb9e1aa3fb66e2a2c297f7643d56a6b69",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/planner/gaussian-design-markov/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/gaussian-design-markov/pair-002.json",
+      "json_path": [
+        "pairs",
+        1
+      ],
+      "raw_bytes": 16031,
+      "raw_sha256": "a110cb2f6b12a4179a0be5223e9a2964aa74cc63d041d8d041f98fd10f0cf0d0"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/gaussian-design-markov/pair-003-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/gaussian-design-markov/pair-003-candidate-raw.json",
+      "raw_bytes": 7531,
+      "raw_sha256": "0d2cc297fa923be279aee137fae6db8de7cb295a56c4888aa22bf0be3ead72fc",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/gaussian-design-markov/pair-003-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/gaussian-design-markov/pair-003-reference-raw.json",
+      "raw_bytes": 7642,
+      "raw_sha256": "d27a2d773fece63a5f8c2ed2eac006b17428fc2b1278c332e306b099d4d2dbc8",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/planner/gaussian-design-markov/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/gaussian-design-markov/pair-003.json",
+      "json_path": [
+        "pairs",
+        2
+      ],
+      "raw_bytes": 16032,
+      "raw_sha256": "c37422ae1b9c40771f1026d2d2268768970af76b54008b524868f776ba85f238"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/gaussian-design-markov/pair-004-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/gaussian-design-markov/pair-004-candidate-raw.json",
+      "raw_bytes": 7531,
+      "raw_sha256": "50148509ec8c40d37bd54792c76a411bbeba6d1fe07156a8394232263e8e32a4",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/gaussian-design-markov/pair-004-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/gaussian-design-markov/pair-004-reference-raw.json",
+      "raw_bytes": 7643,
+      "raw_sha256": "469a6f47eedeca4bd69ee2c1434216f0568746eff611d2e05a36aa4eef841512",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/planner/gaussian-design-markov/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/gaussian-design-markov/pair-004.json",
+      "json_path": [
+        "pairs",
+        3
+      ],
+      "raw_bytes": 16033,
+      "raw_sha256": "3668e39b85380c794b332fad243a3c5cde095155d5da540822b99aec34c9b546"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/gaussian-design-markov/pair-005-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/gaussian-design-markov/pair-005-candidate-raw.json",
+      "raw_bytes": 7531,
+      "raw_sha256": "316792c42c636ebc4ff6a4ed10db2e0cab422eef3077270428836143e50c37e5",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/gaussian-design-markov/pair-005-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/gaussian-design-markov/pair-005-reference-raw.json",
+      "raw_bytes": 7642,
+      "raw_sha256": "89e773519ee3627c91b686e3405dd4a49e7b87ad69e24cfbeeebefa6c5218498",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/planner/gaussian-design-markov/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/gaussian-design-markov/pair-005.json",
+      "json_path": [
+        "pairs",
+        4
+      ],
+      "raw_bytes": 16032,
+      "raw_sha256": "eb42455dc63b1e71a64a802ed18148de811345db1ddb86f4f4a31bfb781fb64b"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/gaussian-design-markov/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/gaussian-design-markov/result.json",
+      "raw_bytes": 115868,
+      "raw_sha256": "26e8418517879d91f096ad8a2cb72bd56762b9ecf71f7299d3b649f0c45725ee",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/geometry-boundaries/pair-001-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/geometry-boundaries/pair-001-candidate-raw.json",
+      "raw_bytes": 1548,
+      "raw_sha256": "641a1a0cf28c8a1f562fe080b7bbe4b44a2ae201fd21ae2598592a35fc706c1d",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/geometry-boundaries/pair-001-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/geometry-boundaries/pair-001-reference-raw.json",
+      "raw_bytes": 1568,
+      "raw_sha256": "1d5555a20fdea6f888e180d6f1226d859ed391627e4b8cc6db75c232c1c66b88",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/planner/geometry-boundaries/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/geometry-boundaries/pair-001.json",
+      "json_path": [
+        "pairs",
+        0
+      ],
+      "raw_bytes": 4363,
+      "raw_sha256": "a77eb54b12412b1f7efc3ac8f8b280a9aca180422fb7d70fc6ccfc3eefd01706"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/geometry-boundaries/pair-002-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/geometry-boundaries/pair-002-candidate-raw.json",
+      "raw_bytes": 1547,
+      "raw_sha256": "839603485eebf1ba6d0da1160c488a13756609807ca7ef9d6b222b54a8b558db",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/geometry-boundaries/pair-002-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/geometry-boundaries/pair-002-reference-raw.json",
+      "raw_bytes": 1577,
+      "raw_sha256": "86bd91a69dae74841a7c540c9e86b89c22a7399031ba9b6f9f15011d1c72efc8",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/planner/geometry-boundaries/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/geometry-boundaries/pair-002.json",
+      "json_path": [
+        "pairs",
+        1
+      ],
+      "raw_bytes": 4361,
+      "raw_sha256": "07d861e95ecd847b373478b5dd1651a9f8b20b1ef591012b1da770a956c3c396"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/geometry-boundaries/pair-003-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/geometry-boundaries/pair-003-candidate-raw.json",
+      "raw_bytes": 1547,
+      "raw_sha256": "126d1dfb6cbe8a005241ed092b8ffd048b48dd722078c0cdc52b9e7e8827fe93",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/geometry-boundaries/pair-003-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/geometry-boundaries/pair-003-reference-raw.json",
+      "raw_bytes": 1578,
+      "raw_sha256": "dd5d3ff9b6f9b3f2a4c097a78c7b28ff12ab14dad6033ada34672dca8e5301e8",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/planner/geometry-boundaries/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/geometry-boundaries/pair-003.json",
+      "json_path": [
+        "pairs",
+        2
+      ],
+      "raw_bytes": 4363,
+      "raw_sha256": "b6742f0449579970756fcd19e2f83b9118025faf67c7bf229a4e140c5ee39492"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/geometry-boundaries/pair-004-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/geometry-boundaries/pair-004-candidate-raw.json",
+      "raw_bytes": 1548,
+      "raw_sha256": "492860fdc2ba129d163a877d6b53eb01ca9a8ed2427f694aa46b41046c6dffe2",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/geometry-boundaries/pair-004-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/geometry-boundaries/pair-004-reference-raw.json",
+      "raw_bytes": 1569,
+      "raw_sha256": "0b4c4594938e6bf0ca0b2c9da0f0613b930a9a0d95f72cb116da86604c11ed8a",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/planner/geometry-boundaries/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/geometry-boundaries/pair-004.json",
+      "json_path": [
+        "pairs",
+        3
+      ],
+      "raw_bytes": 4364,
+      "raw_sha256": "1ebc95d685cc800e8339140dbc1715db50c41a63b42d81629cc81573c0f91e12"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/geometry-boundaries/pair-005-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/geometry-boundaries/pair-005-candidate-raw.json",
+      "raw_bytes": 1548,
+      "raw_sha256": "8f09084eff159edee9e9454f7dff49273468c21d000c642b1dffa176b7a2f7ba",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/geometry-boundaries/pair-005-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/geometry-boundaries/pair-005-reference-raw.json",
+      "raw_bytes": 1576,
+      "raw_sha256": "b19a38520b07bbc2a236f9bdd34bb161f6fc0c2fa12ec702369cb5a877f4ac91",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/planner/geometry-boundaries/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/geometry-boundaries/pair-005.json",
+      "json_path": [
+        "pairs",
+        4
+      ],
+      "raw_bytes": 4362,
+      "raw_sha256": "5fb0c120b70e73e2fdb06598198c36681d7172d2a9b71e6191f56d5c9af28ca7"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/geometry-boundaries/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/geometry-boundaries/result.json",
+      "raw_bytes": 52460,
+      "raw_sha256": "962cc3f820742d1a801cf7364c46213b3e34e3fde40c93827b1d58d54c3440fb",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/grid-exhaustion/pair-001-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/grid-exhaustion/pair-001-candidate-raw.json",
+      "raw_bytes": 896,
+      "raw_sha256": "88bf995b6d50c6e69c230938a81d4e9b1d16bfa4ae3661ba89a7a499cd78b5af",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/grid-exhaustion/pair-001-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/grid-exhaustion/pair-001-reference-raw.json",
+      "raw_bytes": 917,
+      "raw_sha256": "fd6e6dff5a3a30eabf30f429d325f726f5286fef1d586cc0fb852225982e5977",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/planner/grid-exhaustion/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/grid-exhaustion/pair-001.json",
+      "json_path": [
+        "pairs",
+        0
+      ],
+      "raw_bytes": 2425,
+      "raw_sha256": "50feaed1f9296106fc805d984ee80cc88604312da1354639b2d1af402e0f27e9"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/grid-exhaustion/pair-002-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/grid-exhaustion/pair-002-candidate-raw.json",
+      "raw_bytes": 896,
+      "raw_sha256": "0ba93a6451593f741af9e685d1dbb03dc0154e99137e4a371f2cf02308bfe3c4",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/grid-exhaustion/pair-002-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/grid-exhaustion/pair-002-reference-raw.json",
+      "raw_bytes": 917,
+      "raw_sha256": "bb6749378c81166bfc55d845293b2d27fd787cf44cfe9b705a253af585e9dc1a",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/planner/grid-exhaustion/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/grid-exhaustion/pair-002.json",
+      "json_path": [
+        "pairs",
+        1
+      ],
+      "raw_bytes": 2426,
+      "raw_sha256": "158a3209dcab2ce107309e9eaa32f1a4e917ea94f77de7269bb7442899026530"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/grid-exhaustion/pair-003-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/grid-exhaustion/pair-003-candidate-raw.json",
+      "raw_bytes": 887,
+      "raw_sha256": "1b0e88cc9d078643c2898a5fcf9a59383d959e4de139440dfe805cbeccb83f5e",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/grid-exhaustion/pair-003-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/grid-exhaustion/pair-003-reference-raw.json",
+      "raw_bytes": 917,
+      "raw_sha256": "3fa47dc9757ae2f9fc7e725f27904add42f110bdb1866b3f4d7977ed662bbde4",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/planner/grid-exhaustion/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/grid-exhaustion/pair-003.json",
+      "json_path": [
+        "pairs",
+        2
+      ],
+      "raw_bytes": 2426,
+      "raw_sha256": "a60175887a5e85af330f90db2f2a67f1045e68597766102ec920eec83fe1d0a3"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/grid-exhaustion/pair-004-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/grid-exhaustion/pair-004-candidate-raw.json",
+      "raw_bytes": 896,
+      "raw_sha256": "103453437c8793465d2a8f9b9a87f224c5825f9aa0a42eba6f0f1e23c7261fe6",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/grid-exhaustion/pair-004-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/grid-exhaustion/pair-004-reference-raw.json",
+      "raw_bytes": 917,
+      "raw_sha256": "aa0a8ca9b96a5f70b18dafd5899affcce9e878508c5d77167a795fd9f6d20a79",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/planner/grid-exhaustion/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/grid-exhaustion/pair-004.json",
+      "json_path": [
+        "pairs",
+        3
+      ],
+      "raw_bytes": 2426,
+      "raw_sha256": "48ce4688aeeca65c5e0ebc0646ffd13c3a1d7b9a8d429d5726e4a9ca0c80e6f5"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/grid-exhaustion/pair-005-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/grid-exhaustion/pair-005-candidate-raw.json",
+      "raw_bytes": 896,
+      "raw_sha256": "9bc8ca3713408feba48b4cfe58403f75c468008159d92062c5407d005052ba8d",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/grid-exhaustion/pair-005-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/grid-exhaustion/pair-005-reference-raw.json",
+      "raw_bytes": 908,
+      "raw_sha256": "ca04042e6a77666aae8f1741be6717a734771962f8bd937e62ac29ca40254565",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/planner/grid-exhaustion/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/grid-exhaustion/pair-005.json",
+      "json_path": [
+        "pairs",
+        4
+      ],
+      "raw_bytes": 2426,
+      "raw_sha256": "a9bdb320ab47f55f17ec06a6eca173fd3385b2bc3a6fa920dc7032d22e92c1e1"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/grid-exhaustion/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/grid-exhaustion/result.json",
+      "raw_bytes": 41117,
+      "raw_sha256": "c33cdba427138c1285145d69f1f26e4b366a053aaf60317b89ff18485dcf089a",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/plan.json",
+      "json_path": [
+        "plan"
+      ],
+      "raw_bytes": 10897,
+      "raw_sha256": "d3eb60b696caf4f2c96f838a8e64e30fd529adb179a3be99bde91f871d77c772"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/resource-exits/pair-001-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/resource-exits/pair-001-candidate-raw.json",
+      "raw_bytes": 1383,
+      "raw_sha256": "3b55451532e5e1d9d0524dd4933b1a594eacdd730c51be06efb883080dee09b2",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/resource-exits/pair-001-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/resource-exits/pair-001-reference-raw.json",
+      "raw_bytes": 1404,
+      "raw_sha256": "06c32e8533032b025a39212f86ecc544a96cf8203df4f233487a21950f1cb898",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/planner/resource-exits/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/resource-exits/pair-001.json",
+      "json_path": [
+        "pairs",
+        0
+      ],
+      "raw_bytes": 3774,
+      "raw_sha256": "2cc757bd119c53d1cad16a7d869257b9d6e174c1daef5a17eb2c1733689b7b30"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/resource-exits/pair-002-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/resource-exits/pair-002-candidate-raw.json",
+      "raw_bytes": 1383,
+      "raw_sha256": "552d59a16ea9512c629128b65b51ea3db463872118ce3446d0bd163854e6eaab",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/resource-exits/pair-002-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/resource-exits/pair-002-reference-raw.json",
+      "raw_bytes": 1404,
+      "raw_sha256": "efbb03f3fc1817bab104c20ca4eb007650f5258dd245cb99610930fe2a8a9c91",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/planner/resource-exits/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/resource-exits/pair-002.json",
+      "json_path": [
+        "pairs",
+        1
+      ],
+      "raw_bytes": 3774,
+      "raw_sha256": "ab36fc266da2210f067cd37cc00a717870499295b2a41b1ce1925f7325e1a658"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/resource-exits/pair-003-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/resource-exits/pair-003-candidate-raw.json",
+      "raw_bytes": 1384,
+      "raw_sha256": "cb361501df27e32d13a85e87c00ec25f6a4b73402bcf2e3b1efefb9c117388ec",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/resource-exits/pair-003-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/resource-exits/pair-003-reference-raw.json",
+      "raw_bytes": 1405,
+      "raw_sha256": "e650c8f183a6a66af781e2a18613be520c29b7a621a4a4e466abeef0367d03ec",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/planner/resource-exits/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/resource-exits/pair-003.json",
+      "json_path": [
+        "pairs",
+        2
+      ],
+      "raw_bytes": 3776,
+      "raw_sha256": "6fc48294adbaa221a017d1a48f22c8b09ed1f11d78219d628f3045dc7d6317a4"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/resource-exits/pair-004-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/resource-exits/pair-004-candidate-raw.json",
+      "raw_bytes": 1383,
+      "raw_sha256": "883eab9e304b52c0ecb526ca26d9ce8ee334e706f945b7571f08cc53e13f0afa",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/resource-exits/pair-004-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/resource-exits/pair-004-reference-raw.json",
+      "raw_bytes": 1404,
+      "raw_sha256": "ae302bc5ee5c625244b61e713d2f723519c2f8d005b7c1883846deeb8275a7cc",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/planner/resource-exits/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/resource-exits/pair-004.json",
+      "json_path": [
+        "pairs",
+        3
+      ],
+      "raw_bytes": 3774,
+      "raw_sha256": "a08ab54b15f4573614aa0b207281fd2baeff1b2e9409e9b4955a2d34b5842e43"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/resource-exits/pair-005-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/resource-exits/pair-005-candidate-raw.json",
+      "raw_bytes": 1383,
+      "raw_sha256": "9617df35c0a8ce4eb2f4e66fb2e406664b2fbf3bf7c1f1561b705ebc262af756",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/resource-exits/pair-005-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/resource-exits/pair-005-reference-raw.json",
+      "raw_bytes": 1404,
+      "raw_sha256": "d8901ea7f919bc82f72b9bff10776980ef28e7f97902a0dfb4a9778bef521419",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/planner/resource-exits/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/resource-exits/pair-005.json",
+      "json_path": [
+        "pairs",
+        4
+      ],
+      "raw_bytes": 3774,
+      "raw_sha256": "b6422ea589221dd89f97851c9f75a275bfa12db8f587fbd46400e7ebc613ad09"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/resource-exits/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/resource-exits/result.json",
+      "raw_bytes": 48993,
+      "raw_sha256": "d7ccea7559f35fae128fbfdb6886854f86ba864d42512bb152ccbaa354592510",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/planner/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/planner/summary.json",
+      "raw_bytes": 621099,
+      "raw_sha256": "960021be276cbcec9cf24b780f7471bb1c59fc80705dc89335c36eb32bbfb76b",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/resource/direct-observations.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/resource/direct-observations.json",
+      "raw_bytes": 375013,
+      "raw_sha256": "c684aa7f69dc38a9265e8c34012967e290ed595a4085f7f5776bf5c53e5a25a8",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/extensions/resource/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/resource/frozen-direct.json",
+      "json_path": [
+        "frozen_direct"
+      ],
+      "raw_bytes": 51575,
+      "raw_sha256": "8898f86a9c61bf230513d5d80ad88b04f60e8e6c2f112847ae87c4943bab7052"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/resource/progress.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/resource/progress.json",
+      "raw_bytes": 447848,
+      "raw_sha256": "e3ce809ed7669e7898bcc0c537eb1a90d83fd6ae303352f01fe412fc802728e7",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/resource/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/resource/report.json",
+      "raw_bytes": 558597,
+      "raw_sha256": "eef1072e1f6e4aac4f566f8b080aa6c4dd132bf0d953458831b039be9504a9b1",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/extensions/resource/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/extensions/resource/summary.json",
+      "raw_bytes": 558597,
+      "raw_sha256": "eef1072e1f6e4aac4f566f8b080aa6c4dd132bf0d953458831b039be9504a9b1",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/functional-00/stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/cpu-complete-001/functional-00/stdout.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/functional-00/stdout.log",
+      "raw_bytes": 724,
+      "raw_sha256": "b5183e64b1610cf2fd2770255f2a41cd642bd750cf5cde5630de323a29e2e1e8"
+    },
+    {
+      "archive": "records/cpu-complete-001/functional-01/stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/functional-01/stderr.log",
+      "raw_bytes": 1320,
+      "raw_sha256": "24f8662346c39ee997481143fd7bcc81b8aafc43ad8aeee5465a0637265f567c"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/functional-01/stdout.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/cpu-complete-001/functional-02/stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/functional-02/stderr.log",
+      "raw_bytes": 1714,
+      "raw_sha256": "1d2ef6e0a4154d3b7871b1ce3a41282e96619f10c2edcc61d067add2004d67c8"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/functional-02/stdout.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/cpu-complete-001/functional-03/stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/functional-03/stderr.log",
+      "raw_bytes": 107,
+      "raw_sha256": "10780498d7767b79c950ea85474976578c725be2871ee395128ee5e336c2629a"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/functional-03/stdout.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/cpu-complete-001/functional-04/stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/functional-04/stderr.log",
+      "raw_bytes": 1127,
+      "raw_sha256": "88e2e972cfb75d785a2fd52e662960fbebe15bb6e122478a617b8e25898971fe"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/functional-04/stdout.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/cpu-complete-001/functional-05/stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/functional-05/stderr.log",
+      "raw_bytes": 2193,
+      "raw_sha256": "b6c8110bfaf02173da5352fb1884b8bbdf6cc87258935bd1370aaf77638088ac"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/functional-05/stdout.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/cpu-complete-001/functional-06/stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/functional-06/stderr.log",
+      "raw_bytes": 2920,
+      "raw_sha256": "b482dd4174e6869da5e3f25af77143e3fa0609bcd6ac79ece9f4395aace94e3f"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/functional-06/stdout.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/cpu-complete-001/functional-07/stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/functional-07/stderr.log",
+      "raw_bytes": 1260,
+      "raw_sha256": "ff5dab3a7df3e494b526c458208ee3bea1b178f7ce25523b533710ce7d9f6b12"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/functional-07/stdout.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/functional-08/stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/cpu-complete-001/functional-08/stdout.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/functional-08/stdout.log",
+      "raw_bytes": 1193,
+      "raw_sha256": "0aac97a684d1e812d0b2b0552fc5571bafc4eab0c8108b502db8b937f1637ba9"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/functional-09/stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/cpu-complete-001/functional-09/stdout.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/functional-09/stdout.log",
+      "raw_bytes": 2361,
+      "raw_sha256": "8ee3eca3ca62ac61ef7c2caef7675e2e2729c4ea123b98489b1dcd47adb2d618"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/functional-10/stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/cpu-complete-001/functional-10/stdout.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/functional-10/stdout.log",
+      "raw_bytes": 1195,
+      "raw_sha256": "c3d382efa9651b151ae3dea69209408b8e5f07d7480e82d6b6f63875d0e6fb1d"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/functional-11/stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/cpu-complete-001/functional-11/stdout.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/functional-11/stdout.log",
+      "raw_bytes": 1533,
+      "raw_sha256": "bb35a6122f9751fcac05bbae2062195c247eee175d8f6bfa7ef9f11bd2a50fa8"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/functional-12/stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/cpu-complete-001/functional-12/stdout.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/functional-12/stdout.log",
+      "raw_bytes": 238,
+      "raw_sha256": "c50d43b10d67379b42f4ea0c90d8f1aa9aae15e1f8d74c02ade330cff53faa14"
+    },
+    {
+      "archive": "records/cpu-complete-001/functional-13/stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/functional-13/stderr.log",
+      "raw_bytes": 1292,
+      "raw_sha256": "0fe77ba718c3d43e899c158fad8f58eceb3ca52acdad2d9d11a122215719d6a9"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/functional-13/stdout.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/cpu-complete-001/functional-14/stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/functional-14/stderr.log",
+      "raw_bytes": 2625,
+      "raw_sha256": "9cbb43dfe8ffc0d420f75eae1ad98fd6496d3279615aa809e1941ae573b25097"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/functional-14/stdout.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/cpu-complete-001/functional-15/stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/functional-15/stderr.log",
+      "raw_bytes": 1474,
+      "raw_sha256": "5988da1d0cb18758dc24272da6a4d053501f1b06dfa0f4fdb098f024a645d49f"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/functional-15/stdout.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/cpu-complete-001/functional-16/stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/functional-16/stderr.log",
+      "raw_bytes": 1938,
+      "raw_sha256": "96ae9bdfdf0689614b1a093c01ec085282678f6f4b09510dffc643e6f7d7077c"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/functional-16/stdout.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/identical-fft-process/stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/identical-fft-process/stdout.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/identical-fft/candidate.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/identical-fft/free-crystal/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/identical-fft/free-crystal/forecast.json",
+      "json_path": [
+        "frozen"
+      ],
+      "raw_bytes": 1570,
+      "raw_sha256": "0b71c5d42b2fc4f8a26dd1102aed5fe6652567c9db8176da69a7b49d8b0b5c57"
+    },
+    {
+      "archive": "records/cpu-complete-001/identical-fft/free-crystal/observations.jsonl.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/identical-fft/free-crystal/observations.jsonl",
+      "raw_bytes": 431201,
+      "raw_sha256": "9dee734c943f22bc1919f89432c74396af041d598cf3138f3b995fed953ac3ac"
+    },
+    {
+      "archive": "records/cpu-complete-001/identical-fft/free-crystal/precision-qualification.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/identical-fft/free-crystal/precision-qualification.json",
+      "raw_bytes": 1720,
+      "raw_sha256": "c5746daebb1533e1710ebccfa0bbd557c81e55938e3f2dae45f85c39a2442f0b",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/identical-fft/free-crystal/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/identical-fft/free-crystal/result.json",
+      "raw_bytes": 607575,
+      "raw_sha256": "6941d656064b6b714db5b2cdd3e925778e8206c5439352209d7378e584e6d67e",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/identical-fft/reference.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/cpu-complete-001/identical-fft/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/identical-fft/summary.json",
+      "raw_bytes": 251,
+      "raw_sha256": "56f09445a06b943f6548610133099e396a7118ff338c55db2ee26257e79c0ee8",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/lifecycle-process/stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/cpu-complete-001/lifecycle-process/stdout.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/lifecycle-process/stdout.log",
+      "raw_bytes": 177,
+      "raw_sha256": "a72d1f653d0a1b2cf5ac29b1db9f4abc5c0da0e3a4f226c726b57d522e048f05"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/native-fft-process/stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/native-fft-process/stdout.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/cpu-complete-001/native-fft.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/native-fft.json",
+      "raw_bytes": 7337936,
+      "raw_sha256": "69fc068b85ad6277ad9bdc6b6d93afc50a48659b8a664a012c044d68c1f6a1cf",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/native-fft.work/candidate.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "embedded_in": "records/cpu-complete-001/native-fft.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/native-fft.work/executed-paths.json",
+      "json_path": [
+        "executed_path_coverage"
+      ],
+      "raw_bytes": 50604,
+      "raw_sha256": "6a99326c333f1321d7a2d02d08596df2f56058297b35a3b8bd1773b1246ff184"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/native-fft.work/executed-paths.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/native-fft.work/reference.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/native-inventory/stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/cpu-complete-001/native-inventory/stdout.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/native-inventory/stdout.log",
+      "raw_bytes": 3146,
+      "raw_sha256": "6346c3f8e416fcc9232d44e24b41f18925520b82bfb642df9371a646d0c01d29"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/planner-process/stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/cpu-complete-001/planner-process/stdout.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/planner-process/stdout.log",
+      "raw_bytes": 218,
+      "raw_sha256": "2f22d16af1f3338d78b25ccad8dffddaa31e1fa0c930d2443c7de3cec0a66a1f"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/resource-process/stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/cpu-complete-001/resource-process/stdout.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/resource-process/stdout.log",
+      "raw_bytes": 207,
+      "raw_sha256": "cd922f37cbb3a0aa034b21e7925798a2debc9fb2910310988b79fa241e7a9174"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/sampled-process/stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/sampled-process/stdout.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/sampled/candidate.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/cpu-complete-001/sampled/cfo-batch-tail/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/sampled/cfo-batch-tail/result.json",
+      "raw_bytes": 595309,
+      "raw_sha256": "73d8ee6fbfcd7fb2648800fb741b96f576293ab50b9aedb63c83924d4870560d",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/sampled/gaussian-hour/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/sampled/gaussian-hour/result.json",
+      "raw_bytes": 149169,
+      "raw_sha256": "cbde55d593de28803f73375746c3c5614c97978b9528d75f7facd502fbe90b7f",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/sampled/grouped-multitile/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/sampled/grouped-multitile/result.json",
+      "raw_bytes": 581039,
+      "raw_sha256": "5d07444a069d49788e8837a274a1c722fff0a7b48be1bf0fd2d24bfc15966afa",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/sampled/phase-optimized-hour/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/sampled/phase-optimized-hour/result.json",
+      "raw_bytes": 183653,
+      "raw_sha256": "6dcfe42f99d30556f4bba124c4bb1d1d3d22c270c38bb0a7935ae9a4866c60f7",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/sampled/phase-reference-hour/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/sampled/phase-reference-hour/result.json",
+      "raw_bytes": 167605,
+      "raw_sha256": "a21e3ba930115f68465c724bf265aa776ee1c9edd63d277b33cb6e0bcef222bc",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/sampled/ray-frequency-tiles/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/sampled/ray-frequency-tiles/result.json",
+      "raw_bytes": 233405,
+      "raw_sha256": "6776f29b299492c8a0d2ba3c74d7293f9908b0fdbecf26ccd9b2a55c93589b78",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/sampled/rbpf-systematic/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/sampled/rbpf-systematic/result.json",
+      "raw_bytes": 256617,
+      "raw_sha256": "b4b59a32195e2e2631f3595da6de6d1eaab33dba3a7e466038ba7cec6aa6ac69",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001-invocation.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/sampled/reference.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/cpu-complete-001/sampled/state-sampled-smoke/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/sampled/state-sampled-smoke/result.json",
+      "raw_bytes": 115846,
+      "raw_sha256": "f425ce84d89b5f619adb440bc3059b2e7ce5bdcc2418bc79b55385c8e692eb8b",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/sampled/static-fft/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/sampled/static-fft/result.json",
+      "raw_bytes": 240755,
+      "raw_sha256": "48aa35a8bb6990bce2d8e348d40cb7b7a6d2c3acb7f415d4330268fe2448bcda",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/sampled/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/sampled/summary.json",
+      "raw_bytes": 1358,
+      "raw_sha256": "35a874e5801a36ec10b4e7ff9880b422bf0b03bed77d5a40830158e2976712a4",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "archive": "records/cpu-complete-001/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/cpu-complete-001/summary.json",
+      "raw_bytes": 198165,
+      "raw_sha256": "8d3fed0ebc64a4b2a05324616a81512a05e7c47fe7ab3d7a74f94515baf9d7f6",
+      "storage": "compact_json_reformatted_indent2_newline"
+    }
+  ],
+  "schema": "triad-completed-evidence-archive-v1",
+  "scope": "Completed original records only; arrays, binaries and later-derived conclusions are not substituted.",
+  "storage": "Exact original byte count/SHA256 retained. Identified compact JSON or embedded values reconstruct with indent=2 and trailing newline; other files are exact gzip payloads with zero mtime and empty filename."
+}

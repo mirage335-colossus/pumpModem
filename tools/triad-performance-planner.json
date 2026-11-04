@@ -1,0 +1,31 @@
+{
+  "schema": "triad-performance-planner-cases-v1",
+  "timing_boundary": "complete native subprocess including process startup, full fixed operation bundle, output and process reaping; controller parsing and evidence writes excluded",
+  "arithmetic": "fp64_and_native_long_double_bounds",
+  "internal_repetitions_are_independent_samples": false,
+  "cases": [
+    {"id": "early-calendar", "repetitions": 1000, "scenarios_per_repetition": 6,
+     "outputs": ["supported", "extended_horizon_early_solution", "uncertified", "burst_calendar", "exclusive_calendar_endpoint", "inclusive_calendar_endpoint"]},
+    {"id": "finite-grids", "repetitions": 4, "scenarios_per_repetition": 2,
+     "outputs": ["fixed_rank_complete_grid", "segmented_complete_grid"]},
+    {"id": "resource-exits", "repetitions": 1000, "scenarios_per_repetition": 5,
+     "outputs": ["workspace_limit", "operation_limit", "bank_saturation", "workspace_saturation", "minimum_complexity"]},
+    {"id": "grid-exhaustion", "repetitions": 1, "scenarios_per_repetition": 1,
+     "outputs": ["exhaustive_grid_cap"]},
+    {"id": "geometry-boundaries", "repetitions": 500, "scenarios_per_repetition": 7,
+     "outputs": ["ordinary", "protected_fhss", "multi_month_minimum_tile", "exact_tile_endpoint", "fractional_tile_endpoint", "wide_coordinate", "workspace_boundary"]},
+    {"id": "gamma-branches", "repetitions": 10, "scenarios_per_repetition": 9,
+     "outputs": ["rank_1", "rank_2", "rank_3", "rank_100", "rank_100000", "unsupported_rank", "iteration_exhaustion", "known_channel_binary", "zero_event_bound"]}
+  ],
+  "bounds_cases": [
+    {"id": "gaussian-design-markov", "kind": "gaussian-design", "taps": 2, "scales": [],
+     "null_calibration": "markov", "args": ["--taps", "2", "--no-chernoff", "--null-calibration", "markov"]},
+    {"id": "gaussian-design-chernoff", "kind": "gaussian-design", "taps": 2,
+     "scales": [0.001, 0.03, 0.3, 1.0, 3.0, 10.0], "null_calibration": "gaussian-chernoff",
+     "args": ["--taps", "2", "--chernoff-s", ".001,.03,.3,1,3,10", "--null-calibration", "gaussian-chernoff"]}
+  ],
+  "bounds_timing_boundary": "complete two-thread CPU Python CLI including startup/imports, retained workspace loading/validation, all candidate and distinct-identity pair moment calculations, bound calculation, JSON output and reaping; fixture generation excluded and recorded separately by fixture provenance",
+  "scope": "direct timing of the maintained native duration planner, format geometry and statistical bounds; optional retained-workspace Gaussian design bounds; no waveform generation, receiver or GPU calculation",
+  "work_counter_limits": "Complete scenario counts are measured. Internal solver/grid iterations are not instrumented; no extrapolation uses nominal horizon or an inferred iteration count.",
+  "excluded_distinct_work": "Neither these native planners nor Python Gaussian design inequalities certify arbitrary physical-channel sensitivity. No simulated observation-duration scaling is inferred from these direct full jobs."
+}

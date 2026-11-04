@@ -1,0 +1,23 @@
+{
+  "command": [
+    "taskset",
+    "-c",
+    "2,4",
+    "/tmp/triad-weak-env/bin/python",
+    "local-evidence/triad-performance-broader/savings-native-design/experiment.py",
+    "run",
+    "--plan",
+    "local-evidence/triad-performance-broader/savings-native-plan-001.json",
+    "--output",
+    "REPLAY_OUTPUT_DIRECTORY"
+  ],
+  "instructions": "Restore exact archived source dependencies, binaries identified by the plan and anchor path before running; use a new output directory. This command was not run while archiving.",
+  "kind": "derived reproduction recipe, not a retained historical outer invocation",
+  "original_python_version": "3.13.5 (main, Aug 10 2026, 12:06:59) [GCC 14.2.0]",
+  "original_thread_environment": {
+    "MKL_NUM_THREADS": null,
+    "NUMEXPR_NUM_THREADS": null,
+    "OMP_NUM_THREADS": null,
+    "OPENBLAS_NUM_THREADS": null
+  }
+}

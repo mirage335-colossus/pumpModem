@@ -1,0 +1,1330 @@
+{
+  "schema": "triad-broader-scientific-addition-v1",
+  "records": [
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/complete-routine-002-invocation.json",
+      "raw_sha256": "d7437aadeaa5e08c7e29bc79ed90404d72dbc43ca510526380c2611954b036c9",
+      "raw_bytes": 2127,
+      "archive": "records-additional/gpu/complete-routine-002-invocation.json.gz",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-anchors/cold-cuda-persistent.lifecycle-anchor.json",
+      "raw_sha256": "a7af353c33fb701fcedde06b9414c1a932d804f0ae32c314ebc5fefef3348e02",
+      "raw_bytes": 1969696,
+      "object_from": "records-additional/gpu/lifecycle/lifecycle-qualification-002/summary.json.gz",
+      "fields": [
+        {
+          "key": "schema",
+          "json_path": [
+            "cases",
+            0,
+            "schema"
+          ]
+        },
+        {
+          "key": "id",
+          "json_path": [
+            "cases",
+            0,
+            "id"
+          ]
+        },
+        {
+          "key": "kind",
+          "json_path": [
+            "cases",
+            0,
+            "kind"
+          ]
+        },
+        {
+          "key": "status",
+          "json_path": [
+            "cases",
+            0,
+            "status"
+          ]
+        },
+        {
+          "key": "static_binding",
+          "json_path": [
+            "cases",
+            0,
+            "static_binding"
+          ]
+        },
+        {
+          "key": "environment",
+          "json_path": [
+            "cases",
+            0,
+            "environment"
+          ]
+        },
+        {
+          "key": "expected_work",
+          "json_path": [
+            "cases",
+            0,
+            "expected_work"
+          ]
+        },
+        {
+          "key": "full_pairs",
+          "json_path": [
+            "cases",
+            0,
+            "full_pairs"
+          ]
+        },
+        {
+          "key": "comparison",
+          "json_path": [
+            "cases",
+            0,
+            "comparison"
+          ]
+        },
+        {
+          "key": "regression_policy",
+          "literal": {
+            "pass_alpha": 0.15,
+            "failure_alpha": 0.05,
+            "slowdown_threshold": 1.3
+          }
+        },
+        {
+          "key": "record_sha256",
+          "literal": "e8b0e72de636b66382dc1abc70c92b7fc7bcbe0e060e81089ed0dc3b38d31e86"
+        }
+      ]
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-anchors/cold-cuda-private.lifecycle-anchor.json",
+      "raw_sha256": "6b0076eaf6320aac95f46306270cb7ae4b6cb3f37f05d0f0de9e9cacf63615d9",
+      "raw_bytes": 1975697,
+      "object_from": "records-additional/gpu/lifecycle/lifecycle-qualification-002/summary.json.gz",
+      "fields": [
+        {
+          "key": "schema",
+          "json_path": [
+            "cases",
+            1,
+            "schema"
+          ]
+        },
+        {
+          "key": "id",
+          "json_path": [
+            "cases",
+            1,
+            "id"
+          ]
+        },
+        {
+          "key": "kind",
+          "json_path": [
+            "cases",
+            1,
+            "kind"
+          ]
+        },
+        {
+          "key": "status",
+          "json_path": [
+            "cases",
+            1,
+            "status"
+          ]
+        },
+        {
+          "key": "static_binding",
+          "json_path": [
+            "cases",
+            1,
+            "static_binding"
+          ]
+        },
+        {
+          "key": "environment",
+          "json_path": [
+            "cases",
+            1,
+            "environment"
+          ]
+        },
+        {
+          "key": "expected_work",
+          "json_path": [
+            "cases",
+            1,
+            "expected_work"
+          ]
+        },
+        {
+          "key": "full_pairs",
+          "json_path": [
+            "cases",
+            1,
+            "full_pairs"
+          ]
+        },
+        {
+          "key": "comparison",
+          "json_path": [
+            "cases",
+            1,
+            "comparison"
+          ]
+        },
+        {
+          "key": "regression_policy",
+          "literal": {
+            "pass_alpha": 0.15,
+            "failure_alpha": 0.05,
+            "slowdown_threshold": 1.3
+          }
+        },
+        {
+          "key": "record_sha256",
+          "literal": "884b5d6cb722979ad0125d77adcd64721ca1e8b04e9cbf5075d282331103765d"
+        }
+      ]
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-anchors/mixed-cuda.lifecycle-anchor.json",
+      "raw_sha256": "170c5867d8f69ddfe6a89bba18312c78101b95831237d32c213fae127c625848",
+      "raw_bytes": 36462707,
+      "object_from": "records-additional/gpu/lifecycle/lifecycle-qualification-002/summary.json.gz",
+      "fields": [
+        {
+          "key": "schema",
+          "json_path": [
+            "cases",
+            2,
+            "schema"
+          ]
+        },
+        {
+          "key": "id",
+          "json_path": [
+            "cases",
+            2,
+            "id"
+          ]
+        },
+        {
+          "key": "status",
+          "json_path": [
+            "cases",
+            2,
+            "status"
+          ]
+        },
+        {
+          "key": "static_binding",
+          "json_path": [
+            "cases",
+            2,
+            "static_binding"
+          ]
+        },
+        {
+          "key": "forecast",
+          "json_path": [
+            "cases",
+            2,
+            "forecast"
+          ]
+        },
+        {
+          "key": "full_pairs",
+          "json_path": [
+            "cases",
+            2,
+            "full_pairs"
+          ]
+        },
+        {
+          "key": "training",
+          "json_path": [
+            "cases",
+            2,
+            "training"
+          ]
+        },
+        {
+          "key": "training_pair_ids",
+          "literal": [
+            "ec9dd70f01e76507f779999976ad76fbfb05f27bceb06385945933184d827f00",
+            "e8d4bb380298ccd92d516bd301a85439fe12f49ac42539a4c04e1c8f0e011ed9",
+            "0ffb8dbabfb6be578ed1c52b45838a0e5fbe6ffaa69b87e285f30de413620d5a"
+          ]
+        },
+        {
+          "key": "minimum_campaign_seconds",
+          "literal": 60.0
+        },
+        {
+          "key": "sustained",
+          "json_path": [
+            "cases",
+            2,
+            "sustained"
+          ]
+        },
+        {
+          "key": "confirmation",
+          "json_path": [
+            "cases",
+            2,
+            "confirmation"
+          ]
+        },
+        {
+          "key": "model_relative_error",
+          "literal": 0.1
+        },
+        {
+          "key": "record_sha256",
+          "literal": "e816aa76fc50c64af1e8c93f7ef9db26b7775b0cdd3843bacc6f93d0d0cc2b07"
+        }
+      ]
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-001.log",
+      "raw_sha256": "41c99de33512f2f82fa0ef49909c4c41911133a184d3cbb35ddb73bf108f41fc",
+      "raw_bytes": 475,
+      "archive": "records-additional/gpu/lifecycle/lifecycle-qualification-001.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/cold-cuda-persistent/cache-precondition-000.json",
+      "raw_sha256": "9bddf95802a240a8eeded3be6758b2a3765697c5741bc57c6606146a21c299a6",
+      "raw_bytes": 515144,
+      "embedded_in": "records-additional/gpu/lifecycle/lifecycle-qualification-002/summary.json.gz",
+      "json_path": [
+        "cases",
+        0,
+        "cache_precondition"
+      ]
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/cold-cuda-persistent/cache-precondition-candidate-40294719144.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/cold-cuda-persistent/cache-precondition-reference-40294719144.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/cold-cuda-persistent/cold-direct-001.json",
+      "raw_sha256": "3d7e9a8fefa1988021faee6cc603e603dbbe16bef16c6c923dc757259b70cc65",
+      "raw_bytes": 513276,
+      "embedded_in": "records-additional/gpu/lifecycle/lifecycle-qualification-002/summary.json.gz",
+      "json_path": [
+        "cases",
+        0,
+        "full_pairs",
+        0
+      ]
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/cold-cuda-persistent/cold-direct-002.json",
+      "raw_sha256": "c8bba46e067712532c29c8aa23fa6b54990cdb6755f003dc3745b81e828dba05",
+      "raw_bytes": 513268,
+      "embedded_in": "records-additional/gpu/lifecycle/lifecycle-qualification-002/summary.json.gz",
+      "json_path": [
+        "cases",
+        0,
+        "full_pairs",
+        1
+      ]
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/cold-cuda-persistent/cold-direct-003.json",
+      "raw_sha256": "72e55a15ccdaf870e08cf7765b4a677d834267f39ff6673d067b4ab78d9bcf50",
+      "raw_bytes": 513262,
+      "embedded_in": "records-additional/gpu/lifecycle/lifecycle-qualification-002/summary.json.gz",
+      "json_path": [
+        "cases",
+        0,
+        "full_pairs",
+        2
+      ]
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/cold-cuda-persistent/cold-direct-candidate-40295719144.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/cold-cuda-persistent/cold-direct-candidate-40296719144.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/cold-cuda-persistent/cold-direct-candidate-40297719144.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/cold-cuda-persistent/cold-direct-reference-40295719144.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/cold-cuda-persistent/cold-direct-reference-40296719144.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/cold-cuda-persistent/cold-direct-reference-40297719144.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/cold-cuda-persistent/result.json",
+      "raw_sha256": "7096f785d383c822ceb28dd772bc852ac004031dac3c4db2831a1b05acab750a",
+      "raw_bytes": 2519313,
+      "embedded_in": "records-additional/gpu/lifecycle/lifecycle-qualification-002/summary.json.gz",
+      "json_path": [
+        "cases",
+        0
+      ]
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/cold-cuda-private/cold-direct-001.json",
+      "raw_sha256": "155b1bde12bef3c2e047d514497b8537f8b8635096dc5cea92b48472c294f0f2",
+      "raw_bytes": 515158,
+      "embedded_in": "records-additional/gpu/lifecycle/lifecycle-qualification-002/summary.json.gz",
+      "json_path": [
+        "cases",
+        1,
+        "full_pairs",
+        0
+      ]
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/cold-cuda-private/cold-direct-002.json",
+      "raw_sha256": "e324e480d4e1542a903f49d6e2a5c117e263041fc59a4ed3391568e44432fb88",
+      "raw_bytes": 515159,
+      "embedded_in": "records-additional/gpu/lifecycle/lifecycle-qualification-002/summary.json.gz",
+      "json_path": [
+        "cases",
+        1,
+        "full_pairs",
+        1
+      ]
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/cold-cuda-private/cold-direct-003.json",
+      "raw_sha256": "82dcedcd8e6e6b4630cf472178bc7a561d70fe464c07bea9bc7c4c0d7e5faf0b",
+      "raw_bytes": 515165,
+      "embedded_in": "records-additional/gpu/lifecycle/lifecycle-qualification-002/summary.json.gz",
+      "json_path": [
+        "cases",
+        1,
+        "full_pairs",
+        2
+      ]
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/cold-cuda-private/cold-direct-candidate-838803989860.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/cold-cuda-private/cold-direct-candidate-838804989860.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/cold-cuda-private/cold-direct-candidate-838805989860.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/cold-cuda-private/cold-direct-reference-838803989860.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/cold-cuda-private/cold-direct-reference-838804989860.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/cold-cuda-private/cold-direct-reference-838805989860.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/cold-cuda-private/result.json",
+      "raw_sha256": "db0ee5b80b281ea31a5ccdd9eb2efa999f61a2ae2904363a59ce2aaecb072958",
+      "raw_bytes": 1976722,
+      "embedded_in": "records-additional/gpu/lifecycle/lifecycle-qualification-002/summary.json.gz",
+      "json_path": [
+        "cases",
+        1
+      ]
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/mixed-cuda/cache-precondition-000.json",
+      "raw_sha256": "46b990278dd5bfb6bf7d012165565a11e52f302100ca4a85f49ac4b7999b684d",
+      "raw_bytes": 3088513,
+      "embedded_in": "records-additional/gpu/lifecycle/lifecycle-qualification-002/summary.json.gz",
+      "json_path": [
+        "cases",
+        2,
+        "cache_precondition"
+      ]
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/mixed-cuda/cache-precondition-candidate-908274612200.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/mixed-cuda/cache-precondition-reference-908274612200.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/mixed-cuda/discarded-pilot-000.json",
+      "raw_sha256": "25010b6ead0b32bfb66ebecda441e5f79f225618462b285d10d4c773e40465c9",
+      "raw_bytes": 3476142,
+      "embedded_in": "records-additional/gpu/lifecycle/lifecycle-qualification-002/summary.json.gz",
+      "json_path": [
+        "cases",
+        2,
+        "discarded_pilot"
+      ]
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/mixed-cuda/discarded-pilot-candidate-908274612200.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/mixed-cuda/discarded-pilot-reference-908274612200.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/mixed-cuda/forecast.json",
+      "raw_sha256": "7dbb61b2369c657f30a0b86b349fc4ddd53dbebe442d96051d89675377770fa3",
+      "raw_bytes": 1287493,
+      "embedded_in": "records-additional/gpu/lifecycle/lifecycle-qualification-002/summary.json.gz",
+      "json_path": [
+        "cases",
+        2,
+        "forecast"
+      ]
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/mixed-cuda/result.json",
+      "raw_sha256": "7e978fc3b425e60dff81b2c6055141278d75725b544b654ed07c04c8806364a2",
+      "raw_bytes": 44740799,
+      "embedded_in": "records-additional/gpu/lifecycle/lifecycle-qualification-002/summary.json.gz",
+      "json_path": [
+        "cases",
+        2
+      ]
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/mixed-cuda/training-001.json",
+      "raw_sha256": "b46d18b387184b204af2408addf3d18e9951a56e2c1399edbbe3987837516834",
+      "raw_bytes": 3476046,
+      "embedded_in": "records-additional/gpu/lifecycle/lifecycle-qualification-002/summary.json.gz",
+      "json_path": [
+        "cases",
+        2,
+        "training",
+        0
+      ]
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/mixed-cuda/training-002.json",
+      "raw_sha256": "f913e94936b300bc0ac36dcbae00b40a7f6c2bee48ed65544daf4cb2ae7bc5c4",
+      "raw_bytes": 3476097,
+      "embedded_in": "records-additional/gpu/lifecycle/lifecycle-qualification-002/summary.json.gz",
+      "json_path": [
+        "cases",
+        2,
+        "training",
+        1
+      ]
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/mixed-cuda/training-003.json",
+      "raw_sha256": "f889cc97d5bf7f248152ceff18ef99170bf2ceffdef14137cb85b5ed25ad1c94",
+      "raw_bytes": 3476183,
+      "embedded_in": "records-additional/gpu/lifecycle/lifecycle-qualification-002/summary.json.gz",
+      "json_path": [
+        "cases",
+        2,
+        "training",
+        2
+      ]
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/mixed-cuda/training-candidate-908275612200.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/mixed-cuda/training-candidate-908276612200.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/mixed-cuda/training-candidate-908277612200.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/mixed-cuda/training-reference-908275612200.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/mixed-cuda/training-reference-908276612200.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/mixed-cuda/training-reference-908277612200.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/mixed-cuda/validation-001.json",
+      "raw_sha256": "57f95721a207a84326ad530165a561b124db05605fd859a20f685d524eb85c19",
+      "raw_bytes": 6987119,
+      "embedded_in": "records-additional/gpu/lifecycle/lifecycle-qualification-002/summary.json.gz",
+      "json_path": [
+        "cases",
+        2,
+        "full_pairs",
+        0
+      ]
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/mixed-cuda/validation-002.json",
+      "raw_sha256": "de24dbba96376d66e2cf0375d6d27ab5464b248411f9f346e4d3f03ebc859691",
+      "raw_bytes": 6987844,
+      "embedded_in": "records-additional/gpu/lifecycle/lifecycle-qualification-002/summary.json.gz",
+      "json_path": [
+        "cases",
+        2,
+        "full_pairs",
+        1
+      ]
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/mixed-cuda/validation-003.json",
+      "raw_sha256": "c16946ee42051afe1dfb2bff5d92621a7f70490c4c42b4ce710f0e5823a07279",
+      "raw_bytes": 6986882,
+      "embedded_in": "records-additional/gpu/lifecycle/lifecycle-qualification-002/summary.json.gz",
+      "json_path": [
+        "cases",
+        2,
+        "full_pairs",
+        2
+      ]
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/mixed-cuda/validation-candidate-908375612200.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/mixed-cuda/validation-candidate-908376612200.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/mixed-cuda/validation-candidate-908377612200.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/mixed-cuda/validation-reference-908375612200.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/mixed-cuda/validation-reference-908376612200.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/mixed-cuda/validation-reference-908377612200.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-qualification-002/summary.json",
+      "raw_sha256": "76abc19ee3ca3a4786b90c64607733976d71799eb62dfadd696f150f0ac6ce2c",
+      "raw_bytes": 54641213,
+      "archive": "records-additional/gpu/lifecycle/lifecycle-qualification-002/summary.json.gz",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/native-build/candidate/CMakeCache.txt",
+      "raw_sha256": "1dcf8907079f7f09b0a1b96a8f5ad84cac2f69146be82d37011b3f92bf5c5e2c",
+      "raw_bytes": 35972,
+      "archive": "records-additional/gpu/lifecycle/native-build/candidate/CMakeCache.txt.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/native-build/candidate/CMakeLists.txt",
+      "raw_sha256": "5bf29ee7cc20b1453b9124eaab79948d37744ed70d9444a87218c16d75f9c276",
+      "raw_bytes": 107291,
+      "archive": "records-additional/gpu/lifecycle/native-build/candidate/CMakeLists.txt.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/native-build/candidate/build.sh",
+      "raw_sha256": "645779c32a1d7fc8d0dbf38b321ff0392010ffb2de3f64a49f22220620029826",
+      "raw_bytes": 22743,
+      "archive": "records-additional/gpu/lifecycle/native-build/candidate/build.sh.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/native-build/candidate/compile_commands.json",
+      "raw_sha256": "500d5b8883245ea9131b202531bdec6bafb3dba7da20648954e3ee064bbd10a0",
+      "raw_bytes": 428659,
+      "archive": "records-additional/gpu/lifecycle/native-build/candidate/compile_commands.json.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/native-build/provenance.json",
+      "raw_sha256": "94e3455dd28656f996757839d8228037eb9f617a8e4a5c79819968b2e545c720",
+      "raw_bytes": 1188,
+      "archive": "records-additional/gpu/lifecycle/native-build/provenance.json.gz",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/native-build/reference/CMakeCache.txt",
+      "raw_sha256": "8819d297925f70d52b24c4b79b2767d097e5c6edb9d5fea1f2363015a4ed5582",
+      "raw_bytes": 36012,
+      "archive": "records-additional/gpu/lifecycle/native-build/reference/CMakeCache.txt.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/native-build/reference/CMakeLists.txt",
+      "raw_sha256": "86823623f08850d2bb37cddd28257ebda48e652a37f716cb212999e8324edd50",
+      "raw_bytes": 107281,
+      "archive": "records-additional/gpu/lifecycle/native-build/reference/CMakeLists.txt.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/native-build/reference/build.sh",
+      "raw_sha256": "645779c32a1d7fc8d0dbf38b321ff0392010ffb2de3f64a49f22220620029826",
+      "raw_bytes": 22743,
+      "archive": "records-additional/gpu/lifecycle/native-build/candidate/build.sh.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/native-build/reference/compile_commands.json",
+      "raw_sha256": "78b21b6db88f1d4a5ffe91aacabaf9e44d68692ac84dac03a5d02b2180b70cd3",
+      "raw_bytes": 442107,
+      "archive": "records-additional/gpu/lifecycle/native-build/reference/compile_commands.json.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/lifecycle/cpu-qual-001-analysis.json",
+      "raw_sha256": "a6193f4b8656726f7538a441b75b0a49f100a0296450ae533f63fbe072d292d1",
+      "raw_bytes": 10085,
+      "archive": "records-additional/lifecycle/cpu-qual-001-analysis.json.gz",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/lifecycle/cpu-qual-001-logs/stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/lifecycle/cpu-qual-001-logs/stdout.log",
+      "raw_sha256": "541be2dfc7de02a0f4dadd474f1232266bb066b9c4a41e7b800b140c68871750",
+      "raw_bytes": 117,
+      "archive": "records-additional/lifecycle/cpu-qual-001-logs/stdout.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/lifecycle/cpu-qual-001-monitor.log",
+      "raw_sha256": "c5254938c3a6a6d1393b4d678c514d0778c73f9a526db93219ad5c4063c57e44",
+      "raw_bytes": 71,
+      "archive": "records-additional/lifecycle/cpu-qual-001-monitor.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/lifecycle/cpu-qual-001/cold-cpu-phase/cold-direct-001.json",
+      "raw_sha256": "72b9303ef9b0426a212364cf9c6c2ad170eb771781ddc58e0e9bd14929190bb9",
+      "raw_bytes": 40041,
+      "embedded_in": "records-additional/lifecycle/cpu-qual-001/summary.json.gz",
+      "json_path": [
+        "cases",
+        0,
+        "full_pairs",
+        0
+      ]
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/lifecycle/cpu-qual-001/cold-cpu-phase/cold-direct-002.json",
+      "raw_sha256": "562350e64f232a77bb54f7c464e3b9da4676f9b91e90b380fec84af596b6615a",
+      "raw_bytes": 40035,
+      "embedded_in": "records-additional/lifecycle/cpu-qual-001/summary.json.gz",
+      "json_path": [
+        "cases",
+        0,
+        "full_pairs",
+        1
+      ]
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/lifecycle/cpu-qual-001/cold-cpu-phase/cold-direct-003.json",
+      "raw_sha256": "c1481c33279b4b00c9a56e3a1f0223b28a46909f55a8853135d522166bb11b82",
+      "raw_bytes": 40034,
+      "embedded_in": "records-additional/lifecycle/cpu-qual-001/summary.json.gz",
+      "json_path": [
+        "cases",
+        0,
+        "full_pairs",
+        2
+      ]
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/lifecycle/cpu-qual-001/cold-cpu-phase/cold-direct-candidate-177581441401.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/lifecycle/cpu-qual-001/cold-cpu-phase/cold-direct-candidate-177582441401.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/lifecycle/cpu-qual-001/cold-cpu-phase/cold-direct-candidate-177583441401.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/lifecycle/cpu-qual-001/cold-cpu-phase/cold-direct-reference-177581441401.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/lifecycle/cpu-qual-001/cold-cpu-phase/cold-direct-reference-177582441401.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/lifecycle/cpu-qual-001/cold-cpu-phase/cold-direct-reference-177583441401.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/lifecycle/cpu-qual-001/cold-cpu-phase/result.json",
+      "raw_sha256": "9cdf1d64605c4a83054cad1907135ba98cc50b35799cc1f2882c7a0a3a709f44",
+      "raw_bytes": 151000,
+      "embedded_in": "records-additional/lifecycle/cpu-qual-001/summary.json.gz",
+      "json_path": [
+        "cases",
+        0
+      ]
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/lifecycle/cpu-qual-001/mixed-cpu/discarded-pilot-000.json",
+      "raw_sha256": "7010d570730632d4983c7f70b3d267af50cec7e62ba9bb73545b6398b23c5edd",
+      "raw_bytes": 776292,
+      "archive": "records-additional/lifecycle/cpu-qual-001/mixed-cpu/discarded-pilot-000.json.gz",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/lifecycle/cpu-qual-001/mixed-cpu/discarded-pilot-candidate-626665405637.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/lifecycle/cpu-qual-001/mixed-cpu/discarded-pilot-reference-626665405637.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/lifecycle/cpu-qual-001/mixed-cpu/forecast.json",
+      "raw_sha256": "676516476d301bfee538c5f0fcc4de4e56133e562938f6917af7862a56bd8186",
+      "raw_bytes": 67673,
+      "archive": "records-additional/lifecycle/cpu-qual-001/mixed-cpu/forecast.json.gz",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/lifecycle/cpu-qual-001/mixed-cpu/training-001.json",
+      "raw_sha256": "f330ff30f4fab90d26b5f32c948ca8cd9dc9a598d9829636bc7403be4efb5a0b",
+      "raw_bytes": 776212,
+      "archive": "records-additional/lifecycle/cpu-qual-001/mixed-cpu/training-001.json.gz",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/lifecycle/cpu-qual-001/mixed-cpu/training-002.json",
+      "raw_sha256": "2a548aa69c1545a60e8082e0e024f3445f5d02d528985e24d4c6725825b2a9ce",
+      "raw_bytes": 776261,
+      "archive": "records-additional/lifecycle/cpu-qual-001/mixed-cpu/training-002.json.gz",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/lifecycle/cpu-qual-001/mixed-cpu/training-003.json",
+      "raw_sha256": "8cbabd6de92307591cdbc314212aa36643c69920f5b273616e67f8028221f287",
+      "raw_bytes": 776336,
+      "archive": "records-additional/lifecycle/cpu-qual-001/mixed-cpu/training-003.json.gz",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/lifecycle/cpu-qual-001/mixed-cpu/training-candidate-626666405637.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/lifecycle/cpu-qual-001/mixed-cpu/training-candidate-626667405637.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/lifecycle/cpu-qual-001/mixed-cpu/training-candidate-626668405637.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/lifecycle/cpu-qual-001/mixed-cpu/training-reference-626666405637.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/lifecycle/cpu-qual-001/mixed-cpu/training-reference-626667405637.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/lifecycle/cpu-qual-001/mixed-cpu/training-reference-626668405637.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/lifecycle/cpu-qual-001/mixed-cpu/validation-001.json",
+      "raw_sha256": "c39a4c43fe8c34c8a89214e275bbd463ff0d5ac06d2d574f6b8638b19d8144ab",
+      "raw_bytes": 2297305,
+      "archive": "records-additional/lifecycle/cpu-qual-001/mixed-cpu/validation-001.json.gz",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/lifecycle/cpu-qual-001/mixed-cpu/validation-002.json",
+      "raw_sha256": "4695ba06261e143e3b4338d715f84cc171406b0d7ba3b3151b4e0b6e87a7a5dd",
+      "raw_bytes": 2297127,
+      "archive": "records-additional/lifecycle/cpu-qual-001/mixed-cpu/validation-002.json.gz",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/lifecycle/cpu-qual-001/mixed-cpu/validation-003.json",
+      "raw_sha256": "69ab33c04f3777693a32711d9f645c920f4f019341debd084287db3448d75186",
+      "raw_bytes": 2297228,
+      "archive": "records-additional/lifecycle/cpu-qual-001/mixed-cpu/validation-003.json.gz",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/lifecycle/cpu-qual-001/mixed-cpu/validation-004.json",
+      "raw_sha256": "f11f1918e8f811eb6c31783d27ad4c56e900a1adf7a2079cdb3d5a9e1e1a4ffa",
+      "raw_bytes": 2296967,
+      "archive": "records-additional/lifecycle/cpu-qual-001/mixed-cpu/validation-004.json.gz",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/lifecycle/cpu-qual-001/mixed-cpu/validation-005.json",
+      "raw_sha256": "0bd78f9a606ec2a401e892f9a543c6b281842ef3b4fe89fff707adc55a0366fc",
+      "raw_bytes": 2297319,
+      "archive": "records-additional/lifecycle/cpu-qual-001/mixed-cpu/validation-005.json.gz",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/lifecycle/cpu-qual-001/mixed-cpu/validation-candidate-626766405637.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/lifecycle/cpu-qual-001/mixed-cpu/validation-candidate-626767405637.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/lifecycle/cpu-qual-001/mixed-cpu/validation-candidate-626768405637.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/lifecycle/cpu-qual-001/mixed-cpu/validation-candidate-626769405637.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/lifecycle/cpu-qual-001/mixed-cpu/validation-candidate-626770405637.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/lifecycle/cpu-qual-001/mixed-cpu/validation-candidate-626771405637.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/lifecycle/cpu-qual-001/mixed-cpu/validation-reference-626766405637.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/lifecycle/cpu-qual-001/mixed-cpu/validation-reference-626767405637.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/lifecycle/cpu-qual-001/mixed-cpu/validation-reference-626768405637.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/lifecycle/cpu-qual-001/mixed-cpu/validation-reference-626769405637.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/lifecycle/cpu-qual-001/mixed-cpu/validation-reference-626770405637.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/lifecycle/cpu-qual-001/mixed-cpu/validation-reference-626771405637.stderr.log",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/lifecycle/cpu-qual-001/summary.json",
+      "raw_sha256": "d3ffc09dc169b91864da762890943bc04ebba73bd82540b5d278e634040b0c7f",
+      "raw_bytes": 165898,
+      "archive": "records-additional/lifecycle/cpu-qual-001/summary.json.gz",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/lifecycle/monitor_cpu_budget.py",
+      "raw_sha256": "77fbc70497f18031693c3ff4c48633598930826e9506998a1956ef2efc1721f2",
+      "raw_bytes": 4422,
+      "archive": "records-additional/lifecycle/monitor_cpu_budget.py.gz"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/resource-direct-001/direct-observations.json",
+      "raw_sha256": "354f70ba68344d9ba2f746f27feff9a17721912928a6e430ff612b554a3446e9",
+      "raw_bytes": 374661,
+      "archive": "records-additional/resource-direct-001/direct-observations.json.gz",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/resource-direct-001/frozen-direct.json",
+      "raw_sha256": "e33d2b2046d424c5c4323e2d052a6274e69d843c109173e57f3ccbaafffec836",
+      "raw_bytes": 51559,
+      "embedded_in": "records-additional/resource-direct-001/report.json.gz",
+      "json_path": [
+        "frozen_direct"
+      ]
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/resource-direct-001/progress.json",
+      "raw_sha256": "5d2a3780af1aea562e5963427dce3d61096c5c1d1497f5c5af95fd9d57cdd9bb",
+      "raw_bytes": 447500,
+      "archive": "records-additional/resource-direct-001/progress.json.gz",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/resource-direct-001/replay.json",
+      "raw_sha256": "9796b28a42699a4f95171d9bb1dd124bd5e33eeea7500dfa3c80999b0d9b7a4d",
+      "raw_bytes": 530,
+      "archive": "records-additional/resource-direct-001/replay.json.gz",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/resource-direct-001/report.json",
+      "raw_sha256": "4dee0f1ef0d0f3f8e5a89c41ea0e45fd60bd4295d6d0b43aab5260f171f2c8f3",
+      "raw_bytes": 558411,
+      "archive": "records-additional/resource-direct-001/report.json.gz",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/resource-direct-001/source-freeze.json",
+      "raw_sha256": "cf6beb2acda6debb8e0520061b5927eba2b483ac5e726fbf398f3ea8bb66c9b1",
+      "raw_bytes": 627,
+      "archive": "records-additional/resource-direct-001/source-freeze.json.gz",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/resource-direct-001/summary.json",
+      "raw_sha256": "4dee0f1ef0d0f3f8e5a89c41ea0e45fd60bd4295d6d0b43aab5260f171f2c8f3",
+      "raw_bytes": 558411,
+      "archive": "records-additional/resource-direct-001/report.json.gz",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/resource-qualification-001/frozen.json",
+      "raw_sha256": "87b2430d9476983271a6993fffed5e098393ead4e5dbd07aa4c39bcb221c16f6",
+      "raw_bytes": 405912,
+      "archive": "records-additional/resource-qualification-001/frozen.json.gz",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/resource-qualification-001/geometry-diagnosis.json",
+      "raw_sha256": "f3a6a27eb8b52be2904cfc41953ae195539aaf5a9fc74efb3b4327a811ec0fb6",
+      "raw_bytes": 38317,
+      "archive": "records-additional/resource-qualification-001/geometry-diagnosis.json.gz",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/resource-qualification-001/pilot.json",
+      "raw_sha256": "8070d9c9e06ba5f6281bba0033b4a43ef2fa3e8a995b76e894ca02560db7c8aa",
+      "raw_bytes": 15136,
+      "archive": "records-additional/resource-qualification-001/pilot.json.gz",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/resource-qualification-001/report.json",
+      "raw_sha256": "1918f56269eaf08a835c8267962a7306ecb5e761a4feb071b68ba6920b1042e9",
+      "raw_bytes": 329,
+      "archive": "records-additional/resource-qualification-001/report.json.gz",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/resource-qualification-001/summary.json",
+      "raw_sha256": "1918f56269eaf08a835c8267962a7306ecb5e761a4feb071b68ba6920b1042e9",
+      "raw_bytes": 329,
+      "archive": "records-additional/resource-qualification-001/report.json.gz",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/resource-qualification-001/training.json",
+      "raw_sha256": "6f1b6733b5c34988ce5eac7c2e4fd67f2940ebf40691bf884d0cd379ee1b07b9",
+      "raw_bytes": 401735,
+      "archive": "records-additional/resource-qualification-001/training.json.gz",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/resource-qualification-002/anchor.json",
+      "raw_sha256": "3c0e19dcb056e7fdabfee5f2cbc00145bbf776613790ca1ca6e73ea92a174c94",
+      "raw_bytes": 578817,
+      "archive": "records-additional/resource-qualification-002/report.json.gz",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/resource-qualification-002/frozen.json",
+      "raw_sha256": "dbc1ebf1049e339d6c03373f08c2bdef635a37a0ec8b55a712ef766bafa0fb77",
+      "raw_bytes": 418900,
+      "embedded_in": "records-additional/resource-qualification-002/report.json.gz",
+      "json_path": [
+        "frozen"
+      ]
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/resource-qualification-002/full-observations.json",
+      "raw_sha256": "7f766256e0736c506bd99aaa7670ebe671cab0ca263032549d9b0d144442fe89",
+      "raw_bytes": 111846,
+      "archive": "records-additional/resource-qualification-002/full-observations.json.gz",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/resource-qualification-002/pilot.json",
+      "raw_sha256": "22bfa32d21863123391ba5bbc4b3e68adb27a91b885bde2744c66950c4c3f4f1",
+      "raw_bytes": 15137,
+      "embedded_in": "records-additional/resource-qualification-002/report.json.gz",
+      "json_path": [
+        "pilot"
+      ]
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/resource-qualification-002/progress.json",
+      "raw_sha256": "15da2b72aa0f4347145b87dd2787685e58aae05531c1ee069f5540f0c7563105",
+      "raw_bytes": 115093,
+      "archive": "records-additional/resource-qualification-002/progress.json.gz",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/resource-qualification-002/report.json",
+      "raw_sha256": "3c0e19dcb056e7fdabfee5f2cbc00145bbf776613790ca1ca6e73ea92a174c94",
+      "raw_bytes": 578817,
+      "archive": "records-additional/resource-qualification-002/report.json.gz",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/resource-qualification-002/source-freeze.json",
+      "raw_sha256": "eed7c08b153a143d67aa3f288f20e05466c53177b0d156d164f494fe209c1ad7",
+      "raw_bytes": 627,
+      "archive": "records-additional/resource-qualification-002/source-freeze.json.gz",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/resource-qualification-002/summary.json",
+      "raw_sha256": "3c0e19dcb056e7fdabfee5f2cbc00145bbf776613790ca1ca6e73ea92a174c94",
+      "raw_bytes": 578817,
+      "archive": "records-additional/resource-qualification-002/report.json.gz",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/resource-qualification-002/target-geometry.json",
+      "raw_sha256": "051f453e6efca05e39641ff4586a8811cc3e4e128a7e585e92909633c86e2036",
+      "raw_bytes": 12476,
+      "embedded_in": "records-additional/resource-qualification-002/report.json.gz",
+      "json_path": [
+        "frozen",
+        "target_geometry"
+      ]
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/resource-qualification-002/training.json",
+      "raw_sha256": "e604d73682b4f2c0f3e6d38f21be56d7290ad878345982a0652c3edc4791242b",
+      "raw_bytes": 401740,
+      "archive": "records-additional/resource-qualification-002/training.json.gz",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/resource-qualification-003/anchor.json",
+      "raw_sha256": "68b1f48619e03da4150e3fe5bbe5e212cb40ec2420b9476ee87e873b313671bf",
+      "raw_bytes": 5311141,
+      "archive": "records-additional/resource-qualification-003/report.json.gz",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/resource-qualification-003/frozen.json",
+      "raw_sha256": "b6a9d969a92fc02f0a87f582d85821a492497e60e2dd4694589fdcbee3b73c52",
+      "raw_bytes": 2665926,
+      "embedded_in": "records-additional/resource-qualification-003/report.json.gz",
+      "json_path": [
+        "frozen"
+      ]
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/resource-qualification-003/full-observations.json",
+      "raw_sha256": "5a790ee203634be29c9a6b5a616a6693690e195616f88a689512e219f14a5912",
+      "raw_bytes": 2420302,
+      "archive": "records-additional/resource-qualification-003/full-observations.json.gz",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/resource-qualification-003/pilot.json",
+      "raw_sha256": "899e1681cb99314d4649b247ad875188b1092c06c87a4870a8ac5a2a45da7a23",
+      "raw_bytes": 15138,
+      "embedded_in": "records-additional/resource-qualification-003/report.json.gz",
+      "json_path": [
+        "pilot"
+      ]
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/resource-qualification-003/progress.json",
+      "raw_sha256": "532051a47c7eed162441e6565488e7de219d186e0a4f6f3cebfe23c451568e7d",
+      "raw_bytes": 2433350,
+      "archive": "records-additional/resource-qualification-003/progress.json.gz",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/resource-qualification-003/report.json",
+      "raw_sha256": "68b1f48619e03da4150e3fe5bbe5e212cb40ec2420b9476ee87e873b313671bf",
+      "raw_bytes": 5311141,
+      "archive": "records-additional/resource-qualification-003/report.json.gz",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/resource-qualification-003/source-freeze.json",
+      "raw_sha256": "0c418ae8c084dd8d50f10f17eadef01564df7e189d5c150fb5dd5946f7f16be6",
+      "raw_bytes": 627,
+      "archive": "records-additional/resource-qualification-003/source-freeze.json.gz",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/resource-qualification-003/summary.json",
+      "raw_sha256": "68b1f48619e03da4150e3fe5bbe5e212cb40ec2420b9476ee87e873b313671bf",
+      "raw_bytes": 5311141,
+      "archive": "records-additional/resource-qualification-003/report.json.gz",
+      "storage": "compact_json_reformatted_indent2_newline"
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/resource-qualification-003/target-geometry.json",
+      "raw_sha256": "15674e8fdcf409e8b8702decf952b4f737f2a865f79a8a7180a19c9e45d705d2",
+      "raw_bytes": 12476,
+      "embedded_in": "records-additional/resource-qualification-003/report.json.gz",
+      "json_path": [
+        "frozen",
+        "target_geometry"
+      ]
+    },
+    {
+      "input_path": "local-evidence/triad-performance-broader/resource-qualification-003/training.json",
+      "raw_sha256": "3313d9d1ebfd526833ef93fd4fb89abd73daa232b034e94567571a92000ff0a1",
+      "raw_bytes": 2634188,
+      "archive": "records-additional/resource-qualification-003/training.json.gz",
+      "storage": "compact_json_reformatted_indent2_newline"
+    }
+  ],
+  "scope": "Completed lifecycle/resource attempts and native build provenance; active complete-002 result excluded. Its invocation is a launch receipt only.",
+  "storage": "Exact bytes are either gzip-retained or reconstructed with JSON indent=2 and trailing newline, verified against original byte count and SHA256. Compact JSON payloads and shared embedded values are explicitly identified.",
+  "missing_historical_source": [
+    {
+      "path": "tools/triad_perf_resource.py",
+      "sha256": "f388816d82ab53076510372149ec09696ca5ce800eb9c794e1c5babfe334d60d",
+      "record": "resource-qualification-001/frozen.json",
+      "scope": "Failed geometry preflight; exact source bytes unavailable. No reconstructed source substituted."
+    }
+  ],
+  "reproduction_limit": "Exact lifecycle-qualification-002 outer argv was not retained; raw member commands, profiles, seeds, static bindings and original protocol source remain available."
+}

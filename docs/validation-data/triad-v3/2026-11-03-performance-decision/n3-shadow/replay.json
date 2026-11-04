@@ -1,0 +1,993 @@
+{
+  "aggregate": {
+    "cases": 20,
+    "new_actual_observed_timer_cost_sum_seconds": 408.8031618113594,
+    "new_campaign_wall_seconds": 741.0350357099669,
+    "new_n3_shadow_resolved_cases": 20,
+    "new_n3_shadow_unavailable_or_unresolved": [],
+    "old_default_actual_timer_cost_sum_seconds": 436.4846259627375,
+    "old_n3_shadow_omitted_fraction": 0.33347707843530905,
+    "old_n3_shadow_omitted_timer_seconds": 145.55761784798233,
+    "old_n3_shadow_timer_cost_sum_seconds": 290.92700811475515,
+    "timer_sums_not_campaign_wall_savings": true
+  },
+  "case_results": [
+    {
+      "case_id": "native-flat",
+      "harness": "native_fft",
+      "new_n3_shadow": {
+        "gate": "pass",
+        "n": 3,
+        "trace": [
+          {
+            "gate": "pass",
+            "lower": 0.9174480318816441,
+            "n": 3,
+            "ratio": 0.9638188693898213,
+            "upper": 1.0125334413619547
+          }
+        ],
+        "upper": 1.0125334413619547
+      },
+      "new_n3_timer_cost_seconds": 1.7928741069626994,
+      "new_observed_timer_cost_seconds": 3.04140258586267,
+      "new_pairs": 5,
+      "new_prefix_available_through": 5,
+      "old_default_stop_n": 5,
+      "old_default_timer_cost_seconds": 3.3883292030077428,
+      "old_n3_omitted_timer_seconds": 1.342748953087721,
+      "old_n3_shadow": {
+        "gate": "pass",
+        "n": 3,
+        "trace": [
+          {
+            "gate": "pass",
+            "lower": 0.9444781740597666,
+            "n": 3,
+            "ratio": 0.9904710346005576,
+            "upper": 1.0387035903284083
+          }
+        ],
+        "upper": 1.0387035903284083
+      },
+      "old_n3_timer_cost_seconds": 2.0455802499200217,
+      "old_pairs": 33
+    },
+    {
+      "case_id": "native-fhss-selective-burst",
+      "harness": "native_fft",
+      "new_n3_shadow": {
+        "gate": "pass",
+        "n": 3,
+        "trace": [
+          {
+            "gate": "pass",
+            "lower": 0.9097005700110413,
+            "n": 3,
+            "ratio": 0.9704685289437247,
+            "upper": 1.0352957849182902
+          }
+        ],
+        "upper": 1.0352957849182902
+      },
+      "new_n3_timer_cost_seconds": 9.583328129083384,
+      "new_observed_timer_cost_seconds": 16.194487285101786,
+      "new_pairs": 5,
+      "new_prefix_available_through": 5,
+      "old_default_stop_n": 5,
+      "old_default_timer_cost_seconds": 16.750685908074956,
+      "old_n3_omitted_timer_seconds": 6.776098128058948,
+      "old_n3_shadow": {
+        "gate": "pass",
+        "n": 3,
+        "trace": [
+          {
+            "gate": "pass",
+            "lower": 0.6836780916273089,
+            "n": 3,
+            "ratio": 0.9424917891448139,
+            "upper": 1.2992821965247694
+          }
+        ],
+        "upper": 1.2992821965247694
+      },
+      "old_n3_timer_cost_seconds": 9.974587780016009,
+      "old_pairs": 33
+    },
+    {
+      "case_id": "native-null",
+      "harness": "native_fft",
+      "new_n3_shadow": {
+        "gate": "pass",
+        "n": 3,
+        "trace": [
+          {
+            "gate": "pass",
+            "lower": 0.734261047465557,
+            "n": 3,
+            "ratio": 0.9403611481535743,
+            "upper": 1.2043115891942893
+          }
+        ],
+        "upper": 1.2043115891942893
+      },
+      "new_n3_timer_cost_seconds": 0.2502560299471952,
+      "new_observed_timer_cost_seconds": 0.3917702569742687,
+      "new_pairs": 5,
+      "new_prefix_available_through": 5,
+      "old_default_stop_n": 5,
+      "old_default_timer_cost_seconds": 0.3823167649679817,
+      "old_n3_omitted_timer_seconds": 0.15189101395662874,
+      "old_n3_shadow": {
+        "gate": "pass",
+        "n": 3,
+        "trace": [
+          {
+            "gate": "pass",
+            "lower": 0.8053467712082216,
+            "n": 3,
+            "ratio": 0.9985580728490062,
+            "upper": 1.2381228316790722
+          }
+        ],
+        "upper": 1.2381228316790722
+      },
+      "old_n3_timer_cost_seconds": 0.23042575101135299,
+      "old_pairs": 17
+    },
+    {
+      "case_id": "native-wrong-key",
+      "harness": "native_fft",
+      "new_n3_shadow": {
+        "gate": "pass",
+        "n": 3,
+        "trace": [
+          {
+            "gate": "pass",
+            "lower": 0.8885239730739177,
+            "n": 3,
+            "ratio": 0.973379752781999,
+            "upper": 1.0663394256523047
+          }
+        ],
+        "upper": 1.0663394256523047
+      },
+      "new_n3_timer_cost_seconds": 0.2702031500521116,
+      "new_observed_timer_cost_seconds": 0.4461130329873413,
+      "new_pairs": 5,
+      "new_prefix_available_through": 5,
+      "old_default_stop_n": 5,
+      "old_default_timer_cost_seconds": 0.6547031170339324,
+      "old_n3_omitted_timer_seconds": 0.0,
+      "old_n3_shadow": {
+        "gate": "pass",
+        "n": 5,
+        "trace": [
+          {
+            "gate": "inconclusive",
+            "lower": 0.5313708991313822,
+            "n": 3,
+            "ratio": 0.9427767225405111,
+            "upper": 1.6727072371053273
+          },
+          {
+            "gate": "pass",
+            "lower": 0.7959620408335993,
+            "n": 5,
+            "ratio": 0.9428016730410028,
+            "upper": 1.1167303829690274
+          }
+        ],
+        "upper": 1.1167303829690274
+      },
+      "old_n3_timer_cost_seconds": 0.6547031170339324,
+      "old_pairs": 33
+    },
+    {
+      "case_id": "native-frontend",
+      "harness": "native_fft",
+      "new_n3_shadow": {
+        "gate": "pass",
+        "n": 5,
+        "trace": [
+          {
+            "gate": "inconclusive",
+            "lower": 0.6172227957985131,
+            "n": 3,
+            "ratio": 0.9230967375818246,
+            "upper": 1.3805510631405307
+          },
+          {
+            "gate": "pass",
+            "lower": 0.8121278336800439,
+            "n": 5,
+            "ratio": 0.9198933389130424,
+            "upper": 1.0419588147128651
+          }
+        ],
+        "upper": 1.0419588147128651
+      },
+      "new_n3_timer_cost_seconds": 0.3071991620818153,
+      "new_observed_timer_cost_seconds": 0.3071991620818153,
+      "new_pairs": 5,
+      "new_prefix_available_through": 5,
+      "old_default_stop_n": 5,
+      "old_default_timer_cost_seconds": 0.2898322010296397,
+      "old_n3_omitted_timer_seconds": 0.126452395983506,
+      "old_n3_shadow": {
+        "gate": "pass",
+        "n": 3,
+        "trace": [
+          {
+            "gate": "pass",
+            "lower": 0.7337860959582392,
+            "n": 3,
+            "ratio": 0.9199714597223737,
+            "upper": 1.1533980970278317
+          }
+        ],
+        "upper": 1.1533980970278317
+      },
+      "old_n3_timer_cost_seconds": 0.1633798050461337,
+      "old_pairs": 33
+    },
+    {
+      "case_id": "native-ou-path",
+      "harness": "native_fft",
+      "new_n3_shadow": {
+        "gate": "pass",
+        "n": 3,
+        "trace": [
+          {
+            "gate": "pass",
+            "lower": 0.8350580535907692,
+            "n": 3,
+            "ratio": 1.0389898510676914,
+            "upper": 1.2927243872204914
+          }
+        ],
+        "upper": 1.2927243872204914
+      },
+      "new_n3_timer_cost_seconds": 0.27112729102373123,
+      "new_observed_timer_cost_seconds": 0.461204860068392,
+      "new_pairs": 5,
+      "new_prefix_available_through": 5,
+      "old_default_stop_n": 5,
+      "old_default_timer_cost_seconds": 0.41694503906182945,
+      "old_n3_omitted_timer_seconds": 0.0,
+      "old_n3_shadow": {
+        "gate": "pass",
+        "n": 5,
+        "trace": [
+          {
+            "gate": "inconclusive",
+            "lower": 0.8140618242600395,
+            "n": 3,
+            "ratio": 1.060609322664966,
+            "upper": 1.3818264188304556
+          },
+          {
+            "gate": "pass",
+            "lower": 0.9472873980553386,
+            "n": 5,
+            "ratio": 1.0384090704347018,
+            "upper": 1.1382959382492175
+          }
+        ],
+        "upper": 1.1382959382492175
+      },
+      "old_n3_timer_cost_seconds": 0.41694503906182945,
+      "old_pairs": 33
+    },
+    {
+      "case_id": "native-gaussian-path",
+      "harness": "native_fft",
+      "new_n3_shadow": {
+        "gate": "pass",
+        "n": 5,
+        "trace": [
+          {
+            "gate": "inconclusive",
+            "lower": 0.7416108516392002,
+            "n": 3,
+            "ratio": 1.0400800241985422,
+            "upper": 1.4586712887841191
+          },
+          {
+            "gate": "pass",
+            "lower": 0.9366573575854585,
+            "n": 5,
+            "ratio": 1.0378983059400788,
+            "upper": 1.150082134891041
+          }
+        ],
+        "upper": 1.150082134891041
+      },
+      "new_n3_timer_cost_seconds": 0.4403324190643616,
+      "new_observed_timer_cost_seconds": 0.4403324190643616,
+      "new_pairs": 5,
+      "new_prefix_available_through": 5,
+      "old_default_stop_n": 5,
+      "old_default_timer_cost_seconds": 0.4576048601884395,
+      "old_n3_omitted_timer_seconds": 0.18368607002776116,
+      "old_n3_shadow": {
+        "gate": "pass",
+        "n": 3,
+        "trace": [
+          {
+            "gate": "pass",
+            "lower": 0.9069982802286689,
+            "n": 3,
+            "ratio": 0.991930769080051,
+            "upper": 1.0848164457375569
+          }
+        ],
+        "upper": 1.0848164457375569
+      },
+      "old_n3_timer_cost_seconds": 0.2739187901606783,
+      "old_pairs": 33
+    },
+    {
+      "case_id": "narrow-hf-tight",
+      "harness": "native_fft_fft",
+      "new_n3_shadow": {
+        "gate": "pass",
+        "n": 9,
+        "trace": [
+          {
+            "gate": "inconclusive",
+            "lower": 0.3221218934145631,
+            "n": 3,
+            "ratio": 0.8719359593562258,
+            "upper": 2.360200696572989
+          },
+          {
+            "gate": "inconclusive",
+            "lower": 0.663403065497566,
+            "n": 5,
+            "ratio": 0.9525952461415577,
+            "upper": 1.3678527431749172
+          },
+          {
+            "gate": "pass",
+            "lower": 0.8008519303066786,
+            "n": 9,
+            "ratio": 0.9392484016278037,
+            "upper": 1.1015613830418798
+          }
+        ],
+        "upper": 1.1015613830418798
+      },
+      "new_n3_timer_cost_seconds": 5.922373891051393,
+      "new_observed_timer_cost_seconds": 5.922373891051393,
+      "new_pairs": 9,
+      "new_prefix_available_through": 9,
+      "old_default_stop_n": 5,
+      "old_default_timer_cost_seconds": 3.2934728972031735,
+      "old_n3_omitted_timer_seconds": 0.0,
+      "old_n3_shadow": {
+        "gate": "pass",
+        "n": 5,
+        "trace": [
+          {
+            "gate": "inconclusive",
+            "lower": 0.6069726874548708,
+            "n": 3,
+            "ratio": 1.0420590631183193,
+            "upper": 1.7890213406147153
+          },
+          {
+            "gate": "pass",
+            "lower": 0.8854681133274445,
+            "n": 5,
+            "ratio": 1.0392313802752546,
+            "upper": 1.2196959387846733
+          }
+        ],
+        "upper": 1.2196959387846733
+      },
+      "old_n3_timer_cost_seconds": 3.2934728972031735,
+      "old_pairs": 33
+    },
+    {
+      "case_id": "hf30-fhss-missed",
+      "harness": "native_fft_fft",
+      "new_n3_shadow": {
+        "gate": "pass",
+        "n": 3,
+        "trace": [
+          {
+            "gate": "pass",
+            "lower": 0.9363579214774704,
+            "n": 3,
+            "ratio": 0.9923182989351861,
+            "upper": 1.0516230853773088
+          }
+        ],
+        "upper": 1.0516230853773088
+      },
+      "new_n3_timer_cost_seconds": 1.5768784478423186,
+      "new_observed_timer_cost_seconds": 2.5996245127753355,
+      "new_pairs": 5,
+      "new_prefix_available_through": 5,
+      "old_default_stop_n": 5,
+      "old_default_timer_cost_seconds": 3.0234404578222893,
+      "old_n3_omitted_timer_seconds": 1.2009650199324824,
+      "old_n3_shadow": {
+        "gate": "pass",
+        "n": 3,
+        "trace": [
+          {
+            "gate": "pass",
+            "lower": 0.8459098186613645,
+            "n": 3,
+            "ratio": 0.9228571809932927,
+            "upper": 1.0068039851560424
+          }
+        ],
+        "upper": 1.0068039851560424
+      },
+      "old_n3_timer_cost_seconds": 1.822475437889807,
+      "old_pairs": 17
+    },
+    {
+      "case_id": "vlf-850-day",
+      "harness": "native_fft_fft",
+      "new_n3_shadow": {
+        "gate": "pass",
+        "n": 5,
+        "trace": [
+          {
+            "gate": "inconclusive",
+            "lower": 0.7249978183524891,
+            "n": 3,
+            "ratio": 0.98779356233716,
+            "upper": 1.3458469764944043
+          },
+          {
+            "gate": "pass",
+            "lower": 0.8845598984216994,
+            "n": 5,
+            "ratio": 0.9754463690247255,
+            "upper": 1.0756712129288852
+          }
+        ],
+        "upper": 1.0756712129288852
+      },
+      "new_n3_timer_cost_seconds": 20.72408782399725,
+      "new_observed_timer_cost_seconds": 20.72408782399725,
+      "new_pairs": 5,
+      "new_prefix_available_through": 5,
+      "old_default_stop_n": 5,
+      "old_default_timer_cost_seconds": 20.13488625001628,
+      "old_n3_omitted_timer_seconds": 0.0,
+      "old_n3_shadow": {
+        "gate": "pass",
+        "n": 5,
+        "trace": [
+          {
+            "gate": "inconclusive",
+            "lower": 0.6947085565191058,
+            "n": 3,
+            "ratio": 1.0224016561969544,
+            "upper": 1.5046671539960046
+          },
+          {
+            "gate": "pass",
+            "lower": 0.9022723344355464,
+            "n": 5,
+            "ratio": 1.0208599824567781,
+            "upper": 1.1550338672786815
+          }
+        ],
+        "upper": 1.1550338672786815
+      },
+      "old_n3_timer_cost_seconds": 20.13488625001628,
+      "old_pairs": 33
+    },
+    {
+      "case_id": "gaussian-multiblock",
+      "harness": "native_fft_gaussian",
+      "new_n3_shadow": {
+        "gate": "pass",
+        "n": 3,
+        "trace": [
+          {
+            "gate": "pass",
+            "lower": 0.922626564136798,
+            "n": 3,
+            "ratio": 1.0134675411227814,
+            "upper": 1.1132526385368264
+          }
+        ],
+        "upper": 1.1132526385368264
+      },
+      "new_n3_timer_cost_seconds": 0.5085085386172463,
+      "new_observed_timer_cost_seconds": 0.8432287315220532,
+      "new_pairs": 5,
+      "new_prefix_available_through": 5,
+      "old_default_stop_n": 5,
+      "old_default_timer_cost_seconds": 1.0118848258862272,
+      "old_n3_omitted_timer_seconds": 0.4325676617445424,
+      "old_n3_shadow": {
+        "gate": "pass",
+        "n": 3,
+        "trace": [
+          {
+            "gate": "pass",
+            "lower": 0.8133924567922985,
+            "n": 3,
+            "ratio": 0.996739630729515,
+            "upper": 1.2214151768566248
+          }
+        ],
+        "upper": 1.2214151768566248
+      },
+      "old_n3_timer_cost_seconds": 0.5793171641416848,
+      "old_pairs": 33
+    },
+    {
+      "case_id": "cfo-batch-tail",
+      "harness": "sampled_family_direct",
+      "new_n3_shadow": {
+        "gate": "pass",
+        "n": 5,
+        "trace": [
+          {
+            "gate": "inconclusive",
+            "lower": 0.7566905966936873,
+            "n": 3,
+            "ratio": 1.0100865355046562,
+            "upper": 1.348338163135404
+          },
+          {
+            "gate": "pass",
+            "lower": 0.9217260982736755,
+            "n": 5,
+            "ratio": 1.0049252641047828,
+            "upper": 1.0956343628844707
+          }
+        ],
+        "upper": 1.0956343628844707
+      },
+      "new_n3_timer_cost_seconds": 76.34264382399851,
+      "new_observed_timer_cost_seconds": 76.34264382399851,
+      "new_pairs": 5,
+      "new_prefix_available_through": 5,
+      "old_default_stop_n": 5,
+      "old_default_timer_cost_seconds": 78.06123666808708,
+      "old_n3_omitted_timer_seconds": 31.857544397062156,
+      "old_n3_shadow": {
+        "gate": "pass",
+        "n": 3,
+        "trace": [
+          {
+            "gate": "pass",
+            "lower": 0.9082154306568614,
+            "n": 3,
+            "ratio": 0.9867567955666954,
+            "upper": 1.0720903221087517
+          }
+        ],
+        "upper": 1.0720903221087517
+      },
+      "old_n3_timer_cost_seconds": 46.20369227102492,
+      "old_pairs": 17
+    },
+    {
+      "case_id": "gaussian-hour",
+      "harness": "sampled_family_direct",
+      "new_n3_shadow": {
+        "gate": "pass",
+        "n": 3,
+        "trace": [
+          {
+            "gate": "pass",
+            "lower": 0.7575064312722537,
+            "n": 3,
+            "ratio": 0.955099988447694,
+            "upper": 1.2042353045117944
+          }
+        ],
+        "upper": 1.2042353045117944
+      },
+      "new_n3_timer_cost_seconds": 28.228416352067143,
+      "new_observed_timer_cost_seconds": 46.63549094594782,
+      "new_pairs": 5,
+      "new_prefix_available_through": 5,
+      "old_default_stop_n": 5,
+      "old_default_timer_cost_seconds": 50.63425389910117,
+      "old_n3_omitted_timer_seconds": 20.323135571030434,
+      "old_n3_shadow": {
+        "gate": "pass",
+        "n": 3,
+        "trace": [
+          {
+            "gate": "pass",
+            "lower": 0.8706237187917405,
+            "n": 3,
+            "ratio": 1.0047157864323188,
+            "upper": 1.159460499085922
+          }
+        ],
+        "upper": 1.159460499085922
+      },
+      "old_n3_timer_cost_seconds": 30.311118328070734,
+      "old_pairs": 17
+    },
+    {
+      "case_id": "grouped-multitile",
+      "harness": "sampled_family_direct",
+      "new_n3_shadow": {
+        "gate": "pass",
+        "n": 5,
+        "trace": [
+          {
+            "gate": "inconclusive",
+            "lower": 0.7650762779641491,
+            "n": 3,
+            "ratio": 1.025895405910789,
+            "upper": 1.3756293511928492
+          },
+          {
+            "gate": "pass",
+            "lower": 0.9328037865229372,
+            "n": 5,
+            "ratio": 1.0228235673276762,
+            "upper": 1.1215306637857314
+          }
+        ],
+        "upper": 1.1215306637857314
+      },
+      "new_n3_timer_cost_seconds": 15.088652205944527,
+      "new_observed_timer_cost_seconds": 15.088652205944527,
+      "new_pairs": 5,
+      "new_prefix_available_through": 5,
+      "old_default_stop_n": 9,
+      "old_default_timer_cost_seconds": 28.11711038701469,
+      "old_n3_omitted_timer_seconds": 0.0,
+      "old_n3_shadow": {
+        "gate": "pass",
+        "n": 9,
+        "trace": [
+          {
+            "gate": "inconclusive",
+            "lower": 0.4863022931149105,
+            "n": 3,
+            "ratio": 1.0948120980706437,
+            "upper": 2.4647499036131815
+          },
+          {
+            "gate": "inconclusive",
+            "lower": 0.8335509506237527,
+            "n": 5,
+            "ratio": 1.0722886779633656,
+            "upper": 1.3794033922317714
+          },
+          {
+            "gate": "pass",
+            "lower": 0.9000079701944103,
+            "n": 9,
+            "ratio": 1.0278319956265327,
+            "upper": 1.173810284152728
+          }
+        ],
+        "upper": 1.173810284152728
+      },
+      "old_n3_timer_cost_seconds": 28.11711038701469,
+      "old_pairs": 33
+    },
+    {
+      "case_id": "phase-optimized-hour",
+      "harness": "sampled_family_direct",
+      "new_n3_shadow": {
+        "gate": "pass",
+        "n": 3,
+        "trace": [
+          {
+            "gate": "pass",
+            "lower": 0.7756138971547185,
+            "n": 3,
+            "ratio": 0.9754075987761324,
+            "upper": 1.2266670146582384
+          }
+        ],
+        "upper": 1.2266670146582384
+      },
+      "new_n3_timer_cost_seconds": 43.71445663808845,
+      "new_observed_timer_cost_seconds": 73.26190467615379,
+      "new_pairs": 5,
+      "new_prefix_available_through": 5,
+      "old_default_stop_n": 5,
+      "old_default_timer_cost_seconds": 80.09445595397847,
+      "old_n3_omitted_timer_seconds": 33.22756578796543,
+      "old_n3_shadow": {
+        "gate": "pass",
+        "n": 3,
+        "trace": [
+          {
+            "gate": "pass",
+            "lower": 0.7713050299328237,
+            "n": 3,
+            "ratio": 0.9868747640391365,
+            "upper": 1.2626934378764838
+          }
+        ],
+        "upper": 1.2626934378764838
+      },
+      "old_n3_timer_cost_seconds": 46.866890166013036,
+      "old_pairs": 33
+    },
+    {
+      "case_id": "phase-reference-hour",
+      "harness": "sampled_family_direct",
+      "new_n3_shadow": {
+        "gate": "pass",
+        "n": 3,
+        "trace": [
+          {
+            "gate": "pass",
+            "lower": 0.8754933094528147,
+            "n": 3,
+            "ratio": 0.9891297193410505,
+            "upper": 1.1175157949467298
+          }
+        ],
+        "upper": 1.1175157949467298
+      },
+      "new_n3_timer_cost_seconds": 31.21723824593937,
+      "new_observed_timer_cost_seconds": 51.613823032879736,
+      "new_pairs": 5,
+      "new_prefix_available_through": 5,
+      "old_default_stop_n": 5,
+      "old_default_timer_cost_seconds": 54.76936682802625,
+      "old_n3_omitted_timer_seconds": 21.930653800955042,
+      "old_n3_shadow": {
+        "gate": "pass",
+        "n": 3,
+        "trace": [
+          {
+            "gate": "pass",
+            "lower": 0.8360102531059931,
+            "n": 3,
+            "ratio": 1.034880392854827,
+            "upper": 1.2810577663807403
+          }
+        ],
+        "upper": 1.2810577663807403
+      },
+      "old_n3_timer_cost_seconds": 32.83871302707121,
+      "old_pairs": 33
+    },
+    {
+      "case_id": "ray-frequency-tiles",
+      "harness": "sampled_family_direct",
+      "new_n3_shadow": {
+        "gate": "pass",
+        "n": 3,
+        "trace": [
+          {
+            "gate": "pass",
+            "lower": 0.9046539633885307,
+            "n": 3,
+            "ratio": 0.9745987583657862,
+            "upper": 1.049951449115792
+          }
+        ],
+        "upper": 1.049951449115792
+      },
+      "new_n3_timer_cost_seconds": 12.919359116058331,
+      "new_observed_timer_cost_seconds": 21.51304828800494,
+      "new_pairs": 5,
+      "new_prefix_available_through": 5,
+      "old_default_stop_n": 5,
+      "old_default_timer_cost_seconds": 21.888983670214657,
+      "old_n3_omitted_timer_seconds": 8.934972058108542,
+      "old_n3_shadow": {
+        "gate": "pass",
+        "n": 3,
+        "trace": [
+          {
+            "gate": "pass",
+            "lower": 0.8895322843145093,
+            "n": 3,
+            "ratio": 0.9890513221800191,
+            "upper": 1.0997043448061934
+          }
+        ],
+        "upper": 1.0997043448061934
+      },
+      "old_n3_timer_cost_seconds": 12.954011612106115,
+      "old_pairs": 33
+    },
+    {
+      "case_id": "rbpf-systematic",
+      "harness": "sampled_family_direct",
+      "new_n3_shadow": {
+        "gate": "pass",
+        "n": 5,
+        "trace": [
+          {
+            "gate": "inconclusive",
+            "lower": 0.7605246727544641,
+            "n": 3,
+            "ratio": 1.011665664398041,
+            "upper": 1.345738610708238
+          },
+          {
+            "gate": "pass",
+            "lower": 0.9016774885628556,
+            "n": 5,
+            "ratio": 0.9936031163963176,
+            "upper": 1.094900522010375
+          }
+        ],
+        "upper": 1.094900522010375
+      },
+      "new_n3_timer_cost_seconds": 44.41035923897289,
+      "new_observed_timer_cost_seconds": 44.41035923897289,
+      "new_pairs": 5,
+      "new_prefix_available_through": 5,
+      "old_default_stop_n": 5,
+      "old_default_timer_cost_seconds": 44.98929618799593,
+      "old_n3_omitted_timer_seconds": 18.682826967036817,
+      "old_n3_shadow": {
+        "gate": "pass",
+        "n": 3,
+        "trace": [
+          {
+            "gate": "pass",
+            "lower": 0.8853244145017488,
+            "n": 3,
+            "ratio": 0.9682347972819382,
+            "upper": 1.0589097141246229
+          }
+        ],
+        "upper": 1.0589097141246229
+      },
+      "old_n3_timer_cost_seconds": 26.306469220959116,
+      "old_pairs": 33
+    },
+    {
+      "case_id": "state-sampled-smoke",
+      "harness": "sampled_family_direct",
+      "new_n3_shadow": {
+        "gate": "pass",
+        "n": 3,
+        "trace": [
+          {
+            "gate": "pass",
+            "lower": 0.9090304474460814,
+            "n": 3,
+            "ratio": 0.9853986317209578,
+            "upper": 1.068182552218781
+          }
+        ],
+        "upper": 1.068182552218781
+      },
+      "new_n3_timer_cost_seconds": 0.6009058060590178,
+      "new_observed_timer_cost_seconds": 0.9989281840389594,
+      "new_pairs": 5,
+      "new_prefix_available_through": 5,
+      "old_default_stop_n": 5,
+      "old_default_timer_cost_seconds": 0.9854556921054609,
+      "old_n3_omitted_timer_seconds": 0.3865100230323151,
+      "old_n3_shadow": {
+        "gate": "pass",
+        "n": 3,
+        "trace": [
+          {
+            "gate": "pass",
+            "lower": 0.7321138146016472,
+            "n": 3,
+            "ratio": 0.9632678701451567,
+            "upper": 1.2674053830808547
+          }
+        ],
+        "upper": 1.2674053830808547
+      },
+      "old_n3_timer_cost_seconds": 0.5989456690731458,
+      "old_pairs": 33
+    },
+    {
+      "case_id": "static-fft",
+      "harness": "sampled_family_direct",
+      "new_n3_shadow": {
+        "gate": "pass",
+        "n": 5,
+        "trace": [
+          {
+            "gate": "inconclusive",
+            "lower": 0.8210554323304639,
+            "n": 3,
+            "ratio": 1.0669379335603097,
+            "upper": 1.3864551761613222
+          },
+          {
+            "gate": "pass",
+            "lower": 0.9526268653426956,
+            "n": 5,
+            "ratio": 1.0457218766860354,
+            "upper": 1.147914554127527
+          }
+        ],
+        "upper": 1.147914554127527
+      },
+      "new_n3_timer_cost_seconds": 27.566486853931565,
+      "new_observed_timer_cost_seconds": 27.566486853931565,
+      "new_pairs": 5,
+      "new_prefix_available_through": 5,
+      "old_default_stop_n": 5,
+      "old_default_timer_cost_seconds": 27.140365151921287,
+      "old_n3_omitted_timer_seconds": 0.0,
+      "old_n3_shadow": {
+        "gate": "pass",
+        "n": 5,
+        "trace": [
+          {
+            "gate": "inconclusive",
+            "lower": 0.7833588266189455,
+            "n": 3,
+            "ratio": 1.0214942926496011,
+            "upper": 1.332021232746359
+          },
+          {
+            "gate": "pass",
+            "lower": 0.9418846691654479,
+            "n": 5,
+            "ratio": 1.022184991316831,
+            "upper": 1.1093313127170705
+          }
+        ],
+        "upper": 1.1093313127170705
+      },
+      "old_n3_timer_cost_seconds": 27.140365151921287,
+      "old_pairs": 33
+    }
+  ],
+  "frozen_plan": "local-evidence/triad-performance-confidence/n3-shadow/plan.json",
+  "input_sha256": {
+    "docs/validation-data/triad-v3/2026-11-03-performance-complete/routine/cpu-complete-001/native-fft.json.gz": "d89466668925d7983ee5259017e89638acb8cdf40deee9693c817526ad4b3bde",
+    "docs/validation-data/triad-v3/2026-11-03-performance-complete/routine/cpu-complete-001/sampled/cfo-batch-tail/result.json.gz": "011e1491b433a006c13026610b67078d6064ed6ecdcb70ead9159816f53209ff",
+    "docs/validation-data/triad-v3/2026-11-03-performance-complete/routine/cpu-complete-001/sampled/gaussian-hour/result.json.gz": "ce98e787b04e9af2a1967f78f22b5c602d53201b2aeba5bbde34ec015c3e0da7",
+    "docs/validation-data/triad-v3/2026-11-03-performance-complete/routine/cpu-complete-001/sampled/grouped-multitile/result.json.gz": "faf07b73a77002692b9d43f9b22fbecfdf64813b3d42024bc42402990fa95308",
+    "docs/validation-data/triad-v3/2026-11-03-performance-complete/routine/cpu-complete-001/sampled/phase-optimized-hour/result.json.gz": "11f77779c9d18ea3ce9c02794987dabde2ba0408e66a66dc89acb50779195a23",
+    "docs/validation-data/triad-v3/2026-11-03-performance-complete/routine/cpu-complete-001/sampled/phase-reference-hour/result.json.gz": "c2238955617331590f3f5e2e0c622f258356eaf63a63a491cc7425f90d430b64",
+    "docs/validation-data/triad-v3/2026-11-03-performance-complete/routine/cpu-complete-001/sampled/ray-frequency-tiles/result.json.gz": "6d148f375c91e93c4eb8b952360a74be7278c924a152d10fb4e57c82b6977c25",
+    "docs/validation-data/triad-v3/2026-11-03-performance-complete/routine/cpu-complete-001/sampled/rbpf-systematic/result.json.gz": "1aee97810a0136c15d8ca0e9732d60789f268015cc3e8bbcf38c4da06a26ecf7",
+    "docs/validation-data/triad-v3/2026-11-03-performance-complete/routine/cpu-complete-001/sampled/state-sampled-smoke/result.json.gz": "c283d4f41655c9572dcdd5198e66432e23a3a33c0133a57289107b876c54ebab",
+    "docs/validation-data/triad-v3/2026-11-03-performance-complete/routine/cpu-complete-001/sampled/static-fft/result.json.gz": "b2563506da7c304259a3cfb51f594c209170067f23533c2334d4c8569ad593a3",
+    "local-evidence/triad-performance-confidence/cpu-decision-001/native-fft.json": "7ca44004061f6959859711dfb1b40c3ca9f3957b817da0a4e909eb6181980a5c",
+    "local-evidence/triad-performance-confidence/cpu-decision-001/sampled/cfo-batch-tail/result.json": "6fda93960bb45713e8c2f74dd2cf88c9d123597c242edf3474973ea2dfde31b3",
+    "local-evidence/triad-performance-confidence/cpu-decision-001/sampled/gaussian-hour/result.json": "7d4748a34042d4d8a82cab16fc5c71910c6cf1ad5f79386f8cb12c81fdcb54b6",
+    "local-evidence/triad-performance-confidence/cpu-decision-001/sampled/grouped-multitile/result.json": "25ad306008a09dc5aa3e31a5e40744e12f8d0a4cbbd2f4a21089c8fc3ebdc0a8",
+    "local-evidence/triad-performance-confidence/cpu-decision-001/sampled/phase-optimized-hour/result.json": "fddb07cc1d23f08d1149300f4c91a9e154da1fb1e71819dde711694a6fceb327",
+    "local-evidence/triad-performance-confidence/cpu-decision-001/sampled/phase-reference-hour/result.json": "0e6d9536707971b54bfa6e10e1e0a16f712ca602977e8ff31e1ef0da6e42ad21",
+    "local-evidence/triad-performance-confidence/cpu-decision-001/sampled/ray-frequency-tiles/result.json": "eb11e4220b480e47f2c1ca04c49b4fc09db62464a8afeda50c4c333ca6c04dc0",
+    "local-evidence/triad-performance-confidence/cpu-decision-001/sampled/rbpf-systematic/result.json": "6a580ec9657d0ef4d7982f051e58875f8244b7e06c886c1d82c3760d53ccc71d",
+    "local-evidence/triad-performance-confidence/cpu-decision-001/sampled/state-sampled-smoke/result.json": "47ca6eccc7598e2edb311911838ad416a54171779921d8ab7cfeeeed1b96ec5f",
+    "local-evidence/triad-performance-confidence/cpu-decision-001/sampled/static-fft/result.json": "2cdd4d4a7c60cc532dc70766b04e534fe0c32fd405db3dc8577e35ed9062fe5f",
+    "local-evidence/triad-performance-confidence/cpu-decision-001/summary.json": "d53d68d02ad009d08d3b4a0bd8a94f9a3344f23814bb0406f9dcb15348463cd8",
+    "local-evidence/triad-performance-confidence/replay/cpu-complete-001-decision-replay.json": "fd17839dc4d261e1bfc5e08b1b8e7d0bf2be4e1f58f54e4568900ea26110a747"
+  },
+  "policy": {
+    "alpha_per_direction": 0.05,
+    "equal_spending": true,
+    "looks": [
+      3,
+      5,
+      9,
+      17,
+      33
+    ],
+    "rule": "decision",
+    "slowdown_threshold": 1.3
+  },
+  "replay_invocation": {
+    "command_form": "python3 - <<'PY' ...inline pure-Python replay... PY",
+    "note": "Replay ran as an inline functions.exec command; no standalone script was saved. No replay was rerun to add this provenance.",
+    "saved_script": false,
+    "script_path": null
+  },
+  "schema": "triad-cpu-n3-shadow-replay-v1"
+}

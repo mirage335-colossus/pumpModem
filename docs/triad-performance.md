@@ -6,19 +6,33 @@ forecasts and unresolved regimes. The routine aggregator is
 [`triad_perf_complete.py`](../tools/triad_perf_complete.py); the older runner
 below remains its native/FFT component. Neither a passing component nor a green
 CI status certifies the whole matrix. Ordinary Robust integration is excluded.
-The [current acceptance record](validation-data/triad-v3/2026-11-03-performance-complete/README.md)
-preserves the successful full-workload forecasts, failed CPU relationships,
-GPU follow-up decisions and measured cost of the expanded scope. The complete
-suite is not yet qualified for routine release assurance.
+The [earlier complete-scope record](validation-data/triad-v3/2026-11-03-performance-complete/README.md)
+preserves the routine run, prediction outcomes, and coverage limits. The
+[broader qualification record](validation-data/triad-v3/2026-11-03-performance-broader/README.md)
+adds Blackwell GPU lifecycle qualification, planner/statistics direct timing,
+and direct resource-boundary timing. The current CPU/GPU reports remain incomplete. Independent review accepted the CPU raw-only lifecycle classification, but its stability/environment hold remains unresolved. Focused broad-FFT checks are conditional single endpoints; the engineering model has no future-coverage guarantee, a limitation rather than an added release-blocking gap. The normal-profile GPU FHSS decision is inconclusive; hosted CI has not run.
+
+Routine sampling targets the **regression decision**, not a runtime interval
+width. The normal profile spends a 15% one-sided pass-error budget per test
+across its fixed looks to rule out a slowdown greater than 30%. The explicit
+CI profile uses a 30% pass-error budget at a 70% slowdown threshold. Both retain
+a separate 5% false-regression budget. Qualification of abbreviated
+predictions retains its separate historical rules. A narrow timing interval
+cannot rescue an invalid prediction model. The
+[decision-policy acceptance record](validation-data/triad-v3/2026-11-03-performance-decision/README.md)
+records 23/23 supported CPU runtime gates in 12 minutes 21 seconds, versus
+about 50 minutes with width-driven stopping. The broader qualification gaps
+remain explicit; this is not complete release certification.
 
 Use [`tools/triad-performance.py`](../tools/triad-performance.py) to measure the
 experimental three-carrier receiver without integrating it into ordinary
 Robust. Its evidence chain now covers complete native CLI simulations,
-full-geometry resident FFT acquisition, sampled execution witnesses for named
-off-line receiver paths, and a smaller Gaussian-window helper measurement.
-The native and FFT duration forecasts have separate identities, timing
-boundaries, anchors, and validation rules. A path witness records execution;
-it is not a timing prediction or exhaustive source-line coverage.
+full-geometry resident FFT acquisition, complete named sampled-family workload
+timings for off-line receiver paths, and a smaller Gaussian-window helper
+measurement. Native and FFT forecasts have separate identities, timing
+boundaries, anchors, and validation rules. A sampled-family run covers its
+declared workload and boundary; it is not exhaustive source-line coverage or a
+universal model.
 
 The suite does not qualify the ordinary Robust receiver, radio sensitivity,
 physical radios, unmeasured receiver families, or every numerical state. The
@@ -32,27 +46,131 @@ before changing arithmetic. Historical validation is context, not a substitute
 for evidence matching the source, build, workload, hardware, and target timing
 boundary.
 
-## Run it
+## Current broader qualification state
 
-For the combined suite, reuse source-matched historical anchors and compatible
-builds. Qualification is a separate operation; the aggregator never silently
-starts it. For example (replace the uppercase paths with existing artifacts):
+The normal routine policy uses a one-sided 85% per-test pass decision at a
+1.30 slowdown ratio. Explicit CI uses 70% at 1.70. Both keep a separate 5%
+false-regression allowance and fixed-look spending. These decisions are separate
+from the 5% timing-width diagnostic and from historical prediction qualification.
+The engineering budget for a routine is 25 minutes.
+
+On the RTX PRO 6000 Blackwell Workstation (96 GB), lifecycle002 conditionally
+qualified its frozen mixed-campaign forecast and scoped process-cold / private
+Triton-cache full-shape lifecycle checks. Its exact stack, scope, cache states,
+and hold results are in the [broader qualification record](validation-data/triad-v3/2026-11-03-performance-broader/README.md).
+Seven historical H200 staged proofs replayed on their matching stack; that replay
+does not transfer H200 timings to Blackwell. The earlier CPU lifecycle forecast
+remains inconclusive: its paired F+6W interval was [0.890392, 0.938725], outside
+the [0.90, 1.10] equivalence band. Do not enable it as a passed CPU prediction.
+The CPU direct all-nine-family lifecycle campaign completed with `auto` selecting
+five cycles after its pilot (the fixed default remains six). Three paired
+reference/candidate campaigns had reference times 104.398, 105.470 and 101.309 s;
+candidate times were 102.029, 101.014 and 102.101 s. Each retained 72.5–75.7 s
+of actual warm work. The normal-profile upper ratio bound was 1.032565, but the
+last/first-quarter ratio was 1.144, above the 1.10 stability limit. Independent review accepted the raw-only lifecycle reclassification after verifying
+21 protected timed/model/proof function bodies unchanged from 5dfa0492 and 12 raw-file hashes. The original CPU report and its exit
+status remain unchanged; the 1.144 stability/environment hold means this is not a
+routine pass.
+
+Planner/statistics direct timing has passed for eight workloads in 42.635
+seconds, and the direct paired/sequential resource-boundary comparison passed
+for two regimes in 14.467 seconds. The prior cross-duration resource forecast
+remains inconclusive and is not promoted by direct timing. These results close
+named direct timing obligations, not general duration, memory-tier, or scaling
+models. Current independent archive indexes are in the [broader record](validation-data/triad-v3/2026-11-03-performance-broader/README.md).
+
+Routine execution and qualification are separate. The latest CPU full routine
+completed in 1684.791 s (28:05), 184.791 s above the 25-minute target. In
+that original run, CPU warm-target decisions passed except broad FFT historical-
+anchor applicability. Later focused CPU/GPU checks passed one endpoint each, but
+the routine was not rerun after repair.
+The VLF native case used `--native-direct-case native-vlf-low-cn0`. A separate
+stopped savings experiment measured 57.819 s for the abbreviated arm and
+46.949 s for the direct arm in its first matched block; these are arm costs, not
+single-target runtimes. Its second abbreviated guard was inconclusive, so the
+experiment is incomparable and supports no savings claim. The CPU routine also had
+three raw one-shot hardware screen warnings: ratios 1.356 (stream), 1.314
+(phase complex64) and 1.467 (phase complex128). These five-second screens are
+not statistically confirmed regressions.
+
+The latest RTX PRO 6000 Blackwell GPU routine completed in 1170.758 s (19:31).
+All twelve sampled-family cases and configured extensions passed. The normal
+profile FHSS comparison interval [1.285225, 1.306855] crosses the 1.30 limit,
+so its normal decision is inconclusive; the derived CI-profile decision at 1.70
+is supported. Neither actual hosted CI workflow has run, and the run is not a
+whole-scope pass.
+The final accepted lifecycle-proof replay took 0.479253 s and passed its source
+transfer checks without cold or mixed flags. It ran no receiver kernels and did
+not rerun or revise the original incomplete routine; details are in the
+[GPU routine archive](validation-data/triad-v3/2026-11-03-performance-broader/scientific-gpu-complete-002/README.md).
+
+For routine CPU checks, use paired/direct named family measurement, include
+planner and resource extensions, and do not automatically spend on the failed
+CPU forecast. GPU lifecycle reuse is enabled only for the matching Blackwell
+identity. The wrapper invocation
+below shows the current direct CPU lifecycle options. Direct mode bypasses the
+inconclusive forecast; an optional lifecycle anchor directory supplies an output-local cache only:
 
 ```sh
 python3 tools/triad_perf_complete.py \
   --reference-root REFERENCE_SOURCE --binary build/dev-cli/triad_long \
   --reference-binary REFERENCE_BINARY --anchor-directory LEGACY_ANCHORS \
-  --family-route staged --staged-anchor-directory STAGED_ANCHORS \
-  --fixture-cache FIXTURE_CACHE --hardware-baseline HARDWARE_PROFILE_JSON \
+  --hardware-baseline HARDWARE_PROFILE_JSON \
+  --family-route paired --family-mode direct \
+  --planner-binary build/dev-cli/triad_planner_perf \
+  --planner-reference-binary REFERENCE_PLANNER_BINARY \
+  --planner-bounds-workspace RETAINED_GAUSSIAN_WORKSPACE \
+  --resource-direct --lifecycle-mixed-method direct \
+  --lifecycle-direct-cycles auto --lifecycle-anchor-directory CPU_LIFECYCLE_CACHE \
+  --native-direct-case native-vlf-low-cn0 \
+  --identical-fft-case free-crystal \
+  --identical-anchor-directory EXACT_FFT_ANCHORS --fixture-cache FIXTURE_CACHE \
   --functional-defaults \
   --native-coverage NATIVE_COVERAGE_JSON --python-coverage PYTHON_COVERAGE_JSON \
-  --device cpu --threads 2 --native-threads 1 --budget-seconds 600 \
+  --device cpu --threads 2 --native-threads 1 --budget-seconds 2100 \
+  --regression-profile normal --output local-evidence/triad-performance-complete/cpu-routine
+```
+
+The CPU direct lifecycle run is measured, with five cycles selected by
+`auto`; a raw-only derived replay confirms the cold and nine-family target/work
+contract; independent review accepted that derived classification after checking
+21 protected timed/model/proof function bodies unchanged from 5dfa0492 and 12 raw-file hashes. The original exit and report remain
+incomplete, with the 1.14435 stability/environment hold still unresolved. The historical F+6W CPU
+forecast remains inconclusive and is not reused in direct mode. The ordinary
+routine target is 1500 seconds. The local command uses a 2100-second hard cap
+for practical headroom after the separately measured repair; it is not a promise
+that a full routine fits or a new complete-run measurement. For GPU lifecycle reuse, use
+`--device cuda --lifecycle-anchor-directory RTX_PRO_6000_LIFECYCLE_ANCHORS`;
+keep it in a distinct output and matching device run. In CPU direct mode, the
+optional lifecycle directory is only an output-local anchor cache, not a
+qualified CPU forecast source. Do not substitute the H200
+staged anchor directory for a Blackwell lifecycle identity.
+
+## Run it
+
+For the native/FFT core component, reuse source-matched historical anchors and
+compatible builds. This example does not include the planner, resource or
+lifecycle extensions shown above. Qualification is a separate operation; the
+aggregator never silently starts it. Replace uppercase paths with existing
+artifacts:
+
+```sh
+python3 tools/triad_perf_complete.py \
+  --reference-root REFERENCE_SOURCE --binary build/dev-cli/triad_long \
+  --reference-binary REFERENCE_BINARY --anchor-directory LEGACY_ANCHORS \
+  --family-route paired --family-mode direct \
+  --fixture-cache FIXTURE_CACHE --hardware-baseline HARDWARE_PROFILE_JSON \
+  --native-direct-case native-vlf-low-cn0 --functional-defaults \
+  --native-coverage NATIVE_COVERAGE_JSON --python-coverage PYTHON_COVERAGE_JSON \
+  --device cpu --threads 2 --native-threads 1 --budget-seconds 2100 \
+  --regression-profile normal \
   --output local-evidence/triad-performance-complete/routine-001
 ```
 
 Missing anchors, unsupported hardware and unresolved inventory rows remain
 explicit. This command is not a claim that all current CPU models qualify or
-that complete coverage fits in 600 seconds. Use the matrix's actual results.
+that all qualification gaps are closed. The routine engineering target is
+25 minutes; use the matrix's actual measurements.
 Do not repeatedly launch qualification to turn an inconclusive result green.
 
 The sampled-family route measures native waveform/channel generation and file
@@ -63,15 +181,21 @@ generation profiles and retains their uncertainty once. Arithmetic stage means
 are additive; geometric means are not. Both whole-pipeline and individual-stage
 predictions must survive independent full-run validation. The observed CPU
 phase-prefix failure and CPU cache-state discrepancy prohibit treating these
-models as interchangeable. Worker startup and cold JIT/graph capture remain
-separate, currently unqualified timing boundaries.
+models as interchangeable. GPU cold lifecycle and mixed-campaign qualification
+now exists for the RTX PRO 6000 Blackwell Workstation under its recorded source,
+stack, and cache contract. The CPU lifecycle direct campaign is measured, and
+independent review accepted its raw-only classification. Its stability/environment
+hold remains unresolved and its original report remains incomplete. Neither
+result transfers between backends.
 
-The staged routine checks both individual-stage and pipeline precision. Once
+The staged routine checks the pipeline slowdown decision and the timing
+uncertainty needed by its independent endpoint guard. Once
 a stage reaches its final permitted sample count, an interval too wide to
 satisfy the existing conditional guard cannot be repaired by sampling another
-stage. The routine then freezes that unresolved result and retains one full
-endpoint check. It does not widen the guard, discard an outlier, or qualify a
-model through early stopping. Qualification and historical proof replay retain
+stage. When the decision becomes decisive, the routine retains the required full
+endpoint check. A terminal unresolved or infeasible result is frozen without an
+endpoint and remains unqualified. The routine does not widen the guard, discard
+an outlier, or qualify a model through early stopping. Qualification and historical proof replay retain
 their original schedules. The narrow compatibility mappings for the two
 recorded earlier drivers require unchanged measured code and policy constants;
 they do not transfer arbitrary implementation changes.
@@ -92,6 +216,35 @@ aggregator exposes this as `--family-mode direct`). Prefer it
 when a model fails or costs more than direct measurement. The
 [`sampled-family manifest`](../tools/triad-performance-families.json) declares
 the concrete full workload, work dimensions and dependencies for each case.
+In paired-family decision mode, missing applicable history selects bounded
+direct full measurement and records that choice; it does not qualify the
+missing model. Staged reuse still reports missing history as unqualified.
+
+The broad/free-crystal cache issue was a manifest identity mismatch, not a
+numerical-data mismatch: sampled arrays were identical while timer and temporary
+output metadata differed. The strict identical FFT route requires the exact
+retained `--fixture-cache FIXTURE_CACHE`; other routine routes can use that option
+when needed. The legacy FFT reuse route prefers an eligible
+exact-qualified format in FP32-then-FP64 order; qualification makes a fresh
+selection. This was a manifest/cache identity issue, not a numerical model
+failure. The focused GPU check passed in 33.771707 s ([archived details](validation-data/triad-v3/2026-11-03-performance-broader/scientific-focused-broad-001/README.md)): full reference and candidate runs
+took 6.261369 s and 6.251684 s, and the single prediction/full-endpoint checks
+passed. Its conditional normal interval [0.898242, 1.106221] includes the
+historical engineering allowance. The focused CPU check also passed its single
+prediction/full endpoint in 206.889412 s, with 33 training samples, full
+reference/candidate times of 12.944703/13.118263 s, and interval
+[0.882159, 1.148666]. The checks used qualified FP32 and preserved their source, fixtures and anchors. These individual checks do not establish future
+coverage or rewrite the incomplete CPU routine. The 206.889 s focused CPU repair plus the original 1684.791 s routine sum to
+1891.681 s (31m32s); this sum includes the original failed broad-HF pilot, which
+was not rerun, and is not a newly measured complete-run wall time. No repaired
+complete routine has been measured against the 25-minute target.
+
+The strict identical free-crystal qualification took 47.034 s. One randomized
+comparison measured 61.620 s for direct full work and 24.258 s for the abbreviated
+route, a nominal 37.362 s (60.63%) per-use difference and roughly two-use
+break-even after qualification cost. This is one randomized pair, not a repeated
+savings estimate. The first absolute-baseline gate was inconclusive as expected;
+the qualified anchor itself remains valid for its exact identity.
 
 The optional [`triad_perf_identical_fft.py`](../tools/triad_perf_identical_fft.py)
 route uses one timing stream only when both workers independently report equal
@@ -133,9 +286,10 @@ python3 tools/triad-performance.py \
 Use Python with NumPy, SciPy and PyTorch. The
 [dedicated CI workflow](../.github/workflows/triad-performance.yml) pins its
 numerical stack and builds reference and candidate binaries from immutable
-source revisions. `--budget-seconds` defaults to 1,800 seconds per backend and
-is capped at 28,800 seconds. The preferred routine budget is five minutes; a
-slow but necessary first qualification can take longer. Native build and Python
+source revisions. The complete aggregator defaults to 1,500 seconds per backend;
+individual research drivers retain their explicit qualification allowances.
+The preferred complete routine budget is 25 minutes. Occasional qualification
+may take longer when needed to validate a relationship. Native build and Python
 dependency setup are outside the per-backend budget; fixture creation, hardware
 checks, native models, receiver measurements, witnesses and optional sustained
 checks are inside it. A process-group deadline covers blocked descendants.
@@ -146,13 +300,18 @@ Incomplete or timed-out evidence never counts as a performance pass.
 | `--profile ci` | Default required native, FFT, Gaussian-helper, and applicable path-witness cases. |
 | `--profile quick` | Small smoke profile; `complete_required_coverage` is false. It cannot pass the full regression suite. |
 | `--profile sustain` | Extended native/FFT scenario set; defaults to one 60-second sustained check when eligible. |
-| `--precision-target .05` | Default maximum relative half-width for the family-adjusted timing intervals. |
-| `--precision-target .01` | Optional tighter timing target. It may require many more independent observations; stop at the declared maximum if that target remains unmet. |
+| `--stopping-rule decision` | Routine default: stop when the selected per-test slowdown decision resolves, with fixed-look error spending. Model applicability is still required. |
+| `--regression-profile normal` | Default: 15% erroneous-pass budget, 30% slowdown threshold; 5% false-regression budget. |
+| `--regression-profile ci` | Explicit hosted-CI choice: 30% erroneous-pass budget, 70% slowdown threshold; 5% false-regression budget. |
+| `--regression-profile strict` | Prior policy: 5% erroneous-pass budget, 30% slowdown threshold; 5% false-regression budget. |
+| `--stopping-rule precision` | Explicit legacy measurement/qualification mode; continue toward the diagnostic width target. |
+| `--precision-target .05` | Diagnostic maximum relative half-width. Drives sampling only in precision mode; it is not the routine acceptance criterion. |
+| `--precision-target .01` | Optional tighter diagnostic width; does not force extra routine decision samples. |
 | `--looks 5,9,17,33` | Predeclared cumulative timing sample counts. All looks are included in multiplicity adjustment. |
 | `--validation-mode auto` | Reuse an applicable historical proof with a fresh full paired endpoint sentinel; otherwise qualify this case. |
 | `--validation-mode qualify` | Force a new frozen forecast and independent full-workload qualification where that adapter has a duration model. |
 | `--validation-mode reuse` | Reuse an applicable historical proof if available; do not silently spend a new qualification campaign. A missing/incompatible anchor leaves the model unqualified. |
-| `--case ID` | Focus qualification on a named case; repeat to select several. Retains the full profile’s confidence multiplicity, skips other timing/fixture work, and cannot claim complete CI coverage. |
+| `--case ID` | Focus on named cases; repeat to select several. Historical qualification retains its original multiplicity; routine decisions remain per-test. Skips unrelated work and cannot claim complete CI coverage. |
 | `--anchor-directory PATH` | Persist and find source/case/environment-bound forecast records. Default is the reusable `triad-performance-anchors` directory beside each output. |
 | `--sustained-seconds N` | Request one predeclared sustained consistency check per eligible native/FFT family; accepts 0–3,600 seconds and defaults to zero, or 60 for `--profile sustain`. It is not a new CI or model qualification. |
 | `--reference-binary FILE` | Binary for the paired comparison. Omitting it reuses the candidate binary and means native results cannot detect a change against a prior native implementation. |
@@ -289,25 +448,38 @@ makes this distinction explicit. This motivates separating mean-model error
 from the individual-run scatter used by the sentinel; it does not prove
 stationarity or normality for a particular machine.
 
-The default 5% target means the maximum multiplicative half-width of the
-family-adjusted confidence intervals for the reference runtime, candidate
-runtime, and paired slowdown. The optional 1% target asks for a much tighter
-timing estimate and can be expensive. The predeclared cumulative looks default
-to 5, 9, 17, and 33 samples. At each look the suite stops when all three timing
-intervals reach the target, the confirmed regression boundary is crossed, or
-the final look/resource budget is reached. Reports explicitly say when timing
-precision remains unresolved; they never relabel a missed target as 5% precision.
+Routine mode uses a **directional error probability per test**, not an interval-width
+target. Normal uses an 85% one-sided pass procedure at a 1.30 ratio; CI uses
+a 70% procedure at 1.70; strict retains 95% at 1.30. At the predeclared cumulative
+looks 5, 9, 17 and 33, the paired upper slowdown bound spends its pass budget
+divided by four per look (0.0375 normal, 0.075 CI, 0.0125 strict). Component-based
+adapters additionally divide that budget across the unique components used in
+their bound. The union bound controls erroneous early acceptance under the
+stated statistical assumptions. It stops at the
+first supported pass or regression, or the sample/resource ceiling. It does
+not keep sampling a resolved test to refine its displayed runtime estimate.
+The lower regression bound retains a separate 5% directional ledger in all
+three profiles. The displayed pair of bounds is therefore not a simultaneous
+two-sided interval, nor is there a simultaneous confidence claim for the
+entire suite. There is no additional
+case-count or three-diagnostic-metric penalty on this per-test decision.
 
-Times are analyzed on a log scale, so widths and ratios are multiplicative.
-For each case family and each predeclared look, the familywise timing ledger
-splits total α=0.05 across three intervals: reference, candidate and paired
-candidate/reference ratio. The paired ratio interval is reused for the 30%
-slowdown decision; it does not spend a second unstated α. The ledger protects
-the stated families and looks under the sampling assumptions. It does not adjust
-the separate per-case model-equivalence checks, claim distribution-free
-coverage, or guarantee an interval on a different host. The model-equivalence
-check and the family timing ledger answer different questions and must be shown
-separately.
+Native, FFT and paired-family timings retain their established log analysis:
+the estimand is the ratio of **geometric mean full-workload runtimes**, not an
+individual future execution or an arithmetic mean in the presence of unequal
+runtime variances. Staged predictions retain arithmetic stage means because
+stage times add. Do not mix these estimands or transfer the historical
+log-bias model to an arithmetic-ratio claim. The
+[NIST one-sided mean interval](https://www.itl.nist.gov/div898/handbook/prc/section2/prc221.htm)
+and [paired-observation analysis](https://www.itl.nist.gov/div898/handbook/prc/section3/prc311.htm)
+describe the underlying Student-t inference; the fixed-look allocation here
+is an explicit additional safeguard against repeated testing.
+
+The old family-adjusted runtime-width diagnostics remain visible. Their 5%
+target drives sampling only under explicit `--stopping-rule precision` and
+historical qualification. A diagnostic width miss does not veto an otherwise
+supported routine slowdown decision. Historical proof replay retains its
+original stopping rule and is never retroactively promoted under this change.
 
 Under the current implementation, outer samples are paired timed observations
 made within persistent Python worker processes for FFT workloads. They estimate
@@ -339,14 +511,15 @@ are not each required to be within 5%. This is not a future-run interval or proo
 residual lies within ±5%. Observed maximum residuals are useful scenarios, not
 future coverage bounds.
 
-The 30% regression threshold is an engineering decision boundary. A
-**supported pass** requires valid model qualification, direct full timing, or
-an explicitly conditional historical model with its widened error allowance, and
-a multiplicity-adjusted upper paired slowdown bound no larger than 1.30. A
-**regression** is supported when the lower bound exceeds 1.30. If the interval
-crosses the threshold, the result is **inconclusive**. If the 5% timing target
-is unresolved by the last look, that fact is reported even when the slowdown
-gate itself is separated from its threshold. Missing coverage, numerical
+The normal and strict profiles use a 30% regression threshold (ratio 1.30); the
+explicit CI profile uses 70% (ratio 1.70). A **supported pass** requires valid
+model qualification, direct full timing, or an explicitly conditional historical
+model with its widened error allowance, and a per-test upper slowdown bound no
+larger than the selected profile threshold. A **regression** is supported when
+the lower bound exceeds that threshold. If the interval
+crosses the threshold, the result is **inconclusive**. A conditional historical
+model adds its frozen engineering allowance to the timing bound; this is not
+an unconditional 95% bound on future prediction error. Missing coverage, numerical
 mismatch, changed geometry, invalid model, or timeout is a failure/unqualified
 result, never a successful performance pass. The suite stops after its maximum
 look instead of spending arbitrarily for a preferred interval. A separate
@@ -387,8 +560,11 @@ A routine modeled case freezes the following before new full work:
    conditional support. Individual-run scatter does not become mean-model bias.
 4. A separate **single-observation sentinel** envelope also retains the historical
    maximum absolute residual. Exactly one independent full-target paired endpoint
-   runs with work and numerical checks. Its discrepancy and training uncertainty
-   must fit this frozen envelope; the envelope cannot expand after seeing it.
+   runs with work and numerical checks before a decisive modeled pass or
+   regression. If uncertainty is terminal or a case is infeasible, decision mode
+   freezes the unresolved result without running an endpoint. Its discrepancy
+   and training uncertainty must fit this frozen envelope; the envelope cannot
+   expand after seeing it.
 
 The resulting status is **`historically_supported_conditional`**, distinct from
 fresh mean-equivalence qualification. The conditional regression gate widens the
@@ -465,10 +641,16 @@ This lets the raw hardware screen reveal environmental slowdowns shared by both
 receiver implementations. A current comparison cannot automatically replace that
 reference. Different CPU allocations abstain. A five-second block is a useful
 throughput/utilization screen, not an independently replicated confidence bound
-or certification that the original host represented ideal performance.
+or certification that the original host represented ideal performance. The
+actual-helper controls demonstrate that a synthetic hardware profile can raise
+a warning; they do not establish universal physical slowdown detection. Paired
+ratios can cancel common environmental degradation, and selected backend probes
+do not observe every startup/import/disk activity or every CPU stage in a
+GPU-hosted pipeline. Keep functional correctness, model validity and hardware
+health as separate results.
 
-On the tested RTX PRO 6000 Blackwell Server with Torch 2.8/Triton, requested
-strict FP8 probes emitted FP16 tensor instructions and are reported as
+In the historical RTX PRO 6000 Blackwell Server probe with Torch 2.8/Triton,
+requested strict FP8 probes emitted FP16 tensor instructions and are reported as
 unsupported, without fallback-format throughput. This is a tested
 compiler/runtime result, not a claim that the GPU lacks FP8 capability.
 
@@ -488,9 +670,10 @@ Normal CI runs the dedicated performance job unless `devfast` is explicitly
 selected; the job is separate from sanitizer/matrix repetitions. New direct
 release builds depend on the exact-source performance job. A noisy or
 unresolved component warning remains visible separately from a regression
-failure. The combined wrapper exits nonzero when complete-scope obligations
+failure. The combined wrapper exits nonzero when finite complete-scope obligations
 are unresolved; component warnings cannot turn that result into a qualified
-release pass. Green CI alone does not mean every model is validated or every
+release pass. Direct timing may satisfy a named workload obligation without
+qualifying an unused forecast. Green CI alone does not mean every model is validated or every
 requested interval is narrow. Existing
 ordinary-release certification remains separate. Source-release and existing
 APT repackaging routes that reuse older verified binaries have not measured the

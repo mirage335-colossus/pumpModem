@@ -1,0 +1,1179 @@
+{
+  "compression": "gzip with empty filename, zero mtime; exact original bytes; identical payloads shared by raw SHA256",
+  "exclusions": [
+    "physical arrays",
+    "executables",
+    "provider metadata and credentials",
+    "controls owned separately",
+    "native coverage owned separately",
+    "pending resource and lifecycle runs",
+    "moving top-level README and current matrix"
+  ],
+  "records": [
+    {
+      "archive": "records/planner-build/build-evidence.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-build/build-evidence.json",
+      "raw_bytes": 4115,
+      "raw_sha256": "493cdc050d7d06dc1c858f7b810bef7cc1e98eaaea456d449c7fc1e805c0f826"
+    },
+    {
+      "archive": "records/planner-build/candidate-commands.txt.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-build/candidate-commands.txt",
+      "raw_bytes": 6616,
+      "raw_sha256": "1a4d320dfd34592218d2dee28d161b3766fb1ee465fa1840b94ab8f62cba1c78"
+    },
+    {
+      "archive": "records/planner-build/reference-commands.txt.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-build/reference-commands.txt",
+      "raw_bytes": 8408,
+      "raw_sha256": "422eda8214710a1392867df5477734d22bae019d69293ed023e3759dc58b7b68"
+    },
+    {
+      "archive": "records/planner-build/reference-overlay.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-build/reference-overlay.json",
+      "raw_bytes": 2304,
+      "raw_sha256": "6732235b767d06777e8680da80daf145a0e6eaccd2987e7bb5156b5b125af6a0"
+    },
+    {
+      "archive": "records/planner-build/triad-planner-build-final.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-build/triad-planner-build-final.log",
+      "raw_bytes": 796,
+      "raw_sha256": "fd874e50b1b265ce3869bb4d769d0faa428566038b3543208a2cd15c01bb6a7a"
+    },
+    {
+      "archive": "records/planner-build/triad-planner-build.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-build/triad-planner-build.log",
+      "raw_bytes": 139,
+      "raw_sha256": "5d4727a780c66d76db31ec7d6cdac926ce676c999cf0bad249a5fff461fbaf1e"
+    },
+    {
+      "archive": "records/planner-build/triad-planner-configure.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-build/triad-planner-configure.log",
+      "raw_bytes": 960,
+      "raw_sha256": "58c5f279d9514b348411fa69445175c4fa20dcf193f854458a630b8c39decbef"
+    },
+    {
+      "archive": "records/planner-build/triad-planner-reference-build-final.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-build/triad-planner-reference-build-final.log",
+      "raw_bytes": 838,
+      "raw_sha256": "a072b3c8817dea333cd28375c05dd1626b752f40dd090621f3a2243c1e9a51c7"
+    },
+    {
+      "archive": "records/planner-build/triad-planner-reference-build.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-build/triad-planner-reference-build.log",
+      "raw_bytes": 23943,
+      "raw_sha256": "9f297059f8e1a953f4835f08459c67505ca3c7e987f12f2ea0e2cb4fb90d16b4"
+    },
+    {
+      "archive": "records/planner-build/triad-planner-reference-configure.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-build/triad-planner-reference-configure.log",
+      "raw_bytes": 1044,
+      "raw_sha256": "8e1abd3c6c2261e1ed2069537ba5e162243e24913d34e76026ed246d135c0aa9"
+    },
+    {
+      "archive": "records/planner-build/triad-planner-routine-001.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-build/triad-planner-routine-001.log",
+      "raw_bytes": 157,
+      "raw_sha256": "f7ec9baf2efdf3cfd34887e1312713d203015cc4749b05c0f885b77223c1ff3c"
+    },
+    {
+      "archive": "records/planner-build/triad-planner-tests-final.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-build/triad-planner-tests-final.log",
+      "raw_bytes": 2521,
+      "raw_sha256": "d87b5c810377c1d1f276a0d63d94e9fc1966e52d30242ae11d1e4105510b6516"
+    },
+    {
+      "archive": "records/planner-routine-001/early-calendar/pair-001-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/early-calendar/pair-001-candidate-raw.json",
+      "raw_bytes": 1486,
+      "raw_sha256": "689c908586417c5e6c0215300cb9964441f9e3c62393f85fe19cf6afba61eb6c"
+    },
+    {
+      "archive": "records/planner-routine-001/early-calendar/pair-001-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/early-calendar/pair-001-reference-raw.json",
+      "raw_bytes": 1507,
+      "raw_sha256": "1c00bf37281befac1a6db0e6447d8f3d24b18bf199a96ceee2b8afcea2c1839d"
+    },
+    {
+      "archive": "records/planner-routine-001/early-calendar/pair-001.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/early-calendar/pair-001.json",
+      "raw_bytes": 4060,
+      "raw_sha256": "89f3d527dc394cd0a31bdfa6b93bcf6cd53995d67b3a0eb95dacc185e6821fcd"
+    },
+    {
+      "archive": "records/planner-routine-001/early-calendar/pair-002-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/early-calendar/pair-002-candidate-raw.json",
+      "raw_bytes": 1486,
+      "raw_sha256": "57cdfb33b66a15866fbdec22ecc63f3ea45c589c1e1b7b9e40b04b8ebf2bf289"
+    },
+    {
+      "archive": "records/planner-routine-001/early-calendar/pair-002-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/early-calendar/pair-002-reference-raw.json",
+      "raw_bytes": 1507,
+      "raw_sha256": "7e54a1970fc6ae5f2182cc0835de5be7d6042f41ecdaa1056bf3d054dc70ffec"
+    },
+    {
+      "archive": "records/planner-routine-001/early-calendar/pair-002.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/early-calendar/pair-002.json",
+      "raw_bytes": 4060,
+      "raw_sha256": "f20bd389ae69dbd4967a5e941cd05830d2c3c5279c7f764ae3bbe1a4b379a63a"
+    },
+    {
+      "archive": "records/planner-routine-001/early-calendar/pair-003-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/early-calendar/pair-003-candidate-raw.json",
+      "raw_bytes": 1486,
+      "raw_sha256": "964cc013424f8c98db5a8df9a75f91b943414a11cfba717ebc8d4e06bf170253"
+    },
+    {
+      "archive": "records/planner-routine-001/early-calendar/pair-003-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/early-calendar/pair-003-reference-raw.json",
+      "raw_bytes": 1497,
+      "raw_sha256": "40911c664d4dad1ef4098b0fd431317f711faca8432b66c3011a2cf2ad1fc407"
+    },
+    {
+      "archive": "records/planner-routine-001/early-calendar/pair-003.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/early-calendar/pair-003.json",
+      "raw_bytes": 4060,
+      "raw_sha256": "888e3a875d57469a2b1abbab0d8dc3ec84439c9dc3795fac697d8e8a50e2cbad"
+    },
+    {
+      "archive": "records/planner-routine-001/early-calendar/pair-004-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/early-calendar/pair-004-candidate-raw.json",
+      "raw_bytes": 1476,
+      "raw_sha256": "0549ea473363dbea8c1cdb511e349f96e0392e2255b8038485e73a000b49b68c"
+    },
+    {
+      "archive": "records/planner-routine-001/early-calendar/pair-004-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/early-calendar/pair-004-reference-raw.json",
+      "raw_bytes": 1504,
+      "raw_sha256": "5829852a585d1bf961b13c64ade7baba8b2d9f12808cdd53729931f1e88fb0ba"
+    },
+    {
+      "archive": "records/planner-routine-001/early-calendar/pair-004.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/early-calendar/pair-004.json",
+      "raw_bytes": 4056,
+      "raw_sha256": "28a2235dd1900d248fba7843be1bbdcd6adfbc1e1e6f2aa5610c649df2e70c87"
+    },
+    {
+      "archive": "records/planner-routine-001/early-calendar/pair-005-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/early-calendar/pair-005-candidate-raw.json",
+      "raw_bytes": 1476,
+      "raw_sha256": "4ea0e1640839b43f614839061814f87b523ec42b7b870a9f20877fb55e276e39"
+    },
+    {
+      "archive": "records/planner-routine-001/early-calendar/pair-005-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/early-calendar/pair-005-reference-raw.json",
+      "raw_bytes": 1507,
+      "raw_sha256": "f7d9b014f9aafbe64eb643e985bcf7dc24c8b54289fcfd82d8a36b6ac1493ec9"
+    },
+    {
+      "archive": "records/planner-routine-001/early-calendar/pair-005.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/early-calendar/pair-005.json",
+      "raw_bytes": 4060,
+      "raw_sha256": "02ab12c426c7f3f90107ec42ffe3d7f3757645301e7aadbda8e7ccd5d92c1722"
+    },
+    {
+      "archive": "records/planner-routine-001/early-calendar/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/early-calendar/result.json",
+      "raw_bytes": 50693,
+      "raw_sha256": "4985abc6ee329a6201ff113c0811bb26bc4b65ec1bee91b74fd43776c96c5998"
+    },
+    {
+      "archive": "records/planner-routine-001/finite-grids/pair-001-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/finite-grids/pair-001-candidate-raw.json",
+      "raw_bytes": 1003,
+      "raw_sha256": "1fb006131081f0f014ab5bd463891d56004908e3969055618f31a316b7ae6a3a"
+    },
+    {
+      "archive": "records/planner-routine-001/finite-grids/pair-001-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/finite-grids/pair-001-reference-raw.json",
+      "raw_bytes": 1024,
+      "raw_sha256": "becc6e5bc618635cc7c0b6b6b9844b4627de2a6875c41fde71c5175e3a6d62fc"
+    },
+    {
+      "archive": "records/planner-routine-001/finite-grids/pair-001.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/finite-grids/pair-001.json",
+      "raw_bytes": 2746,
+      "raw_sha256": "a3b2df6a360e6546204f1470db17b230b83057b3691812bfd36d7c263b8793ba"
+    },
+    {
+      "archive": "records/planner-routine-001/finite-grids/pair-002-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/finite-grids/pair-002-candidate-raw.json",
+      "raw_bytes": 1003,
+      "raw_sha256": "74e08b64ef94d111ffc444d503fb6d53b04c323fa851e6179b1b6ec8c74f5ad6"
+    },
+    {
+      "archive": "records/planner-routine-001/finite-grids/pair-002-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/finite-grids/pair-002-reference-raw.json",
+      "raw_bytes": 1025,
+      "raw_sha256": "75fc67ee2ec6d809ced2378afbb8ab9b2b884e71c1fc77a815f5ca16e73cf7bb"
+    },
+    {
+      "archive": "records/planner-routine-001/finite-grids/pair-002.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/finite-grids/pair-002.json",
+      "raw_bytes": 2747,
+      "raw_sha256": "7111cff4b3d7811b9194199e18e6b34d02e6b4141a59cd140679255550fe445b"
+    },
+    {
+      "archive": "records/planner-routine-001/finite-grids/pair-003-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/finite-grids/pair-003-candidate-raw.json",
+      "raw_bytes": 1003,
+      "raw_sha256": "f225dc866261f8a615738f66ea68115e81157d2e93b6b8bda3a86e66c31a68d1"
+    },
+    {
+      "archive": "records/planner-routine-001/finite-grids/pair-003-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/finite-grids/pair-003-reference-raw.json",
+      "raw_bytes": 1024,
+      "raw_sha256": "296ca88d626b9f7476804047a26a56899df68f1993f30dce545056028128527c"
+    },
+    {
+      "archive": "records/planner-routine-001/finite-grids/pair-003.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/finite-grids/pair-003.json",
+      "raw_bytes": 2745,
+      "raw_sha256": "4c93ac5e2f704e4f2f6d17a081c82e45348f73fcd1d371ea4cad42498401f555"
+    },
+    {
+      "archive": "records/planner-routine-001/finite-grids/pair-004-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/finite-grids/pair-004-candidate-raw.json",
+      "raw_bytes": 1003,
+      "raw_sha256": "0e7602a5b9a955e997c07274f1e689a5f34963340a876a40ae26d3a0d2eec228"
+    },
+    {
+      "archive": "records/planner-routine-001/finite-grids/pair-004-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/finite-grids/pair-004-reference-raw.json",
+      "raw_bytes": 1024,
+      "raw_sha256": "223d8d5075cbccce0803236653983240095fcc6eb7e673cb3996babb2c409ce4"
+    },
+    {
+      "archive": "records/planner-routine-001/finite-grids/pair-004.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/finite-grids/pair-004.json",
+      "raw_bytes": 2746,
+      "raw_sha256": "ab79c458673e7e524c59c7b5fe40d3d7a9e2ff52ae1e92b0822c61d9676a6a53"
+    },
+    {
+      "archive": "records/planner-routine-001/finite-grids/pair-005-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/finite-grids/pair-005-candidate-raw.json",
+      "raw_bytes": 1003,
+      "raw_sha256": "ec1904cf2f17648e01c029487fb1bd6d4e987c81d353f2a4de0d00a4992f7d51"
+    },
+    {
+      "archive": "records/planner-routine-001/finite-grids/pair-005-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/finite-grids/pair-005-reference-raw.json",
+      "raw_bytes": 1024,
+      "raw_sha256": "3c98667cc43981edcfc49703ebd4eab62bfaeb1dcbe81709bdd41f391f05ae7a"
+    },
+    {
+      "archive": "records/planner-routine-001/finite-grids/pair-005.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/finite-grids/pair-005.json",
+      "raw_bytes": 2746,
+      "raw_sha256": "5c381069561a77383c23d47a607dda3fd41781b76441a783f28c2545144e1024"
+    },
+    {
+      "archive": "records/planner-routine-001/finite-grids/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/finite-grids/result.json",
+      "raw_bytes": 43040,
+      "raw_sha256": "7e21ff2d29c47ecbd0ced9af0898db7cc16dd011a123d8a5ed5788fc81425068"
+    },
+    {
+      "archive": "records/planner-routine-001/gamma-branches/pair-001-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gamma-branches/pair-001-candidate-raw.json",
+      "raw_bytes": 1805,
+      "raw_sha256": "33c9b1f4ca78ca40e9feba9d8dc4cb2af22405b9a7246351d5c106e065f4ffda"
+    },
+    {
+      "archive": "records/planner-routine-001/gamma-branches/pair-001-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gamma-branches/pair-001-reference-raw.json",
+      "raw_bytes": 1827,
+      "raw_sha256": "7b16b1704aee741e69efa15fa3495ef5a2bdcddb3f52fd4739fb5b060f836ef2"
+    },
+    {
+      "archive": "records/planner-routine-001/gamma-branches/pair-001.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gamma-branches/pair-001.json",
+      "raw_bytes": 5100,
+      "raw_sha256": "72f844b107e5e4709b76a11195c5c02410fd208e46ae6466d37be766b1d640ec"
+    },
+    {
+      "archive": "records/planner-routine-001/gamma-branches/pair-002-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gamma-branches/pair-002-candidate-raw.json",
+      "raw_bytes": 1806,
+      "raw_sha256": "518b43b52984ada2285831a1de86a6bafc7318bbba3011af4a3f4032472346be"
+    },
+    {
+      "archive": "records/planner-routine-001/gamma-branches/pair-002-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gamma-branches/pair-002-reference-raw.json",
+      "raw_bytes": 1817,
+      "raw_sha256": "d8df7f20f6a76d9ab84160e70f73a4f92d99407fa663f4edc2caccd1c3b9cab0"
+    },
+    {
+      "archive": "records/planner-routine-001/gamma-branches/pair-002.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gamma-branches/pair-002.json",
+      "raw_bytes": 5102,
+      "raw_sha256": "8ef9bfe0c1bdfbc92d26df6e63c20220bc0b2af4fe0c9b714ceaa24d2aeff329"
+    },
+    {
+      "archive": "records/planner-routine-001/gamma-branches/pair-003-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gamma-branches/pair-003-candidate-raw.json",
+      "raw_bytes": 1806,
+      "raw_sha256": "dfd226ded9af7650ac970f36d50a365cb221359f8440e8b577f76353885fe485"
+    },
+    {
+      "archive": "records/planner-routine-001/gamma-branches/pair-003-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gamma-branches/pair-003-reference-raw.json",
+      "raw_bytes": 1827,
+      "raw_sha256": "8152ba126f419212888ca019608d0ce6a1840471e0526d4c5884353cecb70b1e"
+    },
+    {
+      "archive": "records/planner-routine-001/gamma-branches/pair-003.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gamma-branches/pair-003.json",
+      "raw_bytes": 5102,
+      "raw_sha256": "c87e7b0cedea6dea35b708e4b14a33b88a0e14d4a8e32bbe8c54d5ad45b74208"
+    },
+    {
+      "archive": "records/planner-routine-001/gamma-branches/pair-004-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gamma-branches/pair-004-candidate-raw.json",
+      "raw_bytes": 1806,
+      "raw_sha256": "00fcc3b45e3cd551c6551eb369dfbea8ba7ce277dc10a7e40c909b3ba2d49896"
+    },
+    {
+      "archive": "records/planner-routine-001/gamma-branches/pair-004-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gamma-branches/pair-004-reference-raw.json",
+      "raw_bytes": 1827,
+      "raw_sha256": "f62ee2787fe643f2a112a95e75d6f9d42006b3fadd0694d190e38ec517dadb59"
+    },
+    {
+      "archive": "records/planner-routine-001/gamma-branches/pair-004.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gamma-branches/pair-004.json",
+      "raw_bytes": 5102,
+      "raw_sha256": "d4554b006ddef4499ffd957ce533b30b96273bd3e5031e253ae34430810bcdd4"
+    },
+    {
+      "archive": "records/planner-routine-001/gamma-branches/pair-005-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gamma-branches/pair-005-candidate-raw.json",
+      "raw_bytes": 1796,
+      "raw_sha256": "22ff1e9d51fcae3fe3aae065c507b7c8d6c875564bfc8b5eb8b45488612b5d31"
+    },
+    {
+      "archive": "records/planner-routine-001/gamma-branches/pair-005-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gamma-branches/pair-005-reference-raw.json",
+      "raw_bytes": 1827,
+      "raw_sha256": "c30e14bc55ab6de90175b9e945cbb91496fbf9e5df2bb18303f9da2eb64fcff8"
+    },
+    {
+      "archive": "records/planner-routine-001/gamma-branches/pair-005.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gamma-branches/pair-005.json",
+      "raw_bytes": 5102,
+      "raw_sha256": "25f10218a45dad4b0964a893c71b797429a7147e6e90c8c2c7e22e14d1713bb4"
+    },
+    {
+      "archive": "records/planner-routine-001/gamma-branches/pair-006-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gamma-branches/pair-006-candidate-raw.json",
+      "raw_bytes": 1796,
+      "raw_sha256": "991c1659d14f82c478f5089a9b1d9d044e9c54b5b73c270e693530fbffb0ac5d"
+    },
+    {
+      "archive": "records/planner-routine-001/gamma-branches/pair-006-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gamma-branches/pair-006-reference-raw.json",
+      "raw_bytes": 1827,
+      "raw_sha256": "41f8f239101d1b52776439799b5444a03b75ae8199dc12b893343563df07a1f3"
+    },
+    {
+      "archive": "records/planner-routine-001/gamma-branches/pair-006.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gamma-branches/pair-006.json",
+      "raw_bytes": 5102,
+      "raw_sha256": "943d41ea647aaa35fb6fddb9588ccc0b2aba97b535ec6ee914218e0575f9981c"
+    },
+    {
+      "archive": "records/planner-routine-001/gamma-branches/pair-007-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gamma-branches/pair-007-candidate-raw.json",
+      "raw_bytes": 1805,
+      "raw_sha256": "00506f917abf2a8f2c26cdb5e5b4005e70acd3b12f2ca39f5141a080092a4bad"
+    },
+    {
+      "archive": "records/planner-routine-001/gamma-branches/pair-007-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gamma-branches/pair-007-reference-raw.json",
+      "raw_bytes": 1827,
+      "raw_sha256": "74acae58658ecb5ce88b3048550c712ec5d0119e44b9679062b4b66906ffe26b"
+    },
+    {
+      "archive": "records/planner-routine-001/gamma-branches/pair-007.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gamma-branches/pair-007.json",
+      "raw_bytes": 5101,
+      "raw_sha256": "b70a1ab06c1a3ad36284939df4759dfc0faf07212beab6d012e3d3836ca91710"
+    },
+    {
+      "archive": "records/planner-routine-001/gamma-branches/pair-008-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gamma-branches/pair-008-candidate-raw.json",
+      "raw_bytes": 1806,
+      "raw_sha256": "8e771e2040c47405a7b8dd1fd9b4885cbf3a0db381b6c37b8a2666f7edc702e9"
+    },
+    {
+      "archive": "records/planner-routine-001/gamma-branches/pair-008-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gamma-branches/pair-008-reference-raw.json",
+      "raw_bytes": 1827,
+      "raw_sha256": "9d40c2def1f3667f77888765988377599922a9cc5944a54d9355462e75a52249"
+    },
+    {
+      "archive": "records/planner-routine-001/gamma-branches/pair-008.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gamma-branches/pair-008.json",
+      "raw_bytes": 5102,
+      "raw_sha256": "24273a2eea25ca5cf9a9158e04e76f919cafea6f8c6d344f330643a75c144c6a"
+    },
+    {
+      "archive": "records/planner-routine-001/gamma-branches/pair-009-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gamma-branches/pair-009-candidate-raw.json",
+      "raw_bytes": 1806,
+      "raw_sha256": "a90010f23bc4c4da18015b74ee36a50c4cd85fb37ce50a8b605f5c9da86429c2"
+    },
+    {
+      "archive": "records/planner-routine-001/gamma-branches/pair-009-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gamma-branches/pair-009-reference-raw.json",
+      "raw_bytes": 1827,
+      "raw_sha256": "760bd49bc2960e939f294e4c71609ac8d8c14b17cd835585e8fd49f38337f0fe"
+    },
+    {
+      "archive": "records/planner-routine-001/gamma-branches/pair-009.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gamma-branches/pair-009.json",
+      "raw_bytes": 5102,
+      "raw_sha256": "869394ea510decf738d768ff3434d98d73eaa92184693d947508b4c5f99a7f57"
+    },
+    {
+      "archive": "records/planner-routine-001/gamma-branches/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gamma-branches/result.json",
+      "raw_bytes": 93480,
+      "raw_sha256": "4496ccac7ecddeb9da13c65ae20477b0c7d168f80d52ec8a5ef10ad919e27ae5"
+    },
+    {
+      "archive": "records/planner-routine-001/gaussian-design-chernoff/pair-001-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gaussian-design-chernoff/pair-001-candidate-raw.json",
+      "raw_bytes": 9262,
+      "raw_sha256": "6a320933db20e980f6bbd7e6de9ec169892930c25bf60dc4b220a8caec5f3bc5"
+    },
+    {
+      "archive": "records/planner-routine-001/gaussian-design-chernoff/pair-001-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gaussian-design-chernoff/pair-001-reference-raw.json",
+      "raw_bytes": 9376,
+      "raw_sha256": "62327764d19383aab8a7e22c49e848bd41c6f77ce0e913abf8ab3aaa98a9e4ad"
+    },
+    {
+      "archive": "records/planner-routine-001/gaussian-design-chernoff/pair-001.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gaussian-design-chernoff/pair-001.json",
+      "raw_bytes": 19833,
+      "raw_sha256": "ea3a40fe5258ec87f56937dbfda10b6f90d0c6ca09e952f13feeae9a1fde8542"
+    },
+    {
+      "archive": "records/planner-routine-001/gaussian-design-chernoff/pair-002-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gaussian-design-chernoff/pair-002-candidate-raw.json",
+      "raw_bytes": 9263,
+      "raw_sha256": "376deac4068bfe284cfcd471a2fa3fb22c2fbe54cb9f0207ba585a09ea7bd242"
+    },
+    {
+      "archive": "records/planner-routine-001/gaussian-design-chernoff/pair-002-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gaussian-design-chernoff/pair-002-reference-raw.json",
+      "raw_bytes": 9376,
+      "raw_sha256": "a14a458a665b937b3199b42658ddece1690ce7f24daa83600082bc9d7cbc1415"
+    },
+    {
+      "archive": "records/planner-routine-001/gaussian-design-chernoff/pair-002.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gaussian-design-chernoff/pair-002.json",
+      "raw_bytes": 19834,
+      "raw_sha256": "167298c9e010f20e284b16f2f6beccc7e7f4b675f061186a2bcee871494bf102"
+    },
+    {
+      "archive": "records/planner-routine-001/gaussian-design-chernoff/pair-003-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gaussian-design-chernoff/pair-003-candidate-raw.json",
+      "raw_bytes": 9263,
+      "raw_sha256": "a9bd30a8a9df5e4335cfb81ce3b9e5981c4ed7f8e29fcc4383ed19dd18eaa3c7"
+    },
+    {
+      "archive": "records/planner-routine-001/gaussian-design-chernoff/pair-003-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gaussian-design-chernoff/pair-003-reference-raw.json",
+      "raw_bytes": 9375,
+      "raw_sha256": "6ae8de5f073609c221059da95630dfe5a421dd6997777bef6c93d18c9d44989b"
+    },
+    {
+      "archive": "records/planner-routine-001/gaussian-design-chernoff/pair-003.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gaussian-design-chernoff/pair-003.json",
+      "raw_bytes": 19833,
+      "raw_sha256": "5394b820aae07b80962242c1d786d6ce248db61c75102e5984ae796e45c65c06"
+    },
+    {
+      "archive": "records/planner-routine-001/gaussian-design-chernoff/pair-004-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gaussian-design-chernoff/pair-004-candidate-raw.json",
+      "raw_bytes": 9263,
+      "raw_sha256": "bf07b8043d2da3062e6f2505a2bed2a2c1f89246f5087f42d6d370083da6d80d"
+    },
+    {
+      "archive": "records/planner-routine-001/gaussian-design-chernoff/pair-004-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gaussian-design-chernoff/pair-004-reference-raw.json",
+      "raw_bytes": 9376,
+      "raw_sha256": "89d035400bfb27270aa00e2146a6307909b390184b7929875603cc9fbc6ede8b"
+    },
+    {
+      "archive": "records/planner-routine-001/gaussian-design-chernoff/pair-004.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gaussian-design-chernoff/pair-004.json",
+      "raw_bytes": 19834,
+      "raw_sha256": "def8adc6186a05998f62d215a4e4d8bcf4e1397f5318a239a9a601e36c343fa4"
+    },
+    {
+      "archive": "records/planner-routine-001/gaussian-design-chernoff/pair-005-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gaussian-design-chernoff/pair-005-candidate-raw.json",
+      "raw_bytes": 9263,
+      "raw_sha256": "9841ee0ccc753be63ec156d0531fc570cf1b26e3a34e0ebec70905df119cd9d8"
+    },
+    {
+      "archive": "records/planner-routine-001/gaussian-design-chernoff/pair-005-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gaussian-design-chernoff/pair-005-reference-raw.json",
+      "raw_bytes": 9374,
+      "raw_sha256": "99ef7f2a65b387be31c3f7503d32b8f84e026541bbe28c7c1b94d7888449fe9d"
+    },
+    {
+      "archive": "records/planner-routine-001/gaussian-design-chernoff/pair-005.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gaussian-design-chernoff/pair-005.json",
+      "raw_bytes": 19832,
+      "raw_sha256": "b5c78ec159d63cac7e6b49dc288357c73352f2875c15b072e5acb9f091f51cc8"
+    },
+    {
+      "archive": "records/planner-routine-001/gaussian-design-chernoff/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gaussian-design-chernoff/result.json",
+      "raw_bytes": 137746,
+      "raw_sha256": "7a1cbe402bc60498c70ecff517120aba84fb07369da3f52972706353c0ea69fd"
+    },
+    {
+      "archive": "records/planner-routine-001/gaussian-design-markov/pair-001-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gaussian-design-markov/pair-001-candidate-raw.json",
+      "raw_bytes": 7472,
+      "raw_sha256": "5ed38803bcc28265ba56169e2c3bc5d43c0270318c5105121329fe27cad2a268"
+    },
+    {
+      "archive": "records/planner-routine-001/gaussian-design-markov/pair-001-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gaussian-design-markov/pair-001-reference-raw.json",
+      "raw_bytes": 7584,
+      "raw_sha256": "5a3bee63f6f588925c4e484b922f18cd5d11d5e59faad3bbbe2ad3b7c61faa2d"
+    },
+    {
+      "archive": "records/planner-routine-001/gaussian-design-markov/pair-001.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gaussian-design-markov/pair-001.json",
+      "raw_bytes": 15915,
+      "raw_sha256": "f984f8ae5ed296fddc7b2a6d717c91993a04452104a4c8d365f0c0e0d4501f5c"
+    },
+    {
+      "archive": "records/planner-routine-001/gaussian-design-markov/pair-002-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gaussian-design-markov/pair-002-candidate-raw.json",
+      "raw_bytes": 7472,
+      "raw_sha256": "c12982871fa62125891ebc9cfb2194da0d848758b6d4dde5bff1ad918bd65aec"
+    },
+    {
+      "archive": "records/planner-routine-001/gaussian-design-markov/pair-002-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gaussian-design-markov/pair-002-reference-raw.json",
+      "raw_bytes": 7584,
+      "raw_sha256": "a67be48cc3f8afd7ac09da7f4173634534f2a753924249e2d2106e23f5c989c8"
+    },
+    {
+      "archive": "records/planner-routine-001/gaussian-design-markov/pair-002.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gaussian-design-markov/pair-002.json",
+      "raw_bytes": 15915,
+      "raw_sha256": "5d60656ff21bb05af563b369eddd7425488e2f932b079b8b581183061967e151"
+    },
+    {
+      "archive": "records/planner-routine-001/gaussian-design-markov/pair-003-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gaussian-design-markov/pair-003-candidate-raw.json",
+      "raw_bytes": 7472,
+      "raw_sha256": "62924133235d6879731d59831830bd441443a0c5b12caad88eec945351baea2c"
+    },
+    {
+      "archive": "records/planner-routine-001/gaussian-design-markov/pair-003-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gaussian-design-markov/pair-003-reference-raw.json",
+      "raw_bytes": 7585,
+      "raw_sha256": "6138bed08294e00d0157a61153ec68f26873bd44d70245e55085ba67cd8d78eb"
+    },
+    {
+      "archive": "records/planner-routine-001/gaussian-design-markov/pair-003.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gaussian-design-markov/pair-003.json",
+      "raw_bytes": 15916,
+      "raw_sha256": "8a005d9db8266288f16950692c64eac713b179c06addaa3f216e04f0df7009b6"
+    },
+    {
+      "archive": "records/planner-routine-001/gaussian-design-markov/pair-004-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gaussian-design-markov/pair-004-candidate-raw.json",
+      "raw_bytes": 7472,
+      "raw_sha256": "2ae0b40314cd84681112059510fd73c923fed2d64ec2b3b41f720bb290e8f8e8"
+    },
+    {
+      "archive": "records/planner-routine-001/gaussian-design-markov/pair-004-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gaussian-design-markov/pair-004-reference-raw.json",
+      "raw_bytes": 7584,
+      "raw_sha256": "d8bdc1b6f9a77df928a9b7bce04cee4432b8da5116c89730bbbdc6e769f0a93f"
+    },
+    {
+      "archive": "records/planner-routine-001/gaussian-design-markov/pair-004.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gaussian-design-markov/pair-004.json",
+      "raw_bytes": 15915,
+      "raw_sha256": "6196eb278b43de6d7b00a13aac638f3129eb52291a951f9591e415ca3bdd4d37"
+    },
+    {
+      "archive": "records/planner-routine-001/gaussian-design-markov/pair-005-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gaussian-design-markov/pair-005-candidate-raw.json",
+      "raw_bytes": 7472,
+      "raw_sha256": "68a64fd13532e86e3d4b44e861ec521ac711dbd712a14001b88a8f1bcc3f7d18"
+    },
+    {
+      "archive": "records/planner-routine-001/gaussian-design-markov/pair-005-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gaussian-design-markov/pair-005-reference-raw.json",
+      "raw_bytes": 7585,
+      "raw_sha256": "c83d74aae699a26b0c8abe534c7e008f43c2f5e2d4a85c165f3d4eb7ab18141d"
+    },
+    {
+      "archive": "records/planner-routine-001/gaussian-design-markov/pair-005.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gaussian-design-markov/pair-005.json",
+      "raw_bytes": 15916,
+      "raw_sha256": "df3db3bd8fe235ab2558d6f3775b8e9de8fedc049b14de34c47977614f250409"
+    },
+    {
+      "archive": "records/planner-routine-001/gaussian-design-markov/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/gaussian-design-markov/result.json",
+      "raw_bytes": 115254,
+      "raw_sha256": "f7fb748c361021672d6d77f2b23584b7f9ff8bc7be7d8f81fd4c0e8f4c58a043"
+    },
+    {
+      "archive": "records/planner-routine-001/geometry-boundaries/pair-001-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/geometry-boundaries/pair-001-candidate-raw.json",
+      "raw_bytes": 1548,
+      "raw_sha256": "51c26e1327981955396d6bcf8d5d19afd7f65a937ca91bce65cd465e3167d05a"
+    },
+    {
+      "archive": "records/planner-routine-001/geometry-boundaries/pair-001-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/geometry-boundaries/pair-001-reference-raw.json",
+      "raw_bytes": 1577,
+      "raw_sha256": "f53e5409a91e7913dcf15c3ca45ce7d0b7853f2f0fa64459e2b68eaf974e5244"
+    },
+    {
+      "archive": "records/planner-routine-001/geometry-boundaries/pair-001.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/geometry-boundaries/pair-001.json",
+      "raw_bytes": 4362,
+      "raw_sha256": "ce0b4420bf9c3d04906b33425f2bc5799b6b4cd6fc496be7d36585f54a1a6ac9"
+    },
+    {
+      "archive": "records/planner-routine-001/geometry-boundaries/pair-002-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/geometry-boundaries/pair-002-candidate-raw.json",
+      "raw_bytes": 1556,
+      "raw_sha256": "75b495b15301e122365150cfd7cfd94877e3f1af019867634a286e570ef457d0"
+    },
+    {
+      "archive": "records/planner-routine-001/geometry-boundaries/pair-002-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/geometry-boundaries/pair-002-reference-raw.json",
+      "raw_bytes": 1578,
+      "raw_sha256": "2eb01aad5003002da0853dc036af2db9d68b6e3a297f8ce97d4c5ffcfff1ff60"
+    },
+    {
+      "archive": "records/planner-routine-001/geometry-boundaries/pair-002.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/geometry-boundaries/pair-002.json",
+      "raw_bytes": 4362,
+      "raw_sha256": "41b955ec9074ffd78c59115e72da7ba0f9d840c3fb0e873b13cf9a2f5b1b6bd6"
+    },
+    {
+      "archive": "records/planner-routine-001/geometry-boundaries/pair-003-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/geometry-boundaries/pair-003-candidate-raw.json",
+      "raw_bytes": 1557,
+      "raw_sha256": "99913abbf12470de45a4405a83056f1cdc21547c6e44c8b87a62a72393c8b4d3"
+    },
+    {
+      "archive": "records/planner-routine-001/geometry-boundaries/pair-003-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/geometry-boundaries/pair-003-reference-raw.json",
+      "raw_bytes": 1577,
+      "raw_sha256": "0deead829d10188384f5511f4733084e4bf814124466636effeefa5f37efefce"
+    },
+    {
+      "archive": "records/planner-routine-001/geometry-boundaries/pair-003.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/geometry-boundaries/pair-003.json",
+      "raw_bytes": 4363,
+      "raw_sha256": "30f2d112d78dd1bb7807d46e45ab47c74ab814468cdf4f04eb090ef99066f739"
+    },
+    {
+      "archive": "records/planner-routine-001/geometry-boundaries/pair-004-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/geometry-boundaries/pair-004-candidate-raw.json",
+      "raw_bytes": 1548,
+      "raw_sha256": "cadf34f527e75b0046092adba96fa15a3bab3a6936435820fe1b66b2b3923a71"
+    },
+    {
+      "archive": "records/planner-routine-001/geometry-boundaries/pair-004-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/geometry-boundaries/pair-004-reference-raw.json",
+      "raw_bytes": 1577,
+      "raw_sha256": "e1a6c057c1d578cfb72e0e295a11a463c787dc414ba1ca0e8aa27f517199ee9f"
+    },
+    {
+      "archive": "records/planner-routine-001/geometry-boundaries/pair-004.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/geometry-boundaries/pair-004.json",
+      "raw_bytes": 4362,
+      "raw_sha256": "eaec4d08f464ae5bcd24e0625a8ec671fd1eebbf381190cf345104b04c7ca2e1"
+    },
+    {
+      "archive": "records/planner-routine-001/geometry-boundaries/pair-005-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/geometry-boundaries/pair-005-candidate-raw.json",
+      "raw_bytes": 1557,
+      "raw_sha256": "c966f822889f7534d38c9801e223a21e10c8f649dbbe7e06f54fd1a4a64e15d3"
+    },
+    {
+      "archive": "records/planner-routine-001/geometry-boundaries/pair-005-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/geometry-boundaries/pair-005-reference-raw.json",
+      "raw_bytes": 1569,
+      "raw_sha256": "50f8d2c57131d478e8cc2d269456fa455308741c49ded2c2a2699e0fffb8cb99"
+    },
+    {
+      "archive": "records/planner-routine-001/geometry-boundaries/pair-005.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/geometry-boundaries/pair-005.json",
+      "raw_bytes": 4364,
+      "raw_sha256": "0aed90a4f8dd11527e9d8886389ff4117b0c76c7d71e6789107bccfb9df52ab6"
+    },
+    {
+      "archive": "records/planner-routine-001/geometry-boundaries/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/geometry-boundaries/result.json",
+      "raw_bytes": 52440,
+      "raw_sha256": "27a4f38726bff44dd80ec3fe312237c0d55ed0f4693b62ed038884efa989797d"
+    },
+    {
+      "archive": "records/planner-routine-001/grid-exhaustion/pair-001-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/grid-exhaustion/pair-001-candidate-raw.json",
+      "raw_bytes": 895,
+      "raw_sha256": "d58a2fa26c1d28a7eb548610fca2d28e1c0aef16e1e123f5f5b82f276da8eb57"
+    },
+    {
+      "archive": "records/planner-routine-001/grid-exhaustion/pair-001-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/grid-exhaustion/pair-001-reference-raw.json",
+      "raw_bytes": 916,
+      "raw_sha256": "65296f1b1ac04b3e089c606f4c614572668fe7f6ad41909dad6df7a0509130bb"
+    },
+    {
+      "archive": "records/planner-routine-001/grid-exhaustion/pair-001.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/grid-exhaustion/pair-001.json",
+      "raw_bytes": 2426,
+      "raw_sha256": "1b89c13eb04d2508cf93a7a64c33fa412af407e6f39f715c3a372dd56064734e"
+    },
+    {
+      "archive": "records/planner-routine-001/grid-exhaustion/pair-002-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/grid-exhaustion/pair-002-candidate-raw.json",
+      "raw_bytes": 887,
+      "raw_sha256": "8421205209540f5f04a60a33b9032e632fc278a36d84ccffe53953d65917ecbf"
+    },
+    {
+      "archive": "records/planner-routine-001/grid-exhaustion/pair-002-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/grid-exhaustion/pair-002-reference-raw.json",
+      "raw_bytes": 916,
+      "raw_sha256": "adba42600d2c0b69b1db6c9855958a9e9742a347101c9fe84d204d3cb497a627"
+    },
+    {
+      "archive": "records/planner-routine-001/grid-exhaustion/pair-002.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/grid-exhaustion/pair-002.json",
+      "raw_bytes": 2426,
+      "raw_sha256": "bad699ca63cd770835027ccf4694e2e7a50a668cae2cc6bd9bc859ff43132fb1"
+    },
+    {
+      "archive": "records/planner-routine-001/grid-exhaustion/pair-003-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/grid-exhaustion/pair-003-candidate-raw.json",
+      "raw_bytes": 887,
+      "raw_sha256": "3686d1586da41310400c822e4e7f41dfb17d913bed050748bc288800d6539866"
+    },
+    {
+      "archive": "records/planner-routine-001/grid-exhaustion/pair-003-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/grid-exhaustion/pair-003-reference-raw.json",
+      "raw_bytes": 908,
+      "raw_sha256": "79a3acc8452d398955450b77d1c4d56d4912a65a968b19308ac3ef8c92e8b312"
+    },
+    {
+      "archive": "records/planner-routine-001/grid-exhaustion/pair-003.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/grid-exhaustion/pair-003.json",
+      "raw_bytes": 2426,
+      "raw_sha256": "9f9b6b10fd7eb5224cb7a4d114c0331104ec34a867a311271957662469b5cb4b"
+    },
+    {
+      "archive": "records/planner-routine-001/grid-exhaustion/pair-004-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/grid-exhaustion/pair-004-candidate-raw.json",
+      "raw_bytes": 895,
+      "raw_sha256": "b6124c1b7f22da122528102d6369b965facfcc62c3a663c9def83f8eb46e0c05"
+    },
+    {
+      "archive": "records/planner-routine-001/grid-exhaustion/pair-004-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/grid-exhaustion/pair-004-reference-raw.json",
+      "raw_bytes": 907,
+      "raw_sha256": "e3db4ee70f8c12eb687b4513544766b1ebb54e7013501376c5dd44db4ef0ab3f"
+    },
+    {
+      "archive": "records/planner-routine-001/grid-exhaustion/pair-004.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/grid-exhaustion/pair-004.json",
+      "raw_bytes": 2425,
+      "raw_sha256": "a3f38456fadd5e3c88752499e0d0bfde964872307bacf5ff9d273821c5677894"
+    },
+    {
+      "archive": "records/planner-routine-001/grid-exhaustion/pair-005-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/grid-exhaustion/pair-005-candidate-raw.json",
+      "raw_bytes": 896,
+      "raw_sha256": "1d1154a7340c87bd2e517e2aa261c284e8815f4ea9da7773cfbbfdf483d53dce"
+    },
+    {
+      "archive": "records/planner-routine-001/grid-exhaustion/pair-005-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/grid-exhaustion/pair-005-reference-raw.json",
+      "raw_bytes": 917,
+      "raw_sha256": "1ee3db05c08b56204bdd277a29131312a8bc20d745ca583bcfb329e758a830d5"
+    },
+    {
+      "archive": "records/planner-routine-001/grid-exhaustion/pair-005.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/grid-exhaustion/pair-005.json",
+      "raw_bytes": 2426,
+      "raw_sha256": "13d9fd7af003619dec8daecd5899146e3150ddeb718a3542e6da00ca041b6dca"
+    },
+    {
+      "archive": "records/planner-routine-001/grid-exhaustion/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/grid-exhaustion/result.json",
+      "raw_bytes": 41085,
+      "raw_sha256": "95b9ffc716338241641cd9eff65566ebe25a906c0bc4b29a86d933fbcc763fee"
+    },
+    {
+      "archive": "records/planner-routine-001/plan.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/plan.json",
+      "raw_bytes": 10885,
+      "raw_sha256": "1772e7dc2fd1929121bc3024c96548e07caed5e52816b9d0f2b230e0eaecfe1a"
+    },
+    {
+      "archive": "records/planner-routine-001/replay-validation.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/replay-validation.json",
+      "raw_bytes": 402,
+      "raw_sha256": "bf7fc0cc30928d18ac872463ba67549828fbcdc00ed2704f0848e7fa893289dc"
+    },
+    {
+      "archive": "records/planner-routine-001/resource-exits/pair-001-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/resource-exits/pair-001-candidate-raw.json",
+      "raw_bytes": 1383,
+      "raw_sha256": "37a29c54113608411fc8f044bcaf63d8415789d5ceabe4378de20b368143a6e2"
+    },
+    {
+      "archive": "records/planner-routine-001/resource-exits/pair-001-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/resource-exits/pair-001-reference-raw.json",
+      "raw_bytes": 1404,
+      "raw_sha256": "4ef6952f6cd8a27658bb72ba0b2d933515c7ae3a6648b6fbfdf96f2013170369"
+    },
+    {
+      "archive": "records/planner-routine-001/resource-exits/pair-001.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/resource-exits/pair-001.json",
+      "raw_bytes": 3774,
+      "raw_sha256": "38ea3e0de268e1414228de3c72d640b3e0edaccc1137ea27d24710ca22c08865"
+    },
+    {
+      "archive": "records/planner-routine-001/resource-exits/pair-002-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/resource-exits/pair-002-candidate-raw.json",
+      "raw_bytes": 1383,
+      "raw_sha256": "bab27840e1d4901e4c9fd05dc5724ac074fec9e0093ec81c308aa48a466684a6"
+    },
+    {
+      "archive": "records/planner-routine-001/resource-exits/pair-002-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/resource-exits/pair-002-reference-raw.json",
+      "raw_bytes": 1404,
+      "raw_sha256": "16c2d2443b0fe43c55449ba4cc48aefb241dbec5d140bd4cd8d6a8ec16123f2b"
+    },
+    {
+      "archive": "records/planner-routine-001/resource-exits/pair-002.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/resource-exits/pair-002.json",
+      "raw_bytes": 3774,
+      "raw_sha256": "7c3ce687d15dd8c99992cc301f8a56da940b685e67ff9c8dff4dd882bf5e771c"
+    },
+    {
+      "archive": "records/planner-routine-001/resource-exits/pair-003-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/resource-exits/pair-003-candidate-raw.json",
+      "raw_bytes": 1383,
+      "raw_sha256": "49071d035383969031077210e4b104e7df937acda828097a5c4a642e9b124ba5"
+    },
+    {
+      "archive": "records/planner-routine-001/resource-exits/pair-003-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/resource-exits/pair-003-reference-raw.json",
+      "raw_bytes": 1394,
+      "raw_sha256": "840c7f2e6087f5090d7d54891fa4bb491f874d59b8af6d9747e84f5426b2b765"
+    },
+    {
+      "archive": "records/planner-routine-001/resource-exits/pair-003.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/resource-exits/pair-003.json",
+      "raw_bytes": 3774,
+      "raw_sha256": "982ce6246446d0f992f64bf49b9a42b707b9697d6e6068317ece273ebff70a27"
+    },
+    {
+      "archive": "records/planner-routine-001/resource-exits/pair-004-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/resource-exits/pair-004-candidate-raw.json",
+      "raw_bytes": 1384,
+      "raw_sha256": "042776afef2a3a198c03fba09f777c3f42d65c2badbf8d70abd0c3c6fc801084"
+    },
+    {
+      "archive": "records/planner-routine-001/resource-exits/pair-004-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/resource-exits/pair-004-reference-raw.json",
+      "raw_bytes": 1404,
+      "raw_sha256": "01d0a15d04fe55bdbe1c969546207d446f4dd98e58e8335aa0ffd73bc672c8b6"
+    },
+    {
+      "archive": "records/planner-routine-001/resource-exits/pair-004.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/resource-exits/pair-004.json",
+      "raw_bytes": 3775,
+      "raw_sha256": "aeb23a97b34ae49ef2c1736e797a4a60219931a6132b632bd5fefa2742bcd0ac"
+    },
+    {
+      "archive": "records/planner-routine-001/resource-exits/pair-005-candidate-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/resource-exits/pair-005-candidate-raw.json",
+      "raw_bytes": 1382,
+      "raw_sha256": "1a44342d2be6de54cd1ca164f7cc830b7fe632f0fd24314d04d05287ce127029"
+    },
+    {
+      "archive": "records/planner-routine-001/resource-exits/pair-005-reference-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/resource-exits/pair-005-reference-raw.json",
+      "raw_bytes": 1404,
+      "raw_sha256": "bdb3ec2e3e916403f4578fd768e2993f058a3614b6c26c7ed6d3a30fd96ead60"
+    },
+    {
+      "archive": "records/planner-routine-001/resource-exits/pair-005.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/resource-exits/pair-005.json",
+      "raw_bytes": 3771,
+      "raw_sha256": "bfae60427bd517f9e3ae7ee61f10b20220f62e532db349bed367bce8790d9dc1"
+    },
+    {
+      "archive": "records/planner-routine-001/resource-exits/result.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/resource-exits/result.json",
+      "raw_bytes": 49003,
+      "raw_sha256": "3f0eceb1977263e46be3f347a780d27422cf4cbdd2f4c97efc1f3e957cdf2c7b"
+    },
+    {
+      "archive": "records/planner-routine-001/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-routine-001/summary.json",
+      "raw_bytes": 660624,
+      "raw_sha256": "a30d552ce45293c56b7280af5e45beb6cf0db605ddafc5103301887efc04316d"
+    },
+    {
+      "archive": "records/planner-diagnostic/gaussian-design-chernoff-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-diagnostic/gaussian-design-chernoff-raw.json",
+      "raw_bytes": 9264,
+      "raw_sha256": "446821c73176f44322e1b5c6479fbbe879a2aaa90de752ca8b8124863f889e3c"
+    },
+    {
+      "archive": "records/planner-diagnostic/gaussian-design-markov-raw.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-diagnostic/gaussian-design-markov-raw.json",
+      "raw_bytes": 7472,
+      "raw_sha256": "5b93257d319271bf6961e32045091ece9ebbede61dc8683880e9950128b0495c"
+    },
+    {
+      "archive": "records/planner-diagnostic/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/planner-diagnostic/summary.json",
+      "raw_bytes": 3990,
+      "raw_sha256": "f2dde340da81bcc9e54169365a8a937540232f9762df222397386e1d0e10402e"
+    },
+    {
+      "archive": "records/python-coverage-001/raw/coverage.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/python-coverage-001/raw/coverage.json",
+      "raw_bytes": 1291595,
+      "raw_sha256": "2b8208fe0a29bef6a249aa7b7d7d457681f20faae9326b2fc721723cd3e0b418"
+    },
+    {
+      "archive": "records/python-coverage-001/summary.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/python-coverage-001/summary.json",
+      "raw_bytes": 127649,
+      "raw_sha256": "2609ccbcd7085bfb1654e00aa21ae527b1e450bab8830e704bc58395d19bb37d"
+    },
+    {
+      "archive": "records/gpu/hardware/gpu.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/hardware/gpu.json",
+      "raw_bytes": 278247,
+      "raw_sha256": "11444936c5d72b71f780b3988644cb88c124156d9c0e36166c06b5f9f88fe230"
+    },
+    {
+      "archive": "records/gpu/legacy/legacy-anchors/cuda/1793764120402602191-700ad521a6ec37f0.anchor.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/legacy/legacy-anchors/cuda/1793764120402602191-700ad521a6ec37f0.anchor.json",
+      "raw_bytes": 66075,
+      "raw_sha256": "01ae08bb5e92070c332da3a2f1022de16a9abe2268444066db21de272a5112e2"
+    },
+    {
+      "archive": "records/gpu/legacy/legacy-anchors/cuda/1793764120402602191-700ad521a6ec37f0.prediction.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/legacy/legacy-anchors/cuda/1793764120402602191-700ad521a6ec37f0.prediction.json",
+      "raw_bytes": 2722,
+      "raw_sha256": "d20ad879a60127dda331b85733956203bd375cc475943d1910deefe8b89a3fab"
+    },
+    {
+      "archive": "records/gpu/legacy/legacy-anchors/cuda/1793764188002222174-67fce8d7a123f285.anchor.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/legacy/legacy-anchors/cuda/1793764188002222174-67fce8d7a123f285.anchor.json",
+      "raw_bytes": 96749,
+      "raw_sha256": "fe9a2630e1058250e00fa4feaf2fb1d793296455e95c59099957e8c522c12cbb"
+    },
+    {
+      "archive": "records/gpu/legacy/legacy-anchors/cuda/1793764188002222174-67fce8d7a123f285.prediction.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/legacy/legacy-anchors/cuda/1793764188002222174-67fce8d7a123f285.prediction.json",
+      "raw_bytes": 2734,
+      "raw_sha256": "12565a169fdded4a99c204b914e480deb3b5846f4dd1a23139874f6b783d73ff"
+    },
+    {
+      "archive": "records/gpu/legacy/legacy-anchors/native-vlf-low-cn0.native-anchor.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/legacy/legacy-anchors/native-vlf-low-cn0.native-anchor.json",
+      "raw_bytes": 483800,
+      "raw_sha256": "05d19586172f096403bf4c6d4c2effa8f8981040dd9b59ae3cb65f239ece0f3e"
+    },
+    {
+      "archive": "records/gpu/legacy/legacy-qualification-001/outer.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/legacy/legacy-qualification-001/outer.log",
+      "raw_bytes": 465,
+      "raw_sha256": "e31921c458ba641233cc853a7754498e66a98b234f4bf4191ca1df3518d3ce5f"
+    },
+    {
+      "embedded_in": "records/gpu/legacy/legacy-qualification-001/report.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/legacy/legacy-qualification-001/report.cuda.json",
+      "json_path": [
+        "backends",
+        0
+      ],
+      "raw_bytes": 34695078,
+      "raw_sha256": "19b4f1f8beb3f711e1fb02d84d2127d379d8a164d1b569c71f40dfda516478aa",
+      "serialization": "json indent=2, allow_nan=False, trailing newline"
+    },
+    {
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/legacy/legacy-qualification-001/report.cuda.stdout.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/legacy/legacy-qualification-001/report.cuda.work/candidate.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.work/executed-paths.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/legacy/legacy-qualification-001/report.cuda.work/executed-paths.json",
+      "raw_bytes": 92322,
+      "raw_sha256": "635ad23e95ab68d372cf48bf7881126bf70ad4d254900bbfb31a9816dba18722"
+    },
+    {
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/legacy/legacy-qualification-001/report.cuda.work/executed-paths.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.work/native-vlf-low-cn0.prediction-4.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/legacy/legacy-qualification-001/report.cuda.work/native-vlf-low-cn0.prediction-4.json",
+      "raw_bytes": 97756,
+      "raw_sha256": "4f1155f032dff9b1c387b04c02469c2362ebee03830b8f34cbbc5fc9d37d37cb"
+    },
+    {
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.cuda.stderr.log.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/legacy/legacy-qualification-001/report.cuda.work/reference.stderr.log",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "archive": "records/gpu/legacy/legacy-qualification-001/report.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/legacy/legacy-qualification-001/report.json",
+      "raw_bytes": 37920972,
+      "raw_sha256": "2c2a6dc24af9a872c09164873fa9b447a02beb84faf50bebea30f819ed18331e"
+    },
+    {
+      "archive": "records/gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/broad-hf-timing/b220df4f187da55c0b8b8767cd394db67fa0b2fc7151835496f558dea34104b0/fixture.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/broad-hf-timing/b220df4f187da55c0b8b8767cd394db67fa0b2fc7151835496f558dea34104b0/fixture.json",
+      "raw_bytes": 17033,
+      "raw_sha256": "d11551d5390075a84ea306d128b6503b27db992a6d10a8578d7b843d0584a6f8"
+    },
+    {
+      "archive": "records/gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/broad-hf-timing/b220df4f187da55c0b8b8767cd394db67fa0b2fc7151835496f558dea34104b0/workspace/manifest.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/broad-hf-timing/b220df4f187da55c0b8b8767cd394db67fa0b2fc7151835496f558dea34104b0/workspace/manifest.json",
+      "raw_bytes": 23846,
+      "raw_sha256": "730e06b6ae96d26c285e3439c661c53a6f61d84f0dd874e3d7d916f03395eea0"
+    },
+    {
+      "archive": "records/gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/free-crystal/e978cbff057117f908ba9ae7f72777f7b210f2890d6a627bae0752f470d92f33/fixture.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/free-crystal/e978cbff057117f908ba9ae7f72777f7b210f2890d6a627bae0752f470d92f33/fixture.json",
+      "raw_bytes": 17020,
+      "raw_sha256": "563222fe89f0abc70eb6b84ac96ac6601013c48d0bde588d831bc02d567301e3"
+    },
+    {
+      "archive": "records/gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/free-crystal/e978cbff057117f908ba9ae7f72777f7b210f2890d6a627bae0752f470d92f33/workspace/manifest.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/free-crystal/e978cbff057117f908ba9ae7f72777f7b210f2890d6a627bae0752f470d92f33/workspace/manifest.json",
+      "raw_bytes": 23457,
+      "raw_sha256": "c218b81bb87347e4f4d08f6e39a77a21afc252f16f11eabfdfcc022ccf77ff60"
+    },
+    {
+      "archive": "records/gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/hf30-fhss-missed/724b5c52e981c67503d580480d01bfe4562fb799f0916f8e122d425396fac8ab/fixture.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/hf30-fhss-missed/724b5c52e981c67503d580480d01bfe4562fb799f0916f8e122d425396fac8ab/fixture.json",
+      "raw_bytes": 17853,
+      "raw_sha256": "9274b80cd72446328fa332b1df3085b70685d55110ea4e62d375a4f524e74e30"
+    },
+    {
+      "archive": "records/gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/hf30-fhss-missed/724b5c52e981c67503d580480d01bfe4562fb799f0916f8e122d425396fac8ab/workspace/manifest.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/hf30-fhss-missed/724b5c52e981c67503d580480d01bfe4562fb799f0916f8e122d425396fac8ab/workspace/manifest.json",
+      "raw_bytes": 23746,
+      "raw_sha256": "71277bbbf5d2cc12839ddf8a09e4879fb2461c4876b838d3435884911eb47847"
+    },
+    {
+      "archive": "records/gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/narrow-hf-tight/da59c5cd0c871fb082a91f27f10436d18ff3d10f15e0c53d7e4ed0f36c8920f5/fixture.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/narrow-hf-tight/da59c5cd0c871fb082a91f27f10436d18ff3d10f15e0c53d7e4ed0f36c8920f5/fixture.json",
+      "raw_bytes": 17056,
+      "raw_sha256": "1c994fe39f9ac3febbf164ea7e8fdd295bbdc229f4602341bb6a21dafe9764d2"
+    },
+    {
+      "archive": "records/gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/narrow-hf-tight/da59c5cd0c871fb082a91f27f10436d18ff3d10f15e0c53d7e4ed0f36c8920f5/workspace/manifest.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/narrow-hf-tight/da59c5cd0c871fb082a91f27f10436d18ff3d10f15e0c53d7e4ed0f36c8920f5/workspace/manifest.json",
+      "raw_bytes": 23872,
+      "raw_sha256": "e893adf7f81a161412454b0f66e31ae562f274baf8861acdba4ba0d2d2b48131"
+    },
+    {
+      "archive": "records/gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/vlf-850-day/0701229e4d19b8fbd9670cbda4bc779b9f2c086b19fd5a227210935735055fe8/fixture.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/vlf-850-day/0701229e4d19b8fbd9670cbda4bc779b9f2c086b19fd5a227210935735055fe8/fixture.json",
+      "raw_bytes": 17263,
+      "raw_sha256": "594584fbf67985d20fce2135e700bdb07de8245b5e5826dccbaf5af475c66e4d"
+    },
+    {
+      "archive": "records/gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/vlf-850-day/0701229e4d19b8fbd9670cbda4bc779b9f2c086b19fd5a227210935735055fe8/workspace/manifest.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/legacy/legacy-qualification-001/triad-performance-fixtures/triad-physical-fixtures/vlf-850-day/0701229e4d19b8fbd9670cbda4bc779b9f2c086b19fd5a227210935735055fe8/workspace/manifest.json",
+      "raw_bytes": 23987,
+      "raw_sha256": "62b458ace71c292fe55692a3bc2ac07c3cc562d05960043f2cb51ce4e273330d"
+    },
+    {
+      "archive": "records/gpu/historical-staged-replay.json.gz",
+      "input_path": "local-evidence/triad-performance-broader/gpu/historical-staged-replay.json",
+      "raw_bytes": 1836,
+      "raw_sha256": "d843854827117b08a583cbb974a1649bf1d2e1a4d8ea6fe571e339a8644e5a33"
+    },
+    {
+      "archive": "records/planner-build/candidate-CMakeCache.txt.gz",
+      "input_path": "build/dev-cli/CMakeCache.txt",
+      "raw_bytes": 38149,
+      "raw_sha256": "f17b0762cdeea06073d224123968e496dd23f82ebfdec6abb504ab871c9cc453"
+    },
+    {
+      "archive": "records/planner-build/reference-CMakeCache.txt.gz",
+      "input_path": "build/dev-cli-242-reference-source/CMakeCache.txt",
+      "raw_bytes": 38293,
+      "raw_sha256": "eeeed88b704922644a9f0c70f78d2b61d8445368c99050a4e6c6ccb1d7e8d147"
+    },
+    {
+      "archive": "records/planner-input/manifest.json.gz",
+      "input_path": "local-evidence/triad-performance-complete/actual-delay-001/sampled-stats/manifest.json",
+      "raw_bytes": 14919,
+      "raw_sha256": "b8c2c75ebfc0f9f12cc05dae971a5cb3771d37c7470acc827db7023ad09ac637"
+    },
+    {
+      "archive": "records/planner-input/plan.json.gz",
+      "input_path": "local-evidence/triad-performance-complete/actual-delay-001/plan.json",
+      "raw_bytes": 1894,
+      "raw_sha256": "669019254bda265084b1862e901260d53c9904bf4e2ee4b3f20a396d0d3d2d60"
+    },
+    {
+      "archive": "records/planner-input/reproduction-receipt.json.gz",
+      "input_path": "local-evidence/triad-performance-complete/actual-delay-001/reproduction-receipt.json",
+      "raw_bytes": 310,
+      "raw_sha256": "e1b4369408011aa700f25bbe890cdcc36bb266e26e3d8435302e178324670440"
+    },
+    {
+      "archive": "records/planner-input/reproduce.py.gz",
+      "input_path": "local-evidence/triad-performance-complete/actual-delay-001/reproduce.py",
+      "raw_bytes": 4329,
+      "raw_sha256": "2e7879c235b200b50e225c9b8ab15d517570a47b6fb64efbfc728215b61449a0"
+    }
+  ],
+  "schema": "triad-broader-scientific-archive-v1",
+  "status": "original selected record groups and source bindings sealed; completed additions are indexed separately"
+}

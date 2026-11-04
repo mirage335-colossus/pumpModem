@@ -1,0 +1,23 @@
+{
+  "archive": "post-run-classification-source.tar.gz",
+  "receipt": "local-evidence/triad-performance-broader/lifecycle/cpu-complete-001-derived-classification-reviewed.json",
+  "receipt_sha256": "dcda4066c02cc4f6949d9bd906b4be2cc5ac2f5daf80dabeb1ab381e2ef00d02",
+  "scope": "Accepted derived classification of preserved raw records, with stability review retained; not a rewritten complete report or new measurement.",
+  "sources": [
+    {
+      "bytes": 73615,
+      "path": "tools/triad_perf_lifecycle.py",
+      "sha256": "93de7a47b360bcb7531e72de5381cdb4b6feb0d10c0c44150697bc62704d7b80"
+    },
+    {
+      "bytes": 28550,
+      "path": "tests/test_triad_perf_lifecycle.py",
+      "sha256": "5a83101b3c5bc1d6c73c76b5616c4ef5bb5e2fc047f7bae46de62d73cc82c6d4"
+    },
+    {
+      "bytes": 1377,
+      "path": "tools/triad-performance-lifecycle.json",
+      "sha256": "eee47f2396e0a230bf95a60029c958041449e37ab7d54872a2a5156a898643d4"
+    }
+  ]
+}

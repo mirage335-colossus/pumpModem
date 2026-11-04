@@ -33,6 +33,13 @@ class ConditionalModelError(ValueError):
     """Invalid frozen model inputs or tampered contract."""
 
 
+def conditional_training_confidence(policy, summary: Mapping) -> float:
+    """Two-sided endpoint feasibility intervals, separate from the ratio gate."""
+    if policy.stopping_rule == "decision":
+        return 1. - policy.alpha / (len(policy.looks) * len(_METRICS))
+    return summary["policy"]["interval_confidence_per_look"]
+
+
 def _hash(value: Mapping) -> str:
     payload = json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
     return hashlib.sha256(payload.encode()).hexdigest()
@@ -288,6 +295,31 @@ def conditional_comparison(timing_ratio_interval: Iterable[float],
         "threshold": slowdown_threshold,
         "scope": "conditional scenario gate; paired timing interval receives the prevalidated historical envelope once",
     }
+
+
+def conditional_gate_readiness(plan: Mapping, timing_ratio_interval: Iterable[float], *,
+                               slowdown_threshold: float = 1.30) -> dict:
+    """Decide whether to freeze the forecast before a single full endpoint.
+
+    This look uses training and history only. It cannot admit a performance
+    pass. If the timing interval is wider than the observation envelope or
+    exceeds the combined mean cap, even an exactly centered endpoint cannot
+    validate that metric. The independent endpoint still decides applicability.
+    """
+    ready = plan["status"] == "conditional_contract_ready"
+    bounds = plan["model_log_error_envelopes"]
+    blockers = []
+    for metric in _METRICS:
+        half = plan["training_forecasts"][metric]["timing_log_half_width"]
+        if (half > plan["sentinel_observation_log_envelopes"][metric] or
+                half + bounds[metric] > plan["maximum_model_error_log_envelope"]):
+            blockers.append(metric)
+    comparison = conditional_comparison(timing_ratio_interval,
+        {"eligible": ready, "model_log_error_bounds": bounds}, slowdown_threshold=slowdown_threshold)
+    return {"sentinel_feasible": ready and not blockers, "timing_blockers": blockers,
+            "provisional_gate": comparison["gate"] if ready else "unvalidated",
+            "provisional_model_adjusted_ratio_interval": comparison["model_adjusted_ratio_interval"],
+            "performance_pass_eligible": False}
 
 
 def check_conditional_sentinel(plan: Mapping, actual_full_seconds: Mapping[str, float], *,

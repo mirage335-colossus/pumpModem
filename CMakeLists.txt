@@ -718,6 +718,27 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
   add_executable(triad_long EXCLUDE_FROM_ALL tools/triad-long.cpp)
   target_include_directories(triad_long PRIVATE src)
   target_link_libraries(triad_long PRIVATE triad_experiment)
+  add_executable(triad_planner_perf EXCLUDE_FROM_ALL tools/triad-planner-perf.cpp)
+  target_link_libraries(triad_planner_perf PRIVATE triad_experiment)
+  # The direct timer verifies these embedded identities against the selected
+  # source tree. Reconfigure when any declared timed dependency changes.
+  set(_triad_planner_dependencies
+    src/triad_statistics.cpp src/triad_modem_v3.cpp
+    include/datapump/triad_statistics.hpp include/datapump/triad_modem_v3.hpp
+    include/datapump/triad_modem.hpp include/datapump/triad_simulation.hpp
+    include/datapump/crypto.hpp include/datapump/pattern_pulse.hpp)
+  set(_triad_planner_hashes "")
+  foreach(_dependency IN LISTS _triad_planner_dependencies)
+    file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/${_dependency}" _dependency_hash)
+    string(APPEND _triad_planner_hashes "${_dependency}:${_dependency_hash}\n")
+  endforeach()
+  string(SHA256 _triad_planner_production_hash "${_triad_planner_hashes}")
+  file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/tools/triad-planner-perf.cpp" _triad_planner_driver_hash)
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    tools/triad-planner-perf.cpp ${_triad_planner_dependencies})
+  target_compile_definitions(triad_planner_perf PRIVATE
+    TRIAD_PLANNER_DRIVER_SHA256="${_triad_planner_driver_hash}"
+    TRIAD_PLANNER_PRODUCTION_SHA256="${_triad_planner_production_hash}")
   add_executable(triad_oscillator_study EXCLUDE_FROM_ALL tools/triad-oscillator-study.cpp)
   target_include_directories(triad_oscillator_study PRIVATE src)
   target_link_libraries(triad_oscillator_study PRIVATE triad_experiment)
@@ -1187,7 +1208,8 @@ if(NOT DATAPUMP_BUILD_WASM)
           _target STREQUAL "test_triad_statistics" OR _target STREQUAL "test_triad_v3_source" OR
           _target STREQUAL "test_triad_v3_channel" OR _target STREQUAL "test_triad_v3_receiver" OR
           _target STREQUAL "triad_study" OR _target STREQUAL "triad_examples" OR
-          _target STREQUAL "triad_long" OR _target STREQUAL "triad_oscillator_study")
+          _target STREQUAL "triad_long" OR _target STREQUAL "triad_planner_perf" OR
+          _target STREQUAL "triad_oscillator_study")
         # These experiments are self-contained complex-I/Q simulations. Do
         # not pull the native audio provider or ordinary receiver into them.
         continue()

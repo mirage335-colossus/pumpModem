@@ -1,0 +1,345 @@
+{
+  "schema": "triad-gpu-complete-002-external-inputs-v1",
+  "records": [
+    {
+      "role": "native coverage reused by complete002",
+      "relative_path": "../coverage/native/native-coverage-001/coverage.json",
+      "storage": "bytes",
+      "raw_sha256": "d86056ddab6fd17c79c3e769310d7a1e18b01476b527ec6782f0de2994188225",
+      "file_sha256": "d86056ddab6fd17c79c3e769310d7a1e18b01476b527ec6782f0de2994188225"
+    },
+    {
+      "role": "Python coverage reused by complete002",
+      "relative_path": "../scientific/records/python-coverage-001/summary.json.gz",
+      "storage": "gzip",
+      "raw_sha256": "2609ccbcd7085bfb1654e00aa21ae527b1e450bab8830e704bc58395d19bb37d",
+      "file_sha256": "5fd409f6b3d19bdc68c57f853af685dfcf78ad8853d7ee54334a3a30b1b528dd"
+    },
+    {
+      "role": "retained historical qualification anchor; no new qualification claimed",
+      "bundle": "../scientific",
+      "record": {
+        "archive": "records/gpu/legacy/legacy-anchors/cuda/1793764120402602191-700ad521a6ec37f0.anchor.json.gz",
+        "input_path": "local-evidence/triad-performance-broader/gpu/legacy/legacy-anchors/cuda/1793764120402602191-700ad521a6ec37f0.anchor.json",
+        "raw_bytes": 66075,
+        "raw_sha256": "01ae08bb5e92070c332da3a2f1022de16a9abe2268444066db21de272a5112e2"
+      }
+    },
+    {
+      "role": "retained historical qualification anchor; no new qualification claimed",
+      "bundle": "../scientific",
+      "record": {
+        "archive": "records/gpu/legacy/legacy-anchors/cuda/1793764188002222174-67fce8d7a123f285.anchor.json.gz",
+        "input_path": "local-evidence/triad-performance-broader/gpu/legacy/legacy-anchors/cuda/1793764188002222174-67fce8d7a123f285.anchor.json",
+        "raw_bytes": 96749,
+        "raw_sha256": "fe9a2630e1058250e00fa4feaf2fb1d793296455e95c59099957e8c522c12cbb"
+      }
+    },
+    {
+      "role": "retained historical qualification anchor; no new qualification claimed",
+      "bundle": "../scientific",
+      "record": {
+        "archive": "records/gpu/legacy/legacy-anchors/native-vlf-low-cn0.native-anchor.json.gz",
+        "input_path": "local-evidence/triad-performance-broader/gpu/legacy/legacy-anchors/native-vlf-low-cn0.native-anchor.json",
+        "raw_bytes": 483800,
+        "raw_sha256": "05d19586172f096403bf4c6d4c2effa8f8981040dd9b59ae3cb65f239ece0f3e"
+      }
+    },
+    {
+      "role": "retained historical qualification anchor; no new qualification claimed",
+      "bundle": "../scientific",
+      "record": {
+        "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-anchors/cold-cuda-persistent.lifecycle-anchor.json",
+        "raw_sha256": "a7af353c33fb701fcedde06b9414c1a932d804f0ae32c314ebc5fefef3348e02",
+        "raw_bytes": 1969696,
+        "object_from": "records-additional/gpu/lifecycle/lifecycle-qualification-002/summary.json.gz",
+        "fields": [
+          {
+            "key": "schema",
+            "json_path": [
+              "cases",
+              0,
+              "schema"
+            ]
+          },
+          {
+            "key": "id",
+            "json_path": [
+              "cases",
+              0,
+              "id"
+            ]
+          },
+          {
+            "key": "kind",
+            "json_path": [
+              "cases",
+              0,
+              "kind"
+            ]
+          },
+          {
+            "key": "status",
+            "json_path": [
+              "cases",
+              0,
+              "status"
+            ]
+          },
+          {
+            "key": "static_binding",
+            "json_path": [
+              "cases",
+              0,
+              "static_binding"
+            ]
+          },
+          {
+            "key": "environment",
+            "json_path": [
+              "cases",
+              0,
+              "environment"
+            ]
+          },
+          {
+            "key": "expected_work",
+            "json_path": [
+              "cases",
+              0,
+              "expected_work"
+            ]
+          },
+          {
+            "key": "full_pairs",
+            "json_path": [
+              "cases",
+              0,
+              "full_pairs"
+            ]
+          },
+          {
+            "key": "comparison",
+            "json_path": [
+              "cases",
+              0,
+              "comparison"
+            ]
+          },
+          {
+            "key": "regression_policy",
+            "literal": {
+              "pass_alpha": 0.15,
+              "failure_alpha": 0.05,
+              "slowdown_threshold": 1.3
+            }
+          },
+          {
+            "key": "record_sha256",
+            "literal": "e8b0e72de636b66382dc1abc70c92b7fc7bcbe0e060e81089ed0dc3b38d31e86"
+          }
+        ]
+      }
+    },
+    {
+      "role": "retained historical qualification anchor; no new qualification claimed",
+      "bundle": "../scientific",
+      "record": {
+        "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-anchors/cold-cuda-private.lifecycle-anchor.json",
+        "raw_sha256": "6b0076eaf6320aac95f46306270cb7ae4b6cb3f37f05d0f0de9e9cacf63615d9",
+        "raw_bytes": 1975697,
+        "object_from": "records-additional/gpu/lifecycle/lifecycle-qualification-002/summary.json.gz",
+        "fields": [
+          {
+            "key": "schema",
+            "json_path": [
+              "cases",
+              1,
+              "schema"
+            ]
+          },
+          {
+            "key": "id",
+            "json_path": [
+              "cases",
+              1,
+              "id"
+            ]
+          },
+          {
+            "key": "kind",
+            "json_path": [
+              "cases",
+              1,
+              "kind"
+            ]
+          },
+          {
+            "key": "status",
+            "json_path": [
+              "cases",
+              1,
+              "status"
+            ]
+          },
+          {
+            "key": "static_binding",
+            "json_path": [
+              "cases",
+              1,
+              "static_binding"
+            ]
+          },
+          {
+            "key": "environment",
+            "json_path": [
+              "cases",
+              1,
+              "environment"
+            ]
+          },
+          {
+            "key": "expected_work",
+            "json_path": [
+              "cases",
+              1,
+              "expected_work"
+            ]
+          },
+          {
+            "key": "full_pairs",
+            "json_path": [
+              "cases",
+              1,
+              "full_pairs"
+            ]
+          },
+          {
+            "key": "comparison",
+            "json_path": [
+              "cases",
+              1,
+              "comparison"
+            ]
+          },
+          {
+            "key": "regression_policy",
+            "literal": {
+              "pass_alpha": 0.15,
+              "failure_alpha": 0.05,
+              "slowdown_threshold": 1.3
+            }
+          },
+          {
+            "key": "record_sha256",
+            "literal": "884b5d6cb722979ad0125d77adcd64721ca1e8b04e9cbf5075d282331103765d"
+          }
+        ]
+      }
+    },
+    {
+      "role": "retained historical qualification anchor; no new qualification claimed",
+      "bundle": "../scientific",
+      "record": {
+        "input_path": "local-evidence/triad-performance-broader/gpu/lifecycle/lifecycle-anchors/mixed-cuda.lifecycle-anchor.json",
+        "raw_sha256": "170c5867d8f69ddfe6a89bba18312c78101b95831237d32c213fae127c625848",
+        "raw_bytes": 36462707,
+        "object_from": "records-additional/gpu/lifecycle/lifecycle-qualification-002/summary.json.gz",
+        "fields": [
+          {
+            "key": "schema",
+            "json_path": [
+              "cases",
+              2,
+              "schema"
+            ]
+          },
+          {
+            "key": "id",
+            "json_path": [
+              "cases",
+              2,
+              "id"
+            ]
+          },
+          {
+            "key": "status",
+            "json_path": [
+              "cases",
+              2,
+              "status"
+            ]
+          },
+          {
+            "key": "static_binding",
+            "json_path": [
+              "cases",
+              2,
+              "static_binding"
+            ]
+          },
+          {
+            "key": "forecast",
+            "json_path": [
+              "cases",
+              2,
+              "forecast"
+            ]
+          },
+          {
+            "key": "full_pairs",
+            "json_path": [
+              "cases",
+              2,
+              "full_pairs"
+            ]
+          },
+          {
+            "key": "training",
+            "json_path": [
+              "cases",
+              2,
+              "training"
+            ]
+          },
+          {
+            "key": "training_pair_ids",
+            "literal": [
+              "ec9dd70f01e76507f779999976ad76fbfb05f27bceb06385945933184d827f00",
+              "e8d4bb380298ccd92d516bd301a85439fe12f49ac42539a4c04e1c8f0e011ed9",
+              "0ffb8dbabfb6be578ed1c52b45838a0e5fbe6ffaa69b87e285f30de413620d5a"
+            ]
+          },
+          {
+            "key": "minimum_campaign_seconds",
+            "literal": 60.0
+          },
+          {
+            "key": "sustained",
+            "json_path": [
+              "cases",
+              2,
+              "sustained"
+            ]
+          },
+          {
+            "key": "confirmation",
+            "json_path": [
+              "cases",
+              2,
+              "confirmation"
+            ]
+          },
+          {
+            "key": "model_relative_error",
+            "literal": 0.1
+          },
+          {
+            "key": "record_sha256",
+            "literal": "e816aa76fc50c64af1e8c93f7ef9db26b7775b0cdd3843bacc6f93d0d0cc2b07"
+          }
+        ]
+      }
+    }
+  ]
+}

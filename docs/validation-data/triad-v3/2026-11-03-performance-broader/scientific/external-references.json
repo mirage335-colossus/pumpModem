@@ -1,0 +1,40 @@
+{
+  "records": [
+    {
+      "relative_path": "../../2026-11-03-performance-complete/families/gpu-stage-aware-qual-001/stage-aware-anchors/phase-reduction-hour.staged-anchor.json.gz",
+      "role": "immutable historical staged anchor referenced by exact replay record",
+      "sha256": "5b9b1bc88574b4b3a1d6d29d25e74f9fa391f5f7c0b266559b3db463dbbd7743"
+    },
+    {
+      "relative_path": "../../2026-11-03-performance-complete/families/gpu-stage-aware-qual-001/stage-aware-anchors/phase-reference-hour.staged-anchor.json.gz",
+      "role": "immutable historical staged anchor referenced by exact replay record",
+      "sha256": "dcca8ca3fafdda262d112e525a7f833ae07a284a25588ebde7a299c4ffb4ebf0"
+    },
+    {
+      "relative_path": "../../2026-11-03-performance-complete/families/gpu-stage-aware-qual-001/stage-aware-anchors/phase-tensor-hour.staged-anchor.json.gz",
+      "role": "immutable historical staged anchor referenced by exact replay record",
+      "sha256": "18f7cad65d2a316b43dddea53a6905e77bf9d392bfe240302c988a519547be22"
+    },
+    {
+      "relative_path": "../../2026-11-03-performance-complete/families/gpu-staged-001/staged-anchors/phase-graph-hour.staged-anchor.json.gz",
+      "role": "immutable historical staged anchor referenced by exact replay record",
+      "sha256": "3eea2213ff146ece69285ebc68903fcde8da6673c64a10d114bde00803188234"
+    },
+    {
+      "relative_path": "../../2026-11-03-performance-complete/families/gpu-staged-002/staged-anchors/gaussian-hour.staged-anchor.json.gz",
+      "role": "immutable historical staged anchor referenced by exact replay record",
+      "sha256": "5349babcbbc83031a7a8a25e553a7d4fa52845d20783fe8ba82f6242fd283fbf"
+    },
+    {
+      "relative_path": "../../2026-11-03-performance-complete/families/gpu-staged-002/staged-anchors/phase-graph-hour.staged-anchor.json.gz",
+      "role": "immutable historical staged anchor referenced by exact replay record",
+      "sha256": "3eea2213ff146ece69285ebc68903fcde8da6673c64a10d114bde00803188234"
+    },
+    {
+      "relative_path": "../../2026-11-03-performance-complete/families/gpu-staged-002/staged-anchors/phase-optimized-hour.staged-anchor.json.gz",
+      "role": "immutable historical staged anchor referenced by exact replay record",
+      "sha256": "482e59f7fa0ffd2c7638e985f310aac73a180424eff93c30364b82922c3fa296"
+    }
+  ],
+  "schema": "triad-broader-scientific-external-references-v1"
+}

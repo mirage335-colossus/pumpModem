@@ -1,0 +1,14 @@
+{
+  "schema": "triad-performance-lifecycle-v1",
+  "model_relative_error": 0.10,
+  "minimum_campaign_seconds": 60.0,
+  "minimum_campaign_cycles": 2,
+  "maximum_campaign_cycles": 256,
+  "cases": [
+    {"id": "cold-cpu-phase", "device": "cpu", "kind": "cold", "cache": "process-cold", "members": ["phase-reference-hour"], "routine": true},
+    {"id": "mixed-cpu", "device": "cpu", "kind": "mixed", "cache": "process-cold", "direct_cycles": 6, "members": ["gaussian-hour", "phase-reference-hour", "phase-optimized-hour", "grouped-multitile", "rbpf-systematic", "cfo-batch-tail", "static-fft", "ray-frequency-tiles", "state-sampled-smoke"], "routine": true},
+    {"id": "cold-cuda-persistent", "device": "cuda", "kind": "cold", "cache": "persistent-compiled", "members": ["phase-graph-hour", "phase-tensor-hour"], "routine": true},
+    {"id": "cold-cuda-private", "device": "cuda", "kind": "cold", "cache": "private-empty-compiled", "members": ["phase-graph-hour", "phase-tensor-hour"], "routine": false},
+    {"id": "mixed-cuda", "device": "cuda", "kind": "mixed", "cache": "persistent-compiled", "members": ["gaussian-hour", "phase-reference-hour", "phase-optimized-hour", "phase-graph-hour", "phase-reduction-hour", "phase-tensor-hour", "grouped-multitile", "rbpf-systematic", "cfo-batch-tail", "static-fft", "ray-frequency-tiles", "state-sampled-smoke"], "routine": true}
+  ]
+}

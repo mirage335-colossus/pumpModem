@@ -8,10 +8,10 @@ on:
         type: string
         required: true
       performance_budget_seconds:
-        description: 'Shared routine wall budget; 600-second engineering target, maximum 1800'
+        description: 'Shared routine wall budget; 1500-second engineering target, maximum 1800'
         type: number
         required: false
-        default: 600
+        default: 1500
   workflow_dispatch:
     inputs:
       candidate_ref:
@@ -20,10 +20,20 @@ on:
         required: false
         default: ''
       performance_budget_seconds:
-        description: 'Shared routine wall budget; maximum 1800 seconds, no automatic qualification'
+        description: 'Shared routine wall budget; 1500-second target, maximum 1800, no automatic qualification'
         type: number
         required: false
-        default: 600
+        default: 1500
+      qualify:
+        description: 'Explicitly produce source/hardware-bound qualification artifacts before routine checks (default branch only)'
+        type: boolean
+        required: false
+        default: false
+      qualification_budget_seconds:
+        description: 'Separate one-time qualification budget, maximum 3600 seconds'
+        type: number
+        required: false
+        default: 1800
 
 permissions:
   contents: read
@@ -33,11 +43,14 @@ jobs:
     name: CPU receiver performance regression
     runs-on: ubuntu-24.04
     # Confidence-driven stopping with bounded install/build overhead.
-    timeout-minutes: 50
+    timeout-minutes: ${{ inputs.qualify && 105 || 50 }}
     env:
       BASELINE_REF: 242ea15fa032ee117b9113a7f3cd07cc6e9f0254
       CANDIDATE_REF: ${{ inputs.candidate_ref || github.sha }}
       PERFORMANCE_BUDGET_SECONDS: ${{ inputs.performance_budget_seconds }}
+      QUALIFICATION_REQUESTED: ${{ inputs.qualify == true }}
+      QUALIFICATION_BUDGET_SECONDS: ${{ inputs.qualification_budget_seconds }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       # Exercise AVX2 fallback dispatch even when a hosted CPU offers AVX512.
       # This does not emulate older caches/clocks or constrain every vendor path.
       ATEN_CPU_CAPABILITY: avx2
@@ -94,6 +107,12 @@ jobs:
           budget = float(os.environ['PERFORMANCE_BUDGET_SECONDS'])
           if not math.isfinite(budget) or not 0 < budget <= 1800:
               raise SystemExit('performance_budget_seconds must be finite and in (0, 1800]')
+          if os.environ['QUALIFICATION_REQUESTED'] == 'true':
+              if os.environ['GITHUB_EVENT_NAME'] != 'workflow_dispatch' or os.environ['GITHUB_REF'] != 'refs/heads/' + os.environ['DEFAULT_BRANCH']:
+                  raise SystemExit('Explicit qualification and cache production require workflow_dispatch on the trusted default branch')
+              qualification_budget = float(os.environ['QUALIFICATION_BUDGET_SECONDS'])
+              if not math.isfinite(qualification_budget) or not 0 < qualification_budget <= 3600:
+                  raise SystemExit('qualification_budget_seconds must be finite and in (0, 3600]')
           PYBUDGET
           git cat-file -e "$BASELINE_REF^{commit}"
           printf 'candidate_sha=%s\nbaseline_sha=%s\n' "$actual" "$BASELINE_REF" >> "$GITHUB_STEP_SUMMARY"
@@ -203,13 +222,42 @@ jobs:
       - name: Build baseline native simulation and receiver
         run: cmake --build reference/build/dev-cli --config Release --target triad_long --parallel 2
 
+      - name: Prepare identical planner test driver against immutable reference production
+        run: |
+          python - <<'PYPLANNER'
+          import hashlib, json, sys
+          from pathlib import Path
+          sys.path.insert(0, str(Path('tools').resolve()))
+          from triad_perf_planner import prepare_reference_driver
+          receipt = prepare_reference_driver(Path('candidate'), Path('reference'))
+          receipt['reference_native_sha256'] = hashlib.sha256(Path('reference/build/dev-cli/triad_long').read_bytes()).hexdigest()
+          Path('build/triad-performance/planner-reference-build.json').write_text(json.dumps(receipt, indent=2) + '\n')
+          PYPLANNER
+
+      - name: Build only the new baseline planner test target
+        working-directory: reference
+        run: |
+          ./build.sh configure --cli --build-dir build/dev-cli -- -DBUILD_TESTING=ON -DDATAPUMP_COMPILER_CACHE=OFF
+          cmake --build build/dev-cli --config Release --target triad_planner_perf --parallel 2
+
+      - name: Verify reference receiver binary was preserved
+        run: |
+          python - <<'PYPLANNERBINARY'
+          import hashlib, json
+          from pathlib import Path
+          receipt = json.loads(Path('build/triad-performance/planner-reference-build.json').read_text())
+          actual = hashlib.sha256(Path('reference/build/dev-cli/triad_long').read_bytes()).hexdigest()
+          if actual != receipt['reference_native_sha256'] or not receipt['production_unchanged']:
+              raise RuntimeError('Planner test preparation changed reference receiver inputs or binary')
+          PYPLANNERBINARY
+
       - name: Configure candidate CLI and isolated receiver fixture
         working-directory: candidate
         run: ./build.sh configure --cli --build-dir build/dev-cli -- -DBUILD_TESTING=ON -DDATAPUMP_COMPILER_CACHE=OFF
 
       - name: Build the focused native transmitter and four functional checks
         working-directory: candidate
-        run: cmake --build build/dev-cli --config Release --target triad_long test_triad_statistics test_triad_v3_source test_triad_v3_channel test_triad_v3_receiver --parallel 2
+        run: cmake --build build/dev-cli --config Release --target triad_long triad_planner_perf test_triad_statistics test_triad_v3_source test_triad_v3_channel test_triad_v3_receiver --parallel 2
 
       # Fixtures are independent of report logs and are already validated
       # against source, binary, configuration and per-file SHA-256 receipts.
@@ -223,7 +271,7 @@ jobs:
       - name: Restore receiver performance anchors
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # actions/cache v6.1.0
         with:
-          path: build/triad-performance/anchors/**/*anchor.json
+          path: build/triad-performance/anchors
           key: triad-anchors-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-profile.outputs.key }}-${{ steps.binary-key.outputs.candidate }}-${{ steps.binary-key.outputs.reference }}-${{ hashFiles('tools/triad-performance-cases.json', 'tools/triad-performance-native-cases.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             triad-anchors-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-profile.outputs.key }}-${{ steps.binary-key.outputs.candidate }}-${{ steps.binary-key.outputs.reference }}-${{ hashFiles('tools/triad-performance-cases.json', 'tools/triad-performance-native-cases.json') }}-
@@ -238,16 +286,6 @@ jobs:
 
       # These are independently qualified artifacts. A cache miss is reported
       # as unqualified; a normal CI run must not launch historical qualification.
-      - name: Restore independently qualified sampled-family anchors
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # actions/cache v6.1.0
-        with:
-          path: build/triad-performance/staged-anchors/**/*anchor.json
-          key: triad-staged-anchors-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-profile.outputs.key }}-${{ steps.binary-key.outputs.candidate }}-${{ steps.binary-key.outputs.reference }}-${{ hashFiles('tools/triad-performance-families.json', 'tools/triad_perf_staged.py', 'tools/triad_perf_families.py', 'tools/triad_perf_family_*.py') }}
-          # Discover older proofs only on the same runtime allocation and both
-          # native binaries. The staged proof validator still decides reuse.
-          restore-keys: |
-            triad-staged-anchors-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-profile.outputs.key }}-${{ steps.binary-key.outputs.candidate }}-${{ steps.binary-key.outputs.reference }}-
-
       - name: Restore source-bound instrumented coverage receipts
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # actions/cache v6.1.0
         with:
@@ -258,14 +296,85 @@ jobs:
           restore-keys: |
             triad-coverage-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-profile.outputs.key }}-${{ steps.binary-key.outputs.candidate }}-
 
+      # Restore only independently produced proofs. The routine validators
+      # recheck sources, hardware, work and raw evidence; no cache hit is a pass.
+      - name: Restore qualified lifecycle campaign anchors
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # actions/cache v6.1.0
+        with:
+          path: build/triad-performance/lifecycle-anchors
+          key: triad-lifecycle-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-profile.outputs.key }}-${{ steps.binary-key.outputs.candidate }}-${{ steps.binary-key.outputs.reference }}-${{ hashFiles('tools/triad_perf_lifecycle.py', 'tools/triad-performance-lifecycle.json') }}
+          restore-keys: |
+            triad-lifecycle-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-profile.outputs.key }}-${{ steps.binary-key.outputs.candidate }}-${{ steps.binary-key.outputs.reference }}-
+
       - name: Check native performance trace and harness contracts
         env:
           TRIAD_LONG_BINARY: ${{ github.workspace }}/candidate/build/dev-cli/triad_long
           TRIAD_SOURCE_ROOT: ${{ github.workspace }}/candidate
         run: python -m unittest discover -s tests -p 'test_triad_perf*.py'
 
+      - name: Explicit one-time qualification producer
+        id: qualification
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.qualify && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+        run: |
+          python tools/triad_perf_bootstrap.py \
+            --candidate-root candidate --reference-root reference \
+            --binary candidate/build/dev-cli/triad_long --reference-binary reference/build/dev-cli/triad_long \
+            --output build/triad-performance/bootstrap \
+            --anchor-directory build/triad-performance/anchors \
+            --lifecycle-anchor-directory build/triad-performance/lifecycle-anchors \
+            --coverage-directory build/triad-performance/coverage \
+            --fixture-cache build/triad-performance/triad-performance-fixtures \
+            --threads 2 --native-threads 1 --baseline-ref "$BASELINE_REF" \
+            --native-direct-case native-vlf-low-cn0 \
+            --budget-seconds "$QUALIFICATION_BUDGET_SECONDS"
+
+      - name: Validate exact bootstrap publication index
+        id: bootstrap-cache-ready
+        if: ${{ always() && !cancelled() && github.event_name == 'workflow_dispatch' && inputs.qualify && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+        run: |
+          python - <<'PYBOOTSTRAP'
+          import json, os, sys
+          from pathlib import Path
+          sys.path.insert(0, str(Path('tools').resolve()))
+          from triad_perf_bootstrap import prepare_publication_cache
+          report = Path('build/triad-performance/bootstrap/summary.json')
+          paths = {'anchors': [], 'coverage': [], 'lifecycle': []}
+          if report.is_file():
+              paths = prepare_publication_cache(json.loads(report.read_text()), Path('candidate').resolve(), Path('reference').resolve(),
+                  {'candidate': Path('candidate/build/dev-cli/triad_long'), 'reference': Path('reference/build/dev-cli/triad_long')},
+                  {'anchors': Path('build/triad-performance/anchors'), 'coverage': Path('build/triad-performance/coverage'),
+                   'lifecycle': Path('build/triad-performance/lifecycle-anchors')},
+                  Path('build/triad-performance/bootstrap/unpublished-cache-inputs'))
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              for name, files in paths.items():
+                  output.write(f'{name}_ready={str(bool(files)).lower()}\n')
+          print({name: len(files) for name, files in paths.items()})
+          PYBOOTSTRAP
+
+      - name: Save independently validated native and FFT anchors
+        if: ${{ always() && !cancelled() && steps.bootstrap-cache-ready.outputs.anchors_ready == 'true' && github.event_name == 'workflow_dispatch' && inputs.qualify && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # actions/cache v6.1.0
+        with:
+          path: build/triad-performance/anchors
+          key: triad-anchors-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-profile.outputs.key }}-${{ steps.binary-key.outputs.candidate }}-${{ steps.binary-key.outputs.reference }}-${{ hashFiles('tools/triad-performance-cases.json', 'tools/triad-performance-native-cases.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Save independently validated coverage receipts
+        if: ${{ always() && !cancelled() && steps.bootstrap-cache-ready.outputs.coverage_ready == 'true' && github.event_name == 'workflow_dispatch' && inputs.qualify && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # actions/cache v6.1.0
+        with:
+          path: build/triad-performance/coverage
+          key: triad-coverage-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-profile.outputs.key }}-${{ steps.binary-key.outputs.candidate }}-${{ hashFiles('candidate/src/triad*', 'candidate/src/channel_*', 'candidate/include/datapump/triad*', 'candidate/tools/triad*', 'candidate/tests/test_triad*', 'candidate/CMakeLists.txt', 'candidate/cmake/**') }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Save independently validated lifecycle anchors
+        if: ${{ always() && !cancelled() && steps.bootstrap-cache-ready.outputs.lifecycle_ready == 'true' && github.event_name == 'workflow_dispatch' && inputs.qualify && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # actions/cache v6.1.0
+        with:
+          path: build/triad-performance/lifecycle-anchors
+          key: triad-lifecycle-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-profile.outputs.key }}-${{ steps.binary-key.outputs.candidate }}-${{ steps.binary-key.outputs.reference }}-${{ hashFiles('tools/triad_perf_lifecycle.py', 'tools/triad-performance-lifecycle.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
+
       - name: Compare complete isolated workload scope with the fixed baseline
         id: combined-routine
+        if: ${{ !cancelled() && (success() || steps.qualification.outcome == 'failure') }}
         shell: bash
         run: |
           set -euo pipefail
@@ -283,6 +392,8 @@ jobs:
           fi
           # The legacy child retains five-second hardware arithmetic probes.
           # Cold/inventory/model gaps remain blocking; this is not certification.
+          # Resource regimes use full direct work; Gaussian bounds reuse the
+          # tracked compact fixture. Neither route requires forecast qualification.
           python tools/triad_perf_complete.py \
             --output build/triad-performance/complete \
             --binary candidate/build/dev-cli/triad_long \
@@ -290,11 +401,19 @@ jobs:
             --reference-root reference \
             --device cpu \
             --budget-seconds "$PERFORMANCE_BUDGET_SECONDS" \
+            --stopping-rule decision \
+            --regression-profile ci \
             --threads 2 \
             --functional-defaults \
-            --family-route staged \
-            --family-mode reuse \
-            --staged-anchor-directory build/triad-performance/staged-anchors \
+            --planner-binary candidate/build/dev-cli/triad_planner_perf \
+            --planner-reference-binary reference/build/dev-cli/triad_planner_perf \
+            --planner-bounds-workspace docs/validation-data/triad-v3/2026-11-03-performance-complete/controls/actual-delay-001/sampled-stats \
+            --resource-direct \
+            --lifecycle-mixed-method direct \
+            --lifecycle-direct-cycles auto \
+            --family-route paired \
+            --family-mode direct \
+            --native-direct-case native-vlf-low-cn0 \
             --anchor-directory build/triad-performance/anchors \
             --fixture-cache build/triad-performance/triad-performance-fixtures \
             "${coverage_args[@]}" \
@@ -348,24 +467,6 @@ jobs:
         with:
           path: build/triad-performance/hardware-reference.json
           key: triad-hardware-reference-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-profile.outputs.hardware_key }}
-
-      - name: Check whether validated receiver anchors are available to cache
-        id: anchor-cache-ready
-        if: success()
-        shell: bash
-        run: |
-          if [[ -d build/triad-performance/anchors ]] && find build/triad-performance/anchors -type f -name '*anchor.json' -print -quit | grep -q .; then
-            echo 'ready=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'ready=false' >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Save runner-bound anchors from a trusted default-branch run
-        if: ${{ success() && steps.anchor-cache-ready.outputs.ready == 'true' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # actions/cache v6.1.0
-        with:
-          path: build/triad-performance/anchors/**/*anchor.json
-          key: triad-anchors-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-profile.outputs.key }}-${{ steps.binary-key.outputs.candidate }}-${{ steps.binary-key.outputs.reference }}-${{ hashFiles('tools/triad-performance-cases.json', 'tools/triad-performance-native-cases.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Validate fixture identities before ancillary caching
         id: fixture-cache-ready
@@ -425,10 +526,18 @@ jobs:
               value = json.loads(report.read_text())
               lines = [f"Triad performance status: {value.get('status')}; complete scope qualification: {value.get('complete_scope_qualification')}",
                        f"Candidate source: {os.environ['CANDIDATE_REF']}",
+                       f"Requested regression profile: {value.get('regression_profile')}; core decision profile active: {value.get('core_decision_profile_active')}; routine target: {value.get('routine_budget_target_seconds')} s",
                        f"Warm target decisions complete: {value.get('warm_target_decisions_complete')}; elapsed: {value.get('wall_seconds')} s; budget: {value.get('budget_seconds')} s"]
+              lines.append(f"Maintained workload scope complete: {value.get('maintained_workload_scope_complete')}; release review requirements: {value.get('release_review_requirements', [])}")
               lines += [f"{name}: {row.get('status')}" for name, row in value.get('outcomes', {}).items()]
+              lines += [f"Extension {name}: {row.get('status')}; validated gap IDs: {row.get('gap_ids', [])}" for name, row in value.get('extension_outcomes', {}).items()]
               lines += [f"Blocking scope: {reason}" for reason in value.get('scope_blockers', [])]
               lines += [f"Failure: {reason}" for reason in value.get('errors', [])]
+          bootstrap = Path('build/triad-performance/bootstrap/summary.json')
+          if bootstrap.is_file():
+              qualification = json.loads(bootstrap.read_text())
+              lines.append(f"Qualification artifacts: {qualification.get('status')}; independently cacheable: {qualification.get('cache_ready')}; separate qualification elapsed: {qualification.get('wall_seconds')} s")
+              lines += [f"Qualification issue: {reason}" for reason in qualification.get('errors', [])]
           lines.append('Unresolved combined scope blocks this CI/release gate. Cached hardware/fixtures do not certify receiver performance.')
           print('\n'.join(lines))
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
@@ -443,7 +552,7 @@ jobs:
           path: |
             build/triad-performance/**/*.json
             build/triad-performance/**/*.jsonl
-            build/triad-performance/coverage/**/*.gz
+            build/triad-performance/**/*.gz
             build/triad-performance/**/*.log
             build/triad-performance/*.json
             build/triad-performance/*.log

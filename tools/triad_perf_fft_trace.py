@@ -17,9 +17,10 @@ import statistics
 import time
 
 from triad_perf_adaptive import (MODEL_CONFIRMATION_CONFIDENCE, MODEL_CONFIRMATION_LOOKS,
-                                 model_confirmation_policy, qualify_log_residuals, summarize)
+                                 model_confirmation_policy, qualification_policy, qualify_log_residuals, summarize)
 from triad_perf_conditional import (build_conditional_contract, check_conditional_sentinel,
-                                    conditional_comparison, conditional_model_log_bounds)
+                                    conditional_comparison, conditional_gate_readiness,
+                                    conditional_model_log_bounds, conditional_training_confidence)
 
 
 SCHEMA = "triad-performance-fft-trace-v3"
@@ -312,6 +313,8 @@ def measure_fft(case, workers, precision, device, *, policy, deadline, api,
     """
     if validation_mode not in ("auto", "reuse", "qualify"):
         raise ValueError("validation_mode must be auto, reuse or qualify")
+    if validation_mode == "qualify" and policy.stopping_rule == "decision":
+        policy = qualification_policy(policy)
     if set(workers) != {"reference", "candidate"}:
         raise ValueError("exactly reference and candidate receiver workers are required")
     target = len(case["frequency_offsets_hz"])
@@ -412,6 +415,22 @@ def measure_fft(case, workers, precision, device, *, policy, deadline, api,
     if not direct and validation_mode in ("reuse", "auto"):
         anchor, anchor_reason = _find_anchor(anchor_directory, identity)
         historical_anchor = anchor
+        if anchor is None and validation_mode == "auto" and effective_policy.stopping_rule == "decision":
+            effective_policy = qualification_policy(effective_policy)
+    decision_sampling = effective_policy.stopping_rule == "decision"
+    readiness = None
+    if historical_anchor:
+        historical_record = historical_anchor["record"]
+        historical_key = historical_anchor["applicability"]["applicability_key"]
+
+        def build_plan(values, summary):
+            return build_conditional_contract(historical_record["qualification"]["log_errors"], values,
+                applicability_key=historical_key,
+                historical_anchor_ids=[historical_record["payload_sha256"]+":full:"+str(i)
+                                       for i in range(len(historical_record["full_validation"]))],
+                training_pair_ids=[run_id+":training:"+str(i) for i in range(len(values["reference"]))],
+                timing_confidence=conditional_training_confidence(effective_policy, summary))
+
     validation_count = None if direct or (validation_mode == "reuse" and anchor is None) else target
     confirmation_plan = None
     sampling_started = time.monotonic()
@@ -458,12 +477,24 @@ def measure_fft(case, workers, precision, device, *, policy, deadline, api,
             else:
                 confirmation_plan = _confirmation_plan({n: raw[n]["models"] for n in workers}, validation_count,
                     None if deadline is None else deadline-time.monotonic())
+        if historical_anchor and decision_sampling:
+            conditional_plan = build_plan(values, summary)
+            readiness = conditional_gate_readiness(conditional_plan,
+                summary["paired_candidate_over_reference"]["timing_mean_confidence_interval_seconds"],
+                slowdown_threshold=policy.slowdown_threshold)
+            summary["conditional_readiness"] = readiness
+            if readiness["sentinel_feasible"] and readiness["provisional_gate"] in ("pass", "performance_regression"):
+                sampling_stop = "conditional_decision_ready_for_endpoint"
+                break
+            if readiness["provisional_gate"] == "unvalidated":
+                sampling_stop = "historical_contract_unavailable"
+                break
         if sampling_stop != "continue":
             break
         if not direct and validation_count is None:
             sampling_stop = "historical_anchor_unavailable"
             break
-        if (not direct and summary["paired_candidate_over_reference"]["model_adjusted_gate_interval"][0]
+        if (not direct and not decision_sampling and summary["paired_candidate_over_reference"]["model_adjusted_gate_interval"][0]
                 > policy.slowdown_threshold):
             sampling_stop = "freeze_for_potential_regression_validation"
             break
@@ -488,22 +519,32 @@ def measure_fft(case, workers, precision, device, *, policy, deadline, api,
                   "confirmation_plan": confirmation_plan, "model_error_limit": MODEL_ERROR_LIMIT,
                   "prediction_frozen_before_validation": True}
         if historical_anchor:
-            record = historical_anchor["record"]
-            conditional_plan = build_conditional_contract(
-                record["qualification"]["log_errors"], values,
-                applicability_key=historical_anchor["applicability"]["applicability_key"],
-                historical_anchor_ids=[record["payload_sha256"]+":full:"+str(i) for i in range(len(record["full_validation"]))],
-                training_pair_ids=[run_id+":training:"+str(i) for i in range(len(values["reference"]))],
-                timing_confidence=summary["policy"]["interval_confidence_per_look"])
+            if conditional_plan is None:
+                conditional_plan = build_plan(values, summary)
             frozen.update(routine_kind="historical_full_endpoint_sentinel", conditional_contract=conditional_plan,
                           sentinel_id=run_id+":full-endpoint", current_run_id=run_id)
+            if readiness is not None:
+                frozen["conditional_readiness"] = readiness
         if anchor_directory is not None:
             token = run_id + "-" + _digest(identity)[:16]
             freeze_path = Path(anchor_directory) / (token + ".prediction.json")
             _save(freeze_path, frozen)
         if historical_anchor:
             anchor_path = historical_anchor["path"]
-            if repeats and conditional_plan["status"] == "conditional_contract_ready":
+            if conditional_plan["status"] != "conditional_contract_ready":
+                model_state = "unvalidated"
+                conditional_check = {"status": model_state, "conditional_performance_pass_eligible": False,
+                                     "reason": conditional_plan["status"]}
+            elif readiness is not None and readiness["timing_blockers"]:
+                model_state = "inconclusive"
+                conditional_check = {"status": model_state, "conditional_performance_pass_eligible": False,
+                                     "reason": "training uncertainty precludes a passing full endpoint",
+                                     "timing_blockers": readiness["timing_blockers"]}
+            elif readiness is not None and readiness["provisional_gate"] == "inconclusive":
+                model_state = "inconclusive"
+                conditional_check = {"status": model_state, "conditional_performance_pass_eligible": False,
+                                     "reason": "decision_inconclusive_at_frozen_look"}
+            elif repeats:
                 pair = measure_pair([target], "historical_endpoint_sentinel", 0)
                 observed = {n: {"preparation_seconds": pair[n]["prepare"]["wall_seconds"],
                                 "score_including_finish_seconds": pair[n]["scores"][target]["wall_seconds_including_finish"],
@@ -513,14 +554,14 @@ def measure_fft(case, workers, precision, device, *, policy, deadline, api,
                                                     purpose="historical_endpoint_sentinel"))
                 conditional_check = check_conditional_sentinel(conditional_plan,
                     {n: observed[n]["full_seconds"] for n in workers},
-                    applicability_key=historical_anchor["applicability"]["applicability_key"],
+                    applicability_key=historical_key,
                     sentinel_id=frozen["sentinel_id"])
                 conditional_bounds = conditional_model_log_bounds(conditional_plan, conditional_check)
                 model_state = conditional_check["status"]
             else:
                 model_state = "unvalidated"
                 conditional_check = {"status": "unvalidated", "conditional_performance_pass_eligible": False,
-                                     "reason": "historical contract unsuitable or full endpoint budget unavailable"}
+                                     "reason": "full endpoint budget unavailable"}
             # A single sentinel is deliberately not fed to fresh mean-equivalence
             # inference. Its evidence may support only the separate conditional gate.
             summary = summarize(values["reference"], values["candidate"], effective_policy,
@@ -568,6 +609,8 @@ def measure_fft(case, workers, precision, device, *, policy, deadline, api,
                                 paired_model_log_errors=paired_errors)
         if summary["performance_gate"] != "performance_regression":
             summary["stop_reason"] = sampling_stop
+        if readiness is not None:
+            summary["conditional_readiness"] = readiness
         looks[-1] = summary
 
     valid = model_state in ("direct_full", "validated", "historically_supported_conditional")
@@ -589,7 +632,7 @@ def measure_fft(case, workers, precision, device, *, policy, deadline, api,
     warnings = []
     if not valid:
         warnings.append("full-bank mean-equivalence model invalid or unqualified; no supported performance pass")
-    if not summary["timing_precision_reached"]:
+    if not decision_sampling and not summary["timing_precision_reached"]:
         warnings.append("requested full-runtime timing precision remains unresolved")
     if comparison["gate"] == "inconclusive":
         warnings.append("full-runtime regression decision remains inconclusive")

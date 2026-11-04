@@ -1,0 +1,614 @@
+{
+  "schema": "triad-performance-per-test-decision-controls-v2",
+  "plan": {
+    "schema": "triad-performance-per-test-decision-controls-v2",
+    "policy": {
+      "relative_precision": 0.05,
+      "looks": [
+        5,
+        9,
+        17,
+        33
+      ],
+      "family_count": 1,
+      "alpha": 0.05,
+      "slowdown_threshold": 1.7,
+      "model_allowance_log": 0.0,
+      "stopping_rule": "decision",
+      "pass_alpha": 0.3,
+      "failure_alpha": 0.05
+    },
+    "noise": {
+      "kind": "lognormal",
+      "log_sigma": 0.04,
+      "paired_correlation": 0.6,
+      "block_length": 2
+    },
+    "regression_profile": "ci",
+    "directional_error_budgets": {
+      "pass": 0.3,
+      "failure": 0.05
+    },
+    "trials_per_factor": 1000,
+    "factors": [
+      1.0,
+      1.69,
+      1.7,
+      1.71,
+      2.0
+    ],
+    "seed": 3913041,
+    "source_sha256": {
+      "triad_perf_decision_policy_controls.py": "69090ec3ec2a302ece7a3c20373b6ada3785be15425d07b9130055a2ccff065e",
+      "triad_perf_adaptive.py": "b6a1b25851a8cd98c76134aff90ad0fa980eb6f445ff003c722ad5185b7de202",
+      "triad_perf_decision_controls.py": "3c25d2f12693354d3ae65fe3028dbf343bbb6525f9bf263817ee7cf469de188e",
+      "triad_perf_conditional.py": "ff89c20c950e8c422bf60ad91eea15b0fe7d4c3f3c656d26e959cf72b1ab3835",
+      "triad-performance.py": "604d5082870777767c2fa289fa1f3090c05463bb01cbdc57a473563f970cea40"
+    },
+    "empirical_provenance": null,
+    "runtime": {
+      "python": "3.13.5 (main, Aug 10 2026, 12:06:59) [GCC 14.2.0]",
+      "numpy": "2.5.4",
+      "scipy": "1.18.1"
+    },
+    "gate_contract": "per test, separately declared one-sided pass/failure error budgets across fixed looks 5,9,17,33; no whole-suite multiplicity adjustment",
+    "timing_precision_is_not_a_stop_requirement": true,
+    "mean_runtime_estimand": "geometric mean of paired complete-runtime ratios",
+    "interval_scope": "95% pointwise Clopper-Pearson intervals over independent simulated test replications, not simultaneous across factors/outcomes",
+    "assumptions": [
+      "stationary paired lognormal outer runtimes for the parametric generator",
+      "the empirical generator is conditional on a finite measured jitter sample; its uncertainty is not a future hardware bound",
+      "block resampling preserves short serial dependence and therefore stress-tests, rather than proves, the independent-time assumption",
+      "model applicability and hardware health are separate; simulated direct-full timing has no abbreviation model error"
+    ],
+    "qualification_scope": "decision logic simulation only; no receiver speed, mixed-CI-dispatch, or future error-rate qualification",
+    "plan_sha256": "5d33a78b837b090ebac9e27728ec4211d15f3e05dcd063c3bccb79ea115d08f8"
+  },
+  "status": "complete",
+  "results": [
+    {
+      "true_geometric_mean_ratio": 1.0,
+      "seed": 3913041,
+      "trials": 1000,
+      "outcomes": {
+        "pass": {
+          "count": 1000,
+          "campaigns": 1000,
+          "fraction": 1.0,
+          "interval": [
+            0.9963179161031344,
+            1.0
+          ],
+          "confidence": 0.95,
+          "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes"
+        },
+        "performance_regression": {
+          "count": 0,
+          "campaigns": 1000,
+          "fraction": 0.0,
+          "interval": [
+            0.0,
+            0.003682083896865671
+          ],
+          "confidence": 0.95,
+          "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes"
+        },
+        "inconclusive": {
+          "count": 0,
+          "campaigns": 1000,
+          "fraction": 0.0,
+          "interval": [
+            0.0,
+            0.003682083896865671
+          ],
+          "confidence": 0.95,
+          "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes"
+        },
+        "false_pass": {
+          "count": 0,
+          "campaigns": 1000,
+          "fraction": 0.0,
+          "interval": [
+            0.0,
+            0.003682083896865671
+          ],
+          "confidence": 0.95,
+          "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes"
+        },
+        "false_regression": {
+          "count": 0,
+          "campaigns": 1000,
+          "fraction": 0.0,
+          "interval": [
+            0.0,
+            0.003682083896865671
+          ],
+          "confidence": 0.95,
+          "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes"
+        },
+        "timing_precision_reached": {
+          "count": 8,
+          "campaigns": 1000,
+          "fraction": 0.008,
+          "interval": [
+            0.0034599761653293115,
+            0.015702049176074682
+          ],
+          "confidence": 0.95,
+          "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes"
+        },
+        "decision_before_timing_precision": {
+          "count": 992,
+          "campaigns": 1000,
+          "fraction": 0.992,
+          "interval": [
+            0.9842979508239253,
+            0.9965400238346707
+          ],
+          "confidence": 0.95,
+          "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes"
+        }
+      },
+      "stopping_sample_count": {
+        "5": 1000,
+        "9": 0,
+        "17": 0,
+        "33": 0
+      },
+      "mean_sample_count": 5.0,
+      "false_pass_applicable": false,
+      "false_regression_applicable": true,
+      "scope": "one test at a time; Monte Carlo probabilities conditional on the stated timing generator"
+    },
+    {
+      "true_geometric_mean_ratio": 1.69,
+      "seed": 3914041,
+      "trials": 1000,
+      "outcomes": {
+        "pass": {
+          "count": 426,
+          "campaigns": 1000,
+          "fraction": 0.426,
+          "interval": [
+            0.3951080526222896,
+            0.4573288630343598
+          ],
+          "confidence": 0.95,
+          "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes"
+        },
+        "performance_regression": {
+          "count": 12,
+          "campaigns": 1000,
+          "fraction": 0.012,
+          "interval": [
+            0.0062155255595952455,
+            0.02086767959103641
+          ],
+          "confidence": 0.95,
+          "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes"
+        },
+        "inconclusive": {
+          "count": 562,
+          "campaigns": 1000,
+          "fraction": 0.562,
+          "interval": [
+            0.5306047253440984,
+            0.5930292354341888
+          ],
+          "confidence": 0.95,
+          "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes"
+        },
+        "false_pass": {
+          "count": 0,
+          "campaigns": 1000,
+          "fraction": 0.0,
+          "interval": [
+            0.0,
+            0.003682083896865671
+          ],
+          "confidence": 0.95,
+          "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes"
+        },
+        "false_regression": {
+          "count": 12,
+          "campaigns": 1000,
+          "fraction": 0.012,
+          "interval": [
+            0.0062155255595952455,
+            0.02086767959103641
+          ],
+          "confidence": 0.95,
+          "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes"
+        },
+        "timing_precision_reached": {
+          "count": 814,
+          "campaigns": 1000,
+          "fraction": 0.814,
+          "interval": [
+            0.7884716407300623,
+            0.8376640223583915
+          ],
+          "confidence": 0.95,
+          "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes"
+        },
+        "decision_before_timing_precision": {
+          "count": 186,
+          "campaigns": 1000,
+          "fraction": 0.186,
+          "interval": [
+            0.16233597764160843,
+            0.2115283592699378
+          ],
+          "confidence": 0.95,
+          "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes"
+        }
+      },
+      "stopping_sample_count": {
+        "5": 126,
+        "9": 90,
+        "17": 99,
+        "33": 685
+      },
+      "mean_sample_count": 25.728,
+      "false_pass_applicable": false,
+      "false_regression_applicable": true,
+      "scope": "one test at a time; Monte Carlo probabilities conditional on the stated timing generator"
+    },
+    {
+      "true_geometric_mean_ratio": 1.7,
+      "seed": 3915041,
+      "trials": 1000,
+      "outcomes": {
+        "pass": {
+          "count": 182,
+          "campaigns": 1000,
+          "fraction": 0.182,
+          "interval": [
+            0.15854965331143797,
+            0.20733884949016515
+          ],
+          "confidence": 0.95,
+          "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes"
+        },
+        "performance_regression": {
+          "count": 39,
+          "campaigns": 1000,
+          "fraction": 0.039,
+          "interval": [
+            0.027877148795336416,
+            0.05293093578544508
+          ],
+          "confidence": 0.95,
+          "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes"
+        },
+        "inconclusive": {
+          "count": 779,
+          "campaigns": 1000,
+          "fraction": 0.779,
+          "interval": [
+            0.7519815367883571,
+            0.8043646255471617
+          ],
+          "confidence": 0.95,
+          "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes"
+        },
+        "false_pass": {
+          "count": 0,
+          "campaigns": 1000,
+          "fraction": 0.0,
+          "interval": [
+            0.0,
+            0.003682083896865671
+          ],
+          "confidence": 0.95,
+          "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes"
+        },
+        "false_regression": {
+          "count": 39,
+          "campaigns": 1000,
+          "fraction": 0.039,
+          "interval": [
+            0.027877148795336416,
+            0.05293093578544508
+          ],
+          "confidence": 0.95,
+          "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes"
+        },
+        "timing_precision_reached": {
+          "count": 890,
+          "campaigns": 1000,
+          "fraction": 0.89,
+          "interval": [
+            0.8689475363625123,
+            0.9087222255405338
+          ],
+          "confidence": 0.95,
+          "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes"
+        },
+        "decision_before_timing_precision": {
+          "count": 110,
+          "campaigns": 1000,
+          "fraction": 0.11,
+          "interval": [
+            0.09127777445946615,
+            0.13105246363748774
+          ],
+          "confidence": 0.95,
+          "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes"
+        }
+      },
+      "stopping_sample_count": {
+        "5": 79,
+        "9": 48,
+        "17": 45,
+        "33": 828
+      },
+      "mean_sample_count": 28.916,
+      "false_pass_applicable": false,
+      "false_regression_applicable": true,
+      "scope": "one test at a time; Monte Carlo probabilities conditional on the stated timing generator"
+    },
+    {
+      "true_geometric_mean_ratio": 1.71,
+      "seed": 3916041,
+      "trials": 1000,
+      "outcomes": {
+        "pass": {
+          "count": 61,
+          "campaigns": 1000,
+          "fraction": 0.061,
+          "interval": [
+            0.04697787554108021,
+            0.07767077404912354
+          ],
+          "confidence": 0.95,
+          "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes"
+        },
+        "performance_regression": {
+          "count": 139,
+          "campaigns": 1000,
+          "fraction": 0.139,
+          "interval": [
+            0.11814585276496607,
+            0.1620045038554902
+          ],
+          "confidence": 0.95,
+          "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes"
+        },
+        "inconclusive": {
+          "count": 800,
+          "campaigns": 1000,
+          "fraction": 0.8,
+          "interval": [
+            0.7738406271786294,
+            0.8243794251691577
+          ],
+          "confidence": 0.95,
+          "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes"
+        },
+        "false_pass": {
+          "count": 61,
+          "campaigns": 1000,
+          "fraction": 0.061,
+          "interval": [
+            0.04697787554108021,
+            0.07767077404912354
+          ],
+          "confidence": 0.95,
+          "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes"
+        },
+        "false_regression": {
+          "count": 0,
+          "campaigns": 1000,
+          "fraction": 0.0,
+          "interval": [
+            0.0,
+            0.003682083896865671
+          ],
+          "confidence": 0.95,
+          "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes"
+        },
+        "timing_precision_reached": {
+          "count": 922,
+          "campaigns": 1000,
+          "fraction": 0.922,
+          "interval": [
+            0.903606366597417,
+            0.937858786867286
+          ],
+          "confidence": 0.95,
+          "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes"
+        },
+        "decision_before_timing_precision": {
+          "count": 78,
+          "campaigns": 1000,
+          "fraction": 0.078,
+          "interval": [
+            0.062141213132714056,
+            0.09639363340258299
+          ],
+          "confidence": 0.95,
+          "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes"
+        }
+      },
+      "stopping_sample_count": {
+        "5": 50,
+        "9": 42,
+        "17": 45,
+        "33": 863
+      },
+      "mean_sample_count": 29.872,
+      "false_pass_applicable": true,
+      "false_regression_applicable": false,
+      "scope": "one test at a time; Monte Carlo probabilities conditional on the stated timing generator"
+    },
+    {
+      "true_geometric_mean_ratio": 2.0,
+      "seed": 3917041,
+      "trials": 1000,
+      "outcomes": {
+        "pass": {
+          "count": 0,
+          "campaigns": 1000,
+          "fraction": 0.0,
+          "interval": [
+            0.0,
+            0.003682083896865671
+          ],
+          "confidence": 0.95,
+          "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes"
+        },
+        "performance_regression": {
+          "count": 1000,
+          "campaigns": 1000,
+          "fraction": 1.0,
+          "interval": [
+            0.9963179161031344,
+            1.0
+          ],
+          "confidence": 0.95,
+          "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes"
+        },
+        "inconclusive": {
+          "count": 0,
+          "campaigns": 1000,
+          "fraction": 0.0,
+          "interval": [
+            0.0,
+            0.003682083896865671
+          ],
+          "confidence": 0.95,
+          "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes"
+        },
+        "false_pass": {
+          "count": 0,
+          "campaigns": 1000,
+          "fraction": 0.0,
+          "interval": [
+            0.0,
+            0.003682083896865671
+          ],
+          "confidence": 0.95,
+          "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes"
+        },
+        "false_regression": {
+          "count": 0,
+          "campaigns": 1000,
+          "fraction": 0.0,
+          "interval": [
+            0.0,
+            0.003682083896865671
+          ],
+          "confidence": 0.95,
+          "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes"
+        },
+        "timing_precision_reached": {
+          "count": 7,
+          "campaigns": 1000,
+          "fraction": 0.007,
+          "interval": [
+            0.0028188587596205245,
+            0.014369194978918632
+          ],
+          "confidence": 0.95,
+          "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes"
+        },
+        "decision_before_timing_precision": {
+          "count": 993,
+          "campaigns": 1000,
+          "fraction": 0.993,
+          "interval": [
+            0.9856308050210814,
+            0.9971811412403795
+          ],
+          "confidence": 0.95,
+          "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes"
+        }
+      },
+      "stopping_sample_count": {
+        "5": 1000,
+        "9": 0,
+        "17": 0,
+        "33": 0
+      },
+      "mean_sample_count": 5.0,
+      "false_pass_applicable": true,
+      "false_regression_applicable": false,
+      "scope": "one test at a time; Monte Carlo probabilities conditional on the stated timing generator"
+    }
+  ],
+  "pending_factors": [],
+  "scope_controls": {
+    "outside_receiver": {
+      "complete_timer_gate": "performance_regression",
+      "incorrect_receiver_only_gate": "pass",
+      "nominal_receiver_fraction": 0.8,
+      "injected_external_fraction": 1.0,
+      "scope": "synthetic stage costs demonstrate why complete timer boundaries matter"
+    },
+    "full_size_only": {
+      "abbreviated_gate": "pass",
+      "full_target_ratio": 2.0,
+      "sentinel": "unvalidated_request_focused_qualification",
+      "calibration_blocking": true,
+      "scope": "unchanged abbreviation alone passes incorrectly for the full target; separate full endpoint is required"
+    },
+    "changed_regime": {
+      "applicability_accepted": false,
+      "sentinel": "unvalidated_request_focused_qualification",
+      "scope": "actual applicability validator, not measured slowdown"
+    },
+    "common_environment": {
+      "paired_gate": "pass",
+      "absolute_factor": 1.6,
+      "hardware_screen": {
+        "input_kind": "synthetic compatible hardware profile",
+        "factor": 1.6,
+        "result": {
+          "status": "raw_hardware_screen",
+          "performance_pass_eligible": false,
+          "rows": [
+            {
+              "case": "control-kernel",
+              "throughput_measure": "operations_per_second",
+              "old": 1000.0,
+              "current": 625.0,
+              "time_equivalent_ratio": 1.6,
+              "regression_screen": true,
+              "low_cpu_utilization_screen": false,
+              "low_device_busy_screen": false,
+              "raw_utilization_current": 2.0
+            }
+          ],
+          "warning": true,
+          "scope": "raw environment-health screen; one five-second block does not establish independent-replicate confidence"
+        },
+        "actual_hardware_test": false,
+        "limitation": "the raw single-block screen has no confidence-qualified false-failure guarantee"
+      },
+      "scope": "relative source comparison cannot establish absolute hardware health"
+    },
+    "not_actual_receiver_or_hardware_runs": true
+  },
+  "exit_code": 0,
+  "monte_carlo_sources_verified": true,
+  "unrelated_source_changes": {},
+  "elapsed_seconds": 5.585089190979488,
+  "scope_control_sources": {
+    "before": {
+      "triad_perf_decision_policy_controls.py": "69090ec3ec2a302ece7a3c20373b6ada3785be15425d07b9130055a2ccff065e",
+      "triad_perf_adaptive.py": "b6a1b25851a8cd98c76134aff90ad0fa980eb6f445ff003c722ad5185b7de202",
+      "triad_perf_decision_controls.py": "3c25d2f12693354d3ae65fe3028dbf343bbb6525f9bf263817ee7cf469de188e",
+      "triad_perf_conditional.py": "ff89c20c950e8c422bf60ad91eea15b0fe7d4c3f3c656d26e959cf72b1ab3835",
+      "triad-performance.py": "604d5082870777767c2fa289fa1f3090c05463bb01cbdc57a473563f970cea40"
+    },
+    "after": {
+      "triad_perf_decision_policy_controls.py": "69090ec3ec2a302ece7a3c20373b6ada3785be15425d07b9130055a2ccff065e",
+      "triad_perf_adaptive.py": "b6a1b25851a8cd98c76134aff90ad0fa980eb6f445ff003c722ad5185b7de202",
+      "triad_perf_decision_controls.py": "3c25d2f12693354d3ae65fe3028dbf343bbb6525f9bf263817ee7cf469de188e",
+      "triad_perf_conditional.py": "ff89c20c950e8c422bf60ad91eea15b0fe7d4c3f3c656d26e959cf72b1ab3835",
+      "triad-performance.py": "604d5082870777767c2fa289fa1f3090c05463bb01cbdc57a473563f970cea40"
+    },
+    "stable": true
+  }
+}

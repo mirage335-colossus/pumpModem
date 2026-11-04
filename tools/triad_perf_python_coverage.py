@@ -22,6 +22,7 @@ from typing import Any, Iterable
 
 SCHEMA_VERSION = 1
 DEFAULT_MODULES = (
+    "triad_gaussian_bounds",
     "triad_gaussian_state",
     "triad_state_workspace",
     "triad_prepared_observation",
@@ -40,6 +41,7 @@ DEFAULT_MODULES = (
     "triad-ray-frequency-study.py",
 )
 DEFAULT_TESTS = (
+    "test_triad_gaussian_bounds",
     "test_triad_gaussian_state",
     "test_triad_prepared_observation",
     "test_triad_gaussian_window",
