@@ -8,6 +8,12 @@ assumptions and limits before applying their findings.
 the [development workflow](triad-development-workflow.md). It maps the efficient
 simulation tools, evidence-backed receiver choices, small runnable diagnostics,
 workspace reuse and proportionate testing before larger sampled campaigns.
+For isolated regression computation, follow the required
+[efficient regression workflow](triad-performance.md#required-efficient-regression-workflow)
+and its [confidence and material-slowdown policy](triad-performance.md#confidence-and-material-slowdown):
+use validated predictive chains, cover distinct paths, and spend more only when
+uncertainty or a material slowdown warrants it. Shared and ordinary Robust
+changes retain their applicable requirements.
 Use the [isolated Live/Duplex cable suite](triad-live-duplex.md) to characterize
 the combined audio path and compare held-out waveforms with a frozen measured
 model. Its coverage grades distinguish complete physical patterns, actual-rate

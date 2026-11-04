@@ -464,25 +464,31 @@ and runs its registered checks; optional Python research tools also have their
 own focused tests that are not all registered in this group.
 
 The [isolated receiver performance suite](triad-performance.md) runs in a
-separate normal-CI job unless `devfast` is selected. Normal CI uses the fast
-`triad_perf_guard.py --profile ci` entry point: screen the named full workloads,
-then confirm only suspects with fresh full-target pairs. It tests a median paired
-runtime ratio above 1.70, with a 1% workflow-wide statistical rejection budget
-under the declared independent-pair assumptions. Inconclusive timing and
-five-second hardware warnings remain nonblocking limited assurance; correctness,
-source/input integrity, work-count and execution failures remain blocking.
-A green guard does not establish full qualification or prove no slowdown.
-
-The guard defaults to 300 seconds on CPU; `--profile gpu-dev --device cuda`
-uses a 1.30 threshold and a 600-second default for broader development checks.
-Budgets bound effort, not coverage claims. Setup/build time is recorded separately.
-Explicit qualification retains `triad_perf_complete.py`, historical forecast
-validation and cold/sustained checks; its engineering target is 25 minutes and
-focused new qualification may take longer. Reuse compatible fixtures, builds and
-source-matched prediction evidence instead of repeatedly qualifying unaffected
-work. The dedicated job is not repeated in every CTest/sanitizer leg and excludes
-the ordinary Robust receiver. See the performance guide for precise timing
-boundaries, workflow multiplicity and unchanged-archive repackaging semantics.
+separate normal-CI job unless `devfast` is selected. Its fast entrypoints are
+`triad_perf_guard.py --profile ci` for CPU and
+`triad_perf_guard.py --profile gpu-dev --device cuda` for GPU development.
+For regression work, follow
+the performance guide's [required efficient workflow](triad-performance.md#required-efficient-regression-workflow)
+and [confidence and material-slowdown policy](triad-performance.md#confidence-and-material-slowdown).
+Cover distinct paths without exhaustive Cartesian sweeps. Where this saves total
+work, use validated full or sustained references, abbreviated intermediate checks
+and a full-runtime predictive bound; otherwise measure the named full targets
+directly. The current guard directly measures its named full targets because
+that route costs less than model qualification; predictions remain source-bound
+alternatives, not blanket substitutes. Reuse compatible fixtures, builds and
+source-matched evidence.
+Choose the least computation that supports the required coverage, and expand it
+when uncertainty or a material slowdown warrants more evidence. Do not rebuild
+or requalify unchanged work, or pursue a narrow timing interval after the decision
+is supported. CPU and GPU guard budgets are effort limits, not coverage claims;
+hosted CI allows 600 seconds (standalone CPU defaults to 300 seconds and
+`gpu-dev` to 600 seconds). The 25-minute qualification target is an engineering
+target, not a minimum. Setup/build time is recorded separately. The dedicated
+job is not repeated in every CTest/sanitizer leg and excludes the ordinary Robust
+receiver. Shared runtime changes and ordinary-receiver integration still require
+their applicable regression and qualification stages; see the performance guide
+for timing boundaries, workflow multiplicity, the randomized balanced-block
+conditional-slot/no-carryover assumptions and unchanged-archive semantics.
 The [guard validation record](validation-data/triad-v3/2026-11-04-performance-guard/README.md) preserves
 measured decision errors and the serial-dependence limitation.
 

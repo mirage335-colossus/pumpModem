@@ -4,6 +4,12 @@ Start with the [maintained coverage and prediction matrix](triad-performance-mat
 It separates functional coverage, complete workload timings, validated forecasts
 and unresolved regimes. Ordinary Robust integration is excluded.
 
+**For agents adding or changing regression tests: follow the
+[required efficient workflow](#required-efficient-regression-workflow) before
+adding computation.** Development-cycle time is a design constraint. Preserve
+coverage and predictive validity while using the least computation needed for
+the declared performance decision; a longer test is not inherently stronger.
+
 Use the appropriate entry point; a green guard is not full qualification:
 
 | Purpose | Entry point | Decision and cost policy |
@@ -31,6 +37,128 @@ physical-host grouping leaves a conservative bound of 95%. This is an
 occasional qualification, not a CI prerequisite or evidence of regression
 detection power. Keep the routine unit-plus-guard workflow unchanged and do not
 repeat the cloud campaign for unaffected changes.
+
+## Required efficient regression workflow
+
+This is the maintained policy for future isolated three-carrier performance
+work. Apply it to changes in test scripts, workload manifests and CI as well as
+receiver algorithms. Keep mappings in the existing
+[coverage and prediction matrix](triad-performance-matrix.md); do not introduce
+a second qualification registry or make historical research a routine dependency.
+
+1. **Cover distinct computation, not every parameter combination.** Map the
+   affected transmitter, channel, acquisition, receiver, planner, streaming,
+   arithmetic and CPU/GPU paths to cheap functional checks and representative
+   full workloads. Include boundaries that change algorithms, fallbacks, work
+   counts, memory use or concurrency. Use native/Python branch instrumentation
+   where practical, plus explicit numerical-library and GPU regime checks.
+   Function-entry witnesses, test names and parameter variety alone do not
+   establish comprehensive code-path coverage. Mark exclusions and unavailable
+   hardware explicitly; an untested path does not become covered to save time.
+2. **Define the processing time being estimated.** Record full observation and
+   search geometry, measured work counters and included stages. Generation,
+   channel simulation, loading, preparation, transfers, receiver work and
+   finalization belong in the target when the represented simulation includes
+   them. Name cold startup, resident latency and multi-test campaign throughput
+   separately, accounting for shared setup once. Simulated days are not processor
+   wall time. An inner-kernel timer cannot stand in for an entire simulation.
+3. **When forecasting, establish a predictive-validity chain for each regime.**
+   Use source/build/input/arithmetic/environment-bound full and sustained runs
+   to validate the relationship between abbreviated measured work and the full
+   target. Freeze a forecast before independent full-target validation; retain
+   raw errors, uncertainty and applicability limits. Check sustained behavior
+   where warm-up, allocation, cache, transfer, thermal or scheduling effects can
+   change costs. Do not scale a prefix through an algorithm or memory-regime
+   boundary without evidence. A passing unit test or execution witness is not a
+   runtime anchor. Hardware microbenchmarks alone do not establish receiver or
+   cross-architecture scaling.
+4. **Make routine forecasts reuse that chain.** Refresh only the inexpensive
+   measurements needed to forecast current full-target time, preserving the
+   validated work geometry and model-error allowance. Confidence and material
+   slowdown decisions concern the represented **full workload**, not the small
+   abbreviated call. Reuse compatible binaries, fixtures, sampled I/Q, DSP
+   workspaces and unaffected-stage proofs. Invalidate affected relationships
+   when source, work, arithmetic or environment changes; allow narrower reuse
+   only with a checked dependency/transfer argument. Neither blind reuse nor
+   automatic complete requalification is acceptable. Use file-only assessment
+   when sufficient. Avoid repeated generation, setup and hashing inside timed
+   cases unless those operations belong to the target.
+5. **Choose the cheaper defensible measurement route.** Abbreviation is useful
+   when it saves total development time at the required assurance. Prefer direct
+   full-target measurement when modeling, validation or repeated sentinels cost
+   more. The current guard deliberately uses direct named targets for that
+   reason; its historical native/FFT and GPU campaign forecasts are not blanket
+   predictors for every simulation. Extend inexpensive forecasting to missing
+   costly families when independently validated savings justify it. GPU
+   development checks are preferred when they improve turnaround and cover the
+   relevant paths; they do not replace CPU-specific ISA, fallback or CI checks.
+6. **Stop when the declared decision is supported.** Predeclare thresholds,
+   looks and budget. Do not continue a resolved test to obtain a prettier 1–5%
+   interval, rerun until green, widen a tolerance after seeing a failure, or turn
+   a five-second diagnostic into a sustained campaign without a concrete gap.
+   Escalate only the affected case when validity, regime or material-slowdown
+   evidence requires it. Keep ordinary receiver and unrelated regression
+   campaigns outside isolated work.
+
+For a new or changed timing case, the maintained matrix/report must identify
+its cheap coverage check, full target, measurement method, independent anchor
+or direct-timing evidence, reuse/invalidation conditions and remaining gaps.
+Report functional correctness, code-path coverage, timing uncertainty, prediction
+accuracy, hardware health and performance decisions separately. Measure routine
+command wall time including setup and confirmation overhead, and compare saved
+computation with direct testing at comparable assurance. Do not claim savings
+from shorter simulated observations or excluded setup costs alone.
+
+The **25-minute engineering target is a ceiling to work toward, not a minimum
+or an allowance to consume**. The normal guard budgets and measured roughly
+5.5/7.7-minute CPU/GPU routines are described below. Occasional qualification
+may take longer for a justified missing relationship; it must not be repeated
+after every unrelated edit. Documentation-only edits require proportionate
+link, command and consistency checks, not receiver benchmarking.
+
+## Confidence and material slowdown
+
+Use the selected tool's explicit decision contract. Keep these quantities
+separate: the material slowdown ratio, directional error/confidence budget,
+interval width, prediction-model error and individual-run variation. A very
+narrow interval around a negligible slowdown is not a reason to block; an
+imprecise observation is not proof of a regression. Do not demand a universal
+5% runtime half-width before making a 30% or 70% slowdown decision.
+
+The fast CI guard tests a **1.70×** threshold with a **1% workflow-wide**
+statistical rejection budget; GPU development uses **1.30×** and **5%**.
+It confirms suspects using the randomized balanced-block procedure below,
+accounting for hypotheses, jobs and repeated looks. Its estimand is a median
+block ratio, not a mean-runtime confidence interval. CI intentionally accepts
+reduced detection power to keep false performance blocks rare across the whole
+suite. The allowance is conditional on its stated assumptions; per-test
+intervals and same-host repeats cannot establish an unconditional suite-wide
+false-block rate. Preserve the null-control evidence and its clustering limits.
+
+The separate qualification-oriented runner implements the earlier relaxed
+criteria as **15% directional pass-error at 30% slowdown**, or **30% at 70%** in
+its legacy CI profile, with a separate 5% per-test false-regression allowance.
+These mean 85%/70% one-sided pass procedures under that contract, **not ±15%/±30%
+interval widths or the current fast CI policy**. See the precise
+[qualification definitions](#qualification-timing-precision-model-accuracy-and-regression-decisions)
+before changing sampling. Historical ±5% model-validation requirements remain
+part of their anchor identities; relaxing a regression decision does not
+retroactively validate a failed predictor.
+
+For a qualified mean-runtime comparison, an upper bound below the material
+threshold supports a pass; a lower bound above it supports a regression;
+overlap is inconclusive. The reject-only fast guard instead reports **no
+confirmed regression / limited assurance** when confirmation is insufficient.
+Do not relabel that outcome as a bound proving no slowdown. Correctness,
+integrity and execution failures remain separate blocking outcomes.
+
+When investigating a suspected regression, compare matched candidate/reference
+work and inspect work counters, stage timings and hardware diagnostics. Shared
+environmental slowdown can affect both builds; source-dependent slowdown can
+also interact with cache or scheduling. Attribute a poor algorithm or
+implementation only after evidence distinguishes these explanations. Additional
+samples cannot repair an invalid model or systematic bias. Improve that weakest
+link rather than repeatedly tightening already sufficient timing intervals.
 
 ## Fast guard commands and decision contract
 

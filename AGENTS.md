@@ -5,6 +5,16 @@ Current compatibility requirements are in [the development contract](docs/develo
 build and test stages are in [the build guide](docs/building.md#testing-stages).
 Search `src/`, `include/`, `tests/` and `cmake/` first when locating implementation.
 
+For isolated three-carrier regression work, follow the required efficient
+workflow in the [performance guide](docs/triad-performance.md#required-efficient-regression-workflow)
+and its [confidence and material-slowdown policy](docs/triad-performance.md#confidence-and-material-slowdown).
+Use comprehensive distinct-path coverage and minimize computation. Where it
+saves total work, use validated full/sustained-to-abbreviated-to-full-runtime
+predictive chains; otherwise measure the named full target directly. Reuse
+source-matched evidence, and let uncertainty or a material slowdown determine
+whether more work is warranted. This scope does not replace ordinary/shared
+runtime regression and qualification requirements.
+
 ## New three-carrier Robust modem
 
 For implementing or integrating the isolated three-adjacent-carrier modem, start

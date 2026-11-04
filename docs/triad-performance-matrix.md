@@ -1,5 +1,15 @@
 # Maintained triad performance coverage matrix
 
+**Before adding or expanding a row, follow the
+[required efficient regression workflow](triad-performance.md#required-efficient-regression-workflow).**
+The goal is comprehensive coverage of distinct code paths with minimum routine
+computation. Each row must connect its cheap check to a defined full workload
+and either independently validated prediction evidence or direct measurement.
+Record gaps explicitly. Do not fill the matrix with equivalent parameter sweeps,
+repeat unaffected qualification, or mistake a short execution witness for a
+full-workload forecast. The decision thresholds and confidence semantics live
+in the [performance policy](triad-performance.md#confidence-and-material-slowdown).
+
 This inventory defines the maintained isolated v3 scope for the performance
 prediction work. The machine-readable rows and stable row IDs are in
 [`tools/triad-performance-coverage.json`](../tools/triad-performance-coverage.json).

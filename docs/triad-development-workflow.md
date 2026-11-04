@@ -10,6 +10,14 @@ reception contracts are in the [v3 study](triad-v3.md); this page describes how
 to make the next bounded development decision without replaying old campaigns
 by default.
 
+For isolated performance regressions, first follow the
+[required efficient regression workflow](triad-performance.md#required-efficient-regression-workflow)
+and [confidence and material-slowdown policy](triad-performance.md#confidence-and-material-slowdown).
+The procedure covers computation paths while minimizing work, with validated
+predictive chains where they save total work and direct full-target timing where
+that is cheaper. Shared-code and ordinary-receiver changes retain their own
+requirements.
+
 For ADC/DAC cable comparisons, use the [Live/Duplex hierarchy](triad-live-duplex.md).
 It keeps public probe synchronization and measured audio noise separate from
 operational receiver acquisition/admission. Do not feed physical captures to a
@@ -170,42 +178,21 @@ completed conditions in failed jobs, actual elapsed/sample calendars, post-erasu
 energy and the complete attempted denominator. Keep actual GPU throughput
 separate from GPU availability or theoretical operation counts.
 
-For performance work, use the [maintained coverage matrix](triad-performance-matrix.md)
-to select cheap functional checks and the
-[fast guard commands](triad-performance.md#fast-guard-commands-and-decision-contract).
-Normal CPU CI uses `triad_perf_guard.py --profile ci`: broad full-workload screens
-followed by fresh confirmation only for suspects. Its exact binomial decision
-checks median randomized balanced-block runtime ratios above 1.70, with a 1%
-workflow-wide false-rejection budget under the declared conditional slot and
-no-carryover assumptions. Each block uses fresh execution contexts and a recorded
-fresh-random source order; fixed-order diagnostic replay cannot block performance. It does
-not establish a mean-runtime confidence bound or prove that no slowdown occurred.
-Use `--profile gpu-dev --device cuda` for the applicable GPU development paths,
-a 1.30 ratio threshold and a 5% workflow budget. Standalone defaults are 300/600 seconds; hosted CI supplies 600 seconds of
-headroom around the approximately five-minute complete screen. Omitted or
-unfinished work stays visible.
-Even a severe slowdown can remain unconfirmed when the fresh full confirmation
-cost exceeds the remaining budget; choose `--budget-seconds 1500` when warranted.
-Timing uncertainty and hardware warnings alone do not make these guards fail;
-correctness, source/work integrity and actual execution failures remain blocking.
-
-`triad_perf_complete.py` and the focused adapters retain stronger prediction,
-mean-runtime and full-scope qualification checks. Reuse applicable full-workload
-anchors and qualify only affected relationships with an explicit budget. Full
-simulation, resident receiver, startup and sustained throughput are different
-timing targets. Their qualification-oriented engineering target remains 25
-minutes. The [historical decision run](validation-data/triad-v3/2026-11-03-performance-decision/README.md)
-took 12 minutes 21 seconds for 23 CPU gates; that is not a measurement of the new
-guard or a claim that broader qualification completed. Preserve original
-qualification evidence and unresolved scope. Do not rerun historical sensitivity
-campaigns or unaffected qualification merely to obtain a narrower timing interval.
-The [current completion record](validation-data/triad-v3/2026-11-04-performance-completion/README.md)
-qualifies the finite 33 CPU/36 GPU measurement routes, records 328/461-second
-routines and sustained forecast evidence, and preserves remaining limits.
-Its randomized balanced-block controls address the persistent-context failure
-retained in the earlier guard record; they do not prove an unconditional
-hardware false-block bound. File-only `assess-methods` reuses the evidence
-without repeating receiver work.
+For performance work, follow the [required efficient regression workflow](triad-performance.md#required-efficient-regression-workflow)
+and [confidence and material-slowdown policy](triad-performance.md#confidence-and-material-slowdown),
+then consult the [maintained coverage matrix](triad-performance-matrix.md) to
+choose affected checks. Cover distinct paths rather than Cartesian combinations.
+Where forecasting saves total work, build a validated chain from full or sustained
+references through abbreviated stages to a full-runtime predictive bound; use
+direct full-target timing where it is cheaper. Reuse source-matched evidence and
+existing builds; expand work only when uncertainty or a material slowdown calls
+for it. The fast guard entrypoints are `triad_perf_guard.py --profile ci` and
+`triad_perf_guard.py --profile gpu-dev --device cuda`; the exact timing decision
+contract, including randomized balanced-block conditional-slot/no-carryover
+assumptions, is in the [performance guide](triad-performance.md#confidence-and-material-slowdown).
+A green guard means no confirmed regression, not full qualification. See the
+[current completion record](validation-data/triad-v3/2026-11-04-performance-completion/README.md)
+for its validated finite measurement routes and remaining limits.
 
 **Selective-model version warning:** the detailed 2026-11-02 selective
 campaign used `legacy-allpass-v1`. Its receiver results remain valid for that
