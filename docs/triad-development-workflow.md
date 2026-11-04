@@ -14,6 +14,13 @@ For ADC/DAC cable comparisons, use the [Live/Duplex hierarchy](triad-live-duplex
 It keeps public probe synchronization and measured audio noise separate from
 operational receiver acquisition/admission. Do not feed physical captures to a
 workspace that asserts a known ideal Gaussian simulation noise model.
+For actual cable reception comparisons, its `triad_live_margins.py` path reuses
+the maintained FFT receiver through an explicit physical adapter and a separate
+empirical null gate. Keep that marker-conditioned experimental gate distinct
+from the analytic operational false-admission guarantees.
+The [actual cable reception evidence](validation-data/triad-v3/2026-11-04-live-reception/README.md)
+includes successful comparisons and excluded floor captures with real playback
+underruns. Read its short-test guidance before repeating hardware campaigns.
 
 **For a large timing bank, start with the
 [sampled FFT acquisition study](validation-data/triad-v3/2026-11-03-fft-timing/README.md).**

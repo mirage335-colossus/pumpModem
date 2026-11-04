@@ -254,6 +254,71 @@ whitening, operational admissions, misses, authentication, blind search or
 continuous-operation false admissions. It must not spoof a native Gaussian
 capture manifest to activate those receivers' admission gates.
 
+## Actual receiver admissions on cable captures
+
+[`triad_live_margins.py`](../tools/triad_live_margins.py) adds a separate
+physical reception experiment. It reuses the maintained FFT acquisition and
+Gaussian-window likelihood calculations through
+[`triad_live_receiver.py`](../tools/triad_live_receiver.py), with both bit
+patterns and every declared timing/frequency alternative. The physical adapter
+does **not** assert a Gaussian simulation manifest. It discards the kernel's
+analytic admission decisions and uses its likelihood as a working statistic.
+
+Freeze the public templates, noise condition, scaling, audio profile, search,
+source and arithmetic before calibration. The empirical gate ranks the maximum
+bit-mixture likelihood against independent noise-only calibration records:
+`p = (1 + count(calibration_score >= test_score)) / (n + 1)`.
+Ties are conservative. The initial experimental gate uses `p <= 0.05` per
+capture. Its marginal interpretation requires exchangeable null records; it is
+not the operational `1e-4/day` guarantee or a conditional guarantee for the
+particular frozen threshold. Fresh null validation must report its uncertainty,
+including when no admissions occur. Null calibration cannot guarantee correct
+bits or reject structured wrong-key signals.
+
+Two complementary measurements distinguish hardware effects:
+
+- Mix independently seeded noise with the keyed signal **before the DAC**,
+  using a fixed noise level and declared signal gains. Feed the identical full
+  quantized composite to the frozen audio model. This is transmitted noise
+  through the cable filter, not independent receiver-input AWGN.
+- Reduce signal level with no added noise, calibrating separately on physical
+  silence. This tests DAC truncation as well as the combined analog/ADC noise
+  floor. A nominal nonzero signal can become entirely zero in S16 PCM.
+
+Public measurement chirps condition transport timing and relative clock. The
+receiver still searches the declared residual timing/CFO bank; epoch and clock
+hypotheses are fixed. No bit-dependent alignment or payload amplitude fitting
+is permitted. Report this as **marker-conditioned offline reception of actual
+cable PCM**, not blind acquisition or real-time backlog qualification. The
+deterministic model and physical path remain continuous across playlist records;
+the model's independently drawn finite-record residual remains a stationarity
+assumption. Finite template tails carry an explicit discarded-energy bound.
+
+Use `prepare --phase calibration` with at least 39 null records, record its
+playlist with `triad_audio_capture`, then `analyze` it. Reuse those exact fixtures
+with `prepare --phase validation --fixtures CALIBRATION/fixtures`, and pass
+`--calibration CALIBRATION_ANALYSIS` to the independent validation analysis.
+`--phase pilot` is exploratory and emits no calibrated decisions by itself.
+`--phase floor` makes a separate silence-calibrated level experiment. All tools
+require fresh output directories. The default prepared cases are deliberately
+small; specify `--cases baseline,edge,spreading,stress` for the four distinct
+current regimes. Read the retained experiment before repeating long hardware
+playlists, and never count synthetic harness tests as physical trials.
+
+The [2026-11-04 actual reception study](validation-data/triad-v3/2026-11-04-live-reception/README.md)
+records the physical margin curves, matched simulation failures and the measured
+upper-edge model correction. Both no-added-noise floor attempts failed playback
+continuity and are excluded. Diagnose the underrun before repeating that long
+playlist; successful marker-conditioned offline decoding does not qualify
+real-time endpoint continuity or a complete under-50-minute campaign.
+
+Additional hardware-free checks (NumPy, SciPy and CPU PyTorch):
+
+```sh
+python tests/test_triad_live_receiver.py
+python tests/test_triad_live_margins.py
+```
+
 ## Maintained coverage inventory
 
 The plan should select representative boundaries rather than repeat equivalent
