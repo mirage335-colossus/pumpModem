@@ -464,20 +464,27 @@ and runs its registered checks; optional Python research tools also have their
 own focused tests that are not all registered in this group.
 
 The [isolated receiver performance suite](triad-performance.md) runs in a
-separate normal-CI job unless `devfast` is selected. It uses five-second hardware
-probes and paired abbreviated receiver measurements, preserving the full sample
-and timing geometry and validating full-runtime estimates on held-out work.
-The complete routine target and default budget are 25 minutes per backend.
-Sampling stops when the selected slowdown decision resolves, rather than
-chasing a runtime interval width. Normal uses a 15% per-test erroneous-pass
-budget at 30% slowdown; hosted CI explicitly uses 30% at 70% slowdown. Both
-retain a 5% false-regression budget. Qualification of a new prediction model
-is separate and can take longer under an explicit budget.
-Routine source-matched anchor reuse avoids repeating full qualification;
-dependency setup and the narrow `triad_long` build are separate. This job is not
-repeated in every CTest/sanitizer leg. It includes the isolated native v3
-simulation and excludes the ordinary Robust receiver. See the guide for warning-versus-failure semantics
-and the unchanged-archive repackaging exemption.
+separate normal-CI job unless `devfast` is selected. Normal CI uses the fast
+`triad_perf_guard.py --profile ci` entry point: screen the named full workloads,
+then confirm only suspects with fresh full-target pairs. It tests a median paired
+runtime ratio above 1.70, with a 1% workflow-wide statistical rejection budget
+under the declared independent-pair assumptions. Inconclusive timing and
+five-second hardware warnings remain nonblocking limited assurance; correctness,
+source/input integrity, work-count and execution failures remain blocking.
+A green guard does not establish full qualification or prove no slowdown.
+
+The guard defaults to 300 seconds on CPU; `--profile gpu-dev --device cuda`
+uses a 1.30 threshold and a 600-second default for broader development checks.
+Budgets bound effort, not coverage claims. Setup/build time is recorded separately.
+Explicit qualification retains `triad_perf_complete.py`, historical forecast
+validation and cold/sustained checks; its engineering target is 25 minutes and
+focused new qualification may take longer. Reuse compatible fixtures, builds and
+source-matched prediction evidence instead of repeatedly qualifying unaffected
+work. The dedicated job is not repeated in every CTest/sanitizer leg and excludes
+the ordinary Robust receiver. See the performance guide for precise timing
+boundaries, workflow multiplicity and unchanged-archive repackaging semantics.
+The [guard validation record](validation-data/triad-v3/2026-11-04-performance-guard/README.md) preserves
+measured decision errors and the serial-dependence limitation.
 
 A dated Monte Carlo, GPU or multi-day sensitivity campaign is not automatically
 a regression prerequisite for an isolated study edit. Reuse unchanged evidence,

@@ -1,0 +1,83 @@
+{
+  "schema": "triad-guard-acceptance-artifacts-v1",
+  "artifacts": [
+    {
+      "file": "all-harness-tests.log",
+      "bytes": 935,
+      "sha256": "e05e880eec95899bb2f16e5c475325adc06a5205792f501230eed95fc08cf584"
+    },
+    {
+      "file": "coverage-reuse.json",
+      "bytes": 79151,
+      "sha256": "a0d27d58b7f914869482c5ced011fdc6af5004bf0cd724ad3554e202265d1779"
+    },
+    {
+      "file": "cpu-003.tar.gz",
+      "bytes": 899036,
+      "sha256": "15948f2eaec8a5a5e382a770fa6fe3e52244952b9eb33a089dc1b601c676649d"
+    },
+    {
+      "file": "cpu-004.tar.gz",
+      "bytes": 976194,
+      "sha256": "b2d686fd8a65cb4aa01ec6e5f34ca8602d384ffc967b278870943fadec2a2958"
+    },
+    {
+      "file": "decision-controls.tar.gz",
+      "bytes": 50677,
+      "sha256": "eff9096cfd84ff14194925ab3a431d741eaa8544faf9acd4f3f95413a09a10a5"
+    },
+    {
+      "file": "gpu-002.tar.gz",
+      "bytes": 1368198,
+      "sha256": "4eefdfc3309e1612611669fa906872dbc03a42cd12bea79935f2b6f39a868f83"
+    },
+    {
+      "file": "gpu-003.tar.gz",
+      "bytes": 2350037,
+      "sha256": "86bce05eb0a8f8516ff8b5dc7564dad971255e9976ced25379a1253e4b964fcc"
+    },
+    {
+      "file": "guard-coverage-cli.log",
+      "bytes": 310,
+      "sha256": "bef84a5dfbe6d5648c13a794ec74a60eb31584880ef15ae582c6065094ffefbb"
+    },
+    {
+      "file": "guard-coverage-receipt.json",
+      "bytes": 2190,
+      "sha256": "6f1085a2bf2fad9754809da67581e898cd074d43809ed08299383fd5595f2735"
+    },
+    {
+      "file": "guard-coverage-tests.log",
+      "bytes": 182,
+      "sha256": "ad664c1aeaaf468c732297e845240b5a56ede7916ea3b46ef2c876aef4e50893"
+    },
+    {
+      "file": "guard-coverage.json",
+      "bytes": 121653,
+      "sha256": "f35f07dd41dc52b13e4edd6ffb224c8a930cd3d3a72274af83b275ad72d577c0"
+    },
+    {
+      "file": "initial-guard-sources.tar.gz",
+      "bytes": 52819,
+      "sha256": "501066a07ac2a6899172e147e7c135618816628f0e4daf7cb4b92cbcca28b4fe"
+    },
+    {
+      "file": "injected-controls.tar.gz",
+      "bytes": 554528,
+      "sha256": "8e86d1da4a693a6ed4112785189af46b58cbb891f34ed31dda374f3c014e9606"
+    },
+    {
+      "file": "time-command.py",
+      "bytes": 553,
+      "sha256": "a20ac9f3d03c1da61305c0e610c28802f8806a261b6a95e8b2204ce6368aadce"
+    }
+  ],
+  "runtime_sources": {
+    "tools/triad_perf_guard.py": "abf9b9e48733dc4493e98f2528827f7bf865a38766370c57f5824060db2c3241",
+    "tools/triad_perf_guard_controls.py": "6b1c12a01452d98315593c05f4f88b9a82a431c1bd24ae687b85247204657079",
+    "tools/triad_perf_guard_extras.py": "0504ce41cb55b043f81d18c0edb51bfcb274460c4bb6a837f3a173979b13bc8f",
+    "tools/triad_perf_guard_families.py": "b4b656f3750468c4e632d9146c3a8f6dc5b82c11120c2cf527e34288c314f69d",
+    "tools/triad_perf_guard_native_fft.py": "7140415167ed2b813e9ea0e41705f5e68bd262cde9106ab092470ef2e2d31ec8",
+    "tools/triad_perf_guard_policy.py": "156a65af2b92c2b6a0f17da7b54f99a5378a13a5a6c26b413693ddb551ffa84b"
+  }
+}

@@ -19,6 +19,49 @@ Maintained likelihood, projection, channel, precision and receiver functions
 remain in scope even when implemented in a study script and reused by an
 adapter. The native `triad-long` CLI remains part of complete-pipeline timing.
 
+## Fast guard versus qualification
+
+The normal CI/development entry point is
+[`triad_perf_guard.py`](../tools/triad_perf_guard.py). It keeps a finite full-workload
+screening inventory and confirms only suspects. The existing
+[`triad_perf_complete.py`](../tools/triad_perf_complete.py) remains the stronger
+qualification aggregator; its historical holds and prediction failures below
+are unchanged. A guard outcome cannot turn those records into qualification.
+
+| Guard family | CPU / CUDA workload count | Full timing boundary and reuse |
+| --- | ---: | --- |
+| Native v3 | 9 / 9 | Complete manifest CLI simulation/trial bundle, including maximal Added Symbols; no duration extrapolation. |
+| Resident FFT | 5 / 5 | Complete preparation and search bank on an exact cached fixture; worker startup and fixture creation are separately recorded. |
+| Sampled state/phase/grouped/RBPF/acquisition | 9 / 12 | Full manifest geometry; screening shares exact generation profiles, confirmation uses fresh generation plus complete receiver processing. |
+| Planner/statistics | 8 / 8 | Fixed native or retained-workspace bundles, complete process timer. Bounds remain CPU work on GPU hosts. |
+| Native resource boundary | 2 / 2 | Full paired/sequential preparation exports at the fixed 5/4 MiB boundary, with actual branch/work and byte-parity checks. |
+| Functional/coverage and hardware diagnostics | Separate outcomes | Required focused tests and matched coverage receipts; five-second arithmetic/tensor probes are advisory, not extra rejection hypotheses. |
+
+There are 33 CPU or 36 CUDA workload hypotheses before diagnostic `--case`
+selection. Unsupported optional configurations remain in the frozen inventory
+with explicit unavailable status; they do not count as tested. The complete
+CUDA-family inventory uses FP32; the tensor family is explicitly unavailable
+under forced FP64. Functional/numerical parity and public work geometry are
+checked separately from timing. Private allocation estimates may differ between
+revisions where explicitly normalized, but remain recorded and stable within
+each revision; changed public work or algorithmic regimes are not silently
+compared as equivalent.
+
+The [guard decision contract](triad-performance.md#fast-guard-commands-and-decision-contract)
+uses a workflow-wide exact binomial test for median paired full-runtime ratios.
+It is intentionally distinct from the existing arithmetic/geometric mean
+forecasts and their qualification rules. Limited assurance, missing coverage,
+model applicability and hardware warnings do not become successful coverage or
+qualification when the reject-only guard exits zero. An expensive nominated
+case can remain unconfirmed even for a severe slowdown if its fresh full look
+does not fit the remaining budget; there is no timeout-censoring rejection rule.
+The existing source
+instrumentation below remains necessary evidence; a full timing screen or
+function-entry witness cannot replace it.
+
+The [guard validation record](validation-data/triad-v3/2026-11-04-performance-guard/README.md) records the separate
+statistical controls and their limits; it does not replace the qualifications below.
+
 ## Reading status
 
 The current native CLI manifest provides complete simulation cases for selected
@@ -86,9 +129,10 @@ The latest [confidence-decision run](validation-data/triad-v3/2026-11-03-perform
 completed the same 23 CPU target gates in **741.035 seconds**, all passing,
 with 16 functional commands passing and applicable retained coverage receipts.
 That archived run used a per-test one-sided 95% decision at the 1.30 ratio
-threshold. The current normal profile uses 85% at 1.30; the explicit CI profile
-uses 70% at 1.70, each retaining a separate 5% false-regression budget and
-fixed-look error spending. The routine target is 25 minutes. It no longer pursues a 5% runtime
+threshold. The qualification-oriented normal profile uses 85% at 1.30; its legacy CI
+profile uses 70% at 1.70, each retaining a separate 5% per-test false-regression
+budget and fixed-look spending. These are not the fast guard's workflow policy.
+The qualification-oriented routine target is 25 minutes. It no longer pursues a 5% runtime
 half-width after that decision resolves. Historical qualification rules and
 failed model evidence is unchanged. GPU lifecycle cold and mixed-campaign
 qualification now exists for one RTX PRO 6000 Blackwell identity. The current

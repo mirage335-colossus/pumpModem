@@ -1,0 +1,1 @@
+{"status": "no_confirmed_regression", "exit_code": 0, "profile": "ci", "device": "cpu", "performance_status": "no_confirmed_regression", "confirmed_regressions": [], "functional_failures": [], "limited_assurance": true, "qualification_status": "not_evaluated_by_fast_guard", "wall_seconds": 2.558748417010065}

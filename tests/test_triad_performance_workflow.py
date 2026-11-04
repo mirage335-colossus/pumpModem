@@ -2,6 +2,12 @@
 """Keep the isolated Triad performance gate source-bound and bounded."""
 
 from pathlib import Path
+import fnmatch
+import json
+import os
+import subprocess
+import sys
+import tempfile
 import re
 import textwrap
 import unittest
@@ -15,6 +21,14 @@ def job_section(text, name):
         rf"(?ms)^  {re.escape(name)}:\n(.*?)(?=^  [A-Za-z0-9_-]+:\n|\Z)", text)
     if not match:
         raise AssertionError(f"workflow job {name!r} is missing")
+    return match.group(1)
+
+
+def step_section(text, name):
+    match = re.search(
+        rf"(?ms)^      - name: {re.escape(name)}\n(.*?)(?=^      - name:|\Z)", text)
+    if not match:
+        raise AssertionError(f"workflow step {name!r} is missing")
     return match.group(1)
 
 
@@ -33,20 +47,21 @@ class TriadPerformanceWorkflowTests(unittest.TestCase):
         self.assertIn("candidate_ref: ${{ github.sha }}", job)
         self.assertIn("tests/test_triad_performance_workflow.py", self.ci)
 
-    def test_manual_and_reusable_workflow_uses_combined_routine_without_qualification(self):
+    def test_manual_and_reusable_workflow_uses_fast_guard_without_qualification(self):
         self.assertIn("workflow_call:", self.performance)
         self.assertIn("workflow_dispatch:", self.performance)
         self.assertIn("CANDIDATE_REF: ${{ inputs.candidate_ref || github.sha }}", self.performance)
         self.assertIn("242ea15fa032ee117b9113a7f3cd07cc6e9f0254", self.performance)
-        self.assertEqual(self.performance.count("default: 1500"), 2)
+        self.assertEqual(self.performance.count("default: 300"), 2)
         self.assertIn('0 < budget <= 1800', self.performance)
         self.assertIn('--budget-seconds "$PERFORMANCE_BUDGET_SECONDS"', self.performance)
         self.assertIn("--stopping-rule decision", self.performance)
-        self.assertIn("--regression-profile ci", self.performance)
+        self.assertIn("--regression-profile normal", self.performance)
         self.assertIn("Requested regression profile:", self.performance)
-        self.assertIn("timeout-minutes: ${{ inputs.qualify && 105 || 50 }}", self.performance)
+        self.assertIn("timeout-minutes: ${{ inputs.qualify && 145 || 50 }}", self.performance)
         self.assertIn("five-second hardware arithmetic probes", self.performance)
         self.assertIn("--threads 2", self.performance)
+        self.assertIn("python tools/triad_perf_guard.py", self.performance)
         self.assertIn("python tools/triad_perf_complete.py", self.performance)
         self.assertIn("--functional-defaults", self.performance)
         self.assertIn("--family-route paired", self.performance)
@@ -79,6 +94,43 @@ class TriadPerformanceWorkflowTests(unittest.TestCase):
             self.assertIn(target, self.performance)
         self.assertIn("--fixture-cache build/triad-performance/triad-performance-fixtures", self.performance)
         self.assertIn("build/triad-performance/**/*.jsonl", self.performance)
+
+    def test_normal_guard_is_reject_only_and_does_not_run_qualification_work(self):
+        guard = step_section(self.performance, "Guard isolated receiver performance against confirmed large slowdowns")
+        self.assertIn("if: ${{ inputs.qualify != true }}", guard)
+        self.assertIn("set -euo pipefail", guard)
+        self.assertIn("--profile ci --suite-alpha 0.01 --workflow-job-count 1", guard)
+        self.assertIn("--device cpu --precision fp32 --threads 2 --native-threads 1", guard)
+        self.assertIn('--budget-seconds "$PERFORMANCE_BUDGET_SECONDS"', guard)
+        self.assertIn("--functional-defaults", guard)
+        self.assertIn("--hardware-seconds 5", guard)
+        self.assertIn("--output build/triad-performance/guard 2>&1 | tee", guard)
+        for forbidden in ("triad_perf_complete", "triad_perf_bootstrap", "--anchor-directory",
+                          "--lifecycle", "--family-mode", "--native-direct-case", "--skip-hardware-probes"):
+            self.assertNotIn(forbidden, guard)
+        for restore in ("Restore receiver performance anchors", "Restore qualified lifecycle campaign anchors"):
+            self.assertIn("if: ${{ inputs.qualify == true }}", step_section(self.performance, restore))
+        complete = step_section(self.performance, "Compare complete isolated workload scope with the fixed baseline")
+        self.assertIn("inputs.qualify == true && !cancelled()", complete)
+        self.assertIn("--regression-profile normal", complete)
+        self.assertIn('--budget-seconds "$QUALIFICATION_BUDGET_SECONDS"', complete)
+        self.assertIn("set -euo pipefail", complete)
+        self.assertNotIn("continue-on-error", self.performance)
+        self.assertEqual(len(re.findall(r"(?m)^  [A-Za-z0-9_-]+:\n    name:", self.performance)), 1)
+        self.assertNotIn("matrix:", self.performance)
+
+    def test_one_harness_discovery_includes_guard_checks_before_any_timings(self):
+        name = "Check native performance trace and harness contracts"
+        block = step_section(self.performance, name)
+        pattern = re.search(r"python -m unittest discover -s tests -p '([^']+)'", block).group(1)
+        guard_tests = list((ROOT / "tests").glob("test_triad_perf_guard*.py"))
+        self.assertTrue(guard_tests, "guard policy and adapter tests must exist")
+        self.assertTrue(all(fnmatch.fnmatch(test.name, pattern) for test in guard_tests))
+        self.assertEqual(self.performance.count("python -m unittest discover"), 1)
+        check_position = self.performance.index("name: " + name)
+        self.assertLess(self.performance.index("name: Install pinned CPU numerical stack"), check_position)
+        self.assertLess(check_position, self.performance.index("name: Guard isolated receiver performance"))
+        self.assertLess(check_position, self.performance.index("name: Explicit one-time qualification producer"))
 
     def test_ci_exercises_portable_dispatch_without_claiming_cpu_emulation(self):
         for control in ("ATEN_CPU_CAPABILITY: avx2", "OPENBLAS_CORETYPE: HASWELL",
@@ -157,6 +209,7 @@ class TriadPerformanceWorkflowTests(unittest.TestCase):
         self.assertNotIn("qualify:", call)
         self.assertRegex(dispatch, r"(?s)qualify:.*?type: boolean.*?default: false")
         self.assertIn("default: 1800", dispatch)
+        self.assertIn("bootstrap and complete each receive this duration", dispatch)
         self.assertIn("0 < qualification_budget <= 3600", self.performance)
         qualify = self.performance.index("name: Explicit one-time qualification producer")
         index = self.performance.index("name: Validate exact bootstrap publication index")
@@ -225,6 +278,10 @@ class TriadPerformanceWorkflowTests(unittest.TestCase):
         self.assertIn("dispatch_environment", self.performance)
         self.assertIn("--hardware-baseline build/triad-performance/hardware-reference.json", self.performance)
         self.assertIn("complete/native-fft.json", self.performance)
+        self.assertIn("guard/summary.json", self.performance)
+        capture_block = step_section(self.performance, "Capture first complete hardware reference")
+        self.assertIn("os.environ['QUALIFICATION_REQUESTED'] == 'true'", capture_block)
+        self.assertIn(".get('hardware_profile')", capture_block)
         self.assertIn("triad-first-hardware-reference-v1", self.performance)
         self.assertIn("destination.open('x')", self.performance)
         self.assertEqual(self.performance.count("steps.hardware-baseline.outputs.cache-hit != 'true'"), 2)
@@ -237,15 +294,70 @@ class TriadPerformanceWorkflowTests(unittest.TestCase):
         self.assertIn("'receiver_qualification_claim': False", self.performance)
         self.assertIn("profile.get('status') != 'complete'", self.performance)
 
-    def test_combined_summary_keeps_scope_blockers_and_all_outcomes(self):
-        self.assertIn("REPORT: build/triad-performance/complete/summary.json", self.performance)
+    def test_summary_distinguishes_guard_assurance_from_full_qualification(self):
+        self.assertIn("build/triad-performance/complete/summary.json", self.performance)
+        self.assertIn("build/triad-performance/guard/summary.json", self.performance)
         self.assertIn("complete_scope_qualification", self.performance)
         self.assertIn("warm_target_decisions_complete", self.performance)
         self.assertIn("maintained_workload_scope_complete", self.performance)
         self.assertIn("release_review_requirements", self.performance)
         self.assertIn("value.get('outcomes', {})", self.performance)
         self.assertIn("value.get('scope_blockers', [])", self.performance)
-        self.assertIn("Unresolved combined scope blocks this CI/release gate", self.performance)
+        self.assertIn("Unresolved combined scope blocks explicit qualification", self.performance)
+        for field in ("suite_alpha", "workflow_job_count", "hypothesis_count", "limited_assurance",
+                      "assurance_limitations", "functional_failures", "confirmed_regressions"):
+            self.assertIn(f"value.get('{field}'", self.performance)
+        self.assertIn("A green CI guard means no confirmed regression", self.performance)
+        self.assertIn("does not cover deterministic test or infrastructure failures", self.performance)
+        self.assertIn("conditional on independent confirmation pairs", self.performance)
+
+    def render_summary(self, payload, qualification=False):
+        body = re.search(r"(?ms)^ {10}python - <<'PYSUMMARY'\n(.*?)^ {10}PYSUMMARY\s*$", self.performance).group(1)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            report = root / "report.json"
+            report.write_text(json.dumps(payload))
+            result = subprocess.run([sys.executable, "-c", textwrap.dedent(body)], cwd=root,
+                                    env={**os.environ, "REPORT": str(report), "GITHUB_STEP_SUMMARY": str(root / "summary.md"),
+                                         "CANDIDATE_REF": "1" * 40, "QUALIFICATION_REQUESTED": str(qualification).lower()},
+                                    text=True, capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual((root / "summary.md").read_text().strip().replace("\n\n", "\n"), result.stdout.strip())
+            return result.stdout
+
+    def test_advisory_guard_summary_does_not_claim_qualification_or_block_scope(self):
+        rendered = self.render_summary({"status": "no_confirmed_regression", "performance_status": "no_confirmed_regression",
+                                        "limited_assurance": True, "qualification_status": "not_evaluated_by_fast_guard",
+                                        "suite_alpha": 0.01, "workflow_job_count": 1, "hypothesis_count": 23,
+                                        "assurance_limitations": ["Missing source-bound coverage"], "wall_seconds": 103.4,
+                                        "guard_decision": {"blocking_estimand": "median of paired full-target candidate/reference runtime ratios",
+                                                           "blocking_test": "exact one-sided binomial sign test",
+                                                           "statistical_assumptions": ["independent confirmation signs"]}})
+        self.assertIn("Limited assurance: True", rendered)
+        self.assertIn("false-block budget: 0.01; jobs: 1; frozen hypotheses: 23", rendered)
+        self.assertIn("Assurance limitation (advisory): Missing source-bound coverage", rendered)
+        self.assertIn("does not establish complete qualification", rendered)
+        self.assertIn("Blocking estimand: median of paired full-target candidate/reference runtime ratios", rendered)
+        self.assertIn("exact one-sided binomial sign test", rendered)
+        self.assertIn("Statistical assumption: independent confirmation signs", rendered)
+        self.assertIn("conditional on independent confirmation pairs", rendered)
+        self.assertNotIn("Blocking scope:", rendered)
+        self.assertNotIn("Unresolved combined scope blocks", rendered)
+
+    def test_guard_failures_and_explicit_qualification_failures_remain_visible(self):
+        rendered = self.render_summary({"status": "blocked", "confirmed_regressions": ["native-vlf slowdown"],
+                                        "functional_failures": ["invalid source identity"]})
+        self.assertIn("Confirmed regression: native-vlf slowdown", rendered)
+        self.assertIn("Functional/integrity failure: invalid source identity", rendered)
+        rendered = self.render_summary({"status": "incomplete", "complete_scope_qualification": False,
+                                        "scope_blockers": ["historical model missing"],
+                                        "outcomes": {"coverage": {"status": "incomplete"}},
+                                        "extension_outcomes": {"resource": {"status": "failed", "gap_ids": []}}}, qualification=True)
+        self.assertIn("Blocking scope: historical model missing", rendered)
+        self.assertIn("coverage: incomplete", rendered)
+        self.assertIn("Extension resource: failed", rendered)
+        self.assertIn("Unresolved combined scope blocks explicit qualification", rendered)
+        self.assertNotIn("A green CI guard", rendered)
 
     def test_embedded_python_blocks_compile_without_running_workloads(self):
         blocks = re.findall(r"(?ms)^ {10}python(?:3)? - <<'([A-Z]+)'\n(.*?)^ {10}\1\s*$", self.performance)

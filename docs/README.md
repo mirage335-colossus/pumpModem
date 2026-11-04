@@ -8,16 +8,17 @@ assumptions and limits before applying their findings.
 the [development workflow](triad-development-workflow.md). It maps the efficient
 simulation tools, evidence-backed receiver choices, small runnable diagnostics,
 workspace reuse and proportionate testing before larger sampled campaigns.
-Use the [isolated receiver performance suite](triad-performance.md) for bounded
-hardware calibration, same-host source comparisons and source-bound full-workload
-runtime estimates, with explicit qualification and unresolved-result reporting.
+Use the [isolated receiver performance suite](triad-performance.md) for fast
+CPU CI guards, GPU development checks and separate source-bound prediction
+qualification. `triad_perf_guard.py` screens broadly and confirms suspected
+slowdowns; noisy or incomplete timing does not by itself block CI. A green guard
+means no confirmed regression, not full qualification. `triad_perf_complete.py`
+retains the stronger mean-runtime, historical forecast and sustained checks.
 The [coverage and prediction matrix](triad-performance-matrix.md) maps maintained
-paths to cheap checks, full workloads, anchors and unresolved regimes.
-`triad_perf_complete.py` is the combined routine entry point; qualify only the
-affected cases explicitly. It separates native simulations, resident FFT,
-sampled state/phase/particle workloads and lightweight execution witnesses.
-Its CI checks do not replay historical sensitivity campaigns
-or qualify ordinary Robust performance.
+paths to cheap checks, full workloads, anchors and unresolved regimes. Neither
+entry point replays historical sensitivity campaigns by default or qualifies
+ordinary Robust performance. The [guard validation record](validation-data/triad-v3/2026-11-04-performance-guard/README.md)
+keeps statistical controls and remaining operational limits explicit.
 The current [broad configuration study](validation-data/triad-v3/2026-11-03-broad/README.md)
 separates unsupported configurations, capture limits, incomplete acquisition and
 receiver failures. It also records corrected high-C/N₀ numerical failures;

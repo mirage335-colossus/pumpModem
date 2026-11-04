@@ -8,10 +8,10 @@ on:
         type: string
         required: true
       performance_budget_seconds:
-        description: 'Shared routine wall budget; 1500-second engineering target, maximum 1800'
+        description: 'Fast CI guard wall budget; 300-second target, maximum 1800'
         type: number
         required: false
-        default: 1500
+        default: 300
   workflow_dispatch:
     inputs:
       candidate_ref:
@@ -20,17 +20,17 @@ on:
         required: false
         default: ''
       performance_budget_seconds:
-        description: 'Shared routine wall budget; 1500-second target, maximum 1800, no automatic qualification'
+        description: 'Fast CI guard wall budget; 300-second target, maximum 1800, no automatic qualification'
         type: number
         required: false
-        default: 1500
+        default: 300
       qualify:
-        description: 'Explicitly produce source/hardware-bound qualification artifacts before routine checks (default branch only)'
+        description: 'Explicit comprehensive qualification with source/hardware-bound artifacts (default branch only)'
         type: boolean
         required: false
         default: false
       qualification_budget_seconds:
-        description: 'Separate one-time qualification budget, maximum 3600 seconds'
+        description: 'Budget per explicit stage: bootstrap and complete each receive this duration, maximum 3600 seconds each'
         type: number
         required: false
         default: 1800
@@ -42,8 +42,9 @@ jobs:
   performance:
     name: CPU receiver performance regression
     runs-on: ubuntu-24.04
-    # Confidence-driven stopping with bounded install/build overhead.
-    timeout-minutes: ${{ inputs.qualify && 105 || 50 }}
+    # Fast reject-only guard normally; comprehensive qualification is explicit.
+    # Install/build overhead is outside the measured performance budget.
+    timeout-minutes: ${{ inputs.qualify && 145 || 50 }}
     env:
       BASELINE_REF: 242ea15fa032ee117b9113a7f3cd07cc6e9f0254
       CANDIDATE_REF: ${{ inputs.candidate_ref || github.sha }}
@@ -269,6 +270,7 @@ jobs:
           printf 'candidate=%s\nreference=%s\n' "$candidate_sha" "$reference_sha" >> "$GITHUB_OUTPUT"
 
       - name: Restore receiver performance anchors
+        if: ${{ inputs.qualify == true }}
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # actions/cache v6.1.0
         with:
           path: build/triad-performance/anchors
@@ -285,7 +287,8 @@ jobs:
             triad-fixtures-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.binary-key.outputs.candidate }}-${{ hashFiles('tools/triad_perf_cases.py', 'tools/triad-performance-*.json', 'candidate/tools/triad-long.cpp', 'candidate/src/triad_modem_v3.cpp', 'candidate/src/triad_simulation_stream.cpp', 'candidate/src/triad_gaussian_fading.hpp', 'candidate/src/channel_perturbation.hpp', 'candidate/src/channel_spread.hpp', 'candidate/include/datapump/triad_modem_v3.hpp', 'candidate/include/datapump/pattern_pulse.hpp', 'candidate/include/datapump/clock_sync.hpp') }}-
 
       # These are independently qualified artifacts. A cache miss is reported
-      # as unqualified; a normal CI run must not launch historical qualification.
+      # as advisory limited coverage by the guard; normal CI never collects it.
+      # Explicit qualification still requires applicable instrumented evidence.
       - name: Restore source-bound instrumented coverage receipts
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # actions/cache v6.1.0
         with:
@@ -296,9 +299,11 @@ jobs:
           restore-keys: |
             triad-coverage-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-profile.outputs.key }}-${{ steps.binary-key.outputs.candidate }}-
 
-      # Restore only independently produced proofs. The routine validators
+      # Restore only independently produced proofs for explicit qualification.
+      # The qualification validators
       # recheck sources, hardware, work and raw evidence; no cache hit is a pass.
       - name: Restore qualified lifecycle campaign anchors
+        if: ${{ inputs.qualify == true }}
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # actions/cache v6.1.0
         with:
           path: build/triad-performance/lifecycle-anchors
@@ -306,6 +311,8 @@ jobs:
           restore-keys: |
             triad-lifecycle-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-profile.outputs.key }}-${{ steps.binary-key.outputs.candidate }}-${{ steps.binary-key.outputs.reference }}-
 
+      # One discovery includes the new test_triad_perf_guard*.py policy/adapter
+      # checks as well as historical harness contracts; do not run them twice.
       - name: Check native performance trace and harness contracts
         env:
           TRIAD_LONG_BINARY: ${{ github.workspace }}/candidate/build/dev-cli/triad_long
@@ -372,9 +379,9 @@ jobs:
           path: build/triad-performance/lifecycle-anchors
           key: triad-lifecycle-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-profile.outputs.key }}-${{ steps.binary-key.outputs.candidate }}-${{ steps.binary-key.outputs.reference }}-${{ hashFiles('tools/triad_perf_lifecycle.py', 'tools/triad-performance-lifecycle.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
 
-      - name: Compare complete isolated workload scope with the fixed baseline
-        id: combined-routine
-        if: ${{ !cancelled() && (success() || steps.qualification.outcome == 'failure') }}
+      - name: Guard isolated receiver performance against confirmed large slowdowns
+        id: performance-guard
+        if: ${{ inputs.qualify != true }}
         shell: bash
         run: |
           set -euo pipefail
@@ -390,8 +397,46 @@ jobs:
           if [[ -f build/triad-performance/coverage/python.json ]]; then
             coverage_args+=(--python-coverage build/triad-performance/coverage/python.json)
           fi
-          # The legacy child retains five-second hardware arithmetic probes.
-          # Cold/inventory/model gaps remain blocking; this is not certification.
+          # Five-second hardware arithmetic probes are advisory. The guard uses
+          # fresh confirmation pairs and one workflow-wide false-block budget.
+          # Missing anchors, model uncertainty and exhausted timing budgets do
+          # not fail CI; correctness, integrity and confirmed regressions do.
+          python tools/triad_perf_guard.py \
+            --profile ci --suite-alpha 0.01 --workflow-job-count 1 \
+            --candidate-root candidate --reference-root reference \
+            --binary candidate/build/dev-cli/triad_long \
+            --reference-binary reference/build/dev-cli/triad_long \
+            --fixture-cache build/triad-performance/triad-performance-fixtures \
+            --device cpu --precision fp32 --threads 2 --native-threads 1 \
+            --budget-seconds "$PERFORMANCE_BUDGET_SECONDS" \
+            --functional-defaults \
+            --planner-binary candidate/build/dev-cli/triad_planner_perf \
+            --planner-reference-binary reference/build/dev-cli/triad_planner_perf \
+            --planner-bounds-workspace docs/validation-data/triad-v3/2026-11-03-performance-complete/controls/actual-delay-001/sampled-stats \
+            --hardware-seconds 5 \
+            "${coverage_args[@]}" "${hardware_args[@]}" \
+            --output build/triad-performance/guard 2>&1 | tee build/triad-performance/guard.log
+
+      - name: Compare complete isolated workload scope with the fixed baseline
+        id: combined-routine
+        if: ${{ inputs.qualify == true && !cancelled() && (success() || steps.qualification.outcome == 'failure') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/triad-performance
+          hardware_args=()
+          if [[ -f build/triad-performance/hardware-reference.json ]]; then
+            hardware_args=(--hardware-baseline build/triad-performance/hardware-reference.json)
+          fi
+          coverage_args=()
+          if [[ -f build/triad-performance/coverage/native.json ]]; then
+            coverage_args+=(--native-coverage build/triad-performance/coverage/native.json)
+          fi
+          if [[ -f build/triad-performance/coverage/python.json ]]; then
+            coverage_args+=(--python-coverage build/triad-performance/coverage/python.json)
+          fi
+          # The explicit qualification child retains five-second hardware arithmetic probes.
+          # Cold/inventory/model gaps remain blocking here; this is not certification.
           # Resource regimes use full direct work; Gaussian bounds reuse the
           # tracked compact fixture. Neither route requires forecast qualification.
           python tools/triad_perf_complete.py \
@@ -400,9 +445,9 @@ jobs:
             --reference-binary reference/build/dev-cli/triad_long \
             --reference-root reference \
             --device cpu \
-            --budget-seconds "$PERFORMANCE_BUDGET_SECONDS" \
+            --budget-seconds "$QUALIFICATION_BUDGET_SECONDS" \
             --stopping-rule decision \
-            --regression-profile ci \
+            --regression-profile normal \
             --threads 2 \
             --functional-defaults \
             --planner-binary candidate/build/dev-cli/triad_planner_perf \
@@ -437,7 +482,8 @@ jobs:
           from pathlib import Path
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               output.write('ready=false\n')
-          report = Path('build/triad-performance/complete/native-fft.json')
+          report = Path('build/triad-performance/complete/native-fft.json' if os.environ['QUALIFICATION_REQUESTED'] == 'true'
+                        else 'build/triad-performance/guard/summary.json')
           if not report.is_file():
               print('No independently complete hardware profile was produced; nothing to cache.')
               raise SystemExit(0)
@@ -503,7 +549,7 @@ jobs:
           PYFIXTURES
 
       # Only identity-validated ancillary inputs from trusted runs are cached.
-      # Pull requests can restore but never promote; receiver gaps remain blocking.
+      # Pull requests can restore but never promote; inputs do not certify receivers.
       - name: Save validated sampled fixtures from a trusted default-branch run
         if: ${{ always() && !cancelled() && steps.fixture-cache-ready.outputs.ready == 'true' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # actions/cache v6.1.0
@@ -514,35 +560,50 @@ jobs:
       - name: Summarize the result
         if: always()
         env:
-          REPORT: build/triad-performance/complete/summary.json
+          REPORT: ${{ inputs.qualify && 'build/triad-performance/complete/summary.json' || 'build/triad-performance/guard/summary.json' }}
         run: |
-          python - <<'PY'
+          python - <<'PYSUMMARY'
           import json, os
           from pathlib import Path
           report = Path(os.environ['REPORT'])
+          qualification_requested = os.environ['QUALIFICATION_REQUESTED'] == 'true'
+          lines = [f"Candidate source: {os.environ['CANDIDATE_REF']}"]
           if not report.is_file():
-              lines = ['Combined performance report was not produced; setup/timeout remains unresolved.']
+              lines.append('Performance report was not produced; setup/timeout remains unresolved.')
           else:
               value = json.loads(report.read_text())
-              lines = [f"Triad performance status: {value.get('status')}; complete scope qualification: {value.get('complete_scope_qualification')}",
-                       f"Candidate source: {os.environ['CANDIDATE_REF']}",
-                       f"Requested regression profile: {value.get('regression_profile')}; core decision profile active: {value.get('core_decision_profile_active')}; routine target: {value.get('routine_budget_target_seconds')} s",
-                       f"Warm target decisions complete: {value.get('warm_target_decisions_complete')}; elapsed: {value.get('wall_seconds')} s; budget: {value.get('budget_seconds')} s"]
-              lines.append(f"Maintained workload scope complete: {value.get('maintained_workload_scope_complete')}; release review requirements: {value.get('release_review_requirements', [])}")
-              lines += [f"{name}: {row.get('status')}" for name, row in value.get('outcomes', {}).items()]
-              lines += [f"Extension {name}: {row.get('status')}; validated gap IDs: {row.get('gap_ids', [])}" for name, row in value.get('extension_outcomes', {}).items()]
-              lines += [f"Blocking scope: {reason}" for reason in value.get('scope_blockers', [])]
+              if qualification_requested:
+                  lines += [f"Explicit qualification status: {value.get('status')}; complete scope qualification: {value.get('complete_scope_qualification')}",
+                            f"Requested regression profile: {value.get('regression_profile')}; core decision profile active: {value.get('core_decision_profile_active')}",
+                            f"Warm target decisions complete: {value.get('warm_target_decisions_complete')}; elapsed: {value.get('wall_seconds')} s; budget: {value.get('budget_seconds')} s",
+                            f"Maintained workload scope complete: {value.get('maintained_workload_scope_complete')}; release review requirements: {value.get('release_review_requirements', [])}"]
+                  lines += [f"{name}: {row.get('status')}" for name, row in value.get('outcomes', {}).items()]
+                  lines += [f"Extension {name}: {row.get('status')}; validated gap IDs: {row.get('gap_ids', [])}" for name, row in value.get('extension_outcomes', {}).items()]
+                  lines += [f"Blocking scope: {reason}" for reason in value.get('scope_blockers', [])]
+              else:
+                  lines += [f"Fast CI guard status: {value.get('status')}; performance decision: {value.get('performance_status')}; elapsed: {value.get('wall_seconds')} s",
+                            f"Limited assurance: {value.get('limited_assurance')}; qualification: {value.get('qualification_status')}",
+                            f"Nominal workflow performance false-block budget: {value.get('suite_alpha')}; jobs: {value.get('workflow_job_count')}; frozen hypotheses: {value.get('hypothesis_count')}"]
+                  decision = value.get('guard_decision') or {}
+                  lines.append(f"Blocking estimand: {decision.get('blocking_estimand', 'median paired full-runtime ratio')}; test: {decision.get('blocking_test', 'not evaluated')}")
+                  lines += [f"Statistical assumption: {assumption}" for assumption in decision.get('statistical_assumptions', [])]
+                  lines += [f"Confirmed regression: {reason}" for reason in value.get('confirmed_regressions', [])]
+                  lines += [f"Functional/integrity failure: {reason}" for reason in value.get('functional_failures', [])]
+                  lines += [f"Assurance limitation (advisory): {reason}" for reason in value.get('assurance_limitations', [])]
               lines += [f"Failure: {reason}" for reason in value.get('errors', [])]
           bootstrap = Path('build/triad-performance/bootstrap/summary.json')
           if bootstrap.is_file():
               qualification = json.loads(bootstrap.read_text())
               lines.append(f"Qualification artifacts: {qualification.get('status')}; independently cacheable: {qualification.get('cache_ready')}; separate qualification elapsed: {qualification.get('wall_seconds')} s")
               lines += [f"Qualification issue: {reason}" for reason in qualification.get('errors', [])]
-          lines.append('Unresolved combined scope blocks this CI/release gate. Cached hardware/fixtures do not certify receiver performance.')
+          if qualification_requested:
+              lines.append('Unresolved combined scope blocks explicit qualification. Cached hardware/fixtures do not certify receiver performance.')
+          else:
+              lines.append('A green CI guard means no confirmed regression; it does not establish complete qualification, absence of a slowdown, or release certification. The nominal statistical budget concerns the median paired full-runtime ratio and is conditional on independent confirmation pairs and the declared test assumptions; it is not a universal machine guarantee and does not cover deterministic test or infrastructure failures.')
           print('\n'.join(lines))
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
               summary.write('\n\n' + '\n\n'.join(lines) + '\n')
-          PY
+          PYSUMMARY
 
       - name: Retain report and process log, including failed attempts
         if: always()

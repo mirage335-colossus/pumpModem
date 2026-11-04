@@ -153,21 +153,33 @@ energy and the complete attempted denominator. Keep actual GPU throughput
 separate from GPU availability or theoretical operation counts.
 
 For performance work, use the [maintained coverage matrix](triad-performance-matrix.md)
-to select cheap functional checks and the [routine performance aggregator](triad-performance.md#run-it).
-Reuse applicable full-workload anchors; qualify only affected cases with an
-explicit budget. Full simulation, resident receiver, startup and sustained
-throughput are different timing targets. Missing coverage or an unqualified
-prediction stays visible even when functional checks pass. Do not repeat the
-historical sensitivity campaigns as routine performance tests.
-Routine sampling defaults to a per-test one-sided 85% decision that rules out
-more than 30% slowdown. The explicit CI profile uses 70% confidence at a 70%
-slowdown threshold; both retain 5% false-regression error. Runtime interval
-width is diagnostic. The routine target is 25 minutes. Stop when that
-decision and the applicable model checks resolve. Preserve the original
-qualification evidence instead of rerunning it to satisfy a diagnostic width.
-The [current measured routine](validation-data/triad-v3/2026-11-03-performance-decision/README.md)
-took 12 minutes 21 seconds for all 23 CPU gates; the remaining scope gaps are
-listed separately.
+to select cheap functional checks and the
+[fast guard commands](triad-performance.md#fast-guard-commands-and-decision-contract).
+Normal CPU CI uses `triad_perf_guard.py --profile ci`: broad full-workload screens
+followed by fresh confirmation only for suspects. Its exact binomial decision
+checks median paired-runtime ratios above 1.70, with a 1% workflow-wide
+false-rejection budget under the declared independent-pair assumptions. It does
+not establish a mean-runtime confidence bound or prove that no slowdown occurred.
+Use `--profile gpu-dev --device cuda` for the applicable GPU development paths,
+a 1.30 ratio threshold and a 5% workflow budget. Default work budgets are 300
+seconds and 600 seconds respectively; omitted or unfinished work stays visible.
+Even a severe slowdown can remain unconfirmed when the fresh full confirmation
+cost exceeds the remaining budget; choose `--budget-seconds 1500` when warranted.
+Timing uncertainty and hardware warnings alone do not make these guards fail;
+correctness, source/work integrity and actual execution failures remain blocking.
+
+`triad_perf_complete.py` and the focused adapters retain stronger prediction,
+mean-runtime and full-scope qualification checks. Reuse applicable full-workload
+anchors and qualify only affected relationships with an explicit budget. Full
+simulation, resident receiver, startup and sustained throughput are different
+timing targets. Their qualification-oriented engineering target remains 25
+minutes. The [historical decision run](validation-data/triad-v3/2026-11-03-performance-decision/README.md)
+took 12 minutes 21 seconds for 23 CPU gates; that is not a measurement of the new
+guard or a claim that broader qualification completed. Preserve original
+qualification evidence and unresolved scope. Do not rerun historical sensitivity
+campaigns or unaffected qualification merely to obtain a narrower timing interval.
+The [guard validation record](validation-data/triad-v3/2026-11-04-performance-guard/README.md) retains both
+successful controls and the serious serial-dependence limitation.
 
 **Selective-model version warning:** the detailed 2026-11-02 selective
 campaign used `legacy-allpass-v1`. Its receiver results remain valid for that

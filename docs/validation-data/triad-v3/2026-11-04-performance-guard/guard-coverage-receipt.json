@@ -1,0 +1,34 @@
+{
+  "schema": "triad-guard-source-coverage-v1",
+  "scope": "83 focused unit tests plus one instrumented real native-null CLI; separate from uninstrumented performance evidence; not complete path coverage",
+  "totals": {
+    "covered_lines": 1407,
+    "num_statements": 1662,
+    "percent_covered": 81.5180102915952,
+    "percent_covered_display": "82",
+    "missing_lines": 255,
+    "excluded_lines": 0,
+    "percent_statements_covered": 84.65703971119133,
+    "percent_statements_covered_display": "85",
+    "num_branches": 670,
+    "num_partial_branches": 118,
+    "covered_branches": 494,
+    "missing_branches": 176,
+    "percent_branches_covered": 73.73134328358209,
+    "percent_branches_covered_display": "74"
+  },
+  "source_sha256": {
+    "tools/triad_perf_guard.py": "abf9b9e48733dc4493e98f2528827f7bf865a38766370c57f5824060db2c3241",
+    "tools/triad_perf_guard_controls.py": "6b1c12a01452d98315593c05f4f88b9a82a431c1bd24ae687b85247204657079",
+    "tools/triad_perf_guard_extras.py": "0504ce41cb55b043f81d18c0edb51bfcb274460c4bb6a837f3a173979b13bc8f",
+    "tools/triad_perf_guard_families.py": "b4b656f3750468c4e632d9146c3a8f6dc5b82c11120c2cf527e34288c314f69d",
+    "tools/triad_perf_guard_native_fft.py": "7140415167ed2b813e9ea0e41705f5e68bd262cde9106ab092470ef2e2d31ec8",
+    "tools/triad_perf_guard_policy.py": "156a65af2b92c2b6a0f17da7b54f99a5378a13a5a6c26b413693ddb551ffa84b"
+  },
+  "report_sha256": "f35f07dd41dc52b13e4edd6ffb224c8a930cd3d3a72274af83b275ad72d577c0",
+  "reproduction": [
+    "COVERAGE_FILE=guard-coverage-data python -m coverage run --branch --include=\"*/tools/triad_perf_guard*.py\" -m unittest discover -s tests -p \"test_triad_perf_guard*.py\"",
+    "COVERAGE_FILE=guard-coverage-data python -m coverage run --append --branch --include=\"*/tools/triad_perf_guard*.py\" tools/triad_perf_guard.py --profile ci --device cpu --candidate-root . --reference-root REFERENCE_SOURCE --binary CANDIDATE_BINARY --reference-binary REFERENCE_BINARY --case native-null --skip-hardware-probes --threads 2 --native-threads 1 --budget-seconds 30 --output NEW_OUTPUT_DIRECTORY",
+    "COVERAGE_FILE=guard-coverage-data python -m coverage json -o guard-coverage.json"
+  ]
+}

@@ -1,58 +1,160 @@
 # Isolated three-carrier performance regression
 
 Start with the [maintained coverage and prediction matrix](triad-performance-matrix.md).
-It distinguishes implemented adapters, measured functional paths, qualified
-forecasts and unresolved regimes. The routine aggregator is
-[`triad_perf_complete.py`](../tools/triad_perf_complete.py); the older runner
-below remains its native/FFT component. Neither a passing component nor a green
-CI status certifies the whole matrix. Ordinary Robust integration is excluded.
+It separates functional coverage, complete workload timings, validated forecasts
+and unresolved regimes. Ordinary Robust integration is excluded.
+
+Use the appropriate entry point; a green guard is not full qualification:
+
+| Purpose | Entry point | Decision and cost policy |
+| --- | --- | --- |
+| Routine CPU CI | [`triad_perf_guard.py --profile ci`](../tools/triad_perf_guard.py) | Broad screening; fresh confirmation of suspected slowdowns beyond 1.70×; default 300-second budget. |
+| Development on available GPUs | `triad_perf_guard.py --profile gpu-dev --device cuda` | The applicable GPU families, a 1.30× threshold, and a default 600-second budget. |
+| Prediction and complete-scope qualification | [`triad_perf_complete.py`](../tools/triad_perf_complete.py) and focused adapters below | Retains historical forecast validation, mean-runtime decisions, cold/sustained checks and explicit unresolved obligations. The engineering target remains 25 minutes; focused qualification can take longer. |
+
+The fast guard can finish with **no confirmed performance regression and limited
+assurance**. This accepts a greater chance of missing a regression to avoid
+frequent false CI blocks. It never asserts that all runtimes are acceptable,
+that an abbreviated forecast qualified, or that release certification completed.
+Missing models or hardware, engineering warnings, insufficient timing evidence
+and a spent work budget remain visible limitations. Actual correctness,
+source/input integrity, work-count or execution failures remain blocking.
+
+## Fast guard commands and decision contract
+
+Reuse compatible candidate/reference builds, sampled fixtures and coverage
+receipts. Replace uppercase paths with existing artifacts; use a new output
+folder for each run:
+
+```sh
+python3 tools/triad_perf_guard.py --profile ci --device cpu \
+  --candidate-root . --reference-root REFERENCE_SOURCE \
+  --binary build/dev-cli/triad_long --reference-binary REFERENCE_BINARY \
+  --planner-binary build/dev-cli/triad_planner_perf \
+  --planner-reference-binary REFERENCE_PLANNER_BINARY \
+  --planner-bounds-workspace RETAINED_GAUSSIAN_WORKSPACE \
+  --fixture-cache FIXTURE_CACHE --functional-defaults \
+  --native-coverage NATIVE_COVERAGE_JSON --python-coverage PYTHON_COVERAGE_JSON \
+  --hardware-baseline HARDWARE_PROFILE_JSON \
+  --threads 2 --native-threads 1 --budget-seconds 300 \
+  --output local-evidence/triad-performance-guard/cpu-001
+```
+
+For GPU development, use the same command with `--profile gpu-dev --device cuda
+--precision fp32 --budget-seconds 600` and a distinct output. CUDA FP32 is the
+full GPU-family profile; the explicit tensor family does not support FP64.
+`--case HYPOTHESIS_ID` selects a diagnostic subset, which cannot claim complete
+screening. Omitted optional planner, bounds, hardware or coverage inputs are
+reported as unavailable rather than silently counted as tested. Measure the
+external command wall time when assessing end-to-end latency; the internal
+budget does not include dependency installation/build or the final report write.
+
+Both guards screen complete named workload geometries, sharing exact sampled
+fixture generation and persistent worker setup where valid. Native simulations
+include generation, channel, receiver and CLI completion. FFT screening includes
+resident preparation and the full search bank; fixture generation and worker
+startup are separate recorded costs. Sampled-family confirmation regenerates its
+capture and measures the complete receiver pipeline. Planner/resource targets
+use full process timing. These direct comparisons introduce no new extrapolation
+and do not require requalifying unaffected historical models. Cold compilation,
+minute-long sustained checks and prediction qualification are separate tasks.
+
+A screen nominates a suspect; it cannot block performance. Fresh direct full-target
+pairs then test whether `P(candidate/reference > threshold) > 0.5`, treating a
+tie as nonpositive. This is a **median paired-runtime-ratio** criterion, not an
+arithmetic-mean or geometric-mean runtime bound, nor a ratio of marginal
+medians. Arithmetic means remain
+reported diagnostics; the existing mean-runtime forecasts and qualification
+procedures below keep their original estimands and rules.
+
+The [exact sign/binomial test](https://www.itl.nist.gov/div898/software/dataplot/refman1/auxillar/signtest.htm)
+uses conservative nonpositive ties instead of discarding them. A
+[Bonferroni allocation](https://www.itl.nist.gov/div898/handbook/prc/section4/prc473.htm)
+spends a single workflow budget across the
+frozen hypotheses, performance jobs and confirmation looks: each look receives
+`alpha_suite / (hypotheses × jobs × looks)`. CI defaults to 1%;
+GPU development defaults to 5%. This controls the chance of any statistical
+performance rejection under the declared null and independent confirmation-pair
+assumptions; dependence between different workload cases does not require another
+assumption. It is a per-workflow allowance, not a lifetime guarantee across commits.
+Normality of runtimes is not required. Randomized execution order and fresh
+inputs help reduce systematic pairing effects but do not prove independence or
+remove serial thermal/scheduling regimes.
+
+CI normally has one look at 12 fresh pairs; GPU development normally has looks
+at 12 and 20. Larger job/hypothesis families or smaller error budgets can increase
+the frozen sample counts so an exact rejection is attainable. Confirmation can
+stop early when no remaining permitted look could reject even if every remaining
+pair were positive. This is a nonblocking futility stop, not a favorable timing
+result. No alpha is reclaimed, no sample is discarded, and no retry seeks a pass.
+
+The 300/600-second defaults are effort budgets, not detection-power guarantees.
+An expensive family can nominate even a severe slowdown without leaving enough
+time for a complete fresh confirmation look; that remains an unconfirmed
+nomination with limited assurance. The guard does not infer a rejection from
+censored timeouts. Use an explicit larger budget, such as
+`--budget-seconds 1500`, when that confirmation cost is justified.
+
+The [decision controls](../tools/triad_perf_guard_controls.py) include asymmetric,
+bimodal, heavy-tailed and serial regimes. The rejected five-pair Student-t
+proposal could falsely block most workflows in a symmetric bimodal mean-null
+control; a nominal small alpha did not repair invalid distributional assumptions.
+The exact sign test avoids that normality failure. A skewed mean-null law can
+still be a true median regression: report the estimands separately. Serial
+pair dependence remains an explicit limitation, not a proven future error bound.
+
+Five-second arithmetic and tensor probes remain separate diagnostics, with
+first-use costs and unavailable formats reported. A one-block hardware warning
+cannot independently make the guard red. It can reveal a shared environmental
+slowdown that cancels in candidate/reference ratios. Do not infer CUDA kernel
+coverage, FP32 correctness or instruction utilization from a nominal dtype alone;
+read the [GPU precision guide](gpu-precision-controls.md) before changing arithmetic.
+
+The [guard validation record](validation-data/triad-v3/2026-11-04-performance-guard/README.md)
+records final CPU/GPU command walls of **291.060/236.635 seconds**, all 33/36
+workload screens and 18 functional receipts per run, with no confirmed regression
+or functional failure. These exclude separate harness tests and dependency/build
+setup; the hosted workflow has not run. Both guards retain limited assurance.
+The record also preserves initial integration failures, actual slowdown controls,
+partial new-guard coverage and the severe serial-dependence false-block control.
+The nominal 1%/5% budgets are not unconditional hardware guarantees.
+
+## Preserved qualification evidence
+
 The [earlier complete-scope record](validation-data/triad-v3/2026-11-03-performance-complete/README.md)
-preserves the routine run, prediction outcomes, and coverage limits. The
+preserves the routine run, prediction outcomes and coverage limits. The
 [broader qualification record](validation-data/triad-v3/2026-11-03-performance-broader/README.md)
-adds Blackwell GPU lifecycle qualification, planner/statistics direct timing,
-and direct resource-boundary timing. The current CPU/GPU reports remain incomplete. Independent review accepted the CPU raw-only lifecycle classification, but its stability/environment hold remains unresolved. Focused broad-FFT checks are conditional single endpoints; the engineering model has no future-coverage guarantee, a limitation rather than an added release-blocking gap. The normal-profile GPU FHSS decision is inconclusive; hosted CI has not run.
+adds Blackwell GPU lifecycle qualification, planner/statistics direct timing and
+direct resource-boundary timing. Those CPU/GPU reports remain incomplete; the
+new guard does not retrospectively change their exits or resolve their holds.
 
-Routine sampling targets the **regression decision**, not a runtime interval
-width. The normal profile spends a 15% one-sided pass-error budget per test
-across its fixed looks to rule out a slowdown greater than 30%. The explicit
-CI profile uses a 30% pass-error budget at a 70% slowdown threshold. Both retain
-a separate 5% false-regression budget. Qualification of abbreviated
-predictions retains its separate historical rules. A narrow timing interval
-cannot rescue an invalid prediction model. The
-[decision-policy acceptance record](validation-data/triad-v3/2026-11-03-performance-decision/README.md)
-records 23/23 supported CPU runtime gates in 12 minutes 21 seconds, versus
-about 50 minutes with width-driven stopping. The broader qualification gaps
-remain explicit; this is not complete release certification.
+The qualification-oriented runner's normal profile uses a 15% one-sided
+per-test pass-error budget to rule out a slowdown greater than 30%; its legacy
+`--regression-profile ci` uses 30% at 70% slowdown. Both retain a separate 5%
+per-test false-regression budget. These are **not** the fast guard's workflow
+policy and are no longer the normal hosted-CI entry point. The
+[decision-policy record](validation-data/triad-v3/2026-11-03-performance-decision/README.md)
+retains 23/23 supported CPU runtime gates in 12 minutes 21 seconds, versus about
+50 minutes with width-driven stopping, without claiming whole-scope certification.
 
-Use [`tools/triad-performance.py`](../tools/triad-performance.py) to measure the
-experimental three-carrier receiver without integrating it into ordinary
-Robust. Its evidence chain now covers complete native CLI simulations,
-full-geometry resident FFT acquisition, complete named sampled-family workload
-timings for off-line receiver paths, and a smaller Gaussian-window helper
-measurement. Native and FFT forecasts have separate identities, timing
-boundaries, anchors, and validation rules. A sampled-family run covers its
-declared workload and boundary; it is not exhaustive source-line coverage or a
-universal model.
-
-The suite does not qualify the ordinary Robust receiver, radio sensitivity,
-physical radios, unmeasured receiver families, or every numerical state. The
-Python-path adapters describe their implemented scope in the
-[computational-family manifest](../tools/triad-performance-paths.json); the
-[native scenario manifest](../tools/triad-performance-native-cases.json)
-declares the complete CLI simulation cases. Read the
-[triad development workflow](triad-development-workflow.md) for functional and
-sensitivity checks, and the [GPU precision guide](gpu-precision-controls.md)
-before changing arithmetic. Historical validation is context, not a substitute
-for evidence matching the source, build, workload, hardware, and target timing
-boundary.
+The native/FFT component is [`triad-performance.py`](../tools/triad-performance.py).
+Its evidence includes complete native CLI simulations, full-geometry resident
+FFT acquisition, named sampled-family workloads and a Gaussian-window helper.
+Each has its own timing boundary and qualification identity. A passing execution
+witness is neither source-line coverage nor a general duration predictor.
+The [computational-family manifest](../tools/triad-performance-paths.json),
+[native scenario manifest](../tools/triad-performance-native-cases.json) and
+[triad development workflow](triad-development-workflow.md) define their finite
+scope. Historical evidence is reusable only under its matching source, build,
+workload, arithmetic, hardware and timing-boundary contract.
 
 ## Current broader qualification state
 
-The normal routine policy uses a one-sided 85% per-test pass decision at a
-1.30 slowdown ratio. Explicit CI uses 70% at 1.70. Both keep a separate 5%
+The qualification-oriented normal policy uses a one-sided 85% per-test pass
+decision at a 1.30 slowdown ratio. Its legacy CI profile uses 70% at 1.70. Both keep a separate 5%
 false-regression allowance and fixed-look spending. These decisions are separate
 from the 5% timing-width diagnostic and from historical prediction qualification.
-The engineering budget for a routine is 25 minutes.
+The engineering target for a complete qualification-oriented routine is 25 minutes.
 
 On the RTX PRO 6000 Blackwell Workstation (96 GB), lifecycle002 conditionally
 qualified its frozen mixed-campaign forecast and scoped process-cold / private
@@ -79,7 +181,7 @@ remains inconclusive and is not promoted by direct timing. These results close
 named direct timing obligations, not general duration, memory-tier, or scaling
 models. Current independent archive indexes are in the [broader record](validation-data/triad-v3/2026-11-03-performance-broader/README.md).
 
-Routine execution and qualification are separate. The latest CPU full routine
+The latest archived CPU qualification-oriented routine
 completed in 1684.791 s (28:05), 184.791 s above the 25-minute target. In
 that original run, CPU warm-target decisions passed except broad FFT historical-
 anchor applicability. Later focused CPU/GPU checks passed one endpoint each, but
@@ -93,7 +195,7 @@ three raw one-shot hardware screen warnings: ratios 1.356 (stream), 1.314
 (phase complex64) and 1.467 (phase complex128). These five-second screens are
 not statistically confirmed regressions.
 
-The latest RTX PRO 6000 Blackwell GPU routine completed in 1170.758 s (19:31).
+The latest archived RTX PRO 6000 Blackwell qualification-oriented GPU routine completed in 1170.758 s (19:31).
 All twelve sampled-family cases and configured extensions passed. The normal
 profile FHSS comparison interval [1.285225, 1.306855] crosses the 1.30 limit,
 so its normal decision is inconclusive; the derived CI-profile decision at 1.70
@@ -104,7 +206,7 @@ transfer checks without cold or mixed flags. It ran no receiver kernels and did
 not rerun or revise the original incomplete routine; details are in the
 [GPU routine archive](validation-data/triad-v3/2026-11-03-performance-broader/scientific-gpu-complete-002/README.md).
 
-For routine CPU checks, use paired/direct named family measurement, include
+For complete-scope CPU qualification checks, use paired/direct named family measurement, include
 planner and resource extensions, and do not automatically spend on the failed
 CPU forecast. GPU lifecycle reuse is enabled only for the matching Blackwell
 identity. The wrapper invocation
@@ -146,7 +248,7 @@ optional lifecycle directory is only an output-local anchor cache, not a
 qualified CPU forecast source. Do not substitute the H200
 staged anchor directory for a Blackwell lifecycle identity.
 
-## Run it
+## Focused prediction and qualification commands
 
 For the native/FFT core component, reuse source-matched historical anchors and
 compatible builds. This example does not include the planner, resource or
@@ -293,7 +395,9 @@ may take longer when needed to validate a relationship. Native build and Python
 dependency setup are outside the per-backend budget; fixture creation, hardware
 checks, native models, receiver measurements, witnesses and optional sustained
 checks are inside it. A process-group deadline covers blocked descendants.
-Incomplete or timed-out evidence never counts as a performance pass.
+Incomplete or timed-out evidence never counts as a qualification pass.
+The following options belong to the legacy native/FFT component and complete
+qualification route, not to `triad_perf_guard.py`:
 
 | Option | Meaning |
 | --- | --- |
@@ -302,7 +406,7 @@ Incomplete or timed-out evidence never counts as a performance pass.
 | `--profile sustain` | Extended native/FFT scenario set; defaults to one 60-second sustained check when eligible. |
 | `--stopping-rule decision` | Routine default: stop when the selected per-test slowdown decision resolves, with fixed-look error spending. Model applicability is still required. |
 | `--regression-profile normal` | Default: 15% erroneous-pass budget, 30% slowdown threshold; 5% false-regression budget. |
-| `--regression-profile ci` | Explicit hosted-CI choice: 30% erroneous-pass budget, 70% slowdown threshold; 5% false-regression budget. |
+| `--regression-profile ci` | Legacy qualification-oriented choice: 30% erroneous-pass budget, 70% slowdown threshold; 5% false-regression budget. |
 | `--regression-profile strict` | Prior policy: 5% erroneous-pass budget, 30% slowdown threshold; 5% false-regression budget. |
 | `--stopping-rule precision` | Explicit legacy measurement/qualification mode; continue toward the diagnostic width target. |
 | `--precision-target .05` | Diagnostic maximum relative half-width. Drives sampling only in precision mode; it is not the routine acceptance criterion. |
@@ -435,7 +539,7 @@ coverage for every numerical state nor a duration/throughput forecast for those
 algorithms. The native CLI adapter separately witnesses end-to-end channel,
 waveform, encryption, erasure, burst and finalization paths in its manifest.
 
-## Timing precision, model accuracy, and the regression gate
+## Qualification timing precision, model accuracy, and regression decisions
 
 Keep four uncertainties distinct: (1) uncertainty in the mean runtime; (2)
 variation in a future runtime; (3) error in the abbreviated-to-full prediction;
@@ -448,7 +552,7 @@ makes this distinction explicit. This motivates separating mean-model error
 from the individual-run scatter used by the sentinel; it does not prove
 stationarity or normality for a particular machine.
 
-Routine mode uses a **directional error probability per test**, not an interval-width
+The qualification-oriented runner uses a **directional error probability per test**, not an interval-width
 target. Normal uses an 85% one-sided pass procedure at a 1.30 ratio; CI uses
 a 70% procedure at 1.70; strict retains 95% at 1.30. At the predeclared cumulative
 looks 5, 9, 17 and 33, the paired upper slowdown bound spends its pass budget
@@ -523,7 +627,7 @@ an unconditional 95% bound on future prediction error. Missing coverage, numeric
 mismatch, changed geometry, invalid model, or timeout is a failure/unqualified
 result, never a successful performance pass. The suite stops after its maximum
 look instead of spending arbitrarily for a preferred interval. A separate
-**`severe_endpoint_prediction_mismatch`** blocks CI when a failed full endpoint
+**`severe_endpoint_prediction_mismatch`** blocks that qualification route when a failed full endpoint
 underpredicts runtime by more than 30% even after subtracting its frozen
 historical observation allowance and current timing uncertainty in log space.
 This is an engineering **calibration failure**, not proof of a regression in
@@ -591,7 +695,7 @@ budget allows. `reuse` abstains when no applicable proof exists. `qualify`
 explicitly runs fresh full holds. Keep the anchor directory across runs; changing
 the output filename does not require new calibration. Use `--validation-mode qualify --case free-crystal` (or another
 reported case ID) for affected-case qualification; a focused run is never a
-complete CI pass. CI restores anchor and
+complete qualification pass. Explicit qualification restores anchor and
 sampled-fixture caches before measurement, and only trusted default-branch runs
 save reusable caches. All restored records still pass normal identity/raw-proof
 validation. A hosted runner with different hardware/runtime can legitimately
@@ -664,33 +768,30 @@ actual run. Library controls have build/version-specific limits: [ATen dispatch]
 [oneDNN ISA control](https://uxlfoundation.github.io/oneDNN/v3.7/dev_guide_cpu_dispatcher_control.html),
 and [NumPy dispatch inspection](https://numpy.org/doc/2.3/reference/generated/numpy.lib.introspect.opt_func_info.html).
 
-## Routine CI, qualification, and transfer
+## CI, qualification, and transfer
 
-Normal CI runs the dedicated performance job unless `devfast` is explicitly
-selected; the job is separate from sanitizer/matrix repetitions. New direct
-release builds depend on the exact-source performance job. A noisy or
-unresolved component warning remains visible separately from a regression
-failure. The combined wrapper exits nonzero when finite complete-scope obligations
-are unresolved; component warnings cannot turn that result into a qualified
-release pass. Direct timing may satisfy a named workload obligation without
-qualifying an unused forecast. Green CI alone does not mean every model is validated or every
-requested interval is narrow. Existing
-ordinary-release certification remains separate. Source-release and existing
-APT repackaging routes that reuse older verified binaries have not measured the
-current triad study and report it as unevaluated.
+Normal CI runs `triad_perf_guard.py --profile ci` in the dedicated job unless
+`devfast` is explicitly selected; it is separate from sanitizer/matrix
+repetitions. New direct release builds depend on this exact-source guard. An
+inconclusive performance result or engineering warning does not block it;
+confirmed median slowdowns and actual correctness/integrity/execution failures
+do. The workflow declares one performance job; a future matrix must update the
+job count/index and retain a shared workflow error budget. A green guard leaves
+`complete_scope_qualification` false.
 
-The suite's routine role is to execute the declared code-path witnesses,
-qualify current numerical precision/score behavior, test duration/FFT work
-models against applicable historical proof and current full endpoint sentinels, measure all named performance families
-to an explicit precision or budget ceiling, and sample a longer sustained span
-when requested. The initial qualification campaign has a different purpose:
-run expensive complete-duration and full-bank anchors on relevant host classes,
-freeze forecasts before validation, and retain independent full-workload
-residuals that establish how much the abbreviation misses. Historical full tests
-can serve as anchors only if they preserve source/binary and harness hashes,
-configuration/seed, workload counters/geometry, timing boundary, selected
-precision and sufficiently comparable hardware. If that metadata is missing,
-label the run historical/contextual evidence; do not calibrate with it silently.
+Explicit trusted qualification retains bootstrap plus `triad_perf_complete.py`
+under the normal qualification profile. It still exits nonzero for unresolved
+finite complete-scope obligations. Direct timing can satisfy a named workload
+without qualifying an unused forecast. Existing ordinary-release certification
+remains separate; source-release and APT repackaging of older verified binaries
+do not newly measure the current triad study.
+
+Run focused qualification when changing a timing model, its computational regime
+or a relevant source/arithmetic/environment identity. Freeze forecasts before
+independent full workloads and retain residuals, counters, complete timing
+boundaries and raw measurements. Reuse an unchanged relation only when its
+applicability checks pass. Historical captures without timing provenance remain
+contextual evidence; a successful guard cannot supply missing predictive validity.
 
 No unmeasured architecture has a qualified runtime forecast. The current suite
 explicitly marks cross-architecture transfer unqualified; a GPU GEMM rate or
@@ -720,8 +821,8 @@ Performance Changes with Effect Size Confidence Intervals*](https://www.cs.kent.
 and their [*Rigorous Benchmarking in Reasonable Time*](https://kar.kent.ac.uk/33611/): distinguish repeated measurements within a process from independent execution/process effects and allocate replication where variance and cost justify it. [Lan and DeMets' alpha-spending method](https://doi.org/10.1093/biomet/70.3.659) is a principled alternative when a variable schedule of repeated looks is needed; this implementation instead uses a fixed look schedule with conservative multiplicity adjustment. [Howard et al.'s confidence sequences](https://doi.org/10.1214/20-AOS1991) provide anytime-valid alternatives under their stated sub-Gaussian, Bernstein, self-normalized or other conditions; the suite does not claim those assumptions for arbitrary machine timing.
 
 [Google Benchmark interleaving guidance](https://github.com/google/benchmark/blob/main/docs/random_interleaving.md)
-supports spreading paired measurements across changing conditions. The current
-alternating order is a bounded choice; it does not prove statistical independence
+supports spreading paired measurements across changing conditions. The guard freezes randomized pair order; historical adapters retain their
+recorded interleaving protocols. Neither proves statistical independence
 or remove thermal drift. [PyTorch's CUDA timing guidance](https://docs.pytorch.org/docs/stable/notes/cuda.html#asynchronous-execution)
 requires synchronization or device events for asynchronous work. Keep timing
 uncertainty, prediction residuals, future-run variation, hardware health and
