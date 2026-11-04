@@ -8,6 +8,10 @@ assumptions and limits before applying their findings.
 the [development workflow](triad-development-workflow.md). It maps the efficient
 simulation tools, evidence-backed receiver choices, small runnable diagnostics,
 workspace reuse and proportionate testing before larger sampled campaigns.
+Use the [isolated Live/Duplex cable suite](triad-live-duplex.md) to characterize
+the combined audio path and compare held-out waveforms with a frozen measured
+model. Its coverage grades distinguish complete physical patterns, actual-rate
+components, simulated-channel replay and unsupported or unidentified behavior.
 Use the [isolated receiver performance suite](triad-performance.md) for fast
 CPU CI guards, GPU development checks and separate source-bound prediction
 qualification. `triad_perf_guard.py` screens broadly and confirms suspected

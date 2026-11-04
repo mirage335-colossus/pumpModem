@@ -342,15 +342,20 @@ def main():
     near(path["outage_end_seconds"], 1000, "physical outage end")
     near(path["outage_gain"], .1, "physical outage attenuation")
     near(path["outage_ramp_seconds"], 60, "physical outage ramps")
-    gaussian = configure("--ray-gaussian-width-hz", ".001")
+    # At Fs=64, .001 Hz needs 203,721 history taps and is correctly outside
+    # the bounded sampled channel. Exercise metadata within the 8193-tap limit.
+    narrow_gaussian = invoke("--mode", "configure", *COMMON,
+                             "--ray-gaussian-width-hz", ".001", ok=False)
+    check("8193-tap" in narrow_gaussian.stderr, "Gaussian history preflight was lost")
+    gaussian = configure("--ray-gaussian-width-hz", ".05")
     gp = gaussian["path_evolution"]
     check(gp["active"], "Gaussian ray width did not activate physical path evolution")
     near(gp["ray_coherence_seconds"], 0, "Gaussian rays silently enabled OU")
-    near(gp["gaussian_doppler_width_hz"], .001, "Gaussian target width")
-    near(gp["gaussian_doppler_standard_deviation_hz"], .0005, "Gaussian width is not two sigma")
-    near(gp["gaussian_capture_total_allowance_hz"], .006, "Gaussian six-sigma capture edges")
+    near(gp["gaussian_doppler_width_hz"], .05, "Gaussian target width")
+    near(gp["gaussian_doppler_standard_deviation_hz"], .025, "Gaussian width is not two sigma")
+    near(gp["gaussian_capture_total_allowance_hz"], .3, "Gaussian six-sigma capture edges")
     near(gaussian["capture"]["deterministic_nyquist_margin_hz"],
-         c["capture"]["deterministic_nyquist_margin_hz"]-.006, "Gaussian capture allowance omitted or doubled")
+         c["capture"]["deterministic_nyquist_margin_hz"]-.3, "Gaussian capture allowance omitted or doubled")
     near(gaussian["spread_doppler_hz"], c["spread_doppler_hz"], "ray width changed independent Doppler centers")
     check("FIR" in gp["ray_model"] and "B=2*sigma" in gp["gaussian_target_correlation"],
           "Gaussian teacher conventions missing")

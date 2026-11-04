@@ -10,6 +10,11 @@ reception contracts are in the [v3 study](triad-v3.md); this page describes how
 to make the next bounded development decision without replaying old campaigns
 by default.
 
+For ADC/DAC cable comparisons, use the [Live/Duplex hierarchy](triad-live-duplex.md).
+It keeps public probe synchronization and measured audio noise separate from
+operational receiver acquisition/admission. Do not feed physical captures to a
+workspace that asserts a known ideal Gaussian simulation noise model.
+
 **For a large timing bank, start with the
 [sampled FFT acquisition study](validation-data/triad-v3/2026-11-03-fft-timing/README.md).**
 [`tools/triad_fft_acquire.py`](../tools/triad_fft_acquire.py) consumes one

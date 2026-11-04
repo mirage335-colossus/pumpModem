@@ -718,6 +718,17 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
   add_executable(triad_long EXCLUDE_FROM_ALL tools/triad-long.cpp)
   target_include_directories(triad_long PRIVATE src)
   target_link_libraries(triad_long PRIVATE triad_experiment)
+  # Opt-in physical cable characterization. Keep native audio out of the
+  # isolated triad library and its ordinary, hardware-free test group.
+  if(NOT EMSCRIPTEN)
+    add_executable(triad_audio_capture EXCLUDE_FROM_ALL
+      tools/triad_audio_capture.cpp src/audio.cpp src/audio_policy.cpp src/resampler.cpp)
+    target_include_directories(triad_audio_capture PRIVATE include src)
+    target_link_libraries(triad_audio_capture PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
+    if(WIN32)
+      target_link_libraries(triad_audio_capture PRIVATE winmm)
+    endif()
+  endif()
   add_executable(triad_planner_perf EXCLUDE_FROM_ALL tools/triad-planner-perf.cpp)
   target_link_libraries(triad_planner_perf PRIVATE triad_experiment)
   # The direct timer verifies these embedded identities against the selected
@@ -1105,6 +1116,16 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
       ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_triad_configuration.py $<TARGET_FILE:triad_long>)
     set_tests_properties(triad_configuration PROPERTIES LABELS "triad" TIMEOUT 90)
     add_custom_target(test_triad_configuration DEPENDS triad_long)
+    add_test(NAME triad_live_source COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_triad_live_source.py $<TARGET_FILE:triad_long>)
+    set_tests_properties(triad_live_source PROPERTIES LABELS "triad" TIMEOUT 90)
+    add_custom_target(test_triad_live_source DEPENDS triad_long)
+    if(TARGET triad_audio_capture)
+      add_test(NAME triad_audio_capture_guards COMMAND ${CMAKE_COMMAND} -E env
+        TRIAD_AUDIO_CAPTURE_BINARY=$<TARGET_FILE:triad_audio_capture> ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_triad_audio_capture.py)
+      set_tests_properties(triad_audio_capture_guards PROPERTIES LABELS "triad-live" TIMEOUT 30)
+    endif()
     if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
       foreach(_triad_python_test bounded_run diversity_export lowrate_campaign)
         add_test(NAME triad_${_triad_python_test} COMMAND ${Python3_EXECUTABLE}
@@ -1208,10 +1229,11 @@ if(NOT DATAPUMP_BUILD_WASM)
           _target STREQUAL "test_triad_statistics" OR _target STREQUAL "test_triad_v3_source" OR
           _target STREQUAL "test_triad_v3_channel" OR _target STREQUAL "test_triad_v3_receiver" OR
           _target STREQUAL "triad_study" OR _target STREQUAL "triad_examples" OR
-          _target STREQUAL "triad_long" OR _target STREQUAL "triad_planner_perf" OR
+          _target STREQUAL "triad_long" OR _target STREQUAL "triad_audio_capture" OR
+          _target STREQUAL "triad_planner_perf" OR
           _target STREQUAL "triad_oscillator_study")
-        # These experiments are self-contained complex-I/Q simulations. Do
-        # not pull the native audio provider or ordinary receiver into them.
+        # Isolated simulations and the standalone cable adapter supply their
+        # own dependencies. Do not pull the ordinary receiver into them.
         continue()
       endif()
       if(_target IN_LIST _datapump_mock_audio_tests OR _target IN_LIST _datapump_direct_audio_tests)

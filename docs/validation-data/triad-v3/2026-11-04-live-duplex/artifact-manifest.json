@@ -1,0 +1,2010 @@
+{
+  "evidence-matrix.json": {
+    "bytes": 343128,
+    "sha256": "f68931e4b97c1d11b93198e1b6a4de14dd58261984c4df341c1dfcc60d5d5d39"
+  },
+  "external-bridge-anchor/2520-payload-aligned/manifest.json": {
+    "bytes": 1314,
+    "sha256": "26df1a5162a35875ff40907fb1e3d4aa82957267cd5625f6975511925afc46db"
+  },
+  "external-bridge-anchor/2520/manifest.json": {
+    "bytes": 1314,
+    "sha256": "353ada83756b7471487988525b9a25213d599b34350214a915e3620228275076"
+  },
+  "external-bridge-anchor/48000-payload-aligned/manifest.json": {
+    "bytes": 1323,
+    "sha256": "973f0ca44b90275e6cbc9c8a8b750da674860981461eb0066c52baad52ec5527"
+  },
+  "external-bridge-anchor/48000/manifest.json": {
+    "bytes": 1323,
+    "sha256": "9f0d8cb24b857e3c3d0a7d71ca0ef1cba3ade44bbcfb0facc4dfeca1fef3276a"
+  },
+  "external-bridge-anchor/final-module-result.json": {
+    "bytes": 1113,
+    "sha256": "d79f54bb6f354505e99c653e4d12e36e098848331da661f7a000e93b33cde05b"
+  },
+  "external-bridge-anchor/payload-aligned-result.json": {
+    "bytes": 974,
+    "sha256": "ecfd9a462e9bfdeeaa0de02282589f7c2d0fa2533cc845c3a7de76894718febd"
+  },
+  "external-bridge-anchor/result.json": {
+    "bytes": 965,
+    "sha256": "2310ba6cb183c0a05f3962fbcc6d1853dfc9d38461c393b78bed9a6c53d84f3f"
+  },
+  "final-integration-source/CMakeLists.txt": {
+    "bytes": 108603,
+    "sha256": "08924fe851c033898e6d3449aa041a3e8f5f06fc90e5d360db87e470c4e47e50"
+  },
+  "final-integration-source/cmake/TestGroups.cmake": {
+    "bytes": 24075,
+    "sha256": "46739bb5206e4ca178cc9a3ba1e607c93cf3a7f7471eeffc65ea37c232533633"
+  },
+  "final-integration-source/tests/test_triad_audio_capture.py": {
+    "bytes": 4533,
+    "sha256": "161f06c27f4482c7a8733731ffdc1e996f71584ee19b65954defa9afd83a1b85"
+  },
+  "final-integration-source/tests/test_triad_configuration.py": {
+    "bytes": 55480,
+    "sha256": "1217b0e18e6b6e36f6530a90abb8f9f23f890aed185d74de2b14b83a2a5a7d57"
+  },
+  "final-integration-source/tests/test_triad_live_alsa.py": {
+    "bytes": 12691,
+    "sha256": "7925766de260de04b5f9a8090c84e6d437ee35026064c5d262856c760a38104e"
+  },
+  "final-integration-source/tests/test_triad_live_duplex.py": {
+    "bytes": 22412,
+    "sha256": "264ffecd855d6aed0683f3334286a447d6cb9a796dcba122b1ddbd7182fbfbb3"
+  },
+  "final-integration-source/tests/test_triad_live_model.py": {
+    "bytes": 19317,
+    "sha256": "2b59145b6ff81e0786d44e598b2ff3bef0004fc9cc2c2d1e1deeb3759878dc81"
+  },
+  "final-integration-source/tests/test_triad_live_source.py": {
+    "bytes": 7453,
+    "sha256": "5a750d8eaedc9cb5aa30f53aefa803211ed53021f547b2b75ecc4aace60ac21b"
+  },
+  "final-integration-source/tests/test_triad_live_waveforms.py": {
+    "bytes": 15159,
+    "sha256": "0222103beff552b6c86ca5db9407e70fc8ed948ca9b8b537bd884d523440c7f0"
+  },
+  "final-integration-source/tools/triad-long.cpp": {
+    "bytes": 203072,
+    "sha256": "5be03fe18a87eeee7d702191c9b4b9b25417715bdd00f8bd6e078b30d5493918"
+  },
+  "final-integration-source/tools/triad_audio_capture.cpp": {
+    "bytes": 27508,
+    "sha256": "1b4bc27ccae6dc9e5c0ce4b4ef8a66dbaa0ed0ce3188c588f1115d76d3d2fb80"
+  },
+  "final-integration-source/tools/triad_live_alsa.py": {
+    "bytes": 16507,
+    "sha256": "e3aaa6ed3597f0e6ac31bd81200a99328acdb84c6b6b3b45dc5d6c76537c35bf"
+  },
+  "final-integration-source/tools/triad_live_duplex.py": {
+    "bytes": 73851,
+    "sha256": "997643c8e023fde87a9db323c8a15a07ddf06eecaf14ec7a4fd01a00988d7899"
+  },
+  "final-integration-source/tools/triad_live_model.py": {
+    "bytes": 50145,
+    "sha256": "72066fe65f1c2fcf47cece91e6dcf9371c5c35e0051645a2868eb50cb3434871"
+  },
+  "final-integration-source/tools/triad_live_waveforms.py": {
+    "bytes": 45078,
+    "sha256": "6b1502306135af9f2ff6273d70ea2f919ed0f2a29db27b2fbffb20618bec0814"
+  },
+  "local-evidence/triad-live-duplex/alsa-training-001/capture.json": {
+    "bytes": 4080,
+    "sha256": "fc7e612efbd12d31f6f7d404ed3e2c470a40c5da1782e4f0446bb416adc8f6f2"
+  },
+  "local-evidence/triad-live-duplex/alsa-training-001/probe.json": {
+    "bytes": 686407,
+    "sha256": "c1d6c180a93774009d0b306d0a09db39c95cc0ed045eb3c9cb86335c6448578e"
+  },
+  "local-evidence/triad-live-duplex/alsa-training-001/profile.json": {
+    "bytes": 208592,
+    "sha256": "a18643e25a8df0a5c27b1a8893df6dad5c46e1859f9c4dbe7ce6070aebe5110e"
+  },
+  "local-evidence/triad-live-duplex/alsa-training-001/rx.f32.aplay.stderr.log": {
+    "bytes": 769,
+    "sha256": "a4b85d1f1952c12332448e348e1904840c2c68c3176f02bcdfd296781e8677e5"
+  },
+  "local-evidence/triad-live-duplex/alsa-training-001/rx.f32.aplay.stdout.log": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "local-evidence/triad-live-duplex/alsa-training-001/rx.f32.arecord.stderr.log": {
+    "bytes": 698,
+    "sha256": "9727b3e55c0dc09aa0da2433c61efc7b45f507d478e2dff92be0a80e94c74aab"
+  },
+  "local-evidence/triad-live-duplex/native-training-001/capture.json": {
+    "bytes": 1217,
+    "sha256": "721febee8f934e32b661305914013818425f61e144c24786e20a55fffbf9627a"
+  },
+  "local-evidence/triad-live-duplex/native-training-001/probe.json": {
+    "bytes": 686407,
+    "sha256": "e89831939f8ec678deb54a035b9915aa64c314774d1e50bf2d9f4de594ea4d56"
+  },
+  "local-evidence/triad-live-duplex/pilot-route-001/analysis-mono.json": {
+    "bytes": 33360,
+    "sha256": "0bd7b82af27ae347eb9d976bbd05af9fc1584e9ff3ab64d55215f6faab0e1cc7"
+  },
+  "local-evidence/triad-live-duplex/pilot-route-001/capture.log": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "local-evidence/triad-live-duplex/pilot-route-001/metadata.json": {
+    "bytes": 18281,
+    "sha256": "4f13fba53b9da40d6558f578292ae7d78b5c1d34d48daafad846ebdf2b98fab4"
+  },
+  "local-evidence/triad-live-duplex/pilot-route-001/playback.log": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "local-evidence/triad-live-fhss-timing-001/nominal-reproduction.json": {
+    "bytes": 4686,
+    "sha256": "6b0373fa3bc981c12d83d86d1f42d961cd83bc325b24484937ce25f259d7197e"
+  },
+  "local-evidence/triad-live-fhss-timing-001/predicted-timing.json": {
+    "bytes": 54459,
+    "sha256": "ec92cda0700d0044d58ab6063f972bfe1105c85bbc0c16ada653bdb49d3eeea2"
+  },
+  "local-evidence/triad-live-fhss-timing-001/real-timing.json": {
+    "bytes": 54472,
+    "sha256": "284103a4339d4498ab682a5a1288f6bc491437fe2ca9932976d33ffedaafe454"
+  },
+  "local-evidence/triad-live-fhss-timing-001/recipe.json": {
+    "bytes": 2312,
+    "sha256": "9431d404ada136b40172f7f3425f69d2e15b91b12f9e55586a51627957e1774c"
+  },
+  "local-evidence/triad-live-fhss-timing-001/reproduce.py": {
+    "bytes": 6941,
+    "sha256": "69d2c0a92d0f3a0155ac775a3358b47bbd9697ec658046d39db061116d9fb21a"
+  },
+  "local-evidence/triad-live-fhss-timing-001/result.json": {
+    "bytes": 4510,
+    "sha256": "f13cc9cf081dffacc59624b20bb262196469829b87d79c2f4b0d6e2fbb494d75"
+  },
+  "local-evidence/triad-live-final-checks-001/python-tests.log": {
+    "bytes": 169,
+    "sha256": "bd8f4c5b8d8ecfea51780dacb5e7a2ffb2a7136f901eadcab9b0efa07ef414a0"
+  },
+  "local-evidence/triad-live-final-checks-001/result.json": {
+    "bytes": 945,
+    "sha256": "815980aba9a643241960f67c603abb318dea9164420aa3c932155a825576af19"
+  },
+  "local-evidence/triad-live-final-checks-001/triad-ctest.log": {
+    "bytes": 62388,
+    "sha256": "ec33e2bcfc34958367fa057f6c927b7307508bd374377e0ecb9dfca48cc5d4f6"
+  },
+  "local-evidence/triad-live-full-analysis-002/audio-profile.json": {
+    "bytes": 208923,
+    "sha256": "16adb6581686b8aa60eccfa2430bd574f092f229fc0e578cdb4880d38ea4d413"
+  },
+  "local-evidence/triad-live-full-analysis-002/holdout-analysis.json": {
+    "bytes": 6545,
+    "sha256": "ec4b29c6e27b44cd45c53434b4d0c7a2154b52344673387436ca0a4f11fca3e4"
+  },
+  "local-evidence/triad-live-full-analysis-002/low-frequency-analysis.json": {
+    "bytes": 7092,
+    "sha256": "c36d5af02b05adfd51c9c32d5cb6778956cf45218e2a465cd746479f4eeb620b"
+  },
+  "local-evidence/triad-live-full-analysis-002/partial-0.001-audio-analysis.json": {
+    "bytes": 5902,
+    "sha256": "ae5283e1201942a6a632e8cefff7c7d621499712a3f075c93e15fe487692701c"
+  },
+  "local-evidence/triad-live-full-analysis-002/partial-0.001-half-analysis.json": {
+    "bytes": 6023,
+    "sha256": "34e0da41a4d3fea55ea1cddbd5836b59369b546ca203aa9120713f6d0e414003"
+  },
+  "local-evidence/triad-live-full-analysis-002/partial-0.01-audio-analysis.json": {
+    "bytes": 5896,
+    "sha256": "836a5d78b890a4e0639439b509f02a86057f54c7d9957da6057dea83ce067623"
+  },
+  "local-evidence/triad-live-full-analysis-002/partial-0.01-half-analysis.json": {
+    "bytes": 6018,
+    "sha256": "a636e307009b89534db374090a78e63796892a336bd8202b8ccac115f105024b"
+  },
+  "local-evidence/triad-live-full-analysis-002/partial-0.1-added100-analysis.json": {
+    "bytes": 5905,
+    "sha256": "d90458aee11ced62772395af32ba82082930edc9de6ca0f7791ed2232ea97c7a"
+  },
+  "local-evidence/triad-live-full-analysis-002/partial-0.1-added1000-analysis.json": {
+    "bytes": 5909,
+    "sha256": "2944f5b9e986f917af4fc4667c9e4170b01bfb3ed4349666779987c6d0575e88"
+  },
+  "local-evidence/triad-live-full-analysis-002/partial-0.1-audio-analysis.json": {
+    "bytes": 5893,
+    "sha256": "df19d4c287e80820cbed27a669028abf35f6f7f4243208575decbd3a7f9d2c99"
+  },
+  "local-evidence/triad-live-full-analysis-002/partial-0.1-half-analysis.json": {
+    "bytes": 5999,
+    "sha256": "d1ad39470b9b154ab98cde3fe51a6660d775d742e720805f445270903ea29f4a"
+  },
+  "local-evidence/triad-live-full-analysis-002/profile-freeze.json": {
+    "bytes": 170,
+    "sha256": "606dedee66e66e8825a5051cdc9c72955e1a31604763a3e21c60502029e7eb8a"
+  },
+  "local-evidence/triad-live-full-analysis-002/profile-verification.json": {
+    "bytes": 960,
+    "sha256": "a2b8cc3f6aa2f293d6afbcdab631619f06f0c01b6f078d16b3379527f591cd9f"
+  },
+  "local-evidence/triad-live-full-analysis-002/rate1-added1000-analysis.json": {
+    "bytes": 35970,
+    "sha256": "099a3c82f06564a7226e29ee4d1c361c16048d3642d2300fdf23d61ff84e6816"
+  },
+  "local-evidence/triad-live-full-analysis-002/rate12000-carrier6000-analysis.json": {
+    "bytes": 36101,
+    "sha256": "9243fd8dd38a0c3f3f023ec141ac41d44bfc5f41d734a3979eb417508f92b1fb"
+  },
+  "local-evidence/triad-live-full-analysis-002/rate18000-carrier9000-analysis.json": {
+    "bytes": 36160,
+    "sha256": "23fa1c6ca049438a4ba472210e2c1e2106c707258f753a7c17e566490e1f1f2b"
+  },
+  "local-evidence/triad-live-full-analysis-002/rate24000-carrier12000-analysis.json": {
+    "bytes": 36105,
+    "sha256": "15be82305637db56341bce8c73017ca812958da937d27c120cb31577dd08a2d7"
+  },
+  "local-evidence/triad-live-full-analysis-002/rate24000-carrier15500-analysis.json": {
+    "bytes": 36113,
+    "sha256": "40be711567a9ae1cd037fbe2697d4b0e24cba491f85b3067ed5c8408b8d4612c"
+  },
+  "local-evidence/triad-live-full-analysis-002/rate3.6-added1000-analysis.json": {
+    "bytes": 36017,
+    "sha256": "c2683f6e95ad6c766c931b62c592aacf7ed89420cfae34eb29900d80c7d11f86"
+  },
+  "local-evidence/triad-live-full-analysis-002/rate3600-carrier1725-analysis.json": {
+    "bytes": 36163,
+    "sha256": "5cd27617d8de65e5c421f65b4a3a3b187ee24eabdb4c204fdac301392a6d4810"
+  },
+  "local-evidence/triad-live-full-analysis-002/stages/001.json": {
+    "bytes": 314,
+    "sha256": "e63f3350ad4e18c51bdc08802d13ecab17aaa828bed8edf00c0f3f96df3f7168"
+  },
+  "local-evidence/triad-live-full-analysis-002/stages/002.json": {
+    "bytes": 311,
+    "sha256": "bab3c322c28be31680d7de797534d4e44ef824b0ca3dbf7f8ad9b608be1fcdcc"
+  },
+  "local-evidence/triad-live-full-analysis-002/stages/003.json": {
+    "bytes": 324,
+    "sha256": "32c46ebb388cd613e0189927eabb29c6704d2041a60bf9e79727f47d9da47491"
+  },
+  "local-evidence/triad-live-full-analysis-002/stages/004.json": {
+    "bytes": 325,
+    "sha256": "0f52b9c217aac88d61463440230ab961cfcfa1ff09f03a91142db9162b6cb372"
+  },
+  "local-evidence/triad-live-full-analysis-002/stages/005.json": {
+    "bytes": 324,
+    "sha256": "bd03e8dfa175d0d11ac19d80dc68f490e4eb411fc4edf8aefb8bdaa2fb5bb895"
+  },
+  "local-evidence/triad-live-full-analysis-002/stages/006.json": {
+    "bytes": 324,
+    "sha256": "d6fec3bc3014c8e4fd5178f89fbee7c58d8c9201e695185a67f9b10961b82893"
+  },
+  "local-evidence/triad-live-full-analysis-002/stages/007.json": {
+    "bytes": 319,
+    "sha256": "500ff0096e992b51e6882e0f3243783b2bb321e635f7352fc76dff102b62dd44"
+  },
+  "local-evidence/triad-live-full-analysis-002/stages/008.json": {
+    "bytes": 324,
+    "sha256": "322ac12d9be33e5eaad9d3ac04ed2007826e87d898c9ef0f1c09619a2b4ab5f5"
+  },
+  "local-evidence/triad-live-full-analysis-002/stages/009.json": {
+    "bytes": 326,
+    "sha256": "f77a6c0f54a7023e716a98b96efdb57c187d8621df8eabc4e23b5c9c80c9fd04"
+  },
+  "local-evidence/triad-live-full-analysis-002/stages/010.json": {
+    "bytes": 328,
+    "sha256": "b23b9fcce39da97b03b9ffacbd2b67ee90386c3313dfaf74a18e626d7545f989"
+  },
+  "local-evidence/triad-live-full-analysis-002/stages/011.json": {
+    "bytes": 328,
+    "sha256": "5916744ab9c553a92792ada75ec40194afa8e4613f6f007ebc1e500e3a76f2d0"
+  },
+  "local-evidence/triad-live-full-analysis-002/stages/012.json": {
+    "bytes": 327,
+    "sha256": "6e0c7511393ecdaaf5a3b8d0d5fdeffaafe5c6027833216ec82bd3c153f19e08"
+  },
+  "local-evidence/triad-live-full-analysis-002/stages/013.json": {
+    "bytes": 328,
+    "sha256": "6390b301e236c7766a039db1107928f5e0853e95ef8b1a35aa55193d1bdb776f"
+  },
+  "local-evidence/triad-live-full-analysis-002/stages/014.json": {
+    "bytes": 327,
+    "sha256": "2686dbef2d20f09b0f004fe162fe348cfaaf57801789eac6f22017cdd38f7aaf"
+  },
+  "local-evidence/triad-live-full-analysis-002/stages/015.json": {
+    "bytes": 327,
+    "sha256": "be3b12ff1f912b9eaf653821081bf9b39d91f578a3d4d27a38b2b6adf4a8dca2"
+  },
+  "local-evidence/triad-live-full-analysis-002/stages/016.json": {
+    "bytes": 323,
+    "sha256": "2343d8cbcad9f38c9d601c33e6e872acfa018e44b483bc91b2da72efd97eb283"
+  },
+  "local-evidence/triad-live-full-analysis-002/stages/017.json": {
+    "bytes": 320,
+    "sha256": "b41a2e898d4d0817c910c63520d977b9aabe8fd3fa6fb208761a9d73f6b38faf"
+  },
+  "local-evidence/triad-live-full-analysis-002/stages/018.json": {
+    "bytes": 518,
+    "sha256": "f49cea12b610c0056673c7015914ab5b3abb4c93c592e876c548c637e9195acf"
+  },
+  "local-evidence/triad-live-full-analysis-002/summary.json": {
+    "bytes": 8144,
+    "sha256": "5e7bc17cc092966532061be899efe1e1e55b41ce70f4fd8c50e2e4ca046f49fb"
+  },
+  "local-evidence/triad-live-full-capture-001/audio-profile.json": {
+    "bytes": 208923,
+    "sha256": "16adb6581686b8aa60eccfa2430bd574f092f229fc0e578cdb4880d38ea4d413"
+  },
+  "local-evidence/triad-live-full-capture-001/executed-source.json": {
+    "bytes": 1108,
+    "sha256": "6179d3080c06f948eeea3e17309d7e8a6547b46b84504d1c0521815cac219b48"
+  },
+  "local-evidence/triad-live-full-capture-001/executed-source.tar.gz": {
+    "bytes": 113956,
+    "sha256": "38928ff09160574032c285b73ddd0ba88eb4a945458dda2b1cd53790d75e9225"
+  },
+  "local-evidence/triad-live-full-capture-001/heldout-noise-diagnostic.json": {
+    "bytes": 1387,
+    "sha256": "885365c00b2e8809cc64e097f397328e05c068453bdd748db9cdc96b4242c5b5"
+  },
+  "local-evidence/triad-live-full-capture-001/holdout-analysis.json": {
+    "bytes": 2377,
+    "sha256": "d153906c8ea2a676b8af7e6d377c65082883102754e05002b6b0e0c1b3991f96"
+  },
+  "local-evidence/triad-live-full-capture-001/holdout/capture-identity.json": {
+    "bytes": 269,
+    "sha256": "684532539721f5dfde44192391062b355f5e92ebf22233545505d3ffb7f9c34e"
+  },
+  "local-evidence/triad-live-full-capture-001/holdout/capture.f32.aplay.stderr.log": {
+    "bytes": 820,
+    "sha256": "f55a1bfcebec0e2b4f9d440be18d48819dbf1bbaa88f88b0da28999092c456bb"
+  },
+  "local-evidence/triad-live-full-capture-001/holdout/capture.f32.aplay.stdout.log": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "local-evidence/triad-live-full-capture-001/holdout/capture.f32.arecord.stderr.log": {
+    "bytes": 698,
+    "sha256": "9727b3e55c0dc09aa0da2433c61efc7b45f507d478e2dff92be0a80e94c74aab"
+  },
+  "local-evidence/triad-live-full-capture-001/holdout/capture.json": {
+    "bytes": 4629,
+    "sha256": "6a8ef36e4c909f106bbd9a8fefd1081600e223d76234cf7e96a4d116336e2c2d"
+  },
+  "local-evidence/triad-live-full-capture-001/holdout/command.json": {
+    "bytes": 1051,
+    "sha256": "bef6afe4887c11d15974c67cef1f6e2bfe2106819e49d44322013bc30123824e"
+  },
+  "local-evidence/triad-live-full-capture-001/input-identity.json": {
+    "bytes": 2064,
+    "sha256": "0b13b533a8a3dda72521b321923e27719f1d5efbea690c818f0c930ca845427d"
+  },
+  "local-evidence/triad-live-full-capture-001/low-frequency-analysis.json": {
+    "bytes": 5355,
+    "sha256": "a4060571283c59ec59bfd71ef60dc045d8b2cdacae5bad28efff8ee1f7b70bca"
+  },
+  "local-evidence/triad-live-full-capture-001/low-frequency/capture-identity.json": {
+    "bytes": 269,
+    "sha256": "08e4a81e0f86dc3052bf09e99e84e2f371c25eda56b668f7fc807d61c07faaf5"
+  },
+  "local-evidence/triad-live-full-capture-001/low-frequency/capture.f32.aplay.stderr.log": {
+    "bytes": 826,
+    "sha256": "be3eb090242148a8b6cb62cfc38d08d412bf04b3e9fdafd45eab4f3469140579"
+  },
+  "local-evidence/triad-live-full-capture-001/low-frequency/capture.f32.aplay.stdout.log": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "local-evidence/triad-live-full-capture-001/low-frequency/capture.f32.arecord.stderr.log": {
+    "bytes": 698,
+    "sha256": "9727b3e55c0dc09aa0da2433c61efc7b45f507d478e2dff92be0a80e94c74aab"
+  },
+  "local-evidence/triad-live-full-capture-001/low-frequency/capture.json": {
+    "bytes": 4698,
+    "sha256": "4385d77d2027b920ec4304f6d975ea5b295e5812dce32ade37e74e7f90cef50b"
+  },
+  "local-evidence/triad-live-full-capture-001/low-frequency/command.json": {
+    "bytes": 1076,
+    "sha256": "217b799219429251d4901d6ee4e8cbc3182eb2848f8f70febd5220f45deab1de"
+  },
+  "local-evidence/triad-live-full-capture-001/model-review-envelope.json": {
+    "bytes": 1228,
+    "sha256": "0a45ca080300d837c5ca6ff297980e658fd341745a3cdaefb172e3801e012e2a"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.001-audio-analysis.json": {
+    "bytes": 4163,
+    "sha256": "491353c20e63c7ffbc9606494fb61bf123e9329372abd7319cbc2d1a3b39a297"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.001-audio/capture-identity.json": {
+    "bytes": 269,
+    "sha256": "a97a5c6b17af2a5980062ce18a53ffe5ef9799b1a50a459cd4605dd25fa26423"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.001-audio/capture.f32.aplay.stderr.log": {
+    "bytes": 832,
+    "sha256": "82d095f4ac2c11c128827704f0e18352c978c28025b469194b8c28e3e0efe479"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.001-audio/capture.f32.aplay.stdout.log": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.001-audio/capture.f32.arecord.stderr.log": {
+    "bytes": 698,
+    "sha256": "9727b3e55c0dc09aa0da2433c61efc7b45f507d478e2dff92be0a80e94c74aab"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.001-audio/capture.json": {
+    "bytes": 4744,
+    "sha256": "a48e644a149ebcd7eb2c863717865ee0556b0f6d3f42a60d951106360809d74d"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.001-audio/command.json": {
+    "bytes": 1097,
+    "sha256": "0104f73c778c6fe6cf5b5a4e94b31047c3d0f9996d52d59329a3573ffbb9c83e"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.001-half-analysis.json": {
+    "bytes": 4280,
+    "sha256": "0a5fee45c252e47cc805de3e97c2f1baa4de03532ac5ecffd696d8e02c760230"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.001-half/capture-identity.json": {
+    "bytes": 269,
+    "sha256": "56d18dceda40d7390c3a0753eac457d94933e094471a8aabcf493f5524952087"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.001-half/capture.f32.aplay.stderr.log": {
+    "bytes": 831,
+    "sha256": "35a586f20b707cd9f709c007388fb58cc8537fcdd5c7b27192f253c9ffeefe13"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.001-half/capture.f32.aplay.stdout.log": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.001-half/capture.f32.arecord.stderr.log": {
+    "bytes": 698,
+    "sha256": "9727b3e55c0dc09aa0da2433c61efc7b45f507d478e2dff92be0a80e94c74aab"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.001-half/capture.json": {
+    "bytes": 4737,
+    "sha256": "a7edc2585a609a36242bc84049337c2b215d3dfbb6b643c41961c564c36117eb"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.001-half/command.json": {
+    "bytes": 1095,
+    "sha256": "9db89ad3aedad86a59c77b992d159371d84594ddfec07cf01a7ca408d3f31348"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.01-audio-analysis.json": {
+    "bytes": 4158,
+    "sha256": "32c1327249b342ea3d9eb69a96fdfd218556e3e9f1a88d3165e1d1b9df73e59f"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.01-audio/capture-identity.json": {
+    "bytes": 269,
+    "sha256": "9a2c7a482ccfcaf7f1d5a631ea00784f3dd42e33ccbdef32c88c4a24911b390d"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.01-audio/capture.f32.aplay.stderr.log": {
+    "bytes": 831,
+    "sha256": "a1b5b0f73d212b5284fbc803a5f8fc9ff21a34414bba900230ad7d39de20c4d8"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.01-audio/capture.f32.aplay.stdout.log": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.01-audio/capture.f32.arecord.stderr.log": {
+    "bytes": 698,
+    "sha256": "9727b3e55c0dc09aa0da2433c61efc7b45f507d478e2dff92be0a80e94c74aab"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.01-audio/capture.json": {
+    "bytes": 4732,
+    "sha256": "84c1fe8d5d0eb5daaaa7ae413e51fd85b89c1e4d2d5051688814ddb99d31b4a9"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.01-audio/command.json": {
+    "bytes": 1095,
+    "sha256": "d664164e9f74299999d392228c87f5ead1e2f994387ba44c07c8998e1b1df847"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.01-half-analysis.json": {
+    "bytes": 4282,
+    "sha256": "15eafab244d6d9a43d381398554c3d39fe78393dd07cdf94083b12450469825e"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.01-half/capture-identity.json": {
+    "bytes": 269,
+    "sha256": "ad4642184fcfbb72e60547a2be4af7fc1590d38202b45c2a1b09a52c68a04e8f"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.01-half/capture.f32.aplay.stderr.log": {
+    "bytes": 830,
+    "sha256": "fa6c655daba5b4d9d25e8ef2da88f852b80f1d9cf199880dabbd07ac988f33eb"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.01-half/capture.f32.aplay.stdout.log": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.01-half/capture.f32.arecord.stderr.log": {
+    "bytes": 698,
+    "sha256": "9727b3e55c0dc09aa0da2433c61efc7b45f507d478e2dff92be0a80e94c74aab"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.01-half/capture.json": {
+    "bytes": 4729,
+    "sha256": "0d5db7b85f7e20d229e26407de57970da2edaf2a6d8e05251adfb207a894e5b1"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.01-half/command.json": {
+    "bytes": 1091,
+    "sha256": "2f30958aef560256711f125d63767adc7a1d936a9140b2046e2f67d91fb71fcc"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.1-added100-analysis.json": {
+    "bytes": 4167,
+    "sha256": "1e8254e0b41266b54d504aaddf51b43942e02c02f6c6fbe2bfc81054d6c0c428"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.1-added100/capture-identity.json": {
+    "bytes": 269,
+    "sha256": "c8a30a8c010acad2551b71789fc4f7498ab84e240713b1eace8ae79999653b13"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.1-added100/capture.f32.aplay.stderr.log": {
+    "bytes": 833,
+    "sha256": "9cdbf61af7710c11040c2ba7c244abac88d2a53480b4df93be27553a43d0ec5a"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.1-added100/capture.f32.aplay.stdout.log": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.1-added100/capture.f32.arecord.stderr.log": {
+    "bytes": 698,
+    "sha256": "9727b3e55c0dc09aa0da2433c61efc7b45f507d478e2dff92be0a80e94c74aab"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.1-added100/capture.json": {
+    "bytes": 4755,
+    "sha256": "759dd6f5b6bc2a51ae5ed1a9b85480651d3e628a9670eee057ea62d78b0feb07"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.1-added100/command.json": {
+    "bytes": 1103,
+    "sha256": "fc0df4a7450d83a476b90e03b5723b61710e07cd4f1f51fe74cb8bd5c1f59724"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.1-added1000-analysis.json": {
+    "bytes": 4171,
+    "sha256": "f6a334d25b006d879aa0aadd1cf8c625032bc28d7d185ba3088f51a096a3ad81"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.1-added1000/capture-identity.json": {
+    "bytes": 269,
+    "sha256": "93bcfb2650d9febcfcfe97c195b6f3a92afe072161717cbabee3333c55c887b3"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.1-added1000/capture.f32.aplay.stderr.log": {
+    "bytes": 834,
+    "sha256": "32028b545ed3b413cf194305a28707a998b56c89860ed1792675ba5bcc1940ca"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.1-added1000/capture.f32.aplay.stdout.log": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.1-added1000/capture.f32.arecord.stderr.log": {
+    "bytes": 698,
+    "sha256": "9727b3e55c0dc09aa0da2433c61efc7b45f507d478e2dff92be0a80e94c74aab"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.1-added1000/capture.json": {
+    "bytes": 4760,
+    "sha256": "2c40a0b8273e9ca6eada9afda19b8aedb9bce9091356abc6fd048d5adeb6ce62"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.1-added1000/command.json": {
+    "bytes": 1106,
+    "sha256": "a3c3c70b23fd9671e1cd3223a0388dae638d06990619740c69f466e772a4f8d6"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.1-audio-analysis.json": {
+    "bytes": 4155,
+    "sha256": "15f4565f074901737b63cdd1fd7286fcace939e6c84037f59af5b3e69a06b9b6"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.1-audio/capture-identity.json": {
+    "bytes": 269,
+    "sha256": "b6a6ec85a59df3d224af14591ce06a1307bfe0e995ef68599f2e708626b5ba6f"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.1-audio/capture.f32.aplay.stderr.log": {
+    "bytes": 830,
+    "sha256": "8aa9c47817c1f940fd1677b2dc4ebee077b34896ddb2c7f02fbfdeae83fa8fb2"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.1-audio/capture.f32.aplay.stdout.log": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.1-audio/capture.f32.arecord.stderr.log": {
+    "bytes": 698,
+    "sha256": "9727b3e55c0dc09aa0da2433c61efc7b45f507d478e2dff92be0a80e94c74aab"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.1-audio/capture.json": {
+    "bytes": 4727,
+    "sha256": "d460b33f334e8f880a99c6017de7c811953b07f68eb07af9ed2d5dddb42e5ea4"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.1-audio/command.json": {
+    "bytes": 1091,
+    "sha256": "2c254327ff0f2f77a89fec0412337e09fc94a1e6c37dc85133ded4aaa3d378a6"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.1-half-analysis.json": {
+    "bytes": 4266,
+    "sha256": "cfd80395c9ed0362cc17532bf49cb1f68395a11a7f03ec62ad328924b2787c65"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.1-half/capture-identity.json": {
+    "bytes": 269,
+    "sha256": "fb5103fe6947bc39d0042d615f22a7ff8d9a947ff08d8d7ee11e12dc5a7da5d7"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.1-half/capture.f32.aplay.stderr.log": {
+    "bytes": 829,
+    "sha256": "3487c5151da753cf0fcc082fd2f16ba456f9fb0b591db68aec6b564e0c7c4cd7"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.1-half/capture.f32.aplay.stdout.log": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.1-half/capture.f32.arecord.stderr.log": {
+    "bytes": 698,
+    "sha256": "9727b3e55c0dc09aa0da2433c61efc7b45f507d478e2dff92be0a80e94c74aab"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.1-half/capture.json": {
+    "bytes": 4711,
+    "sha256": "2e80931084eb1ac14ba8fdec68ed65ee8ed8470410e27f8821fa41923ff774f1"
+  },
+  "local-evidence/triad-live-full-capture-001/partial-0.1-half/command.json": {
+    "bytes": 1085,
+    "sha256": "22d7be6300691bfaa79a6af88212c58e92b93d880331b6c104ce48e4ece05b04"
+  },
+  "local-evidence/triad-live-full-capture-001/profile-freeze.json": {
+    "bytes": 170,
+    "sha256": "606dedee66e66e8825a5051cdc9c72955e1a31604763a3e21c60502029e7eb8a"
+  },
+  "local-evidence/triad-live-full-capture-001/rate1-added1000-analysis.json": {
+    "bytes": 34233,
+    "sha256": "ad1caed474b531f3ff8bf56f05250067548a61b1d30b5ff4bcaed43d72a09a0f"
+  },
+  "local-evidence/triad-live-full-capture-001/rate1-added1000/capture-identity.json": {
+    "bytes": 269,
+    "sha256": "c7028103063621842d6a7ff377a645d514d544f82ce4777ffd6adeebdafaed90"
+  },
+  "local-evidence/triad-live-full-capture-001/rate1-added1000/capture.f32.aplay.stderr.log": {
+    "bytes": 828,
+    "sha256": "d6d8a562a421d778a9846bb0ac4364ec067f5f7f594ac752a84f73e3ffa24c86"
+  },
+  "local-evidence/triad-live-full-capture-001/rate1-added1000/capture.f32.aplay.stdout.log": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "local-evidence/triad-live-full-capture-001/rate1-added1000/capture.f32.arecord.stderr.log": {
+    "bytes": 698,
+    "sha256": "9727b3e55c0dc09aa0da2433c61efc7b45f507d478e2dff92be0a80e94c74aab"
+  },
+  "local-evidence/triad-live-full-capture-001/rate1-added1000/capture.json": {
+    "bytes": 4723,
+    "sha256": "e21a2de6d2f14793a9354bd59381c355d45a632885f7273a9ac60508c8ab81e7"
+  },
+  "local-evidence/triad-live-full-capture-001/rate1-added1000/command.json": {
+    "bytes": 1089,
+    "sha256": "35f0d5ab53f22f927492daebc06e39eb1aa16dc4db69e6c678550a85885d4f2f"
+  },
+  "local-evidence/triad-live-full-capture-001/rate10-added100/capture.f32.aplay.stderr.log": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "local-evidence/triad-live-full-capture-001/rate10-added100/capture.f32.aplay.stdout.log": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "local-evidence/triad-live-full-capture-001/rate10-added100/capture.f32.arecord.stderr.log": {
+    "bytes": 61,
+    "sha256": "abab6e190146b441b8ffe7293707de675c9b423d5545bcd6e2a6900ce99e4320"
+  },
+  "local-evidence/triad-live-full-capture-001/rate10-added100/capture.json": {
+    "bytes": 3909,
+    "sha256": "a04a675983739c380fcf4870fff4995fe5097ce3601cd8cb155e03a0d5fe4fab"
+  },
+  "local-evidence/triad-live-full-capture-001/rate10-added100/command.json": {
+    "bytes": 1143,
+    "sha256": "c1422f43fead6d54d3f67fbff754eddee03c5e28bc93fec8a054252fa1637e60"
+  },
+  "local-evidence/triad-live-full-capture-001/rate12000-carrier6000-analysis.json": {
+    "bytes": 34361,
+    "sha256": "02b8e30767ab7aa00a4a6a7abf1be8b8e8dcafd9ea43b44bbff3c3e52950349b"
+  },
+  "local-evidence/triad-live-full-capture-001/rate12000-carrier6000/capture-identity.json": {
+    "bytes": 269,
+    "sha256": "1a7ab4afb8ea526badc8689db82132aa17cf6aa47104689c4ef516517288371d"
+  },
+  "local-evidence/triad-live-full-capture-001/rate12000-carrier6000/capture.f32.aplay.stderr.log": {
+    "bytes": 834,
+    "sha256": "d3adcb0fb86a0870f121df32b4e9bfbc19d662bd6a070fac0b041865359f2e46"
+  },
+  "local-evidence/triad-live-full-capture-001/rate12000-carrier6000/capture.f32.aplay.stdout.log": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "local-evidence/triad-live-full-capture-001/rate12000-carrier6000/capture.f32.arecord.stderr.log": {
+    "bytes": 698,
+    "sha256": "9727b3e55c0dc09aa0da2433c61efc7b45f507d478e2dff92be0a80e94c74aab"
+  },
+  "local-evidence/triad-live-full-capture-001/rate12000-carrier6000/capture.json": {
+    "bytes": 4775,
+    "sha256": "e2df029dfb26346ddbc0ffc04e72ae2822a5d1000ecdc803ace90bdcac857bc6"
+  },
+  "local-evidence/triad-live-full-capture-001/rate12000-carrier6000/command.json": {
+    "bytes": 1120,
+    "sha256": "a8aa685fad963806fbb60ccf99e21e4e78c2ff3e236454f29cb64c93c0723a09"
+  },
+  "local-evidence/triad-live-full-capture-001/rate18000-carrier9000-analysis.json": {
+    "bytes": 34423,
+    "sha256": "b80f6ce1333f637a61061542275391851ab1110056158ed3e4c91e8e98e4efa1"
+  },
+  "local-evidence/triad-live-full-capture-001/rate18000-carrier9000/capture-identity.json": {
+    "bytes": 269,
+    "sha256": "b3bc279ec68bb136fb6fdc58ef1e47ed61d78a9a823afe89cdca0f8393f865cc"
+  },
+  "local-evidence/triad-live-full-capture-001/rate18000-carrier9000/capture.f32.aplay.stderr.log": {
+    "bytes": 834,
+    "sha256": "b712213489168633256298c6daf6f2e1d5b7c92938bdc55c4e96c061de0dae27"
+  },
+  "local-evidence/triad-live-full-capture-001/rate18000-carrier9000/capture.f32.aplay.stdout.log": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "local-evidence/triad-live-full-capture-001/rate18000-carrier9000/capture.f32.arecord.stderr.log": {
+    "bytes": 698,
+    "sha256": "9727b3e55c0dc09aa0da2433c61efc7b45f507d478e2dff92be0a80e94c74aab"
+  },
+  "local-evidence/triad-live-full-capture-001/rate18000-carrier9000/capture.json": {
+    "bytes": 4781,
+    "sha256": "04f4d92908f9f3bdf592fe07ff20d18671c99f7797ae51899746dd0bc0510f28"
+  },
+  "local-evidence/triad-live-full-capture-001/rate18000-carrier9000/command.json": {
+    "bytes": 1121,
+    "sha256": "a338f87895c9baec12bd9d2b69d0947c629a45f347d6eae51ebbba3b141b27cd"
+  },
+  "local-evidence/triad-live-full-capture-001/rate24000-carrier12000-analysis.json": {
+    "bytes": 34372,
+    "sha256": "7ba4c9150646184435a408a0444115230094a14e4dfb5e88b9fbe6a49b84aa9d"
+  },
+  "local-evidence/triad-live-full-capture-001/rate24000-carrier12000/capture-identity.json": {
+    "bytes": 269,
+    "sha256": "3a8a8dc35154f08660ed6244d5212fea43e1dadb6ae8e5ee75010b0e10b298ec"
+  },
+  "local-evidence/triad-live-full-capture-001/rate24000-carrier12000/capture.f32.aplay.stderr.log": {
+    "bytes": 835,
+    "sha256": "6d598bea8e5163dfcb473df7942abfb203d215f632f6eb2074be0d6384d9b45f"
+  },
+  "local-evidence/triad-live-full-capture-001/rate24000-carrier12000/capture.f32.aplay.stdout.log": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "local-evidence/triad-live-full-capture-001/rate24000-carrier12000/capture.f32.arecord.stderr.log": {
+    "bytes": 698,
+    "sha256": "9727b3e55c0dc09aa0da2433c61efc7b45f507d478e2dff92be0a80e94c74aab"
+  },
+  "local-evidence/triad-live-full-capture-001/rate24000-carrier12000/capture.json": {
+    "bytes": 4784,
+    "sha256": "3f2ac4aa3bd2d60d58f2c5041ed64603f8cb877274fa6b0fc8a787475c8ce46c"
+  },
+  "local-evidence/triad-live-full-capture-001/rate24000-carrier12000/command.json": {
+    "bytes": 1125,
+    "sha256": "f48faec5a88f4b1be306fe6a0c4b022c044d197e07a8d1596401f577d054469b"
+  },
+  "local-evidence/triad-live-full-capture-001/rate24000-carrier15500-analysis.json": {
+    "bytes": 34380,
+    "sha256": "f0056f76cf7dc9fcec6bc85dda8333f0cf8ef5e429c437d1726447def183cd56"
+  },
+  "local-evidence/triad-live-full-capture-001/rate24000-carrier15500/capture-identity.json": {
+    "bytes": 269,
+    "sha256": "35b8ef178b9b2d1b0fedd4aa43e07dc27746e0142387df84a9fadb59f4b8a349"
+  },
+  "local-evidence/triad-live-full-capture-001/rate24000-carrier15500/capture.f32.aplay.stderr.log": {
+    "bytes": 835,
+    "sha256": "ccf695560257a05a695a6d1cf278c332a46ecf4ed936c3e3489502d7435e81cd"
+  },
+  "local-evidence/triad-live-full-capture-001/rate24000-carrier15500/capture.f32.aplay.stdout.log": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "local-evidence/triad-live-full-capture-001/rate24000-carrier15500/capture.f32.arecord.stderr.log": {
+    "bytes": 698,
+    "sha256": "9727b3e55c0dc09aa0da2433c61efc7b45f507d478e2dff92be0a80e94c74aab"
+  },
+  "local-evidence/triad-live-full-capture-001/rate24000-carrier15500/capture.json": {
+    "bytes": 4784,
+    "sha256": "65f0861a4dd08f1a3309761d72d39fcca1e8a9b2b0d87ba89cd1ccec11aaee75"
+  },
+  "local-evidence/triad-live-full-capture-001/rate24000-carrier15500/command.json": {
+    "bytes": 1124,
+    "sha256": "a5eb4fb217ec00e3b3f64d31face6959df43710e93851814f3c24568db80b4f7"
+  },
+  "local-evidence/triad-live-full-capture-001/rate3.6-added1000-analysis.json": {
+    "bytes": 34283,
+    "sha256": "dcaaa421af95b46f3bcd4fb623656d4e8ca30a0ba8230f6efbb6086e925a193e"
+  },
+  "local-evidence/triad-live-full-capture-001/rate3.6-added1000/capture-identity.json": {
+    "bytes": 269,
+    "sha256": "b9e88b79582a81f4d9520dc2111cc6735ee92e32c3b59bf78365cc5d862347b3"
+  },
+  "local-evidence/triad-live-full-capture-001/rate3.6-added1000/capture.f32.aplay.stderr.log": {
+    "bytes": 830,
+    "sha256": "b12fd5b426124bb4907f628c19fc9a58078ec3977030b862a2b3dbcaa1c2a166"
+  },
+  "local-evidence/triad-live-full-capture-001/rate3.6-added1000/capture.f32.aplay.stdout.log": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "local-evidence/triad-live-full-capture-001/rate3.6-added1000/capture.f32.arecord.stderr.log": {
+    "bytes": 698,
+    "sha256": "9727b3e55c0dc09aa0da2433c61efc7b45f507d478e2dff92be0a80e94c74aab"
+  },
+  "local-evidence/triad-live-full-capture-001/rate3.6-added1000/capture.json": {
+    "bytes": 4728,
+    "sha256": "4b38ca63bfc20110837bae0d673ee614a93a0cfa09438b5e72c19f3bbc46881f"
+  },
+  "local-evidence/triad-live-full-capture-001/rate3.6-added1000/command.json": {
+    "bytes": 1096,
+    "sha256": "ae2075459029105efd5f9ffb7796eb3296f095782bcdb31d54dd047699a67fcb"
+  },
+  "local-evidence/triad-live-full-capture-001/rate3600-carrier1725-analysis.json": {
+    "bytes": 34432,
+    "sha256": "6c69066205d08a1e31d8b043693633a3568c671136460737d3ee9fad2780d552"
+  },
+  "local-evidence/triad-live-full-capture-001/rate3600-carrier1725/capture-identity.json": {
+    "bytes": 269,
+    "sha256": "09e8743835db7318e4ff70eba8ea0031567e22a4e7da50bf8073435d37597fbf"
+  },
+  "local-evidence/triad-live-full-capture-001/rate3600-carrier1725/capture.f32.aplay.stderr.log": {
+    "bytes": 833,
+    "sha256": "549cfc58aa2829e66a77783bf692a1722ae9b5c24720f07f0d96c1a26f55df16"
+  },
+  "local-evidence/triad-live-full-capture-001/rate3600-carrier1725/capture.f32.aplay.stdout.log": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "local-evidence/triad-live-full-capture-001/rate3600-carrier1725/capture.f32.arecord.stderr.log": {
+    "bytes": 698,
+    "sha256": "9727b3e55c0dc09aa0da2433c61efc7b45f507d478e2dff92be0a80e94c74aab"
+  },
+  "local-evidence/triad-live-full-capture-001/rate3600-carrier1725/capture.json": {
+    "bytes": 4773,
+    "sha256": "86d4b46732d1597355adecd45ebe07905efa1e2c17996d26977a8a4f1551b717"
+  },
+  "local-evidence/triad-live-full-capture-001/rate3600-carrier1725/command.json": {
+    "bytes": 1117,
+    "sha256": "40fc28645aec6632f74364bd7791a311778623f21ea7e7b7f803d7f9f953f2a1"
+  },
+  "local-evidence/triad-live-full-capture-001/route-after.json": {
+    "bytes": 4815,
+    "sha256": "875f54a6492b71aa907cac546a155abb7113d88bb7f2310832e8be987adddeb2"
+  },
+  "local-evidence/triad-live-full-capture-001/route-before.json": {
+    "bytes": 4709,
+    "sha256": "2392dea30cac1ae61aa07864dc2a8e502d2f47734b8053235b1da0e8196cd4ab"
+  },
+  "local-evidence/triad-live-full-capture-001/route-preservation.json": {
+    "bytes": 139,
+    "sha256": "95599a85ab60073f9c474aef33312f61f89681fb0f7c3c76952d9c6c87d65a6c"
+  },
+  "local-evidence/triad-live-full-capture-001/stages/001.json": {
+    "bytes": 305,
+    "sha256": "bdcb9c398c242428e80c45a6777392c91294fb517836d210655ad7c7678967b0"
+  },
+  "local-evidence/triad-live-full-capture-001/stages/002.json": {
+    "bytes": 315,
+    "sha256": "6e5c622f58d43799665f4cdae728f81d23b7a258f43838dc076c90995fc401b3"
+  },
+  "local-evidence/triad-live-full-capture-001/stages/003.json": {
+    "bytes": 308,
+    "sha256": "3e3632dc2624c2830bef0b9dcd8f117fbc834ff1fb0959d1a964a545747f3da2"
+  },
+  "local-evidence/triad-live-full-capture-001/stages/004.json": {
+    "bytes": 311,
+    "sha256": "5b14c4494ff81367305906ca399c4782a8726c9e224bff7ebf0f9256f57adcb0"
+  },
+  "local-evidence/triad-live-full-capture-001/stages/005.json": {
+    "bytes": 317,
+    "sha256": "11b34ef149b4014033e835ffde5019713c397babb1c5dbd409e76ee55ceb183b"
+  },
+  "local-evidence/triad-live-full-capture-001/stages/006.json": {
+    "bytes": 313,
+    "sha256": "7da0f4b0d4c289b1cbdefd610e748f092f6dc1c17081b4e5c066d2f516611a44"
+  },
+  "local-evidence/triad-live-full-capture-001/stages/007.json": {
+    "bytes": 325,
+    "sha256": "0444ca799b072d5f35b00193cee87e729c7479c6c9e1842e3e1614fe1af7070a"
+  },
+  "local-evidence/triad-live-full-capture-001/stages/008.json": {
+    "bytes": 309,
+    "sha256": "9aa3cd03cab973aa1601b20ac2bcb9628c5dc8585c4856890fe56f95f17b7175"
+  },
+  "local-evidence/triad-live-full-capture-001/stages/009.json": {
+    "bytes": 327,
+    "sha256": "12638564d4a25f2839d39f5bc088bfe314fa37872638e630c4e79d8ef03959aa"
+  },
+  "local-evidence/triad-live-full-capture-001/stages/010.json": {
+    "bytes": 322,
+    "sha256": "543a5ea3a2da8ea861c5ad6d4e4263b4b22b510072bd7f35f7c74e74404a892f"
+  },
+  "local-evidence/triad-live-full-capture-001/stages/011.json": {
+    "bytes": 328,
+    "sha256": "af0da69b0e99f801126bfcdade408a6400a0f52f2182f6c0c73ff7a3698f0634"
+  },
+  "local-evidence/triad-live-full-capture-001/stages/012.json": {
+    "bytes": 324,
+    "sha256": "ab37332c8b7c1f3c2157f91c102f7a184ea9802595384b0e2cdca3e38466faf2"
+  },
+  "local-evidence/triad-live-full-capture-001/stages/013.json": {
+    "bytes": 326,
+    "sha256": "057aff3ec9fcfab84a8055234333c6e719f2946541271adfe4ae7297901924a8"
+  },
+  "local-evidence/triad-live-full-capture-001/stages/014.json": {
+    "bytes": 322,
+    "sha256": "52e6d0450d4c00d7be7b61f9d6300d1c3d6273b9c322fa6bfd4385a5be7b40fa"
+  },
+  "local-evidence/triad-live-full-capture-001/stages/015.json": {
+    "bytes": 328,
+    "sha256": "eeaf617841d50b11153278be16ba5a7339ea1109044a2022f4556975f4a7c5fd"
+  },
+  "local-evidence/triad-live-full-capture-001/stages/016.json": {
+    "bytes": 322,
+    "sha256": "9c584a797f76a556a60a846cbccc073dbbaa1e689448f4ec9e68665b6d252285"
+  },
+  "local-evidence/triad-live-full-capture-001/stages/017.json": {
+    "bytes": 326,
+    "sha256": "8a6dd4998bf7b579d8facd671096d25ab89a6c5cff9a69e2d057da307561f3d9"
+  },
+  "local-evidence/triad-live-full-capture-001/stages/018.json": {
+    "bytes": 322,
+    "sha256": "bff3fe2a735049e99d53ffc3cf83f56cb7de9d50d6d689fbad21a2e864d8c510"
+  },
+  "local-evidence/triad-live-full-capture-001/stages/019.json": {
+    "bytes": 326,
+    "sha256": "823b13ec170beb39a2ddbaae960506e24843eceef32ff94daa4b234f57ede1cb"
+  },
+  "local-evidence/triad-live-full-capture-001/stages/020.json": {
+    "bytes": 321,
+    "sha256": "584023672169dd8c76671273e1efe05978e41aa04f7db59449c1722fcdc08c96"
+  },
+  "local-evidence/triad-live-full-capture-001/stages/021.json": {
+    "bytes": 329,
+    "sha256": "9438dc4f40fa1d87350d1843fc8be9b3f1ab1fe298a3d4c93424ba108a04734c"
+  },
+  "local-evidence/triad-live-full-capture-001/stages/022.json": {
+    "bytes": 325,
+    "sha256": "d807a08ab5daa9b485d5121fbde61b6aad6f0ee66f2b4dddac2b3154b8522083"
+  },
+  "local-evidence/triad-live-full-capture-001/stages/023.json": {
+    "bytes": 331,
+    "sha256": "8f859e0c696e92e46cd1958e44b72ab22c750042442d74fa790a757dc0963ca6"
+  },
+  "local-evidence/triad-live-full-capture-001/stages/024.json": {
+    "bytes": 324,
+    "sha256": "24f16b84457d70e0f963a8653250d6a93320914e94fd9b68ad5b6ed3d52578e8"
+  },
+  "local-evidence/triad-live-full-capture-001/stages/025.json": {
+    "bytes": 330,
+    "sha256": "9a0a33ed99cf0378b5073584e1e6c0dac6278af1c505cbd0a524766d1fb000ee"
+  },
+  "local-evidence/triad-live-full-capture-001/stages/026.json": {
+    "bytes": 327,
+    "sha256": "07109124aa40dbdbb769b674d502cf8f26bf14694faa497d9b7bb4ed7868d7e0"
+  },
+  "local-evidence/triad-live-full-capture-001/stages/027.json": {
+    "bytes": 331,
+    "sha256": "3766b2e7d49d2b2423103b99a4b0c6bef9a2906a237eb5d5c61caa40c9525efc"
+  },
+  "local-evidence/triad-live-full-capture-001/stages/028.json": {
+    "bytes": 328,
+    "sha256": "e58d2c3d53f29e0e8ec2346e514c6bfb01a454dff9eaaee16713fa85f8cc9da5"
+  },
+  "local-evidence/triad-live-full-capture-001/stages/029.json": {
+    "bytes": 332,
+    "sha256": "d4baf02622ade0a463ee5401293345aecb4c967b7de013c0585b9e7a4997bea2"
+  },
+  "local-evidence/triad-live-full-capture-001/stages/030.json": {
+    "bytes": 327,
+    "sha256": "562d59f5db2e29c665b7bb72b61a5bfedc5f25afe3b4e4775d5a7a02bde5eac6"
+  },
+  "local-evidence/triad-live-full-capture-001/stages/031.json": {
+    "bytes": 332,
+    "sha256": "96f364cd96dfab78bce9243d70f4428d6f670da2115137c3f9fc4975ee56285f"
+  },
+  "local-evidence/triad-live-full-capture-001/stages/032.json": {
+    "bytes": 328,
+    "sha256": "00ee5f01a710c23808c80222d0d7e26661e26ddbec2d4394e557ee03b1e808ee"
+  },
+  "local-evidence/triad-live-full-capture-001/stages/033.json": {
+    "bytes": 330,
+    "sha256": "b27dead62ff76c5afcc9e2ca6bf85c27595b47fed02e1c72735af8c0cab75e24"
+  },
+  "local-evidence/triad-live-full-capture-001/stages/034.json": {
+    "bytes": 327,
+    "sha256": "6be5e2c1b20c3d598e85e4721409337edc2b7fa7845117770f9fa6e613b02173"
+  },
+  "local-evidence/triad-live-full-capture-001/stages/035.json": {
+    "bytes": 326,
+    "sha256": "ea482581d2f8757b8b4c2aec89af6fcef478562e5d7de6818bf902c58cbab9c8"
+  },
+  "local-evidence/triad-live-full-capture-001/stages/036.json": {
+    "bytes": 324,
+    "sha256": "9cb9c259dea875277195aaf1d45a3cf3ccafb856ec1bd6d18bd4720749b70761"
+  },
+  "local-evidence/triad-live-full-capture-001/stages/037.json": {
+    "bytes": 325,
+    "sha256": "d06489a4125d28fb0474363c3ef94412823bf76587e6966cda75c4fd581cf15d"
+  },
+  "local-evidence/triad-live-full-capture-001/stages/038.json": {
+    "bytes": 321,
+    "sha256": "c9bace0c914ac38c4a9e9661f83fb1f4a478593b591fe5ddfff8a8a2a39a66e2"
+  },
+  "local-evidence/triad-live-full-capture-001/stages/039.json": {
+    "bytes": 369,
+    "sha256": "64f86ae0ef7db53d6966c771f2932edc6ef065526be5b2bc5952ced7c2144d77"
+  },
+  "local-evidence/triad-live-full-capture-001/summary.json": {
+    "bytes": 15504,
+    "sha256": "42eb2d06c70d9f28c4db14aadcf6f080482e48a4938a5f80e5cf36ae45f25b05"
+  },
+  "local-evidence/triad-live-full-capture-001/training/capture-identity.json": {
+    "bytes": 269,
+    "sha256": "0897164ab8e410deb5039a3af2415a7fc0828a37b2267705cbc238fd16cbb64d"
+  },
+  "local-evidence/triad-live-full-capture-001/training/capture.f32.aplay.stderr.log": {
+    "bytes": 821,
+    "sha256": "068cf77b9f1cc1cba1b868581a9635c6290626b425df58a6c98ac6558248a33e"
+  },
+  "local-evidence/triad-live-full-capture-001/training/capture.f32.aplay.stdout.log": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "local-evidence/triad-live-full-capture-001/training/capture.f32.arecord.stderr.log": {
+    "bytes": 698,
+    "sha256": "9727b3e55c0dc09aa0da2433c61efc7b45f507d478e2dff92be0a80e94c74aab"
+  },
+  "local-evidence/triad-live-full-capture-001/training/capture.json": {
+    "bytes": 4641,
+    "sha256": "8f170193d619a295b29f000f0eec677056108956548c279b469a9555f83ee293"
+  },
+  "local-evidence/triad-live-full-capture-001/training/command.json": {
+    "bytes": 1053,
+    "sha256": "d07f56f1f85e22976dbd89f27e0df82c2ff7f1ecbe6c3f9781e62e8c83a6051a"
+  },
+  "local-evidence/triad-live-full-continuation-001/audio-profile.json": {
+    "bytes": 208923,
+    "sha256": "16adb6581686b8aa60eccfa2430bd574f092f229fc0e578cdb4880d38ea4d413"
+  },
+  "local-evidence/triad-live-full-continuation-001/aurora-each65-analysis.json": {
+    "bytes": 36040,
+    "sha256": "2c619852939ece3837570a8b7b764f150b567bc1bdabf16c266083a1659b233f"
+  },
+  "local-evidence/triad-live-full-continuation-001/aurora-each65/capture-identity.json": {
+    "bytes": 552,
+    "sha256": "367947ba6d71df9cf2cb574369eecd3f636a13b9cc0132d67508c9938df2c2f2"
+  },
+  "local-evidence/triad-live-full-continuation-001/aurora-each65/capture.f32.aplay.stderr.log": {
+    "bytes": 831,
+    "sha256": "8207b8fa5ef4b615eece22db12780914af6e243aba1c296a227f765cb5893c65"
+  },
+  "local-evidence/triad-live-full-continuation-001/aurora-each65/capture.f32.aplay.stdout.log": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "local-evidence/triad-live-full-continuation-001/aurora-each65/capture.f32.arecord.stderr.log": {
+    "bytes": 698,
+    "sha256": "9727b3e55c0dc09aa0da2433c61efc7b45f507d478e2dff92be0a80e94c74aab"
+  },
+  "local-evidence/triad-live-full-continuation-001/aurora-each65/capture.json": {
+    "bytes": 4739,
+    "sha256": "f1fe62f8075f9c4c2d5d9dec037654785be59e08a1849afa0d7b1415622444dd"
+  },
+  "local-evidence/triad-live-full-continuation-001/aurora-each65/command.json": {
+    "bytes": 1095,
+    "sha256": "50a835e93970db09e338b231abe012deb70106b365196fa265aad4d848548a95"
+  },
+  "local-evidence/triad-live-full-continuation-001/continuation.json": {
+    "bytes": 19654,
+    "sha256": "ca248f854ee54b63a5db21b459e1026d1b6844c8e6a043d47c7d89aa41ff3682"
+  },
+  "local-evidence/triad-live-full-continuation-001/executed-source.tar.gz": {
+    "bytes": 139396,
+    "sha256": "0b9c6aa09f0bffaff39aed661d29f99c34ce0df602502fefabc55cd22219a4db"
+  },
+  "local-evidence/triad-live-full-continuation-001/fhss-burst3-analysis.json": {
+    "bytes": 36124,
+    "sha256": "1f3867a64a7d84d94335127606f7f650efa74b2e8623ca5c4c2acaa360f6de80"
+  },
+  "local-evidence/triad-live-full-continuation-001/fhss-burst3/capture-identity.json": {
+    "bytes": 552,
+    "sha256": "7b4ca84de56abe6489634f5aac1d56387ea70040346e6c77cb4945ad78213814"
+  },
+  "local-evidence/triad-live-full-continuation-001/fhss-burst3/capture.f32.aplay.stderr.log": {
+    "bytes": 829,
+    "sha256": "cecc0d88c5ba8992f7779e40714a11e55a04888742a9704a084deb304b5cc774"
+  },
+  "local-evidence/triad-live-full-continuation-001/fhss-burst3/capture.f32.aplay.stdout.log": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "local-evidence/triad-live-full-continuation-001/fhss-burst3/capture.f32.arecord.stderr.log": {
+    "bytes": 698,
+    "sha256": "9727b3e55c0dc09aa0da2433c61efc7b45f507d478e2dff92be0a80e94c74aab"
+  },
+  "local-evidence/triad-live-full-continuation-001/fhss-burst3/capture.json": {
+    "bytes": 4742,
+    "sha256": "45be935e1a8ae40bbb2b1c7a28c9e56b88fe9f08b84f0cc79cba1857dfed0774"
+  },
+  "local-evidence/triad-live-full-continuation-001/fhss-burst3/command.json": {
+    "bytes": 1096,
+    "sha256": "f5938ee46a231f749bb80f2eb4895378aa91cd82dc4a8086be0eb8eeab0de527"
+  },
+  "local-evidence/triad-live-full-continuation-001/hf-each25-analysis.json": {
+    "bytes": 36036,
+    "sha256": "9552fabc0a642a7620a970887bab4d228b017fd750d8a1ac0ede75c33e59863c"
+  },
+  "local-evidence/triad-live-full-continuation-001/hf-each25/capture-identity.json": {
+    "bytes": 552,
+    "sha256": "95df3f6c784af8b96d42889d38c38b4603953eb92d1ecf0b859a652b47b090ce"
+  },
+  "local-evidence/triad-live-full-continuation-001/hf-each25/capture.f32.aplay.stderr.log": {
+    "bytes": 827,
+    "sha256": "72f56cafb691463fdff0705e6bcebf5b183c4de33d53ea90ba61844b1de8ba46"
+  },
+  "local-evidence/triad-live-full-continuation-001/hf-each25/capture.f32.aplay.stdout.log": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "local-evidence/triad-live-full-continuation-001/hf-each25/capture.f32.arecord.stderr.log": {
+    "bytes": 698,
+    "sha256": "9727b3e55c0dc09aa0da2433c61efc7b45f507d478e2dff92be0a80e94c74aab"
+  },
+  "local-evidence/triad-live-full-continuation-001/hf-each25/capture.json": {
+    "bytes": 4717,
+    "sha256": "5f0313ae83bcd232d76586d1a9afb72e7f1e22c66bdce5596d4762960b3cd568"
+  },
+  "local-evidence/triad-live-full-continuation-001/hf-each25/command.json": {
+    "bytes": 1088,
+    "sha256": "fa49376215666669ee11a73df051311a2324639f7deeabd4e0757e37b72e6ca4"
+  },
+  "local-evidence/triad-live-full-continuation-001/hf-each65-analysis.json": {
+    "bytes": 36038,
+    "sha256": "5cd12b7579fa4487a1e095947c149ceb021ee0fbb3aa5f4844eb704f56befa4f"
+  },
+  "local-evidence/triad-live-full-continuation-001/hf-each65/capture-identity.json": {
+    "bytes": 552,
+    "sha256": "a18b411e23bf6116b9c5289ac815124b9757eaabf7c88d70d660d05ce2953f68"
+  },
+  "local-evidence/triad-live-full-continuation-001/hf-each65/capture.f32.aplay.stderr.log": {
+    "bytes": 827,
+    "sha256": "f354f272654f5a6d0839dc5ecc7b2b7fd9b8491018001fb70bb622e92c034e02"
+  },
+  "local-evidence/triad-live-full-continuation-001/hf-each65/capture.f32.aplay.stdout.log": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "local-evidence/triad-live-full-continuation-001/hf-each65/capture.f32.arecord.stderr.log": {
+    "bytes": 698,
+    "sha256": "9727b3e55c0dc09aa0da2433c61efc7b45f507d478e2dff92be0a80e94c74aab"
+  },
+  "local-evidence/triad-live-full-continuation-001/hf-each65/capture.json": {
+    "bytes": 4720,
+    "sha256": "b3b2d1187702f6502f274635ecd750fc305fd00ad50f4225b3b54c8b9d897fa9"
+  },
+  "local-evidence/triad-live-full-continuation-001/hf-each65/command.json": {
+    "bytes": 1088,
+    "sha256": "305e21376e778bb39653bd63dab56a09073e09e8044b08fb84bd1842bcbae773"
+  },
+  "local-evidence/triad-live-full-continuation-001/input-identity.json": {
+    "bytes": 2064,
+    "sha256": "779d1b22e361c8b823befb86f60173451a07b89eac2d60c33f2ca241dd66863b"
+  },
+  "local-evidence/triad-live-full-continuation-001/low-level-quantization-analysis.json": {
+    "bytes": 36030,
+    "sha256": "216d469046b0e99a1d0737c65dfb54019741768fc2a1876fff59905f48c0f42e"
+  },
+  "local-evidence/triad-live-full-continuation-001/low-level-quantization/capture-identity.json": {
+    "bytes": 552,
+    "sha256": "b328622c78e983b6dc88da1e80f3abc8f3d5c87676e0ac4e7866d73451e50ae6"
+  },
+  "local-evidence/triad-live-full-continuation-001/low-level-quantization/capture.f32.aplay.stderr.log": {
+    "bytes": 840,
+    "sha256": "5524bba25de13ac985b31ba1215d829aa35f737f658928b5e3b1f94a63eda9db"
+  },
+  "local-evidence/triad-live-full-continuation-001/low-level-quantization/capture.f32.aplay.stdout.log": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "local-evidence/triad-live-full-continuation-001/low-level-quantization/capture.f32.arecord.stderr.log": {
+    "bytes": 698,
+    "sha256": "9727b3e55c0dc09aa0da2433c61efc7b45f507d478e2dff92be0a80e94c74aab"
+  },
+  "local-evidence/triad-live-full-continuation-001/low-level-quantization/capture.json": {
+    "bytes": 4839,
+    "sha256": "1cdf996adecd4b8b0cbefa6a6de745d9fbc6dbe1e2576700699c0e280cc34b1d"
+  },
+  "local-evidence/triad-live-full-continuation-001/low-level-quantization/command.json": {
+    "bytes": 1140,
+    "sha256": "407cdbb2e00d035ea1b39c244282392d1d979a01b297fd14641353ba19ce0e69"
+  },
+  "local-evidence/triad-live-full-continuation-001/profile-freeze.json": {
+    "bytes": 170,
+    "sha256": "606dedee66e66e8825a5051cdc9c72955e1a31604763a3e21c60502029e7eb8a"
+  },
+  "local-evidence/triad-live-full-continuation-001/rate10-added100-analysis.json": {
+    "bytes": 35962,
+    "sha256": "1485588f551ccc227af07150e1dd25e4284886703d2ce7c5251931121c06591c"
+  },
+  "local-evidence/triad-live-full-continuation-001/rate10-added100/capture-identity.json": {
+    "bytes": 552,
+    "sha256": "df8a8182d84c2abc8c5a784f255c886b02bc1e4cd8c618813e0afc1997573945"
+  },
+  "local-evidence/triad-live-full-continuation-001/rate10-added100/capture.f32.aplay.stderr.log": {
+    "bytes": 833,
+    "sha256": "1bc6a43b53ac42b4e95b2716df79b96c4d4f5ae28bb2db6d211b0c754974c6a2"
+  },
+  "local-evidence/triad-live-full-continuation-001/rate10-added100/capture.f32.aplay.stdout.log": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "local-evidence/triad-live-full-continuation-001/rate10-added100/capture.f32.arecord.stderr.log": {
+    "bytes": 698,
+    "sha256": "9727b3e55c0dc09aa0da2433c61efc7b45f507d478e2dff92be0a80e94c74aab"
+  },
+  "local-evidence/triad-live-full-continuation-001/rate10-added100/capture.json": {
+    "bytes": 4779,
+    "sha256": "e7b1bafec0cbc15f333a8f2b0f3ee9f114c810029dbcf08a93fcfbeee2aa71e0"
+  },
+  "local-evidence/triad-live-full-continuation-001/rate10-added100/command.json": {
+    "bytes": 1110,
+    "sha256": "b99d81976a1e6e988df6d88e03f81b1c61f330f7f6027a4b0b15766360f35386"
+  },
+  "local-evidence/triad-live-full-continuation-001/route-after.json": {
+    "bytes": 4709,
+    "sha256": "2392dea30cac1ae61aa07864dc2a8e502d2f47734b8053235b1da0e8196cd4ab"
+  },
+  "local-evidence/triad-live-full-continuation-001/route-before.json": {
+    "bytes": 4709,
+    "sha256": "2392dea30cac1ae61aa07864dc2a8e502d2f47734b8053235b1da0e8196cd4ab"
+  },
+  "local-evidence/triad-live-full-continuation-001/route-preservation.json": {
+    "bytes": 138,
+    "sha256": "5d681436867fe0bd35a44ad56602682b9ad019ecc2ede25c1af396f0cad75a53"
+  },
+  "local-evidence/triad-live-full-continuation-001/snapshot-check.json": {
+    "bytes": 144,
+    "sha256": "15dbb63cedf75c6ba31a96ab620a674a38827b81a01e3efc5afd87a6050df543"
+  },
+  "local-evidence/triad-live-full-continuation-001/stages/001.json": {
+    "bytes": 315,
+    "sha256": "53a5f62bd076e4e66e2418b56879525523d11f01044568acf21f0fe44a578f24"
+  },
+  "local-evidence/triad-live-full-continuation-001/stages/002.json": {
+    "bytes": 315,
+    "sha256": "875e50f605dac4038a3da5e8aa74610afd88e1e5c290098652192bb68658f5e6"
+  },
+  "local-evidence/triad-live-full-continuation-001/stages/003.json": {
+    "bytes": 326,
+    "sha256": "b988b4b1dbd492200f393c85b9de74d48a2b3fc23c017c84a0b09d27bed99a90"
+  },
+  "local-evidence/triad-live-full-continuation-001/stages/004.json": {
+    "bytes": 318,
+    "sha256": "819a90c9d587788fefc49f3d98109fc8d826363691223f65567be0e00ed87feb"
+  },
+  "local-evidence/triad-live-full-continuation-001/stages/005.json": {
+    "bytes": 322,
+    "sha256": "5ffb6e8aed1ac1409f31173b3150fd2eb7e3f50c883dee0ffa874061c21380d9"
+  },
+  "local-evidence/triad-live-full-continuation-001/stages/006.json": {
+    "bytes": 318,
+    "sha256": "0f3f5a93cf5eae31218eefcf1924c1718fba9b9b9778ab3c0ef64a42601bf614"
+  },
+  "local-evidence/triad-live-full-continuation-001/stages/007.json": {
+    "bytes": 320,
+    "sha256": "345ff78f26808a81f568c08289f9e34199a3485c666b2a1b36428690ed5eb47d"
+  },
+  "local-evidence/triad-live-full-continuation-001/stages/008.json": {
+    "bytes": 316,
+    "sha256": "7fbb2640df70c5d8edc69afdb54f65b4e1855932337e148ba14224c8dae3bdef"
+  },
+  "local-evidence/triad-live-full-continuation-001/stages/009.json": {
+    "bytes": 319,
+    "sha256": "aa8145203ca7a8a639b5b1ffd864d64ef6877974fbf5a51dd024e3dc478d7907"
+  },
+  "local-evidence/triad-live-full-continuation-001/stages/010.json": {
+    "bytes": 315,
+    "sha256": "eff3320e4b8233603398c8cd0c13d8992f42c00d2e72d4e0048e606063e6a925"
+  },
+  "local-evidence/triad-live-full-continuation-001/stages/011.json": {
+    "bytes": 324,
+    "sha256": "b821c05cebc21414e46262f4cab08b211de8d6c6508107bac4bfbef1b051f516"
+  },
+  "local-evidence/triad-live-full-continuation-001/stages/012.json": {
+    "bytes": 320,
+    "sha256": "ae6d2b787ed8d7fa0282514766644b2a4fa56b4af8a80cd235303b966ac7676d"
+  },
+  "local-evidence/triad-live-full-continuation-001/stages/013.json": {
+    "bytes": 334,
+    "sha256": "8ead3cfd3f30728e78364f1e49916438466e799d33076b985bcd61d0d4ccc43c"
+  },
+  "local-evidence/triad-live-full-continuation-001/stages/014.json": {
+    "bytes": 329,
+    "sha256": "dc4a1c098e8d4044bc8621e059f9e77039903e0c4b38782896b0fd58d0ff55f5"
+  },
+  "local-evidence/triad-live-full-continuation-001/summary.json": {
+    "bytes": 10769,
+    "sha256": "2e5e934d14b6c3298551b3248beb3689a0a6fa1c6b593e0aa0f7ae8fc906bfe2"
+  },
+  "local-evidence/triad-live-full-input-001/aurora-each65/export-command.json": {
+    "bytes": 922,
+    "sha256": "911ca05edf4c6ce3731afc85a7c5b35423e9319cba50ed1fca1d1a449ae7a63b"
+  },
+  "local-evidence/triad-live-full-input-001/aurora-each65/native/manifest.json": {
+    "bytes": 22014,
+    "sha256": "3ac93256aea63b2e633bee02b26b0e7e7ed0eca27efb7381d461c56614990daa"
+  },
+  "local-evidence/triad-live-full-input-001/aurora-each65/stimulus.json": {
+    "bytes": 16434,
+    "sha256": "f829a0d7ab6d765ec697d410f145adaef891efe61d2ec64c72133110a686efab"
+  },
+  "local-evidence/triad-live-full-input-001/fhss-burst3/export-command.json": {
+    "bytes": 845,
+    "sha256": "d6e34792f0b740d97d6d8eaf64bbc427b3ef24b254c70ebfe7b2d138447eddea"
+  },
+  "local-evidence/triad-live-full-input-001/fhss-burst3/native/manifest.json": {
+    "bytes": 20061,
+    "sha256": "353afae52c51e6d7baa42b6ae8d42a4cd0b9815cae10e1d26c6c5bb2fbe430a2"
+  },
+  "local-evidence/triad-live-full-input-001/fhss-burst3/stimulus.json": {
+    "bytes": 16533,
+    "sha256": "1d304fdc498af6a3328af0f9a007eab88175ca4f740dbaf2d15c6b801b30ec81"
+  },
+  "local-evidence/triad-live-full-input-001/hf-each25/export-command.json": {
+    "bytes": 910,
+    "sha256": "2f7e775b452a7db399588705014de1103e2290026e3e6182d404dfceb918d5dc"
+  },
+  "local-evidence/triad-live-full-input-001/hf-each25/native/manifest.json": {
+    "bytes": 21834,
+    "sha256": "3f8e546fcb1588c19f6b70fe1e2f7bec2a8ddcc7108b74cd49127c4267158393"
+  },
+  "local-evidence/triad-live-full-input-001/hf-each25/stimulus.json": {
+    "bytes": 16418,
+    "sha256": "67a831464b88d7b1475aa54d0a356a1073e78dcdca07cea7d92770a689e69588"
+  },
+  "local-evidence/triad-live-full-input-001/hf-each65/export-command.json": {
+    "bytes": 910,
+    "sha256": "6eb698f7797ef8c6709925476dfe1f77e31398722c74c7543f5f2a6809f3c8ca"
+  },
+  "local-evidence/triad-live-full-input-001/hf-each65/native/manifest.json": {
+    "bytes": 21924,
+    "sha256": "71ccdb504a89bef87ed328dd5bdd882f5375935863c0d7f8fa9c33efa991fe54"
+  },
+  "local-evidence/triad-live-full-input-001/hf-each65/stimulus.json": {
+    "bytes": 16416,
+    "sha256": "9f4fba753800f6366cbbaca5cccd833c159c11d322f4035c757b9e942b71c5f3"
+  },
+  "local-evidence/triad-live-full-input-001/holdout/stimulus.json": {
+    "bytes": 403174,
+    "sha256": "bd63cfe34e385c56eea77882cddaff826f78e5f13f524f0c07df1393878ab162"
+  },
+  "local-evidence/triad-live-full-input-001/low-frequency/stimulus.json": {
+    "bytes": 1254,
+    "sha256": "1142279272c9fb43bdf718cb9b9b336dc4d6dc88a60772a97887c81a53d22543"
+  },
+  "local-evidence/triad-live-full-input-001/low-level-quantization/export-command.json": {
+    "bytes": 804,
+    "sha256": "cdafde340025fbc98b1bb8ee1a116397dd7bcb0fe6777386e3b709c6e39c2d51"
+  },
+  "local-evidence/triad-live-full-input-001/low-level-quantization/native/manifest.json": {
+    "bytes": 20046,
+    "sha256": "d62daa68a0c13aae28b7861a4094b7d5d381131ded70740ffec4d83dee2f100c"
+  },
+  "local-evidence/triad-live-full-input-001/low-level-quantization/stimulus.json": {
+    "bytes": 16401,
+    "sha256": "88d5e0f68e87272dd5fbdf854b1d89d85c855b773a73abdee7863353889df2d7"
+  },
+  "local-evidence/triad-live-full-input-001/partial-0.001-audio/export-command.json": {
+    "bytes": 797,
+    "sha256": "907149193b41dc6e4f3abcf91aff751c7b4eae9e859f5fc9291a09e6a7a64301"
+  },
+  "local-evidence/triad-live-full-input-001/partial-0.001-audio/native/manifest.json": {
+    "bytes": 1377,
+    "sha256": "ca086b174046bbef851459b6df57ac8e2e0bc3e07ddbfeed69f4db22c7be9e62"
+  },
+  "local-evidence/triad-live-full-input-001/partial-0.001-audio/stimulus.json": {
+    "bytes": 16591,
+    "sha256": "0a50f458248ce2a1f582b6a7b6edaa502b9ef7903faad27563c110d5814003be"
+  },
+  "local-evidence/triad-live-full-input-001/partial-0.001-half/export-command.json": {
+    "bytes": 796,
+    "sha256": "6cf228a3bbd9efb91acd0d324a9d4f12201fcc332a5f0e1684c6bb63ef2e96d2"
+  },
+  "local-evidence/triad-live-full-input-001/partial-0.001-half/native/manifest.json": {
+    "bytes": 1377,
+    "sha256": "ca086b174046bbef851459b6df57ac8e2e0bc3e07ddbfeed69f4db22c7be9e62"
+  },
+  "local-evidence/triad-live-full-input-001/partial-0.001-half/stimulus.json": {
+    "bytes": 16606,
+    "sha256": "5d0d29bc5af016f5fb1113b0004d69d0fcd44c27a7c279fdaf0d3863133ef413"
+  },
+  "local-evidence/triad-live-full-input-001/partial-0.01-audio/export-command.json": {
+    "bytes": 795,
+    "sha256": "8509a5382d985c2db3bcdb23cc649ed24fc06f9fd01d8a107e711446d3c6a090"
+  },
+  "local-evidence/triad-live-full-input-001/partial-0.01-audio/native/manifest.json": {
+    "bytes": 1370,
+    "sha256": "71afad6bd703c9bb5c58dabff360e2f4b17f7675dc360eb500b0a6e07521d1ca"
+  },
+  "local-evidence/triad-live-full-input-001/partial-0.01-audio/stimulus.json": {
+    "bytes": 16542,
+    "sha256": "edf413fc7f659235b0dbe126b5e7410643d03055e51b686d0d2363b50a15e393"
+  },
+  "local-evidence/triad-live-full-input-001/partial-0.01-half/export-command.json": {
+    "bytes": 794,
+    "sha256": "22eee060fd6538e7703695f7928a4b3a49ccb2fd27555c86a19a807d81f16350"
+  },
+  "local-evidence/triad-live-full-input-001/partial-0.01-half/native/manifest.json": {
+    "bytes": 1370,
+    "sha256": "71afad6bd703c9bb5c58dabff360e2f4b17f7675dc360eb500b0a6e07521d1ca"
+  },
+  "local-evidence/triad-live-full-input-001/partial-0.01-half/stimulus.json": {
+    "bytes": 16527,
+    "sha256": "84293ffa31a88f491988d4b3a8c1bedc209ff893540e5f64f383d0b082b825d7"
+  },
+  "local-evidence/triad-live-full-input-001/partial-0.1-added100/export-command.json": {
+    "bytes": 798,
+    "sha256": "434f951bdcdf7c15a2a9772ffa826392084057c115672c8ac8b45d0dbd5d576a"
+  },
+  "local-evidence/triad-live-full-input-001/partial-0.1-added100/native/manifest.json": {
+    "bytes": 1357,
+    "sha256": "033ae283ef411cc587c034016e2f73d2102e3e4ad3b21ead06d18c79fd3719d1"
+  },
+  "local-evidence/triad-live-full-input-001/partial-0.1-added100/stimulus.json": {
+    "bytes": 16497,
+    "sha256": "976824818f0c08f6a9f5ca9bbfc24d131c8d2eda09ed1f97eb358c0c35f8a3d1"
+  },
+  "local-evidence/triad-live-full-input-001/partial-0.1-added1000/export-command.json": {
+    "bytes": 800,
+    "sha256": "308746a85ed50b6590d986f10235e56f79cee4a88c13f5705e20d455147fc891"
+  },
+  "local-evidence/triad-live-full-input-001/partial-0.1-added1000/native/manifest.json": {
+    "bytes": 1371,
+    "sha256": "95a56e3c9e1d77e40f541444a338bd90a2f815d9261db5e825d7523733fffd2d"
+  },
+  "local-evidence/triad-live-full-input-001/partial-0.1-added1000/stimulus.json": {
+    "bytes": 16529,
+    "sha256": "19b9e76d93c5df98a911af6d17e2b18446a233680323a6007fa98042771cda8d"
+  },
+  "local-evidence/triad-live-full-input-001/partial-0.1-audio/export-command.json": {
+    "bytes": 793,
+    "sha256": "4ba1c19adbe0f3f728fe19049ca4df5b4ad51742ead4d01b0624b0e7d562f3b7"
+  },
+  "local-evidence/triad-live-full-input-001/partial-0.1-audio/native/manifest.json": {
+    "bytes": 1363,
+    "sha256": "5ae3508366110ded2b5a5dcc8c511a43190562e38b25a4e6549a0e31c27d58fa"
+  },
+  "local-evidence/triad-live-full-input-001/partial-0.1-audio/stimulus.json": {
+    "bytes": 16494,
+    "sha256": "c039ef5fa271de93ec29b63e087fdca0383a48b1e4f6ded74bad91b223817cc0"
+  },
+  "local-evidence/triad-live-full-input-001/partial-0.1-half/export-command.json": {
+    "bytes": 792,
+    "sha256": "3947b0862230c5e709b01558d2a27fb5c9c2f49a5dd2b20792d6095eb78c36c1"
+  },
+  "local-evidence/triad-live-full-input-001/partial-0.1-half/native/manifest.json": {
+    "bytes": 1363,
+    "sha256": "5ae3508366110ded2b5a5dcc8c511a43190562e38b25a4e6549a0e31c27d58fa"
+  },
+  "local-evidence/triad-live-full-input-001/partial-0.1-half/stimulus.json": {
+    "bytes": 16499,
+    "sha256": "00fc8cba9a6f8d7f564baa26c19092fcb5633011f6b2082e9b7fdb52272fdb73"
+  },
+  "local-evidence/triad-live-full-input-001/plan.json": {
+    "bytes": 1861840,
+    "sha256": "3399ced79d2bc02264eb9d4738eae24965576a9ceeeb0b5f64dcb889b20434c0"
+  },
+  "local-evidence/triad-live-full-input-001/prepared.json": {
+    "bytes": 19438,
+    "sha256": "afd73690040879a17b786e64033c5998be1f06b50765a463d5f9c306f234abdb"
+  },
+  "local-evidence/triad-live-full-input-001/rate1-added1000/export-command.json": {
+    "bytes": 801,
+    "sha256": "46531aec7b53d64858feaad00d1c7a8ff434237e625deb05b9b21ca42ae7fd58"
+  },
+  "local-evidence/triad-live-full-input-001/rate1-added1000/native/manifest.json": {
+    "bytes": 20149,
+    "sha256": "d0e6987d9f855f8057c41b4c0d8556c0466822453ef08623832722c8d21fcc7f"
+  },
+  "local-evidence/triad-live-full-input-001/rate1-added1000/stimulus.json": {
+    "bytes": 16455,
+    "sha256": "4504b2f408096cf17a76f7138348e65a333e44f6b751cd1bc8c6ca8b2e96d1af"
+  },
+  "local-evidence/triad-live-full-input-001/rate10-added100/export-command.json": {
+    "bytes": 799,
+    "sha256": "16687b39e0d87649d285c944daaac4ef63b7720bf3306c1f090072606b62c751"
+  },
+  "local-evidence/triad-live-full-input-001/rate10-added100/native/manifest.json": {
+    "bytes": 20216,
+    "sha256": "03d5a6676b7b93652a90811b7c6cf11e4789b31d9f05c6144643a3cc146ea5ca"
+  },
+  "local-evidence/triad-live-full-input-001/rate10-added100/stimulus.json": {
+    "bytes": 16534,
+    "sha256": "4c55e3a8e4ce5cb8c38002d6c7a11f961502ca9c5d2c8ac59085c091e8365e69"
+  },
+  "local-evidence/triad-live-full-input-001/rate12000-carrier6000/export-command.json": {
+    "bytes": 804,
+    "sha256": "e24ed47dc642e4537e46669275bbcb39a09351a19426b6c4dfd053f2318100c2"
+  },
+  "local-evidence/triad-live-full-input-001/rate12000-carrier6000/native/manifest.json": {
+    "bytes": 20060,
+    "sha256": "f861c27f8efbdfede5aa210734545cd0ec8a8d198dd78132f86ea6d47c30bd61"
+  },
+  "local-evidence/triad-live-full-input-001/rate12000-carrier6000/stimulus.json": {
+    "bytes": 16385,
+    "sha256": "1e7234a88a5f93d892c65c88f524faf0f1449a8e3b6d9e8c98a727abea70268f"
+  },
+  "local-evidence/triad-live-full-input-001/rate18000-carrier9000/export-command.json": {
+    "bytes": 806,
+    "sha256": "beb81f246e69f475b13a4af17a942dfde8076ba0c8a4ac198e5149181867bb07"
+  },
+  "local-evidence/triad-live-full-input-001/rate18000-carrier9000/native/manifest.json": {
+    "bytes": 20078,
+    "sha256": "d85cfeead768035ed713bc66b7cdf2a10254d6f8517be1066a0b16b279e5d46e"
+  },
+  "local-evidence/triad-live-full-input-001/rate18000-carrier9000/stimulus.json": {
+    "bytes": 16416,
+    "sha256": "8012e5cadb8f871e2defc4deaf3a40258694b08e88327ccde2ba80826534f144"
+  },
+  "local-evidence/triad-live-full-input-001/rate24000-carrier12000/export-command.json": {
+    "bytes": 807,
+    "sha256": "7e50261adf842c1fe95cd44a61525c08c28e5caf64f15e8df45822f0deb92f42"
+  },
+  "local-evidence/triad-live-full-input-001/rate24000-carrier12000/native/manifest.json": {
+    "bytes": 20076,
+    "sha256": "458a9184ed1714febd6b29b9fd0b57edf8cd2944214cc9faa1f90de43cc3c24b"
+  },
+  "local-evidence/triad-live-full-input-001/rate24000-carrier12000/stimulus.json": {
+    "bytes": 16410,
+    "sha256": "ca3089ebabd33eaee5686583aa42b7e899094d5a3e5d778e13c39da0245894ad"
+  },
+  "local-evidence/triad-live-full-input-001/rate24000-carrier15500/export-command.json": {
+    "bytes": 807,
+    "sha256": "9fca79e93e0d6268626a1683d55b1c41655b7384f657379e3b96aff67ab793fd"
+  },
+  "local-evidence/triad-live-full-input-001/rate24000-carrier15500/native/manifest.json": {
+    "bytes": 20076,
+    "sha256": "322f6b92d66021bcacd0915ef3372feee38a8619848fcc1fa5153af1f50e917c"
+  },
+  "local-evidence/triad-live-full-input-001/rate24000-carrier15500/stimulus.json": {
+    "bytes": 16410,
+    "sha256": "1873f668167d0c934df026b4b572dba9a82304241301b66bad984819264a31f8"
+  },
+  "local-evidence/triad-live-full-input-001/rate3.6-added1000/export-command.json": {
+    "bytes": 803,
+    "sha256": "69009fd427ea86ffcc4945d804d649771b2960d70edf8bd6fdfc4b7e3358bb58"
+  },
+  "local-evidence/triad-live-full-input-001/rate3.6-added1000/native/manifest.json": {
+    "bytes": 20086,
+    "sha256": "7a61b10e35694bf632e1bb29a777cf83e58a9180f971697935e4bf6267c6842b"
+  },
+  "local-evidence/triad-live-full-input-001/rate3.6-added1000/stimulus.json": {
+    "bytes": 16424,
+    "sha256": "c8ca399085c0709d8254f6daf656bba72583f8d202a78ab85138c7475358e369"
+  },
+  "local-evidence/triad-live-full-input-001/rate3600-carrier1725/export-command.json": {
+    "bytes": 802,
+    "sha256": "9a38f4350d2c039dafeafdf496b52ea4c87a44bd8329ae52d4e791faaf169594"
+  },
+  "local-evidence/triad-live-full-input-001/rate3600-carrier1725/native/manifest.json": {
+    "bytes": 20044,
+    "sha256": "8ca834508f9afbc29c9c339b238d29995088199ebe1decb3c65a5f8b0ecd6db0"
+  },
+  "local-evidence/triad-live-full-input-001/rate3600-carrier1725/stimulus.json": {
+    "bytes": 16390,
+    "sha256": "0ca5af316339a15d59f013fb4d08d70948cfadab3eb613ffb9f9bbfcafddd2a1"
+  },
+  "local-evidence/triad-live-full-input-001/stages/001.json": {
+    "bytes": 162,
+    "sha256": "f307556247f22c74ee1c8ee92995e6efc01f9f2aab0822b149c05c6c27a39a5c"
+  },
+  "local-evidence/triad-live-full-input-001/stages/002.json": {
+    "bytes": 161,
+    "sha256": "d76e548bc6b2b142270e12b4d783594a7708da479888cd4c2a9417ab949e105c"
+  },
+  "local-evidence/triad-live-full-input-001/stages/003.json": {
+    "bytes": 165,
+    "sha256": "5f22f995311d0c19ea649a80b48b032109b61f48fcd341f9f82eb55d4c72083e"
+  },
+  "local-evidence/triad-live-full-input-001/stages/004.json": {
+    "bytes": 169,
+    "sha256": "3699276ed021f30f91a1d36d48b495b070a38bfb12f3b1c54fbf137db72a755d"
+  },
+  "local-evidence/triad-live-full-input-001/stages/005.json": {
+    "bytes": 169,
+    "sha256": "6d2580be42d64bb13c1e64589aa48f15cf87bcd0e8add8b6ecca24ddd8540b57"
+  },
+  "local-evidence/triad-live-full-input-001/stages/006.json": {
+    "bytes": 168,
+    "sha256": "18e64a6e45568e8c29afbfb3325567bdbcb58780b6b72fa1273720fe7bc7e95e"
+  },
+  "local-evidence/triad-live-full-input-001/stages/007.json": {
+    "bytes": 169,
+    "sha256": "56eeabbec4805a1a49e1db539ca5479ecf6995b0a1233547e09c5063508ce34e"
+  },
+  "local-evidence/triad-live-full-input-001/stages/008.json": {
+    "bytes": 167,
+    "sha256": "b8d124b0d836f9394e932cbf789c3981fbe84ea6b29b4cd66ff29b2d65895e46"
+  },
+  "local-evidence/triad-live-full-input-001/stages/009.json": {
+    "bytes": 168,
+    "sha256": "4b5ad3f5cc6392b0d2be2d2d45dabe326b3727f38f400493715a55b02cb13a54"
+  },
+  "local-evidence/triad-live-full-input-001/stages/010.json": {
+    "bytes": 170,
+    "sha256": "77e254ed39c5433cfe5ac48b9d673b65ca921229e3d9fd91e35764a8cbd20e70"
+  },
+  "local-evidence/triad-live-full-input-001/stages/011.json": {
+    "bytes": 172,
+    "sha256": "4fc494477b69c48f5fe030aeac01dd95b1c683451561a2fd2cf057858be09978"
+  },
+  "local-evidence/triad-live-full-input-001/stages/012.json": {
+    "bytes": 173,
+    "sha256": "fdf1c571b4e2219f2684f9002786f30a1a8afc0bd1a55bc9624b4bd8724bcaa9"
+  },
+  "local-evidence/triad-live-full-input-001/stages/013.json": {
+    "bytes": 172,
+    "sha256": "e772970d31b2d73ba0e257d01c9d4e8dc200fc7df0f975250080742ee5aa2a09"
+  },
+  "local-evidence/triad-live-full-input-001/stages/014.json": {
+    "bytes": 172,
+    "sha256": "31ffa13dbbaa727bbdaa79ba99cbf06a51bab191881fab3a36399e119f59c026"
+  },
+  "local-evidence/triad-live-full-input-001/stages/015.json": {
+    "bytes": 173,
+    "sha256": "626853ad5d971969c969e969782fe3605f8af5549579b9fa87285c785ebee19d"
+  },
+  "local-evidence/triad-live-full-input-001/stages/016.json": {
+    "bytes": 173,
+    "sha256": "c68538888159c46e98ce37d92e6518bd3896099d1148c606cb6bfc4a49cb71c0"
+  },
+  "local-evidence/triad-live-full-input-001/stages/017.json": {
+    "bytes": 167,
+    "sha256": "f8b4468d6c6ded1befe7a4b742b30593771b5fc5bc87f18ef201a495defe1701"
+  },
+  "local-evidence/triad-live-full-input-001/stages/018.json": {
+    "bytes": 167,
+    "sha256": "e83bb392021ff980a9f75eca77367bd2d52b018d6015a9e8b302dd228283b050"
+  },
+  "local-evidence/triad-live-full-input-001/stages/019.json": {
+    "bytes": 166,
+    "sha256": "8f2fc8b4c6ce59d2c3e577dfb7a73c4bef15db2db6bd0fa33a9799fa3fa28937"
+  },
+  "local-evidence/triad-live-full-input-001/stages/020.json": {
+    "bytes": 161,
+    "sha256": "bbf0031fa12c2b1c983f2d6f6edbb65b6ea8341fbc2f68684691dda80c4e13ab"
+  },
+  "local-evidence/triad-live-full-input-001/stages/021.json": {
+    "bytes": 160,
+    "sha256": "4394926dc7d87a0a791e1ca6330d95d741cf78450934282a6eb7ea6951e767c7"
+  },
+  "local-evidence/triad-live-full-input-001/stages/022.json": {
+    "bytes": 160,
+    "sha256": "5dae4f19813a2f4e97058001c51d7d33265487eac23f3842c20805d672654f91"
+  },
+  "local-evidence/triad-live-full-input-001/stages/023.json": {
+    "bytes": 164,
+    "sha256": "56f89e03758108123064a8a48b9df39aac8dff23b7af599521380926fc2a33c4"
+  },
+  "local-evidence/triad-live-full-input-001/stages/024.json": {
+    "bytes": 173,
+    "sha256": "db218a12064adf73e668b8de8187eac5aa61dbc0dfef36fda6c7a6eee2d696dd"
+  },
+  "local-evidence/triad-live-full-input-001/summary.json": {
+    "bytes": 25691,
+    "sha256": "0382cf83e18cb9542bbbc8033347b70ff7391eda4cc2d6354764f3cfae54075d"
+  },
+  "local-evidence/triad-live-full-input-001/training/stimulus.json": {
+    "bytes": 812937,
+    "sha256": "2f226d13677b215145324f7013a99d26ef844382541d8cd318be25c83952bcd6"
+  },
+  "local-evidence/triad-live-full-plan-001/plan.json": {
+    "bytes": 1861840,
+    "sha256": "3399ced79d2bc02264eb9d4738eae24965576a9ceeeb0b5f64dcb889b20434c0"
+  },
+  "local-evidence/triad-live-full-plan-001/stages/001.json": {
+    "bytes": 162,
+    "sha256": "c2f5a3ad3cf4cb09dc6c81e2b054f69cafde007d894af5c3d7c0d37d55e30c5f"
+  },
+  "local-evidence/triad-live-full-plan-001/summary.json": {
+    "bytes": 1932898,
+    "sha256": "8da87be519c28b061c18e0a98621ae36a68a6acbbe670fbc578db96f6e32dec1"
+  },
+  "local-evidence/triad-live-low-four-pole-001/analyze_frozen_validation.py": {
+    "bytes": 7455,
+    "sha256": "e7036e4e6c7b37bce43cfdb2727e07b2a0cf51c61fbcb93fa78b40fbb77e0d4a"
+  },
+  "local-evidence/triad-live-low-four-pole-001/audio-profile.json": {
+    "bytes": 214746,
+    "sha256": "63f64f9692b017bfc9a4b1b48a4e42be4e408cca75007f0859d3e9678f6e9397"
+  },
+  "local-evidence/triad-live-low-four-pole-001/check_retained_mainband.py": {
+    "bytes": 6810,
+    "sha256": "1439e0cb1c8242377ddfb2ee197ae2e0a129dbb5036795df7b7d686e7a0f4e3a"
+  },
+  "local-evidence/triad-live-low-four-pole-001/executed-source.tar.gz": {
+    "bytes": 20054,
+    "sha256": "1cfcfbea49549dc2e32133c107a1df45cc67c2efbc8f593b8ff8934575c70ec9"
+  },
+  "local-evidence/triad-live-low-four-pole-001/low-frequency-section.json": {
+    "bytes": 5914,
+    "sha256": "d8bb26bab04e32621fecf172110cea9e695e3648c5d67ffefa41bf461c7964e6"
+  },
+  "local-evidence/triad-live-low-four-pole-001/plot_validation.py": {
+    "bytes": 3700,
+    "sha256": "33cd3d6ff3399c327787c0cd035f613fca1c0243fe806e4754601cc43c52f0e2"
+  },
+  "local-evidence/triad-live-low-four-pole-001/profile-freeze.json": {
+    "bytes": 990,
+    "sha256": "feb046b68235e63d77d55f0b3a91ffa63d2bae4a2f918c6dee2e870a6445b898"
+  },
+  "local-evidence/triad-live-low-four-pole-001/retained-mainband-comparison.json": {
+    "bytes": 13597,
+    "sha256": "f1ab0134c0a7018d95d8ba3a5ae37ffd077da6926e508c877cbf05807f695522"
+  },
+  "local-evidence/triad-live-low-four-pole-001/validation-result.json": {
+    "bytes": 10822,
+    "sha256": "ff2c3863c2be901bab61f02c5aa19717480b90418786731787408d52111da0df"
+  },
+  "local-evidence/triad-live-low-four-pole-001/validation/capture.json": {
+    "bytes": 4140,
+    "sha256": "803be73349e2bd6522084db118e8b3f6802ad109d28621b6a3a0b91cf2e3b8af"
+  },
+  "local-evidence/triad-live-low-four-pole-001/validation/probe.json": {
+    "bytes": 1175,
+    "sha256": "4cbd8a98431b889a422c0ca102b0645163669340a0435166479e134668416b75"
+  },
+  "local-evidence/triad-live-low-four-pole-001/validation/rx.f32.aplay.stderr.log": {
+    "bytes": 773,
+    "sha256": "cc6626c13764decbe5046ff8228b60508a149bede10cb5f6efa5367ff6839f8c"
+  },
+  "local-evidence/triad-live-low-four-pole-001/validation/rx.f32.aplay.stdout.log": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "local-evidence/triad-live-low-four-pole-001/validation/rx.f32.arecord.stderr.log": {
+    "bytes": 698,
+    "sha256": "9727b3e55c0dc09aa0da2433c61efc7b45f507d478e2dff92be0a80e94c74aab"
+  },
+  "local-evidence/triad-live-low-refinement-001/audio-profile.json": {
+    "bytes": 214529,
+    "sha256": "0624eded522171d363066b18d10154292570ce669e7b1882e0804dc52f93bdfb"
+  },
+  "local-evidence/triad-live-low-refinement-001/executed-source.tar.gz": {
+    "bytes": 19512,
+    "sha256": "98469951f57744cf9356c33936b551b0a554fa6f7ed9fa70330f7f60947e59d3"
+  },
+  "local-evidence/triad-live-low-refinement-001/execution-freeze.json": {
+    "bytes": 578,
+    "sha256": "1f19854693239d86f93cf0b3c3c054498824a8937e8a54ee8a8df83af5f5f556"
+  },
+  "local-evidence/triad-live-low-refinement-001/low-frequency-section.json": {
+    "bytes": 5648,
+    "sha256": "0e133412263f735385b4269c3ec2c4275851c9fdf98b2dccf43bd56ef7f99f15"
+  },
+  "local-evidence/triad-live-low-refinement-001/profile-freeze.json": {
+    "bytes": 418,
+    "sha256": "52f9ddb516f797afdc6cffbe22483bfed2cc10475930c099f8d4e138143922b9"
+  },
+  "local-evidence/triad-live-low-refinement-001/qualification-plan.json": {
+    "bytes": 943,
+    "sha256": "a52ee7b87d2939bccf5c2f937317e31fa47f58236ab068f9884dece18e36ddd0"
+  },
+  "local-evidence/triad-live-low-refinement-001/training/capture.json": {
+    "bytes": 4131,
+    "sha256": "b7f810e631d127ac68061e06611217ddab2417a828a01f6e9ee6898afedb7d72"
+  },
+  "local-evidence/triad-live-low-refinement-001/training/probe.json": {
+    "bytes": 1207,
+    "sha256": "85d657c40f7943571dd062301ca2f048a898c60863387ad3776d65fc46e0ddab"
+  },
+  "local-evidence/triad-live-low-refinement-001/training/rx.f32.aplay.stderr.log": {
+    "bytes": 772,
+    "sha256": "2c7823ab04cf2b664f333f36a14a8f93b782aff7b80b4df72cc56e08524bfc8d"
+  },
+  "local-evidence/triad-live-low-refinement-001/training/rx.f32.aplay.stdout.log": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "local-evidence/triad-live-low-refinement-001/training/rx.f32.arecord.stderr.log": {
+    "bytes": 698,
+    "sha256": "9727b3e55c0dc09aa0da2433c61efc7b45f507d478e2dff92be0a80e94c74aab"
+  },
+  "local-evidence/triad-live-low-refinement-001/validation-result.json": {
+    "bytes": 8291,
+    "sha256": "93747154d28b95a5f979c2b7c4170f551e166cb86b009269f79b5019db45652b"
+  },
+  "local-evidence/triad-live-low-refinement-001/validation/capture.json": {
+    "bytes": 4149,
+    "sha256": "4137c18fb24c16d444f6b58d24e4affd94067de6959de538a2d84a46864bd201"
+  },
+  "local-evidence/triad-live-low-refinement-001/validation/probe.json": {
+    "bytes": 1147,
+    "sha256": "3bfa2d71a061e33479f4b86fe2c2445098f91b980bb04e5ab296436241f1ff8f"
+  },
+  "local-evidence/triad-live-low-refinement-001/validation/rx.f32.aplay.stderr.log": {
+    "bytes": 774,
+    "sha256": "b9650887271f8b0616dbeae9d151aca835ebe6d43e6eba3fddda53e8a4f99744"
+  },
+  "local-evidence/triad-live-low-refinement-001/validation/rx.f32.aplay.stdout.log": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "local-evidence/triad-live-low-refinement-001/validation/rx.f32.arecord.stderr.log": {
+    "bytes": 698,
+    "sha256": "9727b3e55c0dc09aa0da2433c61efc7b45f507d478e2dff92be0a80e94c74aab"
+  },
+  "local-evidence/triad-live-lowfreq-diagnosis/compare_four_poles.py": {
+    "bytes": 3287,
+    "sha256": "3e22ac8b0c3f95c6042e0c4ab825e309baad0795ad950af29dec03515175356f"
+  },
+  "local-evidence/triad-live-lowfreq-diagnosis/four-pole-result.json": {
+    "bytes": 3234,
+    "sha256": "a2334f97dea16d6afcc23d045732935335a7f845387cfe3c57bbea565d8a1930"
+  },
+  "local-evidence/triad-live-lowfreq-diagnosis/reproduce.py": {
+    "bytes": 4138,
+    "sha256": "350570dfcbc05d8069aa2cb9e379cbc98c05c830cd1f459014b681c6ba568b89"
+  },
+  "local-evidence/triad-live-lowfreq-diagnosis/result.json": {
+    "bytes": 2258,
+    "sha256": "f8aa23adc583fcb58c5839aded14f75eccd9c6c45ac6236644da0a6532c97b32"
+  },
+  "local-evidence/triad-live-smoke-analysis-003/audio-profile.json": {
+    "bytes": 180999,
+    "sha256": "20d9eca345237093c7c12b4080e3e722e07813601bfc1cd0233cbbdca370b19a"
+  },
+  "local-evidence/triad-live-smoke-analysis-003/holdout-analysis.json": {
+    "bytes": 6538,
+    "sha256": "d4640b4b3c1440c7975b9f4933e2c5fbd3edecb07f1d35196d874a7dd8a9d5c4"
+  },
+  "local-evidence/triad-live-smoke-analysis-003/profile-verification.json": {
+    "bytes": 838,
+    "sha256": "bb6b439671ca8b5b9fb8035a32b25b48df0667ff79733802414ddbd8f8f39d14"
+  },
+  "local-evidence/triad-live-smoke-analysis-003/rate3600-analysis.json": {
+    "bytes": 36133,
+    "sha256": "5ad9aaebdda42a4e9cdf184b4292a2147f63438c5797afa3b9c9530b8f0da047"
+  },
+  "local-evidence/triad-live-smoke-analysis-003/stages/001.json": {
+    "bytes": 304,
+    "sha256": "5f877c00f1bfde9de4a25a74758a860d7bb8ab475fb57bd0e4ffd0a7590fbb42"
+  },
+  "local-evidence/triad-live-smoke-analysis-003/stages/002.json": {
+    "bytes": 305,
+    "sha256": "978bd87d3e571defe4aa8919d73e85d52506f1ea31022ad5b1ba3e49de11831d"
+  },
+  "local-evidence/triad-live-smoke-analysis-003/summary.json": {
+    "bytes": 3634,
+    "sha256": "63ad205df351d8f56d5aca73a461761b34f9b2db65ad8b347ce1bebbeafa1819"
+  },
+  "local-evidence/triad-live-smoke-capture-001/audio-profile.json": {
+    "bytes": 180999,
+    "sha256": "20d9eca345237093c7c12b4080e3e722e07813601bfc1cd0233cbbdca370b19a"
+  },
+  "local-evidence/triad-live-smoke-capture-001/holdout-analysis.json": {
+    "bytes": 2310,
+    "sha256": "5ee052e41325da96ed2076cb5160ef6e41ccb296e19d8c38b9dce5b5185bb92f"
+  },
+  "local-evidence/triad-live-smoke-capture-001/holdout/capture-identity.json": {
+    "bytes": 269,
+    "sha256": "fbd7971d95948b21202b3f781b538d233c1af445f918532b44ae40e041d46554"
+  },
+  "local-evidence/triad-live-smoke-capture-001/holdout/capture.f32.aplay.stderr.log": {
+    "bytes": 821,
+    "sha256": "563a8698d6558706a4b98b8091ad59fbd38a0e558496b6746068c32b82164bbd"
+  },
+  "local-evidence/triad-live-smoke-capture-001/holdout/capture.f32.aplay.stdout.log": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "local-evidence/triad-live-smoke-capture-001/holdout/capture.f32.arecord.stderr.log": {
+    "bytes": 698,
+    "sha256": "9727b3e55c0dc09aa0da2433c61efc7b45f507d478e2dff92be0a80e94c74aab"
+  },
+  "local-evidence/triad-live-smoke-capture-001/holdout/capture.json": {
+    "bytes": 4624,
+    "sha256": "260a2761a292ac8e263efc2dd5e924701c8a7c41323d06b23333fc2272ab6205"
+  },
+  "local-evidence/triad-live-smoke-capture-001/holdout/command.json": {
+    "bytes": 1054,
+    "sha256": "d45e3a2950664942d92b30d8d09b2ca8f2df411b081543de8870780ed66ba442"
+  },
+  "local-evidence/triad-live-smoke-capture-001/input-identity.json": {
+    "bytes": 2065,
+    "sha256": "7c8c21c8a0f12245097b6182576205974e5475b062996d86d2731ed345d8ada1"
+  },
+  "local-evidence/triad-live-smoke-capture-001/rate3600-analysis.json": {
+    "bytes": 16422,
+    "sha256": "2f5e875eb2f01422919751ca0438f0974d5d646ae83bb61deac4c955ea34a363"
+  },
+  "local-evidence/triad-live-smoke-capture-001/rate3600/capture-identity.json": {
+    "bytes": 269,
+    "sha256": "adb2083418166e69970f77f959097581463bd7ae509f786f9e8afe1436c4048d"
+  },
+  "local-evidence/triad-live-smoke-capture-001/rate3600/capture.f32.aplay.stderr.log": {
+    "bytes": 822,
+    "sha256": "870421f0e5947323d31aa6ddef847569d30eebbcae9f65bc416d048e6c1b5b7b"
+  },
+  "local-evidence/triad-live-smoke-capture-001/rate3600/capture.f32.aplay.stdout.log": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "local-evidence/triad-live-smoke-capture-001/rate3600/capture.f32.arecord.stderr.log": {
+    "bytes": 698,
+    "sha256": "9727b3e55c0dc09aa0da2433c61efc7b45f507d478e2dff92be0a80e94c74aab"
+  },
+  "local-evidence/triad-live-smoke-capture-001/rate3600/capture.json": {
+    "bytes": 4645,
+    "sha256": "9e77deb2f7bb8206683d1fce8618b881c590eb0a6fdac6987c0cd94f8608b5bd"
+  },
+  "local-evidence/triad-live-smoke-capture-001/rate3600/command.json": {
+    "bytes": 1073,
+    "sha256": "4fb4bf9d14d63c6ac6ea942283847dd936acc590e94dfc42a5ebd660ef1d6e25"
+  },
+  "local-evidence/triad-live-smoke-capture-001/route-after.json": {
+    "bytes": 4709,
+    "sha256": "2392dea30cac1ae61aa07864dc2a8e502d2f47734b8053235b1da0e8196cd4ab"
+  },
+  "local-evidence/triad-live-smoke-capture-001/route-before.json": {
+    "bytes": 4709,
+    "sha256": "2392dea30cac1ae61aa07864dc2a8e502d2f47734b8053235b1da0e8196cd4ab"
+  },
+  "local-evidence/triad-live-smoke-capture-001/route-preservation.json": {
+    "bytes": 138,
+    "sha256": "5d681436867fe0bd35a44ad56602682b9ad019ecc2ede25c1af396f0cad75a53"
+  },
+  "local-evidence/triad-live-smoke-capture-001/stages/001.json": {
+    "bytes": 158,
+    "sha256": "c81b21ec6adbbcf25a288d65c1eacbc925b15d22dd1b906a52ce5834109bf93d"
+  },
+  "local-evidence/triad-live-smoke-capture-001/stages/002.json": {
+    "bytes": 156,
+    "sha256": "094f7c4bc048f741d5087f3203ea497ee47ce03a40c0a2e363b6a103b6723675"
+  },
+  "local-evidence/triad-live-smoke-capture-001/stages/003.json": {
+    "bytes": 161,
+    "sha256": "dfddf09136fb0e3f830d9580d3b04aa4fd88d032d8eee6558849aef6e41554f1"
+  },
+  "local-evidence/triad-live-smoke-capture-001/stages/004.json": {
+    "bytes": 165,
+    "sha256": "a5fd8aa61fe1ee10e968cafea84454250c73485fe15b794515a4604a4ebd0ffb"
+  },
+  "local-evidence/triad-live-smoke-capture-001/stages/005.json": {
+    "bytes": 158,
+    "sha256": "1b02006c43924c46e989858040f8969dc96c280a1c230f4c2d27b8e08cebc55f"
+  },
+  "local-evidence/triad-live-smoke-capture-001/stages/006.json": {
+    "bytes": 145,
+    "sha256": "703b0c04071aedb271722007827338505878e8b3085727c50bc045d5b9724767"
+  },
+  "local-evidence/triad-live-smoke-capture-001/stages/007.json": {
+    "bytes": 159,
+    "sha256": "8088a0db2073280aebb5f3a24c814c6bff05d717697d69ff329786d2376dd4f6"
+  },
+  "local-evidence/triad-live-smoke-capture-001/stages/008.json": {
+    "bytes": 156,
+    "sha256": "98501d19a132d383e0c1fb075acdc7054d61933ec313fbbc45f50eb7dde10071"
+  },
+  "local-evidence/triad-live-smoke-capture-001/summary.json": {
+    "bytes": 3998,
+    "sha256": "233cc6daf2958698b5d12c90fb09055d4be3e7aefb64c2b0dc6a3b53b63dcd84"
+  },
+  "local-evidence/triad-live-smoke-capture-001/training/capture-identity.json": {
+    "bytes": 269,
+    "sha256": "66eee011b23eba764a1833e7a92ead019e0a8d22d9188690a9c4dbe811a157b0"
+  },
+  "local-evidence/triad-live-smoke-capture-001/training/capture.f32.aplay.stderr.log": {
+    "bytes": 822,
+    "sha256": "d058512fd829b02d009ee0bc90c2f4da35171136dc42b02ce26607934d95f166"
+  },
+  "local-evidence/triad-live-smoke-capture-001/training/capture.f32.aplay.stdout.log": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "local-evidence/triad-live-smoke-capture-001/training/capture.f32.arecord.stderr.log": {
+    "bytes": 698,
+    "sha256": "9727b3e55c0dc09aa0da2433c61efc7b45f507d478e2dff92be0a80e94c74aab"
+  },
+  "local-evidence/triad-live-smoke-capture-001/training/capture.json": {
+    "bytes": 4633,
+    "sha256": "e16d81268d1f9983b49e2be279cb800f78e62d7eeeb63216bb2132d03f40336a"
+  },
+  "local-evidence/triad-live-smoke-capture-001/training/command.json": {
+    "bytes": 1057,
+    "sha256": "a1075fcb89841e11bb85287b673cc71ba88577cc797a7f20a3996692f8d6cf88"
+  },
+  "package_evidence.py": {
+    "bytes": 19030,
+    "sha256": "b97a159ee04dde21f9261b99ff4525448577217213a216fbff6b460a39cb1c5f"
+  }
+}

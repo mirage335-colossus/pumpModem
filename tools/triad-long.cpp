@@ -47,6 +47,9 @@ struct Options {
     std::string control = "signal";
     std::string output;
     double seconds = 16;
+    double source_window_seconds = 0;
+    std::optional<std::uint64_t> source_first_sample;
+    bool source_window_center = false;
     double cn0 = 8;
     double rate = 36, rf_hz = 30e6;
     double start_low = 0, start_high = 0, start_step = 1;
@@ -260,7 +263,7 @@ Options parse(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         const std::string_view key(argv[i]);
         if (key == "--help" || key == "-h") {
-            std::cout << R"HELP(triad_long --mode configure|plan|run|export|export-sampled|export-stats|export-group-stats [options]
+            std::cout << R"HELP(triad_long --mode configure|plan|run|export|export-source-window|export-sampled|export-stats|export-group-stats [options]
   --seconds S                 Requested active one-bit span (8..315576000 s, ten Julian years); rounded to complete private tiles.
   --rate HZ --added N --sample-rate HZ --rf-hz HZ
   --sample-rate-denominator N Reciprocal-integer sampling: N>1 requires --sample-rate 1; Fs=1/N Hz.
@@ -296,6 +299,10 @@ Options parse(int argc, char** argv) {
   --truth-epoch-offset N --truth-frequency-hz HZ --truth-frequency-drift HZ/S
                               Configured physical truth is independent of the public acquisition bank.
   --mode configure            Resolve physical bounds, capture feasibility and search/calendar estimates only.
+  --mode export-source-window Export an absolute-coordinate source-only window; no channel is applied.
+  --source-window-seconds S   Required window length for export-source-window.
+  --source-first-sample N     Absolute first sample (default: active payload start).
+  --source-window-center      Center in active payload; mutually exclusive with --source-first-sample.
   --performance-trace yes|no  Mode run: record bounded setup/read/push/finish stage timings and work counts.
   --cn0 DB-HZ                 Total nominal three-carrier C/N0; N0 normalization uses power1, not faded output.
   --channel none|hf           hf: shared two-ray1.5ms/.3Hz plus slow/fast5% perturbations.
@@ -413,6 +420,9 @@ Examples:
         else if (key == "--frequency") { o.frequency_low=number(need(), "frequency minimum"); o.frequency_high=number(need(), "frequency maximum"); o.frequency_step=number(need(), "frequency step"); }
         else if (key == "--timing-loss-db") o.timing_loss_db=number(need(),"timing recommendation loss");
         else if (key == "--sample-rate") o.sample_rate = number(need(), "sample rate");
+        else if (key == "--source-window-seconds") o.source_window_seconds=number(need(),"source window seconds");
+        else if (key == "--source-first-sample") o.source_first_sample=integer(need(),"source first sample");
+        else if (key == "--source-window-center") o.source_window_center=true;
         else if (key == "--sample-rate-denominator") o.sample_rate_denominator=bounded_integer<std::uint32_t>(need(),"sample rate denominator");
         else if (key == "--phase-diffusion") {o.phase_diffusion=number(need(),"Wiener phase diffusion");o.phase_diffusion_explicit=true;}
         else if (key == "--white-fm") o.white_fm=number(need(),"white FM");
@@ -481,7 +491,9 @@ Examples:
     }
     if (o.now) o.epoch = static_cast<std::uint64_t>(std::time(nullptr));
     if(o.mode=="resolve")o.mode="configure";
-    if (o.mode != "configure" && o.mode != "plan" && o.mode != "run" && o.mode != "export" && o.mode != "export-sampled" && o.mode != "export-stats" && o.mode != "export-group-stats") throw std::invalid_argument("mode must be configure, plan, run, export, export-sampled, export-stats, or export-group-stats");
+    if (o.mode != "configure" && o.mode != "plan" && o.mode != "run" && o.mode != "export" && o.mode != "export-source-window" && o.mode != "export-sampled" && o.mode != "export-stats" && o.mode != "export-group-stats") throw std::invalid_argument("mode must be configure, plan, run, export, export-source-window, export-sampled, export-stats, or export-group-stats");
+    if(o.mode!="export-source-window"&&(o.source_window_seconds!=0||o.source_first_sample||o.source_window_center))
+        throw std::invalid_argument("source-window options require --mode export-source-window");
     if(o.performance_trace&&o.mode!="run")
         throw std::invalid_argument("--performance-trace yes is supported only by --mode run");
     if (o.channel != "none" && o.channel != "hf") throw std::invalid_argument("channel must be none or hf");
@@ -1776,6 +1788,101 @@ void export_basis(const Options& o) {
     std::filesystem::rename(directory/"manifest.json.partial",directory/"manifest.json");
 }
 
+void export_source_window(const Options& o) {
+    if(o.output.empty())throw std::invalid_argument("--output directory is required for --mode export-source-window");
+    if(!(std::isfinite(o.source_window_seconds)&&o.source_window_seconds>0))
+        throw std::invalid_argument("--source-window-seconds must be finite and positive");
+    if(o.source_window_center&&o.source_first_sample)
+        throw std::invalid_argument("--source-window-center cannot be combined with --source-first-sample");
+    if(o.control!="signal")throw std::invalid_argument("source-window export supports --control signal only; candidate arrays always contain public bit 0 and bit 1 sources");
+    // This mode exports the exact maintained keyed source before propagation.
+    // FHSS and Symbol_Burst are Format-level source envelope/calendar features
+    // and remain enabled. Channel, oscillator, converter and erasure effects
+    // are intentionally not applied and therefore must not be selected.
+    const bool channel_effect=(o.channel!="none")||o.base_oscillator||o.shift_oscillator||o.clock_sync_text||
+        o.spread_preset||(o.spread_delay_ms&&*o.spread_delay_ms!=0)||(o.spread_doppler_hz&&*o.spread_doppler_hz!=0)||
+        (o.selective_perturbation&&*o.selective_perturbation!="off")||
+        (o.selective_modulation_rate_hz&&*o.selective_modulation_rate_hz!=0)||o.audio_error_explicit||
+        (o.margin_explicit&&o.margin!=1)||o.phase_diffusion_explicit&&o.phase_diffusion!=0||
+        o.white_fm!=0||o.random_walk_fm!=0||o.flicker_fm!=0||o.white_pm!=0||path_evolution_active(o)||
+        o.dropout_ms!=0||!o.missed_dwells.empty()||o.frontend.active()||o.truth_epoch_offset!=0||
+        o.truth_frequency_hz!=0||o.truth_frequency_drift!=0;
+    if(channel_effect)
+        throw std::invalid_argument("export-source-window is source-only; remove propagation/oscillator/frontend/erasure selections or use a propagated export mode");
+    const auto f=format_for(o);const auto g=geometry(f);const double fs=effective_sample_rate(f);
+    const long double requested=std::ceil(static_cast<long double>(o.source_window_seconds)*fs);
+    if(!std::isfinite(static_cast<double>(requested))||requested<1||requested>UINT64_MAX)
+        throw std::invalid_argument("source window sample count exceeds numeric range");
+    const auto rows=static_cast<std::uint64_t>(requested);
+    if(rows>o.export_max_samples)throw std::invalid_argument("source window exceeds --export-max-samples");
+    const auto payload_begin=g.calendar_origin_sample;
+    const auto payload_end=g.source_samples-g.calendar_origin_sample;
+    if(payload_end<payload_begin||rows>payload_end-payload_begin)
+        throw std::invalid_argument("source window is longer than the active payload; lower --source-window-seconds or increase --seconds");
+    std::uint64_t first=payload_begin;
+    if(o.source_first_sample)first=*o.source_first_sample;
+    else if(o.source_window_center)first=payload_begin+(payload_end-payload_begin-rows)/2;
+    if(first>g.source_samples||rows>g.source_samples-first)
+        throw std::invalid_argument("source window [first,first+count) exceeds complete source geometry");
+    const long double output_bytes=static_cast<long double>(rows)*3*sizeof(std::complex<float>);
+    if(output_bytes>o.export_max_bytes)throw std::invalid_argument("source window exceeds explicit --export-max-mib disk budget");
+    const long double scratch=static_cast<long double>(o.chunk)*(sizeof(Complex)+sizeof(std::complex<float>))+65536;
+    if(scratch+g.source_workspace_bytes>o.memory_bytes)
+        throw std::invalid_argument("source-window render scratch exceeds --memory-mib");
+
+    const auto directory=std::filesystem::path(o.output);std::filesystem::create_directories(directory);
+    for(const auto* name:{"source_candidates.c64","signal.c64","manifest.json"}){
+        if(std::filesystem::exists(directory/name)||std::filesystem::exists(directory/(std::string(name)+".partial")))
+            throw std::invalid_argument("source-window final or partial files already exist; choose a fresh output directory");
+    }
+    std::ofstream candidates(directory/"source_candidates.c64.partial",std::ios::binary);
+    std::ofstream signal(directory/"signal.c64.partial",std::ios::binary);
+    if(!candidates||!signal)throw std::runtime_error("cannot create source-window export files");
+    std::vector<Complex> values(o.chunk);std::vector<std::complex<float>> packed(o.chunk);
+    const auto pack=[](Complex v){
+        if(!std::isfinite(v.real())||!std::isfinite(v.imag())||std::abs(v.real())>std::numeric_limits<float>::max()||std::abs(v.imag())>std::numeric_limits<float>::max())
+            throw std::runtime_error("source-window sample is not representable as FP32");
+        return std::complex<float>{static_cast<float>(v.real()),static_cast<float>(v.imag())};};
+    const auto txkey=key_for(o.key_seed.value_or(o.seed),0);
+    const auto candidate_key=txkey;
+    auto render=[&](PatternSource& source,std::ofstream& out){
+        std::uint64_t done=0;
+        while(done<rows){const auto n=static_cast<std::size_t>(std::min<std::uint64_t>(o.chunk,rows-done));
+            source.render(first+done,std::span(values).first(n));
+            for(std::size_t j=0;j<n;++j)packed[j]=pack(values[j]);
+            out.write(reinterpret_cast<const char*>(packed.data()),static_cast<std::streamsize>(n*sizeof(packed[0])));
+            if(!out)throw std::runtime_error("failed writing source-window samples");
+            done+=n;
+        }
+    };
+    {
+        PatternSource truth(transmitter_format(o,f),txkey,o.signal_bit);
+        render(truth,signal);
+    }
+    for(std::uint8_t bit=0;bit<2;++bit){PatternSource candidate(f,candidate_key,bit);render(candidate,candidates);}
+    candidates.close();signal.close();if(!candidates||!signal)throw std::runtime_error("failed finalizing source-window sample files");
+    std::ofstream manifest(directory/"manifest.json.partial");
+    manifest<<std::setprecision(17)<<"{\"format\":\"triad-source-window-v1\",\"byte_order\":\"native\",\"complex_type\":\"complex64\",\"layout\":\"candidate,sample\",\"source_candidates_file\":\"source_candidates.c64\",\"source_candidates_shape\":[2,"<<rows
+        <<"],\"signal_file\":\"signal.c64\",\"signal_shape\":["<<rows<<"],\"partial_source_window\":true,\"source_only\":true,\"channel_applied\":false,\"propagated_waveform\":false"
+        <<",\"candidate_model\":\"nominal-flat-keyed-source\",\"channel_model\":\"none-source-only\",\"source_origin_sample\":0"
+        <<",\"sample_rate\":"<<fs<<",\"inner_rate_hz\":"<<f.inner_rate_hz<<",\"fine_rate_hz\":"<<g.fine_chip_rate_hz
+        <<",\"carrier_spacing_hz\":"<<g.carrier_spacing_hz<<",\"occupied_bandwidth_hz\":"<<g.occupied_bandwidth_hz
+        <<",\"added_symbols\":"<<f.added_symbols<<",\"encrypted\":"<<(f.encrypt?"true":"false")
+        <<",\"seed\":"<<o.seed<<",\"key_seed\":"<<o.key_seed.value_or(o.seed)<<",\"epoch\":"<<f.epoch
+        <<",\"full_source_samples\":"<<g.source_samples<<",\"full_calendar_seconds\":"<<static_cast<double>(g.source_samples)/fs
+        <<",\"requested_active_seconds\":"<<f.bit_seconds<<",\"minimum_pattern_cells\":"<<f.minimum_inner_coefficients
+        <<",\"source_fraction\":"<<static_cast<double>(rows)/g.source_samples<<",\"first_sample\":"<<first
+        <<",\"window_samples\":"<<rows<<",\"window_seconds\":"<<static_cast<double>(rows)/fs
+        <<",\"active_payload_first_sample\":"<<payload_begin<<",\"active_payload_end_sample_exclusive\":"<<payload_end
+        <<",\"signal_bit\":"<<static_cast<unsigned>(o.signal_bit)<<",\"candidate_bits\":[0,1]"
+        <<",\"fhss_envelope_only\":"<<(f.fhss?"true":"false")<<",\"burst_wait_tiles\":"<<f.burst_wait_tiles
+        <<",\"export_bytes\":"<<static_cast<std::uint64_t>(output_bytes)<<",\"note\":\"Source samples at original absolute sample coordinates; no skipped prefix was rendered. Channel, oscillator, converter, noise, and erasure effects are absent. Full propagated waveform validation requires export/export-sampled.\"}\n";
+    manifest.close();if(!manifest)throw std::runtime_error("failed writing source-window manifest");
+    std::filesystem::rename(directory/"source_candidates.c64.partial",directory/"source_candidates.c64");
+    std::filesystem::rename(directory/"signal.c64.partial",directory/"signal.c64");
+    std::filesystem::rename(directory/"manifest.json.partial",directory/"manifest.json");
+}
+
 struct ColumnRef { std::size_t candidate=0, local=0; };
 using ColumnKey=std::string;
 void key_part(ColumnKey& k,const auto& value) {
@@ -2451,6 +2558,7 @@ int main(int argc,char** argv) {
         }
         if(options.mode=="run") run(options);
         else if(options.mode=="export") export_basis(options);
+        else if(options.mode=="export-source-window") export_source_window(options);
         else if(options.mode=="export-sampled") export_sampled(options);
         else if(options.mode=="export-stats") export_stats(options);
         else export_group_stats(options);
