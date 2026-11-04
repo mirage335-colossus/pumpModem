@@ -1,0 +1,271 @@
+{
+  "status": "complete",
+  "plan": {
+    "command": [
+      "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/triad_long",
+      "--mode",
+      "export-stats",
+      "--seconds",
+      "16",
+      "--rate",
+      "36",
+      "--added",
+      "1",
+      "--sample-rate",
+      "256",
+      "--channel",
+      "hf",
+      "--phase-diffusion",
+      "0",
+      "--basis",
+      "two-ray",
+      "--block-seconds",
+      ".5",
+      "--cn0",
+      "8",
+      "--stats-noisy",
+      "--threads",
+      "1",
+      "--memory-mib",
+      "64",
+      "--export-max-samples",
+      "100000",
+      "--export-max-mib",
+      "16",
+      "--seed",
+      "931751",
+      "--output",
+      "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-complete/actual-delay-001/sampled-stats"
+    ],
+    "case": {
+      "id": "gaussian-actual-delay-control",
+      "family": "gaussian-state",
+      "unit": "blocks",
+      "options": {
+        "coherences": [
+          4.0
+        ],
+        "taps": 2,
+        "memory_limit_bytes": 33554432
+      }
+    },
+    "requested_external_delay_seconds": 0.05,
+    "source_sha256": {
+      "tools/triad_perf_decision_controls.py": "3c25d2f12693354d3ae65fe3028dbf343bbb6525f9bf263817ee7cf469de188e",
+      "tools/triad_perf_family_state.py": "67d750dd41c317b7cb810591de6f88585f7cd3191888e1c0d28ede49b3595c06",
+      "tools/triad_perf_families.py": "d2758a1cecd33a466469f1c04a5c91232c429d1336c3affa206ef835e3d7563b",
+      "tools/triad-state-study.py": "3fa7491ae93031ff6bfadc4c9b792659336999effc0508a71cf734ada9250402",
+      "tools/triad_state_workspace.py": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923",
+      "tools/triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba"
+    },
+    "binary_sha256": "862b0431f04a3973ce15e7cff9b9959ed45ca36d626e401352db5cf8630c9c6b",
+    "scope": "actual noisy native exporter plus full Gaussian-state adapter; one paired numerical/timer diagnostic, no confidence-qualified performance gate"
+  },
+  "export_wall_seconds": 0.0839749849983491,
+  "fixture_sha256": {
+    "gram.c128": "6da68a4a960f570f496d6b57ffa786f5c0a1916f7a99c999773ecd6015c649d2",
+    "mean.c128": "1bde8fb749777e7ce839f1e5aed68298932e0ff8bb8f7b33035f2e5ef1d06984",
+    "intervals.u64": "9b304ae8491f067dd159c8b80f32851d170c2acb68f41e7d5eb7351a12ce39dc",
+    "valid_rows.u64": "fa98de26d2d1446ef995486affb6643ffd55490f5c18c92647aaf43edcccdbed",
+    "signal_energy.f64": "25a04a3ceaed9ba8e3e42fd047dec53fc121b47008b13fb22ed5eb146d4f9ad9",
+    "observation.c128": "26b8134953157f4a4f644d225522d2d02b14713cd4fe24867194cf4f773dfe20",
+    "received_energy.f64": "644aeada33b528896649eb947a40bf69b031ce4302a2fd329a7f2dde5dc9e9c3",
+    "manifest.json": "b8c2c75ebfc0f9f12cc05dae971a5cb3771d37c7470acc827db7023ad09ac637"
+  },
+  "baseline": {
+    "seconds": {
+      "load": 0.0038226449978537858,
+      "initialize_update_transfer_and_finalize": 0.32745143299689516,
+      "update_iterator_and_transfer_nested": 0.32637955801328644
+    },
+    "work": {
+      "unit": "blocks",
+      "count": 39,
+      "target_count": 39,
+      "updates_per_state": [
+        39
+      ],
+      "valid_rows": 4938,
+      "empty_blocks": 0,
+      "partial_blocks": 1,
+      "transition_intervals": [
+        [
+          0.0,
+          1
+        ],
+        [
+          0.39453125,
+          1
+        ],
+        [
+          0.5,
+          37
+        ]
+      ],
+      "counter_scope": "target from public sample calendar; observed row and transition events counted in the iterator; updates from receiver diagnostics"
+    },
+    "regime": {
+      "family": "gaussian-state",
+      "device": "cpu",
+      "precision": "fp64",
+      "sample_count": 4938,
+      "sample_rate": 256.0,
+      "base_block_samples": 128,
+      "dimension": 4,
+      "candidates": 2,
+      "taps": 2,
+      "terminal_partial_block": true,
+      "loader_tile_blocks": 16,
+      "memory_limit_bytes": 33554432,
+      "resolved": {
+        "state_dtype": "torch.complex128",
+        "log_likelihood_dtype": "torch.float64",
+        "states": 1,
+        "owned_state_bytes": 352
+      },
+      "timing_boundaries": {
+        "load": "source and public workspace metadata loading",
+        "initialize_update_transfer_and_finalize": "one synchronized evaluate call, including receiver initialization, sampled-statistic reads, device transfers, updates and result finalization",
+        "update_iterator_and_transfer_nested": "subset of evaluate call; diagnostic timer, never added to enclosing stage"
+      }
+    },
+    "result": {
+      "scores": [
+        77.84536135450803,
+        12.628586844068668
+      ],
+      "winner": 0,
+      "known_noise_simulation_diagnostic": true,
+      "diagnostics": [
+        {
+          "blocks": 39,
+          "taps": 2,
+          "state_dtype": "torch.complex128",
+          "log_likelihood_dtype": "torch.float64",
+          "input_checks_each_block": false,
+          "minimum_relative_covariance_eigenvalue": 0.0,
+          "maximum_relative_gram_psd_repair": 0.0,
+          "owned_state_bytes": 352,
+          "memory_scope": "owned streaming state only; excludes caller tiles, framework and temporary linear-algebra workspace",
+          "likelihood_scope": "proper complex Gaussian block-constant coefficients with declared OU/static transitions; no physical-channel optimality or anytime-admission claim"
+        }
+      ],
+      "scope": "complete actual sampled receiver"
+    }
+  },
+  "injected": {
+    "seconds": {
+      "load": 0.0004989969893358648,
+      "initialize_update_transfer_and_finalize": 0.021076294011436403,
+      "update_iterator_and_transfer_nested": 0.020573358051478863
+    },
+    "work": {
+      "unit": "blocks",
+      "count": 39,
+      "target_count": 39,
+      "updates_per_state": [
+        39
+      ],
+      "valid_rows": 4938,
+      "empty_blocks": 0,
+      "partial_blocks": 1,
+      "transition_intervals": [
+        [
+          0.0,
+          1
+        ],
+        [
+          0.39453125,
+          1
+        ],
+        [
+          0.5,
+          37
+        ]
+      ],
+      "counter_scope": "target from public sample calendar; observed row and transition events counted in the iterator; updates from receiver diagnostics"
+    },
+    "regime": {
+      "family": "gaussian-state",
+      "device": "cpu",
+      "precision": "fp64",
+      "sample_count": 4938,
+      "sample_rate": 256.0,
+      "base_block_samples": 128,
+      "dimension": 4,
+      "candidates": 2,
+      "taps": 2,
+      "terminal_partial_block": true,
+      "loader_tile_blocks": 16,
+      "memory_limit_bytes": 33554432,
+      "resolved": {
+        "state_dtype": "torch.complex128",
+        "log_likelihood_dtype": "torch.float64",
+        "states": 1,
+        "owned_state_bytes": 352
+      },
+      "timing_boundaries": {
+        "load": "source and public workspace metadata loading",
+        "initialize_update_transfer_and_finalize": "one synchronized evaluate call, including receiver initialization, sampled-statistic reads, device transfers, updates and result finalization",
+        "update_iterator_and_transfer_nested": "subset of evaluate call; diagnostic timer, never added to enclosing stage"
+      }
+    },
+    "result": {
+      "scores": [
+        77.84536135450803,
+        12.628586844068668
+      ],
+      "winner": 0,
+      "known_noise_simulation_diagnostic": true,
+      "diagnostics": [
+        {
+          "blocks": 39,
+          "taps": 2,
+          "state_dtype": "torch.complex128",
+          "log_likelihood_dtype": "torch.float64",
+          "input_checks_each_block": false,
+          "minimum_relative_covariance_eigenvalue": 0.0,
+          "maximum_relative_gram_psd_repair": 0.0,
+          "owned_state_bytes": 352,
+          "memory_scope": "owned streaming state only; excludes caller tiles, framework and temporary linear-algebra workspace",
+          "likelihood_scope": "proper complex Gaussian block-constant coefficients with declared OU/static transitions; no physical-channel optimality or anytime-admission claim"
+        }
+      ],
+      "scope": "complete actual sampled receiver"
+    }
+  },
+  "external_wrapped_seconds": 0.07181664300151169,
+  "internal_receiver_seconds": 0.021575291000772268,
+  "outside_receiver_seconds": 0.050241352000739425,
+  "delay_ledger": {
+    "frozen_plan": {
+      "rules": {
+        "external-finalization": {
+          "multiplier": 1.0,
+          "extra_seconds": 0.05
+        }
+      },
+      "maximum_requested_delay_seconds": 0.1,
+      "actual_sleep_may_overshoot_requested_delay": true,
+      "injection_kind": "post-operation sleep",
+      "returned_values_modified": false
+    },
+    "plan_sha256": "ef1c5711a8a0c79c205c3ddc8a13a1cb1c581433cc6da423420e8133a0dc4a13",
+    "wrapper_source_sha256": "3c25d2f12693354d3ae65fe3028dbf343bbb6525f9bf263817ee7cf469de188e",
+    "calls": [
+      {
+        "stage": "external-finalization",
+        "raw_operation_seconds": 0.021714743983466178,
+        "requested_injected_seconds": 0.05,
+        "actual_injected_seconds": 0.05008571897633374,
+        "complete_wrapped_seconds": 0.07180046295979992
+      }
+    ],
+    "requested_total_seconds": 0.05,
+    "actual_total_seconds": 0.05008571897633374,
+    "scope": "real operation plus explicitly injected post-operation sleep; not a hardware slowdown or receiver correctness test"
+  },
+  "numeric_and_work_unchanged": true,
+  "performance_regression_qualified": false,
+  "scope": "one actual full-family execution validates timer inclusion and unchanged values, not regression detection power or future performance"
+}

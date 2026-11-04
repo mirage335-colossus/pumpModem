@@ -1,0 +1,33 @@
+......F
+======================================================================
+FAIL: test_zero_relative_matches_same_grid_static_and_atom_lower_bound (__main__.RayFrequencyTests.test_zero_relative_matches_same_grid_static_and_atom_lower_bound)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_triad_ray_frequency.py", line 89, in test_zero_relative_matches_same_grid_static_and_atom_lower_bound
+    np.testing.assert_allclose(matched.numpy(),static,atol=3e-12,rtol=3e-12)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/triad-weak-env/lib/python3.13/site-packages/numpy/testing/_private/utils.py", line 1780, in assert_allclose
+    assert_array_compare(compare, actual, desired, err_msg=str(err_msg),
+    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                         verbose=verbose, header=header, equal_nan=equal_nan,
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                         strict=strict)
+                         ^^^^^^^^^^^^^^
+  File "/tmp/triad-weak-env/lib/python3.13/site-packages/numpy/testing/_private/utils.py", line 988, in assert_array_compare
+    raise AssertionError(msg)
+AssertionError: 
+Not equal to tolerance rtol=3e-12, atol=3e-12
+
+Mismatched elements: 2 / 2 (100%)
+Mismatch at indices:
+ [0]: -1.4236530181332077 (ACTUAL), -1.4236411973866054 (DESIRED)
+ [1]: -1.3999641125057658 (ACTUAL), -1.3999522385183802 (DESIRED)
+Max absolute difference among violations: 1.18739874e-05
+Max relative difference among violations: 8.48170892e-06
+ ACTUAL: array([-1.423653, -1.399964])
+ DESIRED: array([-1.423641, -1.399952])
+
+----------------------------------------------------------------------
+Ran 7 tests in 0.443s
+
+FAILED (failures=1)

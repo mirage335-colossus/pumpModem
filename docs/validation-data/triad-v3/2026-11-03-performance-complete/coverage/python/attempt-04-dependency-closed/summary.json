@@ -1,0 +1,4172 @@
+{
+  "coverage_interpretation": {
+    "branch_metric": "coverage.py executed and missing Python control-flow arcs",
+    "limitations": [
+      "coverage.py records Python line execution and control-flow arcs; these are not a proof that every semantic condition or receiver behavior is covered.",
+      "C/C++ extensions and internal NumPy, SciPy, Torch, and CUDA implementation branches are outside this Python source report.",
+      "CUDA availability is recorded as environment context. A CPU-only or unavailable CUDA run does not cover CUDA execution paths.",
+      "This is a focused regression measurement for the listed maintained runtime modules, not coverage of every triad Python tool or performance harness."
+    ],
+    "line_metric": "coverage.py executable Python source statements"
+  },
+  "coverage_version": "7.17.1",
+  "cuda_environment": {
+    "cuda_available": false,
+    "cuda_device_count": 0,
+    "torch_installed": true,
+    "torch_version": "2.8.0+cpu"
+  },
+  "dependency_sha256": {
+    "docs/gpu-precision-controls.md": "b61dab07377a1f1b676ec262fc44db4069c895a956dc896bb773df70bdbaa207",
+    "tests/test_triad_cfo_batch.py": "f03812407de28cef6854c39df73c25cc66301abb637d8fd4cb40e34b8c16a356",
+    "tests/test_triad_fft_acquire.py": "7b8c3156ebec580f22da3dae4e9941f502e88a35caf15863b2f3b3b6d066458a",
+    "tests/test_triad_gaussian_prepared.py": "d59e54477f9a31d4038761d2d0c7a8fe020398d4e9e0d6386c1a1593a2e749c4",
+    "tests/test_triad_gaussian_state.py": "386ba03d3d6e850c7b0c6e805a5c9d30f88fdc33d07aeed8e0268cfccbde7da1",
+    "tests/test_triad_gaussian_window.py": "66783804ee920a46757daa54155d9fd88a9d1ed0d65fbb5d364287ffcafde1f9",
+    "tests/test_triad_group_acquire.py": "ad4b64bfa40433ed114a55787a55a89a25eed8be43ee02334859fe69151ab17c",
+    "tests/test_triad_noise_likelihood.py": "2c5452df602057d3fc8550a59fda22d2ca6f64f791b5a506b08d5b8079cb65c7",
+    "tests/test_triad_noise_study.py": "1b423c98057997398b3fff142aa53bf0d46e524841a58c70ee08084671e7893f",
+    "tests/test_triad_perf_hardware.py": "721bd0aaf3ec019aa8b63cbde150598158d2775577bf6dfcd05554d5935a2aa9",
+    "tests/test_triad_phase_frequency.py": "cc4d6f1b9c33fc746bb57791ebd19f3ae496272d11bc7cf6379bfb116b9f7dad",
+    "tests/test_triad_phase_optimized.py": "2dbb8586c57c57d0d8e98b7066535cd21ee2010cf1ec78ed56ec1d0e4f18982b",
+    "tests/test_triad_phase_reduction.py": "2d1bf61ebe53494568777439ca9c5b0b4d9badc7597440a82c9bb4175da62ff7",
+    "tests/test_triad_phase_tensor.py": "9403029b2ab959689b475dd92c10e8da84d633501dd0c1414a0a99d55a4639ae",
+    "tests/test_triad_precision_probe.py": "7de34739c72121baa230610c197f9ce7a529688fb1f581b8b01d559443498fee",
+    "tests/test_triad_prepared_observation.py": "e1ff404d5dc487146442bf58038301a9610678e9d36fdcaf186d40b40b0a763b",
+    "tests/test_triad_ray_frequency.py": "982473b034caa7bc550e1acee29dc2d9c8e33c6131e25683abd11bc95fbb89b3",
+    "tests/test_triad_rbpf.py": "668c624ef439c098a99ff9e33822b6272ea367183865b7caccdafcffbc8c42fa",
+    "tests/test_triad_rbpf_study.py": "dbc93c3570719a216ca34d9e10248b8f49f0d25c7ebee1537c0df70a81b28598",
+    "tests/test_triad_state_study.py": "6e1bbdf0ef3dd1124d30be9bee8dc804a617ce1e3f615b3f2862f328f5f1bc4a",
+    "tests/test_triad_state_workspace.py": "b9a0276203bd212b74f8becca1726d56dd6074d8c27c720a14d08cff4b6b0aba",
+    "tests/test_triad_static_frequency_study.py": "73c609d183dfacf03e22426d9defac30be386f48ce35cb08b92942fc5811c34d",
+    "tools/triad-cfo-batch-study.py": "5c7fb6f8b0ad8cadeaae8591d9fb0e3d489fb5eb4c14962faf800ad46a661665",
+    "tools/triad-noise-study.py": "960040dc2a9a00910185a5b79f8af8c84410ffd3b8b7327256399543f396a621",
+    "tools/triad-ray-frequency-study.py": "ea3ca2acde8aea75538066e46e3ccae2e36612afac753db6b2d048bd6ff87dd2",
+    "tools/triad-rbpf-study.py": "34a9797ed7119dcf6545b6be759b8f506cbdaf6ac9ece886b82fa699cd5d085f",
+    "tools/triad-state-study.py": "3fa7491ae93031ff6bfadc4c9b792659336999effc0508a71cf734ada9250402",
+    "tools/triad-static-frequency-study.py": "d1b75e9b49de21041558e97ee1daff2ba07a1fd18a123bc8a6cb928f1052e11b",
+    "tools/triad_exhaustive_correlation.py": "ae02b1f7d85e2d3f8c2c153000f530a411860ff443aeaf674abaa93cf60ab2d4",
+    "tools/triad_fft_acquire.py": "d4a3c2cc39e0068e6aa6aab27d7ee8eeff6cc7db72a790868fe166c3f1d65843",
+    "tools/triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba",
+    "tools/triad_gaussian_window.py": "b22fe002864922e44bc7e10000672a163353818f610c4882bae5d62cfe1cf883",
+    "tools/triad_group_acquire.py": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+    "tools/triad_noise_likelihood.py": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110",
+    "tools/triad_phase_frequency.py": "48ee569b1d467b2d7b6fd55088764bd28dd11e0bfecb5974622a318fbb408585",
+    "tools/triad_phase_optimized.py": "759b46d536f2daa1d1de2336190ab19153376aca3eeca32847cba5289d2d63ed",
+    "tools/triad_phase_reduction.py": "b2f762320fbff5a66fa88123711483f9c42721e1765e406b7699c434048ded98",
+    "tools/triad_phase_tensor.py": "3b1a674ac7ace90ddce72c2773c2d1543bcfe8307d7b65ea965ad03a6525ffda",
+    "tools/triad_prepared_observation.py": "13d37977620519aaeb457d4ed1163c80d68dca96c8319480de914cae8a6aaec8",
+    "tools/triad_rbpf.py": "d4b64c3a830acd3bd15433421da0e003ba1aa9810bf1dd904c57082d94c3bd54",
+    "tools/triad_state_workspace.py": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923"
+  },
+  "elapsed_seconds": 53.43168301903643,
+  "input_identity": {
+    "capture_scope": "declared matrix row source union, matrix test source paths, selected test source paths, explicit support fixture/dependencies, Python runtime rows, and collector source; not discovered dynamic import closure",
+    "changed_inputs": [],
+    "dependency_sha256": {
+      "docs/gpu-precision-controls.md": "b61dab07377a1f1b676ec262fc44db4069c895a956dc896bb773df70bdbaa207",
+      "tests/test_triad_cfo_batch.py": "f03812407de28cef6854c39df73c25cc66301abb637d8fd4cb40e34b8c16a356",
+      "tests/test_triad_fft_acquire.py": "7b8c3156ebec580f22da3dae4e9941f502e88a35caf15863b2f3b3b6d066458a",
+      "tests/test_triad_gaussian_prepared.py": "d59e54477f9a31d4038761d2d0c7a8fe020398d4e9e0d6386c1a1593a2e749c4",
+      "tests/test_triad_gaussian_state.py": "386ba03d3d6e850c7b0c6e805a5c9d30f88fdc33d07aeed8e0268cfccbde7da1",
+      "tests/test_triad_gaussian_window.py": "66783804ee920a46757daa54155d9fd88a9d1ed0d65fbb5d364287ffcafde1f9",
+      "tests/test_triad_group_acquire.py": "ad4b64bfa40433ed114a55787a55a89a25eed8be43ee02334859fe69151ab17c",
+      "tests/test_triad_noise_likelihood.py": "2c5452df602057d3fc8550a59fda22d2ca6f64f791b5a506b08d5b8079cb65c7",
+      "tests/test_triad_noise_study.py": "1b423c98057997398b3fff142aa53bf0d46e524841a58c70ee08084671e7893f",
+      "tests/test_triad_perf_hardware.py": "721bd0aaf3ec019aa8b63cbde150598158d2775577bf6dfcd05554d5935a2aa9",
+      "tests/test_triad_phase_frequency.py": "cc4d6f1b9c33fc746bb57791ebd19f3ae496272d11bc7cf6379bfb116b9f7dad",
+      "tests/test_triad_phase_optimized.py": "2dbb8586c57c57d0d8e98b7066535cd21ee2010cf1ec78ed56ec1d0e4f18982b",
+      "tests/test_triad_phase_reduction.py": "2d1bf61ebe53494568777439ca9c5b0b4d9badc7597440a82c9bb4175da62ff7",
+      "tests/test_triad_phase_tensor.py": "9403029b2ab959689b475dd92c10e8da84d633501dd0c1414a0a99d55a4639ae",
+      "tests/test_triad_precision_probe.py": "7de34739c72121baa230610c197f9ce7a529688fb1f581b8b01d559443498fee",
+      "tests/test_triad_prepared_observation.py": "e1ff404d5dc487146442bf58038301a9610678e9d36fdcaf186d40b40b0a763b",
+      "tests/test_triad_ray_frequency.py": "982473b034caa7bc550e1acee29dc2d9c8e33c6131e25683abd11bc95fbb89b3",
+      "tests/test_triad_rbpf.py": "668c624ef439c098a99ff9e33822b6272ea367183865b7caccdafcffbc8c42fa",
+      "tests/test_triad_rbpf_study.py": "dbc93c3570719a216ca34d9e10248b8f49f0d25c7ebee1537c0df70a81b28598",
+      "tests/test_triad_state_study.py": "6e1bbdf0ef3dd1124d30be9bee8dc804a617ce1e3f615b3f2862f328f5f1bc4a",
+      "tests/test_triad_state_workspace.py": "b9a0276203bd212b74f8becca1726d56dd6074d8c27c720a14d08cff4b6b0aba",
+      "tests/test_triad_static_frequency_study.py": "73c609d183dfacf03e22426d9defac30be386f48ce35cb08b92942fc5811c34d",
+      "tools/triad-cfo-batch-study.py": "5c7fb6f8b0ad8cadeaae8591d9fb0e3d489fb5eb4c14962faf800ad46a661665",
+      "tools/triad-noise-study.py": "960040dc2a9a00910185a5b79f8af8c84410ffd3b8b7327256399543f396a621",
+      "tools/triad-ray-frequency-study.py": "ea3ca2acde8aea75538066e46e3ccae2e36612afac753db6b2d048bd6ff87dd2",
+      "tools/triad-rbpf-study.py": "34a9797ed7119dcf6545b6be759b8f506cbdaf6ac9ece886b82fa699cd5d085f",
+      "tools/triad-state-study.py": "3fa7491ae93031ff6bfadc4c9b792659336999effc0508a71cf734ada9250402",
+      "tools/triad-static-frequency-study.py": "d1b75e9b49de21041558e97ee1daff2ba07a1fd18a123bc8a6cb928f1052e11b",
+      "tools/triad_exhaustive_correlation.py": "ae02b1f7d85e2d3f8c2c153000f530a411860ff443aeaf674abaa93cf60ab2d4",
+      "tools/triad_fft_acquire.py": "d4a3c2cc39e0068e6aa6aab27d7ee8eeff6cc7db72a790868fe166c3f1d65843",
+      "tools/triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba",
+      "tools/triad_gaussian_window.py": "b22fe002864922e44bc7e10000672a163353818f610c4882bae5d62cfe1cf883",
+      "tools/triad_group_acquire.py": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+      "tools/triad_noise_likelihood.py": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110",
+      "tools/triad_phase_frequency.py": "48ee569b1d467b2d7b6fd55088764bd28dd11e0bfecb5974622a318fbb408585",
+      "tools/triad_phase_optimized.py": "759b46d536f2daa1d1de2336190ab19153376aca3eeca32847cba5289d2d63ed",
+      "tools/triad_phase_reduction.py": "b2f762320fbff5a66fa88123711483f9c42721e1765e406b7699c434048ded98",
+      "tools/triad_phase_tensor.py": "3b1a674ac7ace90ddce72c2773c2d1543bcfe8307d7b65ea965ad03a6525ffda",
+      "tools/triad_prepared_observation.py": "13d37977620519aaeb457d4ed1163c80d68dca96c8319480de914cae8a6aaec8",
+      "tools/triad_rbpf.py": "d4b64c3a830acd3bd15433421da0e003ba1aa9810bf1dd904c57082d94c3bd54",
+      "tools/triad_state_workspace.py": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923"
+    },
+    "expected_python_source_files": [
+      "tools/triad-cfo-batch-study.py",
+      "tools/triad-ray-frequency-study.py",
+      "tools/triad-rbpf-study.py",
+      "tools/triad-state-study.py",
+      "tools/triad-static-frequency-study.py",
+      "tools/triad_fft_acquire.py",
+      "tools/triad_gaussian_prepared.py",
+      "tools/triad_gaussian_state.py",
+      "tools/triad_gaussian_window.py",
+      "tools/triad_group_acquire.py",
+      "tools/triad_noise_likelihood.py",
+      "tools/triad_phase_frequency.py",
+      "tools/triad_phase_optimized.py",
+      "tools/triad_prepared_observation.py",
+      "tools/triad_rbpf.py",
+      "tools/triad_state_workspace.py"
+    ],
+    "extra_declared_dependency_files": [
+      "tests/test_triad_noise_study.py",
+      "tools/triad-noise-study.py"
+    ],
+    "matrix_path": "tools/triad-performance-coverage.json",
+    "matrix_row_dependency_files": [
+      "docs/gpu-precision-controls.md",
+      "tools/triad-cfo-batch-study.py",
+      "tools/triad-ray-frequency-study.py",
+      "tools/triad-rbpf-study.py",
+      "tools/triad-state-study.py",
+      "tools/triad-static-frequency-study.py",
+      "tools/triad_exhaustive_correlation.py",
+      "tools/triad_fft_acquire.py",
+      "tools/triad_gaussian_state.py",
+      "tools/triad_gaussian_window.py",
+      "tools/triad_group_acquire.py",
+      "tools/triad_noise_likelihood.py",
+      "tools/triad_phase_frequency.py",
+      "tools/triad_phase_optimized.py",
+      "tools/triad_phase_reduction.py",
+      "tools/triad_phase_tensor.py",
+      "tools/triad_prepared_observation.py",
+      "tools/triad_rbpf.py",
+      "tools/triad_state_workspace.py"
+    ],
+    "matrix_sha256_post": "1860b045b4078da56db5b8928cbb3b71660844a94d0c5da3ddb1eab5382e5a33",
+    "matrix_sha256_pre": "1860b045b4078da56db5b8928cbb3b71660844a94d0c5da3ddb1eab5382e5a33",
+    "matrix_test_source_files": [
+      "tests/test_triad_cfo_batch.py",
+      "tests/test_triad_fft_acquire.py",
+      "tests/test_triad_gaussian_state.py",
+      "tests/test_triad_gaussian_window.py",
+      "tests/test_triad_group_acquire.py",
+      "tests/test_triad_perf_hardware.py",
+      "tests/test_triad_phase_frequency.py",
+      "tests/test_triad_phase_optimized.py",
+      "tests/test_triad_phase_reduction.py",
+      "tests/test_triad_phase_tensor.py",
+      "tests/test_triad_precision_probe.py",
+      "tests/test_triad_ray_frequency.py",
+      "tests/test_triad_rbpf.py",
+      "tests/test_triad_state_workspace.py",
+      "tests/test_triad_static_frequency_study.py"
+    ],
+    "post_sha256": {
+      "collector:/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_perf_python_coverage.py": "f5cafed148d406230fbda2cd02ac2feb7f22edca268b0d9d08381db6357428bc",
+      "docs/gpu-precision-controls.md": "b61dab07377a1f1b676ec262fc44db4069c895a956dc896bb773df70bdbaa207",
+      "tests/test_triad_cfo_batch.py": "f03812407de28cef6854c39df73c25cc66301abb637d8fd4cb40e34b8c16a356",
+      "tests/test_triad_fft_acquire.py": "7b8c3156ebec580f22da3dae4e9941f502e88a35caf15863b2f3b3b6d066458a",
+      "tests/test_triad_gaussian_prepared.py": "d59e54477f9a31d4038761d2d0c7a8fe020398d4e9e0d6386c1a1593a2e749c4",
+      "tests/test_triad_gaussian_state.py": "386ba03d3d6e850c7b0c6e805a5c9d30f88fdc33d07aeed8e0268cfccbde7da1",
+      "tests/test_triad_gaussian_window.py": "66783804ee920a46757daa54155d9fd88a9d1ed0d65fbb5d364287ffcafde1f9",
+      "tests/test_triad_group_acquire.py": "ad4b64bfa40433ed114a55787a55a89a25eed8be43ee02334859fe69151ab17c",
+      "tests/test_triad_noise_likelihood.py": "2c5452df602057d3fc8550a59fda22d2ca6f64f791b5a506b08d5b8079cb65c7",
+      "tests/test_triad_noise_study.py": "1b423c98057997398b3fff142aa53bf0d46e524841a58c70ee08084671e7893f",
+      "tests/test_triad_perf_hardware.py": "721bd0aaf3ec019aa8b63cbde150598158d2775577bf6dfcd05554d5935a2aa9",
+      "tests/test_triad_phase_frequency.py": "cc4d6f1b9c33fc746bb57791ebd19f3ae496272d11bc7cf6379bfb116b9f7dad",
+      "tests/test_triad_phase_optimized.py": "2dbb8586c57c57d0d8e98b7066535cd21ee2010cf1ec78ed56ec1d0e4f18982b",
+      "tests/test_triad_phase_reduction.py": "2d1bf61ebe53494568777439ca9c5b0b4d9badc7597440a82c9bb4175da62ff7",
+      "tests/test_triad_phase_tensor.py": "9403029b2ab959689b475dd92c10e8da84d633501dd0c1414a0a99d55a4639ae",
+      "tests/test_triad_precision_probe.py": "7de34739c72121baa230610c197f9ce7a529688fb1f581b8b01d559443498fee",
+      "tests/test_triad_prepared_observation.py": "e1ff404d5dc487146442bf58038301a9610678e9d36fdcaf186d40b40b0a763b",
+      "tests/test_triad_ray_frequency.py": "982473b034caa7bc550e1acee29dc2d9c8e33c6131e25683abd11bc95fbb89b3",
+      "tests/test_triad_rbpf.py": "668c624ef439c098a99ff9e33822b6272ea367183865b7caccdafcffbc8c42fa",
+      "tests/test_triad_rbpf_study.py": "dbc93c3570719a216ca34d9e10248b8f49f0d25c7ebee1537c0df70a81b28598",
+      "tests/test_triad_state_study.py": "6e1bbdf0ef3dd1124d30be9bee8dc804a617ce1e3f615b3f2862f328f5f1bc4a",
+      "tests/test_triad_state_workspace.py": "b9a0276203bd212b74f8becca1726d56dd6074d8c27c720a14d08cff4b6b0aba",
+      "tests/test_triad_static_frequency_study.py": "73c609d183dfacf03e22426d9defac30be386f48ce35cb08b92942fc5811c34d",
+      "tools/triad-cfo-batch-study.py": "5c7fb6f8b0ad8cadeaae8591d9fb0e3d489fb5eb4c14962faf800ad46a661665",
+      "tools/triad-noise-study.py": "960040dc2a9a00910185a5b79f8af8c84410ffd3b8b7327256399543f396a621",
+      "tools/triad-performance-coverage.json": "1860b045b4078da56db5b8928cbb3b71660844a94d0c5da3ddb1eab5382e5a33",
+      "tools/triad-ray-frequency-study.py": "ea3ca2acde8aea75538066e46e3ccae2e36612afac753db6b2d048bd6ff87dd2",
+      "tools/triad-rbpf-study.py": "34a9797ed7119dcf6545b6be759b8f506cbdaf6ac9ece886b82fa699cd5d085f",
+      "tools/triad-state-study.py": "3fa7491ae93031ff6bfadc4c9b792659336999effc0508a71cf734ada9250402",
+      "tools/triad-static-frequency-study.py": "d1b75e9b49de21041558e97ee1daff2ba07a1fd18a123bc8a6cb928f1052e11b",
+      "tools/triad_exhaustive_correlation.py": "ae02b1f7d85e2d3f8c2c153000f530a411860ff443aeaf674abaa93cf60ab2d4",
+      "tools/triad_fft_acquire.py": "d4a3c2cc39e0068e6aa6aab27d7ee8eeff6cc7db72a790868fe166c3f1d65843",
+      "tools/triad_gaussian_prepared.py": "c88afdf459521393958c49d801517d79cd158cbe2291e4a48c3eff6931e42875",
+      "tools/triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba",
+      "tools/triad_gaussian_window.py": "b22fe002864922e44bc7e10000672a163353818f610c4882bae5d62cfe1cf883",
+      "tools/triad_group_acquire.py": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+      "tools/triad_noise_likelihood.py": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110",
+      "tools/triad_phase_frequency.py": "48ee569b1d467b2d7b6fd55088764bd28dd11e0bfecb5974622a318fbb408585",
+      "tools/triad_phase_optimized.py": "759b46d536f2daa1d1de2336190ab19153376aca3eeca32847cba5289d2d63ed",
+      "tools/triad_phase_reduction.py": "b2f762320fbff5a66fa88123711483f9c42721e1765e406b7699c434048ded98",
+      "tools/triad_phase_tensor.py": "3b1a674ac7ace90ddce72c2773c2d1543bcfe8307d7b65ea965ad03a6525ffda",
+      "tools/triad_prepared_observation.py": "13d37977620519aaeb457d4ed1163c80d68dca96c8319480de914cae8a6aaec8",
+      "tools/triad_rbpf.py": "d4b64c3a830acd3bd15433421da0e003ba1aa9810bf1dd904c57082d94c3bd54",
+      "tools/triad_state_workspace.py": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923"
+    },
+    "pre_sha256": {
+      "collector:/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_perf_python_coverage.py": "f5cafed148d406230fbda2cd02ac2feb7f22edca268b0d9d08381db6357428bc",
+      "docs/gpu-precision-controls.md": "b61dab07377a1f1b676ec262fc44db4069c895a956dc896bb773df70bdbaa207",
+      "tests/test_triad_cfo_batch.py": "f03812407de28cef6854c39df73c25cc66301abb637d8fd4cb40e34b8c16a356",
+      "tests/test_triad_fft_acquire.py": "7b8c3156ebec580f22da3dae4e9941f502e88a35caf15863b2f3b3b6d066458a",
+      "tests/test_triad_gaussian_prepared.py": "d59e54477f9a31d4038761d2d0c7a8fe020398d4e9e0d6386c1a1593a2e749c4",
+      "tests/test_triad_gaussian_state.py": "386ba03d3d6e850c7b0c6e805a5c9d30f88fdc33d07aeed8e0268cfccbde7da1",
+      "tests/test_triad_gaussian_window.py": "66783804ee920a46757daa54155d9fd88a9d1ed0d65fbb5d364287ffcafde1f9",
+      "tests/test_triad_group_acquire.py": "ad4b64bfa40433ed114a55787a55a89a25eed8be43ee02334859fe69151ab17c",
+      "tests/test_triad_noise_likelihood.py": "2c5452df602057d3fc8550a59fda22d2ca6f64f791b5a506b08d5b8079cb65c7",
+      "tests/test_triad_noise_study.py": "1b423c98057997398b3fff142aa53bf0d46e524841a58c70ee08084671e7893f",
+      "tests/test_triad_perf_hardware.py": "721bd0aaf3ec019aa8b63cbde150598158d2775577bf6dfcd05554d5935a2aa9",
+      "tests/test_triad_phase_frequency.py": "cc4d6f1b9c33fc746bb57791ebd19f3ae496272d11bc7cf6379bfb116b9f7dad",
+      "tests/test_triad_phase_optimized.py": "2dbb8586c57c57d0d8e98b7066535cd21ee2010cf1ec78ed56ec1d0e4f18982b",
+      "tests/test_triad_phase_reduction.py": "2d1bf61ebe53494568777439ca9c5b0b4d9badc7597440a82c9bb4175da62ff7",
+      "tests/test_triad_phase_tensor.py": "9403029b2ab959689b475dd92c10e8da84d633501dd0c1414a0a99d55a4639ae",
+      "tests/test_triad_precision_probe.py": "7de34739c72121baa230610c197f9ce7a529688fb1f581b8b01d559443498fee",
+      "tests/test_triad_prepared_observation.py": "e1ff404d5dc487146442bf58038301a9610678e9d36fdcaf186d40b40b0a763b",
+      "tests/test_triad_ray_frequency.py": "982473b034caa7bc550e1acee29dc2d9c8e33c6131e25683abd11bc95fbb89b3",
+      "tests/test_triad_rbpf.py": "668c624ef439c098a99ff9e33822b6272ea367183865b7caccdafcffbc8c42fa",
+      "tests/test_triad_rbpf_study.py": "dbc93c3570719a216ca34d9e10248b8f49f0d25c7ebee1537c0df70a81b28598",
+      "tests/test_triad_state_study.py": "6e1bbdf0ef3dd1124d30be9bee8dc804a617ce1e3f615b3f2862f328f5f1bc4a",
+      "tests/test_triad_state_workspace.py": "b9a0276203bd212b74f8becca1726d56dd6074d8c27c720a14d08cff4b6b0aba",
+      "tests/test_triad_static_frequency_study.py": "73c609d183dfacf03e22426d9defac30be386f48ce35cb08b92942fc5811c34d",
+      "tools/triad-cfo-batch-study.py": "5c7fb6f8b0ad8cadeaae8591d9fb0e3d489fb5eb4c14962faf800ad46a661665",
+      "tools/triad-noise-study.py": "960040dc2a9a00910185a5b79f8af8c84410ffd3b8b7327256399543f396a621",
+      "tools/triad-performance-coverage.json": "1860b045b4078da56db5b8928cbb3b71660844a94d0c5da3ddb1eab5382e5a33",
+      "tools/triad-ray-frequency-study.py": "ea3ca2acde8aea75538066e46e3ccae2e36612afac753db6b2d048bd6ff87dd2",
+      "tools/triad-rbpf-study.py": "34a9797ed7119dcf6545b6be759b8f506cbdaf6ac9ece886b82fa699cd5d085f",
+      "tools/triad-state-study.py": "3fa7491ae93031ff6bfadc4c9b792659336999effc0508a71cf734ada9250402",
+      "tools/triad-static-frequency-study.py": "d1b75e9b49de21041558e97ee1daff2ba07a1fd18a123bc8a6cb928f1052e11b",
+      "tools/triad_exhaustive_correlation.py": "ae02b1f7d85e2d3f8c2c153000f530a411860ff443aeaf674abaa93cf60ab2d4",
+      "tools/triad_fft_acquire.py": "d4a3c2cc39e0068e6aa6aab27d7ee8eeff6cc7db72a790868fe166c3f1d65843",
+      "tools/triad_gaussian_prepared.py": "c88afdf459521393958c49d801517d79cd158cbe2291e4a48c3eff6931e42875",
+      "tools/triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba",
+      "tools/triad_gaussian_window.py": "b22fe002864922e44bc7e10000672a163353818f610c4882bae5d62cfe1cf883",
+      "tools/triad_group_acquire.py": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+      "tools/triad_noise_likelihood.py": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110",
+      "tools/triad_phase_frequency.py": "48ee569b1d467b2d7b6fd55088764bd28dd11e0bfecb5974622a318fbb408585",
+      "tools/triad_phase_optimized.py": "759b46d536f2daa1d1de2336190ab19153376aca3eeca32847cba5289d2d63ed",
+      "tools/triad_phase_reduction.py": "b2f762320fbff5a66fa88123711483f9c42721e1765e406b7699c434048ded98",
+      "tools/triad_phase_tensor.py": "3b1a674ac7ace90ddce72c2773c2d1543bcfe8307d7b65ea965ad03a6525ffda",
+      "tools/triad_prepared_observation.py": "13d37977620519aaeb457d4ed1163c80d68dca96c8319480de914cae8a6aaec8",
+      "tools/triad_rbpf.py": "d4b64c3a830acd3bd15433421da0e003ba1aa9810bf1dd904c57082d94c3bd54",
+      "tools/triad_state_workspace.py": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923"
+    },
+    "selected_test_source_files": [
+      "tests/test_triad_cfo_batch.py",
+      "tests/test_triad_fft_acquire.py",
+      "tests/test_triad_gaussian_prepared.py",
+      "tests/test_triad_gaussian_state.py",
+      "tests/test_triad_gaussian_window.py",
+      "tests/test_triad_group_acquire.py",
+      "tests/test_triad_noise_likelihood.py",
+      "tests/test_triad_phase_frequency.py",
+      "tests/test_triad_phase_optimized.py",
+      "tests/test_triad_prepared_observation.py",
+      "tests/test_triad_ray_frequency.py",
+      "tests/test_triad_rbpf.py",
+      "tests/test_triad_rbpf_study.py",
+      "tests/test_triad_state_study.py",
+      "tests/test_triad_state_workspace.py",
+      "tests/test_triad_static_frequency_study.py"
+    ],
+    "status": "stable",
+    "test_identity_files": [
+      "tests/test_triad_cfo_batch.py",
+      "tests/test_triad_fft_acquire.py",
+      "tests/test_triad_gaussian_prepared.py",
+      "tests/test_triad_gaussian_state.py",
+      "tests/test_triad_gaussian_window.py",
+      "tests/test_triad_group_acquire.py",
+      "tests/test_triad_noise_likelihood.py",
+      "tests/test_triad_noise_study.py",
+      "tests/test_triad_perf_hardware.py",
+      "tests/test_triad_phase_frequency.py",
+      "tests/test_triad_phase_optimized.py",
+      "tests/test_triad_phase_reduction.py",
+      "tests/test_triad_phase_tensor.py",
+      "tests/test_triad_precision_probe.py",
+      "tests/test_triad_prepared_observation.py",
+      "tests/test_triad_ray_frequency.py",
+      "tests/test_triad_rbpf.py",
+      "tests/test_triad_rbpf_study.py",
+      "tests/test_triad_state_study.py",
+      "tests/test_triad_state_workspace.py",
+      "tests/test_triad_static_frequency_study.py"
+    ],
+    "test_source_sha256_post": {
+      "tests/test_triad_cfo_batch.py": "f03812407de28cef6854c39df73c25cc66301abb637d8fd4cb40e34b8c16a356",
+      "tests/test_triad_fft_acquire.py": "7b8c3156ebec580f22da3dae4e9941f502e88a35caf15863b2f3b3b6d066458a",
+      "tests/test_triad_gaussian_prepared.py": "d59e54477f9a31d4038761d2d0c7a8fe020398d4e9e0d6386c1a1593a2e749c4",
+      "tests/test_triad_gaussian_state.py": "386ba03d3d6e850c7b0c6e805a5c9d30f88fdc33d07aeed8e0268cfccbde7da1",
+      "tests/test_triad_gaussian_window.py": "66783804ee920a46757daa54155d9fd88a9d1ed0d65fbb5d364287ffcafde1f9",
+      "tests/test_triad_group_acquire.py": "ad4b64bfa40433ed114a55787a55a89a25eed8be43ee02334859fe69151ab17c",
+      "tests/test_triad_noise_likelihood.py": "2c5452df602057d3fc8550a59fda22d2ca6f64f791b5a506b08d5b8079cb65c7",
+      "tests/test_triad_noise_study.py": "1b423c98057997398b3fff142aa53bf0d46e524841a58c70ee08084671e7893f",
+      "tests/test_triad_perf_hardware.py": "721bd0aaf3ec019aa8b63cbde150598158d2775577bf6dfcd05554d5935a2aa9",
+      "tests/test_triad_phase_frequency.py": "cc4d6f1b9c33fc746bb57791ebd19f3ae496272d11bc7cf6379bfb116b9f7dad",
+      "tests/test_triad_phase_optimized.py": "2dbb8586c57c57d0d8e98b7066535cd21ee2010cf1ec78ed56ec1d0e4f18982b",
+      "tests/test_triad_phase_reduction.py": "2d1bf61ebe53494568777439ca9c5b0b4d9badc7597440a82c9bb4175da62ff7",
+      "tests/test_triad_phase_tensor.py": "9403029b2ab959689b475dd92c10e8da84d633501dd0c1414a0a99d55a4639ae",
+      "tests/test_triad_precision_probe.py": "7de34739c72121baa230610c197f9ce7a529688fb1f581b8b01d559443498fee",
+      "tests/test_triad_prepared_observation.py": "e1ff404d5dc487146442bf58038301a9610678e9d36fdcaf186d40b40b0a763b",
+      "tests/test_triad_ray_frequency.py": "982473b034caa7bc550e1acee29dc2d9c8e33c6131e25683abd11bc95fbb89b3",
+      "tests/test_triad_rbpf.py": "668c624ef439c098a99ff9e33822b6272ea367183865b7caccdafcffbc8c42fa",
+      "tests/test_triad_rbpf_study.py": "dbc93c3570719a216ca34d9e10248b8f49f0d25c7ebee1537c0df70a81b28598",
+      "tests/test_triad_state_study.py": "6e1bbdf0ef3dd1124d30be9bee8dc804a617ce1e3f615b3f2862f328f5f1bc4a",
+      "tests/test_triad_state_workspace.py": "b9a0276203bd212b74f8becca1726d56dd6074d8c27c720a14d08cff4b6b0aba",
+      "tests/test_triad_static_frequency_study.py": "73c609d183dfacf03e22426d9defac30be386f48ce35cb08b92942fc5811c34d"
+    },
+    "test_source_sha256_pre": {
+      "tests/test_triad_cfo_batch.py": "f03812407de28cef6854c39df73c25cc66301abb637d8fd4cb40e34b8c16a356",
+      "tests/test_triad_fft_acquire.py": "7b8c3156ebec580f22da3dae4e9941f502e88a35caf15863b2f3b3b6d066458a",
+      "tests/test_triad_gaussian_prepared.py": "d59e54477f9a31d4038761d2d0c7a8fe020398d4e9e0d6386c1a1593a2e749c4",
+      "tests/test_triad_gaussian_state.py": "386ba03d3d6e850c7b0c6e805a5c9d30f88fdc33d07aeed8e0268cfccbde7da1",
+      "tests/test_triad_gaussian_window.py": "66783804ee920a46757daa54155d9fd88a9d1ed0d65fbb5d364287ffcafde1f9",
+      "tests/test_triad_group_acquire.py": "ad4b64bfa40433ed114a55787a55a89a25eed8be43ee02334859fe69151ab17c",
+      "tests/test_triad_noise_likelihood.py": "2c5452df602057d3fc8550a59fda22d2ca6f64f791b5a506b08d5b8079cb65c7",
+      "tests/test_triad_noise_study.py": "1b423c98057997398b3fff142aa53bf0d46e524841a58c70ee08084671e7893f",
+      "tests/test_triad_perf_hardware.py": "721bd0aaf3ec019aa8b63cbde150598158d2775577bf6dfcd05554d5935a2aa9",
+      "tests/test_triad_phase_frequency.py": "cc4d6f1b9c33fc746bb57791ebd19f3ae496272d11bc7cf6379bfb116b9f7dad",
+      "tests/test_triad_phase_optimized.py": "2dbb8586c57c57d0d8e98b7066535cd21ee2010cf1ec78ed56ec1d0e4f18982b",
+      "tests/test_triad_phase_reduction.py": "2d1bf61ebe53494568777439ca9c5b0b4d9badc7597440a82c9bb4175da62ff7",
+      "tests/test_triad_phase_tensor.py": "9403029b2ab959689b475dd92c10e8da84d633501dd0c1414a0a99d55a4639ae",
+      "tests/test_triad_precision_probe.py": "7de34739c72121baa230610c197f9ce7a529688fb1f581b8b01d559443498fee",
+      "tests/test_triad_prepared_observation.py": "e1ff404d5dc487146442bf58038301a9610678e9d36fdcaf186d40b40b0a763b",
+      "tests/test_triad_ray_frequency.py": "982473b034caa7bc550e1acee29dc2d9c8e33c6131e25683abd11bc95fbb89b3",
+      "tests/test_triad_rbpf.py": "668c624ef439c098a99ff9e33822b6272ea367183865b7caccdafcffbc8c42fa",
+      "tests/test_triad_rbpf_study.py": "dbc93c3570719a216ca34d9e10248b8f49f0d25c7ebee1537c0df70a81b28598",
+      "tests/test_triad_state_study.py": "6e1bbdf0ef3dd1124d30be9bee8dc804a617ce1e3f615b3f2862f328f5f1bc4a",
+      "tests/test_triad_state_workspace.py": "b9a0276203bd212b74f8becca1726d56dd6074d8c27c720a14d08cff4b6b0aba",
+      "tests/test_triad_static_frequency_study.py": "73c609d183dfacf03e22426d9defac30be386f48ce35cb08b92942fc5811c34d"
+    }
+  },
+  "raw_coverage_json": "raw/coverage.json",
+  "schema": "datapump.triad.python-branch-coverage",
+  "schema_version": 1,
+  "scope": "focused isolated triad Python runtime modules exercised by selected regression tests",
+  "source_revision": "e0c3f50a88d2ee951c059397a594445f3c21a9c0",
+  "source_root": "/home/user/___quick/p/_cur/dataPump/pumpModem",
+  "sources": {
+    "tools/triad-cfo-batch-study.py": {
+      "branches": {
+        "covered_arcs": 43,
+        "executable_arcs": 62,
+        "missing_arcs": [
+          [
+            37,
+            38
+          ],
+          [
+            70,
+            71
+          ],
+          [
+            73,
+            -68
+          ],
+          [
+            97,
+            98
+          ],
+          [
+            109,
+            110
+          ],
+          [
+            120,
+            -77
+          ],
+          [
+            122,
+            123
+          ],
+          [
+            150,
+            151
+          ],
+          [
+            151,
+            -148
+          ],
+          [
+            151,
+            152
+          ],
+          [
+            156,
+            -148
+          ],
+          [
+            164,
+            175
+          ],
+          [
+            165,
+            175
+          ],
+          [
+            166,
+            175
+          ],
+          [
+            171,
+            174
+          ],
+          [
+            172,
+            175
+          ],
+          [
+            177,
+            157
+          ],
+          [
+            185,
+            186
+          ],
+          [
+            199,
+            211
+          ]
+        ]
+      },
+      "lines": {
+        "covered": 167,
+        "executable": 180,
+        "missing": [
+          38,
+          71,
+          72,
+          98,
+          110,
+          123,
+          151,
+          152,
+          153,
+          186,
+          245,
+          246,
+          247
+        ]
+      },
+      "module": "triad-cfo-batch-study.py",
+      "sha256": "5c7fb6f8b0ad8cadeaae8591d9fb0e3d489fb5eb4c14962faf800ad46a661665"
+    },
+    "tools/triad-ray-frequency-study.py": {
+      "branches": {
+        "covered_arcs": 48,
+        "executable_arcs": 76,
+        "missing_arcs": [
+          [
+            84,
+            85
+          ],
+          [
+            92,
+            93
+          ],
+          [
+            94,
+            -82
+          ],
+          [
+            94,
+            88
+          ],
+          [
+            139,
+            -114
+          ],
+          [
+            141,
+            -114
+          ],
+          [
+            149,
+            150
+          ],
+          [
+            160,
+            -156
+          ],
+          [
+            161,
+            -156
+          ],
+          [
+            163,
+            164
+          ],
+          [
+            166,
+            167
+          ],
+          [
+            168,
+            -156
+          ],
+          [
+            169,
+            170
+          ],
+          [
+            209,
+            -156
+          ],
+          [
+            221,
+            -218
+          ],
+          [
+            227,
+            228
+          ],
+          [
+            228,
+            -225
+          ],
+          [
+            228,
+            229
+          ],
+          [
+            231,
+            -225
+          ],
+          [
+            239,
+            286
+          ],
+          [
+            240,
+            286
+          ],
+          [
+            242,
+            243
+          ],
+          [
+            243,
+            244
+          ],
+          [
+            243,
+            286
+          ],
+          [
+            248,
+            286
+          ],
+          [
+            253,
+            254
+          ],
+          [
+            258,
+            286
+          ],
+          [
+            265,
+            286
+          ]
+        ]
+      },
+      "lines": {
+        "covered": 222,
+        "executable": 239,
+        "missing": [
+          78,
+          85,
+          93,
+          94,
+          150,
+          164,
+          167,
+          170,
+          228,
+          229,
+          230,
+          243,
+          244,
+          254,
+          317,
+          318,
+          319
+        ]
+      },
+      "module": "triad-ray-frequency-study.py",
+      "sha256": "ea3ca2acde8aea75538066e46e3ccae2e36612afac753db6b2d048bd6ff87dd2"
+    },
+    "tools/triad-rbpf-study.py": {
+      "branches": {
+        "covered_arcs": 72,
+        "executable_arcs": 92,
+        "missing_arcs": [
+          [
+            72,
+            73
+          ],
+          [
+            84,
+            85
+          ],
+          [
+            87,
+            88
+          ],
+          [
+            89,
+            90
+          ],
+          [
+            91,
+            92
+          ],
+          [
+            123,
+            124
+          ],
+          [
+            128,
+            129
+          ],
+          [
+            132,
+            133
+          ],
+          [
+            142,
+            143
+          ],
+          [
+            149,
+            150
+          ],
+          [
+            152,
+            153
+          ],
+          [
+            194,
+            195
+          ],
+          [
+            238,
+            239
+          ],
+          [
+            259,
+            291
+          ],
+          [
+            261,
+            291
+          ],
+          [
+            265,
+            266
+          ],
+          [
+            268,
+            291
+          ],
+          [
+            279,
+            291
+          ],
+          [
+            294,
+            297
+          ],
+          [
+            326,
+            327
+          ]
+        ]
+      },
+      "lines": {
+        "covered": 225,
+        "executable": 244,
+        "missing": [
+          73,
+          85,
+          88,
+          90,
+          92,
+          124,
+          129,
+          133,
+          143,
+          150,
+          153,
+          195,
+          239,
+          266,
+          267,
+          327,
+          333,
+          334,
+          336
+        ]
+      },
+      "module": "triad-rbpf-study.py",
+      "sha256": "34a9797ed7119dcf6545b6be759b8f506cbdaf6ac9ece886b82fa699cd5d085f"
+    },
+    "tools/triad-state-study.py": {
+      "branches": {
+        "covered_arcs": 7,
+        "executable_arcs": 76,
+        "missing_arcs": [
+          [
+            48,
+            49
+          ],
+          [
+            57,
+            53
+          ],
+          [
+            118,
+            119
+          ],
+          [
+            118,
+            120
+          ],
+          [
+            120,
+            121
+          ],
+          [
+            120,
+            122
+          ],
+          [
+            122,
+            123
+          ],
+          [
+            122,
+            124
+          ],
+          [
+            124,
+            125
+          ],
+          [
+            124,
+            126
+          ],
+          [
+            126,
+            127
+          ],
+          [
+            126,
+            128
+          ],
+          [
+            128,
+            129
+          ],
+          [
+            128,
+            130
+          ],
+          [
+            132,
+            133
+          ],
+          [
+            132,
+            134
+          ],
+          [
+            134,
+            135
+          ],
+          [
+            134,
+            136
+          ],
+          [
+            147,
+            148
+          ],
+          [
+            147,
+            184
+          ],
+          [
+            150,
+            151
+          ],
+          [
+            150,
+            158
+          ],
+          [
+            152,
+            153
+          ],
+          [
+            152,
+            154
+          ],
+          [
+            155,
+            156
+          ],
+          [
+            155,
+            157
+          ],
+          [
+            168,
+            169
+          ],
+          [
+            168,
+            178
+          ],
+          [
+            170,
+            171
+          ],
+          [
+            170,
+            173
+          ],
+          [
+            173,
+            174
+          ],
+          [
+            173,
+            177
+          ],
+          [
+            188,
+            189
+          ],
+          [
+            188,
+            214
+          ],
+          [
+            194,
+            195
+          ],
+          [
+            194,
+            197
+          ],
+          [
+            195,
+            196
+          ],
+          [
+            195,
+            197
+          ],
+          [
+            197,
+            198
+          ],
+          [
+            197,
+            199
+          ],
+          [
+            199,
+            188
+          ],
+          [
+            199,
+            202
+          ],
+          [
+            214,
+            215
+          ],
+          [
+            214,
+            216
+          ],
+          [
+            219,
+            220
+          ],
+          [
+            219,
+            223
+          ],
+          [
+            223,
+            224
+          ],
+          [
+            223,
+            226
+          ],
+          [
+            226,
+            228
+          ],
+          [
+            226,
+            233
+          ],
+          [
+            238,
+            239
+          ],
+          [
+            238,
+            240
+          ],
+          [
+            247,
+            248
+          ],
+          [
+            247,
+            295
+          ],
+          [
+            251,
+            252
+          ],
+          [
+            251,
+            253
+          ],
+          [
+            255,
+            247
+          ],
+          [
+            255,
+            256
+          ],
+          [
+            258,
+            259
+          ],
+          [
+            258,
+            262
+          ],
+          [
+            263,
+            264
+          ],
+          [
+            263,
+            268
+          ],
+          [
+            265,
+            266
+          ],
+          [
+            265,
+            267
+          ],
+          [
+            268,
+            255
+          ],
+          [
+            268,
+            269
+          ],
+          [
+            284,
+            285
+          ],
+          [
+            284,
+            287
+          ],
+          [
+            306,
+            307
+          ]
+        ]
+      },
+      "lines": {
+        "covered": 48,
+        "executable": 225,
+        "missing": [
+          49,
+          81,
+          82,
+          83,
+          84,
+          85,
+          86,
+          87,
+          88,
+          89,
+          90,
+          91,
+          92,
+          94,
+          95,
+          96,
+          97,
+          99,
+          100,
+          101,
+          102,
+          103,
+          104,
+          106,
+          107,
+          108,
+          109,
+          110,
+          111,
+          112,
+          113,
+          115,
+          117,
+          118,
+          119,
+          120,
+          121,
+          122,
+          123,
+          124,
+          125,
+          126,
+          127,
+          128,
+          129,
+          130,
+          131,
+          132,
+          133,
+          134,
+          135,
+          136,
+          141,
+          142,
+          143,
+          144,
+          146,
+          147,
+          148,
+          149,
+          150,
+          151,
+          152,
+          153,
+          154,
+          155,
+          156,
+          157,
+          158,
+          166,
+          167,
+          168,
+          169,
+          170,
+          171,
+          172,
+          173,
+          174,
+          175,
+          177,
+          178,
+          180,
+          184,
+          185,
+          186,
+          187,
+          188,
+          189,
+          190,
+          191,
+          193,
+          194,
+          195,
+          196,
+          197,
+          198,
+          199,
+          202,
+          203,
+          204,
+          206,
+          207,
+          209,
+          210,
+          211,
+          212,
+          213,
+          214,
+          215,
+          216,
+          217,
+          218,
+          219,
+          220,
+          221,
+          222,
+          223,
+          224,
+          225,
+          226,
+          228,
+          229,
+          230,
+          231,
+          233,
+          237,
+          238,
+          239,
+          240,
+          241,
+          242,
+          243,
+          244,
+          245,
+          246,
+          247,
+          248,
+          249,
+          250,
+          251,
+          252,
+          253,
+          254,
+          255,
+          256,
+          257,
+          258,
+          259,
+          260,
+          261,
+          262,
+          263,
+          264,
+          265,
+          266,
+          267,
+          268,
+          269,
+          270,
+          271,
+          280,
+          281,
+          282,
+          284,
+          285,
+          286,
+          287,
+          288,
+          291,
+          292,
+          293,
+          294,
+          295,
+          301,
+          302,
+          303,
+          307
+        ]
+      },
+      "module": "triad-state-study.py",
+      "sha256": "3fa7491ae93031ff6bfadc4c9b792659336999effc0508a71cf734ada9250402"
+    },
+    "tools/triad-static-frequency-study.py": {
+      "branches": {
+        "covered_arcs": 73,
+        "executable_arcs": 106,
+        "missing_arcs": [
+          [
+            63,
+            64
+          ],
+          [
+            65,
+            66
+          ],
+          [
+            69,
+            70
+          ],
+          [
+            73,
+            74
+          ],
+          [
+            75,
+            76
+          ],
+          [
+            77,
+            78
+          ],
+          [
+            88,
+            89
+          ],
+          [
+            93,
+            94
+          ],
+          [
+            97,
+            98
+          ],
+          [
+            105,
+            106
+          ],
+          [
+            143,
+            144
+          ],
+          [
+            146,
+            147
+          ],
+          [
+            195,
+            196
+          ],
+          [
+            197,
+            198
+          ],
+          [
+            201,
+            202
+          ],
+          [
+            204,
+            205
+          ],
+          [
+            208,
+            209
+          ],
+          [
+            230,
+            231
+          ],
+          [
+            244,
+            245
+          ],
+          [
+            260,
+            261
+          ],
+          [
+            276,
+            283
+          ],
+          [
+            284,
+            285
+          ],
+          [
+            297,
+            298
+          ],
+          [
+            327,
+            -325
+          ],
+          [
+            328,
+            329
+          ],
+          [
+            332,
+            -325
+          ],
+          [
+            340,
+            341
+          ],
+          [
+            341,
+            342
+          ],
+          [
+            341,
+            384
+          ],
+          [
+            344,
+            384
+          ],
+          [
+            349,
+            384
+          ],
+          [
+            357,
+            384
+          ],
+          [
+            363,
+            384
+          ]
+        ]
+      },
+      "lines": {
+        "covered": 288,
+        "executable": 319,
+        "missing": [
+          64,
+          66,
+          70,
+          74,
+          76,
+          78,
+          89,
+          94,
+          98,
+          106,
+          144,
+          147,
+          196,
+          198,
+          202,
+          205,
+          209,
+          231,
+          245,
+          261,
+          283,
+          285,
+          298,
+          329,
+          330,
+          341,
+          342,
+          405,
+          406,
+          407,
+          408
+        ]
+      },
+      "module": "triad-static-frequency-study.py",
+      "sha256": "d1b75e9b49de21041558e97ee1daff2ba07a1fd18a123bc8a6cb928f1052e11b"
+    },
+    "tools/triad_fft_acquire.py": {
+      "branches": {
+        "covered_arcs": 136,
+        "executable_arcs": 180,
+        "missing_arcs": [
+          [
+            54,
+            55
+          ],
+          [
+            60,
+            62
+          ],
+          [
+            69,
+            70
+          ],
+          [
+            72,
+            73
+          ],
+          [
+            75,
+            76
+          ],
+          [
+            80,
+            81
+          ],
+          [
+            86,
+            87
+          ],
+          [
+            93,
+            94
+          ],
+          [
+            96,
+            97
+          ],
+          [
+            101,
+            102
+          ],
+          [
+            109,
+            110
+          ],
+          [
+            118,
+            119
+          ],
+          [
+            120,
+            121
+          ],
+          [
+            126,
+            127
+          ],
+          [
+            140,
+            141
+          ],
+          [
+            164,
+            165
+          ],
+          [
+            166,
+            167
+          ],
+          [
+            168,
+            169
+          ],
+          [
+            170,
+            171
+          ],
+          [
+            182,
+            183
+          ],
+          [
+            189,
+            190
+          ],
+          [
+            192,
+            193
+          ],
+          [
+            195,
+            196
+          ],
+          [
+            216,
+            219
+          ],
+          [
+            244,
+            245
+          ],
+          [
+            287,
+            288
+          ],
+          [
+            315,
+            316
+          ],
+          [
+            346,
+            349
+          ],
+          [
+            352,
+            356
+          ],
+          [
+            371,
+            372
+          ],
+          [
+            385,
+            386
+          ],
+          [
+            387,
+            388
+          ],
+          [
+            389,
+            390
+          ],
+          [
+            394,
+            395
+          ],
+          [
+            398,
+            399
+          ],
+          [
+            403,
+            404
+          ],
+          [
+            437,
+            438
+          ],
+          [
+            515,
+            516
+          ],
+          [
+            523,
+            528
+          ],
+          [
+            555,
+            556
+          ],
+          [
+            558,
+            559
+          ],
+          [
+            587,
+            597
+          ],
+          [
+            589,
+            590
+          ],
+          [
+            605,
+            606
+          ]
+        ]
+      },
+      "lines": {
+        "covered": 415,
+        "executable": 470,
+        "missing": [
+          55,
+          57,
+          58,
+          62,
+          70,
+          73,
+          76,
+          81,
+          87,
+          94,
+          97,
+          102,
+          110,
+          119,
+          121,
+          127,
+          141,
+          165,
+          167,
+          169,
+          171,
+          183,
+          190,
+          193,
+          196,
+          219,
+          220,
+          221,
+          222,
+          223,
+          245,
+          288,
+          316,
+          349,
+          350,
+          356,
+          357,
+          358,
+          372,
+          386,
+          388,
+          390,
+          395,
+          399,
+          404,
+          438,
+          516,
+          556,
+          559,
+          590,
+          606,
+          607,
+          608,
+          609,
+          610
+        ]
+      },
+      "module": "triad_fft_acquire",
+      "sha256": "d4a3c2cc39e0068e6aa6aab27d7ee8eeff6cc7db72a790868fe166c3f1d65843"
+    },
+    "tools/triad_gaussian_prepared.py": {
+      "branches": {
+        "covered_arcs": 44,
+        "executable_arcs": 102,
+        "missing_arcs": [
+          [
+            34,
+            35
+          ],
+          [
+            36,
+            37
+          ],
+          [
+            40,
+            41
+          ],
+          [
+            42,
+            43
+          ],
+          [
+            49,
+            50
+          ],
+          [
+            59,
+            60
+          ],
+          [
+            63,
+            64
+          ],
+          [
+            71,
+            72
+          ],
+          [
+            86,
+            87
+          ],
+          [
+            95,
+            96
+          ],
+          [
+            103,
+            104
+          ],
+          [
+            111,
+            112
+          ],
+          [
+            123,
+            124
+          ],
+          [
+            139,
+            140
+          ],
+          [
+            142,
+            143
+          ],
+          [
+            143,
+            144
+          ],
+          [
+            143,
+            145
+          ],
+          [
+            145,
+            146
+          ],
+          [
+            154,
+            155
+          ],
+          [
+            186,
+            187
+          ],
+          [
+            191,
+            192
+          ],
+          [
+            193,
+            194
+          ],
+          [
+            195,
+            196
+          ],
+          [
+            197,
+            198
+          ],
+          [
+            200,
+            201
+          ],
+          [
+            230,
+            231
+          ],
+          [
+            252,
+            253
+          ],
+          [
+            252,
+            254
+          ],
+          [
+            255,
+            256
+          ],
+          [
+            255,
+            257
+          ],
+          [
+            261,
+            262
+          ],
+          [
+            261,
+            263
+          ],
+          [
+            263,
+            264
+          ],
+          [
+            263,
+            265
+          ],
+          [
+            270,
+            271
+          ],
+          [
+            270,
+            272
+          ],
+          [
+            299,
+            300
+          ],
+          [
+            299,
+            301
+          ],
+          [
+            306,
+            307
+          ],
+          [
+            306,
+            308
+          ],
+          [
+            311,
+            -310
+          ],
+          [
+            311,
+            312
+          ],
+          [
+            330,
+            331
+          ],
+          [
+            330,
+            338
+          ],
+          [
+            332,
+            333
+          ],
+          [
+            332,
+            334
+          ],
+          [
+            334,
+            330
+          ],
+          [
+            334,
+            335
+          ],
+          [
+            340,
+            341
+          ],
+          [
+            340,
+            348
+          ],
+          [
+            342,
+            343
+          ],
+          [
+            342,
+            344
+          ],
+          [
+            344,
+            340
+          ],
+          [
+            344,
+            345
+          ],
+          [
+            412,
+            413
+          ],
+          [
+            412,
+            414
+          ],
+          [
+            414,
+            415
+          ],
+          [
+            414,
+            416
+          ]
+        ]
+      },
+      "lines": {
+        "covered": 161,
+        "executable": 300,
+        "missing": [
+          35,
+          37,
+          41,
+          43,
+          50,
+          60,
+          64,
+          72,
+          87,
+          96,
+          104,
+          112,
+          124,
+          140,
+          143,
+          144,
+          146,
+          155,
+          180,
+          181,
+          182,
+          183,
+          187,
+          192,
+          194,
+          196,
+          198,
+          201,
+          231,
+          235,
+          252,
+          253,
+          254,
+          255,
+          256,
+          257,
+          261,
+          262,
+          263,
+          264,
+          265,
+          266,
+          267,
+          268,
+          269,
+          270,
+          271,
+          272,
+          273,
+          274,
+          275,
+          278,
+          279,
+          280,
+          281,
+          282,
+          283,
+          285,
+          286,
+          287,
+          288,
+          289,
+          290,
+          291,
+          292,
+          293,
+          294,
+          296,
+          298,
+          299,
+          300,
+          301,
+          303,
+          304,
+          305,
+          306,
+          307,
+          308,
+          310,
+          311,
+          312,
+          314,
+          315,
+          316,
+          317,
+          318,
+          319,
+          324,
+          325,
+          329,
+          330,
+          331,
+          332,
+          333,
+          334,
+          335,
+          336,
+          338,
+          339,
+          340,
+          341,
+          342,
+          343,
+          344,
+          345,
+          346,
+          348,
+          349,
+          350,
+          351,
+          352,
+          353,
+          354,
+          355,
+          357,
+          358,
+          359,
+          363,
+          364,
+          365,
+          369,
+          370,
+          397,
+          398,
+          402,
+          403,
+          404,
+          405,
+          406,
+          407,
+          408,
+          409,
+          410,
+          411,
+          412,
+          413,
+          414,
+          415,
+          416
+        ]
+      },
+      "module": "triad_gaussian_prepared",
+      "sha256": "c88afdf459521393958c49d801517d79cd158cbe2291e4a48c3eff6931e42875"
+    },
+    "tools/triad_gaussian_state.py": {
+      "branches": {
+        "covered_arcs": 40,
+        "executable_arcs": 56,
+        "missing_arcs": [
+          [
+            45,
+            46
+          ],
+          [
+            71,
+            72
+          ],
+          [
+            74,
+            75
+          ],
+          [
+            99,
+            100
+          ],
+          [
+            134,
+            135
+          ],
+          [
+            138,
+            139
+          ],
+          [
+            140,
+            141
+          ],
+          [
+            146,
+            147
+          ],
+          [
+            152,
+            153
+          ],
+          [
+            167,
+            168
+          ],
+          [
+            179,
+            180
+          ],
+          [
+            185,
+            186
+          ],
+          [
+            204,
+            205
+          ],
+          [
+            211,
+            212
+          ],
+          [
+            218,
+            219
+          ],
+          [
+            220,
+            221
+          ]
+        ]
+      },
+      "lines": {
+        "covered": 142,
+        "executable": 160,
+        "missing": [
+          46,
+          72,
+          75,
+          100,
+          135,
+          139,
+          141,
+          144,
+          145,
+          147,
+          153,
+          168,
+          180,
+          186,
+          205,
+          212,
+          219,
+          221
+        ]
+      },
+      "module": "triad_gaussian_state",
+      "sha256": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba"
+    },
+    "tools/triad_gaussian_window.py": {
+      "branches": {
+        "covered_arcs": 64,
+        "executable_arcs": 90,
+        "missing_arcs": [
+          [
+            39,
+            40
+          ],
+          [
+            40,
+            41
+          ],
+          [
+            40,
+            42
+          ],
+          [
+            43,
+            44
+          ],
+          [
+            87,
+            88
+          ],
+          [
+            90,
+            91
+          ],
+          [
+            93,
+            94
+          ],
+          [
+            122,
+            123
+          ],
+          [
+            126,
+            127
+          ],
+          [
+            153,
+            154
+          ],
+          [
+            160,
+            161
+          ],
+          [
+            199,
+            200
+          ],
+          [
+            219,
+            220
+          ],
+          [
+            235,
+            236
+          ],
+          [
+            246,
+            247
+          ],
+          [
+            248,
+            249
+          ],
+          [
+            250,
+            251
+          ],
+          [
+            257,
+            258
+          ],
+          [
+            259,
+            260
+          ],
+          [
+            262,
+            263
+          ],
+          [
+            264,
+            265
+          ],
+          [
+            265,
+            266
+          ],
+          [
+            265,
+            267
+          ],
+          [
+            274,
+            275
+          ],
+          [
+            278,
+            279
+          ],
+          [
+            310,
+            311
+          ]
+        ]
+      },
+      "lines": {
+        "covered": 204,
+        "executable": 229,
+        "missing": [
+          40,
+          41,
+          42,
+          44,
+          88,
+          91,
+          94,
+          123,
+          127,
+          154,
+          161,
+          200,
+          220,
+          236,
+          247,
+          249,
+          251,
+          258,
+          260,
+          263,
+          265,
+          266,
+          275,
+          279,
+          311
+        ]
+      },
+      "module": "triad_gaussian_window",
+      "sha256": "b22fe002864922e44bc7e10000672a163353818f610c4882bae5d62cfe1cf883"
+    },
+    "tools/triad_group_acquire.py": {
+      "branches": {
+        "covered_arcs": 166,
+        "executable_arcs": 220,
+        "missing_arcs": [
+          [
+            59,
+            60
+          ],
+          [
+            90,
+            91
+          ],
+          [
+            92,
+            95
+          ],
+          [
+            149,
+            157
+          ],
+          [
+            172,
+            173
+          ],
+          [
+            174,
+            176
+          ],
+          [
+            189,
+            190
+          ],
+          [
+            193,
+            194
+          ],
+          [
+            195,
+            196
+          ],
+          [
+            203,
+            204
+          ],
+          [
+            206,
+            207
+          ],
+          [
+            212,
+            213
+          ],
+          [
+            218,
+            219
+          ],
+          [
+            222,
+            223
+          ],
+          [
+            226,
+            227
+          ],
+          [
+            230,
+            231
+          ],
+          [
+            233,
+            234
+          ],
+          [
+            235,
+            236
+          ],
+          [
+            237,
+            238
+          ],
+          [
+            240,
+            241
+          ],
+          [
+            243,
+            244
+          ],
+          [
+            247,
+            249
+          ],
+          [
+            251,
+            216
+          ],
+          [
+            252,
+            253
+          ],
+          [
+            255,
+            256
+          ],
+          [
+            258,
+            259
+          ],
+          [
+            263,
+            264
+          ],
+          [
+            276,
+            277
+          ],
+          [
+            287,
+            288
+          ],
+          [
+            293,
+            294
+          ],
+          [
+            303,
+            304
+          ],
+          [
+            313,
+            314
+          ],
+          [
+            322,
+            323
+          ],
+          [
+            371,
+            372
+          ],
+          [
+            389,
+            390
+          ],
+          [
+            391,
+            392
+          ],
+          [
+            432,
+            433
+          ],
+          [
+            439,
+            440
+          ],
+          [
+            458,
+            459
+          ],
+          [
+            487,
+            488
+          ],
+          [
+            489,
+            490
+          ],
+          [
+            526,
+            527
+          ],
+          [
+            531,
+            532
+          ],
+          [
+            640,
+            641
+          ],
+          [
+            642,
+            643
+          ],
+          [
+            649,
+            650
+          ],
+          [
+            650,
+            651
+          ],
+          [
+            650,
+            652
+          ],
+          [
+            666,
+            680
+          ],
+          [
+            669,
+            670
+          ],
+          [
+            674,
+            678
+          ],
+          [
+            684,
+            689
+          ],
+          [
+            690,
+            695
+          ],
+          [
+            699,
+            700
+          ]
+        ]
+      },
+      "lines": {
+        "covered": 461,
+        "executable": 520,
+        "missing": [
+          60,
+          91,
+          95,
+          169,
+          170,
+          173,
+          176,
+          190,
+          194,
+          196,
+          204,
+          207,
+          213,
+          219,
+          223,
+          227,
+          231,
+          234,
+          236,
+          238,
+          241,
+          244,
+          249,
+          253,
+          256,
+          259,
+          264,
+          277,
+          285,
+          286,
+          288,
+          294,
+          304,
+          314,
+          323,
+          372,
+          390,
+          392,
+          433,
+          440,
+          459,
+          488,
+          490,
+          527,
+          532,
+          641,
+          643,
+          650,
+          651,
+          652,
+          653,
+          670,
+          678,
+          695,
+          700,
+          701,
+          702,
+          703,
+          704
+        ]
+      },
+      "module": "triad_group_acquire",
+      "sha256": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104"
+    },
+    "tools/triad_noise_likelihood.py": {
+      "branches": {
+        "covered_arcs": 75,
+        "executable_arcs": 108,
+        "missing_arcs": [
+          [
+            43,
+            44
+          ],
+          [
+            45,
+            46
+          ],
+          [
+            61,
+            62
+          ],
+          [
+            67,
+            68
+          ],
+          [
+            83,
+            84
+          ],
+          [
+            101,
+            102
+          ],
+          [
+            130,
+            131
+          ],
+          [
+            132,
+            133
+          ],
+          [
+            137,
+            138
+          ],
+          [
+            143,
+            144
+          ],
+          [
+            145,
+            146
+          ],
+          [
+            147,
+            148
+          ],
+          [
+            152,
+            153
+          ],
+          [
+            221,
+            222
+          ],
+          [
+            224,
+            225
+          ],
+          [
+            226,
+            227
+          ],
+          [
+            228,
+            229
+          ],
+          [
+            230,
+            231
+          ],
+          [
+            233,
+            234
+          ],
+          [
+            236,
+            237
+          ],
+          [
+            245,
+            246
+          ],
+          [
+            247,
+            248
+          ],
+          [
+            250,
+            251
+          ],
+          [
+            253,
+            254
+          ],
+          [
+            267,
+            268
+          ],
+          [
+            288,
+            289
+          ],
+          [
+            295,
+            296
+          ],
+          [
+            316,
+            317
+          ],
+          [
+            335,
+            336
+          ],
+          [
+            357,
+            358
+          ],
+          [
+            359,
+            360
+          ],
+          [
+            396,
+            397
+          ],
+          [
+            401,
+            402
+          ]
+        ]
+      },
+      "lines": {
+        "covered": 227,
+        "executable": 268,
+        "missing": [
+          44,
+          46,
+          62,
+          68,
+          84,
+          102,
+          131,
+          133,
+          138,
+          141,
+          142,
+          144,
+          146,
+          148,
+          153,
+          222,
+          225,
+          227,
+          229,
+          231,
+          234,
+          237,
+          238,
+          239,
+          243,
+          244,
+          246,
+          248,
+          251,
+          254,
+          268,
+          289,
+          296,
+          317,
+          336,
+          358,
+          360,
+          366,
+          367,
+          397,
+          402
+        ]
+      },
+      "module": "triad_noise_likelihood",
+      "sha256": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110"
+    },
+    "tools/triad_phase_frequency.py": {
+      "branches": {
+        "covered_arcs": 82,
+        "executable_arcs": 128,
+        "missing_arcs": [
+          [
+            56,
+            57
+          ],
+          [
+            62,
+            63
+          ],
+          [
+            105,
+            106
+          ],
+          [
+            108,
+            109
+          ],
+          [
+            111,
+            112
+          ],
+          [
+            113,
+            114
+          ],
+          [
+            117,
+            118
+          ],
+          [
+            118,
+            119
+          ],
+          [
+            118,
+            120
+          ],
+          [
+            122,
+            123
+          ],
+          [
+            124,
+            125
+          ],
+          [
+            126,
+            127
+          ],
+          [
+            128,
+            129
+          ],
+          [
+            130,
+            131
+          ],
+          [
+            139,
+            140
+          ],
+          [
+            143,
+            144
+          ],
+          [
+            152,
+            153
+          ],
+          [
+            155,
+            156
+          ],
+          [
+            168,
+            169
+          ],
+          [
+            176,
+            177
+          ],
+          [
+            180,
+            182
+          ],
+          [
+            182,
+            183
+          ],
+          [
+            186,
+            187
+          ],
+          [
+            234,
+            235
+          ],
+          [
+            236,
+            245
+          ],
+          [
+            252,
+            253
+          ],
+          [
+            252,
+            254
+          ],
+          [
+            254,
+            255
+          ],
+          [
+            254,
+            256
+          ],
+          [
+            256,
+            257
+          ],
+          [
+            256,
+            259
+          ],
+          [
+            269,
+            270
+          ],
+          [
+            279,
+            280
+          ],
+          [
+            300,
+            301
+          ],
+          [
+            309,
+            314
+          ],
+          [
+            326,
+            327
+          ],
+          [
+            354,
+            355
+          ],
+          [
+            356,
+            358
+          ],
+          [
+            358,
+            359
+          ],
+          [
+            358,
+            360
+          ],
+          [
+            360,
+            361
+          ],
+          [
+            365,
+            366
+          ],
+          [
+            370,
+            371
+          ],
+          [
+            374,
+            375
+          ],
+          [
+            395,
+            396
+          ],
+          [
+            414,
+            416
+          ]
+        ]
+      },
+      "lines": {
+        "covered": 285,
+        "executable": 336,
+        "missing": [
+          57,
+          63,
+          106,
+          109,
+          112,
+          114,
+          118,
+          119,
+          123,
+          125,
+          127,
+          129,
+          131,
+          140,
+          144,
+          153,
+          156,
+          169,
+          177,
+          183,
+          187,
+          235,
+          245,
+          246,
+          247,
+          248,
+          249,
+          250,
+          251,
+          252,
+          253,
+          254,
+          255,
+          256,
+          257,
+          259,
+          260,
+          261,
+          262,
+          270,
+          280,
+          301,
+          327,
+          355,
+          358,
+          359,
+          361,
+          366,
+          371,
+          375,
+          396
+        ]
+      },
+      "module": "triad_phase_frequency",
+      "sha256": "48ee569b1d467b2d7b6fd55088764bd28dd11e0bfecb5974622a318fbb408585"
+    },
+    "tools/triad_phase_optimized.py": {
+      "branches": {
+        "covered_arcs": 15,
+        "executable_arcs": 54,
+        "missing_arcs": [
+          [
+            51,
+            52
+          ],
+          [
+            51,
+            53
+          ],
+          [
+            53,
+            54
+          ],
+          [
+            53,
+            63
+          ],
+          [
+            57,
+            58
+          ],
+          [
+            57,
+            61
+          ],
+          [
+            86,
+            87
+          ],
+          [
+            88,
+            89
+          ],
+          [
+            129,
+            131
+          ],
+          [
+            131,
+            132
+          ],
+          [
+            131,
+            133
+          ],
+          [
+            153,
+            154
+          ],
+          [
+            154,
+            155
+          ],
+          [
+            154,
+            156
+          ],
+          [
+            200,
+            202
+          ],
+          [
+            223,
+            224
+          ],
+          [
+            223,
+            225
+          ],
+          [
+            225,
+            226
+          ],
+          [
+            225,
+            227
+          ],
+          [
+            227,
+            -222
+          ],
+          [
+            227,
+            229
+          ],
+          [
+            263,
+            264
+          ],
+          [
+            263,
+            268
+          ],
+          [
+            268,
+            269
+          ],
+          [
+            268,
+            272
+          ],
+          [
+            273,
+            274
+          ],
+          [
+            273,
+            275
+          ],
+          [
+            291,
+            292
+          ],
+          [
+            291,
+            293
+          ],
+          [
+            309,
+            310
+          ],
+          [
+            309,
+            313
+          ],
+          [
+            320,
+            321
+          ],
+          [
+            320,
+            322
+          ],
+          [
+            329,
+            330
+          ],
+          [
+            329,
+            336
+          ],
+          [
+            332,
+            333
+          ],
+          [
+            332,
+            335
+          ],
+          [
+            336,
+            338
+          ],
+          [
+            336,
+            339
+          ]
+        ]
+      },
+      "lines": {
+        "covered": 80,
+        "executable": 233,
+        "missing": [
+          32,
+          33,
+          34,
+          35,
+          36,
+          37,
+          39,
+          40,
+          45,
+          46,
+          47,
+          48,
+          49,
+          50,
+          51,
+          52,
+          53,
+          54,
+          55,
+          56,
+          57,
+          58,
+          59,
+          60,
+          61,
+          62,
+          63,
+          65,
+          87,
+          89,
+          131,
+          132,
+          133,
+          134,
+          135,
+          136,
+          137,
+          147,
+          148,
+          154,
+          155,
+          202,
+          203,
+          204,
+          205,
+          206,
+          208,
+          210,
+          211,
+          212,
+          213,
+          214,
+          215,
+          216,
+          217,
+          218,
+          219,
+          220,
+          223,
+          224,
+          225,
+          226,
+          227,
+          229,
+          235,
+          236,
+          237,
+          238,
+          239,
+          241,
+          242,
+          243,
+          244,
+          245,
+          246,
+          247,
+          248,
+          249,
+          256,
+          259,
+          262,
+          263,
+          264,
+          265,
+          268,
+          269,
+          270,
+          271,
+          272,
+          273,
+          274,
+          275,
+          276,
+          281,
+          282,
+          284,
+          285,
+          286,
+          287,
+          288,
+          289,
+          290,
+          291,
+          292,
+          293,
+          294,
+          296,
+          297,
+          298,
+          299,
+          300,
+          301,
+          302,
+          303,
+          304,
+          306,
+          307,
+          308,
+          309,
+          310,
+          313,
+          315,
+          316,
+          319,
+          320,
+          321,
+          322,
+          323,
+          324,
+          325,
+          326,
+          327,
+          328,
+          329,
+          330,
+          331,
+          332,
+          333,
+          335,
+          336,
+          338,
+          339,
+          340,
+          341,
+          345,
+          346,
+          347,
+          348,
+          349,
+          350,
+          353,
+          354,
+          371
+        ]
+      },
+      "module": "triad_phase_optimized",
+      "sha256": "759b46d536f2daa1d1de2336190ab19153376aca3eeca32847cba5289d2d63ed"
+    },
+    "tools/triad_prepared_observation.py": {
+      "branches": {
+        "covered_arcs": 24,
+        "executable_arcs": 36,
+        "missing_arcs": [
+          [
+            41,
+            42
+          ],
+          [
+            47,
+            48
+          ],
+          [
+            49,
+            50
+          ],
+          [
+            51,
+            52
+          ],
+          [
+            57,
+            58
+          ],
+          [
+            59,
+            60
+          ],
+          [
+            62,
+            65
+          ],
+          [
+            144,
+            145
+          ],
+          [
+            155,
+            156
+          ],
+          [
+            169,
+            170
+          ],
+          [
+            171,
+            172
+          ],
+          [
+            177,
+            178
+          ]
+        ]
+      },
+      "lines": {
+        "covered": 135,
+        "executable": 152,
+        "missing": [
+          42,
+          48,
+          50,
+          52,
+          55,
+          56,
+          58,
+          60,
+          65,
+          145,
+          156,
+          170,
+          172,
+          175,
+          176,
+          178,
+          234
+        ]
+      },
+      "module": "triad_prepared_observation",
+      "sha256": "13d37977620519aaeb457d4ed1163c80d68dca96c8319480de914cae8a6aaec8"
+    },
+    "tools/triad_rbpf.py": {
+      "branches": {
+        "covered_arcs": 73,
+        "executable_arcs": 98,
+        "missing_arcs": [
+          [
+            85,
+            86
+          ],
+          [
+            87,
+            88
+          ],
+          [
+            91,
+            92
+          ],
+          [
+            93,
+            94
+          ],
+          [
+            99,
+            100
+          ],
+          [
+            101,
+            102
+          ],
+          [
+            103,
+            104
+          ],
+          [
+            132,
+            133
+          ],
+          [
+            181,
+            182
+          ],
+          [
+            197,
+            198
+          ],
+          [
+            206,
+            207
+          ],
+          [
+            208,
+            209
+          ],
+          [
+            211,
+            212
+          ],
+          [
+            265,
+            266
+          ],
+          [
+            267,
+            268
+          ],
+          [
+            269,
+            270
+          ],
+          [
+            271,
+            272
+          ],
+          [
+            277,
+            278
+          ],
+          [
+            292,
+            293
+          ],
+          [
+            301,
+            302
+          ],
+          [
+            307,
+            308
+          ],
+          [
+            334,
+            335
+          ],
+          [
+            341,
+            342
+          ],
+          [
+            343,
+            344
+          ],
+          [
+            345,
+            346
+          ]
+        ]
+      },
+      "lines": {
+        "covered": 214,
+        "executable": 241,
+        "missing": [
+          86,
+          88,
+          92,
+          94,
+          100,
+          102,
+          104,
+          133,
+          182,
+          198,
+          207,
+          209,
+          212,
+          266,
+          268,
+          270,
+          272,
+          275,
+          276,
+          278,
+          293,
+          302,
+          308,
+          335,
+          342,
+          344,
+          346
+        ]
+      },
+      "module": "triad_rbpf",
+      "sha256": "d4b64c3a830acd3bd15433421da0e003ba1aa9810bf1dd904c57082d94c3bd54"
+    },
+    "tools/triad_state_workspace.py": {
+      "branches": {
+        "covered_arcs": 126,
+        "executable_arcs": 182,
+        "missing_arcs": [
+          [
+            82,
+            83
+          ],
+          [
+            84,
+            85
+          ],
+          [
+            86,
+            87
+          ],
+          [
+            94,
+            95
+          ],
+          [
+            96,
+            97
+          ],
+          [
+            98,
+            99
+          ],
+          [
+            102,
+            103
+          ],
+          [
+            104,
+            105
+          ],
+          [
+            112,
+            113
+          ],
+          [
+            126,
+            127
+          ],
+          [
+            133,
+            134
+          ],
+          [
+            138,
+            139
+          ],
+          [
+            142,
+            143
+          ],
+          [
+            146,
+            147
+          ],
+          [
+            159,
+            160
+          ],
+          [
+            164,
+            165
+          ],
+          [
+            167,
+            168
+          ],
+          [
+            170,
+            171
+          ],
+          [
+            173,
+            174
+          ],
+          [
+            176,
+            177
+          ],
+          [
+            179,
+            180
+          ],
+          [
+            181,
+            182
+          ],
+          [
+            184,
+            185
+          ],
+          [
+            195,
+            196
+          ],
+          [
+            197,
+            198
+          ],
+          [
+            200,
+            201
+          ],
+          [
+            207,
+            212
+          ],
+          [
+            226,
+            227
+          ],
+          [
+            229,
+            230
+          ],
+          [
+            248,
+            249
+          ],
+          [
+            266,
+            267
+          ],
+          [
+            269,
+            270
+          ],
+          [
+            271,
+            272
+          ],
+          [
+            273,
+            274
+          ],
+          [
+            279,
+            280
+          ],
+          [
+            281,
+            282
+          ],
+          [
+            283,
+            284
+          ],
+          [
+            287,
+            -265
+          ],
+          [
+            290,
+            291
+          ],
+          [
+            298,
+            299
+          ],
+          [
+            314,
+            315
+          ],
+          [
+            316,
+            317
+          ],
+          [
+            318,
+            319
+          ],
+          [
+            324,
+            325
+          ],
+          [
+            333,
+            334
+          ],
+          [
+            352,
+            353
+          ],
+          [
+            373,
+            374
+          ],
+          [
+            378,
+            379
+          ],
+          [
+            387,
+            388
+          ],
+          [
+            393,
+            394
+          ],
+          [
+            409,
+            410
+          ],
+          [
+            415,
+            416
+          ],
+          [
+            418,
+            419
+          ],
+          [
+            424,
+            425
+          ],
+          [
+            436,
+            437
+          ],
+          [
+            444,
+            445
+          ]
+        ]
+      },
+      "lines": {
+        "covered": 299,
+        "executable": 360,
+        "missing": [
+          75,
+          76,
+          83,
+          85,
+          87,
+          95,
+          97,
+          99,
+          103,
+          105,
+          113,
+          127,
+          134,
+          139,
+          143,
+          147,
+          160,
+          165,
+          168,
+          171,
+          174,
+          177,
+          180,
+          182,
+          185,
+          196,
+          198,
+          201,
+          212,
+          227,
+          230,
+          233,
+          234,
+          249,
+          267,
+          270,
+          272,
+          274,
+          280,
+          282,
+          284,
+          291,
+          299,
+          315,
+          317,
+          319,
+          322,
+          323,
+          325,
+          334,
+          353,
+          374,
+          379,
+          388,
+          394,
+          410,
+          416,
+          419,
+          425,
+          437,
+          445
+        ]
+      },
+      "module": "triad_state_workspace",
+      "sha256": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923"
+    }
+  },
+  "test_exit_code": 0,
+  "test_runs": [
+    {
+      "command": [
+        "/tmp/triad-weak-env/bin/python",
+        "-m",
+        "coverage",
+        "run",
+        "--branch",
+        "--data-file=/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-complete/python-coverage/attempt-04-dependency-closed/raw/.coverage",
+        "--include=/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_state.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_state_workspace.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_prepared_observation.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_window.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_noise_likelihood.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_rbpf.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_phase_frequency.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_phase_optimized.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_fft_acquire.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_group_acquire.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_prepared.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-state-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-static-frequency-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-rbpf-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-cfo-batch-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-ray-frequency-study.py",
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_triad_gaussian_state.py"
+      ],
+      "exit_code": 0,
+      "output": ".........\n----------------------------------------------------------------------\nRan 9 tests in 0.423s\n\nOK\n",
+      "reported_checks": 9,
+      "test": "tests/test_triad_gaussian_state.py",
+      "test_source_sha256": "386ba03d3d6e850c7b0c6e805a5c9d30f88fdc33d07aeed8e0268cfccbde7da1",
+      "timeout": false,
+      "timeout_seconds": 60.0
+    },
+    {
+      "command": [
+        "/tmp/triad-weak-env/bin/python",
+        "-m",
+        "coverage",
+        "run",
+        "--branch",
+        "--data-file=/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-complete/python-coverage/attempt-04-dependency-closed/raw/.coverage",
+        "--include=/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_state.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_state_workspace.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_prepared_observation.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_window.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_noise_likelihood.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_rbpf.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_phase_frequency.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_phase_optimized.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_fft_acquire.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_group_acquire.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_prepared.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-state-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-static-frequency-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-rbpf-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-cfo-batch-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-ray-frequency-study.py",
+        "--append",
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_triad_prepared_observation.py"
+      ],
+      "exit_code": 0,
+      "output": "...\n----------------------------------------------------------------------\nRan 3 tests in 0.031s\n\nOK\n",
+      "reported_checks": 3,
+      "test": "tests/test_triad_prepared_observation.py",
+      "test_source_sha256": "e1ff404d5dc487146442bf58038301a9610678e9d36fdcaf186d40b40b0a763b",
+      "timeout": false,
+      "timeout_seconds": 60.0
+    },
+    {
+      "command": [
+        "/tmp/triad-weak-env/bin/python",
+        "-m",
+        "coverage",
+        "run",
+        "--branch",
+        "--data-file=/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-complete/python-coverage/attempt-04-dependency-closed/raw/.coverage",
+        "--include=/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_state.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_state_workspace.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_prepared_observation.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_window.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_noise_likelihood.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_rbpf.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_phase_frequency.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_phase_optimized.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_fft_acquire.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_group_acquire.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_prepared.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-state-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-static-frequency-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-rbpf-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-cfo-batch-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-ray-frequency-study.py",
+        "--append",
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_triad_gaussian_window.py"
+      ],
+      "exit_code": 0,
+      "output": ".............\n----------------------------------------------------------------------\nRan 13 tests in 0.522s\n\nOK\n",
+      "reported_checks": 13,
+      "test": "tests/test_triad_gaussian_window.py",
+      "test_source_sha256": "66783804ee920a46757daa54155d9fd88a9d1ed0d65fbb5d364287ffcafde1f9",
+      "timeout": false,
+      "timeout_seconds": 60.0
+    },
+    {
+      "command": [
+        "/tmp/triad-weak-env/bin/python",
+        "-m",
+        "coverage",
+        "run",
+        "--branch",
+        "--data-file=/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-complete/python-coverage/attempt-04-dependency-closed/raw/.coverage",
+        "--include=/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_state.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_state_workspace.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_prepared_observation.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_window.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_noise_likelihood.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_rbpf.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_phase_frequency.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_phase_optimized.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_fft_acquire.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_group_acquire.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_prepared.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-state-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-static-frequency-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-rbpf-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-cfo-batch-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-ray-frequency-study.py",
+        "--append",
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_triad_noise_likelihood.py"
+      ],
+      "exit_code": 0,
+      "output": "............\n----------------------------------------------------------------------\nRan 12 tests in 0.394s\n\nOK\n",
+      "reported_checks": 12,
+      "test": "tests/test_triad_noise_likelihood.py",
+      "test_source_sha256": "2c5452df602057d3fc8550a59fda22d2ca6f64f791b5a506b08d5b8079cb65c7",
+      "timeout": false,
+      "timeout_seconds": 60.0
+    },
+    {
+      "command": [
+        "/tmp/triad-weak-env/bin/python",
+        "-m",
+        "coverage",
+        "run",
+        "--branch",
+        "--data-file=/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-complete/python-coverage/attempt-04-dependency-closed/raw/.coverage",
+        "--include=/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_state.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_state_workspace.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_prepared_observation.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_window.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_noise_likelihood.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_rbpf.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_phase_frequency.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_phase_optimized.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_fft_acquire.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_group_acquire.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_prepared.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-state-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-static-frequency-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-rbpf-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-cfo-batch-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-ray-frequency-study.py",
+        "--append",
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_triad_rbpf.py"
+      ],
+      "exit_code": 0,
+      "output": "................\n----------------------------------------------------------------------\nRan 16 tests in 1.606s\n\nOK\n",
+      "reported_checks": 16,
+      "test": "tests/test_triad_rbpf.py",
+      "test_source_sha256": "668c624ef439c098a99ff9e33822b6272ea367183865b7caccdafcffbc8c42fa",
+      "timeout": false,
+      "timeout_seconds": 60.0
+    },
+    {
+      "command": [
+        "/tmp/triad-weak-env/bin/python",
+        "-m",
+        "coverage",
+        "run",
+        "--branch",
+        "--data-file=/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-complete/python-coverage/attempt-04-dependency-closed/raw/.coverage",
+        "--include=/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_state.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_state_workspace.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_prepared_observation.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_window.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_noise_likelihood.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_rbpf.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_phase_frequency.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_phase_optimized.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_fft_acquire.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_group_acquire.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_prepared.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-state-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-static-frequency-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-rbpf-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-cfo-batch-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-ray-frequency-study.py",
+        "--append",
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_triad_phase_frequency.py"
+      ],
+      "exit_code": 0,
+      "output": "{\n  \"device\": \"cpu\",\n  \"torch\": \"2.8.0+cpu\",\n  \"passed\": 7,\n  \"wall_seconds\": 0.2111037410213612,\n  \"checks\": {\n    \"tiny_path_sum\": {\n      \"log_lr\": -0.7254089969012794,\n      \"direct_path_sum_log_lr\": -0.7254089969012798,\n      \"paths\": 1728\n    },\n    \"direct_sample_density\": {\n      \"log_lr\": -1.134255893473311,\n      \"raw_density_log_lr\": -1.134255893473311\n    },\n    \"static_and_gap_limits\": {\n      \"static_log_lr\": -0.42703829726781173,\n      \"gap_score_unchanged\": true,\n      \"aligned_interpolation_variance\": 0.0\n    },\n    \"precision_and_persistence\": {\n      \"maximum_fp32_fp64_log_lr_difference\": 3.056345203589217e-07,\n      \"chunk_difference\": 0.0\n    },\n    \"frequency_chain_checks\": {\n      \"subgrid_rw_variance\": 9.999250037498592e-11,\n      \"continuous_small_step_variance\": 1e-10,\n      \"ou_detailed_balance_max_error\": 4.336808689942018e-19\n    },\n    \"null_mean_diagnostic\": {\n      \"trials\": 12000,\n      \"mean_lr\": 0.997242258817935,\n      \"standard_error\": 0.002075683415512192,\n      \"scope\": \"moderate-SNR mean diagnostic, not rare-tail or operational false-admission qualification\"\n    },\n    \"validation_guards\": {\n      \"expected_rejections\": 6\n    }\n  }\n}\n",
+      "reported_checks": 7,
+      "test": "tests/test_triad_phase_frequency.py",
+      "test_source_sha256": "cc4d6f1b9c33fc746bb57791ebd19f3ae496272d11bc7cf6379bfb116b9f7dad",
+      "timeout": false,
+      "timeout_seconds": 60.0
+    },
+    {
+      "command": [
+        "/tmp/triad-weak-env/bin/python",
+        "-m",
+        "coverage",
+        "run",
+        "--branch",
+        "--data-file=/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-complete/python-coverage/attempt-04-dependency-closed/raw/.coverage",
+        "--include=/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_state.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_state_workspace.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_prepared_observation.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_window.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_noise_likelihood.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_rbpf.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_phase_frequency.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_phase_optimized.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_fft_acquire.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_group_acquire.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_prepared.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-state-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-static-frequency-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-rbpf-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-cfo-batch-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-ray-frequency-study.py",
+        "--append",
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_triad_phase_optimized.py"
+      ],
+      "exit_code": 0,
+      "output": "{\"status\": \"passed\", \"device\": \"cpu\", \"paired\": [{\"dtype\": \"torch.float64\", \"fractional\": false, \"maximum_score_error\": 0.0, \"maximum_posterior_error\": 0.0, \"diagnostics\": {\"backend\": \"torch_cpu_mathematical_check\", \"gpu_optimized_execution\": false, \"optimized_transition_preparations\": 1, \"optimized_stencil_calls\": 18, \"optimized_integral_first_advections\": 18, \"optimized_fractional_first_advections\": 0, \"maximum_phase_stencil_support\": 13}}, {\"dtype\": \"torch.float64\", \"fractional\": true, \"maximum_score_error\": 0.0, \"maximum_posterior_error\": 0.0, \"diagnostics\": {\"backend\": \"torch_cpu_mathematical_check\", \"gpu_optimized_execution\": false, \"optimized_transition_preparations\": 2, \"optimized_stencil_calls\": 18, \"optimized_integral_first_advections\": 6, \"optimized_fractional_first_advections\": 12, \"maximum_phase_stencil_support\": 13}}, {\"dtype\": \"torch.float32\", \"fractional\": false, \"maximum_score_error\": 0.0, \"maximum_posterior_error\": 0.0, \"diagnostics\": {\"backend\": \"torch_cpu_mathematical_check\", \"gpu_optimized_execution\": false, \"optimized_transition_preparations\": 1, \"optimized_stencil_calls\": 18, \"optimized_integral_first_advections\": 18, \"optimized_fractional_first_advections\": 0, \"maximum_phase_stencil_support\": 13}}, {\"dtype\": \"torch.float32\", \"fractional\": true, \"maximum_score_error\": 0.0, \"maximum_posterior_error\": 0.0, \"diagnostics\": {\"backend\": \"torch_cpu_mathematical_check\", \"gpu_optimized_execution\": false, \"optimized_transition_preparations\": 2, \"optimized_stencil_calls\": 18, \"optimized_integral_first_advections\": 6, \"optimized_fractional_first_advections\": 12, \"maximum_phase_stencil_support\": 13}}], \"direct_transition\": {\"maximum_absolute_error\": 1.5265566588595902e-16, \"intervals\": [0.0, 4.0, 3.7, 23.0]}, \"high_dynamic_range\": {\"maximum_score_error\": 0.0}, \"long_recurrence\": [{\"dtype\": \"torch.float64\", \"updates\": 1025, \"elapsed_center_seconds\": 172800.0, \"maximum_score_error\": 0.0}, {\"dtype\": \"torch.float32\", \"updates\": 1025, \"elapsed_center_seconds\": 172800.0, \"maximum_score_error\": 0.0}], \"cuda_graph\": {\"status\": \"unexecuted\", \"reason\": \"CUDA graph unsupported on CPU; rejection checked\"}, \"scope\": \"numerical and independent finite-model checks; no sensitivity or operational tail qualification\", \"cuda_check\": {\"status\": \"unexecuted\", \"reason\": \"CPU invocation; use --device cuda:0 on supported hardware\"}}\n",
+      "reported_checks": 1,
+      "test": "tests/test_triad_phase_optimized.py",
+      "test_source_sha256": "2dbb8586c57c57d0d8e98b7066535cd21ee2010cf1ec78ed56ec1d0e4f18982b",
+      "timeout": false,
+      "timeout_seconds": 60.0
+    },
+    {
+      "command": [
+        "/tmp/triad-weak-env/bin/python",
+        "-m",
+        "coverage",
+        "run",
+        "--branch",
+        "--data-file=/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-complete/python-coverage/attempt-04-dependency-closed/raw/.coverage",
+        "--include=/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_state.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_state_workspace.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_prepared_observation.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_window.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_noise_likelihood.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_rbpf.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_phase_frequency.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_phase_optimized.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_fft_acquire.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_group_acquire.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_prepared.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-state-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-static-frequency-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-rbpf-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-cfo-batch-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-ray-frequency-study.py",
+        "--append",
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_triad_fft_acquire.py"
+      ],
+      "exit_code": 0,
+      "output": "...........\n----------------------------------------------------------------------\nRan 11 tests in 1.355s\n\nOK\n",
+      "reported_checks": 11,
+      "test": "tests/test_triad_fft_acquire.py",
+      "test_source_sha256": "7b8c3156ebec580f22da3dae4e9941f502e88a35caf15863b2f3b3b6d066458a",
+      "timeout": false,
+      "timeout_seconds": 60.0
+    },
+    {
+      "command": [
+        "/tmp/triad-weak-env/bin/python",
+        "-m",
+        "coverage",
+        "run",
+        "--branch",
+        "--data-file=/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-complete/python-coverage/attempt-04-dependency-closed/raw/.coverage",
+        "--include=/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_state.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_state_workspace.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_prepared_observation.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_window.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_noise_likelihood.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_rbpf.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_phase_frequency.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_phase_optimized.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_fft_acquire.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_group_acquire.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_prepared.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-state-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-static-frequency-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-rbpf-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-cfo-batch-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-ray-frequency-study.py",
+        "--append",
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_triad_group_acquire.py"
+      ],
+      "exit_code": 0,
+      "output": "..................\n----------------------------------------------------------------------\nRan 18 tests in 11.778s\n\nOK\n",
+      "reported_checks": 18,
+      "test": "tests/test_triad_group_acquire.py",
+      "test_source_sha256": "ad4b64bfa40433ed114a55787a55a89a25eed8be43ee02334859fe69151ab17c",
+      "timeout": false,
+      "timeout_seconds": 60.0
+    },
+    {
+      "command": [
+        "/tmp/triad-weak-env/bin/python",
+        "-m",
+        "coverage",
+        "run",
+        "--branch",
+        "--data-file=/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-complete/python-coverage/attempt-04-dependency-closed/raw/.coverage",
+        "--include=/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_state.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_state_workspace.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_prepared_observation.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_window.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_noise_likelihood.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_rbpf.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_phase_frequency.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_phase_optimized.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_fft_acquire.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_group_acquire.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_prepared.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-state-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-static-frequency-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-rbpf-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-cfo-batch-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-ray-frequency-study.py",
+        "--append",
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_triad_gaussian_prepared.py"
+      ],
+      "exit_code": 0,
+      "output": ".....\n----------------------------------------------------------------------\nRan 5 tests in 0.561s\n\nOK\n",
+      "reported_checks": 5,
+      "test": "tests/test_triad_gaussian_prepared.py",
+      "test_source_sha256": "d59e54477f9a31d4038761d2d0c7a8fe020398d4e9e0d6386c1a1593a2e749c4",
+      "timeout": false,
+      "timeout_seconds": 60.0
+    },
+    {
+      "command": [
+        "/tmp/triad-weak-env/bin/python",
+        "-m",
+        "coverage",
+        "run",
+        "--branch",
+        "--data-file=/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-complete/python-coverage/attempt-04-dependency-closed/raw/.coverage",
+        "--include=/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_state.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_state_workspace.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_prepared_observation.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_window.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_noise_likelihood.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_rbpf.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_phase_frequency.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_phase_optimized.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_fft_acquire.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_group_acquire.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_prepared.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-state-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-static-frequency-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-rbpf-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-cfo-batch-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-ray-frequency-study.py",
+        "--append",
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_triad_state_workspace.py"
+      ],
+      "exit_code": 0,
+      "output": "...........\n----------------------------------------------------------------------\nRan 11 tests in 0.078s\n\nOK\n",
+      "reported_checks": 11,
+      "test": "tests/test_triad_state_workspace.py",
+      "test_source_sha256": "b9a0276203bd212b74f8becca1726d56dd6074d8c27c720a14d08cff4b6b0aba",
+      "timeout": false,
+      "timeout_seconds": 60.0
+    },
+    {
+      "command": [
+        "/tmp/triad-weak-env/bin/python",
+        "-m",
+        "coverage",
+        "run",
+        "--branch",
+        "--data-file=/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-complete/python-coverage/attempt-04-dependency-closed/raw/.coverage",
+        "--include=/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_state.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_state_workspace.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_prepared_observation.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_window.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_noise_likelihood.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_rbpf.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_phase_frequency.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_phase_optimized.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_fft_acquire.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_group_acquire.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_prepared.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-state-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-static-frequency-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-rbpf-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-cfo-batch-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-ray-frequency-study.py",
+        "--append",
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_triad_state_study.py"
+      ],
+      "exit_code": 0,
+      "output": "..\n----------------------------------------------------------------------\nRan 2 tests in 0.010s\n\nOK\n",
+      "reported_checks": 2,
+      "test": "tests/test_triad_state_study.py",
+      "test_source_sha256": "6e1bbdf0ef3dd1124d30be9bee8dc804a617ce1e3f615b3f2862f328f5f1bc4a",
+      "timeout": false,
+      "timeout_seconds": 60.0
+    },
+    {
+      "command": [
+        "/tmp/triad-weak-env/bin/python",
+        "-m",
+        "coverage",
+        "run",
+        "--branch",
+        "--data-file=/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-complete/python-coverage/attempt-04-dependency-closed/raw/.coverage",
+        "--include=/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_state.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_state_workspace.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_prepared_observation.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_window.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_noise_likelihood.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_rbpf.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_phase_frequency.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_phase_optimized.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_fft_acquire.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_group_acquire.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_prepared.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-state-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-static-frequency-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-rbpf-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-cfo-batch-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-ray-frequency-study.py",
+        "--append",
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_triad_static_frequency_study.py"
+      ],
+      "exit_code": 0,
+      "output": "...........\n----------------------------------------------------------------------\nRan 11 tests in 0.449s\n\nOK\n",
+      "reported_checks": 11,
+      "test": "tests/test_triad_static_frequency_study.py",
+      "test_source_sha256": "73c609d183dfacf03e22426d9defac30be386f48ce35cb08b92942fc5811c34d",
+      "timeout": false,
+      "timeout_seconds": 60.0
+    },
+    {
+      "command": [
+        "/tmp/triad-weak-env/bin/python",
+        "-m",
+        "coverage",
+        "run",
+        "--branch",
+        "--data-file=/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-complete/python-coverage/attempt-04-dependency-closed/raw/.coverage",
+        "--include=/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_state.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_state_workspace.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_prepared_observation.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_window.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_noise_likelihood.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_rbpf.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_phase_frequency.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_phase_optimized.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_fft_acquire.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_group_acquire.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_prepared.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-state-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-static-frequency-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-rbpf-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-cfo-batch-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-ray-frequency-study.py",
+        "--append",
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_triad_rbpf_study.py"
+      ],
+      "exit_code": 0,
+      "output": "..............\n----------------------------------------------------------------------\nRan 14 tests in 0.641s\n\nOK\n",
+      "reported_checks": 14,
+      "test": "tests/test_triad_rbpf_study.py",
+      "test_source_sha256": "dbc93c3570719a216ca34d9e10248b8f49f0d25c7ebee1537c0df70a81b28598",
+      "timeout": false,
+      "timeout_seconds": 60.0
+    },
+    {
+      "command": [
+        "/tmp/triad-weak-env/bin/python",
+        "-m",
+        "coverage",
+        "run",
+        "--branch",
+        "--data-file=/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-complete/python-coverage/attempt-04-dependency-closed/raw/.coverage",
+        "--include=/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_state.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_state_workspace.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_prepared_observation.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_window.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_noise_likelihood.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_rbpf.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_phase_frequency.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_phase_optimized.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_fft_acquire.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_group_acquire.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_prepared.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-state-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-static-frequency-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-rbpf-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-cfo-batch-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-ray-frequency-study.py",
+        "--append",
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_triad_cfo_batch.py"
+      ],
+      "exit_code": 0,
+      "output": "........\n----------------------------------------------------------------------\nRan 8 tests in 0.554s\n\nOK\n",
+      "reported_checks": 8,
+      "test": "tests/test_triad_cfo_batch.py",
+      "test_source_sha256": "f03812407de28cef6854c39df73c25cc66301abb637d8fd4cb40e34b8c16a356",
+      "timeout": false,
+      "timeout_seconds": 60.0
+    },
+    {
+      "command": [
+        "/tmp/triad-weak-env/bin/python",
+        "-m",
+        "coverage",
+        "run",
+        "--branch",
+        "--data-file=/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-complete/python-coverage/attempt-04-dependency-closed/raw/.coverage",
+        "--include=/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_state.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_state_workspace.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_prepared_observation.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_window.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_noise_likelihood.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_rbpf.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_phase_frequency.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_phase_optimized.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_fft_acquire.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_group_acquire.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_prepared.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-state-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-static-frequency-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-rbpf-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-cfo-batch-study.py,/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-ray-frequency-study.py",
+        "--append",
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_triad_ray_frequency.py"
+      ],
+      "exit_code": 0,
+      "output": ".......\n----------------------------------------------------------------------\nRan 7 tests in 0.616s\n\nOK\n",
+      "reported_checks": 7,
+      "test": "tests/test_triad_ray_frequency.py",
+      "test_source_sha256": "982473b034caa7bc550e1acee29dc2d9c8e33c6131e25683abd11bc95fbb89b3",
+      "timeout": false,
+      "timeout_seconds": 60.0
+    }
+  ],
+  "tests": [
+    "tests/test_triad_gaussian_state.py",
+    "tests/test_triad_prepared_observation.py",
+    "tests/test_triad_gaussian_window.py",
+    "tests/test_triad_noise_likelihood.py",
+    "tests/test_triad_rbpf.py",
+    "tests/test_triad_phase_frequency.py",
+    "tests/test_triad_phase_optimized.py",
+    "tests/test_triad_fft_acquire.py",
+    "tests/test_triad_group_acquire.py",
+    "tests/test_triad_gaussian_prepared.py",
+    "tests/test_triad_state_workspace.py",
+    "tests/test_triad_state_study.py",
+    "tests/test_triad_static_frequency_study.py",
+    "tests/test_triad_rbpf_study.py",
+    "tests/test_triad_cfo_batch.py",
+    "tests/test_triad_ray_frequency.py"
+  ]
+}

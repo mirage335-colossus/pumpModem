@@ -1,0 +1,671 @@
+{
+  "schema": "triad-performance-classification-replay-v1",
+  "scope": "Classification only. Original measurements, source identities and coverage receipts are unchanged. Current matrix dispositions may reference separately recorded follow-up checks. No retiming or fresh model qualification.",
+  "original_summary_sha256": "ff4fd06cefb1d0ad368f66e78928bf5b49d4573ed466d76e727104d04d2e24fe",
+  "wrapper_sha256": "48940a2609f075b1d869358722b5abeebe0d249fc193059dc565c0be1d0e2cab",
+  "matrix_sha256": "ecf8ed343d8ce50ec1cae6f1145bd1c8058596fc6bb46a3c15d618cbb76b2fe3",
+  "original_wall_seconds": 2999.8578866570024,
+  "original_status": "incomplete",
+  "classification": {
+    "outcomes": {
+      "functional_correctness": {
+        "status": "passed",
+        "scope": "matrix-named focused tests",
+        "required_scope_complete": true
+      },
+      "code_path_coverage": {
+        "status": "incomplete_stale_or_dependency_unverified",
+        "semantic_completeness": "see the finite maintained inventory; counters alone do not establish it",
+        "fresh": false
+      },
+      "timing_precision": {
+        "status": "inconclusive",
+        "precision_target_met": false,
+        "unresolved": [
+          "native-flat",
+          "native-vlf-low-cn0",
+          "native-wrong-key",
+          "native-frontend",
+          "native-ou-path",
+          "narrow-hf-tight",
+          "broad-hf-timing",
+          "vlf-850-day",
+          "gaussian-multiblock",
+          "grouped-multitile",
+          "rbpf-systematic"
+        ]
+      },
+      "prediction_accuracy": {
+        "status": "passed",
+        "unresolved": [],
+        "sampled_direct_case_ids": [
+          "gaussian-hour",
+          "phase-reference-hour",
+          "phase-optimized-hour",
+          "grouped-multitile",
+          "rbpf-systematic",
+          "cfo-batch-tail",
+          "static-fft",
+          "ray-frequency-tiles",
+          "state-sampled-smoke"
+        ],
+        "direct_scope": "Direct full measurements need no extrapolation model; they do not qualify a failed or absent model."
+      },
+      "performance_regression": {
+        "status": "passed",
+        "regressions": [],
+        "unresolved": []
+      },
+      "hardware_health": {
+        "status": "degraded_screen",
+        "receipt": {
+          "status": "raw_hardware_screen",
+          "performance_pass_eligible": false,
+          "rows": [
+            {
+              "case": "gemm-fp32",
+              "throughput_measure": "operations_per_second",
+              "old": 140719844117.93146,
+              "current": 125332737579.21269,
+              "time_equivalent_ratio": 1.1227700506341676,
+              "regression_screen": false,
+              "low_cpu_utilization_screen": false,
+              "low_device_busy_screen": false,
+              "raw_utilization_current": 1.9989749106417094
+            },
+            {
+              "case": "gemm-fp64",
+              "throughput_measure": "operations_per_second",
+              "old": 54964165903.0377,
+              "current": 47781242036.65612,
+              "time_equivalent_ratio": 1.1503293669275296,
+              "regression_screen": false,
+              "low_cpu_utilization_screen": false,
+              "low_device_busy_screen": false,
+              "raw_utilization_current": 1.9984391237794128
+            },
+            {
+              "case": "fft-complex64",
+              "throughput_measure": "operations_per_second",
+              "old": 28983854868.46294,
+              "current": 29159941326.54786,
+              "time_equivalent_ratio": 0.9939613575996943,
+              "regression_screen": false,
+              "low_cpu_utilization_screen": false,
+              "low_device_busy_screen": false,
+              "raw_utilization_current": 1.8387211199950524
+            },
+            {
+              "case": "fft-complex128",
+              "throughput_measure": "operations_per_second",
+              "old": 8225683896.998274,
+              "current": 6909782572.695687,
+              "time_equivalent_ratio": 1.1904403373707342,
+              "regression_screen": false,
+              "low_cpu_utilization_screen": false,
+              "low_device_busy_screen": false,
+              "raw_utilization_current": 1.8550950876055696
+            },
+            {
+              "case": "stream-copy",
+              "throughput_measure": "bytes_per_second",
+              "old": 17245965154.638668,
+              "current": 12802147151.965294,
+              "time_equivalent_ratio": 1.347115054211136,
+              "regression_screen": true,
+              "low_cpu_utilization_screen": false,
+              "low_device_busy_screen": false,
+              "raw_utilization_current": 0.9977441899435144
+            },
+            {
+              "case": "phase-reduction-complex64",
+              "throughput_measure": "bytes_per_second",
+              "old": 17593953455.422924,
+              "current": 12419038968.930193,
+              "time_equivalent_ratio": 1.4166920241927956,
+              "regression_screen": true,
+              "low_cpu_utilization_screen": false,
+              "low_device_busy_screen": false,
+              "raw_utilization_current": 0.9993200616373491
+            },
+            {
+              "case": "phase-reduction-complex128",
+              "throughput_measure": "bytes_per_second",
+              "old": 13105348293.863699,
+              "current": 8888325576.672483,
+              "time_equivalent_ratio": 1.4744451225165336,
+              "regression_screen": true,
+              "low_cpu_utilization_screen": false,
+              "low_device_busy_screen": false,
+              "raw_utilization_current": 1.9848739724091413
+            },
+            {
+              "case": "tensor-fp16-cpu",
+              "throughput_measure": "operations_per_second",
+              "old": 1686816667.1408324,
+              "current": 1696547885.102869,
+              "time_equivalent_ratio": 0.9942641065144786,
+              "regression_screen": false,
+              "low_cpu_utilization_screen": false,
+              "low_device_busy_screen": false,
+              "raw_utilization_current": 1.001837727252767
+            },
+            {
+              "case": "tensor-bf16-cpu",
+              "throughput_measure": "operations_per_second",
+              "old": 1685444151.9293275,
+              "current": 1636612403.9815607,
+              "time_equivalent_ratio": 1.0298370877728706,
+              "regression_screen": false,
+              "low_cpu_utilization_screen": false,
+              "low_device_busy_screen": false,
+              "raw_utilization_current": 1.0023962749437123
+            }
+          ],
+          "warning": true,
+          "scope": "raw environment-health screen; one five-second block does not establish independent-replicate confidence"
+        }
+      }
+    },
+    "timing_cases": {
+      "rows": [
+        {
+          "id": "native-flat",
+          "harness": "native_fft",
+          "gate": "pass",
+          "comparison": {
+            "gate": "pass",
+            "expanded_full_prediction_ratio_interval": [
+              0.9574524019548615,
+              1.019844945776318
+            ]
+          },
+          "prediction_valid": true,
+          "timing_precision_reached": false,
+          "endpoint_blocking": false
+        },
+        {
+          "id": "native-fhss-selective-burst",
+          "harness": "native_fft",
+          "gate": "pass",
+          "comparison": {
+            "gate": "pass",
+            "expanded_full_prediction_ratio_interval": [
+              0.9054102049932452,
+              0.9701325909647919
+            ]
+          },
+          "prediction_valid": true,
+          "timing_precision_reached": true,
+          "endpoint_blocking": false
+        },
+        {
+          "id": "native-vlf-low-cn0",
+          "harness": "native_fft",
+          "gate": "pass",
+          "comparison": {
+            "status": "conditional_gate_pass",
+            "gate": "pass",
+            "conditional_performance_pass_eligible": true,
+            "timing_ratio_interval": [
+              0.9061890309531326,
+              1.056783191139192
+            ],
+            "paired_model_log_error_bound": 0.09531017980432487,
+            "model_adjusted_ratio_interval": [
+              0.8238082099573932,
+              1.1624615102531113
+            ],
+            "training_timing_uncertainty_included": false,
+            "future_coverage_qualified": false,
+            "threshold": 1.3,
+            "scope": "conditional scenario gate; paired timing interval receives the prevalidated historical envelope once",
+            "evidence": "historically_supported_conditional",
+            "expanded_full_prediction_ratio_interval": [
+              0.8238082099573932,
+              1.1624615102531113
+            ]
+          },
+          "prediction_valid": true,
+          "timing_precision_reached": false,
+          "endpoint_blocking": false
+        },
+        {
+          "id": "native-null",
+          "harness": "native_fft",
+          "gate": "pass",
+          "comparison": {
+            "gate": "pass",
+            "expanded_full_prediction_ratio_interval": [
+              0.9453391158044645,
+              1.015385179354279
+            ]
+          },
+          "prediction_valid": true,
+          "timing_precision_reached": true,
+          "endpoint_blocking": false
+        },
+        {
+          "id": "native-wrong-key",
+          "harness": "native_fft",
+          "gate": "pass",
+          "comparison": {
+            "gate": "pass",
+            "expanded_full_prediction_ratio_interval": [
+              0.928320741961947,
+              1.0474155968773886
+            ]
+          },
+          "prediction_valid": true,
+          "timing_precision_reached": false,
+          "endpoint_blocking": false
+        },
+        {
+          "id": "native-frontend",
+          "harness": "native_fft",
+          "gate": "pass",
+          "comparison": {
+            "gate": "pass",
+            "expanded_full_prediction_ratio_interval": [
+              0.9072142760491573,
+              0.9885075850707479
+            ]
+          },
+          "prediction_valid": true,
+          "timing_precision_reached": false,
+          "endpoint_blocking": false
+        },
+        {
+          "id": "native-ou-path",
+          "harness": "native_fft",
+          "gate": "pass",
+          "comparison": {
+            "gate": "pass",
+            "expanded_full_prediction_ratio_interval": [
+              0.9651163150490422,
+              1.0360827231982874
+            ]
+          },
+          "prediction_valid": true,
+          "timing_precision_reached": false,
+          "endpoint_blocking": false
+        },
+        {
+          "id": "native-gaussian-path",
+          "harness": "native_fft",
+          "gate": "pass",
+          "comparison": {
+            "gate": "pass",
+            "expanded_full_prediction_ratio_interval": [
+              0.9628116268929733,
+              1.0279618210456187
+            ]
+          },
+          "prediction_valid": true,
+          "timing_precision_reached": true,
+          "endpoint_blocking": false
+        },
+        {
+          "id": "narrow-hf-tight",
+          "harness": "native_fft",
+          "gate": "pass",
+          "comparison": {
+            "gate": "pass",
+            "performance_pass_eligible": true,
+            "expanded_full_prediction_ratio_interval": [
+              0.9419009016337845,
+              1.0409641889556551
+            ],
+            "observed_prediction_ratio": 0.9901944799612916,
+            "mean_reference_full_seconds": 0.3190986175499292,
+            "mean_candidate_full_seconds": 0.3160970559163781,
+            "absolute_mean_full_seconds_difference": -0.0030015616335510864
+          },
+          "prediction_valid": true,
+          "timing_precision_reached": false,
+          "endpoint_blocking": false
+        },
+        {
+          "id": "broad-hf-timing",
+          "harness": "native_fft",
+          "gate": "pass",
+          "comparison": {
+            "gate": "pass",
+            "performance_pass_eligible": true,
+            "expanded_full_prediction_ratio_interval": [
+              0.854063534548072,
+              1.1484383405438883
+            ],
+            "observed_prediction_ratio": 0.9903733176612926,
+            "mean_reference_full_seconds": 12.683281354282549,
+            "mean_candidate_full_seconds": 12.569133530988179,
+            "conditional": {
+              "status": "conditional_gate_pass",
+              "gate": "pass",
+              "conditional_performance_pass_eligible": true,
+              "timing_ratio_interval": [
+                0.9394698880028792,
+                1.0440348550398983
+              ],
+              "paired_model_log_error_bound": 0.09531017980432487,
+              "model_adjusted_ratio_interval": [
+                0.854063534548072,
+                1.1484383405438883
+              ],
+              "training_timing_uncertainty_included": false,
+              "future_coverage_qualified": false,
+              "threshold": 1.3,
+              "scope": "conditional scenario gate; paired timing interval receives the prevalidated historical envelope once"
+            },
+            "absolute_mean_full_seconds_difference": -0.11414782329437045
+          },
+          "prediction_valid": true,
+          "timing_precision_reached": false,
+          "endpoint_blocking": false
+        },
+        {
+          "id": "hf30-fhss-missed",
+          "harness": "native_fft",
+          "gate": "pass",
+          "comparison": {
+            "gate": "pass",
+            "performance_pass_eligible": true,
+            "expanded_full_prediction_ratio_interval": [
+              0.9098040689875562,
+              0.9972558547098662
+            ],
+            "observed_prediction_ratio": 0.9525268680917611,
+            "mean_reference_full_seconds": 0.31049051822971224,
+            "mean_candidate_full_seconds": 0.2958098523531054,
+            "absolute_mean_full_seconds_difference": -0.014680665876606824
+          },
+          "prediction_valid": true,
+          "timing_precision_reached": true,
+          "endpoint_blocking": false
+        },
+        {
+          "id": "vlf-850-day",
+          "harness": "native_fft",
+          "gate": "pass",
+          "comparison": {
+            "gate": "pass",
+            "performance_pass_eligible": true,
+            "expanded_full_prediction_ratio_interval": [
+              0.9654729943818593,
+              1.0424837437712084
+            ],
+            "observed_prediction_ratio": 1.0032397030088072,
+            "mean_reference_full_seconds": 2.0370535042761317,
+            "mean_candidate_full_seconds": 2.0426145886974125,
+            "absolute_mean_full_seconds_difference": 0.005561084421280782
+          },
+          "prediction_valid": true,
+          "timing_precision_reached": false,
+          "endpoint_blocking": false
+        },
+        {
+          "id": "gaussian-multiblock",
+          "harness": "native_fft",
+          "gate": "pass",
+          "comparison": {
+            "gate": "pass",
+            "expanded_full_prediction_ratio_interval": [
+              0.892617958107035,
+              1.0888319882679882
+            ]
+          },
+          "prediction_valid": true,
+          "timing_precision_reached": false,
+          "endpoint_blocking": false
+        },
+        {
+          "id": "gaussian-hour",
+          "harness": "sampled_family",
+          "gate": "pass",
+          "comparison": {
+            "gate": "pass"
+          },
+          "prediction_valid": true,
+          "timing_precision_reached": true,
+          "endpoint_blocking": false,
+          "measurement_schema": "triad-performance-sampled-family-pair-v1",
+          "timing_scope": "fresh full native export and complete receiver request in a persistent worker; Python worker startup and import setup reported separately",
+          "runtime_method": "direct_full_measurement"
+        },
+        {
+          "id": "phase-reference-hour",
+          "harness": "sampled_family",
+          "gate": "pass",
+          "comparison": {
+            "gate": "pass"
+          },
+          "prediction_valid": true,
+          "timing_precision_reached": true,
+          "endpoint_blocking": false,
+          "measurement_schema": "triad-performance-sampled-family-pair-v1",
+          "timing_scope": "fresh full native export and complete receiver request in a persistent worker; Python worker startup and import setup reported separately",
+          "runtime_method": "direct_full_measurement"
+        },
+        {
+          "id": "phase-optimized-hour",
+          "harness": "sampled_family",
+          "gate": "pass",
+          "comparison": {
+            "gate": "pass"
+          },
+          "prediction_valid": true,
+          "timing_precision_reached": true,
+          "endpoint_blocking": false,
+          "measurement_schema": "triad-performance-sampled-family-pair-v1",
+          "timing_scope": "fresh full native export and complete receiver request in a persistent worker; Python worker startup and import setup reported separately",
+          "runtime_method": "direct_full_measurement"
+        },
+        {
+          "id": "grouped-multitile",
+          "harness": "sampled_family",
+          "gate": "pass",
+          "comparison": {
+            "gate": "pass"
+          },
+          "prediction_valid": true,
+          "timing_precision_reached": false,
+          "endpoint_blocking": false,
+          "measurement_schema": "triad-performance-sampled-family-pair-v1",
+          "timing_scope": "fresh full native export and complete receiver request in a persistent worker; Python worker startup and import setup reported separately",
+          "runtime_method": "direct_full_measurement"
+        },
+        {
+          "id": "rbpf-systematic",
+          "harness": "sampled_family",
+          "gate": "pass",
+          "comparison": {
+            "gate": "pass"
+          },
+          "prediction_valid": true,
+          "timing_precision_reached": false,
+          "endpoint_blocking": false,
+          "measurement_schema": "triad-performance-sampled-family-pair-v1",
+          "timing_scope": "fresh full native export and complete receiver request in a persistent worker; Python worker startup and import setup reported separately",
+          "runtime_method": "direct_full_measurement"
+        },
+        {
+          "id": "cfo-batch-tail",
+          "harness": "sampled_family",
+          "gate": "pass",
+          "comparison": {
+            "gate": "pass"
+          },
+          "prediction_valid": true,
+          "timing_precision_reached": true,
+          "endpoint_blocking": false,
+          "measurement_schema": "triad-performance-sampled-family-pair-v1",
+          "timing_scope": "fresh full native export and complete receiver request in a persistent worker; Python worker startup and import setup reported separately",
+          "runtime_method": "direct_full_measurement"
+        },
+        {
+          "id": "static-fft",
+          "harness": "sampled_family",
+          "gate": "pass",
+          "comparison": {
+            "gate": "pass"
+          },
+          "prediction_valid": true,
+          "timing_precision_reached": true,
+          "endpoint_blocking": false,
+          "measurement_schema": "triad-performance-sampled-family-pair-v1",
+          "timing_scope": "fresh full native export and complete receiver request in a persistent worker; Python worker startup and import setup reported separately",
+          "runtime_method": "direct_full_measurement"
+        },
+        {
+          "id": "ray-frequency-tiles",
+          "harness": "sampled_family",
+          "gate": "pass",
+          "comparison": {
+            "gate": "pass"
+          },
+          "prediction_valid": true,
+          "timing_precision_reached": true,
+          "endpoint_blocking": false,
+          "measurement_schema": "triad-performance-sampled-family-pair-v1",
+          "timing_scope": "fresh full native export and complete receiver request in a persistent worker; Python worker startup and import setup reported separately",
+          "runtime_method": "direct_full_measurement"
+        },
+        {
+          "id": "state-sampled-smoke",
+          "harness": "sampled_family",
+          "gate": "pass",
+          "comparison": {
+            "gate": "pass"
+          },
+          "prediction_valid": true,
+          "timing_precision_reached": true,
+          "endpoint_blocking": false,
+          "measurement_schema": "triad-performance-sampled-family-pair-v1",
+          "timing_scope": "fresh full native export and complete receiver request in a persistent worker; Python worker startup and import setup reported separately",
+          "runtime_method": "direct_full_measurement"
+        },
+        {
+          "id": "free-crystal",
+          "harness": "identical_fft",
+          "gate": "pass",
+          "comparison": {
+            "gate": "pass",
+            "threshold": 1.3,
+            "full_time_ratio_interval": [
+              0.7774256004594855,
+              1.2686401453251737
+            ],
+            "current_full_seconds": 19.780538943590198,
+            "historical_full_seconds": 19.91771327806614,
+            "absolute_full_seconds_difference": -0.13717433447594374,
+            "historical": {
+              "point_seconds": 19.91771327806614,
+              "timing_mean_confidence_interval_seconds": [
+                17.830755179582347,
+                22.248934396313363
+              ],
+              "future_execution_prediction_interval_seconds": [
+                15.187739628625296,
+                26.12076002932904
+              ],
+              "log_standard_error": 0.009399704264400711,
+              "relative_timing_half_width": 0.11704260854153459
+            },
+            "historical_interval_confidence": 0.999702380952381,
+            "historical_selection_look_count": 4,
+            "model_log_allowance": 0.09531017980432487,
+            "scope": "absolute workload comparison across independent sessions; no within-run implementation ratio",
+            "future_model_coverage_qualified": false
+          },
+          "prediction_valid": true,
+          "timing_precision_reached": true,
+          "endpoint_blocking": false,
+          "identity_deduplication_eligible": true,
+          "implementation_comparison": {
+            "status": "implementation_unchanged",
+            "ratio": null,
+            "confidence_interval": null,
+            "measured": false
+          },
+          "timing_scope": "unchanged ReceiverService.prepare wall_seconds plus score wall_seconds_including_finish",
+          "excluded_costs": [
+            "fixture generation",
+            "worker startup",
+            "runtime identity audit",
+            "evidence writes"
+          ]
+        }
+      ],
+      "expected_sampled_cases": [
+        "gaussian-hour",
+        "phase-reference-hour",
+        "phase-optimized-hour",
+        "grouped-multitile",
+        "rbpf-systematic",
+        "cfo-batch-tail",
+        "static-fft",
+        "ray-frequency-tiles",
+        "state-sampled-smoke"
+      ],
+      "expected_identical_fft_cases": [
+        "free-crystal"
+      ],
+      "missing_identical_fft_cases": [],
+      "unexpected_identical_fft_cases": [],
+      "missing_sampled_cases": [],
+      "unexpected_sampled_cases": [],
+      "all_declared_cases_measured": true,
+      "timing_precision": {
+        "status": "inconclusive",
+        "precision_target_met": false,
+        "unresolved": [
+          "native-flat",
+          "native-vlf-low-cn0",
+          "native-wrong-key",
+          "native-frontend",
+          "native-ou-path",
+          "narrow-hf-tight",
+          "broad-hf-timing",
+          "vlf-850-day",
+          "gaussian-multiblock",
+          "grouped-multitile",
+          "rbpf-systematic"
+        ]
+      },
+      "prediction_accuracy": {
+        "status": "passed",
+        "unresolved": [],
+        "sampled_direct_case_ids": [
+          "gaussian-hour",
+          "phase-reference-hour",
+          "phase-optimized-hour",
+          "grouped-multitile",
+          "rbpf-systematic",
+          "cfo-batch-tail",
+          "static-fft",
+          "ray-frequency-tiles",
+          "state-sampled-smoke"
+        ],
+        "direct_scope": "Direct full measurements need no extrapolation model; they do not qualify a failed or absent model."
+      },
+      "performance_regression": {
+        "status": "passed",
+        "regressions": [],
+        "unresolved": []
+      }
+    },
+    "warm_target_decisions_complete": true,
+    "precision_target_met": false,
+    "warm_decision_statistical_scope": "Existing per-case prediction-validity and performance gates determine warm decisions; the requested timing-precision goal is reported separately. Comparison intervals are retained per case. A conditional model's 20% uncertainty cap is not a universal comparison-ratio interval-width cap. No new threshold, pooled confidence level or future-coverage guarantee is introduced.",
+    "complete_scope_qualification": false,
+    "status": "incomplete",
+    "exit_code": 2,
+    "scope_blockers": [
+      "cold startup/loading/first-use prediction: not_requested_unqualified",
+      "maintained inventory declares 3 unresolved rows or computational boundaries",
+      "required source-matched native/Python coverage receipts are missing or stale",
+      "hardware health comparison is unavailable or degraded"
+    ],
+    "scope_note": "This wrapper aggregates current finite warm targets. It cannot certify unrepresented regimes or qualify cold latency by addition."
+  }
+}

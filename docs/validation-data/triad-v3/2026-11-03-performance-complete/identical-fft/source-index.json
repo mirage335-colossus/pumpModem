@@ -1,0 +1,128 @@
+{
+  "schema": "triad-identical-fft-source-index-v1",
+  "scope": "all six actually observed repository DSP modules and all six pinned measurement files; exact bytes match both qualified records; numerical/native library bytes remain represented by their observed hashes and versions, not copied",
+  "files": [
+    {
+      "member": "tools/triad_gaussian_window.py",
+      "bytes": 22325,
+      "sha256": "b22fe002864922e44bc7e10000672a163353818f610c4882bae5d62cfe1cf883",
+      "required_by": [
+        "cpu-free-001/free-crystal/result.json.gz",
+        "gpu-free-002/free-crystal/result.json.gz"
+      ]
+    },
+    {
+      "member": "tools/triad_gaussian_state.py",
+      "bytes": 13539,
+      "sha256": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba",
+      "required_by": [
+        "cpu-free-001/free-crystal/result.json.gz",
+        "gpu-free-002/free-crystal/result.json.gz"
+      ]
+    },
+    {
+      "member": "tools/triad_noise_likelihood.py",
+      "bytes": 23863,
+      "sha256": "6964eee7372e0d3dbd590fb7f78a6c2b9c6d133dc012b488cce566f2d2447110",
+      "required_by": [
+        "cpu-free-001/free-crystal/result.json.gz",
+        "gpu-free-002/free-crystal/result.json.gz"
+      ]
+    },
+    {
+      "member": "tools/triad_state_workspace.py",
+      "bytes": 25804,
+      "sha256": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923",
+      "required_by": [
+        "cpu-free-001/free-crystal/result.json.gz",
+        "gpu-free-002/free-crystal/result.json.gz"
+      ]
+    },
+    {
+      "member": "tools/triad_group_acquire.py",
+      "bytes": 42989,
+      "sha256": "1e060eb53a411513598a01bd84cc204133056cabdab366c255b66d6b6123b104",
+      "required_by": [
+        "cpu-free-001/free-crystal/result.json.gz",
+        "gpu-free-002/free-crystal/result.json.gz"
+      ]
+    },
+    {
+      "member": "tools/triad_fft_acquire.py",
+      "bytes": 36590,
+      "sha256": "d4a3c2cc39e0068e6aa6aab27d7ee8eeff6cc7db72a790868fe166c3f1d65843",
+      "required_by": [
+        "cpu-free-001/free-crystal/result.json.gz",
+        "gpu-free-002/free-crystal/result.json.gz"
+      ]
+    },
+    {
+      "member": "tools/triad_perf_identical_fft.py",
+      "bytes": 41506,
+      "sha256": "173cd0c74731b2507f18bd28360f0b4f3f69015039a1e93752d043f454041cfb",
+      "required_by": [
+        "cpu-free-001/free-crystal/result.json.gz",
+        "gpu-free-002/free-crystal/result.json.gz"
+      ]
+    },
+    {
+      "member": "tools/triad_perf_receiver.py",
+      "bytes": 16466,
+      "sha256": "fd2fd7109e9dfcd8fe984fc526995a65b4517335cf6d80428a749f13994fcb34",
+      "required_by": [
+        "cpu-free-001/free-crystal/result.json.gz",
+        "gpu-free-002/free-crystal/result.json.gz"
+      ]
+    },
+    {
+      "member": "tools/triad_perf_fft_trace.py",
+      "bytes": 41174,
+      "sha256": "c903dc8909688bb30598e9efb6b85c7ee08c8199310844f2f80fda643060d167",
+      "required_by": [
+        "cpu-free-001/free-crystal/result.json.gz",
+        "gpu-free-002/free-crystal/result.json.gz"
+      ]
+    },
+    {
+      "member": "tools/triad_perf_adaptive.py",
+      "bytes": 18126,
+      "sha256": "3ad99d54b955e735f0db832bd6ac3afe91b016d993de80909827efd491174106",
+      "required_by": [
+        "cpu-free-001/free-crystal/result.json.gz",
+        "gpu-free-002/free-crystal/result.json.gz"
+      ]
+    },
+    {
+      "member": "tools/triad-performance.py",
+      "bytes": 55234,
+      "sha256": "4effb31a1641239deeb933bc5690910e0033ed1a1a47b4418cb70939a4515db3",
+      "required_by": [
+        "cpu-free-001/free-crystal/result.json.gz",
+        "gpu-free-002/free-crystal/result.json.gz"
+      ]
+    },
+    {
+      "member": "tools/triad_perf_hardware.py",
+      "bytes": 45961,
+      "sha256": "74718bc0791dda7ac7ea0b38b8fb79ab7bb1e41c649da9787f2a2645854706b3",
+      "required_by": [
+        "cpu-free-001/free-crystal/result.json.gz",
+        "gpu-free-002/free-crystal/result.json.gz"
+      ]
+    },
+    {
+      "member": "tests/test_triad_perf_identical_fft.py",
+      "bytes": 14504,
+      "sha256": "4d52617b2074ca58705085573d4367fd2991c75c526af407f26d2131a1c173ea",
+      "required_by": [],
+      "scope": "focused regression test snapshot; not an executed DSP dependency"
+    },
+    {
+      "member": "tools/triad_perf_conditional.py",
+      "bytes": 21900,
+      "sha256": "1cb53367367e6797a8bf7af54b6a62a0c2238668458cb441dff51e238236a6e7",
+      "required_by": [],
+      "scope": "archive-time replay support imported by frozen triad_perf_fft_trace; no conditional helper functions are called by this identical-FFT anchor replay; not added retroactively to measured runtime identity"
+    }
+  ]
+}

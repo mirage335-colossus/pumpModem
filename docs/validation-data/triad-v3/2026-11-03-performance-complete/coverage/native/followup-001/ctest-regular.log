@@ -1,0 +1,5 @@
+Internal ctest: build/dev-cli
+1/2 Test #425: triad_statistics .................   Passed    0.21 sec
+2/2 Test #428: triad_v3_receiver ................   Passed    0.55 sec
+100% tests passed, 0 tests failed out of 2
+Total Test time (real) = 0.56 sec

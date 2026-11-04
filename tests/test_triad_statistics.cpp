@@ -49,6 +49,13 @@ void reference_checks() {
     check(fallback.conservative && fallback.score ==
           conservative_null_threshold(100'000'001, std::log(1000.), 1e-4).score,
           "unsupported numerical rank did not retain the concentration fallback");
+    // This rank is inside the supported input boundary. At x ~= a, the
+    // 20,000-term upper-incomplete-Gamma recurrence cannot reach its relative
+    // convergence tolerance, so the documented conservative fallback applies.
+    const auto exhausted = gamma_null_threshold(100'000'000, 0, .5);
+    check(exhausted.conservative && exhausted.score ==
+          conservative_null_threshold(100'000'000, 0, .5).score,
+          "valid high-rank Gamma iteration exhaustion did not retain the conservative bound");
     const auto exact_two=gamma_null_threshold(2,0,.01);
     check(!exact_two.conservative &&
           std::abs(std::exp(-exact_two.score)*(1+exact_two.score)-.01)<1e-10,

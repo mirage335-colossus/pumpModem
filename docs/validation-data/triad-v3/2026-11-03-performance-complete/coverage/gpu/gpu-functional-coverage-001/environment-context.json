@@ -1,0 +1,41 @@
+{
+  "companion_hardware_report_sha256": "c9b1774f781824554901c2dea14ad292c439fef68a497978651ae1547289eb65",
+  "coverage_file_environment": "COVERAGE_FILE set by archived wrapper to output .coverage path",
+  "coverage_invocation": "python -m coverage run --branch --append --include=tools/* tests/<test.py> --device cuda:0",
+  "cuda_visible_devices": "not recorded by the functional runner",
+  "device": {
+    "compute_capability": [
+      9,
+      0
+    ],
+    "driver_version": null,
+    "driver_version_method": null,
+    "hardware_utilization": {
+      "reason": "no in-process utilization counter used",
+      "status": "unavailable"
+    },
+    "index": 0,
+    "multiprocessor_count": 132,
+    "name": "NVIDIA H200",
+    "status": "available",
+    "torch_cuda_build": "12.8",
+    "total_memory_bytes": 150111977472
+  },
+  "dispatch_environment": {
+    "ATEN_CPU_CAPABILITY": null,
+    "MKL_ENABLE_INSTRUCTIONS": null,
+    "NPY_DISABLE_CPU_FEATURES": null,
+    "ONEDNN_MAX_CPU_ISA": null,
+    "OPENBLAS_CORETYPE": null
+  },
+  "explicit_thread_environment": {
+    "MKL_NUM_THREADS": "2",
+    "OMP_NUM_THREADS": "2",
+    "OPENBLAS_NUM_THREADS": "2"
+  },
+  "provenance": "environment details from companion gpu-hardware-001.json; GPU test command and thread environment from archived run_functional_coverage.py and functional summary",
+  "python_interpreter_from_test_command": "/workspace/triad-env/bin/python",
+  "python_version": "3.12.3",
+  "test_device": "cuda:0",
+  "torch": "2.8.0+cu128"
+}

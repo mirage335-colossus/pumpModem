@@ -1,0 +1,161 @@
+{
+  "schema": "triad-family-source-snapshot-v1",
+  "source_archive": "matching-python-source-stage-aware.tar.gz",
+  "scope": "Exact Python sources matching the appended stage-aware records; original b11 source snapshot is retained separately unchanged.",
+  "files": [
+    {
+      "member": "tools/triad-performance.py",
+      "bytes": 55234,
+      "sha256": "4effb31a1641239deeb933bc5690910e0033ed1a1a47b4418cb70939a4515db3",
+      "required_by": [
+        "gpu-stage-aware-001/phase-graph-hour/result.json",
+        "gpu-stage-aware-qual-001/phase-reduction-hour/result.json",
+        "gpu-stage-aware-qual-001/phase-reference-hour/result.json",
+        "gpu-stage-aware-qual-001/phase-tensor-hour/result.json"
+      ]
+    },
+    {
+      "member": "tools/triad-state-study.py",
+      "bytes": 19643,
+      "sha256": "3fa7491ae93031ff6bfadc4c9b792659336999effc0508a71cf734ada9250402",
+      "required_by": [
+        "gpu-stage-aware-001/phase-graph-hour/result.json",
+        "gpu-stage-aware-qual-001/phase-reduction-hour/result.json",
+        "gpu-stage-aware-qual-001/phase-reference-hour/result.json",
+        "gpu-stage-aware-qual-001/phase-tensor-hour/result.json"
+      ]
+    },
+    {
+      "member": "tools/triad_gaussian_state.py",
+      "bytes": 13539,
+      "sha256": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba",
+      "required_by": [
+        "gpu-stage-aware-001/phase-graph-hour/result.json",
+        "gpu-stage-aware-qual-001/phase-reduction-hour/result.json",
+        "gpu-stage-aware-qual-001/phase-reference-hour/result.json",
+        "gpu-stage-aware-qual-001/phase-tensor-hour/result.json"
+      ]
+    },
+    {
+      "member": "tools/triad_perf_adaptive.py",
+      "bytes": 18126,
+      "sha256": "3ad99d54b955e735f0db832bd6ac3afe91b016d993de80909827efd491174106",
+      "required_by": [
+        "gpu-stage-aware-001/phase-graph-hour/result.json",
+        "gpu-stage-aware-qual-001/phase-reduction-hour/result.json",
+        "gpu-stage-aware-qual-001/phase-reference-hour/result.json",
+        "gpu-stage-aware-qual-001/phase-tensor-hour/result.json"
+      ]
+    },
+    {
+      "member": "tools/triad_perf_families.py",
+      "bytes": 32918,
+      "sha256": "65b4bc78aab04b6a854853fe2c052900bd23c5cfc1527ebcfd0a4fe94e78d20f",
+      "required_by": [
+        "gpu-stage-aware-001/phase-graph-hour/result.json",
+        "gpu-stage-aware-qual-001/phase-reduction-hour/result.json",
+        "gpu-stage-aware-qual-001/phase-reference-hour/result.json",
+        "gpu-stage-aware-qual-001/phase-tensor-hour/result.json"
+      ]
+    },
+    {
+      "member": "tools/triad_perf_family_regression.py",
+      "bytes": 30223,
+      "sha256": "6c2bb590bd9e37e8f893aa20e1a04843cdcf6a35feacbbbc8696c1a3ba8ba60d",
+      "required_by": [
+        "gpu-stage-aware-001/phase-graph-hour/result.json",
+        "gpu-stage-aware-qual-001/phase-reduction-hour/result.json",
+        "gpu-stage-aware-qual-001/phase-reference-hour/result.json",
+        "gpu-stage-aware-qual-001/phase-tensor-hour/result.json"
+      ]
+    },
+    {
+      "member": "tools/triad_perf_family_state.py",
+      "bytes": 7848,
+      "sha256": "67d750dd41c317b7cb810591de6f88585f7cd3191888e1c0d28ede49b3595c06",
+      "required_by": [
+        "gpu-stage-aware-001/phase-graph-hour/result.json",
+        "gpu-stage-aware-qual-001/phase-reduction-hour/result.json",
+        "gpu-stage-aware-qual-001/phase-reference-hour/result.json",
+        "gpu-stage-aware-qual-001/phase-tensor-hour/result.json"
+      ]
+    },
+    {
+      "member": "tools/triad_perf_hardware.py",
+      "bytes": 45961,
+      "sha256": "74718bc0791dda7ac7ea0b38b8fb79ab7bb1e41c649da9787f2a2645854706b3",
+      "required_by": [
+        "gpu-stage-aware-001/phase-graph-hour/result.json",
+        "gpu-stage-aware-qual-001/phase-reduction-hour/result.json",
+        "gpu-stage-aware-qual-001/phase-reference-hour/result.json",
+        "gpu-stage-aware-qual-001/phase-tensor-hour/result.json"
+      ]
+    },
+    {
+      "member": "tools/triad_perf_staged.py",
+      "bytes": 52708,
+      "sha256": "9f3d660016bc56dd6e0c240239fb0bc2587b759cd8ce1eafbd12fac9ddbe2237",
+      "required_by": [
+        "gpu-phase-routine-001/gaussian-hour/result.json",
+        "gpu-phase-routine-001/phase-graph-hour/result.json",
+        "gpu-phase-routine-001/phase-optimized-hour/result.json",
+        "gpu-phase-routine-001/phase-reduction-hour/result.json",
+        "gpu-phase-routine-001/phase-reference-hour/result.json",
+        "gpu-phase-routine-001/phase-tensor-hour/result.json",
+        "gpu-stage-aware-001/phase-graph-hour/result.json",
+        "gpu-stage-aware-qual-001/phase-reduction-hour/result.json",
+        "gpu-stage-aware-qual-001/phase-reference-hour/result.json",
+        "gpu-stage-aware-qual-001/phase-tensor-hour/result.json"
+      ]
+    },
+    {
+      "member": "tools/triad_phase_frequency.py",
+      "bytes": 27838,
+      "sha256": "48ee569b1d467b2d7b6fd55088764bd28dd11e0bfecb5974622a318fbb408585",
+      "required_by": [
+        "gpu-stage-aware-001/phase-graph-hour/result.json",
+        "gpu-stage-aware-qual-001/phase-reduction-hour/result.json",
+        "gpu-stage-aware-qual-001/phase-reference-hour/result.json",
+        "gpu-stage-aware-qual-001/phase-tensor-hour/result.json"
+      ]
+    },
+    {
+      "member": "tools/triad_phase_optimized.py",
+      "bytes": 19885,
+      "sha256": "759b46d536f2daa1d1de2336190ab19153376aca3eeca32847cba5289d2d63ed",
+      "required_by": [
+        "gpu-stage-aware-001/phase-graph-hour/result.json",
+        "gpu-stage-aware-qual-001/phase-reduction-hour/result.json",
+        "gpu-stage-aware-qual-001/phase-tensor-hour/result.json"
+      ]
+    },
+    {
+      "member": "tools/triad_phase_reduction.py",
+      "bytes": 21111,
+      "sha256": "b2f762320fbff5a66fa88123711483f9c42721e1765e406b7699c434048ded98",
+      "required_by": [
+        "gpu-stage-aware-qual-001/phase-reduction-hour/result.json",
+        "gpu-stage-aware-qual-001/phase-tensor-hour/result.json"
+      ]
+    },
+    {
+      "member": "tools/triad_phase_tensor.py",
+      "bytes": 23317,
+      "sha256": "3b1a674ac7ace90ddce72c2773c2d1543bcfe8307d7b65ea965ad03a6525ffda",
+      "required_by": [
+        "gpu-stage-aware-qual-001/phase-tensor-hour/result.json"
+      ]
+    },
+    {
+      "member": "tools/triad_state_workspace.py",
+      "bytes": 25804,
+      "sha256": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923",
+      "required_by": [
+        "gpu-stage-aware-001/phase-graph-hour/result.json",
+        "gpu-stage-aware-qual-001/phase-reduction-hour/result.json",
+        "gpu-stage-aware-qual-001/phase-reference-hour/result.json",
+        "gpu-stage-aware-qual-001/phase-tensor-hour/result.json"
+      ]
+    }
+  ]
+}

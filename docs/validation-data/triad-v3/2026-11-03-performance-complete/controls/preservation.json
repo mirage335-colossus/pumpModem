@@ -1,0 +1,84 @@
+{
+  "schema": "triad-control-preservation-v1",
+  "raw_reports": [
+    {
+      "file": "decision-empirical-002.json.gz",
+      "sha256": "5ec2dd77da8d5d0edf097bce0e9f5eae12326cdb5edbb384f5896d9e913ef6d6",
+      "bytes": 47019,
+      "uncompressed_sha256": "23279175ae3324f3cf44684d159e6b83a060206eb9e9798b5eac3ef0593a97be",
+      "uncompressed_bytes": 1473087
+    },
+    {
+      "file": "decision-null-512.json.gz",
+      "sha256": "fd8e95e88f5c72460d7e304dbe6f21c7e8c2c338e8e2a3bf2565b29695938a3d",
+      "bytes": 9638,
+      "uncompressed_sha256": "d10654f4eff58f6715efb8c6123b520a7274356fd65533a08b8ef76fb3314cd5",
+      "uncompressed_bytes": 98827
+    }
+  ],
+  "source_snapshot": {
+    "file": "matching-source.tar.gz",
+    "sha256": "ac14e1ecb7088b92e39a2261db232c485d082cefe631418f33350a57996a7af0",
+    "members": [
+      {
+        "file": "tools/triad-performance.py",
+        "sha256": "4effb31a1641239deeb933bc5690910e0033ed1a1a47b4418cb70939a4515db3",
+        "bytes": 55234
+      },
+      {
+        "file": "tools/triad-state-study.py",
+        "sha256": "3fa7491ae93031ff6bfadc4c9b792659336999effc0508a71cf734ada9250402",
+        "bytes": 19643
+      },
+      {
+        "file": "tools/triad_gaussian_state.py",
+        "sha256": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba",
+        "bytes": 13539
+      },
+      {
+        "file": "tools/triad_perf_adaptive.py",
+        "sha256": "3ad99d54b955e735f0db832bd6ac3afe91b016d993de80909827efd491174106",
+        "bytes": 18126
+      },
+      {
+        "file": "tools/triad_perf_conditional.py",
+        "sha256": "1cb53367367e6797a8bf7af54b6a62a0c2238668458cb441dff51e238236a6e7",
+        "bytes": 21900
+      },
+      {
+        "file": "tools/triad_perf_decision_controls.py",
+        "sha256": "3c25d2f12693354d3ae65fe3028dbf343bbb6525f9bf263817ee7cf469de188e",
+        "bytes": 27598
+      },
+      {
+        "file": "tools/triad_perf_family_state.py",
+        "sha256": "67d750dd41c317b7cb810591de6f88585f7cd3191888e1c0d28ede49b3595c06",
+        "bytes": 7848
+      },
+      {
+        "file": "tools/triad_state_workspace.py",
+        "sha256": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923",
+        "bytes": 25804
+      },
+      {
+        "file": "tools/triad_perf_families.py",
+        "sha256": "d2758a1cecd33a466469f1c04a5c91232c429d1336c3affa206ef835e3d7563b",
+        "bytes": 32563
+      }
+    ],
+    "unavailable_matching_sources": [],
+    "recovered_historical_member": "tools/triad_perf_families.py recovered by exact hash from prior source-upload archive"
+  },
+  "native_binary_preserved": false,
+  "native_binary_sha256": "862b0431f04a3973ce15e7cff9b9959ed45ca36d626e401352db5cf8630c9c6b",
+  "native_binary_scope": "receipt only; build provenance and matching native binary are in the parent performance study",
+  "original_timeout": {
+    "plan": "decision-empirical-001.json.plan.json",
+    "log": "decision-empirical-001.log",
+    "reported_external_timeout_seconds": 300,
+    "reported_exit_code": 124,
+    "completed_report_exists": false,
+    "evidence_scope": "timeout and exit status reported by coordinator in native task history; empty log does not independently substantiate termination status",
+    "effect": "prior implementation wrote only a plan before completion; no finished-control evidence retained from this attempt"
+  }
+}

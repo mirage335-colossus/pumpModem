@@ -139,6 +139,8 @@ void protected_waveform_checks() {
     const auto bh=std::ceil(8.*f.sample_rate/bg.fine_chip_rate_hz)+2;
     check(burst.sample_at(bh+1.5*bg.tile_seconds*f.sample_rate)==Complex{},
           "Symbol Burst wait emitted source payload");
+    check(std::abs(burst.sample_at(bh+.5*bg.tile_seconds*f.sample_rate))>0,
+          "active Symbol Burst tile did not apply its within-tile window");
     for(bool hopping:{false,true}) {
         Format d;d.inner_rate_hz=hopping?360:240;d.added_symbols=1;
         d.sample_rate=960;d.bit_seconds=8;d.fhss=hopping;

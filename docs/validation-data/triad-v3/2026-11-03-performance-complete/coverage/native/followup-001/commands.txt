@@ -1,0 +1,5 @@
+Configure:
+taskset -c 2,4 ./build.sh configure --cli --build-dir build/triad-cov --jobs 2 -- -DDATAPUMP_COMPILER_CACHE=OFF '-DCMAKE_CXX_FLAGS=--coverage -fprofile-update=atomic' -DCMAKE_EXE_LINKER_FLAGS=--coverage -DCMAKE_SHARED_LINKER_FLAGS=--coverage
+After prebuild guard: remove only selected nine TU .o/.gcno/.gcda, force rebuild:
+taskset -c 2,4 cmake --build build/triad-cov --target triad_long test_triad_v3_source test_triad_v3_channel test_triad_v3_receiver test_triad_statistics --parallel 2
+Focused CTest invocation and five CLI mode argv/times are documented in cli-modes.json. Collector parser tests: python3 -B tests/test_triad_perf_coverage.py (7/7). Coverage report regenerated from retained counters after final-guard repair; no native test/binary rerun for that collector-only repair.

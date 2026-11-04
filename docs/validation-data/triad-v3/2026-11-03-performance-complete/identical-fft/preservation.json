@@ -1,0 +1,229 @@
+{
+  "schema": "triad-identical-fft-preservation-v1",
+  "archives": [
+    {
+      "source": "local-evidence/triad-performance-complete/identical-cpu-free-001/candidate.stderr.log",
+      "archive": "cpu-free-001/candidate.stderr.log.gz",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzip_bytes": 20,
+      "gzip_sha256": "ac73670af3abed54ac6fb4695131f4099be9fbe39d6076c5d0264a6bbdae9d83"
+    },
+    {
+      "source": "local-evidence/triad-performance-complete/identical-cpu-free-001/free-crystal/forecast.json",
+      "archive": "cpu-free-001/free-crystal/forecast.json.gz",
+      "bytes": 1857,
+      "sha256": "a11fbd2bda55d541869a3a73655742a4fa3a8bb98bdf6675d55974c3a5bbc2a8",
+      "gzip_bytes": 634,
+      "gzip_sha256": "e5293c239de4d4638feaec30d125b3cd526505f43cb77dfde579980777079d56"
+    },
+    {
+      "source": "local-evidence/triad-performance-complete/identical-cpu-free-001/free-crystal/observations.jsonl",
+      "archive": "cpu-free-001/free-crystal/observations.jsonl.gz",
+      "bytes": 1035990,
+      "sha256": "e21af3453966ad41bda9e79cdf5f8c545927c487f1a24e39722e13ce6927aa33",
+      "gzip_bytes": 110359,
+      "gzip_sha256": "7a7e4381950fdaeffa4a2209d7282da28e2d99560424913f711d1455aa60ac31"
+    },
+    {
+      "source": "local-evidence/triad-performance-complete/identical-cpu-free-001/free-crystal/precision-qualification.json",
+      "archive": "cpu-free-001/free-crystal/precision-qualification.json.gz",
+      "bytes": 1718,
+      "sha256": "7365792fd16308bd558245a7aac84a62c4f7bb2683e7ae364f8f6da5595ed39b",
+      "gzip_bytes": 442,
+      "gzip_sha256": "2c4bb060bd9f7ddb9e8270f2514e75cde95635e9f64b5436c9fd38aa61b69d76"
+    },
+    {
+      "source": "local-evidence/triad-performance-complete/identical-cpu-free-001/free-crystal/result.json",
+      "archive": "cpu-free-001/free-crystal/result.json.gz",
+      "bytes": 1040979,
+      "sha256": "1eab0ac257010f87f6dae014e63f97c77fbf30ab3c0c7c5ce37eb8514fde13b5",
+      "gzip_bytes": 179283,
+      "gzip_sha256": "f992c77530bcfa6e3e7a1778bbce8b087b6646e8dc391d6c3a47496782357f9d"
+    },
+    {
+      "source": "local-evidence/triad-performance-complete/identical-cpu-free-001/reference.stderr.log",
+      "archive": "cpu-free-001/reference.stderr.log.gz",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzip_bytes": 20,
+      "gzip_sha256": "ac73670af3abed54ac6fb4695131f4099be9fbe39d6076c5d0264a6bbdae9d83"
+    },
+    {
+      "source": "local-evidence/triad-performance-complete/identical-cpu-free-001/summary.json",
+      "archive": "cpu-free-001/summary.json.gz",
+      "bytes": 234,
+      "sha256": "4c679f7847eef2e4a0a851f4892d1bf7b2a887751f3cb3e1ee39f6170a80c518",
+      "gzip_bytes": 171,
+      "gzip_sha256": "8eee652e1fb1266371105326f573d025a97017a3d53765e8d451419b20e1cade"
+    },
+    {
+      "source": "local-evidence/triad-performance-complete/gpu/identical-001/evidence/identical-gpu-free-002/candidate.stderr.log",
+      "archive": "gpu-free-002/candidate.stderr.log.gz",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzip_bytes": 20,
+      "gzip_sha256": "ac73670af3abed54ac6fb4695131f4099be9fbe39d6076c5d0264a6bbdae9d83"
+    },
+    {
+      "source": "local-evidence/triad-performance-complete/gpu/identical-001/evidence/identical-gpu-free-002/free-crystal/forecast.json",
+      "archive": "gpu-free-002/free-crystal/forecast.json.gz",
+      "bytes": 1020,
+      "sha256": "b621e30827d0c8788306f560cec553654251cd85962d94b3eb88b598cc6b5de7",
+      "gzip_bytes": 551,
+      "gzip_sha256": "5aa0215e02789e41da26dff1aceadda4fbf00041535c7e956e5ae7feaf93cb1f"
+    },
+    {
+      "source": "local-evidence/triad-performance-complete/gpu/identical-001/evidence/identical-gpu-free-002/free-crystal/observations.jsonl",
+      "archive": "gpu-free-002/free-crystal/observations.jsonl.gz",
+      "bytes": 470229,
+      "sha256": "2b1acc7d7555d204476e1f159f76e055cd3bdbaabd2add0afbb8d5b830a11a66",
+      "gzip_bytes": 98722,
+      "gzip_sha256": "76e662edf3527b6648603679c7041441121816f58c2d37fe2b944bd142c0af0b"
+    },
+    {
+      "source": "local-evidence/triad-performance-complete/gpu/identical-001/evidence/identical-gpu-free-002/free-crystal/precision-qualification.json",
+      "archive": "gpu-free-002/free-crystal/precision-qualification.json.gz",
+      "bytes": 1715,
+      "sha256": "1a2b704da988afed195cff7161fbcf68ee3f26e7019bd728126aca07d5107c04",
+      "gzip_bytes": 443,
+      "gzip_sha256": "d76976474bc72b388bfdaca1cae068e0bfb3af42bdf694e1f3ea3465b32cff75"
+    },
+    {
+      "source": "local-evidence/triad-performance-complete/gpu/identical-001/evidence/identical-gpu-free-002/free-crystal/result.json",
+      "archive": "gpu-free-002/free-crystal/result.json.gz",
+      "bytes": 690603,
+      "sha256": "457e1137eab0cfbcc51a162a06c3aa7c3554277fa1f180672476cca81b509407",
+      "gzip_bytes": 165271,
+      "gzip_sha256": "60bd2f1b2d2b12da01fad461381f431f1df39d73baf962acde79a25e1dac13ac"
+    },
+    {
+      "source": "local-evidence/triad-performance-complete/gpu/identical-001/evidence/identical-gpu-free-002/reference.stderr.log",
+      "archive": "gpu-free-002/reference.stderr.log.gz",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzip_bytes": 20,
+      "gzip_sha256": "ac73670af3abed54ac6fb4695131f4099be9fbe39d6076c5d0264a6bbdae9d83"
+    },
+    {
+      "source": "local-evidence/triad-performance-complete/gpu/identical-001/evidence/identical-gpu-free-002/summary.json",
+      "archive": "gpu-free-002/summary.json.gz",
+      "bytes": 234,
+      "sha256": "4c679f7847eef2e4a0a851f4892d1bf7b2a887751f3cb3e1ee39f6170a80c518",
+      "gzip_bytes": 171,
+      "gzip_sha256": "8eee652e1fb1266371105326f573d025a97017a3d53765e8d451419b20e1cade"
+    },
+    {
+      "source": "local-evidence/triad-performance-complete/identical-cpu-probe-001/candidate.stderr.log",
+      "archive": "cpu-probe-001/candidate.stderr.log.gz",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzip_bytes": 20,
+      "gzip_sha256": "ac73670af3abed54ac6fb4695131f4099be9fbe39d6076c5d0264a6bbdae9d83"
+    },
+    {
+      "source": "local-evidence/triad-performance-complete/identical-cpu-probe-001/narrow-hf-tight/failure.json",
+      "archive": "cpu-probe-001/narrow-hf-tight/failure.json.gz",
+      "bytes": 446,
+      "sha256": "91453b5f7f22b1c20054b7f8a16c0f052daf48c56097c5a3bb297b4f9336e330",
+      "gzip_bytes": 316,
+      "gzip_sha256": "241049970d552bd6d305e3cd7224d9048c505f40dc8aa601b0a4ddc92a94198a"
+    },
+    {
+      "source": "local-evidence/triad-performance-complete/identical-cpu-probe-001/narrow-hf-tight/observations.jsonl",
+      "archive": "cpu-probe-001/narrow-hf-tight/observations.jsonl.gz",
+      "bytes": 22262,
+      "sha256": "45cee38a48dde9ad75487d3ce86fdd4ed61ae409a074e7d0ebfb38f4deb52864",
+      "gzip_bytes": 9123,
+      "gzip_sha256": "9e86eb57ee3e9cac8a9a942b3d047726e21e29e9ab3a4dd131107841db84dc80"
+    },
+    {
+      "source": "local-evidence/triad-performance-complete/identical-cpu-probe-001/reference.stderr.log",
+      "archive": "cpu-probe-001/reference.stderr.log.gz",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzip_bytes": 20,
+      "gzip_sha256": "ac73670af3abed54ac6fb4695131f4099be9fbe39d6076c5d0264a6bbdae9d83"
+    },
+    {
+      "source": "local-evidence/triad-performance-complete/identical-cpu-probe-001/summary.json",
+      "archive": "cpu-probe-001/summary.json.gz",
+      "bytes": 101,
+      "sha256": "13e801f94c85fd5293f2de992e4a7e6b8b0489bc3cc357211ae4e3e3063ba5f0",
+      "gzip_bytes": 107,
+      "gzip_sha256": "0540d2da207bfff4f47db088ab165bad7186dc23f432c81bb4312efde82c7f86"
+    },
+    {
+      "source": "local-evidence/triad-performance-complete/identical-audit-fix-001/responses.jsonl",
+      "archive": "namespace-audit-fix-001/responses.jsonl.gz",
+      "bytes": 137299,
+      "sha256": "1904577819c5eb4f94ccc9d458548b19b852efdd24163834742f9fcf471748cf",
+      "gzip_bytes": 52605,
+      "gzip_sha256": "48ee1e33e823cc89b4c85cec0a342917a4abc1c615778b4ed0c776d8787e8c63"
+    },
+    {
+      "source": "local-evidence/triad-performance-complete/identical-audit-fix-001/stderr.txt",
+      "archive": "namespace-audit-fix-001/stderr.txt.gz",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzip_bytes": 20,
+      "gzip_sha256": "ac73670af3abed54ac6fb4695131f4099be9fbe39d6076c5d0264a6bbdae9d83"
+    },
+    {
+      "source": "local-evidence/triad-performance-complete/identical-audit-fix-001/summary.json",
+      "archive": "namespace-audit-fix-001/summary.json.gz",
+      "bytes": 935,
+      "sha256": "ca60be076ac6539b203f618c2aef7b3fd672c597e58ae0ebc8a83e375088b20b",
+      "gzip_bytes": 392,
+      "gzip_sha256": "77692ec5525e6861c2856df374930ffd0f0e52e71f66bfe3c90220348e394218"
+    },
+    {
+      "source": "local-evidence/triad-performance-complete/gpu/identical-001/evidence/identical-gpu-free-001/summary.json",
+      "archive": "gpu-setup-failure-001/summary.json.gz",
+      "bytes": 101,
+      "sha256": "13e801f94c85fd5293f2de992e4a7e6b8b0489bc3cc357211ae4e3e3063ba5f0",
+      "gzip_bytes": 107,
+      "gzip_sha256": "0540d2da207bfff4f47db088ab165bad7186dc23f432c81bb4312efde82c7f86"
+    },
+    {
+      "source": "local-evidence/triad-performance-complete/gpu/identical-001/evidence/identical-gpu-free-001.log",
+      "archive": "gpu-setup-failure-001/console.log.gz",
+      "bytes": 1364,
+      "sha256": "539c5dd3b432e119427aa26629af2a5b2c5a8ca7d8d0e5f12afc2f4009f69485",
+      "gzip_bytes": 512,
+      "gzip_sha256": "ca0b6a5752448f1c7ba0fe3835b703b15741d12019e9c825c82d9f8bc5c4c785"
+    },
+    {
+      "source": "local-evidence/triad-performance-complete/gpu/identical-001/evidence/identical-gpu-free-002.log",
+      "archive": "gpu-free-002/console.log.gz",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzip_bytes": 20,
+      "gzip_sha256": "ac73670af3abed54ac6fb4695131f4099be9fbe39d6076c5d0264a6bbdae9d83"
+    }
+  ],
+  "source_archive": "matching-source.tar.gz",
+  "source_archive_sha256": "d85033e8e9870388ac44d60df1b2b1a027c6e538ff6c864f96d392f214c500e1",
+  "omissions": [
+    "numerical and native library binary bytes (observed hashes and versions retained in identities)",
+    "sampled I/Q fixture bytes (input hashes and native fixture provenance retained in observations start receipts)",
+    "end-to-end controller process elapsed timing was not separately recorded in these case result files"
+  ],
+  "scope": "byte-preserved qualification records and failures; no original record modified or upgraded into a different proof",
+  "duplicate_artifacts": [
+    {
+      "source": "local-evidence/triad-performance-complete/identical-anchors-cpu/free-crystal.identical-anchor.json",
+      "archive": "cpu-free-001/free-crystal/result.json.gz",
+      "bytes": 1040979,
+      "sha256": "1eab0ac257010f87f6dae014e63f97c77fbf30ab3c0c7c5ce37eb8514fde13b5",
+      "scope": "original saved anchor is byte-identical to original result; frozen controller writes this only after anchor_valid passes in the original numerical environment"
+    },
+    {
+      "source": "local-evidence/triad-performance-complete/gpu/identical-001/evidence/identical-anchors/free-crystal.identical-anchor.json",
+      "archive": "gpu-free-002/free-crystal/result.json.gz",
+      "bytes": 690603,
+      "sha256": "457e1137eab0cfbcc51a162a06c3aa7c3554277fa1f180672476cca81b509407",
+      "scope": "original saved anchor is byte-identical to original result; frozen controller writes this only after anchor_valid passes in the original numerical environment"
+    }
+  ]
+}

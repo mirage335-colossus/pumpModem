@@ -11,8 +11,12 @@ workspace reuse and proportionate testing before larger sampled campaigns.
 Use the [isolated receiver performance suite](triad-performance.md) for bounded
 hardware calibration, same-host source comparisons and source-bound full-workload
 runtime estimates, with explicit qualification and unresolved-result reporting.
-It separates full native simulations, resident FFT timing and lightweight path
-witnesses. Its CI checks do not replay historical sensitivity campaigns
+The [coverage and prediction matrix](triad-performance-matrix.md) maps maintained
+paths to cheap checks, full workloads, anchors and unresolved regimes.
+`triad_perf_complete.py` is the combined routine entry point; qualify only the
+affected cases explicitly. It separates native simulations, resident FFT,
+sampled state/phase/particle workloads and lightweight execution witnesses.
+Its CI checks do not replay historical sensitivity campaigns
 or qualify ordinary Robust performance.
 The current [broad configuration study](validation-data/triad-v3/2026-11-03-broad/README.md)
 separates unsupported configurations, capture limits, incomplete acquisition and

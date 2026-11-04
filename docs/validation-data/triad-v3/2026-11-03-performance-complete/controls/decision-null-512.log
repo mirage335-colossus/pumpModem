@@ -1,0 +1,2 @@
+control 1/2 direct factor=1.0 campaigns=512/512 status=complete
+control 2/2 conditional factor=1.0 campaigns=512/512 status=complete

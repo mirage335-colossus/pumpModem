@@ -1,0 +1,7 @@
+Internal ctest: build/triad-cov
+1/4 Test #425: triad_statistics .................   Passed    0.99 sec
+2/4 Test #428: triad_v3_receiver ................   Passed    1.27 sec
+3/4 Test #426: triad_v3_source ..................   Passed    0.10 sec
+4/4 Test #427: triad_v3_channel .................   Passed   13.47 sec
+100% tests passed, 0 tests failed out of 4
+Total Test time (real) = 13.48 sec

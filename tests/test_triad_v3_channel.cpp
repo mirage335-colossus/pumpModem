@@ -484,6 +484,26 @@ void sampled_frontend_checks() {
     rejects([&]{(void)capture(127,cfg,f);}, "unbounded analog-filter tail accepted");
 }
 
+void slow_agc_processing_check() {
+    const auto f = fixture_format();
+    StreamChannelReport agc_report;
+    const auto baseline = capture(257, {}, f);
+    auto cfg = StreamChannelConfig{};
+    cfg.effects.slow_agc = true;
+    const auto normalized = capture(257, cfg, f, &agc_report);
+    check(normalized.size() == baseline.size() && agc_report.samples == normalized.size(),
+          "slow AGC changed the declared channel extent");
+    check(!agc_report.gaussian_projection_supported,
+          "slow AGC retained the unsupported Gaussian projection claim");
+    bool changed = false;
+    for (std::size_t i = 0; i < normalized.size(); ++i) {
+        check(std::isfinite(normalized[i].real()) && std::isfinite(normalized[i].imag()),
+              "slow AGC produced a nonfinite sample");
+        changed |= normalized[i] != baseline[i];
+    }
+    check(changed, "enabled slow AGC did not process the streamed samples");
+}
+
 void independent_seed_root_checks() {
     const auto f=fixture_format();
     constexpr std::uint64_t legacy_seed=0x13579bdf;
@@ -1685,6 +1705,7 @@ int main() {
         measured_shared_clock_checks();
         bounded_configuration_checks();
         sampled_frontend_checks();
+        slow_agc_processing_check();
         independent_seed_root_checks();
         physical_hop_origin_checks();
         erasure_and_noise_checks();

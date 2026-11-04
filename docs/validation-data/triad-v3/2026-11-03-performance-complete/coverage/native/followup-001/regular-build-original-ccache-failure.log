@@ -1,0 +1,5 @@
+Command: taskset -c 2,4 cmake --build build/dev-cli --target test_triad_v3_receiver test_triad_statistics --parallel 2
+Before and after existing triad_long SHA256: 862b0431f04a3973ce15e7cff9b9959ed45ca36d626e401352db5cf8630c9c6b
+The original configured /usr/bin/ccache launcher failed both focused test-object compile commands before compiler invocation with `ccache: error: Read-only file system`, then Ninja stopped.
+Retry: CCACHE_DIR=/tmp/triad-native-coverage-ccache taskset -c 2,4 cmake --build build/dev-cli --target test_triad_v3_receiver test_triad_statistics --parallel 2
+The retry succeeded and both focused tests passed.

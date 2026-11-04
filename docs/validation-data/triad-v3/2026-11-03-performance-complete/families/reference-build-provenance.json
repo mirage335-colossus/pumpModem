@@ -1,0 +1,28 @@
+{
+  "baseline_commit": "242ea15fa032ee117b9113a7f3cd07cc6e9f0254",
+  "git_archive_sha256": "2c2d50b1bf3752bc34fd677782d249d7ce60a698c3e6c5d7ca949ef120b18f0a",
+  "reference_binary": {
+    "path": "reference-triad_long-gcc142",
+    "sha256": "9cdf82f396d9be9a7d11b66b45b254e5f18b3857f27b08aed58430dce6d8ea47"
+  },
+  "prior_legacy_binary": {
+    "path": "reference-triad_long",
+    "sha256": "9cdf82f396d9be9a7d11b66b45b254e5f18b3857f27b08aed58430dce6d8ea47"
+  },
+  "current_binary": {
+    "path": "../../build/dev-cli/triad_long",
+    "sha256": "862b0431f04a3973ce15e7cff9b9959ed45ca36d626e401352db5cf8630c9c6b"
+  },
+  "compiler": "GNU C++ 14.2.0 at /usr/bin/c++",
+  "configuration": "Release; BUILD_TESTING=ON; DATAPUMP_COMPILER_CACHE=OFF; CMAKE_BUILD_TYPE=Release",
+  "triad_long_compile_options": [
+    "-O3",
+    "-DNDEBUG",
+    "-std=c++20",
+    "-ffp-contract=off",
+    "-fno-fast-math"
+  ],
+  "normalized_compile_invocation_equal": true,
+  "reference_source_extract_relative": "reference-source",
+  "note": "Baseline source came from git archive of exact commit; build was launched from that extracted source directory. Compiler paths differ only for source/include path. No timing runs performed by this build."
+}

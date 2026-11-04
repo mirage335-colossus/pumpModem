@@ -80,13 +80,22 @@ class RayFrequencyTests(unittest.TestCase):
         np.testing.assert_allclose(actual.numpy(),expected,atol=2e-12)
 
     def test_zero_relative_matches_same_grid_static_and_atom_lower_bound(self):
-        _,_,r,g,t,dt=design_case(candidates=2)
+        A,y,r,g,t,dt=design_case(candidates=2)
         nfft=64;f=np.arange(-4,5);zero=np.asarray([0]);labels=np.asarray([0,1])
-        w,det=study.adapter.whiten_channel(r,g.sum(0))
+        diagnostic={}
+        w,det=study.adapter.whiten_channel(r,g.sum(0),diagnostics=diagnostic)
+        self.assertEqual(diagnostic['retained_ranks'],[2,2])
         R=study.adapter.frequency_correlations(w,t,dt,nfft,f)
         static=study.adapter.scores_from_correlations(R,det,labels)[0]
         matched,_=study.joint_evidence(r,g,t,dt,nfft,f,zero)
-        np.testing.assert_allclose(matched.numpy(),static,atol=3e-12,rtol=3e-12)
+        expected=raw_oracle(A,y,t,dt,nfft,f,zero,.5)
+        np.testing.assert_allclose(matched.numpy(),expected,atol=3e-12,rtol=3e-12)
+        # The static adapter inflates numerical noise by scaling both A and y
+        # by 1/sqrt(inflation), so both sufficient statistics scale by 1/inflation.
+        # Compare the same model without changing the exact ray-model oracle.
+        inflation=diagnostic['numerical_noise_inflation']
+        aligned,_=study.joint_evidence(r/inflation,g/inflation,t,dt,nfft,f,zero)
+        np.testing.assert_allclose(aligned.numpy(),static,atol=3e-12,rtol=3e-12)
         mixture,_=study.joint_evidence(r,g,t,dt,nfft,f,np.arange(-3,4),zero_mass=.5)
         self.assertTrue(bool((mixture>=matched-math.log(2)-1e-12).all()))
         atom,_=study.joint_evidence(r,g,t,dt,nfft,f,np.arange(-3,4),zero_mass=1.)

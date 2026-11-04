@@ -1,0 +1,6 @@
+{
+  "driver_sha256": "2e7879c235b200b50e225c9b8ab15d517570a47b6fb64efbfc728215b61449a0",
+  "result_sha256": "a79ec6f37cab40278e94d1b0f5cd930714fc7739aae9a480a73e034b22066063",
+  "driver": "reproduce.py",
+  "note": "matching unmodified actual-run driver copied after completion; original raw result preserved"
+}

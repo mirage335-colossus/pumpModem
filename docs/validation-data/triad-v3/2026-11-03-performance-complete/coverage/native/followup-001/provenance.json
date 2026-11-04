@@ -1,0 +1,55 @@
+{
+  "all_objects_after_guard": true,
+  "archive_scope": "fresh atomic native gcov follow-up; earlier accepted atomic and invalid non-atomic archives unchanged",
+  "build_dir": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/triad-cov",
+  "compiler": {
+    "build_type": "Release",
+    "cmake_cache_sha256": "cb5130c26482b0ed8b80ae8d0dd2c991e7db49ddff48ad5417bfe44022b6d0aa",
+    "cmake_id": "GNU",
+    "cmake_version": "14.2.0",
+    "compile_commands_sha256": "7635e473a39b4f118256dec620f8b6b1c584071021acd10954f5f3e6a4eceaf3",
+    "coverage_flags": {
+      "cxx": "--coverage -fprofile-update=atomic",
+      "exe_link": "--coverage"
+    },
+    "path": "/usr/bin/c++",
+    "version": "c++ (Debian 14.2.0-19) 14.2.0"
+  },
+  "counter_translation_units": [
+    "src/triad_modem_v3.cpp",
+    "src/triad_receiver_v3.cpp",
+    "src/triad_simulation_stream.cpp",
+    "src/triad_statistics.cpp",
+    "tests/test_triad_statistics.cpp",
+    "tests/test_triad_v3_channel.cpp",
+    "tests/test_triad_v3_receiver.cpp",
+    "tests/test_triad_v3_source.cpp",
+    "tools/triad-long.cpp"
+  ],
+  "coverage_matrix_sha256": "1860b045b4078da56db5b8928cbb3b71660844a94d0c5da3ddb1eab5382e5a33",
+  "dependency_guard_match": true,
+  "dependency_sha256_count": 413,
+  "executed_checks": [
+    "ctest --test-dir build/triad-cov --output-on-failure -R '^(triad_v3_(source|channel|receiver)|triad_statistics)$' -j 2",
+    "triad_long --mode plan, export, export-sampled, export-stats, export-group-stats: five focused valid CLI modes"
+  ],
+  "gcov": "gcov (Debian 14.2.0-19) 14.2.0",
+  "header_guard_match": true,
+  "limitations": [
+    "dirty development checkout; not release provenance",
+    "GCC CFG outcomes, not semantic decisions or behavior coverage",
+    "declared applicability inventory, not compiler-emitted full dependency closure",
+    "compile metadata and post-guard timestamps do not prove included header bytes were embedded in objects",
+    "five CLI modes executed on tiny valid settings; CLI has substantial uncovered lines and CFG edges"
+  ],
+  "regular_dev_cli_triad_long_sha256_before_after": "862b0431f04a3973ce15e7cff9b9959ed45ca36d626e401352db5cf8630c9c6b",
+  "source_files": [
+    "src/triad_modem_v3.cpp",
+    "src/triad_receiver_v3.cpp",
+    "src/triad_simulation_stream.cpp",
+    "src/triad_statistics.cpp",
+    "tools/triad-long.cpp"
+  ],
+  "source_revision": "e0c3f50a88d2ee951c059397a594445f3c21a9c0",
+  "working_tree_dirty": true
+}

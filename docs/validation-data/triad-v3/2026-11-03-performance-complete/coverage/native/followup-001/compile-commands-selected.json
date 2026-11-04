@@ -1,0 +1,56 @@
+[
+  {
+    "directory": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/triad-cov",
+    "command": "/usr/bin/c++ -I/home/user/___quick/p/_cur/dataPump/pumpModem/include -I/home/user/___quick/p/_cur/dataPump/pumpModem/src --coverage -fprofile-update=atomic -O3 -DNDEBUG -std=c++20 -Wall -Wextra -Wpedantic -Wconversion -Wshadow -ffp-contract=off -fno-fast-math -o CMakeFiles/triad_experiment.dir/src/triad_statistics.cpp.o -c /home/user/___quick/p/_cur/dataPump/pumpModem/src/triad_statistics.cpp",
+    "file": "/home/user/___quick/p/_cur/dataPump/pumpModem/src/triad_statistics.cpp",
+    "output": "CMakeFiles/triad_experiment.dir/src/triad_statistics.cpp.o"
+  },
+  {
+    "directory": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/triad-cov",
+    "command": "/usr/bin/c++ -I/home/user/___quick/p/_cur/dataPump/pumpModem/include -I/home/user/___quick/p/_cur/dataPump/pumpModem/src --coverage -fprofile-update=atomic -O3 -DNDEBUG -std=c++20 -Wall -Wextra -Wpedantic -Wconversion -Wshadow -ffp-contract=off -fno-fast-math -o CMakeFiles/triad_experiment.dir/src/triad_modem_v3.cpp.o -c /home/user/___quick/p/_cur/dataPump/pumpModem/src/triad_modem_v3.cpp",
+    "file": "/home/user/___quick/p/_cur/dataPump/pumpModem/src/triad_modem_v3.cpp",
+    "output": "CMakeFiles/triad_experiment.dir/src/triad_modem_v3.cpp.o"
+  },
+  {
+    "directory": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/triad-cov",
+    "command": "/usr/bin/c++ -I/home/user/___quick/p/_cur/dataPump/pumpModem/include -I/home/user/___quick/p/_cur/dataPump/pumpModem/src --coverage -fprofile-update=atomic -O3 -DNDEBUG -std=c++20 -Wall -Wextra -Wpedantic -Wconversion -Wshadow -ffp-contract=off -fno-fast-math -o CMakeFiles/triad_experiment.dir/src/triad_simulation_stream.cpp.o -c /home/user/___quick/p/_cur/dataPump/pumpModem/src/triad_simulation_stream.cpp",
+    "file": "/home/user/___quick/p/_cur/dataPump/pumpModem/src/triad_simulation_stream.cpp",
+    "output": "CMakeFiles/triad_experiment.dir/src/triad_simulation_stream.cpp.o"
+  },
+  {
+    "directory": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/triad-cov",
+    "command": "/usr/bin/c++ -I/home/user/___quick/p/_cur/dataPump/pumpModem/include -I/home/user/___quick/p/_cur/dataPump/pumpModem/src --coverage -fprofile-update=atomic -O3 -DNDEBUG -std=c++20 -Wall -Wextra -Wpedantic -Wconversion -Wshadow -ffp-contract=off -fno-fast-math -o CMakeFiles/triad_experiment.dir/src/triad_receiver_v3.cpp.o -c /home/user/___quick/p/_cur/dataPump/pumpModem/src/triad_receiver_v3.cpp",
+    "file": "/home/user/___quick/p/_cur/dataPump/pumpModem/src/triad_receiver_v3.cpp",
+    "output": "CMakeFiles/triad_experiment.dir/src/triad_receiver_v3.cpp.o"
+  },
+  {
+    "directory": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/triad-cov",
+    "command": "/usr/bin/c++ -I/home/user/___quick/p/_cur/dataPump/pumpModem/src -I/home/user/___quick/p/_cur/dataPump/pumpModem/include --coverage -fprofile-update=atomic -O3 -DNDEBUG -std=c++20 -ffp-contract=off -fno-fast-math -o CMakeFiles/test_triad_statistics.dir/tests/test_triad_statistics.cpp.o -c /home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_triad_statistics.cpp",
+    "file": "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_triad_statistics.cpp",
+    "output": "CMakeFiles/test_triad_statistics.dir/tests/test_triad_statistics.cpp.o"
+  },
+  {
+    "directory": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/triad-cov",
+    "command": "/usr/bin/c++ -I/home/user/___quick/p/_cur/dataPump/pumpModem/src -I/home/user/___quick/p/_cur/dataPump/pumpModem/include --coverage -fprofile-update=atomic -O3 -DNDEBUG -std=c++20 -ffp-contract=off -fno-fast-math -o CMakeFiles/test_triad_v3_source.dir/tests/test_triad_v3_source.cpp.o -c /home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_triad_v3_source.cpp",
+    "file": "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_triad_v3_source.cpp",
+    "output": "CMakeFiles/test_triad_v3_source.dir/tests/test_triad_v3_source.cpp.o"
+  },
+  {
+    "directory": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/triad-cov",
+    "command": "/usr/bin/c++ -I/home/user/___quick/p/_cur/dataPump/pumpModem/src -I/home/user/___quick/p/_cur/dataPump/pumpModem/include --coverage -fprofile-update=atomic -O3 -DNDEBUG -std=c++20 -ffp-contract=off -fno-fast-math -o CMakeFiles/test_triad_v3_channel.dir/tests/test_triad_v3_channel.cpp.o -c /home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_triad_v3_channel.cpp",
+    "file": "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_triad_v3_channel.cpp",
+    "output": "CMakeFiles/test_triad_v3_channel.dir/tests/test_triad_v3_channel.cpp.o"
+  },
+  {
+    "directory": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/triad-cov",
+    "command": "/usr/bin/c++ -I/home/user/___quick/p/_cur/dataPump/pumpModem/src -I/home/user/___quick/p/_cur/dataPump/pumpModem/include --coverage -fprofile-update=atomic -O3 -DNDEBUG -std=c++20 -ffp-contract=off -fno-fast-math -o CMakeFiles/test_triad_v3_receiver.dir/tests/test_triad_v3_receiver.cpp.o -c /home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_triad_v3_receiver.cpp",
+    "file": "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_triad_v3_receiver.cpp",
+    "output": "CMakeFiles/test_triad_v3_receiver.dir/tests/test_triad_v3_receiver.cpp.o"
+  },
+  {
+    "directory": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/triad-cov",
+    "command": "/usr/bin/c++ -I/home/user/___quick/p/_cur/dataPump/pumpModem/src -I/home/user/___quick/p/_cur/dataPump/pumpModem/include --coverage -fprofile-update=atomic -O3 -DNDEBUG -std=c++20 -ffp-contract=off -fno-fast-math -o CMakeFiles/triad_long.dir/tools/triad-long.cpp.o -c /home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-long.cpp",
+    "file": "/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad-long.cpp",
+    "output": "CMakeFiles/triad_long.dir/tools/triad-long.cpp.o"
+  }
+]

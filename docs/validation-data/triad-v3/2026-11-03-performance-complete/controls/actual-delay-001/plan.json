@@ -1,0 +1,61 @@
+{
+  "command": [
+    "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/triad_long",
+    "--mode",
+    "export-stats",
+    "--seconds",
+    "16",
+    "--rate",
+    "36",
+    "--added",
+    "1",
+    "--sample-rate",
+    "256",
+    "--channel",
+    "hf",
+    "--phase-diffusion",
+    "0",
+    "--basis",
+    "two-ray",
+    "--block-seconds",
+    ".5",
+    "--cn0",
+    "8",
+    "--stats-noisy",
+    "--threads",
+    "1",
+    "--memory-mib",
+    "64",
+    "--export-max-samples",
+    "100000",
+    "--export-max-mib",
+    "16",
+    "--seed",
+    "931751",
+    "--output",
+    "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-complete/actual-delay-001/sampled-stats"
+  ],
+  "case": {
+    "id": "gaussian-actual-delay-control",
+    "family": "gaussian-state",
+    "unit": "blocks",
+    "options": {
+      "coherences": [
+        4.0
+      ],
+      "taps": 2,
+      "memory_limit_bytes": 33554432
+    }
+  },
+  "requested_external_delay_seconds": 0.05,
+  "source_sha256": {
+    "tools/triad_perf_decision_controls.py": "3c25d2f12693354d3ae65fe3028dbf343bbb6525f9bf263817ee7cf469de188e",
+    "tools/triad_perf_family_state.py": "67d750dd41c317b7cb810591de6f88585f7cd3191888e1c0d28ede49b3595c06",
+    "tools/triad_perf_families.py": "d2758a1cecd33a466469f1c04a5c91232c429d1336c3affa206ef835e3d7563b",
+    "tools/triad-state-study.py": "3fa7491ae93031ff6bfadc4c9b792659336999effc0508a71cf734ada9250402",
+    "tools/triad_state_workspace.py": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923",
+    "tools/triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba"
+  },
+  "binary_sha256": "862b0431f04a3973ce15e7cff9b9959ed45ca36d626e401352db5cf8630c9c6b",
+  "scope": "actual noisy native exporter plus full Gaussian-state adapter; one paired numerical/timer diagnostic, no confidence-qualified performance gate"
+}

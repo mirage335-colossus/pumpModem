@@ -1,0 +1,141 @@
+{
+  "schema": "triad-identical-fft-archive-summary-v1",
+  "complete_suite_claim": false,
+  "cases": {
+    "cpu-free-001": {
+      "status": "validated",
+      "prediction_valid": true,
+      "absolute_regression_gate": "inconclusive",
+      "case_wall_seconds": 194.93329560995335,
+      "frozen_full_prediction_seconds": 20.264251479122628,
+      "full_observed_seconds": [
+        20.202898406016175,
+        19.592218425066676,
+        19.491754757997114,
+        19.828111356997397,
+        20.491219229006674
+      ],
+      "full_observed_geometric_mean_seconds": 19.91771327806614,
+      "training_count": 33,
+      "independent_full_count": 5,
+      "training_processing_seconds": 85.70582890918013,
+      "full_holdout_processing_seconds": 99.60620217508404,
+      "timing_relative_half_width": 0.05304636414552921,
+      "timing_precision_reached": false,
+      "timing_mean_confidence_interval_seconds": [
+        19.243456099452565,
+        21.339196342220745
+      ],
+      "model_relative_mean_error_interval": [
+        -0.04887012075398777,
+        0.015729333444369706
+      ],
+      "identity_sha256": "5f23b0fb7b38a701dba10bf2dd1288f9fedf80ea71e567a118ec8c9ba52408a0",
+      "record_sha256": "9565adf45a2845e2cf19f3253c7b118aac6bf3be94b947e87b8671425c862fbd",
+      "geometry": {
+        "sample_count": 23876,
+        "sample_rate": 2520.0,
+        "nfft": 47916,
+        "lags": 458,
+        "lag_first_sample": 0,
+        "lag_last_sample": 457,
+        "lag_step_samples": 1,
+        "group_tile": 512,
+        "array_bound_bytes": 26647556,
+        "memory_limit_bytes": 1073741824,
+        "precision": "fp32",
+        "device": "cpu"
+      },
+      "versions": {
+        "python": "3.13.5 (main, Aug 10 2026, 12:06:59) [GCC 14.2.0]",
+        "numpy": "2.5.4",
+        "scipy": "1.18.1",
+        "torch": "2.8.0+cpu"
+      },
+      "cpu_name": "AMD Ryzen 5 PRO 5650U with Radeon Graphics",
+      "device": {
+        "status": "available"
+      },
+      "numerical_module_count": 944,
+      "executable_mapping_count": 83,
+      "dynamic_namespaces": [
+        "torch.ops",
+        "torch.classes"
+      ]
+    },
+    "gpu-free-002": {
+      "status": "validated",
+      "prediction_valid": true,
+      "absolute_regression_gate": "inconclusive",
+      "case_wall_seconds": 64.956987420097,
+      "frozen_full_prediction_seconds": 15.076082337762452,
+      "full_observed_seconds": [
+        15.054175629979,
+        15.045316062867641,
+        15.047941061900929
+      ],
+      "full_observed_geometric_mean_seconds": 15.049143792925383,
+      "training_count": 5,
+      "independent_full_count": 3,
+      "training_processing_seconds": 9.661481556016952,
+      "full_holdout_processing_seconds": 45.14743275474757,
+      "timing_relative_half_width": 0.0074074698402100125,
+      "timing_precision_reached": true,
+      "timing_mean_confidence_interval_seconds": [
+        14.965227863710147,
+        15.187757962987952
+      ],
+      "model_relative_mean_error_interval": [
+        -0.0028676122578476476,
+        -0.000704896031757673
+      ],
+      "identity_sha256": "cdb4c77f7b384be2169e37a390f2e6cd1193fa8bb9c1a75ea5bf97e04087c24a",
+      "record_sha256": "0a7885337641583014997e291306460aa0ec0a895ec8f64d1172496f5e550959",
+      "geometry": {
+        "sample_count": 23876,
+        "sample_rate": 2520.0,
+        "nfft": 47916,
+        "lags": 458,
+        "lag_first_sample": 0,
+        "lag_last_sample": 457,
+        "lag_step_samples": 1,
+        "group_tile": 512,
+        "array_bound_bytes": 38139524,
+        "memory_limit_bytes": 1073741824,
+        "precision": "fp32",
+        "device": "cuda"
+      },
+      "versions": {
+        "python": "3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]",
+        "numpy": "2.3.5",
+        "scipy": "1.16.3",
+        "torch": "2.8.0+cu128"
+      },
+      "cpu_name": "INTEL(R) XEON(R) PLATINUM 8568Y+",
+      "device": {
+        "status": "available",
+        "index": 0,
+        "name": "NVIDIA H200",
+        "compute_capability": [
+          9,
+          0
+        ],
+        "total_memory_bytes": 150111977472,
+        "multiprocessor_count": 132,
+        "torch_cuda_build": "12.8",
+        "driver_version": null,
+        "driver_version_method": null,
+        "hardware_utilization": {
+          "status": "unavailable",
+          "reason": "no in-process utilization counter used"
+        }
+      },
+      "numerical_module_count": 977,
+      "executable_mapping_count": 104,
+      "dynamic_namespaces": [
+        "torch.ops",
+        "torch.classes"
+      ]
+    }
+  }
+}

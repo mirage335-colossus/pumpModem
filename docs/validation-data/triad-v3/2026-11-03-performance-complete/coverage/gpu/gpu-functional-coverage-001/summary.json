@@ -1,0 +1,85 @@
+{
+  "status": "passed",
+  "rows": [
+    {
+      "test": "test_triad_phase_frequency.py",
+      "command": [
+        "/workspace/triad-env/bin/python",
+        "-m",
+        "coverage",
+        "run",
+        "--branch",
+        "--append",
+        "--include=tools/*",
+        "tests/test_triad_phase_frequency.py",
+        "--device",
+        "cuda:0"
+      ],
+      "returncode": 0,
+      "wall_seconds": 3.4691292678471655,
+      "test_sha256": "cc4d6f1b9c33fc746bb57791ebd19f3ae496272d11bc7cf6379bfb116b9f7dad"
+    },
+    {
+      "test": "test_triad_phase_optimized.py",
+      "command": [
+        "/workspace/triad-env/bin/python",
+        "-m",
+        "coverage",
+        "run",
+        "--branch",
+        "--append",
+        "--include=tools/*",
+        "tests/test_triad_phase_optimized.py",
+        "--device",
+        "cuda:0"
+      ],
+      "returncode": 0,
+      "wall_seconds": 10.128705937881023,
+      "test_sha256": "2dbb8586c57c57d0d8e98b7066535cd21ee2010cf1ec78ed56ec1d0e4f18982b"
+    },
+    {
+      "test": "test_triad_phase_reduction.py",
+      "command": [
+        "/workspace/triad-env/bin/python",
+        "-m",
+        "coverage",
+        "run",
+        "--branch",
+        "--append",
+        "--include=tools/*",
+        "tests/test_triad_phase_reduction.py",
+        "--device",
+        "cuda:0"
+      ],
+      "returncode": 0,
+      "wall_seconds": 4.871603216975927,
+      "test_sha256": "2d1bf61ebe53494568777439ca9c5b0b4d9badc7597440a82c9bb4175da62ff7"
+    },
+    {
+      "test": "test_triad_phase_tensor.py",
+      "command": [
+        "/workspace/triad-env/bin/python",
+        "-m",
+        "coverage",
+        "run",
+        "--branch",
+        "--append",
+        "--include=tools/*",
+        "tests/test_triad_phase_tensor.py",
+        "--device",
+        "cuda:0"
+      ],
+      "returncode": 0,
+      "wall_seconds": 48.93597032409161,
+      "test_sha256": "9403029b2ab959689b475dd92c10e8da84d633501dd0c1414a0a99d55a4639ae"
+    }
+  ],
+  "sources": {
+    "triad_phase_frequency.py": "48ee569b1d467b2d7b6fd55088764bd28dd11e0bfecb5974622a318fbb408585",
+    "triad_phase_optimized.py": "759b46d536f2daa1d1de2336190ab19153376aca3eeca32847cba5289d2d63ed",
+    "triad_phase_reduction.py": "b2f762320fbff5a66fa88123711483f9c42721e1765e406b7699c434048ded98",
+    "triad_phase_tensor.py": "3b1a674ac7ace90ddce72c2773c2d1543bcfe8307d7b65ea965ad03a6525ffda"
+  },
+  "wall_seconds": 67.59758203895763,
+  "scope": "CUDA phase family functional invariants and Python source arcs; not timing or CUDA instruction coverage"
+}

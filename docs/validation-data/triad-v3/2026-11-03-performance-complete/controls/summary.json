@@ -1,0 +1,3088 @@
+{
+  "schema": "triad-decision-control-evidence-v1",
+  "scope": "timing-decision simulations and one real sampled adapter timer-inclusion check; not future CI false-failure qualification",
+  "reports": [
+    {
+      "campaigns_per_control": 64,
+      "elapsed_seconds": 60.774850214016624,
+      "status": "complete",
+      "complete_controls": 36,
+      "controls": [
+        {
+          "mode": "direct",
+          "factor": 1.0,
+          "campaigns": 64,
+          "any_case": {
+            "performance_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "calibration_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "inconclusive": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "precision_reached": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "applicability_rejected": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            }
+          },
+          "outer_sample_count_mean": 28.834821428571427,
+          "outer_sample_count_max": 33
+        },
+        {
+          "mode": "direct",
+          "factor": 1.2,
+          "campaigns": 64,
+          "any_case": {
+            "performance_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "calibration_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "inconclusive": {
+              "count": 32,
+              "campaigns": 64,
+              "fraction": 0.5,
+              "interval": [
+                0.37232286289560673,
+                0.6276771371043932
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "precision_reached": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "applicability_rejected": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            }
+          },
+          "outer_sample_count_mean": 28.602678571428573,
+          "outer_sample_count_max": 33
+        },
+        {
+          "mode": "direct",
+          "factor": 1.29,
+          "campaigns": 64,
+          "any_case": {
+            "performance_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "calibration_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "inconclusive": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "precision_reached": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "applicability_rejected": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            }
+          },
+          "outer_sample_count_mean": 28.875,
+          "outer_sample_count_max": 33
+        },
+        {
+          "mode": "direct",
+          "factor": 1.31,
+          "campaigns": 64,
+          "any_case": {
+            "performance_failure": {
+              "count": 10,
+              "campaigns": 64,
+              "fraction": 0.15625,
+              "interval": [
+                0.07755733180012322,
+                0.26863424426625704
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "calibration_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "inconclusive": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "precision_reached": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "applicability_rejected": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            }
+          },
+          "outer_sample_count_mean": 28.732142857142858,
+          "outer_sample_count_max": 33
+        },
+        {
+          "mode": "direct",
+          "factor": 1.4,
+          "campaigns": 64,
+          "any_case": {
+            "performance_failure": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "calibration_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "inconclusive": {
+              "count": 28,
+              "campaigns": 64,
+              "fraction": 0.4375,
+              "interval": [
+                0.31373475354849606,
+                0.5672410999335402
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "precision_reached": {
+              "count": 63,
+              "campaigns": 64,
+              "fraction": 0.984375,
+              "interval": [
+                0.9159896735656463,
+                0.9996044874859493
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "applicability_rejected": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            }
+          },
+          "outer_sample_count_mean": 17.316964285714285,
+          "outer_sample_count_max": 33
+        },
+        {
+          "mode": "direct",
+          "factor": 1.6,
+          "campaigns": 64,
+          "any_case": {
+            "performance_failure": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "calibration_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "inconclusive": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "precision_reached": {
+              "count": 1,
+              "campaigns": 64,
+              "fraction": 0.015625,
+              "interval": [
+                0.0003955125140506643,
+                0.08401032643435369
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "applicability_rejected": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            }
+          },
+          "outer_sample_count_mean": 7.495535714285714,
+          "outer_sample_count_max": 33
+        },
+        {
+          "mode": "conditional",
+          "factor": 1.0,
+          "campaigns": 64,
+          "any_case": {
+            "performance_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "calibration_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "inconclusive": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "precision_reached": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "applicability_rejected": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            }
+          },
+          "outer_sample_count_mean": 28.924107142857142,
+          "outer_sample_count_max": 33
+        },
+        {
+          "mode": "conditional",
+          "factor": 1.2,
+          "campaigns": 64,
+          "any_case": {
+            "performance_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "calibration_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "inconclusive": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "precision_reached": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "applicability_rejected": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            }
+          },
+          "outer_sample_count_mean": 28.633928571428573,
+          "outer_sample_count_max": 33
+        },
+        {
+          "mode": "conditional",
+          "factor": 1.29,
+          "campaigns": 64,
+          "any_case": {
+            "performance_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "calibration_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "inconclusive": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "precision_reached": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "applicability_rejected": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            }
+          },
+          "outer_sample_count_mean": 28.901785714285715,
+          "outer_sample_count_max": 33
+        },
+        {
+          "mode": "conditional",
+          "factor": 1.31,
+          "campaigns": 64,
+          "any_case": {
+            "performance_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "calibration_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "inconclusive": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "precision_reached": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "applicability_rejected": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            }
+          },
+          "outer_sample_count_mean": 28.625,
+          "outer_sample_count_max": 33
+        },
+        {
+          "mode": "conditional",
+          "factor": 1.4,
+          "campaigns": 64,
+          "any_case": {
+            "performance_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "calibration_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "inconclusive": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "precision_reached": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "applicability_rejected": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            }
+          },
+          "outer_sample_count_mean": 28.758928571428573,
+          "outer_sample_count_max": 33
+        },
+        {
+          "mode": "conditional",
+          "factor": 1.6,
+          "campaigns": 64,
+          "any_case": {
+            "performance_failure": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "calibration_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "inconclusive": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "precision_reached": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "applicability_rejected": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            }
+          },
+          "outer_sample_count_mean": 28.53125,
+          "outer_sample_count_max": 33
+        },
+        {
+          "mode": "full-only",
+          "factor": 1.0,
+          "campaigns": 64,
+          "any_case": {
+            "performance_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "calibration_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "inconclusive": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "precision_reached": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "applicability_rejected": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            }
+          },
+          "outer_sample_count_mean": 28.383928571428573,
+          "outer_sample_count_max": 33
+        },
+        {
+          "mode": "full-only",
+          "factor": 1.2,
+          "campaigns": 64,
+          "any_case": {
+            "performance_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "calibration_failure": {
+              "count": 10,
+              "campaigns": 64,
+              "fraction": 0.15625,
+              "interval": [
+                0.07755733180012322,
+                0.26863424426625704
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "inconclusive": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "precision_reached": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "applicability_rejected": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            }
+          },
+          "outer_sample_count_mean": 28.808035714285715,
+          "outer_sample_count_max": 33
+        },
+        {
+          "mode": "full-only",
+          "factor": 1.29,
+          "campaigns": 64,
+          "any_case": {
+            "performance_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "calibration_failure": {
+              "count": 23,
+              "campaigns": 64,
+              "fraction": 0.359375,
+              "interval": [
+                0.24319029103121262,
+                0.48903740183877037
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "inconclusive": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "precision_reached": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "applicability_rejected": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            }
+          },
+          "outer_sample_count_mean": 28.580357142857142,
+          "outer_sample_count_max": 33
+        },
+        {
+          "mode": "full-only",
+          "factor": 1.31,
+          "campaigns": 64,
+          "any_case": {
+            "performance_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "calibration_failure": {
+              "count": 27,
+              "campaigns": 64,
+              "fraction": 0.421875,
+              "interval": [
+                0.2993808061434645,
+                0.5518413750630204
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "inconclusive": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "precision_reached": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "applicability_rejected": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            }
+          },
+          "outer_sample_count_mean": 28.745535714285715,
+          "outer_sample_count_max": 33
+        },
+        {
+          "mode": "full-only",
+          "factor": 1.4,
+          "campaigns": 64,
+          "any_case": {
+            "performance_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "calibration_failure": {
+              "count": 61,
+              "campaigns": 64,
+              "fraction": 0.953125,
+              "interval": [
+                0.8690642627585942,
+                0.9902269250455434
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "inconclusive": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "precision_reached": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "applicability_rejected": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            }
+          },
+          "outer_sample_count_mean": 28.785714285714285,
+          "outer_sample_count_max": 33
+        },
+        {
+          "mode": "full-only",
+          "factor": 1.6,
+          "campaigns": 64,
+          "any_case": {
+            "performance_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "calibration_failure": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "inconclusive": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "precision_reached": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "applicability_rejected": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            }
+          },
+          "outer_sample_count_mean": 28.419642857142858,
+          "outer_sample_count_max": 33
+        },
+        {
+          "mode": "outside-score",
+          "factor": 1.0,
+          "campaigns": 64,
+          "any_case": {
+            "performance_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "calibration_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "inconclusive": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "precision_reached": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "applicability_rejected": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            }
+          },
+          "outer_sample_count_mean": 28.223214285714285,
+          "outer_sample_count_max": 33
+        },
+        {
+          "mode": "outside-score",
+          "factor": 1.2,
+          "campaigns": 64,
+          "any_case": {
+            "performance_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "calibration_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "inconclusive": {
+              "count": 14,
+              "campaigns": 64,
+              "fraction": 0.21875,
+              "interval": [
+                0.12506827371524634,
+                0.3396963118152601
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "precision_reached": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "applicability_rejected": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            }
+          },
+          "outer_sample_count_mean": 27.794642857142858,
+          "outer_sample_count_max": 33
+        },
+        {
+          "mode": "outside-score",
+          "factor": 1.29,
+          "campaigns": 64,
+          "any_case": {
+            "performance_failure": {
+              "count": 1,
+              "campaigns": 64,
+              "fraction": 0.015625,
+              "interval": [
+                0.0003955125140506643,
+                0.08401032643435369
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "calibration_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "inconclusive": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "precision_reached": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "applicability_rejected": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            }
+          },
+          "outer_sample_count_mean": 27.392857142857142,
+          "outer_sample_count_max": 33
+        },
+        {
+          "mode": "outside-score",
+          "factor": 1.31,
+          "campaigns": 64,
+          "any_case": {
+            "performance_failure": {
+              "count": 10,
+              "campaigns": 64,
+              "fraction": 0.15625,
+              "interval": [
+                0.07755733180012322,
+                0.26863424426625704
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "calibration_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "inconclusive": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "precision_reached": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "applicability_rejected": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            }
+          },
+          "outer_sample_count_mean": 26.955357142857142,
+          "outer_sample_count_max": 33
+        },
+        {
+          "mode": "outside-score",
+          "factor": 1.4,
+          "campaigns": 64,
+          "any_case": {
+            "performance_failure": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "calibration_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "inconclusive": {
+              "count": 31,
+              "campaigns": 64,
+              "fraction": 0.484375,
+              "interval": [
+                0.3575019967197625,
+                0.6127411917795764
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "precision_reached": {
+              "count": 58,
+              "campaigns": 64,
+              "fraction": 0.90625,
+              "interval": [
+                0.8070308955516561,
+                0.9648126671291817
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "applicability_rejected": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            }
+          },
+          "outer_sample_count_mean": 15.147321428571429,
+          "outer_sample_count_max": 33
+        },
+        {
+          "mode": "outside-score",
+          "factor": 1.6,
+          "campaigns": 64,
+          "any_case": {
+            "performance_failure": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "calibration_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "inconclusive": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "precision_reached": {
+              "count": 6,
+              "campaigns": 64,
+              "fraction": 0.09375,
+              "interval": [
+                0.035187332870818315,
+                0.1929691044483439
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "applicability_rejected": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            }
+          },
+          "outer_sample_count_mean": 7.205357142857143,
+          "outer_sample_count_max": 33
+        },
+        {
+          "mode": "environment",
+          "factor": 1.0,
+          "campaigns": 64,
+          "any_case": {
+            "performance_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "calibration_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "inconclusive": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "precision_reached": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "applicability_rejected": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            }
+          },
+          "outer_sample_count_mean": 29.013392857142858,
+          "outer_sample_count_max": 33
+        },
+        {
+          "mode": "environment",
+          "factor": 1.2,
+          "campaigns": 64,
+          "any_case": {
+            "performance_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "calibration_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "inconclusive": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "precision_reached": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "applicability_rejected": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            }
+          },
+          "outer_sample_count_mean": 28.763392857142858,
+          "outer_sample_count_max": 33
+        },
+        {
+          "mode": "environment",
+          "factor": 1.29,
+          "campaigns": 64,
+          "any_case": {
+            "performance_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "calibration_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "inconclusive": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "precision_reached": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "applicability_rejected": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            }
+          },
+          "outer_sample_count_mean": 28.361607142857142,
+          "outer_sample_count_max": 33
+        },
+        {
+          "mode": "environment",
+          "factor": 1.31,
+          "campaigns": 64,
+          "any_case": {
+            "performance_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "calibration_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "inconclusive": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "precision_reached": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "applicability_rejected": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            }
+          },
+          "outer_sample_count_mean": 28.709821428571427,
+          "outer_sample_count_max": 33
+        },
+        {
+          "mode": "environment",
+          "factor": 1.4,
+          "campaigns": 64,
+          "any_case": {
+            "performance_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "calibration_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "inconclusive": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "precision_reached": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "applicability_rejected": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            }
+          },
+          "outer_sample_count_mean": 28.848214285714285,
+          "outer_sample_count_max": 33
+        },
+        {
+          "mode": "environment",
+          "factor": 1.6,
+          "campaigns": 64,
+          "any_case": {
+            "performance_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "calibration_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "inconclusive": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "precision_reached": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "applicability_rejected": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            }
+          },
+          "outer_sample_count_mean": 28.714285714285715,
+          "outer_sample_count_max": 33
+        },
+        {
+          "mode": "regime-change",
+          "factor": 1.0,
+          "campaigns": 64,
+          "any_case": {
+            "performance_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "calibration_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "inconclusive": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "precision_reached": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "applicability_rejected": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            }
+          },
+          "outer_sample_count_mean": 28.705357142857142,
+          "outer_sample_count_max": 33
+        },
+        {
+          "mode": "regime-change",
+          "factor": 1.2,
+          "campaigns": 64,
+          "any_case": {
+            "performance_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "calibration_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "inconclusive": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "precision_reached": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "applicability_rejected": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            }
+          },
+          "outer_sample_count_mean": 28.65625,
+          "outer_sample_count_max": 33
+        },
+        {
+          "mode": "regime-change",
+          "factor": 1.29,
+          "campaigns": 64,
+          "any_case": {
+            "performance_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "calibration_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "inconclusive": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "precision_reached": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "applicability_rejected": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            }
+          },
+          "outer_sample_count_mean": 28.741071428571427,
+          "outer_sample_count_max": 33
+        },
+        {
+          "mode": "regime-change",
+          "factor": 1.31,
+          "campaigns": 64,
+          "any_case": {
+            "performance_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "calibration_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "inconclusive": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "precision_reached": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "applicability_rejected": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            }
+          },
+          "outer_sample_count_mean": 28.40625,
+          "outer_sample_count_max": 33
+        },
+        {
+          "mode": "regime-change",
+          "factor": 1.4,
+          "campaigns": 64,
+          "any_case": {
+            "performance_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "calibration_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "inconclusive": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "precision_reached": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "applicability_rejected": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            }
+          },
+          "outer_sample_count_mean": 28.535714285714285,
+          "outer_sample_count_max": 33
+        },
+        {
+          "mode": "regime-change",
+          "factor": 1.6,
+          "campaigns": 64,
+          "any_case": {
+            "performance_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "calibration_failure": {
+              "count": 0,
+              "campaigns": 64,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.05600908938663656
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "inconclusive": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "precision_reached": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "applicability_rejected": {
+              "count": 64,
+              "campaigns": 64,
+              "fraction": 1.0,
+              "interval": [
+                0.9439909106133635,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            }
+          },
+          "outer_sample_count_mean": 28.616071428571427,
+          "outer_sample_count_max": 33
+        }
+      ],
+      "environment_screens": [
+        {
+          "input_kind": "synthetic compatible hardware profile",
+          "factor": 1.0,
+          "result": {
+            "status": "raw_hardware_screen",
+            "performance_pass_eligible": false,
+            "rows": [
+              {
+                "case": "control-kernel",
+                "throughput_measure": "operations_per_second",
+                "old": 1000.0,
+                "current": 1000.0,
+                "time_equivalent_ratio": 1.0,
+                "regression_screen": false,
+                "low_cpu_utilization_screen": false,
+                "low_device_busy_screen": false,
+                "raw_utilization_current": 2.0
+              }
+            ],
+            "warning": false,
+            "scope": "raw environment-health screen; one five-second block does not establish independent-replicate confidence"
+          },
+          "actual_hardware_test": false,
+          "limitation": "the raw single-block screen has no confidence-qualified false-failure guarantee"
+        },
+        {
+          "input_kind": "synthetic compatible hardware profile",
+          "factor": 1.2,
+          "result": {
+            "status": "raw_hardware_screen",
+            "performance_pass_eligible": false,
+            "rows": [
+              {
+                "case": "control-kernel",
+                "throughput_measure": "operations_per_second",
+                "old": 1000.0,
+                "current": 833.3333333333334,
+                "time_equivalent_ratio": 1.2,
+                "regression_screen": false,
+                "low_cpu_utilization_screen": false,
+                "low_device_busy_screen": false,
+                "raw_utilization_current": 2.0
+              }
+            ],
+            "warning": false,
+            "scope": "raw environment-health screen; one five-second block does not establish independent-replicate confidence"
+          },
+          "actual_hardware_test": false,
+          "limitation": "the raw single-block screen has no confidence-qualified false-failure guarantee"
+        },
+        {
+          "input_kind": "synthetic compatible hardware profile",
+          "factor": 1.29,
+          "result": {
+            "status": "raw_hardware_screen",
+            "performance_pass_eligible": false,
+            "rows": [
+              {
+                "case": "control-kernel",
+                "throughput_measure": "operations_per_second",
+                "old": 1000.0,
+                "current": 775.1937984496124,
+                "time_equivalent_ratio": 1.29,
+                "regression_screen": false,
+                "low_cpu_utilization_screen": false,
+                "low_device_busy_screen": false,
+                "raw_utilization_current": 2.0
+              }
+            ],
+            "warning": false,
+            "scope": "raw environment-health screen; one five-second block does not establish independent-replicate confidence"
+          },
+          "actual_hardware_test": false,
+          "limitation": "the raw single-block screen has no confidence-qualified false-failure guarantee"
+        },
+        {
+          "input_kind": "synthetic compatible hardware profile",
+          "factor": 1.31,
+          "result": {
+            "status": "raw_hardware_screen",
+            "performance_pass_eligible": false,
+            "rows": [
+              {
+                "case": "control-kernel",
+                "throughput_measure": "operations_per_second",
+                "old": 1000.0,
+                "current": 763.3587786259542,
+                "time_equivalent_ratio": 1.31,
+                "regression_screen": true,
+                "low_cpu_utilization_screen": false,
+                "low_device_busy_screen": false,
+                "raw_utilization_current": 2.0
+              }
+            ],
+            "warning": true,
+            "scope": "raw environment-health screen; one five-second block does not establish independent-replicate confidence"
+          },
+          "actual_hardware_test": false,
+          "limitation": "the raw single-block screen has no confidence-qualified false-failure guarantee"
+        },
+        {
+          "input_kind": "synthetic compatible hardware profile",
+          "factor": 1.4,
+          "result": {
+            "status": "raw_hardware_screen",
+            "performance_pass_eligible": false,
+            "rows": [
+              {
+                "case": "control-kernel",
+                "throughput_measure": "operations_per_second",
+                "old": 1000.0,
+                "current": 714.2857142857143,
+                "time_equivalent_ratio": 1.4,
+                "regression_screen": true,
+                "low_cpu_utilization_screen": false,
+                "low_device_busy_screen": false,
+                "raw_utilization_current": 2.0
+              }
+            ],
+            "warning": true,
+            "scope": "raw environment-health screen; one five-second block does not establish independent-replicate confidence"
+          },
+          "actual_hardware_test": false,
+          "limitation": "the raw single-block screen has no confidence-qualified false-failure guarantee"
+        },
+        {
+          "input_kind": "synthetic compatible hardware profile",
+          "factor": 1.6,
+          "result": {
+            "status": "raw_hardware_screen",
+            "performance_pass_eligible": false,
+            "rows": [
+              {
+                "case": "control-kernel",
+                "throughput_measure": "operations_per_second",
+                "old": 1000.0,
+                "current": 625.0,
+                "time_equivalent_ratio": 1.6,
+                "regression_screen": true,
+                "low_cpu_utilization_screen": false,
+                "low_device_busy_screen": false,
+                "raw_utilization_current": 2.0
+              }
+            ],
+            "warning": true,
+            "scope": "raw environment-health screen; one five-second block does not establish independent-replicate confidence"
+          },
+          "actual_hardware_test": false,
+          "limitation": "the raw single-block screen has no confidence-qualified false-failure guarantee"
+        }
+      ]
+    },
+    {
+      "campaigns_per_control": 512,
+      "elapsed_seconds": 26.88924774195766,
+      "status": "complete",
+      "complete_controls": 2,
+      "controls": [
+        {
+          "mode": "direct",
+          "factor": 1.0,
+          "campaigns": 512,
+          "any_case": {
+            "performance_failure": {
+              "count": 0,
+              "campaigns": 512,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.007178950026259453
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "calibration_failure": {
+              "count": 0,
+              "campaigns": 512,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.007178950026259453
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "inconclusive": {
+              "count": 0,
+              "campaigns": 512,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.007178950026259453
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "precision_reached": {
+              "count": 512,
+              "campaigns": 512,
+              "fraction": 1.0,
+              "interval": [
+                0.9928210499737405,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "applicability_rejected": {
+              "count": 0,
+              "campaigns": 512,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.007178950026259453
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            }
+          },
+          "outer_sample_count_mean": 28.741629464285715,
+          "outer_sample_count_max": 33
+        },
+        {
+          "mode": "conditional",
+          "factor": 1.0,
+          "campaigns": 512,
+          "any_case": {
+            "performance_failure": {
+              "count": 0,
+              "campaigns": 512,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.007178950026259453
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "calibration_failure": {
+              "count": 0,
+              "campaigns": 512,
+              "fraction": 0.0,
+              "interval": [
+                0.0,
+                0.007178950026259453
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "inconclusive": {
+              "count": 512,
+              "campaigns": 512,
+              "fraction": 1.0,
+              "interval": [
+                0.9928210499737405,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "precision_reached": {
+              "count": 512,
+              "campaigns": 512,
+              "fraction": 1.0,
+              "interval": [
+                0.9928210499737405,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            },
+            "applicability_rejected": {
+              "count": 512,
+              "campaigns": 512,
+              "fraction": 1.0,
+              "interval": [
+                0.9928210499737405,
+                1.0
+              ],
+              "confidence": 0.95,
+              "interval_scope": "pointwise exact binomial interval across independently seeded simulated campaigns; not simultaneous across reported outcomes",
+              "fixed_campaign_count_completed": true,
+              "nominal_binomial_coverage_claim": true
+            }
+          },
+          "outer_sample_count_mean": 28.678013392857142,
+          "outer_sample_count_max": 33
+        }
+      ],
+      "environment_screens": []
+    }
+  ],
+  "actual_delay": {
+    "status": "complete",
+    "export_wall_seconds": 0.0839749849983491,
+    "external_wrapped_seconds": 0.07181664300151169,
+    "internal_receiver_seconds": 0.021575291000772268,
+    "outside_receiver_seconds": 0.050241352000739425,
+    "numeric_and_work_unchanged": true,
+    "performance_regression_qualified": false,
+    "scope": "one actual full-family execution validates timer inclusion and unchanged values, not regression detection power or future performance",
+    "work": {
+      "unit": "blocks",
+      "count": 39,
+      "target_count": 39,
+      "updates_per_state": [
+        39
+      ],
+      "valid_rows": 4938,
+      "empty_blocks": 0,
+      "partial_blocks": 1,
+      "transition_intervals": [
+        [
+          0.0,
+          1
+        ],
+        [
+          0.39453125,
+          1
+        ],
+        [
+          0.5,
+          37
+        ]
+      ],
+      "counter_scope": "target from public sample calendar; observed row and transition events counted in the iterator; updates from receiver diagnostics"
+    },
+    "scores": [
+      77.84536135450803,
+      12.628586844068668
+    ],
+    "plan": {
+      "command": [
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/triad_long",
+        "--mode",
+        "export-stats",
+        "--seconds",
+        "16",
+        "--rate",
+        "36",
+        "--added",
+        "1",
+        "--sample-rate",
+        "256",
+        "--channel",
+        "hf",
+        "--phase-diffusion",
+        "0",
+        "--basis",
+        "two-ray",
+        "--block-seconds",
+        ".5",
+        "--cn0",
+        "8",
+        "--stats-noisy",
+        "--threads",
+        "1",
+        "--memory-mib",
+        "64",
+        "--export-max-samples",
+        "100000",
+        "--export-max-mib",
+        "16",
+        "--seed",
+        "931751",
+        "--output",
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-complete/actual-delay-001/sampled-stats"
+      ],
+      "case": {
+        "id": "gaussian-actual-delay-control",
+        "family": "gaussian-state",
+        "unit": "blocks",
+        "options": {
+          "coherences": [
+            4.0
+          ],
+          "taps": 2,
+          "memory_limit_bytes": 33554432
+        }
+      },
+      "requested_external_delay_seconds": 0.05,
+      "source_sha256": {
+        "tools/triad_perf_decision_controls.py": "3c25d2f12693354d3ae65fe3028dbf343bbb6525f9bf263817ee7cf469de188e",
+        "tools/triad_perf_family_state.py": "67d750dd41c317b7cb810591de6f88585f7cd3191888e1c0d28ede49b3595c06",
+        "tools/triad_perf_families.py": "d2758a1cecd33a466469f1c04a5c91232c429d1336c3affa206ef835e3d7563b",
+        "tools/triad-state-study.py": "3fa7491ae93031ff6bfadc4c9b792659336999effc0508a71cf734ada9250402",
+        "tools/triad_state_workspace.py": "88887f23264e00bd432a626a987a3a86592a5b8f674aba25194b8569e0df9923",
+        "tools/triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba"
+      },
+      "binary_sha256": "862b0431f04a3973ce15e7cff9b9959ed45ca36d626e401352db5cf8630c9c6b",
+      "scope": "actual noisy native exporter plus full Gaussian-state adapter; one paired numerical/timer diagnostic, no confidence-qualified performance gate"
+    }
+  }
+}

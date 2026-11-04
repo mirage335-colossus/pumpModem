@@ -152,6 +152,14 @@ completed conditions in failed jobs, actual elapsed/sample calendars, post-erasu
 energy and the complete attempted denominator. Keep actual GPU throughput
 separate from GPU availability or theoretical operation counts.
 
+For performance work, use the [maintained coverage matrix](triad-performance-matrix.md)
+to select cheap functional checks and the [routine performance aggregator](triad-performance.md#run-it).
+Reuse applicable full-workload anchors; qualify only affected cases with an
+explicit budget. Full simulation, resident receiver, startup and sustained
+throughput are different timing targets. Missing coverage or an unqualified
+prediction stays visible even when functional checks pass. Do not repeat the
+historical sensitivity campaigns as routine performance tests.
+
 **Selective-model version warning:** the detailed 2026-11-02 selective
 campaign used `legacy-allpass-v1`. Its receiver results remain valid for that
 simulated operator, but do not establish strong differential added-modulation

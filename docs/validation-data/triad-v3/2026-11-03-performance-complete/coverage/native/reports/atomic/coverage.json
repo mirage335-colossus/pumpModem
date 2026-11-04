@@ -1,0 +1,380 @@
+{
+  "build_dir": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/triad-cov",
+  "compiler": {
+    "build_type": "Release",
+    "cmake_cache_sha256": "cb5130c26482b0ed8b80ae8d0dd2c991e7db49ddff48ad5417bfe44022b6d0aa",
+    "cmake_id": "GNU",
+    "cmake_version": "14.2.0",
+    "compile_commands_sha256": "7635e473a39b4f118256dec620f8b6b1c584071021acd10954f5f3e6a4eceaf3",
+    "coverage_flags": {
+      "cxx": "--coverage -fprofile-update=atomic",
+      "exe_link": "--coverage"
+    },
+    "path": "/usr/bin/c++",
+    "version": "c++ (Debian 14.2.0-19) 14.2.0"
+  },
+  "counter_translation_units": {
+    "src/triad_modem_v3.cpp": {
+      "gcda_mtime_ns": 1793747026858400499,
+      "gcda_path": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/triad-cov/CMakeFiles/triad_experiment.dir/src/triad_modem_v3.cpp.gcda",
+      "gcno_path": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/triad-cov/CMakeFiles/triad_experiment.dir/src/triad_modem_v3.cpp.gcno",
+      "gcov_data": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-complete/native-coverage/atomic/raw/triad_modem_v3.gcov.json.gz",
+      "object_mtime_after_prebuild_header_guard": true,
+      "object_mtime_ns": 1793746993817954910,
+      "object_path": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/triad-cov/CMakeFiles/triad_experiment.dir/src/triad_modem_v3.cpp.o",
+      "sha256": "cb6cac016e57edcd4f6ebc70f09c68cc47380e3b772cdbe047d7a3b93e9b434c"
+    },
+    "src/triad_receiver_v3.cpp": {
+      "gcda_mtime_ns": 1793747014288015189,
+      "gcda_path": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/triad-cov/CMakeFiles/triad_experiment.dir/src/triad_receiver_v3.cpp.gcda",
+      "gcno_path": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/triad-cov/CMakeFiles/triad_experiment.dir/src/triad_receiver_v3.cpp.gcno",
+      "gcov_data": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-complete/native-coverage/atomic/raw/triad_receiver_v3.gcov.json.gz",
+      "object_mtime_after_prebuild_header_guard": true,
+      "object_mtime_ns": 1793747000530040710,
+      "object_path": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/triad-cov/CMakeFiles/triad_experiment.dir/src/triad_receiver_v3.cpp.o",
+      "sha256": "ff7409c55f2c62dbb833f1ae24a7b4aab103607aaf2f66945ea585e1e3ba3e2f"
+    },
+    "src/triad_simulation_stream.cpp": {
+      "gcda_mtime_ns": 1793747026858400499,
+      "gcda_path": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/triad-cov/CMakeFiles/triad_experiment.dir/src/triad_simulation_stream.cpp.gcda",
+      "gcno_path": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/triad-cov/CMakeFiles/triad_experiment.dir/src/triad_simulation_stream.cpp.gcno",
+      "gcov_data": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-complete/native-coverage/atomic/raw/triad_simulation_stream.gcov.json.gz",
+      "object_mtime_after_prebuild_header_guard": true,
+      "object_mtime_ns": 1793746996945994941,
+      "object_path": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/triad-cov/CMakeFiles/triad_experiment.dir/src/triad_simulation_stream.cpp.o",
+      "sha256": "afaa1267c36fcd330151174f6f08b6fb401a7f702c660964071ef24b6e82a70d"
+    },
+    "src/triad_statistics.cpp": {
+      "gcda_mtime_ns": 1793747014286215429,
+      "gcda_path": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/triad-cov/CMakeFiles/triad_experiment.dir/src/triad_statistics.cpp.gcda",
+      "gcno_path": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/triad-cov/CMakeFiles/triad_experiment.dir/src/triad_statistics.cpp.gcno",
+      "gcov_data": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-complete/native-coverage/atomic/raw/triad_statistics.gcov.json.gz",
+      "object_mtime_after_prebuild_header_guard": true,
+      "object_mtime_ns": 1793746991825929376,
+      "object_path": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/triad-cov/CMakeFiles/triad_experiment.dir/src/triad_statistics.cpp.o",
+      "sha256": "18d92c2c51a4057caba6d9de78580305adcd8c038f6e1243ec1a4410f7c00ace"
+    },
+    "tests/test_triad_statistics.cpp": {
+      "gcda_mtime_ns": 1793747013446703057,
+      "gcda_path": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/triad-cov/CMakeFiles/test_triad_statistics.dir/tests/test_triad_statistics.cpp.gcda",
+      "gcno_path": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/triad-cov/CMakeFiles/test_triad_statistics.dir/tests/test_triad_statistics.cpp.gcno",
+      "gcov_data": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-complete/native-coverage/atomic/raw/test_triad_statistics.gcov.json.gz",
+      "object_mtime_after_prebuild_header_guard": true,
+      "object_mtime_ns": 1793747001770056521,
+      "object_path": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/triad-cov/CMakeFiles/test_triad_statistics.dir/tests/test_triad_statistics.cpp.o",
+      "sha256": "a637a6a5b56b9b9cb5b8fe65d6ce963f23116567a4a620dd5b7764f0eb1642d5"
+    },
+    "tests/test_triad_v3_channel.cpp": {
+      "gcda_mtime_ns": 1793747026858607950,
+      "gcda_path": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/triad-cov/CMakeFiles/test_triad_v3_channel.dir/tests/test_triad_v3_channel.cpp.gcda",
+      "gcno_path": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/triad-cov/CMakeFiles/test_triad_v3_channel.dir/tests/test_triad_v3_channel.cpp.gcno",
+      "gcov_data": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-complete/native-coverage/atomic/raw/test_triad_v3_channel.gcov.json.gz",
+      "object_mtime_after_prebuild_header_guard": true,
+      "object_mtime_ns": 1793747008350140218,
+      "object_path": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/triad-cov/CMakeFiles/test_triad_v3_channel.dir/tests/test_triad_v3_channel.cpp.o",
+      "sha256": "c965233fd03834d952327422dd49ac1e0f750ea97476a3f28bbd280678be7f8c"
+    },
+    "tests/test_triad_v3_receiver.cpp": {
+      "gcda_mtime_ns": 1793747014288207973,
+      "gcda_path": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/triad-cov/CMakeFiles/test_triad_v3_receiver.dir/tests/test_triad_v3_receiver.cpp.gcda",
+      "gcno_path": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/triad-cov/CMakeFiles/test_triad_v3_receiver.dir/tests/test_triad_v3_receiver.cpp.gcno",
+      "gcov_data": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-complete/native-coverage/atomic/raw/test_triad_v3_receiver.gcov.json.gz",
+      "object_mtime_after_prebuild_header_guard": true,
+      "object_mtime_ns": 1793747005002097675,
+      "object_path": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/triad-cov/CMakeFiles/test_triad_v3_receiver.dir/tests/test_triad_v3_receiver.cpp.o",
+      "sha256": "26143bd7ea6b57bdaa2bec6771f80eb78968cf590d9c3303bd77eb492d8bbfd4"
+    },
+    "tests/test_triad_v3_source.cpp": {
+      "gcda_mtime_ns": 1793747014411083866,
+      "gcda_path": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/triad-cov/CMakeFiles/test_triad_v3_source.dir/tests/test_triad_v3_source.cpp.gcda",
+      "gcno_path": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/triad-cov/CMakeFiles/test_triad_v3_source.dir/tests/test_triad_v3_source.cpp.gcno",
+      "gcov_data": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-performance-complete/native-coverage/atomic/raw/test_triad_v3_source.gcov.json.gz",
+      "object_mtime_after_prebuild_header_guard": true,
+      "object_mtime_ns": 1793747003290075886,
+      "object_path": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/triad-cov/CMakeFiles/test_triad_v3_source.dir/tests/test_triad_v3_source.cpp.o",
+      "sha256": "49bd097b0ff86321e43e083059cb08f3ee42ab6b324f61222f565d80184d5ad6"
+    }
+  },
+  "coverage_interpretation": {
+    "branch_metric": "GCC gcov branch records are compiler CFG edges, may include compiler- or exception-related edges, and do not establish semantic condition/decision or behavioral coverage. Negative counters are retained as invalid and make the affected branch scope unqualified. No branch exclusions are applied.",
+    "declared_exclusions": [],
+    "line_metric": "source lines with gcov execution counters"
+  },
+  "executed_checks": [
+    "taskset -c 6,8 ctest --test-dir build/triad-cov --output-on-failure -R '^(triad_v3_(source|channel|receiver)|triad_statistics)$' -j 2"
+  ],
+  "gcov": "gcov (Debian 14.2.0-19) 14.2.0",
+  "header_counter_applicability": {
+    "branch_merge": "GCOV edges remain TU-qualified because block IDs are local; no CFG equivalence is inferred across TUs",
+    "build_binding": "per-TU object/note/data paths and mtimes are retained; object_mtime_after_prebuild_header_guard records temporal order, not embedded source/header hashes",
+    "counter_translation_units_built_after_guard": true,
+    "dependency_limit": "gcov records validate exact compiled TU source paths and compile_commands is hashed; compiler instrumentation does not embed source/header hashes or full dependency snapshots",
+    "historical_reports_without_header_guard": "header counters are unqualified to the captured header bytes",
+    "line_merge": "executed source lines are unioned by header-relative path and line; counter values are not summed across TUs",
+    "prebuild_guard_sha256": "036955f981150a6cafd5a032dfef0ce86823f9bbd54f207ba8c43246d8507e81",
+    "prebuild_postcapture_header_inventory_match": true,
+    "source_hash_binding": "each header has a capture-time SHA-256; prebuild_postcapture_header_inventory_match means only the before/after inventories matched"
+  },
+  "headers": {
+    "include/datapump/pattern_pulse.hpp": {
+      "gcov_branches": {
+        "coverage_status": "counted",
+        "instrumented_outcomes": 6,
+        "invalid_negative_outcomes": 0,
+        "taken_outcomes": 4,
+        "unit": "translation-unit-qualified gcov CFG edge outcomes; no cross-TU edge equivalence asserted",
+        "untaken_outcomes": 2
+      },
+      "gcov_records": [
+        "src/triad_modem_v3.cpp"
+      ],
+      "lines": {
+        "coverage_status": "counted",
+        "executed": 6,
+        "instrumented": 6,
+        "invalid_negative_counts": {},
+        "uncovered_source_lines": []
+      },
+      "sha256_at_capture": "f3053ed41fa5cbca182ae4dcf5ff4796b030a3cb15527f617d7a765e7f989312"
+    },
+    "include/datapump/triad_modem_v3.hpp": {
+      "gcov_branches": {
+        "coverage_status": "counted",
+        "instrumented_outcomes": 52,
+        "invalid_negative_outcomes": 0,
+        "taken_outcomes": 30,
+        "unit": "translation-unit-qualified gcov CFG edge outcomes; no cross-TU edge equivalence asserted",
+        "untaken_outcomes": 22
+      },
+      "gcov_records": [
+        "src/triad_receiver_v3.cpp",
+        "src/triad_simulation_stream.cpp",
+        "tests/test_triad_v3_channel.cpp",
+        "tests/test_triad_v3_receiver.cpp"
+      ],
+      "lines": {
+        "coverage_status": "counted",
+        "executed": 9,
+        "instrumented": 9,
+        "invalid_negative_counts": {},
+        "uncovered_source_lines": []
+      },
+      "sha256_at_capture": "1ddd8e851950036f03e6a903ed7ba4746392ffe8623f49685df04f029c4aff48"
+    },
+    "include/datapump/triad_simulation.hpp": {
+      "gcov_branches": {
+        "coverage_status": "counted",
+        "instrumented_outcomes": 0,
+        "invalid_negative_outcomes": 0,
+        "taken_outcomes": 0,
+        "unit": "translation-unit-qualified gcov CFG edge outcomes; no cross-TU edge equivalence asserted",
+        "untaken_outcomes": 0
+      },
+      "gcov_records": [
+        "src/triad_simulation_stream.cpp",
+        "tests/test_triad_v3_channel.cpp"
+      ],
+      "lines": {
+        "coverage_status": "counted",
+        "executed": 0,
+        "instrumented": 0,
+        "invalid_negative_counts": {},
+        "uncovered_source_lines": []
+      },
+      "sha256_at_capture": "55db1c03f95b6bd9b65bf5e3630a506aba40d1e3dbf473f025218454fbbee34d"
+    },
+    "include/datapump/types.hpp": {
+      "gcov_branches": {
+        "coverage_status": "counted",
+        "instrumented_outcomes": 34,
+        "invalid_negative_outcomes": 0,
+        "taken_outcomes": 5,
+        "unit": "translation-unit-qualified gcov CFG edge outcomes; no cross-TU edge equivalence asserted",
+        "untaken_outcomes": 29
+      },
+      "gcov_records": [
+        "src/triad_modem_v3.cpp",
+        "src/triad_receiver_v3.cpp",
+        "src/triad_simulation_stream.cpp",
+        "tests/test_triad_v3_channel.cpp"
+      ],
+      "lines": {
+        "coverage_status": "counted",
+        "executed": 1,
+        "instrumented": 1,
+        "invalid_negative_counts": {},
+        "uncovered_source_lines": []
+      },
+      "sha256_at_capture": "351fc7936aa83b2f2b7df25d54ecccb0b4b9471edd4376b3b842e7ffef10212a"
+    },
+    "src/channel_perturbation.hpp": {
+      "gcov_branches": {
+        "coverage_status": "counted",
+        "instrumented_outcomes": 234,
+        "invalid_negative_outcomes": 0,
+        "taken_outcomes": 144,
+        "unit": "translation-unit-qualified gcov CFG edge outcomes; no cross-TU edge equivalence asserted",
+        "untaken_outcomes": 90
+      },
+      "gcov_records": [
+        "src/triad_simulation_stream.cpp",
+        "tests/test_triad_v3_channel.cpp"
+      ],
+      "lines": {
+        "coverage_status": "counted",
+        "executed": 100,
+        "instrumented": 105,
+        "invalid_negative_counts": {},
+        "uncovered_source_lines": [
+          48,
+          128,
+          131,
+          160,
+          199
+        ]
+      },
+      "sha256_at_capture": "fae3b1b345e3dc19c8b85a5010e4434530bd0a34d595dd4de8cd55349d8d879a"
+    },
+    "src/channel_spread.hpp": {
+      "gcov_branches": {
+        "coverage_status": "counted",
+        "instrumented_outcomes": 8,
+        "invalid_negative_outcomes": 0,
+        "taken_outcomes": 8,
+        "unit": "translation-unit-qualified gcov CFG edge outcomes; no cross-TU edge equivalence asserted",
+        "untaken_outcomes": 0
+      },
+      "gcov_records": [
+        "src/triad_simulation_stream.cpp",
+        "tests/test_triad_v3_channel.cpp"
+      ],
+      "lines": {
+        "coverage_status": "counted",
+        "executed": 14,
+        "instrumented": 14,
+        "invalid_negative_counts": {},
+        "uncovered_source_lines": []
+      },
+      "sha256_at_capture": "bf98698d574869acb79645fa143af7ae563a2f542868e77c672d89d4fb16bdb0"
+    },
+    "src/triad_gaussian_fading.hpp": {
+      "gcov_branches": {
+        "coverage_status": "counted",
+        "instrumented_outcomes": 110,
+        "invalid_negative_outcomes": 0,
+        "taken_outcomes": 56,
+        "unit": "translation-unit-qualified gcov CFG edge outcomes; no cross-TU edge equivalence asserted",
+        "untaken_outcomes": 54
+      },
+      "gcov_records": [
+        "src/triad_simulation_stream.cpp",
+        "tests/test_triad_v3_channel.cpp"
+      ],
+      "lines": {
+        "coverage_status": "counted",
+        "executed": 47,
+        "instrumented": 48,
+        "invalid_negative_counts": {},
+        "uncovered_source_lines": [
+          33
+        ]
+      },
+      "sha256_at_capture": "97f26b082d7d68123952bde7ccb9f97148c5977cf741cf6c15c76e77fcc20944"
+    }
+  },
+  "schema": "datapump.triad.native-gcov-coverage",
+  "schema_version": 2,
+  "scope": "native planner/statistics and v3 source/channel/receiver, plus focused test-TU header counters",
+  "source_revision": "e0c3f50a88d2ee951c059397a594445f3c21a9c0",
+  "source_root": "/home/user/___quick/p/_cur/dataPump/pumpModem",
+  "sources": {
+    "src/triad_modem_v3.cpp": {
+      "gcov_branches": {
+        "coverage_status": "counted",
+        "instrumented_outcomes": 302,
+        "invalid_negative_outcomes": 0,
+        "taken_outcomes": 215,
+        "untaken_outcomes": 87
+      },
+      "lines": {
+        "coverage_status": "counted",
+        "executed": 181,
+        "instrumented": 183,
+        "invalid_negative_counts": {},
+        "uncovered_source_lines": [
+          235,
+          236
+        ]
+      },
+      "raw_gcov_json_gz": "raw/triad_modem_v3.gcov.json.gz",
+      "sha256": "cb6cac016e57edcd4f6ebc70f09c68cc47380e3b772cdbe047d7a3b93e9b434c"
+    },
+    "src/triad_receiver_v3.cpp": {
+      "gcov_branches": {
+        "coverage_status": "counted",
+        "instrumented_outcomes": 524,
+        "invalid_negative_outcomes": 0,
+        "taken_outcomes": 320,
+        "untaken_outcomes": 204
+      },
+      "lines": {
+        "coverage_status": "counted",
+        "executed": 184,
+        "instrumented": 188,
+        "invalid_negative_counts": {},
+        "uncovered_source_lines": [
+          248,
+          267,
+          268,
+          271
+        ]
+      },
+      "raw_gcov_json_gz": "raw/triad_receiver_v3.gcov.json.gz",
+      "sha256": "ff7409c55f2c62dbb833f1ae24a7b4aab103607aaf2f66945ea585e1e3ba3e2f"
+    },
+    "src/triad_simulation_stream.cpp": {
+      "gcov_branches": {
+        "coverage_status": "counted",
+        "instrumented_outcomes": 814,
+        "invalid_negative_outcomes": 0,
+        "taken_outcomes": 579,
+        "untaken_outcomes": 235
+      },
+      "lines": {
+        "coverage_status": "counted",
+        "executed": 558,
+        "instrumented": 560,
+        "invalid_negative_counts": {},
+        "uncovered_source_lines": [
+          806,
+          807
+        ]
+      },
+      "raw_gcov_json_gz": "raw/triad_simulation_stream.gcov.json.gz",
+      "sha256": "afaa1267c36fcd330151174f6f08b6fb401a7f702c660964071ef24b6e82a70d"
+    },
+    "src/triad_statistics.cpp": {
+      "gcov_branches": {
+        "coverage_status": "counted",
+        "instrumented_outcomes": 376,
+        "invalid_negative_outcomes": 0,
+        "taken_outcomes": 237,
+        "untaken_outcomes": 139
+      },
+      "lines": {
+        "coverage_status": "counted",
+        "executed": 241,
+        "instrumented": 244,
+        "invalid_negative_counts": {},
+        "uncovered_source_lines": [
+          186,
+          365,
+          372
+        ]
+      },
+      "raw_gcov_json_gz": "raw/triad_statistics.gcov.json.gz",
+      "sha256": "18d92c2c51a4057caba6d9de78580305adcd8c038f6e1243ec1a4410f7c00ace"
+    }
+  },
+  "working_tree_dirty": true
+}

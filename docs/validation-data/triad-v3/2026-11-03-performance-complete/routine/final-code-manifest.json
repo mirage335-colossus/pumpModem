@@ -1,0 +1,22 @@
+{
+  "scope": "Post-measurement reporting/control/CI changes, not the code snapshot of the 2999.858-second campaign. Native/Python collector source snapshots and test logs are in their separate coverage archives. No new receiver timing campaign was run.",
+  "sources": {
+    ".github/workflows/triad-performance.yml": "14981cbf46d8ac3676818225813ad1f78c9d163311473f7ca057a80b4ad6efaa",
+    "tools/triad_perf_complete.py": "48940a2609f075b1d869358722b5abeebe0d249fc193059dc565c0be1d0e2cab",
+    "tools/triad_perf_staged.py": "f7aa93f7277aae42dbafc0a7cba38f265255ffe1068dba9c9e16bc5d660c2e2c",
+    "tools/triad-performance-coverage.json": "ecf8ed343d8ce50ec1cae6f1145bd1c8058596fc6bb46a3c15d618cbb76b2fe3",
+    "tests/test_triad_perf_complete.py": "bdbca6ab9030d9d649e18106170556cb43f3f0de56fb856773d2209db3436d94",
+    "tests/test_triad_perf_staged.py": "7d74494e5099655193cb39015dec30935a1edb83d9a4a7ece9c84f7c15400afb",
+    "tests/test_triad_performance_workflow.py": "9c9d8061f9bad2466bec62ae72a829f6f644969b46b9847b68af23a384e5f35b",
+    "docs/triad-performance.md": "14567e2fbfa48466f501c37db761bf11db0bb5d3c19991532f2e12abc9a5022c",
+    "docs/triad-performance-matrix.md": "03150a6c09668df4578eeff4d19593bff129728323d3c5a03cf5979352265837",
+    "docs/triad-development-workflow.md": "b1adb5ff0f0d974806c05918953f052ebd984b5187797cf3abede7bdbf7f45c0"
+  },
+  "archive_sha256": "325af78779506b9dc701757e57a248e583bea79beef9fb3b7448154ae6d84ba8",
+  "tests": {
+    "staged": 9,
+    "wrapper": 34,
+    "workflow": 11
+  },
+  "hosted_ci_cache_reuse": "not_exercised"
+}

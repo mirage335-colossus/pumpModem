@@ -1,0 +1,40 @@
+{
+  "device": "cpu",
+  "torch": "2.8.0+cpu",
+  "passed": 7,
+  "wall_seconds": 0.390453840023838,
+  "checks": {
+    "tiny_path_sum": {
+      "log_lr": -0.7254089969012794,
+      "direct_path_sum_log_lr": -0.7254089969012798,
+      "paths": 1728
+    },
+    "direct_sample_density": {
+      "log_lr": -1.134255893473311,
+      "raw_density_log_lr": -1.134255893473311
+    },
+    "static_and_gap_limits": {
+      "static_log_lr": -0.42703829726781173,
+      "gap_score_unchanged": true,
+      "aligned_interpolation_variance": 0.0
+    },
+    "precision_and_persistence": {
+      "maximum_fp32_fp64_log_lr_difference": 3.056345203589217e-07,
+      "chunk_difference": 0.0
+    },
+    "frequency_chain_checks": {
+      "subgrid_rw_variance": 9.999250037498592e-11,
+      "continuous_small_step_variance": 1e-10,
+      "ou_detailed_balance_max_error": 4.336808689942018e-19
+    },
+    "null_mean_diagnostic": {
+      "trials": 12000,
+      "mean_lr": 0.997242258817935,
+      "standard_error": 0.002075683415512192,
+      "scope": "moderate-SNR mean diagnostic, not rare-tail or operational false-admission qualification"
+    },
+    "validation_guards": {
+      "expected_rejections": 6
+    }
+  }
+}

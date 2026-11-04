@@ -15,24 +15,48 @@ template<class Work>void rejects(Work work,const char* message){bool rejected=fa
 Crypto key(){std::array<std::uint8_t,32> bytes{};for(std::size_t i=0;i<bytes.size();++i)bytes[i]=static_cast<std::uint8_t>(11+7*i);return Crypto(bytes);}
 v::Format format(){v::Format result;result.inner_rate_hz=360;result.added_symbols=10;result.sample_rate=4800;result.bit_seconds=8;return result;}
 v::ReceiverConfig config(const v::Format& f){v::ReceiverConfig result;result.format=f;v::Candidate zero,one;one.source_bit=1;result.candidates={zero,one};result.log_family_hypotheses=std::log(2.);result.complex_noise_variance=.001;result.block_samples=397;result.maximum_chunk_samples=257;result.threads=2;return result;}
-v::ReceiverReport clean(const Crypto& crypto,std::size_t chunk,bool missing=false){
-    const auto f=format();auto p=config(f);v::PatternSource source(f,crypto,1);v::StreamingReceiver receiver(p,crypto);
+v::ReceiverReport clean(const Crypto& crypto,std::size_t chunk,bool missing=false,
+                        bool conservative_threshold=false){
+    const auto f=format();auto p=config(f);p.conservative_threshold=conservative_threshold;
+    v::PatternSource source(f,crypto,1);v::StreamingReceiver receiver(p,crypto);
     std::vector<v::Complex> data(chunk);std::vector<std::uint8_t> validity(chunk,1);const auto total=source.geometry().source_samples;
     for(std::uint64_t first=0;first<total;){const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(chunk,total-first));auto block=std::span(data).first(count);source.render(first,block);for(auto& value:block)value*=v::Complex(.7,.2);std::fill(validity.begin(),validity.end(),1);
         if(missing&&first+count>total/2&&first<=total/2)validity[static_cast<std::size_t>(total/2-first)]=0;
         receiver.push(first,block,missing?std::span<const std::uint8_t>(validity).first(count):std::span<const std::uint8_t>{});first+=count;}
     auto result=receiver.finish();check(result.accepted&&result.source_bit==1&&result.complete_observation,"streamed clean bit recovery");
-    check(result.working_bytes<=p.memory_limit_bytes,"receiver workspace exceeded");check(!result.candidates[result.best_candidate].threshold_conservative,"exact Gamma gate silently replaced by concentration bound");std::cout<<"clean chunk="<<chunk<<" best="<<result.best_candidate<<" projection="<<result.candidates[result.best_candidate].projection_energy<<" input="<<result.candidates[result.best_candidate].input_energy<<" residual="<<result.candidates[result.best_candidate].residual_energy<<" rank="<<result.candidates[result.best_candidate].rank<<"\n";check(result.candidates[result.best_candidate].residual_energy<1e-8*result.candidates[result.best_candidate].input_energy,"raw shaped waveform was not fitted");
+    check(result.working_bytes<=p.memory_limit_bytes,"receiver workspace exceeded");
+    check(result.candidates[result.best_candidate].threshold_conservative==conservative_threshold,
+          "receiver did not apply the selected null-threshold policy");
+    std::cout<<"clean chunk="<<chunk<<" best="<<result.best_candidate<<" projection="<<result.candidates[result.best_candidate].projection_energy<<" input="<<result.candidates[result.best_candidate].input_energy<<" residual="<<result.candidates[result.best_candidate].residual_energy<<" rank="<<result.candidates[result.best_candidate].rank<<"\n";check(result.candidates[result.best_candidate].residual_energy<1e-8*result.candidates[result.best_candidate].input_energy,"raw shaped waveform was not fitted");
     check(receiver.finish().score==result.score,"finish repeated score accumulation");return result;
 }
 void streaming_checks(const Crypto& crypto){
     const auto a=clean(crypto,83),b=clean(crypto,257);
     check(std::abs(a.score-b.score)<1e-9*std::max(1.,a.score),"chunk partition changed score");check(a.candidates[a.best_candidate].rank==b.candidates[b.best_candidate].rank,"chunk partition changed rank");
+    const auto conservative=clean(crypto,257,false,true);
+    check(conservative.candidates[conservative.best_candidate].threshold_conservative,
+          "conservative null-threshold branch was not exposed by receiver report");
     const auto erased=clean(crypto,131,true);check(!erased.all_samples_observed&&erased.missing_samples==1&&erased.fully_scored_absence_seconds==0,"missing sample became absence");
     const auto f=format();auto p=config(f);const auto g=v::geometry(f);v::StreamingReceiver null_receiver(p,crypto);std::vector<v::Complex> zeros(211);
     for(std::uint64_t first=0;first<g.source_samples;){const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(zeros.size(),g.source_samples-first));null_receiver.push(first,std::span(zeros).first(count));first+=count;}
     const auto absent=null_receiver.finish();check(!absent.accepted&&!absent.presence&&absent.fully_scored_absence_seconds>=6,"fully scored absent symbol contract");
     v::StreamingReceiver partial(p,crypto);partial.push(0,zeros);const auto short_result=partial.finish();check(!short_result.complete_observation&&!short_result.accepted&&short_result.fully_scored_absence_seconds==0,"EOF admitted or completed a partial symbol");
+    // A complete rendered capture can still have no usable observations. This
+    // exercises the supported rank-zero fit and its infinite null threshold.
+    const auto complete_geometry=v::geometry(f);p=config(f);v::PatternSource rendered(f,crypto,1);v::StreamingReceiver unobserved(p,crypto);
+    std::vector<v::Complex> rendered_chunk(251);std::vector<std::uint8_t> invalidity(rendered_chunk.size(),0);
+    for(std::uint64_t first=0;first<complete_geometry.source_samples;){
+        const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(rendered_chunk.size(),complete_geometry.source_samples-first));
+        auto samples=std::span(rendered_chunk).first(count);rendered.render(first,samples);
+        unobserved.push(first,samples,std::span(invalidity).first(count));first+=count;
+    }
+    const auto no_rows=unobserved.finish();
+    check(no_rows.complete_observation&&no_rows.missing_samples==complete_geometry.source_samples&&
+          no_rows.scored_samples==0&&!no_rows.all_samples_observed,"invalid rendered capture changed observation accounting");
+    check(!no_rows.presence&&!no_rows.accepted&&!no_rows.candidates.empty()&&
+          no_rows.candidates[no_rows.best_candidate].rank==0&&
+          std::isinf(no_rows.candidates[no_rows.best_candidate].null_threshold),
+          "rank-zero capture did not preserve the no-presence infinite-threshold guard");
     p.memory_limit_bytes=1;rejects([&]{v::StreamingReceiver invalid(p,crypto);},"memory cap ignored");p=config(f);p.log_family_hypotheses=0;rejects([&]{v::StreamingReceiver invalid(p,crypto);},"null family count omitted bank candidates");
     p=config(f);p.candidates[0].channel.taps.assign(9,{});rejects([&]{v::StreamingReceiver invalid(p,crypto);},"oversized tap vector copied before admission");
     p=config(f);v::StreamingReceiver discontinuous(p,crypto);rejects([&]{discontinuous.push(1,zeros);},"missing input was manufactured");

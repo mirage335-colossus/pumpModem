@@ -1,5 +1,16 @@
 # Isolated three-carrier performance regression
 
+Start with the [maintained coverage and prediction matrix](triad-performance-matrix.md).
+It distinguishes implemented adapters, measured functional paths, qualified
+forecasts and unresolved regimes. The routine aggregator is
+[`triad_perf_complete.py`](../tools/triad_perf_complete.py); the older runner
+below remains its native/FFT component. Neither a passing component nor a green
+CI status certifies the whole matrix. Ordinary Robust integration is excluded.
+The [current acceptance record](validation-data/triad-v3/2026-11-03-performance-complete/README.md)
+preserves the successful full-workload forecasts, failed CPU relationships,
+GPU follow-up decisions and measured cost of the expanded scope. The complete
+suite is not yet qualified for routine release assurance.
+
 Use [`tools/triad-performance.py`](../tools/triad-performance.py) to measure the
 experimental three-carrier receiver without integrating it into ordinary
 Robust. Its evidence chain now covers complete native CLI simulations,
@@ -23,6 +34,83 @@ boundary.
 
 ## Run it
 
+For the combined suite, reuse source-matched historical anchors and compatible
+builds. Qualification is a separate operation; the aggregator never silently
+starts it. For example (replace the uppercase paths with existing artifacts):
+
+```sh
+python3 tools/triad_perf_complete.py \
+  --reference-root REFERENCE_SOURCE --binary build/dev-cli/triad_long \
+  --reference-binary REFERENCE_BINARY --anchor-directory LEGACY_ANCHORS \
+  --family-route staged --staged-anchor-directory STAGED_ANCHORS \
+  --fixture-cache FIXTURE_CACHE --hardware-baseline HARDWARE_PROFILE_JSON \
+  --functional-defaults \
+  --native-coverage NATIVE_COVERAGE_JSON --python-coverage PYTHON_COVERAGE_JSON \
+  --device cpu --threads 2 --native-threads 1 --budget-seconds 600 \
+  --output local-evidence/triad-performance-complete/routine-001
+```
+
+Missing anchors, unsupported hardware and unresolved inventory rows remain
+explicit. This command is not a claim that all current CPU models qualify or
+that complete coverage fits in 600 seconds. Use the matrix's actual results.
+Do not repeatedly launch qualification to turn an inconclusive result green.
+
+The sampled-family route measures native waveform/channel generation and file
+completion, then receiver loading, preparation, transfers, processing and result
+IPC. The staged route measures generation separately and complete receivers on
+cached sampled inputs. It shares generation measurements only for identical
+generation profiles and retains their uncertainty once. Arithmetic stage means
+are additive; geometric means are not. Both whole-pipeline and individual-stage
+predictions must survive independent full-run validation. The observed CPU
+phase-prefix failure and CPU cache-state discrepancy prohibit treating these
+models as interchangeable. Worker startup and cold JIT/graph capture remain
+separate, currently unqualified timing boundaries.
+
+The staged routine checks both individual-stage and pipeline precision. Once
+a stage reaches its final permitted sample count, an interval too wide to
+satisfy the existing conditional guard cannot be repaired by sampling another
+stage. The routine then freezes that unresolved result and retains one full
+endpoint check. It does not widen the guard, discard an outlier, or qualify a
+model through early stopping. Qualification and historical proof replay retain
+their original schedules. The narrow compatibility mappings for the two
+recorded earlier drivers require unchanged measured code and policy constants;
+they do not transfer arbitrary implementation changes.
+
+For a named affected case, explicitly qualify on the intended backend:
+
+```sh
+python3 tools/triad_perf_staged.py \
+  --reference-root REFERENCE_SOURCE --candidate-root . \
+  --reference-binary REFERENCE_BINARY --binary build/dev-cli/triad_long \
+  --case phase-graph-hour --device cuda --precision fp32 --mode qualify \
+  --anchor-directory STAGED_ANCHORS --maximum-holds 9 \
+  --budget-seconds 600 --output local-evidence/triad-performance-complete/qual-001
+```
+
+`--mode direct` measures the full target without a duration forecast (the
+aggregator exposes this as `--family-mode direct`). Prefer it
+when a model fails or costs more than direct measurement. The
+[`sampled-family manifest`](../tools/triad-performance-families.json) declares
+the concrete full workload, work dimensions and dependencies for each case.
+
+The optional [`triad_perf_identical_fft.py`](../tools/triad_perf_identical_fft.py)
+route uses one timing stream only when both workers independently report equal
+loaded DSP helpers, numerical/native libraries, execution controls, inputs and
+geometry. It still checks absolute full-runtime history and a full-bank
+sentinel; it never invents a paired implementation ratio. It times resident
+preparation and scoring, excluding generation, startup, audit and report writes.
+Select only qualified cases in the aggregator with repeated
+`--identical-fft-case ID`, `--identical-anchor-directory PATH` and
+`--fixture-cache PATH`. Ineligible deduplication is unresolved, not a silent
+fallback or a newly qualified model.
+
+Anchor reuse is identity-specific: affected source, workload, build, arithmetic,
+numerical runtime, hardware, environment, thread count, adapter, timing policy
+or measured geometry changes invalidate the corresponding relationship. An
+unrelated documentation edit does not invalidate DSP source hashes. Identity
+deduplication is an explicitly checked narrow reuse policy, not permission to
+transfer forecasts across implementations or processor architectures.
+
 Reuse compatible builds or configure both the candidate and its intended
 reference. The reference binary is needed to make a native performance
 comparison; if omitted, native cases still measure a prediction but explicitly
@@ -31,7 +119,9 @@ warn that implementation comparison is unavailable.
 ```sh
 ./build.sh configure --cli --build-dir build/dev-cli -- \
   -DBUILD_TESTING=ON -DDATAPUMP_COMPILER_CACHE=OFF
-cmake --build build/dev-cli --config Release --target triad_long --parallel 2
+cmake --build build/dev-cli --config Release --target \
+  triad_long test_triad_statistics test_triad_v3_source \
+  test_triad_v3_channel test_triad_v3_receiver --parallel 2
 python3 tools/triad-performance.py \
   --binary build/dev-cli/triad_long \
   --reference-binary build/previous/triad_long \
@@ -397,8 +487,11 @@ and [NumPy dispatch inspection](https://numpy.org/doc/2.3/reference/generated/nu
 Normal CI runs the dedicated performance job unless `devfast` is explicitly
 selected; the job is separate from sanitizer/matrix repetitions. New direct
 release builds depend on the exact-source performance job. A noisy or
-unresolved warning is visible and may be nonblocking; green CI alone does not
-mean every model is validated or every requested interval is narrow. Existing
+unresolved component warning remains visible separately from a regression
+failure. The combined wrapper exits nonzero when complete-scope obligations
+are unresolved; component warnings cannot turn that result into a qualified
+release pass. Green CI alone does not mean every model is validated or every
+requested interval is narrow. Existing
 ordinary-release certification remains separate. Source-release and existing
 APT repackaging routes that reuse older verified binaries have not measured the
 current triad study and report it as unevaluated.

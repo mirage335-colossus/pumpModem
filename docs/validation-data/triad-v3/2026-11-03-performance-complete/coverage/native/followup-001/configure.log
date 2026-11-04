@@ -1,0 +1,1 @@
+Configured dev via ./build.sh configure; GCC Release, --coverage -fprofile-update=atomic, exe/shared link --coverage. CMake configure/generate succeeded in about 0.9 seconds.
