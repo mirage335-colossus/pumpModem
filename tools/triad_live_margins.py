@@ -287,11 +287,53 @@ def validate_capture(metadata, count):
         raise ValueError("capture incomplete")
     if any(metadata.get("discontinuity", {}).get(k, 1) for k in ("capture","playback")):
         raise ValueError("discontinuous capture")
-    fmt = metadata["audio_format"]["capture"]
-    expected = dict(logical_rate=FS,hardware_rate=FS,hardware_channels=2,logical_channels=1,selected_capture_channel=0)
-    if any(fmt.get(k) != v for k,v in expected.items()):
-        raise ValueError("unexpected physical capture format")
-    if metadata["capture"]["logical_samples"] != count:
+    backend = metadata.get("backend")
+    native_format = metadata.get("audio_format", {}).get("capture", {})
+    if backend is None and {"logical_rate", "hardware_rate", "logical_channels",
+                            "hardware_channels", "selected_capture_channel"}.issubset(native_format):
+        # Existing production-native receipts predate the backend discriminator.
+        fmt = native_format
+        expected = dict(logical_rate=FS,hardware_rate=FS,hardware_channels=2,
+                        logical_channels=1,selected_capture_channel=0)
+        if any(fmt.get(k) != v for k,v in expected.items()):
+            raise ValueError("unexpected physical capture format")
+        samples = metadata["capture"]["logical_samples"]
+    elif backend == "alsa-utils-raw-stereo-v1" or backend is None:
+        # The opt-in ALSA-utils route has an independent raw stereo receipt.
+        # Current receipts declare this backend; older ones are identifiable
+        # by the two raw endpoint reports. Do not rewrite them to resemble the
+        # native adapter. Both
+        # endpoint negotiation records and the fixed channel selection are
+        # required because this path has no logical mono conversion metadata.
+        formats = metadata.get("audio_format")
+        if not isinstance(formats, dict):
+            raise ValueError("unexpected physical capture format")
+        required = {"access": "RW_INTERLEAVED", "format": "S16_LE",
+                    "channels": "2", "rate": str(FS)}
+        for endpoint in ("capture", "playback"):
+            observed = formats.get(endpoint)
+            direction = endpoint.upper()
+            exact_rate = observed.get("exact rate") if isinstance(observed, dict) else None
+            if not isinstance(observed, dict) or observed.get("stream") != direction \
+                    or any(observed.get(key) != value for key,value in required.items()) \
+                    or not isinstance(exact_rate, str) or not exact_rate.split() \
+                    or exact_rate.split()[0] != str(FS):
+                raise ValueError("unexpected physical capture format")
+        requested = metadata.get("requested", {})
+        capture = metadata.get("capture", {})
+        capture_device = requested.get("capture_device", "")
+        playback_device = requested.get("playback_device", "")
+        if requested.get("exclusive") is not True \
+                or not capture_device.startswith("hw:") \
+                or playback_device != capture_device \
+                or requested.get("capture_channel") != 0 \
+                or capture.get("selected_channel") != 0 \
+                or capture.get("logical_rate") != FS:
+            raise ValueError("unexpected physical capture format")
+        samples = capture.get("logical_samples")
+    else:
+        raise ValueError("unsupported physical capture backend")
+    if samples != count:
         raise ValueError("capture metadata/sample count mismatch")
 
 

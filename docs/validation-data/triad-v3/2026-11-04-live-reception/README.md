@@ -6,6 +6,12 @@ isolated FFT acquisition/likelihood receiver on the captured PCM. It compares
 those outcomes with a frozen audio simulation of the **same transmitted
 signal-plus-noise samples**. It does not integrate the ordinary receiver.
 
+The [subsequent low-level follow-up](../2026-11-04-live-margin-bounds/README.md)
+exposes an out-of-band noise discrepancy hidden by these transmitted-noise-
+dominated trials and independently tests a narrower frontend. Preserve the
+counts below as historical results; do not extrapolate their agreement to the
+hardware-noise floor with the original wide workspace.
+
 The primary physical and original simulated classifications agree on all
 **72 signal trials** and all **96 configuration-specific null decisions** from
 32 shared physical null records. That includes an accepted wrong bit and

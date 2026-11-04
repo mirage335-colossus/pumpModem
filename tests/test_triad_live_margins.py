@@ -73,6 +73,10 @@ class FixtureAndCaptureGuards(unittest.TestCase):
 
     def test_capture_requires_complete_exact_continuous_stereo_route(self):
         baseline = metadata(32)
+        # Legacy native metadata intentionally has no backend key. Keep its
+        # existing acceptance contract while adding a separately checked raw
+        # ALSA-utils receipt below.
+        self.assertNotIn("backend", baseline)
         campaign.validate_capture(baseline, 32)
         for field, value in (("logical_rate", 44100), ("hardware_rate", 44100),
                              ("hardware_channels", 1), ("logical_channels", 2),
@@ -96,6 +100,45 @@ class FixtureAndCaptureGuards(unittest.TestCase):
             campaign.validate_capture(bad, 32)
         with self.assertRaisesRegex(ValueError, "sample count mismatch"):
             campaign.validate_capture(baseline, 31)
+
+    def test_raw_alsa_utils_receipt_is_checked_as_its_own_backend(self):
+        # Current ALSA-utils receipts declare their backend. Preserve support
+        # for historical receipts that predate that field as well.
+        raw = dict(status="complete", backend="alsa-utils-raw-stereo-v1", failure=None,
+            discontinuity={"capture": False, "playback": False},
+            requested={"rate":48000, "capture_device":"hw:1,0", "playback_device":"hw:1,0",
+                       "exclusive":True,"capture_channel":0},
+            audio_format={k:dict(stream=k.upper(),access="RW_INTERLEAVED",format="S16_LE",
+                channels="2",rate="48000",**{"exact rate":"48000 (48000/1)"})
+                for k in ("capture","playback")},
+            capture={"logical_samples":32,"logical_rate":48000,"selected_channel":0})
+        campaign.validate_capture(raw, 32)
+        historical = copy.deepcopy(raw); historical.pop("backend")
+        campaign.validate_capture(historical, 32)
+        for endpoint in ("capture", "playback"):
+            for field, value in (("stream", "UNKNOWN"), ("access", "MMAP_INTERLEAVED"),
+                                 ("format", "S32_LE"), ("channels", "1"),
+                                 ("rate", "44100"), ("exact rate", "44100 (44100/1)")):
+                with self.subTest(endpoint=endpoint, field=field):
+                    bad = copy.deepcopy(raw)
+                    bad["audio_format"][endpoint][field] = value
+                    with self.assertRaisesRegex(ValueError, "capture format"):
+                        campaign.validate_capture(bad, 32)
+        for field, value in (("capture_device", "default"), ("playback_device", "hw:1,1"),
+                             ("exclusive", False), ("capture_channel", 1)):
+            with self.subTest(field=field):
+                bad = copy.deepcopy(raw); bad["requested"][field] = value
+                with self.assertRaisesRegex(ValueError, "capture format"):
+                    campaign.validate_capture(bad, 32)
+        bad = copy.deepcopy(raw); bad["capture"]["selected_channel"] = 1
+        with self.assertRaisesRegex(ValueError, "capture format"):
+            campaign.validate_capture(bad, 32)
+        bad = copy.deepcopy(raw); bad["discontinuity"]["playback"] = True
+        with self.assertRaisesRegex(ValueError, "discontinuous"):
+            campaign.validate_capture(bad, 32)
+        bad = copy.deepcopy(raw); bad["backend"] = "unknown"
+        with self.assertRaisesRegex(ValueError, "unsupported physical capture backend"):
+            campaign.validate_capture(bad, 32)
 
     def test_exact_interval_includes_zero_counts(self):
         lo, hi = campaign.interval(0, 20)

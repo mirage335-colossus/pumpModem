@@ -25,6 +25,15 @@ active planning/preparation/capture/analysis total was 1,847.20 seconds
 (30.79 minutes), with a separately reported 681.76-second human pause. This is
 not evidence of one uninterrupted sub-50-minute session.
 
+The later [physical noise and margin follow-up](validation-data/triad-v3/2026-11-04-live-margin-bounds/README.md)
+finds an important boundary: the original baseline DDC admits audio-DC noise
+outside the triplet, contaminating its whole-workspace noise estimate at low
+absolute levels. A fixed narrow frontend brings independent physical/model
+admissions into much closer agreement. Start with that record for marginal
+cable reception; transmitted-noise-dominated agreement alone does not qualify
+hardware-floor behavior. Its narrow mean-loss proxy intervals are conditional
+engineering estimates, not future-pass or full-receiver BER guarantees.
+
 ## What each result establishes
 
 | Evidence class | What was exercised | What it does not establish |
@@ -318,6 +327,21 @@ Additional hardware-free checks (NumPy, SciPy and CPU PyTorch):
 python tests/test_triad_live_receiver.py
 python tests/test_triad_live_margins.py
 ```
+
+For the flat baseline/edge regimes, `triad_live_frontend_compare.py` compares
+the old DDC with the explicit causal filter in `triad_live_narrowband.py`, using
+the same raw capture and separate physical-null gates. `triad_live_level_probe.py`
+prepares repeated absolute-level inputs; `triad_live_level_analysis.py` separates
+repeat variation from repeatable model residuals without payload normalization.
+These tools require fresh output paths and source-bound, complete capture
+receipts. Their fast checks are included by
+`python3 -m unittest discover -s tests -p 'test_triad_live_*.py'`.
+
+Do not reuse a nominal-width filter for unqualified oscillator offsets, Doppler
+spread or modulation sidebands: derive the required passband/capture envelope,
+retain complete state/tails and verify template energy first. Current narrow
+admission qualification is limited to the flat baseline/edge cases and ±0.06-Hz
+conditioned CFO bank. New preprocessing or noise conditions require new gates.
 
 ## Maintained coverage inventory
 

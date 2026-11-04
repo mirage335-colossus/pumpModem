@@ -21,6 +21,12 @@ from the analytic operational false-admission guarantees.
 The [actual cable reception evidence](validation-data/triad-v3/2026-11-04-live-reception/README.md)
 includes successful comparisons and excluded floor captures with real playback
 underruns. Read its short-test guidance before repeating hardware campaigns.
+The [physical noise and margin follow-up](validation-data/triad-v3/2026-11-04-live-margin-bounds/README.md)
+then isolates out-of-band audio-DC contamination, validates a cheap fixed narrow
+frontend on fresh low-level captures, and records the limits of its conditional
+SNR-loss proxy. Use its retained observations and focused Python checks before
+spending hardware time. Its passband is qualified only for the stated flat
+geometries; strong-spread sidebands need a new envelope and calibration.
 
 **For a large timing bank, start with the
 [sampled FFT acquisition study](validation-data/triad-v3/2026-11-03-fft-timing/README.md).**
