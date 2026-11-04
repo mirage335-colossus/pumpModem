@@ -17,12 +17,16 @@ struct State {
     std::vector<std::pair<std::string,unsigned>> configured;
     std::vector<std::size_t> write_frames;
     std::function<std::int16_t(std::size_t,unsigned)> sample;
+    std::function<std::int16_t(std::size_t,unsigned,unsigned)> channel_sample;
     std::function<void()> after_open,after_configure,after_hint;
     std::string selected;
     unsigned opens=0,closes=0,live=0,rate=0,channels=0,configured_streams=0;
     unsigned hint_calls=0,hints_freed=0;
     int direction=0,hint_error=0;
     std::size_t captured=0,write_limit=137,read_limit=4096;
+    bool raw_capture_start=false;
+    unsigned capture_starts=0,prepared_capture_reads=0,start_threshold_requests=0;
+    int start_threshold_result=0;
     std::vector<long> read_results;
     std::vector<long> write_results;
     std::vector<int> wait_results,drain_results,recovered_errors,delay_results;

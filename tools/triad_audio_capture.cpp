@@ -259,6 +259,12 @@ void append_format_json(std::ostream& o, const FormatRecord& r) {
     if (!r.seen) { o << "null"; return; }
     const auto& f = r.value;
     o << "{\"logical_rate\":" << f.logical_rate << ",\"hardware_rate\":" << f.hardware_rate
+      << ",\"logical_channels\":" << f.logical_channels
+      << ",\"hardware_channels\":" << f.hardware_channels
+      << ",\"selected_capture_channel\":";
+    if (f.selected_capture_channel) o << *f.selected_capture_channel;
+    else o << "null";
+    o
       << ",\"usable_passband_hz\":" << std::setprecision(12) << f.usable_passband_hz
       << ",\"workspace_bytes\":" << f.workspace_bytes
       << ",\"timing_quality\":" << json_string(f.timing_quality == TimingQuality::unavailable ? "unavailable" : f.timing_quality == TimingQuality::estimated ? "estimated" : "bounded")
@@ -298,7 +304,7 @@ std::string make_metadata(const Config& c, const RunState& s, bool success, std:
     for (float v : s.logical_capture) logical_peak = std::max(logical_peak, std::abs(static_cast<double>(v)));
     o << logical_peak << ",\"raw_samples\":" << raw_n << ",\"raw_rate\":" << s.raw_rate.load()
       << ",\"raw_seconds\":" << (s.raw_rate.load() ? static_cast<double>(raw_n) / s.raw_rate.load() : 0)
-      << ",\"raw_semantics\":\"optional mono provider capture float samples before modem-rate resampling; native ALSA currently converts S16 PCM; not raw ADC codes\",\"capture_timing_count\":" << s.timing_count;
+      << ",\"raw_semantics\":\"optional selected-channel mono provider capture float samples before modem-rate resampling; hardware channel zero for native ALSA; S16 converted to float, not interleaved ADC codes\",\"capture_timing_count\":" << s.timing_count;
     auto add_prediction = [&](std::string_view name, const std::optional<TimePrediction>& p, std::uint64_t sample) {
         o << "," << json_string(name) << ":";
         if (!p) { o << "null"; return; }

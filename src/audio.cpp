@@ -72,10 +72,16 @@ std::vector<std::uint32_t> rate_candidates(std::uint32_t logical_rate,std::uint3
 }
 void report_format(std::uint32_t logical,std::uint32_t hardware,std::size_t workspace,const StreamFormatCallback& callback,
                    bool timed=false,double uncertainty=0,bool adjusted=false,TimingQuality qualified=TimingQuality::unavailable,
-                   CaptureTransportRecipe capture_transport={}) {
-    if(callback)callback({logical,hardware,(logical==hardware && !adjusted?.5:.42)*std::min(logical,hardware),workspace,
-        qualified!=TimingQuality::unavailable?qualified:timed?TimingQuality::estimated:TimingQuality::unavailable,uncertainty,
-        capture_transport});
+                   CaptureTransportRecipe capture_transport={},unsigned hardware_channels=0,
+                   std::optional<std::uint32_t> selected_capture_channel={}) {
+    if(callback) {
+        StreamFormat format{logical,hardware,(logical==hardware && !adjusted?.5:.42)*std::min(logical,hardware),workspace,
+            qualified!=TimingQuality::unavailable?qualified:timed?TimingQuality::estimated:TimingQuality::unavailable,
+            uncertainty,capture_transport};
+        format.hardware_channels=hardware_channels;
+        format.selected_capture_channel=selected_capture_channel;
+        callback(format);
+    }
 }
 void playback_pcm(std::span<const float> samples,std::span<std::int16_t> output,unsigned channels,ChannelMode mode,double gain) {
     for(std::size_t i=0;i<samples.size();++i) {
@@ -361,6 +367,7 @@ struct Alsa {
     void (*sw_free)(Params*)=nullptr;
     int (*sw_current)(PCM*,Params*)=nullptr;
     int (*sw_apply)(PCM*,Params*)=nullptr;
+    int (*sw_start_threshold)(PCM*,Params*,unsigned long)=nullptr;
     template<class T> void symbol(T& target,const char* name) {
         target=reinterpret_cast<T>(dlsym(library,name));
         if(!target) throw Error(std::string("ALSA missing symbol: ")+name);
@@ -399,6 +406,7 @@ struct Alsa {
             sw_free=reinterpret_cast<decltype(sw_free)>(dlsym(library,"snd_pcm_sw_params_free"));
             sw_current=reinterpret_cast<decltype(sw_current)>(dlsym(library,"snd_pcm_sw_params_current"));
             sw_apply=reinterpret_cast<decltype(sw_apply)>(dlsym(library,"snd_pcm_sw_params"));
+            sw_start_threshold=reinterpret_cast<decltype(sw_start_threshold)>(dlsym(library,"snd_pcm_sw_params_set_start_threshold"));
             // Configure before any ALSA call can cache its plugin directory.
             // All audio workers share this initialization; user configuration
             // and plugins supplied beside libasound retain their precedence.
@@ -527,6 +535,23 @@ void refine_timing_period(Alsa& api,Alsa::PCM* pcm,std::uint32_t rate,unsigned c
     if(actual_buffer!=buffer || actual_period!=period)restore_failed("restored buffer/period differs from original");
     check_cancelled(stop);
 }
+void configure_capture_start(Alsa& api,Alsa::PCM* pcm,std::stop_token stop) {
+    check_cancelled(stop);
+    if(!api.sw_malloc || !api.sw_free || !api.sw_current || !api.sw_start_threshold || !api.sw_apply)
+        throw Error("audio capture requires ALSA software start-threshold configuration");
+    struct Parameters {
+        Alsa& api;Alsa::Params* value=nullptr;
+        ~Parameters(){if(value)api.sw_free(value);}
+    } parameters{api};
+    // snd_pcm_set_params uses a nearly full-buffer start threshold. Raw
+    // capture does not start when our bounded read is smaller than that
+    // threshold. Keep buffer/period/avail_min unchanged and let the first read
+    // start capture, including after a recovery prepares the stream again.
+    if(api.sw_malloc(&parameters.value)<0 || api.sw_current(pcm,parameters.value)<0 ||
+       api.sw_start_threshold(pcm,parameters.value,1)<0 || api.sw_apply(pcm,parameters.value)<0)
+        throw Error("cannot configure audio capture start threshold");
+    check_cancelled(stop);
+}
 bool shared_server_endpoint(std::string_view endpoint) {
     return endpoint=="pulse" || endpoint=="pipewire";
 }
@@ -544,14 +569,17 @@ struct Stream {
         } cleanup{api,pcm};
         check_cancelled(stop);
         const auto rates=rate_candidates(rate,options?options->minimum_hardware_rate:0);
+        const std::array<unsigned,2> playback_channel_order{2,1},capture_channel_order{1,2};
+        const auto& channel_order=direction!=0?capture_channel_order:playback_channel_order;
         const auto requested=device.empty()?std::string("default"):device;
         std::string attempted;
         int last_error=0;
         const auto try_device=[&](const std::string& name) {
             for(const auto candidate:rates) {
-                // Stereo lets us route transmit PCM explicitly. Mono-only
-                // endpoints still work, while capture retains one channel.
-                for(unsigned candidate_channels=direction?1:2;candidate_channels>0;--candidate_channels) {
+                // Preserve mono capture when available, then support endpoints
+                // that accept only interleaved stereo. Playback keeps its
+                // existing stereo-first routing for explicit channel modes.
+                for(const auto candidate_channels:channel_order) {
                     check_cancelled(stop);
                     if(!attempted.empty())attempted+=", ";
                     attempted+=name+"@"+std::to_string(candidate)+"Hz/"+std::to_string(candidate_channels)+"ch";
@@ -573,6 +601,7 @@ struct Stream {
                         // a timing model we will not use. Capture is independent.
                         if(direction!=0 || !shared_server_endpoint(endpoint))
                             refine_timing_period(api,pcm,hardware_rate,channels,options,stop,direction==0,endpoint);
+                        if(direction!=0)configure_capture_start(api,pcm,stop);
                         check_cancelled(stop);return true;
                     }
                     api.close(pcm);pcm=nullptr;
@@ -940,7 +969,7 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
         report_format(rate,stream.hardware_rate,source.workspace_bytes()+block.capacity()*sizeof(std::int16_t)+samples.capacity()*sizeof(float)+
             (timed?sizeof(AlsaTimeline):0)+(graph?graph->workspace_bytes():0),on_format,timed && (estimated || !options->frame_timestamp),
             preflight?std::max(timing->allowance(),qualified_uncertainty-clock_phase):timed?timing->allowance():0,timed,
-            preflight?qualified_quality:TimingQuality::unavailable);
+            preflight?qualified_quality:TimingQuality::unavailable,{},stream.channels);
     };
     if(!estimated && !preflight)report();
     if(timed && !estimated && !preflight && !detail::utc_playback_epoch)throw Error("UTC playback requires a scheduled source epoch");
@@ -1416,12 +1445,13 @@ static void capture_device(std::uint32_t rate,const std::string& device,const Ca
     if(!strict_timing)sink.disable_steering();
     if(!timed){sink.disable_timing();timing.reset();}
     std::uint64_t received=0;
-    std::vector<std::int16_t> block(4096);
-    const auto chunk_limit=std::min<std::size_t>(block.size(),stream.hardware_rate/20);
+    constexpr std::size_t maximum_capture_frames=4096;
+    const auto chunk_limit=std::min<std::size_t>(maximum_capture_frames,stream.hardware_rate/20);
+    std::vector<std::int16_t> block(chunk_limit*stream.channels);
     std::vector<float> converted(chunk_limit);
     report_format(rate,stream.hardware_rate,sink.workspace_bytes()+block.capacity()*sizeof(std::int16_t)+converted.capacity()*sizeof(float)+
         (timed?sizeof(AlsaTimeline):0),on_format,timed && !options->frame_timestamp,timed?timing->allowance():0,
-        false,TimingQuality::unavailable,sink.capture_transport());
+        false,TimingQuality::unavailable,sink.capture_transport(),stream.channels,0u);
     unsigned failures=0;
     const auto lose_observation=[&](const Error& error) {
         sink.lose_observation(error);timed=false;timing.reset();
@@ -1468,7 +1498,8 @@ static void capture_device(std::uint32_t rate,const std::string& device,const Ca
         else if(n==0) throw Error("audio capture stalled");
         else {
             if(static_cast<std::size_t>(n)>chunk_limit) throw Error("audio capture returned invalid sample count");
-            for(std::size_t i=0;i<static_cast<std::size_t>(n);++i) converted[i]=block[i]/32768.0f;
+            for(std::size_t i=0;i<static_cast<std::size_t>(n);++i)
+                converted[i]=block[i*stream.channels]/32768.0f;
             failures=0;
             check_cancelled(stop);
             if(monitor)monitor(std::span<const float>(converted.data(),static_cast<std::size_t>(n)),stream.hardware_rate);
@@ -1613,7 +1644,8 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
     session.prepare();
     mm_check(waveOutPause(session.output),"waveOut pause failed");
     std::vector<float> samples(std::min<std::size_t>(WaveSession::block_frames,session.hardware_rate/20));
-    report_format(rate,session.hardware_rate,source.workspace_bytes()+sizeof(session)+samples.capacity()*sizeof(float),on_format);
+    report_format(rate,session.hardware_rate,source.workspace_bytes()+sizeof(session)+samples.capacity()*sizeof(float),on_format,
+        false,0,false,TimingQuality::unavailable,{},session.channels);
     bool finished=false,started=false;
     std::array<bool,2> queued{};
     const auto enqueue=[&](std::size_t slot) {
@@ -1683,7 +1715,7 @@ static void capture_device(std::uint32_t rate,const std::string& device,const Ca
     const auto chunk_samples=std::min<std::size_t>(WaveSession::block_frames,session.hardware_rate/20);
     std::vector<float> converted(chunk_samples);
     report_format(rate,session.hardware_rate,sink.workspace_bytes()+sizeof(session)+converted.capacity()*sizeof(float),on_format,
-        false,0,false,TimingQuality::unavailable,sink.capture_transport());
+        false,0,false,TimingQuality::unavailable,sink.capture_transport(),session.channels,0u);
     for(auto& header:session.headers) {
         header.dwBufferLength=static_cast<DWORD>(chunk_samples*sizeof(std::int16_t));
         mm_check(waveInAddBuffer(session.input,&header,sizeof(WAVEHDR)),"waveIn queue failed");

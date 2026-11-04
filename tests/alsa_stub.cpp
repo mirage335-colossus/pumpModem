@@ -29,11 +29,15 @@ int snd_pcm_set_params(void*,int format,int access,unsigned channels,unsigned ra
     s.configured_channels.push_back(channels);
     if(s.after_configure)s.after_configure();
     if(format!=2 || access!=3 || (channels!=1 && channels!=2))throw std::runtime_error("expected interleaved S16 ALSA PCM");
-    if(s.direction && channels!=1)throw std::runtime_error("capture channel contract changed");
     if(std::find(s.supported_channels.begin(),s.supported_channels.end(),channels)==s.supported_channels.end())return -22;
     if(!s.supported_rates.empty() && std::find(s.supported_rates.begin(),s.supported_rates.end(),rate)==s.supported_rates.end())return -22;
     if(std::find(s.wrong_format.begin(),s.wrong_format.end(),s.selected)!=s.wrong_format.end())return -22;
-    s.channels=channels;++s.configured_streams;return 0;
+    s.channels=channels;++s.configured_streams;
+    if(s.direction && s.raw_capture_start) {
+        s.pcm_state=2;
+        s.start_threshold=(s.buffer_frames/s.period_frames)*s.period_frames;
+    }
+    return 0;
 }
 int snd_pcm_get_params(void*,unsigned long* buffer,unsigned long* period) {
     *buffer=alsa_test::state.buffer_frames;*period=alsa_test::state.period_frames;return 0;
@@ -59,6 +63,11 @@ int snd_pcm_hw_params_any(void*,HardwareParams* p){
 }
 int snd_pcm_sw_params_current(void*,SoftwareParams* p) {
     const auto& s=alsa_test::state;*p={s.avail_min,s.start_threshold};return 0;
+}
+int snd_pcm_sw_params_set_start_threshold(void*,SoftwareParams* p,unsigned long threshold) {
+    auto& s=alsa_test::state;++s.start_threshold_requests;
+    if(s.start_threshold_result<0)return s.start_threshold_result;
+    p->start_threshold=threshold;return 0;
 }
 int snd_pcm_hw_params_set_access(void*,HardwareParams* p,int access){p->access=access;return 0;}
 int snd_pcm_hw_params_set_format(void*,HardwareParams* p,int format){p->format=format;return 0;}
@@ -102,6 +111,11 @@ int snd_pcm_state(void*) {
 long snd_pcm_readi(void*,void* buffer,unsigned long count) {
     auto* pcm=static_cast<std::int16_t*>(buffer);
     auto& s=alsa_test::state;
+    if(s.raw_capture_start && s.pcm_state==2) {
+        ++s.prepared_capture_reads;
+        if(count<s.start_threshold)return -11;
+        s.pcm_state=3;++s.capture_starts;
+    }
     if(s.read_result<s.read_results.size()) {
         const auto result=s.read_results[s.read_result++];
         if(result<=0)return result;
@@ -109,7 +123,10 @@ long snd_pcm_readi(void*,void* buffer,unsigned long count) {
     }
     count=std::min(count,static_cast<unsigned long>(s.read_limit));
     for(std::size_t i=0;i<count;++i) {
-        pcm[i]=s.sample?s.sample(s.captured,s.rate):static_cast<std::int16_t>(s.captured%32768);
+        for(unsigned channel=0;channel<s.channels;++channel) {
+            pcm[i*s.channels+channel]=s.channel_sample?s.channel_sample(s.captured,channel,s.rate):
+                s.sample?s.sample(s.captured,s.rate):static_cast<std::int16_t>(s.captured%32768);
+        }
         ++s.captured;
     }
     return static_cast<long>(count);

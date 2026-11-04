@@ -148,11 +148,21 @@ output contains floating-point PCM before modem resampling, not literal ADC
 codes.
 
 The first direct-native attempt on the present Realtek ALC257 fixture stopped
-before playback: its physical profile requires two capture channels, while the
-current native raw capture API requests mono. This is an unqualified backend
-configuration, not a modem reception failure. The ALSA stereo adapter permits
-the isolated cable study without changing the production audio API. A passing
-ALSA result does not qualify the native production capture path on this device.
+before playback because the backend requested mono from a stereo-required raw
+capture endpoint. The [production-backend correction and physical follow-up](validation-data/triad-v3/2026-11-04-live-duplex/native-stereo-followup.md)
+now qualify native capture on this fixture at 48 kHz. ALSA capture prefers mono,
+then accepts stereo on the same endpoint/rate and extracts fixed channel zero
+before the mono monitor/resampler. Format metadata distinguishes hardware and
+logical channels. Capture also sets its automatic-start threshold to one frame;
+the former full-buffer threshold prevented the bounded native reads from starting.
+Playback buffering and channel routing retain their existing behavior.
+
+The follow-up exercised an 11.48-second complete waveform through the production
+API, with no reported discontinuities or clipping and a −47.58-dB payload-model
+residual. This single-case native qualification does not relabel the original
+24 ALSA-utils captures as native-backend observations. The ALSA-utils backend
+still retains both ADC channels; optional native provider output retains only
+the selected mono channel at provider rate.
 
 [`triad_live_model.py`](../tools/triad_live_model.py) aligns captures using public
 measurement markers independent of the bit. The affine time map is measured

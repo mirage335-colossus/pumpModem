@@ -753,11 +753,11 @@ void native_period_refinement() {
             check(formatted && !output.empty() && !state.live && !state.parameter_objects,
                 "period refinement leaked device/parameters or lost capture");
             check(state.buffer_frames==hardware/10 && state.avail_min==hardware/40 &&
-                state.start_threshold==hardware/10 && state.channels==1 && state.configured_streams==1,
+                state.start_threshold==1 && state.channels==1 && state.configured_streams==1,
                 "period refinement reduced buffering, increased wakeups or changed PCM format");
             check(state.period_frames==(timed?hardware/100:hardware/40) && state.hw_applies==(timed?1u:0u) &&
-                state.sw_applies==(timed?1u:0u) && statuses==(timed?1u:0u) && timestamps>=(timed?1u:0u),
-                "period refinement did not remain optional or restore original software thresholds");
+                state.sw_applies==(timed?2u:1u) && statuses==(timed?1u:0u) && timestamps>=(timed?1u:0u),
+                "optional period refinement or capture-only startup configuration changed");
             return output;
         };
         check(run(false)==run(true),"finer native period changed capture PCM or fractional filter coordinates");
@@ -792,7 +792,7 @@ void native_period_refinement() {
         check(!state.live && !state.parameter_objects && timestamps==0,"failed refinement leaked or fabricated timing");
         if(scenario<5 || scenario==7) {
             check(error.empty() && statuses==1 && samples==1 && state.period_frames==1200 &&
-                state.buffer_frames==4800 && state.avail_min==1200 && state.start_threshold==4800,
+                state.buffer_frames==4800 && state.avail_min==1200 && state.start_threshold==1,
                 "unsupported period negotiation altered ordinary capture or failed to restore configuration");
             check(state.hw_applies==(scenario==3 || scenario==4?2u:scenario==0?0u:1u),"unexpected hardware reconfiguration");
         } else {
@@ -2760,6 +2760,109 @@ void channel_routing() {
         check(f::state.live==0 && f::state.opens==f::state.closes,"stereo rate negotiation leaked a device");
     }
 }
+void capture_channel_routing() {
+    constexpr unsigned hardware_rate=48000,logical_rate=24000;
+    const auto left_sample=[](std::size_t frame,unsigned) {
+        return static_cast<std::int16_t>(static_cast<int>((frame*97)%16001)-8000);
+    };
+    struct Result {
+        std::vector<float> logical,monitored;
+        std::vector<unsigned> configured;
+        std::vector<std::pair<std::string,unsigned>> configured_rates;
+        std::size_t workspace_bytes=0;
+    };
+    const auto run=[&](std::vector<unsigned> supported,std::size_t read_limit) {
+        f::reset();auto& state=f::state;
+        state.available={"stereo-card"};state.supported_rates={hardware_rate};
+        state.supported_channels=std::move(supported);state.read_limit=read_limit;
+        state.read_results={101,37,233,19,307};
+        state.channel_sample=[&](std::size_t frame,unsigned channel,unsigned rate) {
+            const auto left=left_sample(frame,rate);
+            return channel==0?left:static_cast<std::int16_t>(-left);
+        };
+        Result result; a::StreamFormat format;bool format_seen=false;std::size_t monitor_frames=0;
+        a::Options options;options.minimum_hardware_rate=hardware_rate;
+        options.capture_monitor=[&](std::span<const float> samples,unsigned rate) {
+            check(format_seen && rate==hardware_rate,"capture monitor ran before format or at the modem rate");
+            for(const auto sample:samples) {
+                check(sample==left_sample(monitor_frames++,rate)/32768.0f,
+                      "stereo capture monitor did not contain the selected left channel in frame order");
+                result.monitored.push_back(sample);
+            }
+        };
+        a::capture(logical_rate,"stereo-card",[&](std::span<const float> samples) {
+            result.logical.insert(result.logical.end(),samples.begin(),samples.end());
+            return result.logical.size()<1800;
+        },{},[&](const auto& info) {
+            format=info;format_seen=true;
+            check(state.captured==0,"capture format was reported after hardware PCM arrived");
+        },options);
+        check(format_seen && format.logical_rate==logical_rate && format.hardware_rate==hardware_rate &&
+              format.logical_channels==1 && format.hardware_channels==state.channels &&
+              format.selected_capture_channel==std::optional<std::uint32_t>{0},
+              "capture format did not distinguish mono logical PCM from hardware channel layout");
+        result.workspace_bytes=format.workspace_bytes;
+        check(result.logical.size()>=1800 && monitor_frames==state.captured &&
+              result.monitored.size()==state.captured && state.captured>result.logical.size(),
+              "stereo capture confused frames, interleaved samples or resampled monitor counts");
+        check(state.live==0 && state.opens==state.closes,
+              "capture channel negotiation or early stop leaked a hardware handle");
+        result.configured=state.configured_channels;
+        result.configured_rates=state.configured;
+        return result;
+    };
+
+    const auto mono=run({1},73);
+    check(mono.configured==std::vector<unsigned>{1},"mono capture endpoint lost its preferred native format");
+    const auto dual=run({1,2},73);
+    check(dual.configured==std::vector<unsigned>{1},"dual-capability capture should prefer mono");
+    const auto stereo=run({2},73);
+    check(stereo.configured==std::vector<unsigned>({1,2}),
+          "stereo-only capture did not retry stereo at the same negotiated rate");
+    check(stereo.configured_rates==std::vector<std::pair<std::string,unsigned>>({
+              {"stereo-card",hardware_rate},{"stereo-card",hardware_rate}}) &&
+          std::all_of(f::state.attempts.begin(),f::state.attempts.end(),
+                      [](const auto& endpoint){return endpoint=="stereo-card";}),
+          "stereo retry changed the selected explicit endpoint or hardware rate");
+    check(stereo.workspace_bytes>=mono.workspace_bytes+1024,
+          "reported capture workspace omitted the larger stereo interleaved buffer");
+    check(mono.logical==dual.logical && mono.logical==stereo.logical &&
+          mono.monitored==dual.monitored && mono.monitored==stereo.monitored,
+          "stereo extraction or partial frame reads changed mono/resampled PCM");
+}
+void raw_capture_startup() {
+    for(const auto channels:{1u,2u}) {
+        f::reset();auto& state=f::state;state.available={"raw-card"};
+        state.supported_rates={48000};state.supported_channels={channels};
+        state.raw_capture_start=true;state.read_results={17,-32,29};state.recover_result=0;
+        state.after_recover=[&]{state.pcm_state=2;};
+        state.before_wait=[](int){throw std::runtime_error("raw capture stayed PREPARED below its start threshold");};
+        a::Options options;unsigned gaps=0,callbacks=0,frames=0;
+        options.capture_discontinuity=[&]{++gaps;};
+        a::capture(48000,"raw-card",[&](auto samples) {
+            ++callbacks;frames+=static_cast<unsigned>(samples.size());return callbacks<2;
+        },{},[&](const auto&) {
+            check(state.pcm_state==2 && !state.captured && state.start_threshold==1,
+                "capture startup must be configured before format/PCM without starting prematurely");
+        },options);
+        check(frames==46 && gaps==1 && state.capture_starts==2 && state.prepared_capture_reads==2,
+              "raw capture failed initial or post-recovery automatic startup");
+        check(state.start_threshold_requests==1 && state.buffer_frames==4800 && state.period_frames==1200 &&
+              state.avail_min==1200 && !state.parameter_objects && !state.live,
+              "capture start policy changed buffering/wakeups or leaked resources");
+    }
+    for(const bool setter_failure:{true,false}) {
+        f::reset();auto& state=f::state;state.available={"raw-card"};state.supported_rates={48000};
+        state.raw_capture_start=true;
+        if(setter_failure)state.start_threshold_result=-22;else state.sw_apply_results={-5};
+        bool formatted=false;
+        rejects([&]{a::capture(48000,"raw-card",[](auto){throw std::runtime_error("PCM after failed capture setup");return false;},
+            {},[&](const auto&){formatted=true;});});
+        check(!formatted && !state.captured && !state.parameter_objects && !state.live &&
+              state.opens==state.closes && state.configured.size()==1,
+              "failed capture start configuration continued, retried formats or leaked resources");
+    }
+}
 void audio_options() {
     check(a::exclusive_supported(),"ALSA lost explicit exclusive hardware support");
     const std::vector<float> samples{0,.25f,-.5f,1,-1,2,-2,.00004f,-.00004f};
@@ -2912,7 +3015,7 @@ int main(int argc,char** argv){try{
     }
     plugin_directories();selected_endpoint();default_shared_routes();
     native_source_endpoint_contract();shared_server_timing_fallback();native_prepared_positive_pointer();native_absolute_clock_not_steering_limit();native_running_pointer_intervals();native_slow_query_recovers();native_playback_frontiers();native_sparse_clock_policy();
-    channel_routing();audio_options();
+    channel_routing();capture_channel_routing();raw_capture_startup();audio_options();
     f::reset();f::state.available={"default:CARD=Good"};f::state.hints={{"default:CARD=Good",""}};
     rejects([&]{a::play(std::vector<float>(1),48000,"explicit-bad");});
     check(f::state.attempts==std::vector<std::string>{"explicit-bad"},"explicit endpoint must not silently change");

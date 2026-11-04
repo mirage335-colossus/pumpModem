@@ -7,6 +7,7 @@
 #include <stop_token>
 #include <functional>
 #include <cmath>
+#include <optional>
 namespace datapump::audio {
 struct Device {std::string id,description;};
 std::vector<Device> devices();
@@ -26,13 +27,20 @@ struct StreamFormat {
     // Playback and unsupported providers retain unknown. Any capture gap
     // revokes this witness until a fresh capture/format constructs a new map.
     CaptureTransportRecipe capture_transport={};
+    // Hardware layout is zero when a provider cannot report it. The modem's
+    // logical PCM remains mono; selected_capture_channel records its index in
+    // an interleaved hardware capture stream when known.
+    std::uint32_t hardware_channels=0, logical_channels=1;
+    std::optional<std::uint32_t> selected_capture_channel;
 };
 using StreamFormatCallback = std::function<void(const StreamFormat&)>;
 enum class ChannelMode { left_mono, right_mono, stereo };
 // Applied only at the final hardware PCM boundary, after rate conversion.
 // Unity gain preserves the original conversion exactly; capture is not scaled.
 // Optional read-only capture observation before resampling. The borrowed PCM
-// and rate describe the provider capture stream, independently of the modem clock.
+// is the selected mono input at provider rate (channel zero for a multichannel
+// native stream), independently of the modem clock. It is not interleaved raw
+// device PCM and does not change receiver samples.
 // Keep this callback bounded; it cannot consume samples or finish reception.
 using CaptureMonitor = std::function<void(std::span<const float>,std::uint32_t)>;
 // Report known or uncertain loss of capture continuity before any later PCM.

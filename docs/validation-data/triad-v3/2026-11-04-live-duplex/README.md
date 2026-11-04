@@ -33,11 +33,12 @@ receipts, identities, results and source snapshots, **not** every raw capture.
   physical analog filters or codec conversion.
 - S16 is the software PCM contract, not an effective ADC-bit measurement.
 
-The separate production audio API requests mono capture. This codec requires
-stereo, so the first native attempt stopped before playback. That is an
-unsupported provider/device combination, not a passed physical profile or a
-modem sensitivity failure. The isolated stereo backend avoids changes to the
-ordinary receiver's audio implementation.
+The production audio API originally requested mono capture. This raw codec
+configuration requires stereo, so the first native attempt stopped before
+playback. That original unsupported result is preserved. The subsequent
+[native stereo follow-up](native-stereo-followup.md) corrected the production
+backend and independently exercised it on the same cable. The original campaign
+below remains an ALSA-utils measurement, not a retroactively native observation.
 
 ## Diagnostic ladder and prior evidence
 
@@ -288,8 +289,9 @@ Python model/bridge/ALSA/campaign checks passed **70/70** in **3.03 seconds**
 including interpreter startup. Exact source identities and test logs are retained
 with the evidence. No ordinary receiver regression campaign was run.
 
-Remaining exclusions are substantive: the production mono-capture provider on
-this stereo-only codec, real radios and RF retuning, independently clocked
+The production capture limitation was corrected in the
+[native stereo follow-up](native-stereo-followup.md). Remaining exclusions are
+substantive: real radios and RF retuning, independently clocked
 oscillators, near-DC steady-state responses below measured support, multi-day
 physical operation, calibrated operational admissions and hardware reliability
 under repeated independent trials. They are not counted as passed coverage.
