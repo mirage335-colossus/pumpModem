@@ -8,7 +8,7 @@ Use the appropriate entry point; a green guard is not full qualification:
 
 | Purpose | Entry point | Decision and cost policy |
 | --- | --- | --- |
-| Routine CPU CI | [`triad_perf_guard.py --profile ci`](../tools/triad_perf_guard.py) | Broad screening; fresh confirmation of suspected slowdowns beyond 1.70×; default 300-second budget. |
+| Routine CPU CI | [`triad_perf_guard.py --profile ci`](../tools/triad_perf_guard.py) | Broad screening; fresh confirmation of suspected slowdowns beyond 1.70×; hosted CI allows 600 seconds; the standalone CLI defaults to 300. |
 | Development on available GPUs | `triad_perf_guard.py --profile gpu-dev --device cuda` | The applicable GPU families, a 1.30× threshold, and a default 600-second budget. |
 | Prediction and complete-scope qualification | [`triad_perf_complete.py`](../tools/triad_perf_complete.py) and focused adapters below | Retains historical forecast validation, mean-runtime decisions, cold/sustained checks and explicit unresolved obligations. The engineering target remains 25 minutes; focused qualification can take longer. |
 
@@ -36,7 +36,7 @@ python3 tools/triad_perf_guard.py --profile ci --device cpu \
   --fixture-cache FIXTURE_CACHE --functional-defaults \
   --native-coverage NATIVE_COVERAGE_JSON --python-coverage PYTHON_COVERAGE_JSON \
   --hardware-baseline HARDWARE_PROFILE_JSON \
-  --threads 2 --native-threads 1 --budget-seconds 300 \
+  --threads 2 --native-threads 1 --budget-seconds 600 \
   --output local-evidence/triad-performance-guard/cpu-001
 ```
 
@@ -49,59 +49,94 @@ reported as unavailable rather than silently counted as tested. Measure the
 external command wall time when assessing end-to-end latency; the internal
 budget does not include dependency installation/build or the final report write.
 
-Both guards screen complete named workload geometries, sharing exact sampled
-fixture generation and persistent worker setup where valid. Native simulations
+Both guards screen complete named workload geometries. FFT captures and
+persistent worker setup are reused where valid; sampled-family screens measure
+each complete generation/receiver pipeline directly. Native simulations
 include generation, channel, receiver and CLI completion. FFT screening includes
 resident preparation and the full search bank; fixture generation and worker
-startup are separate recorded costs. Sampled-family confirmation regenerates its
-capture and measures the complete receiver pipeline. Planner/resource targets
+startup are separate recorded costs. Sampled-family screens and confirmations regenerate their captures and include
+generation, loading, preparation, transfer, receiver work and IPC in the complete
+pipeline timer. Worker startup is a separately recorded campaign cost. Planner/resource targets
 use full process timing. These direct comparisons introduce no new extrapolation
 and do not require requalifying unaffected historical models. Cold compilation,
 minute-long sustained checks and prediction qualification are separate tasks.
 
-A screen nominates a suspect; it cannot block performance. Fresh direct full-target
-pairs then test whether `P(candidate/reference > threshold) > 0.5`, treating a
-tie as nonpositive. This is a **median paired-runtime-ratio** criterion, not an
-arithmetic-mean or geometric-mean runtime bound, nor a ratio of marginal
-medians. Arithmetic means remain
-reported diagnostics; the existing mean-runtime forecasts and qualification
-procedures below keep their original estimands and rules.
+The earlier shared-generation family screen composed separately timed stages.
+That estimate was not an independently validated complete-pipeline measurement.
+The default now uses direct pipelines: retained accounting estimated roughly
+28 seconds of additional CPU work, much less than a new multi-minute model
+qualification. The shared composition remains a diagnostic-only constructor
+option; it cannot silently substitute for direct measurement. Historical
+profitable duration/frequency-bank forecasts remain available under their exact
+qualification identities. Failed staged forecasts remain failed.
+
+A screen nominates a suspect; it cannot block performance. Version 3 confirms
+with **randomized balanced blocks**, each containing four complete executions:
+C,R,R,C or R,C,C,R. The two candidate times and two reference times are summed;
+the block is one statistical observation. Its two inner pairs are never counted
+as independent observations. The estimand is the median randomized block ratio,
+not the arithmetic mean runtime or a ratio of marginal medians. Existing
+mean-runtime forecasts retain their separate qualification rules.
+
+Each confirmation period creates fresh source workers in the assigned order,
+warms the full selected case outside its target timer, then closes and reaps the
+workers. Native, planner and resource targets already include fresh process
+startup and exit. Raw context/PID or subprocess-launch receipts, target timings,
+warmup, setup and cleanup costs are retained. These costs count toward the
+campaign budget even when excluded from a resident target's timing boundary.
+Immutable captures and frozen arithmetic choices can still be reused.
+
+Assignment coins use fresh operating-system randomness and are frozen in the
+recorded schedule before screening; simulation seeds remain reproducible.
+`--order-seed` permits diagnostic replay but disables statistical performance
+blocking. Repeating fixed source-order coins across CI runs does not establish
+the randomized-inference assumptions.
 
 The [exact sign/binomial test](https://www.itl.nist.gov/div898/software/dataplot/refman1/auxillar/signtest.htm)
-uses conservative nonpositive ties instead of discarding them. A
+treats ties as nonpositive. A
 [Bonferroni allocation](https://www.itl.nist.gov/div898/handbook/prc/section4/prc473.htm)
-spends a single workflow budget across the
-frozen hypotheses, performance jobs and confirmation looks: each look receives
-`alpha_suite / (hypotheses × jobs × looks)`. CI defaults to 1%;
-GPU development defaults to 5%. This controls the chance of any statistical
-performance rejection under the declared null and independent confirmation-pair
-assumptions; dependence between different workload cases does not require another
-assumption. It is a per-workflow allowance, not a lifetime guarantee across commits.
-Normality of runtimes is not required. Randomized execution order and fresh
-inputs help reduce systematic pairing effects but do not prove independence or
-remove serial thermal/scheduling regimes.
+spends one workflow budget across frozen hypotheses, jobs and confirmation looks:
+`alpha_suite / (hypotheses × jobs × looks)`. CI defaults to 1%; GPU development
+defaults to 5%. This is a per-workflow statistical allowance, not a lifetime
+or unconditional hardware guarantee. Correctness, infrastructure and integrity
+failures are separate from that allowance.
 
-CI normally has one look at 12 fresh pairs; GPU development normally has looks
-at 12 and 20. Larger job/hypothesis families or smaller error budgets can increase
-the frozen sample counts so an exact rejection is attainable. Confirmation can
-stop early when no remaining permitted look could reject even if every remaining
-pair were positive. This is a nonblocking futility stop, not a favorable timing
-result. No alpha is reclaimed, no sample is discarded, and no retry seeks a pass.
+The conditional null requires the probability of a positive block contrast,
+given earlier blocks and source-independent slot conditions, to be at most one
+half. One sufficient condition is that candidate potential runtime is at most
+the threshold times reference potential runtime in every slot, with no
+source-dependent carry-over. The contrasts for complementary assignments then
+sum to a nonpositive value, so at most one fair-coin outcome is positive.
+This permits serial slot variation; it does not follow merely from equal
+marginal runtime distributions. Source-dependent thermal or scheduling
+carry-over can still violate the model. Fresh contexts and full-case warmup
+address persistent worker effects without proving universal independence.
+See [hierarchical benchmarking](https://kar.kent.ac.uk/33611/45/p63-kaliber.pdf)
+for why many iterations within one worker do not replace fresh outer contexts.
 
-The 300/600-second defaults are effort budgets, not detection-power guarantees.
-An expensive family can nominate even a severe slowdown without leaving enough
-time for a complete fresh confirmation look; that remains an unconfirmed
-nomination with limited assurance. The guard does not infer a rejection from
-censored timeouts. Use an explicit larger budget, such as
-`--budget-seconds 1500`, when that confirmation cost is justified.
+CI normally has one look at 12 blocks; GPU development has looks at 12 and 20.
+Larger job/hypothesis families or smaller error budgets can raise the frozen
+counts. Confirmations run round-robin among suspects, starting with cheaper
+cases. They stop without blocking when no remaining permitted look could reject,
+or when the next complete block cannot fit the budget. An incomplete block is
+retained but supplies no sign; it is not selectively replaced. No alpha is
+reclaimed and no retry seeks a pass.
 
-The [decision controls](../tools/triad_perf_guard_controls.py) include asymmetric,
-bimodal, heavy-tailed and serial regimes. The rejected five-pair Student-t
-proposal could falsely block most workflows in a symmetric bimodal mean-null
-control; a nominal small alpha did not repair invalid distributional assumptions.
-The exact sign test avoids that normality failure. A skewed mean-null law can
-still be a true median regression: report the estimands separately. Serial
-pair dependence remains an explicit limitation, not a proven future error bound.
+The standalone CLI’s 300/600-second defaults are effort budgets, not detection-power guarantees. Hosted CI supplies 600 seconds so modest scheduling variation around the measured five-minute run does not truncate its inventory.
+Use `--budget-seconds 1500` when additional confirmation is justified. An expensive
+suspect may remain unconfirmed. Neither a timeout nor a poor model alone makes
+CI red. The broader qualification target remains 25 minutes; qualification is
+occasional, rather than part of every correction cycle.
+
+The [decision controls](../tools/triad_perf_guard_controls.py) retain the earlier
+persistent-source failure and test the same latent slot effects with source
+reassignment. They distinguish full-target, outside-target preparation and changed
+work-regime controls. The
+[actual context controls](../tools/triad_perf_guard_context_controls.py) use real
+FFT/family A/A executions with disclosed logical slot-delay replay. Those small
+experiments validate plumbing and context replacement, not a physical whole-suite
+false-block frequency. Preserve the historical failures and report these scopes
+separately from the synthetic Monte Carlo intervals.
 
 Five-second arithmetic and tensor probes remain separate diagnostics, with
 first-use costs and unavailable formats reported. A one-block hardware warning
@@ -110,14 +145,65 @@ slowdown that cancels in candidate/reference ratios. Do not infer CUDA kernel
 coverage, FP32 correctness or instruction utilization from a nominal dtype alone;
 read the [GPU precision guide](gpu-precision-controls.md) before changing arithmetic.
 
-The [guard validation record](validation-data/triad-v3/2026-11-04-performance-guard/README.md)
-records final CPU/GPU command walls of **291.060/236.635 seconds**, all 33/36
-workload screens and 18 functional receipts per run, with no confirmed regression
-or functional failure. These exclude separate harness tests and dependency/build
-setup; the hosted workflow has not run. Both guards retain limited assurance.
-The record also preserves initial integration failures, actual slowdown controls,
-partial new-guard coverage and the severe serial-dependence false-block control.
-The nominal 1%/5% budgets are not unconditional hardware guarantees.
+The [current completion record](validation-data/triad-v3/2026-11-04-performance-completion/README.md)
+records CPU/GPU command walls of **328.074/461.339 seconds**, all 33/36
+workload screens and 18 functional receipts per run. Separate method assessments
+qualified those finite measurement routes using actual full-target, cold,
+sustained and source-bound coverage evidence. Neither routine found a confirmed
+regression or functional/integrity failure. These walls exclude separate harness
+tests and dependency/build setup; hosted GitHub Actions has not run. The GPU
+profile includes extra cases and confirmations, so this is not an acceleration
+comparison. The CPU sustained trend and unavailable hardware baselines remain
+explicit limitations. The [earlier guard record](validation-data/triad-v3/2026-11-04-performance-guard/README.md)
+preserves the persistent-context statistical failure; the new balanced-block
+controls and their conditional limits are in the current record.
+
+### File-only assessment and focused qualification
+
+After obtaining a complete routine report, reuse compatible existing evidence:
+
+```sh
+python3 tools/triad_perf_complete.py assess-methods \
+  --guard-report GUARD_OUTPUT/summary.json \
+  --candidate-root . --reference-root REFERENCE_SOURCE \
+  --binary build/dev-cli/triad_long --reference-binary REFERENCE_BINARY \
+  --planner-binary build/dev-cli/triad_planner_perf \
+  --planner-reference-binary REFERENCE_PLANNER_BINARY \
+  --planner-bounds-workspace RETAINED_GAUSSIAN_WORKSPACE \
+  --native-coverage NATIVE_COVERAGE_JSON --python-coverage PYTHON_COVERAGE_JSON \
+  --lifecycle-report LIFECYCLE_SUMMARY \
+  --lifecycle-anchor-directory LIFECYCLE_ANCHORS \
+  --output local-evidence/triad-performance-guard/methods-001.json
+```
+
+This performs no receiver timing. It verifies raw full work, numeric/source/input
+identities, timing boundaries, required inventory gaps, functional receipts and
+instrumentation. It does not make performance acceptance or narrow timing
+precision a prerequisite for qualifying a direct measurement method. If cold
+proofs reside in a separate preserved report, supply `--lifecycle-cold-report`.
+The explicit `--assessment-source-transfer` and `--guard-policy-source-transfer`
+options support only the exact reviewed report-only transitions in the current
+record; they are not permission to reuse arbitrary changed source.
+
+When a relevant lifecycle regime actually changes, qualify that case separately:
+
+```sh
+python3 tools/triad_perf_lifecycle.py --mode qualify --device cuda \
+  --precision fp32 --case mixed-cuda \
+  --candidate-root . --reference-root REFERENCE_SOURCE \
+  --binary build/dev-cli/triad_long --reference-binary REFERENCE_BINARY \
+  --anchor-directory NEW_ANCHORS --output NEW_QUALIFICATION \
+  --threads 2 --native-threads 1 --minimum-campaign-seconds 60 \
+  --maximum-holds 3 --budget-seconds 1500
+```
+
+Use `--device cpu --case mixed-cpu --mixed-method direct --direct-cycles 6`
+for the measured CPU direct route. Cold targets are separate named cases. A
+new hardware/software/work regime may require a different sustained length;
+the example is not a universal sufficient duration. Do not repeat qualification
+merely because routine timing is noisy. Failed forecasts remain unselected;
+direct measurement is preferable when forecast qualification costs more than
+the work saved.
 
 ## Preserved qualification evidence
 

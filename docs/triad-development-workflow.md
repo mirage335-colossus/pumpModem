@@ -157,12 +157,15 @@ to select cheap functional checks and the
 [fast guard commands](triad-performance.md#fast-guard-commands-and-decision-contract).
 Normal CPU CI uses `triad_perf_guard.py --profile ci`: broad full-workload screens
 followed by fresh confirmation only for suspects. Its exact binomial decision
-checks median paired-runtime ratios above 1.70, with a 1% workflow-wide
-false-rejection budget under the declared independent-pair assumptions. It does
+checks median randomized balanced-block runtime ratios above 1.70, with a 1%
+workflow-wide false-rejection budget under the declared conditional slot and
+no-carryover assumptions. Each block uses fresh execution contexts and a recorded
+fresh-random source order; fixed-order diagnostic replay cannot block performance. It does
 not establish a mean-runtime confidence bound or prove that no slowdown occurred.
 Use `--profile gpu-dev --device cuda` for the applicable GPU development paths,
-a 1.30 ratio threshold and a 5% workflow budget. Default work budgets are 300
-seconds and 600 seconds respectively; omitted or unfinished work stays visible.
+a 1.30 ratio threshold and a 5% workflow budget. Standalone defaults are 300/600 seconds; hosted CI supplies 600 seconds of
+headroom around the approximately five-minute complete screen. Omitted or
+unfinished work stays visible.
 Even a severe slowdown can remain unconfirmed when the fresh full confirmation
 cost exceeds the remaining budget; choose `--budget-seconds 1500` when warranted.
 Timing uncertainty and hardware warnings alone do not make these guards fail;
@@ -178,8 +181,13 @@ took 12 minutes 21 seconds for 23 CPU gates; that is not a measurement of the ne
 guard or a claim that broader qualification completed. Preserve original
 qualification evidence and unresolved scope. Do not rerun historical sensitivity
 campaigns or unaffected qualification merely to obtain a narrower timing interval.
-The [guard validation record](validation-data/triad-v3/2026-11-04-performance-guard/README.md) retains both
-successful controls and the serious serial-dependence limitation.
+The [current completion record](validation-data/triad-v3/2026-11-04-performance-completion/README.md)
+qualifies the finite 33 CPU/36 GPU measurement routes, records 328/461-second
+routines and sustained forecast evidence, and preserves remaining limits.
+Its randomized balanced-block controls address the persistent-context failure
+retained in the earlier guard record; they do not prove an unconditional
+hardware false-block bound. File-only `assess-methods` reuses the evidence
+without repeating receiver work.
 
 **Selective-model version warning:** the detailed 2026-11-02 selective
 campaign used `legacy-allpass-v1`. Its receiver results remain valid for that

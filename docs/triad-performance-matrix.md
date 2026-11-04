@@ -21,6 +21,47 @@ adapter. The native `triad-long` CLI remains part of complete-pipeline timing.
 
 ## Fast guard versus qualification
 
+### Current selected measurement routes
+
+The routine guard selects a direct complete target for the current named
+workloads. Native and resident FFT screens run the full named target on every
+screen; the older native-duration and FFT prediction chains remain available
+only where their exact source, workload, arithmetic and hardware identities
+qualify them. They are historical alternatives, not a blanket route for all
+cases. The sampled-family adapters screen nine CPU or twelve CUDA workloads as
+direct complete receiver pipelines, including current preparation and full
+scoring. They do not currently treat a short shared-composition witness as a
+validated forecast of those pipelines. Planner and resource workloads also
+use named full-process targets. No route in this summary establishes scaling to
+unmeasured workloads or hardware.
+
+Confirmation uses a randomized balanced four-arm block: two complete paired
+measurements in opposite source order, each in fresh source execution
+contexts. The fair assignment coin selects `candidate, reference, reference,
+candidate` or its reverse. The two candidate runtimes and two reference
+runtimes form one statistical observation; the inner paired calls are not
+independent samples. The nominal 1% CI workflow allocation is conditional on
+the declared randomized-slot null and no unaccounted context carry-over. This
+does not provide an unconditional guarantee against arbitrary persistent
+environmental regimes. Fresh-context setup and warm-up are recorded outside
+each target timer where the adapter's original target boundary excludes them.
+
+The file-only current assessments qualify all 33 CPU and 36 CUDA selected
+measurement routes, separately from the guard's performance outcome. They check
+the actual complete targets and all required inventory gaps. Routine command
+walls were 328.074 and 461.339 seconds; the GPU profile includes extra targets
+and confirmations, so these are not comparable acceleration measurements.
+
+The current direct CPU mixed campaign used six cycles and completed in 798.082
+seconds, with warm spans of 86.2–99.65 seconds. Its maximum reported trend
+ratio was 1.18054; that stability result remains under review. The current GPU
+server mixed forecast check completed in 807.956 seconds with three holds. The
+reference actual/forecast, candidate actual/forecast and paired forecast-ratio intervals were [0.986654, 1.006105],
+[0.981751, 1.029124] and [0.982916, 1.035486], respectively. These results
+belong to their recorded source/build/hardware identities; they do not change
+the status of previous failed forecasts or qualify other backends. Full raw
+work, seals and uncertainty are retained in the [current completion record](validation-data/triad-v3/2026-11-04-performance-completion/README.md).
+
 The normal CI/development entry point is
 [`triad_perf_guard.py`](../tools/triad_perf_guard.py). It keeps a finite full-workload
 screening inventory and confirms only suspects. The existing
@@ -30,9 +71,9 @@ are unchanged. A guard outcome cannot turn those records into qualification.
 
 | Guard family | CPU / CUDA workload count | Full timing boundary and reuse |
 | --- | ---: | --- |
-| Native v3 | 9 / 9 | Complete manifest CLI simulation/trial bundle, including maximal Added Symbols; no duration extrapolation. |
-| Resident FFT | 5 / 5 | Complete preparation and search bank on an exact cached fixture; worker startup and fixture creation are separately recorded. |
-| Sampled state/phase/grouped/RBPF/acquisition | 9 / 12 | Full manifest geometry; screening shares exact generation profiles, confirmation uses fresh generation plus complete receiver processing. |
+| Native v3 | 9 / 9 | Direct full manifest CLI simulation/trial bundle, including maximal Added Symbols; no duration extrapolation in the current screen. |
+| Resident FFT | 5 / 5 | Direct complete preparation and search bank on an exact cached fixture; worker startup and fixture creation are separately recorded. |
+| Sampled state/phase/grouped/RBPF/acquisition | 9 / 12 | Direct complete receiver pipelines at full manifest geometry; confirmations regenerate input and use fresh source contexts. No abbreviated pipeline forecast is selected by the current screen. |
 | Planner/statistics | 8 / 8 | Fixed native or retained-workspace bundles, complete process timer. Bounds remain CPU work on GPU hosts. |
 | Native resource boundary | 2 / 2 | Full paired/sequential preparation exports at the fixed 5/4 MiB boundary, with actual branch/work and byte-parity checks. |
 | Functional/coverage and hardware diagnostics | Separate outcomes | Required focused tests and matched coverage receipts; five-second arithmetic/tensor probes are advisory, not extra rejection hypotheses. |
@@ -48,19 +89,23 @@ each revision; changed public work or algorithmic regimes are not silently
 compared as equivalent.
 
 The [guard decision contract](triad-performance.md#fast-guard-commands-and-decision-contract)
-uses a workflow-wide exact binomial test for median paired full-runtime ratios.
+uses a workflow-wide exact binomial test on randomized balanced-block
+full-runtime ratios.
 It is intentionally distinct from the existing arithmetic/geometric mean
 forecasts and their qualification rules. Limited assurance, missing coverage,
 model applicability and hardware warnings do not become successful coverage or
 qualification when the reject-only guard exits zero. An expensive nominated
 case can remain unconfirmed even for a severe slowdown if its fresh full look
 does not fit the remaining budget; there is no timeout-censoring rejection rule.
+The test treats one four-arm block as one observation, not each of its two
+internal pairs as an independent observation.
 The existing source
 instrumentation below remains necessary evidence; a full timing screen or
 function-entry witness cannot replace it.
 
-The [guard validation record](validation-data/triad-v3/2026-11-04-performance-guard/README.md) records the separate
-statistical controls and their limits; it does not replace the qualifications below.
+The [current completion record](validation-data/triad-v3/2026-11-04-performance-completion/README.md)
+records the separate statistical controls, qualification and limits. The earlier
+guard and failed qualification reports remain historical evidence, unchanged.
 
 ## Reading status
 
@@ -139,8 +184,9 @@ qualification now exists for one RTX PRO 6000 Blackwell identity. The current
 CPU direct all-nine-family campaign is measured, with its stability flag under
 independent review; broad FFT future coverage is not claimed for its conditional engineering model;
 that is a limitation, not an additional release-blocking gap. The normal-profile
-GPU FHSS decision remains inconclusive. Hosted CI has not run, so whole-scope
-qualification is not established. The older width-driven campaigns below remain
+GPU FHSS decision remains inconclusive in that historical protocol. Hosted CI
+has not run. Current finite measurement-method qualification is reported above;
+it does not promote those old performance/forecast decisions. The older width-driven campaigns below remain
 historical evidence, not routine cost requirements.
 
 Earlier native qualification used the duration model for `native-vlf-low-cn0`; the latest CPU routine explicitly selected `--native-direct-case native-vlf-low-cn0`. A separate stopped savings experiment measured 57.819 s for the abbreviated arm and 46.949 s for the direct arm in its first matched block. These are arm costs, not single-target runtimes; the second abbreviated guard was inconclusive, so the experiment is incomparable and supports no savings claim. Direct measurements establish their named source, binary, hardware and case timing; they do not require an unrelated extrapolation and do not generalize to unmeasured geometry. Historical full-target confirmation and reuse limits remain in the [performance trace record](validation-data/triad-v3/2026-11-03-performance-trace/README.md). Resident FFT timing measures full selected preparation and scoring geometry, not waveform/channel generation. The state adapter's outer call combines initialization, updates, transfers and finalization; its nested update timer is contained within that interval and must not be added as a separate stage.
@@ -157,9 +203,9 @@ CPU staged confirmation left all three attempted cases unqualified. For Gaussian
 
 A single-capture phase-cost diagnostic measured a 0.647 ms late-tail block against a 179–246 ms receiver-cost gap. Its subnormal scan found no correlation with the slowdown, and no DSP precision change followed. The retained CPU AVX2 fallback probe reports ATen capability `AVX2`, while NumPy selected `X86_V3` and `baseline(X86_V2)`; requested MKL, OpenBLAS and oneDNN ceilings are not a verified complete ISA quarantine. See the archived [dispatch record](validation-data/triad-v3/2026-11-03-performance/avx2-dispatch.json.gz).
 
-## Latest routine outcomes
+## Preserved November 3 routine outcomes
 
-The latest CPU routine completed in 1684.791 seconds (28:05), 184.791 seconds
+That CPU routine completed in 1684.791 seconds (28:05), 184.791 seconds
 over the 25-minute engineering target. In that original run, native/FFT/sampled
 warm-target decisions passed except broad FFT historical-anchor applicability;
 later focused CPU/GPU checks passed one endpoint each, but the routine was not

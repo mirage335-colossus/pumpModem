@@ -1,5 +1,6 @@
 """Evidence aggregation and process-boundary checks; no timing campaign here."""
 import ast
+import copy
 import json
 import os
 from pathlib import Path
@@ -38,6 +39,17 @@ def report():
             "coverage_receipts": [{"status": "source_rows_matched_historical", "missing_expected_sources": [],
                                    "declared_dependency_status": "matched", "counter_quality": {"status": "valid"}} for _ in range(2)],
             "errors": []}
+
+
+def timing_result(*, measured=True, prediction="passed", regression="passed",
+                  precision="passed", hardware="screen_observed"):
+    return {"all_declared_cases_measured": measured,
+            "rows": [{"id": "native-hour", "runtime_method": "direct_full_measurement"},
+                     {"id": "fft-long", "runtime_method": "validated_full_target_forecast"}],
+            "prediction_accuracy": {"status": prediction},
+            "performance_regression": {"status": regression},
+            "timing_precision": {"status": precision},
+            "hardware_health": {"status": hardware}}
 
 
 class CompleteSuiteTests(unittest.TestCase):
@@ -407,6 +419,200 @@ class CompleteSuiteTests(unittest.TestCase):
         result = complete.summarize(receipt, legacy(), {"sampled": case("sampled")}, ["sampled"])
         self.assertEqual(result["status"], "failed")
         self.assertEqual(result["outcomes"]["performance_regression"]["status"], "passed")
+
+    def test_method_qualification_is_separate_from_performance_and_precision(self):
+        # Direct complete targets and independently validated forecasts qualify
+        # their selected methods even when the candidate itself fails a speed
+        # gate, the timing-width goal is unresolved, or the host raises a trend
+        # warning. Those are distinct outcomes consumed by the legacy summary.
+        timing = timing_result(regression="failed", precision="inconclusive",
+                               hardware="degraded_screen")
+        result = complete.method_qualification(timing, functional_complete=True,
+            coverage_complete=True, cold_complete=True)
+        self.assertEqual(result["status"], "qualified")
+        self.assertEqual(result["case_ids"], ["native-hour", "fft-long"])
+        self.assertEqual(result["performance_acceptability"], "failed")
+        self.assertFalse(result["performance_acceptability_required_for_method_qualification"])
+        self.assertFalse(result["timing_precision_required_for_method_qualification"])
+        self.assertFalse(result["hardware_health_or_trend_screen_required_for_method_qualification"])
+
+    def test_method_qualification_requires_a_complete_valid_method_inventory(self):
+        good = timing_result()
+        cases = [
+            (timing_result(measured=False), {}, "declared complete-target inventory"),
+            (timing_result(prediction="unqualified"), {}, "selected complete-target timing methods"),
+            (good, {"functional_complete": False}, "functional and numerical"),
+            (good, {"coverage_complete": False}, "instrumentation"),
+            (good, {"cold_complete": False}, "cold-start"),
+            (good, {"remaining_gaps": ["memory.spill"]}, "unresolved computational boundaries"),
+            (good, {"extension_unresolved": ["gpu-lifecycle"]}, "extension methods"),
+            (good, {"errors": ["changed work signature"]}, "integrity validation"),
+        ]
+        for timing, changes, expected in cases:
+            with self.subTest(expected=expected):
+                kwargs = {"functional_complete": True, "coverage_complete": True,
+                          "cold_complete": True}
+                kwargs.update(changes)
+                result = complete.method_qualification(timing, **kwargs)
+                self.assertEqual(result["status"], "incomplete")
+                self.assertTrue(any(expected in blocker for blocker in result["blockers"]))
+
+    def test_legacy_exit_and_status_are_not_rewritten_by_additive_method_result(self):
+        evidence = report()
+        evidence["inventory_unresolved"] = []
+        evidence["sampled_summary"] = {"cold_latency_qualification": "qualified"}
+        old_timing = legacy()
+        result = complete.summarize(evidence, old_timing,
+                                    {"sampled": case("sampled")}, ["sampled"])
+        self.assertEqual(result["status"], "passed")
+        self.assertEqual(result["exit_code"], 0)
+        self.assertTrue(result["complete_scope_qualification"])
+        self.assertEqual(result["selected_method_qualification"]["status"], "qualified")
+
+        # A failed current performance decision still leaves the legacy exit
+        # failed, while selected-method qualification remains independently
+        # inspectable and cannot erase that result.
+        slower = legacy(cases=[case("legacy", comparison={"gate": "performance_regression"})])
+        failed = complete.summarize(evidence, slower,
+                                    {"sampled": case("sampled")}, ["sampled"])
+        self.assertEqual(failed["status"], "failed")
+        self.assertEqual(failed["exit_code"], 2)
+        self.assertTrue(failed["selected_method_qualification"]["complete"])
+
+    def test_selected_method_gap_closure_rejects_unknown_wrong_mapping_and_missing_target(self):
+        import triad_perf_planner as planner
+        import triad_perf_resource as resource
+
+        case_ids = {"planner:"+row["id"] for row in planner.manifest()["cases"]}
+        bounds_ids = {"planner:"+row["id"] for row in planner.manifest()["bounds_cases"]}
+        resource_ids = {"resource:"+mode for mode in resource.REGIMES}
+        method_ids = case_ids | bounds_ids | resource_ids
+        lifecycle = {"method_status": "qualified"}
+
+        def matrix(gap_id, extension=None):
+            row = {"row_id": gap_id, "required_gaps": [gap_id]}
+            if extension is not None:
+                row["required_extension"] = {"id": extension, "gap_ids": [gap_id]}
+            return {"rows": [row]}
+
+        good = complete._method_inventory_closures(
+            matrix(planner.GAP, "planner"), method_ids, lifecycle)
+        self.assertEqual(good[0]["id"], planner.GAP)
+        with self.assertRaisesRegex(ValueError, "unrepresented required computational boundary"):
+            complete._method_inventory_closures(matrix("future.unknown-boundary"), method_ids, lifecycle)
+        with self.assertRaisesRegex(ValueError, "required boundary mapping differs"):
+            complete._method_inventory_closures(matrix(planner.GAP, "resource"), method_ids, lifecycle)
+        with self.assertRaisesRegex(ValueError, "lacks complete selected-method evidence"):
+            complete._method_inventory_closures(
+                matrix(planner.GAP, "planner"), method_ids - {next(iter(case_ids))}, lifecycle)
+
+    def test_selected_method_full_family_replay_rejects_corrupted_raw_receipts(self):
+        import triad_perf_families as sample
+
+        case = copy.deepcopy(sample.manifest()["cases"][0])
+        profile = sample.manifest()["fixtures"][case["fixture"]]
+        seed = 1820301
+        binary = ROOT / "build/dev-cli/triad_long"
+        command = sample.native_arguments(binary, profile, seed, 1, "/tmp/capture-0")
+        receiver = {"seconds": {"receiver": 0.25}, "work": {
+            "unit": case["unit"], "count": 7, "target_count": 7},
+            "regime": {"algorithm": "test-regime"}, "result": {"scores": [0.5]}}
+        source = sample.stage_sources(ROOT, case)
+
+        def job():
+            return {"generation": {"count": 1, "seed": seed,
+                    "commands": [list(command)], "invocation_wall_seconds": [0.4],
+                    "wall_seconds": 0.4},
+                "fixture": [{"path": "/tmp/capture-0"}],
+                "receiver_runs": [{"receiver": copy.deepcopy(receiver),
+                    "complete_receiver": True, "source_sha256": dict(source),
+                    "receiver_wall_seconds": 0.25, "request_wall_seconds": 0.3}],
+                "complete_pipeline_wall_seconds": 0.75}
+
+        complete._method_family_job(job(), case, ROOT, binary, 1)
+        changes = {
+            "unit": lambda value: value["receiver_runs"][0]["receiver"]["work"].update(unit="wrong-unit"),
+            "source": lambda value: value["receiver_runs"][0]["source_sha256"].update({"changed.py": "bad"}),
+            "profile_argv": lambda value: value["generation"]["commands"][0].__setitem__(1, "--changed-mode"),
+            "capture_count": lambda value: value["generation"].update(count=2),
+            "outer_timer": lambda value: value.update(complete_pipeline_wall_seconds=0.6),
+        }
+        for label, mutate in changes.items():
+            with self.subTest(receipt=label):
+                invalid = job()
+                mutate(invalid)
+                with self.assertRaises(ValueError):
+                    complete._method_family_job(invalid, case, ROOT, binary, 1)
+
+    def test_historical_guard_restores_only_the_exact_nested_futility_seal(self):
+        import triad_perf_guard_policy as policy
+
+        def retained_fixture(directory, sibling="valid"):
+            directory = Path(directory)
+            measurements = directory / "measurements"
+            measurements.mkdir(parents=True)
+            plan = policy.build_guard_plan(["case-a"], policy.GuardPolicy("ci"),
+                metadata={"case_selection": "all declared applicable workload families"},
+                measurement_protocol=policy.LEGACY_PROTOCOL)
+            observed = policy.PairObservation("screen-a", 10., 10.)
+            screen = policy.screen_case(plan, "case-a", observed, force_confirmation=True)
+            first = [policy.PairObservation("confirmation-a", 10., 1.),
+                     policy.PairObservation("confirmation-b", 10., 1.)]
+            futility = policy.confirmation_futility(plan, "case-a", first,
+                                                   screen_run_ids=["screen-a"])
+            self.assertTrue(futility["futile"])
+            decision = policy.build_guard_report(plan, [screen], [], futility_records=[futility])
+            # The original v2 report stores an unsealed copy nested in the
+            # sealed decision. Its exact separately retained sibling is the
+            # only allowed source for recovering the nested record identity.
+            nested = decision["futility_records"][0]
+            self.assertNotIn("record_sha256", nested)
+            receipt = futility
+            if sibling == "missing":
+                pass
+            elif sibling == "badseal":
+                receipt = dict(futility)
+                receipt["sample_count"] += 1
+            elif sibling == "differentbody":
+                other = policy.confirmation_futility(plan, "case-a",
+                    [policy.PairObservation("confirmation-other-a", 10., .5),
+                     policy.PairObservation("confirmation-other-b", 10., .5)],
+                    screen_run_ids=["screen-a"])
+                receipt = other
+            elif sibling != "valid":
+                raise AssertionError("unknown fixture mutation")
+            if sibling != "missing":
+                (measurements / "futility-0000.json").write_text(json.dumps(receipt, indent=2) + "\n")
+            measured = {"hypothesis_id": "case-a", "phase": "screen",
+                        "observation": {"run_id": observed.run_id}}
+            (measurements / "pair-0000.json").write_text(json.dumps(measured, indent=2) + "\n")
+            (directory / "plan.json").write_text(json.dumps(plan, indent=2) + "\n")
+            value = {"schema": "triad-performance-fast-guard-run-v1",
+                     "plan_sha256": plan["record_sha256"], "guard_decision": decision,
+                     "source_integrity": {"status": "passed"},
+                     "measurements": [measured], "measurement_count": 1}
+            path = directory / "summary.json"
+            path.write_text(json.dumps(value, indent=2) + "\n")
+            return path
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = retained_fixture(directory)
+            with patch.object(policy, "build_guard_report",
+                              wraps=policy.build_guard_report) as replay:
+                _, plan = complete._method_guard(path)
+            restored = replay.call_args.kwargs["futility_records"]
+            self.assertEqual(len(restored), 1)
+            self.assertEqual(restored[0]["record_sha256"],
+                             policy.confirmation_futility(plan, "case-a",
+                                [policy.PairObservation("confirmation-a", 10., 1.),
+                                 policy.PairObservation("confirmation-b", 10., 1.)],
+                                screen_run_ids=["screen-a"])["record_sha256"])
+
+        for mutation in ("missing", "badseal", "differentbody"):
+            with tempfile.TemporaryDirectory() as directory:
+                path = retained_fixture(directory, mutation)
+                with self.subTest(sibling=mutation), self.assertRaises((ValueError, FileNotFoundError)):
+                    complete._method_guard(path)
 
     def test_historical_coverage_is_bound_to_current_source_bytes(self):
         with tempfile.TemporaryDirectory() as tmp:

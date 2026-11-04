@@ -186,6 +186,14 @@ class ExtrasTests(unittest.TestCase):
             self.assertEqual(call.args[2], 64)
             self.assertEqual(call.args[4], extras.BUDGETS_MIB[call.args[5]])
         self.assertEqual(result["reference_seconds"], .7)
+        contexts = result["details"]["confirmation_context"]
+        self.assertEqual(contexts["creation_order"], ["candidate", "reference"])
+        self.assertEqual(contexts["protocol"], "fresh-source-context-pair-v1")
+        self.assertEqual(contexts["warmup_policy"], "fresh-process-target-includes-startup")
+        self.assertTrue(contexts["target_boundary_preserved"])
+        self.assertEqual(len(set(contexts["context_ids"].values())), 2)
+        for path in contexts["context_ids"].values():
+            self.assertTrue(Path(path).is_file())
         self.assertEqual(adapter.summary()["resource_cross_regime_functional"], "passed")
         self.assertEqual(result["details"]["raw"]["reference"]["work"]["channel_passes"], 2)
         self.assertEqual(result["details"]["expected_geometry_source"], "candidate_configure")

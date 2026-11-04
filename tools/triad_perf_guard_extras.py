@@ -221,6 +221,7 @@ class ExtraWorkloads:
         self._measured.add(kind)
         run_dir = self.output / (case_id.replace(":", "-") + "-" + planner.digest([run_id, phase])[:16])
         run_dir.mkdir(parents=True, exist_ok=False)
+        period_started = time.perf_counter()
         try:
             if kind == "native-resource":
                 seconds, details = self._resource_pair(case, run_dir, seed, order)
@@ -247,6 +248,26 @@ class ExtraWorkloads:
                 details = {"raw": observations, "numerical_agreement": True,
                            "operation_seconds_diagnostic": {side: planner.operation_seconds(observations[side]) for side in SIDES},
                            "fixture_generation_in_timing_target": False}
+            if phase == "confirmation":
+                # Each invoke/run_export above starts a new subprocess and waits
+                # through its exit. Identify that launch by its unique raw
+                # receipt, rather than pretending subprocess.run exposes a PID.
+                details["confirmation_context"] = {
+                    "protocol": "fresh-source-context-pair-v1",
+                    "creation_order": list(order),
+                    "context_ids": {side: str(run_dir / (side + "-raw.json")) for side in SIDES},
+                    "identity_kind": "invocation-owned-fresh-subprocess",
+                    "isolation_evidence": {side: {
+                        "raw_launch_receipt": str(run_dir / (side + "-raw.json")),
+                        "argv": details["raw"][side].get("argv"),
+                        "launch_api": "subprocess.run; complete exit before next source",
+                    } for side in SIDES},
+                    "target_boundary_preserved": True,
+                    "warmup_policy": "fresh-process-target-includes-startup",
+                    "setup_seconds": 0., "warmup_seconds": 0., "teardown_seconds": 0.,
+                    "cost_boundary": "startup and exit already included in each complete-process target; configure/validation overhead separate",
+                    "period_wall_seconds": time.perf_counter() - period_started,
+                }
             result = {"run_id": run_id, "reference_seconds": _positive_seconds(seconds["reference"]),
                       "candidate_seconds": _positive_seconds(seconds["candidate"]),
                       "details": {"case_id": case_id, "phase": phase, "seed": seed, "order": list(order),

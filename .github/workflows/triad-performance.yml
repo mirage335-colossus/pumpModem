@@ -8,10 +8,10 @@ on:
         type: string
         required: true
       performance_budget_seconds:
-        description: 'Fast CI guard wall budget; 300-second target, maximum 1800'
+        description: 'Fast CI guard wall budget; roughly five-minute target, 600-second default, maximum 1800'
         type: number
         required: false
-        default: 300
+        default: 600
   workflow_dispatch:
     inputs:
       candidate_ref:
@@ -20,10 +20,10 @@ on:
         required: false
         default: ''
       performance_budget_seconds:
-        description: 'Fast CI guard wall budget; 300-second target, maximum 1800, no automatic qualification'
+        description: 'Fast CI guard wall budget; roughly five-minute target, 600-second default, maximum 1800, no automatic qualification'
         type: number
         required: false
-        default: 300
+        default: 600
       qualify:
         description: 'Explicit comprehensive qualification with source/hardware-bound artifacts (default branch only)'
         type: boolean

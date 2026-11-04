@@ -1,5 +1,6 @@
 """Paired sampled-family model and anchor checks."""
 import json
+from copy import deepcopy
 from pathlib import Path
 import sys
 import tempfile
@@ -29,6 +30,44 @@ def receiver(count, seconds, complete):
 
 
 class PairedSampledTests(unittest.TestCase):
+    def test_library_inspection_order_is_an_unordered_multiset_only(self):
+        call = receiver(24, 1., True)
+        call["receiver"]["regime"].update(dtype="complex64", threads={"count": 2, "library_pools": [
+            {"prefix": "numpy", "version": "1", "num_threads": 2},
+            {"prefix": "scipy", "version": "2", "num_threads": 2}]})
+        jobs = {name: {"receiver_runs": [deepcopy(call)]} for name in regression.SOURCES}
+        jobs["candidate"]["receiver_runs"][0]["receiver"]["regime"]["threads"]["library_pools"].reverse()
+        original = deepcopy(jobs)
+        self.assertEqual(regression.numerical_agreement(jobs, "fp32")["maximum_absolute_score_difference"], 0.)
+        regimes = regression._regimes(jobs)
+        self.assertEqual(regimes["reference"], regimes["candidate"])
+        self.assertEqual(jobs, original)  # Raw observations must never be relabeled.
+        for changed in ("membership", "duplicate", "version", "thread_count", "dtype", "tile", "work"):
+            bad = deepcopy(jobs)
+            target = bad["candidate"]["receiver_runs"][0]["receiver"]
+            pools = target["regime"]["threads"]["library_pools"]
+            if changed == "membership":
+                pools.pop()
+            elif changed == "duplicate":
+                pools.append(deepcopy(pools[0]))
+            elif changed == "version":
+                pools[0]["version"] = "different"
+            elif changed == "thread_count":
+                pools[0]["num_threads"] = 1
+            elif changed == "dtype":
+                target["regime"]["dtype"] = "complex128"
+            elif changed == "tile":
+                target["regime"]["tile"] = 128
+            else:
+                target["work"]["count"] = 23
+            with self.subTest(changed=changed), self.assertRaises(ValueError):
+                regression.numerical_agreement(bad, "fp32")
+        for malformed in ({}, ["not metadata"]):
+            bad = deepcopy(jobs)
+            bad["candidate"]["receiver_runs"][0]["receiver"]["regime"]["threads"]["library_pools"] = malformed
+            with self.subTest(malformed=malformed), self.assertRaisesRegex(ValueError, "metadata mappings"):
+                regression.numerical_agreement(bad, "fp32")
+
     def test_full_confirmation_and_independent_single_sentinel_reuse(self):
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import copy
 import importlib.util
+import json
 import math
 from pathlib import Path
 import subprocess
@@ -84,6 +85,8 @@ class NativeFFTWorkloads:
         self._descriptors = None
         self._used_run_ids = set()
         self._source_paths = {}
+        self._worker_context_sequence = 0
+        self._worker_context = None
         for name, root in self.roots.items():
             for relative in self.api.SOURCE_FILES:
                 self._source_paths[name + ":" + relative] = root / relative
@@ -167,17 +170,23 @@ class NativeFFTWorkloads:
             self._descriptors = rows
         return copy.deepcopy(self._descriptors)
 
-    def _start_workers(self):
+    def _start_workers(self, order=("reference", "candidate"), *, confirmation=False):
         if len(self.workers) == 2:
             return
         self._remaining()
-        for name in ("reference", "candidate"):
+        self._worker_context_sequence += 1
+        context_id = f"fft-context-{self._worker_context_sequence:04d}"
+        context_started = time.perf_counter()
+        context_events = {"id": context_id, "creation_order": list(order),
+                          "confirmation": confirmation, "workers": {}}
+        for name in order:
             if name in self.workers:
                 continue
             started = time.perf_counter()
+            log_directory = Path(self.context["output"]) / "native-fft-workers" / context_id
             worker = self.api.ReceiverWorker(self.roots[name], threads=self.threads,
                 deadline=self.deadline,
-                log_directory=Path(self.context["output"]) / "native-fft-workers", name=name)
+                log_directory=log_directory, name=name)
             self.workers[name] = worker
             expected = {module + ".py": self.sources[name + ":tools/" + module + ".py"]
                         for module in _RECEIVER_MODULES}
@@ -185,7 +194,86 @@ class NativeFFTWorkloads:
                 raise ValueError("receiver worker loaded unexpected source or thread allocation")
             if worker.identity.get("tf32_allowed") is not False:
                 raise ValueError("receiver worker did not preserve FP32-minimum arithmetic")
-            self._event("worker_startup", started, source=name, identity=worker.identity)
+            worker_event = {"source": name, "pid": getattr(getattr(worker, "process", None), "pid", None),
+                            "worker_instance": id(worker), "log_directory": str(log_directory),
+                            "startup_wall_seconds": time.perf_counter() - started,
+                            "external_startup_seconds": getattr(worker, "external_startup_seconds", None),
+                            "identity": worker.identity}
+            context_events["workers"][name] = worker_event
+            self._event("worker_startup", started, source=name, context_id=context_id,
+                        pid=worker_event["pid"], log_directory=str(log_directory), identity=worker.identity)
+        context_events["setup_wall_seconds"] = time.perf_counter() - context_started
+        self._worker_context = context_events
+
+    def _close_worker_context(self, reason):
+        context = self._worker_context
+        if not self.workers:
+            self._worker_context = None
+            return {"reason": reason, "workers": {}, "teardown_wall_seconds": 0.}
+        start = time.perf_counter()
+        records = {}
+        errors = []
+        for name, worker in list(self.workers.items()):
+            one = time.perf_counter()
+            process = getattr(worker, "process", None)
+            close_ack = False
+            close_error = None
+            close_timeout = False
+            pre_cleanup_exit = process.poll() if process is not None else None
+            if process is not None and pre_cleanup_exit is None:
+                try:
+                    response = worker.request({"action": "close"})
+                    close_ack = response.get("closed") is True
+                    if not close_ack:
+                        raise RuntimeError("worker close protocol did not acknowledge closure")
+                    process.stdin.close()
+                    process.wait(timeout=2.)
+                except Exception as exc:
+                    close_error = f"{type(exc).__name__}: {exc}"
+                    close_timeout = isinstance(exc, (TimeoutError, subprocess.TimeoutExpired))
+                    if not close_timeout:
+                        errors.append(name + ": close protocol failure: " + close_error)
+            # Our close request may already have closed stdin. Suppress the
+            # shared facade's second protocol request, while retaining its
+            # bounded terminate/kill/reap and stream/thread cleanup finally.
+            # This worker is retired permanently; the suite deadline is intact.
+            if process is not None:
+                worker.deadline = time.monotonic()-1.
+            try:
+                worker.close()
+            except Exception as exc:
+                errors.append(name + ": " + str(exc))
+            exit_code = process.poll() if process is not None else None
+            if process is not None and exit_code is None:
+                errors.append(name + ": receiver process remained alive after close")
+            event = {"pid": getattr(getattr(worker, "process", None), "pid", None),
+                     "worker_instance": id(worker), "teardown_wall_seconds": time.perf_counter() - one,
+                     "close_protocol_acknowledged": close_ack, "close_protocol_error": close_error,
+                     "exit_code": exit_code, "pre_cleanup_exit": pre_cleanup_exit,
+                     "cleanup_verified": (process is None or (exit_code is not None and
+                         process.stdin.closed and process.stdout.closed and worker.log.closed and
+                         not worker.reader.is_alive())),
+                     "cleanup_mode": ("test_double_unobservable" if process is None else
+                         ("graceful_exit" if close_ack and exit_code == 0 else
+                          "owned_forced_after_timeout" if close_timeout else "forced_or_abnormal_exit"))}
+            if not event["cleanup_verified"]:
+                errors.append(name + ": receiver streams or reader remained alive after close")
+            if process is not None and not close_timeout and exit_code not in (0, None):
+                errors.append(name + ": worker exited abnormally outside owned timeout cleanup")
+            records[name] = event
+            self._event("worker_context_shutdown", one, source=name,
+                        context_id=(context or {}).get("id"), pid=event["pid"], reason=reason,
+                        close_acknowledged=close_ack, exit_code=exit_code,
+                        cleanup_verified=event["cleanup_verified"], cleanup_mode=event["cleanup_mode"])
+        self.workers.clear()
+        self._worker_context = None
+        result = {"id": (context or {}).get("id"), "reason": reason,
+                  "workers": records, "teardown_wall_seconds": time.perf_counter() - start,
+                  "cleanup_errors": errors}
+        self.lifecycle.setdefault("context_cleanup", []).append(copy.deepcopy(result))
+        if errors:
+            raise RuntimeError("receiver worker context cleanup failed: " + "; ".join(errors))
+        return result
 
     def _fixture_hashes(self, case):
         hashes = self._hash_paths({name: Path(case["input_directory"]) / name for name in fixtures.PUBLIC_FILES})
@@ -232,8 +320,37 @@ class NativeFFTWorkloads:
             "boundary": NATIVE_BOUNDARY, "raw": results, "agreement": agreement,
             "work_identity_sha256": native.digest(work), "seed_applied_to_simulation": True}
 
-    def _fft_pair(self, case, order):
-        self._start_workers()
+    def _warm_fft_context(self, case, precision):
+        """Warm one complete target on each newly created confirmation worker."""
+        context = self._worker_context
+        if context is None:
+            raise RuntimeError("FFT worker context identity missing")
+        target = len(case["frequency_offsets_hz"])
+        expected_count = target * case["configuration"]["lag_group_count"]
+        for name in context["creation_order"]:
+            self._remaining()
+            worker = self.workers[name]
+            started = time.perf_counter()
+            prepared = worker.request(self.api.prepare_request(case, precision, self.device))
+            scored = worker.request(self.api.score_request(case, target))
+            elapsed = _positive(time.perf_counter() - started, "FFT full-case warmup wall")
+            if (prepared.get("geometry", {}).get("sample_count") != case["configuration"]["sample_count"] or
+                    prepared.get("geometry", {}).get("precision") != precision or
+                    prepared.get("geometry", {}).get("device") != self.device or
+                    scored.get("measured_group_count") != expected_count or
+                    scored.get("geometry", {}).get("group_count") != expected_count):
+                raise ValueError("FFT warmup did not execute the complete frozen target geometry")
+            worker_event = context["workers"][name]
+            worker_event["warmup"] = {"wall_seconds": elapsed,
+                "prepare_seconds": prepared.get("wall_seconds"),
+                "score_seconds_including_finish": scored.get("wall_seconds_including_finish"),
+                "measured_group_count": scored["measured_group_count"],
+                "precision": precision, "device": self.device}
+            self._event("full_target_warmup", started, source=name, context_id=context["id"],
+                        pid=worker_event["pid"], case=case["id"], groups=expected_count)
+
+    def _fft_pair(self, case, order, *, confirmation=False):
+        self._start_workers(order, confirmation=confirmation)
         hashes = self._fixture_hashes(case)
         if case["id"] not in self.precisions:
             started = time.perf_counter()
@@ -276,6 +393,8 @@ class NativeFFTWorkloads:
             self._event("fft_numerical_precision_pilot", started, case=case["id"], selection=selection)
         selection = self.precisions[case["id"]]
         precision = selection["selected"]
+        if self._worker_context is not None and self._worker_context.get("confirmation"):
+            self._warm_fft_context(case, precision)
         target = len(case["frequency_offsets_hz"])
         expected_count = target * case["configuration"]["lag_group_count"]
         results, seconds = {}, {}
@@ -328,11 +447,35 @@ class NativeFFTWorkloads:
             raise ValueError("FFT full bank numerical disagreement: " + str(agreement))
         self._freeze_work(case["id"], work)
         self._fixture_hashes(case)
+        context = self._worker_context
+        confirmation_context = None
+        if confirmation:
+            confirmation_context = {
+                "protocol": "fresh-source-context-pair-v1",
+                "identity_kind": "source_isolated_receiver_process",
+                "context_id": context["id"],
+                "creation_order": list(context["creation_order"]),
+                "context_ids": {name: f"{context['id']}:{name}:pid-{row['pid']}"
+                                for name, row in context["workers"].items()},
+                "workers": copy.deepcopy(context["workers"]),
+                "isolation_evidence": {name: {
+                    "context_id": f"{context['id']}:{name}:pid-{row['pid']}",
+                    "pid": row["pid"], "worker_instance": row["worker_instance"],
+                    "setup": {key: row[key] for key in ("startup_wall_seconds", "external_startup_seconds", "log_directory")},
+                    "warmup": copy.deepcopy(row.get("warmup")), "teardown": None}
+                    for name, row in context["workers"].items()},
+                "setup_wall_seconds": context["setup_wall_seconds"],
+                "target_boundary_preserved": True,
+                "warmup_policy": "full-target-outside-timer",
+                "warmup_description": "one complete full CFO/lag target per worker outside measured target timer",
+                "setup_warmup_costs_charged_to_campaign": True,
+            }
         return seconds, {"boundary": FFT_BOUNDARY, "raw": results, "agreement": agreement,
             "precision_selection": selection, "work_identity_sha256": native.digest(work),
             "fixture_hashes": hashes, "seed_applied_to_simulation": False,
             "input_scope": "identical source-bound fixture; fresh complete runtime observation, no synthetic shortened data",
-            "profile_costs_excluded_from_case_timer": ["fixture generation/cache validation", "worker startup", "precision pilot", "worker shutdown"]}
+            "profile_costs_excluded_from_case_timer": ["fixture generation/cache validation", "worker startup", "full-target worker warmup", "precision pilot", "worker shutdown"],
+            **({"confirmation_context": confirmation_context} if confirmation else {})}
 
     def measure_pair(self, case_id, run_id, seed, order=("reference", "candidate"), *, phase="screen"):
         self._remaining()
@@ -351,27 +494,60 @@ class NativeFFTWorkloads:
             self._fixtures()
             case, measure = self.fft_cases[case_id[4:]], self._fft_pair
         self._used_run_ids.add(run_id)
+        confirmation_context = None
         if measure == self._native_pair:
             seconds, details = measure(case, seed, order)
+            if phase == "confirmation":
+                # run_native owns one fresh subprocess per source, including
+                # its startup, all batch trials, output and completed exit.
+                # subprocess.run does not expose a PID, so retain its real
+                # launch receipt under an invocation-owned unique directory.
+                run_dir = Path(self.context["output"]) / "native-contexts" / native.digest(run_id)[:24]
+                run_dir.mkdir(parents=True, exist_ok=False)
+                for name in order:
+                    (run_dir / (name + "-raw.json")).write_text(json.dumps(details["raw"][name], indent=2, allow_nan=False)+"\n")
+                details["confirmation_context"] = {
+                    "protocol": "fresh-source-context-pair-v1", "creation_order": list(order),
+                    "context_ids": {name: str(run_dir / (name + "-raw.json")) for name in order},
+                    "identity_kind": "invocation-owned-fresh-subprocess",
+                    "isolation_evidence": {name: {"raw_launch_receipt": str(run_dir / (name + "-raw.json")),
+                        "argv": details["raw"][name].get("argv"),
+                        "launch_api": "subprocess.run; complete batch exit before next source"} for name in order},
+                    "target_boundary_preserved": True,
+                    "warmup_policy": "fresh-process-target-includes-startup",
+                    "setup_seconds": 0., "warmup_seconds": 0., "teardown_seconds": 0.,
+                    "cost_boundary": "all startup and exit costs already included in each native CLI target"}
         else:
-            seconds, details = measure(case, order)
+            if phase == "confirmation" and self.workers:
+                self._close_worker_context("replace_persistent_screen_workers")
+            teardown = None
+            try:
+                seconds, details = measure(case, order, confirmation=(phase == "confirmation"))
+            finally:
+                if phase == "confirmation":
+                    teardown = self._close_worker_context("confirmation_period_complete")
+            if phase == "confirmation":
+                confirmation_context = details.get("confirmation_context", {})
+                confirmation_context["teardown"] = teardown
+                if confirmation_context:
+                    for name in order:
+                        confirmation_context["isolation_evidence"][name]["teardown"] = \
+                            copy.deepcopy(teardown["workers"].get(name))
         self._check_sources()
         return {"reference_seconds": seconds["reference"], "candidate_seconds": seconds["candidate"],
                 "run_id": run_id, "details": {**details, "case_id": case_id, "seed": seed,
                     "order": list(order), "phase": phase, "full_target": True,
+                    **({"confirmation_context": confirmation_context} if phase == "confirmation" and measure != self._native_pair else {}),
                     "source_and_build_identity_sha256": native.digest(self.sources)}}
 
     def close(self):
         if self.lifecycle["closed"]:
             return copy.deepcopy(self.lifecycle)
         errors = []
-        for name, worker in self.workers.items():
-            started = time.perf_counter()
-            try:
-                worker.close()
-            except Exception as exc:
-                errors.append(name + ": " + str(exc))
-            self._event("worker_shutdown", started, source=name)
+        try:
+            self._close_worker_context("adapter_close")
+        except Exception as exc:
+            errors.append(str(exc))
         self.lifecycle["closed"] = True
         self.lifecycle["cleanup_errors"] = errors
         if errors:

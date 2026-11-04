@@ -1,16 +1,19 @@
 """Cheap boundary/integrity tests; no full sampled receiver campaign is run."""
 from copy import deepcopy
+import json
+import subprocess
 from pathlib import Path
 import sys
 import tempfile
 import time
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 import triad_perf_guard_families as guard
+import triad_perf_guard as suite_guard
 
 
 def small_manifest():
@@ -30,6 +33,7 @@ class FakeWorker:
 
     def __init__(self, root, **kwargs):
         self.root = Path(root)
+        self.name = kwargs.get("name")
         self.closed = False
 
     def request(self, request):
@@ -52,6 +56,9 @@ class FamilyGuardTests(unittest.TestCase):
             "fixture_cache": self.directory / "unused-cache", "device": "cpu", "precision": "fp32",
             "threads": 2, "native_threads": 1, "deadline": time.monotonic() + 30,
             "output": self.directory / "output",
+            # Existing cache/composition tests explicitly exercise the retained
+            # qualification diagnostic rather than the routine default.
+            "family_screen_method": "shared-composed-diagnostic",
         }
         for name in ("binary", "reference_binary"):
             self.context[name].write_bytes(b"mock native binary")
@@ -114,14 +121,14 @@ class FamilyGuardTests(unittest.TestCase):
         self.assertIsNone(limit)
         self.receives.append((case["id"], len(paths), worker, precision))
         scores = [0., 1.]
-        if self.bad_scores and worker is self.workers[1]:
+        if self.bad_scores and worker.name == "candidate":
             scores = [1., 0.]
         return {"receiver": {
                     "seconds": {"load": .1, "process": .3},
                     "work": {"count": 3 if self.bad_count else 4, "target_count": 4,
                              "unit": case["unit"], "resampling_events": len(self.receives)},
                     "regime": {"blocks": self.regime, "precision": precision,
-                               **deepcopy(self.regime_extra[self.workers.index(worker)])},
+                             **deepcopy(self.regime_extra[0 if worker.name == "reference" else 1])},
                     "result": {"scores": scores, "winner": 1}},
                 "complete_receiver": True, "request_wall_seconds": .5,
                 "receiver_wall_seconds": .4,
@@ -172,6 +179,74 @@ class FamilyGuardTests(unittest.TestCase):
             adapter.measure_pair("family:phase-tensor-hour", "unsupported", 100)
         self.assertFalse(self.workers or self.exports)
 
+    def test_default_screen_measures_actual_full_pipeline_without_warmup_or_model(self):
+        self.context.pop("family_screen_method")
+        adapter=self.adapter()
+        self.assertTrue(all(row["screen_method"]=="direct-full" for row in adapter.descriptors()))
+        one=adapter.measure_pair("family:single","screen-one",100,order=("candidate","reference"))
+        batch=adapter.measure_pair("family:batch","screen-batch",100)
+        other=adapter.measure_pair("family:other","screen-other",100)
+        self.assertEqual(len(self.workers),2)
+        self.assertEqual(len(self.jobs),6)
+        self.assertEqual([row[2] for row in self.jobs],[(None,)]*6)
+        self.assertEqual(one["reference_seconds"],1.75)  # Actual outer job, not 1.0+.5 composition.
+        self.assertEqual(batch["reference_seconds"],6.75)
+        for row in [one,batch,other]:
+            self.assertEqual(row["details"]["timing_field"],"complete_pipeline_wall_seconds")
+            self.assertTrue(row["details"]["full_fresh"])
+            self.assertEqual(row["details"]["metadata"]["method"],"direct_full")
+            self.assertTrue(row["details"]["metadata"]["direct_complete_pipeline_observation"])
+            self.assertFalse(row["details"]["metadata"]["statistical_independence_claim"])
+            self.assertFalse(row["details"]["metadata"]["extrapolation"])
+            self.assertFalse(row["details"]["metadata"]["generation_shared"])
+            self.assertNotIn("confirmation_context",row["details"])
+            self.assertNotIn("screen_estimated_full_seconds",row["details"]["pair"]["reference"])
+        self.assertFalse(adapter.groups)
+        summary=adapter.close()
+        accounting=summary["direct_screen_accounting"]
+        self.assertEqual(accounting["paired_complete_pipeline_observations"],3)
+        self.assertEqual(accounting["source_complete_pipeline_observations"],6)
+        self.assertEqual(accounting["native_export_invocations"],10)
+        self.assertEqual(accounting["actual_generation_wall_seconds"],16.)
+        self.assertEqual(accounting["actual_complete_pipeline_wall_seconds"],20.5)
+        self.assertFalse(accounting["prediction_model_used"])
+        self.assertEqual(summary["shared_generation_accounting"]["estimated_native_invocation_seconds_saved"],0.)
+        self.assertTrue(all(worker.closed for worker in self.workers))
+
+    def test_default_all_nine_case_claims_are_namespaced_but_confirmations_remain_global(self):
+        self.context.pop("family_screen_method")
+        self.manifest=json.loads(guard.sample.MANIFEST.read_text())
+        adapter=self.adapter()
+        for index,descriptor in enumerate(adapter.descriptors()):
+            adapter.measure_pair(descriptor["id"],f"screen-{index}",1000)
+        self.assertEqual(len(self.workers),2)
+        self.assertEqual(len(self.jobs),18)
+        self.assertEqual(sum(row[2] for row in self.exports),22)
+        self.assertFalse(adapter.groups)
+        claims=adapter.ledger["generation_seed_claims"]
+        self.assertEqual(len(claims),9)
+        self.assertEqual({row["screen_case_id"] for row in claims},set(adapter.cases))
+        self.assertTrue(all(row["profile_sha256"]==guard.sample.digest(adapter.manifest["fixtures"][
+            adapter.cases[row["screen_case_id"]]["fixture"]]) for row in claims))
+        with self.assertRaisesRegex(ValueError,"overlaps"):
+            adapter.measure_pair("family:gaussian-hour","duplicate-screen-seed",1000)
+        with self.assertRaisesRegex(ValueError,"overlaps"):
+            adapter.measure_pair("family:state-sampled-smoke","bad-confirm",1002,phase="confirmation")
+
+    def test_default_direct_screen_keeps_numerical_and_work_validation(self):
+        self.context.pop("family_screen_method")
+        adapter=self.adapter();self.bad_count=True
+        with self.assertRaisesRegex(ValueError,"full endpoint"):
+            adapter.measure_pair("family:single","bad-direct-count",100)
+        self.assertTrue(list(adapter.output.glob("pair-*.json")))
+        self.assertEqual(len(self.jobs),2)
+
+    def test_unknown_family_screen_method_is_not_an_implicit_fallback(self):
+        self.context["family_screen_method"]="automatic-unqualified-model"
+        with self.assertRaisesRegex(ValueError,"family_screen_method"):
+            guard.FamilyWorkloads(self.context)
+        self.assertFalse(self.workers or self.exports)
+
     def test_screen_shares_generation_prefix_but_rebuilds_full_receiver(self):
         adapter = self.adapter()
         one = adapter.measure_pair("family:single", "screen-1", 100,
@@ -203,16 +278,35 @@ class FamilyGuardTests(unittest.TestCase):
         adapter.measure_pair("family:single", "screen", 100)
         result = adapter.measure_pair("family:single", "confirmation", 500,
                                       order=("candidate", "reference"), phase="confirmation")
-        self.assertEqual(self.jobs, [("single", 500, (None,), "candidate"),
-                                    ("single", 500, (None,), "reference")])
+        self.assertEqual([(row[0], row[2], row[3]) for row in self.jobs],
+                         [("single", (None,), "candidate"), ("single", (None,), "reference"),
+                          ("single", (None,), "candidate"), ("single", (None,), "reference")])
+        self.assertEqual(self.jobs[0][1], self.jobs[1][1])
+        self.assertNotEqual(self.jobs[0][1], 500)
+        self.assertEqual([row[1] for row in self.jobs[2:]], [500, 500])
         self.assertEqual(result["reference_seconds"], 1.75)
         self.assertTrue(result["details"]["full_fresh"])
         self.assertTrue(result["details"]["metadata"]["independent_complete_pipeline_observation"])
         self.assertFalse(result["details"]["metadata"]["generation_shared"])
+        context = result["details"]["confirmation_context"]
+        self.assertEqual(context["protocol"], "fresh-source-context-pair-v1")
+        self.assertEqual(context["creation_order"], ["candidate", "reference"])
+        self.assertTrue(context["target_boundary_preserved"])
+        self.assertEqual(context["warmup_policy"], "full-target-outside-timer")
+        self.assertEqual(context["teardown"]["reason"], "confirmation_period_complete")
+        self.assertEqual(len(set(context["context_ids"].values())), 2)
+        self.assertTrue(all(row["warmup"]["complete_pipeline_wall_seconds"] > 0
+                            for row in context["workers"].values()))
         self.assertEqual(result["details"]["identity_before"], result["details"]["identity_after"])
         # No fresh fixture remains after the complete-pipeline receipt is retained.
         self.assertFalse(list(Path(adapter.scratch.name).glob("fresh-*")))
         self.assertTrue(Path(result["details"]["raw_receipt"]).is_file())
+        raw = json.loads(Path(result["details"]["raw_receipt"]).read_text())
+        self.assertEqual(raw["confirmation_context"]["context_id"], context["context_id"])
+        self.assertEqual(set(raw["confirmation_context"]["isolation_evidence"]), {"reference", "candidate"})
+        accepted, reason = suite_guard._context_receipt(result, ("candidate", "reference"), set())
+        self.assertIsNone(reason)
+        self.assertEqual(set(accepted), set(context["context_ids"].values()))
         raw = result["details"]["pair"]["reference"]
         self.assertLessEqual(raw["invocation_started"]["monotonic_seconds"],
                              raw["invocation_finished"]["monotonic_seconds"])
@@ -392,6 +486,48 @@ class FamilyGuardTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "binary changed"):
             adapter.close()
         self.assertTrue(adapter.closed)
+
+    def test_close_protocol_failure_is_retained_after_cleanup(self):
+        adapter=self.adapter();worker=Mock();alive={"value":True}
+        worker.process.pid=123
+        worker.process.poll.side_effect=lambda:None if alive["value"] else 0
+        worker.request.side_effect=RuntimeError("close protocol rejected")
+        worker.process.stdin.closed=False;worker.process.stdout.closed=False;worker.log.closed=False
+        worker.reader.is_alive.return_value=False
+        def close():
+            alive["value"]=False
+            worker.process.stdin.closed=True;worker.process.stdout.closed=True;worker.log.closed=True
+        worker.close.side_effect=close
+        adapter.workers={"reference":worker};adapter._worker_context={"id":"broken-protocol"}
+        adapter.ledger["worker_contexts"].append({"id":"broken-protocol"})
+        with self.assertRaisesRegex(RuntimeError,"close protocol failure"):
+            adapter._close_worker_context("test")
+        self.assertFalse(alive["value"])
+        self.assertFalse(adapter.workers)
+        record=adapter.ledger["worker_contexts"][-1]["teardown"]["workers"]["reference"]
+        self.assertTrue(record["cleanup_verified"])
+        self.assertIn("close protocol rejected",record["close_protocol_error"])
+
+    def test_close_ack_timeout_is_owned_reaping_not_functional_failure(self):
+        adapter=self.adapter();worker=Mock();alive={"value":True}
+        worker.process.pid=123
+        worker.process.poll.side_effect=lambda:None if alive["value"] else -15
+        worker.request.return_value={"closed":True}
+        worker.process.wait.side_effect=subprocess.TimeoutExpired("worker",2.)
+        worker.process.stdin.closed=False;worker.process.stdout.closed=False;worker.log.closed=False
+        worker.reader.is_alive.return_value=False
+        def close():
+            self.assertLess(worker.deadline,time.monotonic())
+            alive["value"]=False
+            worker.process.stdin.closed=True;worker.process.stdout.closed=True;worker.log.closed=True
+        worker.close.side_effect=close
+        adapter.workers={"reference":worker};adapter._worker_context={"id":"slow-shutdown"}
+        adapter.ledger["worker_contexts"].append({"id":"slow-shutdown"})
+        result=adapter._close_worker_context("test")
+        self.assertFalse(result["cleanup_errors"])
+        self.assertEqual(result["workers"]["reference"]["cleanup_mode"],"owned_forced_after_timeout")
+        self.assertTrue(result["workers"]["reference"]["cleanup_verified"])
+        self.assertEqual(worker.request.call_count,1)
 
     def test_shared_fixture_mutation_detected_and_workers_closed(self):
         adapter = self.adapter()

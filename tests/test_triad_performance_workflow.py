@@ -52,7 +52,9 @@ class TriadPerformanceWorkflowTests(unittest.TestCase):
         self.assertIn("workflow_dispatch:", self.performance)
         self.assertIn("CANDIDATE_REF: ${{ inputs.candidate_ref || github.sha }}", self.performance)
         self.assertIn("242ea15fa032ee117b9113a7f3cd07cc6e9f0254", self.performance)
-        self.assertEqual(self.performance.count("default: 300"), 2)
+        # CI's routine budget was raised to keep source-bound fresh-context
+        # confirmations feasible; qualification has its own independent cap.
+        self.assertEqual(self.performance.count("default: 600"), 2)
         self.assertIn('0 < budget <= 1800', self.performance)
         self.assertIn('--budget-seconds "$PERFORMANCE_BUDGET_SECONDS"', self.performance)
         self.assertIn("--stopping-rule decision", self.performance)

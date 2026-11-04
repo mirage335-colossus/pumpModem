@@ -6,6 +6,7 @@ import sys
 import tempfile
 import time
 import unittest
+import subprocess
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,7 +17,22 @@ import triad_perf_paths as paths
 class PathCoverageTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.report = paths.collect_paths(ROOT, threads=2, deadline=time.monotonic()+60)
+        # Profiled code can stall in a native/kernel call, so supervise it in
+        # its own process. The 240 s outer timeout is a hang watchdog only; the
+        # collector has a separate 180 s cooperative deadline between families.
+        cls._temporary = tempfile.TemporaryDirectory(prefix='triad-perf-path-test-')
+        output = Path(cls._temporary.name) / 'coverage.json'
+        command = [sys.executable, str(ROOT/'tools/triad_perf_paths.py'),
+                   '--source-root', str(ROOT), '--device', 'cpu', '--threads', '2',
+                   '--deadline-seconds', '180', '--output', str(output)]
+        completed = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, timeout=240)
+        if completed.returncode:
+            raise AssertionError(f'coverage subprocess failed ({completed.returncode}): {completed.stderr}')
+        cls.report = json.loads(output.read_text())
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._temporary.cleanup()
 
     def test_every_applicable_family_has_executed_source_witnesses(self):
         self.assertTrue(self.report['complete_applicable_coverage'], self.report['failed_ids'])
@@ -55,7 +71,7 @@ class PathCoverageTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp)/'contract.json'; path.write_text(json.dumps(contract))
             with patch.object(paths, 'CONTRACT', path):
-                report = paths.collect_paths(ROOT, threads=2, deadline=time.monotonic()+10)
+                report = paths.collect_paths(ROOT, threads=2, deadline=time.monotonic()+30)
         self.assertFalse(report['complete_applicable_coverage'])
         self.assertEqual(report['failed_ids'], ['gaussian-state'])
         self.assertIn('required execution witnesses missing', report['records'][0]['error'])

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from copy import deepcopy
 from dataclasses import replace
 import json
 import math
@@ -29,6 +30,23 @@ STAGES = ("pipeline", "receiver", "generation")
 SCHEMA = "triad-performance-sampled-family-pair-v1"
 
 
+def canonical_library_call(call):
+    """Compare the complete loaded-library multiset, independent of inspection order.
+
+    This only changes a derived validation copy. Actual arithmetic, library
+    paths/versions, thread counts, duplicates and every other regime field stay
+    strict; raw receiver observations are retained unchanged.
+    """
+    value = deepcopy(call)
+    threads = value["receiver"]["regime"].get("threads", {})
+    if "library_pools" in threads:
+        pools = threads["library_pools"]
+        if not isinstance(pools, list) or any(not isinstance(pool, dict) for pool in pools):
+            raise ValueError("thread library inspection must be a list of metadata mappings")
+        threads["library_pools"] = sorted(pools, key=sample.digest)
+    return value
+
+
 def numerical_agreement(pair, precision):
     first, second = (pair[name]["receiver_runs"] for name in SOURCES)
     if len(first) != len(second):
@@ -36,6 +54,7 @@ def numerical_agreement(pair, precision):
     maximum = 0.
     tol = 1e-5 if precision == "fp32" else 1e-9
     for a, b in zip(first, second, strict=True):
+        a, b = canonical_library_call(a), canonical_library_call(b)
         ar, br = a["receiver"], b["receiver"]
         if (ar["work"]["count"] != br["work"]["count"] or
             ar["work"]["target_count"] != br["work"]["target_count"] or
@@ -65,7 +84,7 @@ def numerical_agreement(pair, precision):
 
 
 def _regimes(pair):
-    return {name: {(sample.digest(row["receiver"]["regime"]), row["receiver"]["work"]["unit"],
+    return {name: {(sample.digest(canonical_library_call(row)["receiver"]["regime"]), row["receiver"]["work"]["unit"],
                     row["receiver"]["work"]["target_count"]) for row in pair[name]["receiver_runs"]}
             for name in SOURCES}
 

@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -47,9 +48,15 @@ class FakeAdapter:
         if error:
             raise error
         values = self.ratios.get((case_id, phase), [1.])
-        ratio = values[min(index, len(values) - 1)]
+        ratio_index = index // 2 if phase == "confirmation" else index
+        ratio = values[min(ratio_index, len(values) - 1)]
         return {"run_id": run_id, "reference_seconds": 1., "candidate_seconds": ratio,
-                "details": {"complete_work": True, "phase": phase, "source_checks": "matched"}}
+                "details": {"complete_work": True, "phase": phase, "source_checks": "matched",
+                    "confirmation_context": {"protocol":"fresh-source-context-pair-v1",
+                        "creation_order":list(order),"context_ids":{name:run_id+":"+name for name in ["reference","candidate"]},
+                        "target_boundary_preserved":True,"warmup_policy":"fresh-process-target-includes-startup",
+                        "identity_kind":"synthetic-unit-fixture",
+                        "isolation_evidence":{name:{"fresh_invocation":run_id+":"+name} for name in ["reference","candidate"]}}}}
 
     def close(self):
         self.closed = True
@@ -89,12 +96,12 @@ class GuardExecutionTests(unittest.TestCase):
     def test_all_screens_precede_confirmation_and_ci_stops_after_first_reject(self):
         adapter = FakeAdapter({"a": {}, "b": {}, "c": {}}, ratios={
             ("a", "screen"): [3.], ("b", "screen"): [4.],
-            ("a", "confirmation"): [3.]})
+            ("a", "confirmation"): [3.], ("b", "confirmation"): [3.]})
         report, retained, _ = self.exercise(adapter)
         self.assertEqual([row["phase"] for row in adapter.calls[:3]], ["screen"] * 3)
         self.assertEqual(report["confirmed_regressions"], ["a"])
         self.assertEqual(report["unconfirmed_nominations"], ["b"])
-        self.assertEqual(len(retained), 15)
+        self.assertEqual(len(retained), 49)
         self.assertEqual(report["exit_code"], 2)
         screen_ids = {row["observation"]["run_id"] for row in report["screens"]}
         self.assertEqual(report["confirmations"][0]["sample_count"], 12)
@@ -106,7 +113,7 @@ class GuardExecutionTests(unittest.TestCase):
             ("a", "confirmation"): [3.], ("b", "confirmation"): [3.]})
         report, _, _ = self.exercise(adapter, profile="gpu-dev")
         self.assertEqual(report["confirmed_regressions"], ["a", "b"])
-        self.assertEqual(len(adapter.calls), 26)
+        self.assertEqual(len(adapter.calls), 50)
 
     def test_gpu_development_second_look_extends_same_fresh_sequence(self):
         adapter = FakeAdapter({"a": {}}, ratios={
@@ -121,11 +128,42 @@ class GuardExecutionTests(unittest.TestCase):
 
     def test_budget_does_not_start_unusable_partial_confirmation(self):
         adapter = FakeAdapter({"a": {}}, ratios={("a", "screen"): [3.]})
-        report, retained, _ = self.exercise(adapter, budget=24.)
+        report, retained, _ = self.exercise(adapter, budget=4.)
         self.assertEqual(len(retained), 1)
         self.assertEqual(report["exit_code"], 0)
         self.assertEqual(report["unconfirmed_nominations"], ["a"])
-        self.assertTrue(any("next predeclared" in reason for reason in report["advisory"]))
+        self.assertTrue(any("next complete confirmation block" in reason for reason in report["advisory"]))
+
+    def test_missing_context_proof_is_advisory_and_not_a_performance_rejection(self):
+        adapter=FakeAdapter({"a":{}},ratios={("a","screen"):[3.],("a","confirmation"):[3.]})
+        original=adapter.measure_pair
+        def no_proof(*args,**kwargs):
+            result=original(*args,**kwargs)
+            result["details"].pop("confirmation_context",None)
+            return result
+        adapter.measure_pair=no_proof
+        report,retained,_=self.exercise(adapter)
+        self.assertEqual(report["exit_code"],0)
+        self.assertFalse(report["confirmations"])
+        self.assertEqual(report["unconfirmed_nominations"],["a"])
+        self.assertTrue(any("context ineligible" in value for value in report["advisory"]))
+        self.assertEqual(retained[-1]["status"],"completed")
+
+    def test_incomplete_second_period_has_no_block_sign(self):
+        adapter=FakeAdapter({"a":{}},ratios={("a","screen"):[3.]},
+            errors={("a","confirmation",1):TimeoutError("second period deadline")})
+        report,retained,_=self.exercise(adapter)
+        self.assertEqual(report["exit_code"],0)
+        self.assertFalse(report["confirmations"])
+        self.assertFalse(report["futility_records"])
+        self.assertEqual(len(retained),3)
+        self.assertEqual(retained[-1]["status"],"budget_limited")
+
+    def test_round_robin_gives_other_nominees_a_block_before_second_block(self):
+        adapter=FakeAdapter({"a":{},"b":{}},ratios={("a","screen"):[3.],("b","screen"):[3.]})
+        self.exercise(adapter)
+        confirmation=[row["case_id"] for row in adapter.calls if row["phase"]=="confirmation"]
+        self.assertEqual(confirmation[:8],["a","a","b","b","a","a","b","b"])
 
     def test_timeout_is_limited_assurance_not_a_statistical_regression(self):
         adapter = FakeAdapter({"a": {}}, errors={("a", "screen", 0): TimeoutError("deadline")})
@@ -156,21 +194,23 @@ class GuardExecutionTests(unittest.TestCase):
         self.assertEqual({row["screen"]["seed"] for row in schedule.values()}, {30})
         ranges = []
         for row in schedule.values():
-            for invocation in row["confirmation"]:
-                value = set(range(invocation["seed"], invocation["seed"] + 3))
-                self.assertNotIn(30, value)
-                self.assertFalse(any(value & earlier for earlier in ranges))
-                ranges.append(value)
-        self.assertEqual(len(ranges), 60)
+            for block in row["confirmation"]:
+                for invocation in block["periods"]:
+                    value = set(range(invocation["seed"], invocation["seed"] + 3))
+                    self.assertNotIn(30, value)
+                    self.assertFalse(any(value & earlier for earlier in ranges))
+                    ranges.append(value)
+                self.assertEqual(block["periods"][0]["order"],block["periods"][1]["order"][::-1])
+        self.assertEqual(len(ranges), 120)
 
     def test_schedule_uses_actual_family_job_floor_and_reproducible_random_order(self):
         policy = GuardPolicy("ci", workflow_job_count=1024)
         ids = ["a", "b"]
         plan = build_guard_plan(ids, policy)
         self.assertGreater(plan["looks"][0], policy.looks[0])
-        one = guard.measurement_schedule(ids, policy, seed=30, session="one", looks=plan["looks"])
-        two = guard.measurement_schedule(ids, policy, seed=30, session="two", looks=plan["looks"])
-        different = guard.measurement_schedule(ids, policy, seed=31, session="three", looks=plan["looks"])
+        one = guard.measurement_schedule(ids, policy, seed=30, session="one", looks=plan["looks"], order_seed=30)
+        two = guard.measurement_schedule(ids, policy, seed=30, session="two", looks=plan["looks"], order_seed=30)
+        different = guard.measurement_schedule(ids, policy, seed=31, session="three", looks=plan["looks"], order_seed=31)
         orders = lambda schedule: [row["order"] for name in ids for row in (
             [schedule[name]["screen"]] + schedule[name]["confirmation"])]
         self.assertEqual(len(one["a"]["confirmation"]), plan["looks"][-1])
@@ -285,6 +325,37 @@ class GuardRunTests(unittest.TestCase):
         self.assertEqual(report["exit_code"], 0)
         self.assertTrue(report["hardware_health"]["warning"])
         self.assertTrue(report["limited_assurance"])
+
+    def test_runtime_order_uses_fresh_os_coins_and_replay_cannot_block(self):
+        with patch.object(guard.secrets,"randbits",side_effect=[0]+[1]*12) as draw:
+            schedule=guard.measurement_schedule(["a"],GuardPolicy(),seed=1,session="s")
+        self.assertEqual(draw.call_count,13)
+        self.assertEqual(schedule["a"]["confirmation"][0]["coin"],1)
+        with tempfile.TemporaryDirectory() as directory:
+            adapter=FakeAdapter({"a":{}},ratios={("a","screen"):[3.],("a","confirmation"):[3.]})
+            args=self._args(directory,["--order-seed","10"])
+            snapshot={"paths":{},"sha256":{},"missing_declared_historical_files":{}}
+            with patch.object(guard,"resolve_device",return_value=("cpu",None)), \
+                 patch.object(guard,"source_snapshot",return_value=snapshot), \
+                 patch.object(guard,"verify_snapshot",return_value={"status":"passed","changed":[]}), \
+                 patch.object(guard,"check_coverage_receipts",return_value=([],[])), \
+                 patch.object(guard,"run_functional",return_value=([],[],[])):
+                report=guard.run(args,factories=[("fake",lambda context:adapter)])
+        self.assertEqual(report["exit_code"],0)
+        self.assertEqual(len(adapter.calls),1)
+        self.assertTrue(any("deterministic order replay" in value for value in report["assurance_limitations"]))
+
+    def test_completed_failure_survives_a_later_timeout(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);out=root/"stdout";err=root/"stderr";err.write_text("")
+            receipt={"status":"deadline_exceeded","stdout":str(out),"stderr":str(err)}
+            for text,command,expected in [
+                ("Ran 1 test in 0.1s\nFAILED (failures=1)\n",["python","test.py"],True),
+                ("1/4 Test #1: triad_v3_source ...***Failed 0.1s",["ctest"],True),
+                ("still working\n",["python","test.py"],False),
+                ("1/4 Test #1: triad_v3_source ...***Timeout 0.1s",["ctest"],False)]:
+                out.write_text(text)
+                self.assertEqual(guard._completed_failure_before_timeout(command,receipt),expected)
 
     def test_parser_validates_job_budget_and_force_floor_controls(self):
         with tempfile.TemporaryDirectory() as directory:

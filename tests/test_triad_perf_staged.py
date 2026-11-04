@@ -309,15 +309,25 @@ class StagedTests(unittest.TestCase):
             legacy_split["record_sha256"] = sample.digest(legacy_split)
             path = directory/"legacy-split.json"
             sample.write_json(path, legacy_split)
-            old = staged._historical(path, result["identity"])
+            # Exercise the explicitly reviewed historical source transition
+            # with its frozen current-side hashes. The working tree now has
+            # an additional metadata-canonicalization edit to the family
+            # validator (its pool-order normalization changes this dependency
+            # hash), and that transition has not been reviewed for these old
+            # staged forecasts. Do not silently bless it through this fixture.
+            reviewed_identity = copy.deepcopy(result["identity"])
+            for name, (_, reviewed_current) in staged.REVIEWED_ROUTINE_DEPENDENCIES.items():
+                reviewed_identity["measurement_dependencies"][name] = reviewed_current
+            old = staged._historical(path, reviewed_identity)
             self.assertEqual(old["source_applicability"]["method"], "9f_routine_effort_only")
             self.assertEqual(set(old["source_applicability"]["reviewed_routine_dependency_transitions"]),
                              set(staged.REVIEWED_ROUTINE_DEPENDENCIES))
-            changed_identity = {**result["identity"], "native_threads": 3}
+            self.assertIsNone(staged._historical(path, result["identity"]))
+            changed_identity = {**reviewed_identity, "native_threads": 3}
             self.assertIsNone(staged._historical(path, changed_identity))
-            changed_dependencies = dict(result["identity"]["measurement_dependencies"],
+            changed_dependencies = dict(reviewed_identity["measurement_dependencies"],
                                         **{"triad-performance.py": "unreviewed"})
-            self.assertIsNone(staged._historical(path, {**result["identity"],
+            self.assertIsNone(staged._historical(path, {**reviewed_identity,
                                                        "measurement_dependencies": changed_dependencies}))
 
             decision_prior = copy.deepcopy(result)
@@ -331,7 +341,9 @@ class StagedTests(unittest.TestCase):
             decision_prior["record_sha256"] = sample.digest(decision_prior)
             decision_path = directory/"decision-prior.json"
             sample.write_json(decision_path, decision_prior)
-            prior = staged._historical(decision_path, result["identity"])
+            decision_identity = copy.deepcopy(result["identity"])
+            decision_identity["measurement_dependencies"].update(staged.REVIEWED_DECISION_DEPENDENCIES)
+            prior = staged._historical(decision_path, decision_identity)
             self.assertEqual(prior["source_applicability"]["method"], "4395_regression_profile_only")
             profile_identity = copy.deepcopy(result["identity"])
             profile_identity["measurement_dependencies"][driver] = staged.LEGACY_PROFILE_DRIVER_SHA256

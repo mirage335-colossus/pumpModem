@@ -29,7 +29,7 @@ from scipy.stats import t as student_t
 
 import triad_perf_families as sample
 from triad_perf_adaptive import AdaptivePolicy, model_confirmation_policy, regression_profile
-from triad_perf_family_regression import numerical_agreement
+from triad_perf_family_regression import canonical_library_call, numerical_agreement
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKER = Path(__file__).resolve()
@@ -41,6 +41,7 @@ REVIEWED_GPU_PROTOCOL35 = "35e543ac8a84ad879dedb1aa39628e995ad1584e5e4e921d207dd
 REVIEWED_GPU_MANIFEST35 = "482af707eedc09962b3253c2c146eb0e7204a6e6afcd2dc370f74165d4700de3"
 REVIEWED_DIRECT_PROTOCOL5DFA = "5dfa0492f4cd3dac3db262feee8b81f5c076ceeece3c56a210a54d3e58fcb336"
 REVIEWED_DIRECT_MANIFEST5DFA = "eee47f2396e0a230bf95a60029c958041449e37ab7d54872a2a5156a898643d4"
+REVIEWED_POOL_ENUM_PROTOCOL93DE = "93de7a47b360bcb7531e72de5381cdb4b6feb0d10c0c44150697bc62704d7b80"
 MEASUREMENT_SCOPE = (
     "fresh receiver process creation, numerical imports, native shared full sampled exports, "
     "family setup/device initialization, first complete calls, declared warm cycles, "
@@ -405,6 +406,44 @@ def direct_sustained_outcomes(sustained):
             "sustained_stability": "review_required" if sustained["trend_review_required"] else "no_flag_observed"}
 
 
+def _comparison_call(call):
+    """Order only the inspection multiset; preserve every actual regime field.
+
+    Fresh processes may enumerate the same loaded numerical libraries in a
+    different order. Paths, versions, threading limits and duplicates remain
+    part of the comparison. Original observations and signatures stay intact.
+    """
+    return canonical_library_call(call)
+
+
+def _comparison_work(observation):
+    """Validate raw first-call signatures, then derive comparison signatures."""
+    first = observation["first"]
+    if len({member["id"] for member in first}) != len(first):
+        raise ValueError("duplicate lifecycle first-call member")
+    raw = {member["id"]: sample.complete_work_signature({"receiver_runs": [member["call"]]})
+           for member in first}
+    if observation["work_signature"] != raw:
+        raise ValueError("raw lifecycle work signature contradicts first receiver calls")
+    return {member["id"]: sample.complete_work_signature({"receiver_runs": [_comparison_call(member["call"])]})
+            for member in first}
+
+
+def _row_work(row):
+    return {name: _comparison_work(row[name]) for name in SOURCES}
+
+
+def comparison_contract():
+    return {"schema": "triad-lifecycle-regime-comparison-v1",
+            "unordered_multiset": "receiver.regime.threads.library_pools only",
+            "all_fields_and_duplicates_preserved": True,
+            "raw_observations_rewritten": False,
+            "bodies": _body_hashes(WORKER, ("_comparison_call", "_comparison_work", "_row_work",
+                                            "_pair_check", "_check_rows")),
+            "shared_validator_bodies": _body_hashes(WORKER.with_name("triad_perf_family_regression.py"),
+                ("canonical_library_call", "numerical_agreement", "_regimes"))}
+
+
 def _pair_check(row, precision):
     for section in ("first", "warm"):
         left, right = (row[n][section] for n in SOURCES)
@@ -423,12 +462,20 @@ def _pair_check(row, precision):
 def _check_rows(rows, members, work, environment, cycles, precision):
     if len({r["pair_id"] for r in rows}) != len(rows):
         raise ValueError("duplicate physical lifecycle pair id")
+    if not rows:
+        raise ValueError("physical lifecycle observations missing")
+    canonical_work = _row_work(rows[0])
+    # Retained pre-correction reports name raw first-process hashes; new
+    # reports name the derived multiset hashes. Both must match the actual
+    # complete first call, and all following calls must preserve that work.
+    if work not in (canonical_work, {n: rows[0][n]["work_signature"] for n in SOURCES}):
+        raise ValueError("expected lifecycle work is not bound to the first complete observation")
     for row in rows:
         _pair_check(row, precision)
         for name in SOURCES:
             value = row[name]
             if (value["cycles"] != cycles or len(value["warm"]) != cycles or
-                    len(value["cycle_seconds"]) != cycles or value["work_signature"] != work[name] or
+                    len(value["cycle_seconds"]) != cycles or _comparison_work(value) != canonical_work[name] or
                     value["environment"] != environment[name] or value["complete_seconds"] <= 0 or
                     not math.isfinite(value["complete_seconds"])):
                 raise ValueError("physical lifecycle work/environment or complete timing differs")
@@ -436,7 +483,7 @@ def _check_rows(rows, members, work, environment, cycles, precision):
                 if [r["id"] for r in calls] != members:
                     raise ValueError("physical lifecycle member ordering differs")
                 for call in calls:
-                    if sample.complete_work_signature({"receiver_runs": [call["call"]]}) != work[name][call["id"]]:
+                    if sample.complete_work_signature({"receiver_runs": [_comparison_call(call["call"])]}) != canonical_work[name][call["id"]]:
                         raise ValueError("physical receiver receipt contradicts complete work signature")
     _physical_seeds(rows)
 
@@ -466,6 +513,8 @@ def _validate_anchor(value):
     if not isinstance(value, dict) or value.get("schema") != SCHEMA or value.get("status") != "validated":
         return False
     try:
+        if "comparison_contract" in value and value["comparison_contract"] != comparison_contract():
+            return False
         if value["record_sha256"] != digest({k: v for k, v in value.items() if k != "record_sha256"}):
             return False
         frozen = value["forecast"]
@@ -483,8 +532,7 @@ def _validate_anchor(value):
         all_rows = [*value["training"], *value["full_pairs"]]
         if (set(value["training_pair_ids"]) & {r["pair_id"] for r in value["full_pairs"]} or
                 value["training_pair_ids"] != [r["pair_id"] for r in value["training"]] or
-                any({n: r[n]["work_signature"] for n in SOURCES} != frozen["work_signature"] or
-                    _environment_signature(r) != frozen["environment"] for r in all_rows)):
+                any(_environment_signature(r) != frozen["environment"] for r in all_rows)):
             return False
         if _physical_seeds(value["training"]) & _physical_seeds(value["full_pairs"]):
             return False
@@ -557,6 +605,8 @@ def _validate_cold_anchor(value):
     if not isinstance(value, dict):
         return False
     try:
+        if "comparison_contract" in value and value["comparison_contract"] != comparison_contract():
+            return False
         if value.get("schema") != SCHEMA or value.get("status") != "direct_full" or value.get("kind") != "cold":
             return False
         if value["record_sha256"] != digest({k: v for k, v in value.items() if k != "record_sha256"}):
@@ -573,7 +623,6 @@ def _validate_cold_anchor(value):
                 for r in rows for n in SOURCES):
             return False
         return (len(rows) in LOOKS and all(r[n]["cycles"] == 0 and
-                    r[n]["work_signature"] == value["expected_work"][n] and
                     r[n]["environment"] == value["environment"][n] for r in rows for n in SOURCES))
     except (KeyError, ValueError, TypeError):
         return False
@@ -633,7 +682,7 @@ def run_case(case, families, known, roots, binaries, output, args, deadline):
               "static_binding": static, "static_binding_sha256": digest(static), "status": "unqualified",
               "prediction_valid": False, "comparison": {"gate": "inconclusive"}, "training": [],
               "full_pairs": [], "confirmation": [], "mode": args.mode, "timing_scope": MEASUREMENT_SCOPE,
-              "mixed_method": mixed_method, "budget_looks": []}
+              "mixed_method": mixed_method, "budget_looks": [], "comparison_contract": comparison_contract()}
     anchor_path = _anchor_path(args.anchor_directory, case["id"])
     anchor = json.loads(anchor_path.read_text()) if not direct_mixed and args.mode == "reuse" and anchor_path.is_file() else None
     if case["kind"] == "mixed" and not direct_mixed and args.mode == "reuse" and (not _validate_anchor(anchor) or anchor["static_binding"] != static):
@@ -659,15 +708,17 @@ def run_case(case, families, known, roots, binaries, output, args, deadline):
             if case["cache"] == "persistent-compiled" and phase != "cache-precondition" and (
                     cache["before_count"] == 0 or cache["new_artifacts"]):
                 raise ValueError("persistent compiled-cache target encountered a cache miss")
+        # Keep complete raw observations even when validation rejects the pair.
+        # Serialization remains outside both source processing timers.
+        row["pair_id"] = digest({"case": case["id"], "seed": seed, "phase": phase})
+        save(output/f"{phase}-{index:03d}.json", row)
         _pair_check(row, args.precision)
-        work = {n: row[n]["work_signature"] for n in SOURCES}
+        work = _row_work(row)
         env = _environment_signature(row)
         if expected_work is None:
             expected_work, environment = work, env
         if work != expected_work or env != environment:
             raise ValueError("lifecycle work or environment changed across physical observations")
-        row["pair_id"] = digest({"case": case["id"], "seed": seed, "phase": phase})
-        save(output/f"{phase}-{index:03d}.json", row)
         return row
     if case["cache"] == "persistent-compiled":
         report["cache_precondition"] = pair(0, 0, "cache-precondition")
@@ -723,7 +774,8 @@ def run_case(case, families, known, roots, binaries, output, args, deadline):
             record = {"schema": SCHEMA, "id": case["id"], "kind": "cold", "status": "direct_full",
                       "static_binding": static, "environment": environment, "expected_work": expected_work,
                       "full_pairs": report["full_pairs"], "comparison": report["comparison"],
-                      "regression_policy": regression_profile(args.regression_profile)}
+                      "regression_policy": regression_profile(args.regression_profile),
+                      "comparison_contract": comparison_contract()}
             record["record_sha256"] = digest(record)
             if anchor_path.exists():
                 raise ValueError("refusing to overwrite a historical cold qualification")
@@ -749,7 +801,7 @@ def run_case(case, families, known, roots, binaries, output, args, deadline):
                 break
         report["forecast"] = {**frozen, "work_signature": expected_work, "environment": environment}
         save(output/"forecast.json", report["forecast"])
-        if anchor and (anchor["forecast"]["work_signature"] != expected_work or anchor["forecast"]["environment"] != environment):
+        if anchor and (_row_work(anchor["training"][0]) != expected_work or anchor["forecast"]["environment"] != environment):
             report["reason"] = "current full work/environment differs from historical mixed model"
         elif anchor and (gate["gate"] == "inconclusive" or not ready["feasible"]):
             report["reason"] = "frozen routine decision or sentinel timing remains inconclusive"
@@ -794,6 +846,7 @@ def run_case(case, families, known, roots, binaries, output, args, deadline):
                           "training": report["training"], "training_pair_ids": [r["pair_id"] for r in report["training"]],
                           "minimum_campaign_seconds": args.minimum_campaign_seconds, "sustained": report["sustained"],
                           "confirmation": report["confirmation"], "model_relative_error": args.model_relative_error}
+                record["comparison_contract"] = comparison_contract()
                 record["record_sha256"] = digest(record)
                 if anchor_path.exists() and not args.diagnostic:
                     raise ValueError("refusing to overwrite a historical lifecycle anchor")
@@ -857,8 +910,18 @@ def validate_routine_report(report, context):
                     "raw_report_sha256": digest(report), "raw_report_rewritten": False,
                     "raw_report_hash_encoding": "canonical JSON via sample.digest; wrapper retains byte-file identity",
                     "basis": "unchanged full timing/work/model bodies; recompute direct arithmetic-mean decision while retaining the unchanged 1.10 stability-review diagnostic"}
+            elif (report.get("protocol_sha256") == REVIEWED_POOL_ENUM_PROTOCOL93DE and
+                    report.get("manifest_sha256") == sha(MANIFEST)):
+                source_transfer = {"kind": "reviewed_protocol93de_library_inspection_order",
+                    "old_protocol_sha256": REVIEWED_POOL_ENUM_PROTOCOL93DE,
+                    "current_protocol_sha256": sha(WORKER),
+                    "raw_report_sha256": digest(report), "raw_report_rewritten": False,
+                    "comparison_contract": comparison_contract(),
+                    "basis": "exact current timed/model/static bindings and raw complete-work replay; only numerical-library multiset enumeration is canonicalized in derived validation copies"}
             else:
                 raise ValueError("lifecycle protocol or manifest differs from completed child")
+        elif report.get("comparison_contract") != comparison_contract():
+            raise ValueError("lifecycle comparison contract missing or changed")
         if report.get("mixed_method", "modeled") != mixed_method:
             raise ValueError("child mixed measurement method differs from selected route")
         if mixed_method == "direct" and report.get("direct_cycles_selection") != str(context.get("direct_cycles", "6")):
@@ -1083,7 +1146,8 @@ def main(argv=None):
               "regression_profile": args.regression_profile, "regression_policy": regression_profile(args.regression_profile),
               "selected_case_ids": [c["id"] for c in selected], "cases": [], "errors": [],
               "diagnostic": args.diagnostic,
-              "protocol_sha256": sha(WORKER), "manifest_sha256": sha(MANIFEST), "status": "running"}
+              "protocol_sha256": sha(WORKER), "manifest_sha256": sha(MANIFEST), "status": "running",
+              "comparison_contract": comparison_contract()}
     report["limitations"] = [
         "Paired source comparisons can cancel common startup, import, storage and scheduling slowdowns.",
         "Arithmetic hardware probes do not establish absolute cold-import or disk health.",

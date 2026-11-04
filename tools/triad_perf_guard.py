@@ -20,19 +20,21 @@ import math
 import os
 from pathlib import Path
 import random
+import secrets
+import re
 import signal
 import sys
 import traceback
 import uuid
 
 import triad_perf_complete as complete
-from triad_perf_guard_policy import (GuardPolicy, PairObservation, build_guard_plan,
+from triad_perf_guard_policy import (GuardPolicy, PairObservation, BlockObservation, build_guard_plan,
                                      build_guard_report, confirm_case, confirmation_futility,
                                      screen_case)
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SCHEMA = "triad-performance-fast-guard-run-v1"
+SCHEMA = "triad-performance-fast-guard-run-v2"
 
 
 def _json_default(value):
@@ -108,7 +110,12 @@ def source_snapshot(candidate, reference, binaries):
             else:
                 absent.append(name)
         missing[label] = absent
-    harness = set((ROOT / "tools").glob("triad_perf_guard*.py"))
+    # Bind the actual execution closure, not unrelated offline statistical
+    # research scripts that happen to share a filename prefix.
+    harness = {ROOT / "tools" / name for name in (
+        "triad_perf_guard.py", "triad_perf_guard_policy.py",
+        "triad_perf_guard_native_fft.py", "triad_perf_guard_families.py",
+        "triad_perf_guard_extras.py")}
     harness.update(ROOT / "tools" / name for name in (
         "triad_perf_complete.py", "triad_perf_hardware.py", "triad-performance.py",
         "triad-performance-coverage.json", "triad-performance-families.json",
@@ -158,21 +165,32 @@ def collect_descriptors(adapters, requested=()):
     return descriptors, owners
 
 
-def measurement_schedule(ids, policy, *, seed, session, looks=None):
-    """Freeze orders and nonoverlapping multi-capture seeds before screening."""
+def measurement_schedule(ids, policy, *, seed, session, looks=None, order_seed=None):
+    """Freeze fair block coins, opposite assignments and disjoint capture ranges."""
     looks = policy.looks if looks is None else tuple(looks)
     if not looks or any(type(n) is not int or n < 1 for n in looks):
         raise ValueError("measurement schedule needs positive frozen look counts")
-    generator = random.Random(seed)
+    generator = random.Random(order_seed) if order_seed is not None else None
+    def draw_coin():
+        return generator.getrandbits(1) if generator is not None else secrets.randbits(1)
     result = {}
     for case_index, name in enumerate(ids):
-        def order():
-            return ["reference", "candidate"] if generator.getrandbits(1) == 0 else ["candidate", "reference"]
+        screen_order = ["reference", "candidate"] if draw_coin() == 0 else ["candidate", "reference"]
+        blocks = []
+        for index in range(max(looks)):
+            coin = draw_coin()
+            first = ["reference", "candidate"] if coin == 0 else ["candidate", "reference"]
+            block_id = session + ":confirmation:" + str(case_index) + ":" + str(index)
+            block_seed = seed + 1_000_000 + 16 * (case_index * max(looks) + index)
+            periods = [{"run_id": block_id + ":period:" + str(period),
+                        "seed": block_seed + 8 * period,
+                        "order": first if period == 0 else first[::-1]}
+                       for period in range(2)]
+            blocks.append({"run_id": block_id, "coin": coin,
+                           "seed": block_seed, "order": first, "periods": periods})
         result[name] = {"screen": {"run_id": session + ":screen:" + str(case_index),
-            "seed": seed, "order": order()}, "confirmation": [
-                {"run_id": session + ":confirmation:" + str(case_index) + ":" + str(index),
-                 "seed": seed + 1_000_000 + 16 * (case_index * max(looks) + index),
-                 "order": order()} for index in range(max(looks))]}
+                                  "seed": seed, "order": screen_order},
+                        "confirmation": blocks}
     return result
 
 
@@ -184,13 +202,42 @@ def _observation(raw, expected_id):
     return PairObservation(raw["run_id"], raw["reference_seconds"], raw["candidate_seconds"])
 
 
+def _context_receipt(raw, order, used_contexts):
+    """A missing experimental-unit proof is nonblocking missing assurance.
+
+    Source/work/numerical corruption is still handled by the adapter. This
+    check prevents a complete but permanently confounded timing from being
+    promoted into statistically eligible evidence merely by assigning an ID.
+    """
+    evidence = raw["details"].get("confirmation_context")
+    if not isinstance(evidence, dict):
+        return None, "fresh execution-context evidence is absent"
+    if (evidence.get("protocol") != "fresh-source-context-pair-v1" or
+            evidence.get("creation_order") != list(order) or
+            evidence.get("target_boundary_preserved") is not True or
+            evidence.get("warmup_policy") not in ("full-target-outside-timer", "fresh-process-target-includes-startup")):
+        return None, "execution-context protocol or original target boundary is unverified"
+    identities = evidence.get("context_ids", {})
+    isolation = evidence.get("isolation_evidence", {})
+    if (not isinstance(identities, dict) or set(identities) != {"reference", "candidate"} or
+            not isinstance(isolation, dict) or set(isolation) != {"reference", "candidate"} or
+            not evidence.get("identity_kind") or not all(isolation.values())):
+        return None, "context identities lack actual isolation/launch receipts"
+    values = tuple(identities[name] for name in ("reference", "candidate"))
+    if (any(not isinstance(value, str) or not value.strip() for value in values) or
+            len(set(values)) != 2 or set(values) & used_contexts):
+        return None, "execution contexts were reused or their identities are invalid"
+    used_contexts.update(values)
+    return values, None
+
+
 def exercise_workloads(adapters, descriptors, owners, plan, schedule, *, deadline, output,
                        clock=time.monotonic):
-    """All screens precede any independent confirmation, without rerun-to-pass."""
+    """Broad screens followed by bounded, round-robin randomized blocks."""
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
     screens, confirmations, futilities, failures, advisory, measurements = [], [], [], [], [], []
-    disabled = set()
+    disabled, used_contexts = set(), set()
     screen_wall = {}
     profile = plan["policy"]["profile"]
 
@@ -204,8 +251,6 @@ def exercise_workloads(adapters, descriptors, owners, plan, schedule, *, deadlin
             raw = owners[name].measure_pair(name, invocation["run_id"], invocation["seed"],
                 order=tuple(invocation["order"]), phase=phase)
             pair = _observation(raw, invocation["run_id"])
-            # Serialize before accepting the evidence: nonfinite work metadata
-            # is an integrity error even if the timer itself is finite.
             json.dumps(raw, allow_nan=False, default=_json_default)
             receipt.update(status="completed", observation=raw)
             return pair, receipt
@@ -225,7 +270,8 @@ def exercise_workloads(adapters, descriptors, owners, plan, schedule, *, deadlin
         finally:
             receipt["wall_seconds"] = max(0., clock() - start)
             measurements.append(receipt)
-            write_json(output / ("pair-%04d.json" % (len(measurements) - 1)), receipt)
+            receipt["measurement_file"] = "pair-%04d.json" % (len(measurements) - 1)
+            write_json(output / receipt["measurement_file"], receipt)
             _event(output / "events.jsonl", receipt)
 
     for descriptor in descriptors:
@@ -242,59 +288,93 @@ def exercise_workloads(adapters, descriptors, owners, plan, schedule, *, deadlin
             continue
         pair, receipt = measure(name, schedule[name]["screen"], "screen")
         if pair is not None:
-            value = screen_case(plan, name, pair)
-            screens.append(value)
-            # A shared-generation screen can be cheaper than its composed
-            # pipeline timer. Use both observed costs as planning diagnostics.
+            screens.append(screen_case(plan, name, pair))
             screen_wall[name] = max(receipt["wall_seconds"], pair.reference_seconds + pair.candidate_seconds)
     screen_by_id = {row["hypothesis_id"]: row for row in screens}
-    for descriptor in descriptors:
-        name = descriptor["id"]
-        screen = screen_by_id.get(name)
-        if not screen or not screen["nominate_confirmation"] or id(owners[name]) in disabled:
-            continue
-        rows = []
-        finished = False
-        for look in plan["looks"]:
-            needed = look - len(rows)
-            estimated = 1.25 * needed * screen_wall[name]
+    if plan["metadata"].get("randomization_inference_eligible") is False:
+        advisory.append("deterministic order replay is diagnostic only; fresh randomized-block inference was disabled")
+        return screens, confirmations, futilities, failures, advisory, measurements
+    # Cheap nominees get an opportunity first, then every active nominee gets
+    # at most one complete block per round. One uncertain case cannot consume
+    # a whole twelve-block look before other cases receive confirmation work.
+    active = sorted([name for name, value in screen_by_id.items()
+                     if value["nominate_confirmation"] and id(owners[name]) not in disabled],
+                    key=lambda name: screen_wall[name])
+    rows_by_id = {name: [] for name in active}
+    estimates = {name: 2.5 * screen_wall[name] for name in active}
+    block_index = 0
+    while active:
+        for name in list(active):
+            if id(owners[name]) in disabled:
+                advisory.append(name + ": confirmation unavailable after this adapter failed")
+                active.remove(name)
+                continue
             remaining = deadline - clock()
-            if remaining <= 0 or estimated > remaining:
-                advisory.append(name + ": next predeclared confirmation look not started; estimated %.3fs, remaining %.3fs" % (estimated, max(0., remaining)))
-                break
-            failed = False
-            for index in range(len(rows), look):
+            if remaining <= 0 or estimates[name] > remaining:
+                advisory.append(name + ": next complete confirmation block not started; estimated %.3fs, remaining %.3fs" % (estimates[name], max(0., remaining)))
+                active.remove(name)
+                continue
+            rows = rows_by_id[name]
+            invocation = schedule[name]["confirmation"][len(rows)]
+            started = clock()
+            attempted = {"hypothesis_id": name, "run_id": invocation["run_id"],
+                         "coin": invocation["coin"], "periods": [], "status": "running",
+                         "plan_sha256": plan["record_sha256"]}
+            pairs, contexts = [], []
+            for period in invocation["periods"]:
                 if clock() >= deadline:
-                    advisory.append(name + ": confirmation sequence interrupted by shared budget")
-                    failed = True
+                    attempted.update(status="budget_limited", reason="shared budget expired within an incomplete block")
+                    advisory.append(name + ": incomplete confirmation block retained; no sign or rejection inferred")
                     break
-                pair, _ = measure(name, schedule[name]["confirmation"][index], "confirmation")
+                pair, receipt = measure(name, period, "confirmation")
+                attempted["periods"].append({"invocation": period, "measurement_file": receipt["measurement_file"],
+                                             "status": receipt["status"]})
                 if pair is None:
-                    failed = True
+                    attempted.update(status=receipt["status"], reason="confirmation period did not complete")
                     break
-                rows.append(pair)
-                # Evaluate only a predeclared rejection look. Between looks,
-                # stop only when the exact policy proves that even every
-                # remaining sign being positive could never cause rejection.
-                if len(rows) in plan["looks"]:
-                    decision = confirm_case(plan, name, rows, screen_run_ids=[screen["observation"]["run_id"]])
-                    confirmations.append(decision)
-                    if decision["confirmed_regression"]:
-                        if profile == "ci":
-                            advisory.append("CI stopped further confirmations after the first confirmed regression; all available screens had already run")
-                            return screens, confirmations, futilities, failures, advisory, measurements
-                        finished = True
-                        break
-                if len(rows) < plan["looks"][-1]:
-                    futility = confirmation_futility(plan, name, rows,
-                        screen_run_ids=[screen["observation"]["run_id"]])
-                    if futility["futile"]:
-                        futilities.append(futility)
-                        write_json(output / ("futility-%04d.json" % (len(futilities) - 1)), futility)
-                        finished = True
-                        break
-            if failed or finished:
-                break
+                context_ids, reason = _context_receipt(receipt["observation"], period["order"], used_contexts)
+                if reason:
+                    attempted.update(status="ineligible_context", reason=reason)
+                    advisory.append(name + ": confirmation context ineligible: " + reason + "; no statistical rejection inferred")
+                    break
+                pairs.append(pair)
+                contexts.append(context_ids)
+            attempted["wall_seconds"] = max(0., clock() - started)
+            if len(pairs) == 2:
+                observation = BlockObservation(invocation["run_id"], tuple(pairs),
+                    tuple(tuple(period["order"]) for period in invocation["periods"]), tuple(contexts))
+                rows.append(observation)
+                attempted.update(status="completed", observation={"run_id": observation.run_id,
+                    "pairs": [dict(run_id=p.run_id, reference_seconds=p.reference_seconds,
+                                   candidate_seconds=p.candidate_seconds) for p in observation.pairs],
+                    "orders": observation.orders, "contexts": observation.contexts},
+                    reference_seconds=observation.reference_seconds, candidate_seconds=observation.candidate_seconds)
+                estimates[name] = 1.25 * attempted["wall_seconds"]
+            write_json(output / ("block-%04d.json" % block_index), attempted)
+            _event(output / "blocks.jsonl", attempted)
+            block_index += 1
+            if len(pairs) != 2:
+                active.remove(name)
+                continue
+            screen_id = screen_by_id[name]["observation"]["run_id"]
+            if len(rows) in plan["looks"]:
+                decision = confirm_case(plan, name, rows, screen_run_ids=[screen_id])
+                confirmations.append(decision)
+                if decision["confirmed_regression"]:
+                    active.remove(name)
+                    if profile == "ci":
+                        advisory.append("CI stopped further confirmations after its first confirmed regression; every available screen had already run")
+                        return screens, confirmations, futilities, failures, advisory, measurements
+                    continue
+            if len(rows) < plan["looks"][-1]:
+                stop = confirmation_futility(plan, name, rows, screen_run_ids=[screen_id])
+                if stop["futile"]:
+                    futilities.append(stop)
+                    write_json(output / ("futility-%04d.json" % (len(futilities)-1)), stop)
+                    active.remove(name)
+                    continue
+            if len(rows) == plan["looks"][-1]:
+                active.remove(name)
     return screens, confirmations, futilities, failures, advisory, measurements
 
 
@@ -305,6 +385,16 @@ def _required_methods(matrix, command):
     return sorted({test.split("::", 1)[1] for row in matrix["rows"]
                    for test in row["cheap_functional_tests"]
                    if test.startswith("tests/" + filename + "::")})
+
+
+def _completed_failure_before_timeout(command, receipt):
+    """A later deadline does not erase a completed correctness failure."""
+    if receipt.get("status") != "deadline_exceeded":
+        return False
+    output = complete.command_output(receipt)
+    if Path(command[0]).name == "ctest":
+        return bool(re.search(r"\*\*\*(?:Failed|Exception)", output))
+    return bool(re.search(r"(?m)^FAILED\s*\((?:failures|errors)=\d+", output))
 
 
 def run_functional(args, candidate, binary, matrix, output, deadline, device):
@@ -330,7 +420,11 @@ def run_functional(args, candidate, binary, matrix, output, deadline, device):
         evidence = complete.functional_evidence(command, receipt, device, _required_methods(matrix, command))
         receipts.append({"kind": "functional", "command": receipt, "evidence": evidence})
         if receipt["status"] in ("deadline_exceeded", "not_started_budget_exhausted"):
-            advisory.append("functional command budget-limited: " + " ".join(command))
+            if _completed_failure_before_timeout(command, receipt):
+                failures.append("completed functional failure preceded a later deadline: " + " ".join(command))
+                evidence["completed_failure_before_timeout"] = True
+            else:
+                advisory.append("functional command budget-limited: " + " ".join(command))
         elif evidence["status"] != "passed":
             failures.append("functional execution/evidence failed: " + " ".join(command))
     return receipts, failures, advisory
@@ -380,6 +474,8 @@ def parse_args(argv=None):
     parser.add_argument("--workflow-job-count", type=int, default=1)
     parser.add_argument("--workflow-job-index", type=int, default=0)
     parser.add_argument("--seed", type=int, default=724031)
+    parser.add_argument("--order-seed", type=int,
+                        help="deterministic order debugging/replay only; disables performance rejection")
     parser.add_argument("--case", action="append", default=[], metavar="HYPOTHESIS_ID")
     parser.add_argument("--planner-binary", type=Path)
     parser.add_argument("--planner-reference-binary", type=Path)
@@ -402,6 +498,8 @@ def parse_args(argv=None):
         parser.error("thread counts must be in [1,256]")
     if not 0 <= args.seed <= 2**31 - 1:
         parser.error("seed must be in [0,2^31-1]")
+    if args.order_seed is not None and not 0 <= args.order_seed < 2**128:
+        parser.error("order-seed must be in [0,2^128)")
     if not math.isfinite(args.hardware_seconds) or not 0 < args.hardware_seconds <= 60:
         parser.error("hardware-seconds must be in (0,60]")
     if not math.isfinite(args.hardware_memory_mib) or not 1 <= args.hardware_memory_mib <= 16384:
@@ -480,7 +578,7 @@ def run(args, *, factories=None, entry_started=None):
         # those counts before freezing every invocation and its random order.
         preliminary = build_guard_plan(ids, policy)
         schedule = measurement_schedule(ids, policy, seed=args.seed, session=uuid.uuid4().hex,
-                                        looks=preliminary["looks"])
+                                        looks=preliminary["looks"], order_seed=args.order_seed)
         plan = build_guard_plan(ids, policy, metadata={
             "descriptors": descriptors, "measurement_schedule": schedule,
             "source_and_build_identity": snapshot, "device": device, "precision": args.precision,
@@ -488,10 +586,12 @@ def run(args, *, factories=None, entry_started=None):
             "workflow_job_index": args.workflow_job_index,
             "case_selection": "explicit diagnostic subset" if args.case else "all declared applicable workload families",
             "screen_policy": "all available screens precede every confirmation; screen times never enter confirmation",
-            "order_randomization": {"method": "predeclared seeded pseudorandom AB/BA draws",
-                                    "seed": args.seed, "uses_timing_data": False,
-                                    "independence_guaranteed_by_random_order": False},
-            "confirmation_budget_policy": "next full look starts only when a 1.25x measured-cost planning estimate fits; not a statistical limit",
+            "order_randomization": {"method": "fresh OS random coin per block" if args.order_seed is None else "deterministic diagnostic order replay",
+                                    "order_seed": args.order_seed, "uses_timing_data": False,
+                                    "independence_guaranteed_by_random_order": False,
+                                    "experimental_unit": "one balanced four-arm block; two complete targets per source"},
+            "randomization_inference_eligible": args.order_seed is None,
+            "confirmation_budget_policy": "cheap-first round-robin nominees; admit one complete block using 1.25x latest block wall (first block 2.5x screen pair wall); setup/warmup/cleanup included in effort; fixed rejection looks unchanged",
             "early_futility_policy": "stop only when the exact policy proves no remaining predeclared look can reject even if all future signs are positive",
             "functional_defaults_requested": args.functional_defaults,
             "hardware_probe_seconds": args.hardware_seconds,

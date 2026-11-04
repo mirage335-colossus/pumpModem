@@ -5,6 +5,7 @@ import importlib.util
 import io
 import json
 import os
+import select
 from pathlib import Path
 import subprocess
 import sys
@@ -71,19 +72,34 @@ class TelemetryTests(unittest.TestCase):
         captured = {}
         code = ("import os,signal,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); "
                 "os.write(2,b'x'*20000); os.write(1,b'x'*5000+b'\\n'); "
-                "os.write(1,b'80, 35, 1800, 144.5, 57, 570.86\\n'); time.sleep(60)")
+                "os.write(1,b'80, 35, 1800, 144.5, 57, 570.86\\n'); "
+                "os.write(int(os.environ['TRIAD_TEST_READY_FD']),b'R'); time.sleep(60)")
         def fake_popen(command, **kwargs):
             captured["command"] = command
+            ready_read, ready_write = os.pipe()
+            child_env = dict(kwargs.pop("env", os.environ))
+            child_env["TRIAD_TEST_READY_FD"] = str(ready_write)
+            kwargs["env"] = child_env
+            kwargs["pass_fds"] = tuple(kwargs.get("pass_fds", ())) + (ready_write,)
             captured["process"] = real_popen([sys.executable, "-u", "-c", code], **kwargs)
+            os.close(ready_write)
+            captured["ready_read"] = ready_read
             return captured["process"]
         start = time.monotonic()
         with mock.patch.object(telemetry.shutil, "which", return_value="/mock/nvidia-smi"), \
              mock.patch.object(telemetry.subprocess, "Popen", side_effect=fake_popen):
             with telemetry.start_sampler(3) as sampler:
-                deadline = time.monotonic() + 2.
+                # Readiness is emitted by the child after its output is written.
+                # This excludes process-start scheduling from the sample check.
+                ready, _, _ = select.select([captured.get("ready_read", -1)], [], [], 30.)
+                self.assertTrue(ready, "fake producer failed its bounded readiness watchdog")
+                self.assertEqual(os.read(captured["ready_read"], 1), b"R")
+                os.close(captured["ready_read"])
+                deadline = time.monotonic() + 30.
                 while time.monotonic() < deadline:
                     result = sampler.summarize(start, time.monotonic())
-                    if result["sample_count"]:
+                    if (result["sample_count"] == 1 and result["discarded_invalid_lines"] == 1
+                            and result["stderr_bytes_discarded"] >= 20000):
                         break
                     time.sleep(.01)
                 self.assertEqual(result["sample_count"], 1)
@@ -91,7 +107,7 @@ class TelemetryTests(unittest.TestCase):
                 self.assertGreater(result["stderr_bytes_discarded"], 0)
         self.assertEqual(sampler._cleanup, "reaped")
         self.assertEqual(captured["process"].returncode, -9)
-        self.assertLess(time.monotonic() - start, 3.)
+        self.assertFalse(any(thread.is_alive() for thread in sampler._threads))
         self.assertIn("--id=3", captured["command"])
         self.assertIn("--loop-ms=200", captured["command"])
         self.assertNotIn("uuid", " ".join(captured["command"]))
@@ -123,11 +139,30 @@ class TelemetryTests(unittest.TestCase):
         with mock.patch.object(telemetry.shutil, "which", return_value="/mock/nvidia-smi"), \
              mock.patch.object(telemetry.subprocess, "Popen", side_effect=fake_popen):
             with telemetry.start_sampler() as sampler:
-                sampler._process.wait(timeout=2.)
+                sampler._process.wait(timeout=30.)
                 result = sampler.summarize(0., time.monotonic())
         self.assertEqual(result["status"], "unavailable")
         self.assertEqual(result["process_returncode"], 2)
         self.assertIn("query exited", result["reason"])
+
+    def test_term_escalation_uses_a_bounded_wait_then_reaps(self):
+        process = mock.Mock()
+        process.pid = 123
+        process.stdout = io.BytesIO()
+        process.stderr = io.BytesIO()
+        process.poll.return_value = None
+        process.wait.side_effect = [subprocess.TimeoutExpired("fake", 1.), 0]
+        with mock.patch.object(telemetry.shutil, "which", return_value="/mock/nvidia-smi"), \
+             mock.patch.object(telemetry.subprocess, "Popen", return_value=process) as popen, \
+             mock.patch.object(telemetry.os, "killpg") as killpg:
+            with telemetry.start_sampler(0) as sampler:
+                pass
+        self.assertTrue(popen.call_args.kwargs["start_new_session"])
+        self.assertEqual(process.wait.call_args_list[0].kwargs["timeout"], 1.)
+        self.assertEqual(process.wait.call_args_list[1].kwargs["timeout"], 1.)
+        self.assertEqual(killpg.call_args_list[0].args, (123, telemetry.signal.SIGTERM))
+        self.assertEqual(killpg.call_args_list[1].args, (123, telemetry.signal.SIGKILL))
+        self.assertEqual(sampler._cleanup, "reaped")
 
 
 if __name__ == "__main__":

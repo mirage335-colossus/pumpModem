@@ -12,6 +12,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 import triad_perf_guard_native_fft as guard
+import triad_perf_guard as suite_guard
 
 
 class FakeWorker:
@@ -154,7 +155,75 @@ class GuardWorkloadTests(unittest.TestCase):
         compare.assert_called_once()
         self.prepare_mock.assert_not_called()
 
-    def test_fft_full_bank_prepares_every_pair_but_reuses_workers_fixture_and_pilot(self):
+    def test_native_confirmation_has_real_invocation_owned_contexts(self):
+        adapter=self.adapter()
+        with mock.patch.object(guard.native,"run_native",side_effect=lambda b,c,t,seed,**k:self.native_result(c,t,seed,**k)), mock.patch.object(
+                guard.native,"compare_native_outputs",return_value={"eligible":True}):
+            first=adapter.measure_pair("native-null","native-confirm0",111,("candidate","reference"),phase="confirmation")
+            second=adapter.measure_pair("native-null","native-confirm1",112,("reference","candidate"),phase="confirmation")
+        used=set()
+        for result in [first,second]:
+            context=result["details"]["confirmation_context"]
+            values,reason=suite_guard._context_receipt(result,result["details"]["order"],used)
+            self.assertIsNone(reason)
+            self.assertEqual(len(values),2)
+            for evidence in context["isolation_evidence"].values():
+                self.assertTrue(Path(evidence["raw_launch_receipt"]).is_file())
+        self.assertEqual(len(used),4)
+
+    def test_context_protocol_failure_remains_hard_after_process_cleanup(self):
+        adapter=self.adapter();worker=mock.Mock();alive={"value":True}
+        worker.process.pid=123
+        worker.process.poll.side_effect=lambda:None if alive["value"] else 0
+        worker.request.side_effect=adapter.api.SuiteError("close rejected")
+        worker.process.stdin.closed=False;worker.process.stdout.closed=False;worker.log.closed=False
+        worker.reader.is_alive.return_value=False
+        def close():
+            alive["value"]=False
+            worker.process.stdin.closed=True;worker.process.stdout.closed=True;worker.log.closed=True
+        worker.close.side_effect=close
+        adapter.workers={"reference":worker};adapter._worker_context={"id":"broken-protocol"}
+        with self.assertRaisesRegex(RuntimeError,"close protocol failure"):
+            adapter._close_worker_context("test")
+        self.assertFalse(alive["value"])
+        self.assertFalse(adapter.workers)
+        record=adapter.lifecycle["context_cleanup"][-1]["workers"]["reference"]
+        self.assertTrue(record["cleanup_verified"])
+        self.assertIn("SuiteError",record["close_protocol_error"])
+
+    def test_acknowledged_shutdown_timeout_is_owned_cleanup_not_random_failure(self):
+        adapter=self.adapter();worker=mock.Mock();alive={"value":True}
+        worker.process.pid=123
+        worker.process.poll.side_effect=lambda:None if alive["value"] else -15
+        worker.request.return_value={"closed":True}
+        worker.process.wait.side_effect=subprocess.TimeoutExpired("worker",2.)
+        worker.process.stdin.closed=False;worker.process.stdout.closed=False;worker.log.closed=False
+        worker.reader.is_alive.return_value=False
+        def close():
+            self.assertLess(worker.deadline,time.monotonic())
+            alive["value"]=False
+            worker.process.stdin.closed=True;worker.process.stdout.closed=True;worker.log.closed=True
+        worker.close.side_effect=close
+        adapter.workers={"reference":worker};adapter._worker_context={"id":"slow-shutdown"}
+        result=adapter._close_worker_context("test")
+        self.assertFalse(result["cleanup_errors"])
+        self.assertTrue(result["workers"]["reference"]["cleanup_verified"])
+        self.assertEqual(result["workers"]["reference"]["cleanup_mode"],"owned_forced_after_timeout")
+        self.assertEqual(worker.request.call_count,1)
+
+    def test_already_dead_nonzero_worker_is_not_silently_clean(self):
+        adapter=self.adapter();worker=mock.Mock()
+        worker.process.pid=124;worker.process.poll.return_value=1
+        worker.process.stdin.closed=True;worker.process.stdout.closed=True;worker.log.closed=True
+        worker.reader.is_alive.return_value=False
+        adapter.workers={"reference":worker};adapter._worker_context={"id":"crashed-worker"}
+        with self.assertRaisesRegex(RuntimeError,"abnormally outside owned"):
+            adapter._close_worker_context("test")
+        worker.request.assert_not_called()
+        worker.close.assert_called_once()
+        self.assertEqual(adapter.lifecycle["context_cleanup"][-1]["workers"]["reference"]["pre_cleanup_exit"],1)
+
+    def test_fft_confirmation_rebuilds_contexts_and_full_case_warms_outside_target(self):
         adapter = self.adapter()
         first = adapter.measure_pair("fft:test-fft", "screen", 1)
         second = adapter.measure_pair("fft:test-fft", "confirm1", 2, ("candidate", "reference"), phase="confirmation")
@@ -162,15 +231,32 @@ class GuardWorkloadTests(unittest.TestCase):
         self.assertEqual(second["details"]["phase"], "confirmation")
         self.assertFalse(second["details"]["seed_applied_to_simulation"])
         self.assertEqual(second["details"]["precision_selection"]["selected"], "fp32")
-        self.assertEqual(len(FakeWorker.instances), 2)
-        for worker in FakeWorker.instances:
+        self.assertEqual(len(FakeWorker.instances), 4)
+        for worker in FakeWorker.instances[:2]:
             scores = [r for r in worker.requests if r["action"] == "score"]
-            self.assertEqual([len(r["frequency_offsets_hz"]) for r in scores], [3, 3, 8, 8])
-            self.assertEqual(len([r for r in worker.requests if r["action"] == "prepare"]), 4)
+            self.assertEqual([len(r["frequency_offsets_hz"]) for r in scores], [3, 3, 8])
+            self.assertEqual(len([r for r in worker.requests if r["action"] == "prepare"]), 3)
+        for worker in FakeWorker.instances[2:]:
+            scores = [r for r in worker.requests if r["action"] == "score"]
+            self.assertEqual([len(r["frequency_offsets_hz"]) for r in scores], [8, 8])
+            self.assertEqual(len([r for r in worker.requests if r["action"] == "prepare"]), 2)
+        context = second["details"]["confirmation_context"]
+        self.assertEqual(context["protocol"], "fresh-source-context-pair-v1")
+        self.assertEqual(context["creation_order"], ["candidate", "reference"])
+        self.assertTrue(context["target_boundary_preserved"])
+        self.assertTrue(context["setup_warmup_costs_charged_to_campaign"])
+        self.assertEqual(context["warmup_policy"], "full-target-outside-timer")
+        self.assertEqual(context["teardown"]["reason"], "confirmation_period_complete")
+        self.assertEqual(len(set(context["context_ids"].values())), 2)
+        self.assertTrue(all(event["warmup"]["measured_group_count"] == 24
+                            for event in context["workers"].values()))
+        accepted, reason = suite_guard._context_receipt(second, ("candidate", "reference"), set())
+        self.assertIsNone(reason)
+        self.assertEqual(set(accepted), set(context["context_ids"].values()))
         self.prepare_mock.assert_called_once()
         kinds = [event["kind"] for event in adapter.lifecycle["events"]]
         self.assertEqual(kinds.count("fft_numerical_precision_pilot"), 1)
-        self.assertEqual(kinds.count("worker_startup"), 2)
+        self.assertEqual(kinds.count("worker_startup"), 4)
         adapter.close()
         self.assertTrue(all(worker.closed for worker in FakeWorker.instances))
         self.assertEqual(adapter.close(), adapter.lifecycle)
@@ -194,9 +280,12 @@ class GuardWorkloadTests(unittest.TestCase):
         self.assertEqual(selection["requested_precision"], "fp64")
         self.assertFalse(selection["fallback"])
         self.assertEqual(first["details"]["precision_selection"], selection)
-        for worker in FakeWorker.instances:
-            self.assertEqual([r["precision"] for r in worker.requests if r["action"] == "prepare"], ["fp64"] * 3)
-            self.assertEqual([len(r["frequency_offsets_hz"]) for r in worker.requests if r["action"] == "score"], [3, 8, 8])
+        for worker in FakeWorker.instances[:2]:
+            self.assertEqual([r["precision"] for r in worker.requests if r["action"] == "prepare"], ["fp64"] * 2)
+            self.assertEqual([len(r["frequency_offsets_hz"]) for r in worker.requests if r["action"] == "score"], [3, 8])
+        for worker in FakeWorker.instances[2:]:
+            self.assertEqual([r["precision"] for r in worker.requests if r["action"] == "prepare"], ["fp64"] * 2)
+            self.assertEqual([len(r["frequency_offsets_hz"]) for r in worker.requests if r["action"] == "score"], [8, 8])
 
     def test_fp32_floor_may_explicitly_select_faster_qualified_fp64(self):
         adapter = self.adapter()

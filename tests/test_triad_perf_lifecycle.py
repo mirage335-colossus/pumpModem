@@ -1,5 +1,6 @@
 """Cheap protocol and inference checks; no receiver campaign is executed."""
 from copy import deepcopy
+import json
 from pathlib import Path
 import sys
 import tempfile
@@ -53,6 +54,41 @@ def anchor():
 
 
 class LifecycleInferenceTests(unittest.TestCase):
+    def test_comparison_work_preserves_raw_signatures_across_process_pool_order(self):
+        rows = [pair(i, cycles=2) for i in range(3)]
+        for index, row in enumerate(rows):
+            for side in lifecycle.SOURCES:
+                value = row[side]
+                calls = [value["first"], *value["warm"]]
+                for cycle, members in enumerate(calls):
+                    pools = [{"prefix": "numpy", "num_threads": 2}, {"prefix": "scipy", "num_threads": 2}]
+                    if (index + cycle + (side == "candidate")) % 2:
+                        pools.reverse()
+                    members[0]["call"]["receiver"]["regime"]["threads"] = {"library_pools": pools}
+                value["work_signature"]["one"] = lifecycle.sample.complete_work_signature(
+                    {"receiver_runs": [value["first"][0]["call"]]})
+        original = deepcopy(rows)
+        canonical = lifecycle._row_work(rows[0])
+        environment = lifecycle._environment_signature(rows[0])
+        lifecycle._check_rows(rows, ["one"], canonical, environment, 2, "fp32")
+        legacy = {n: rows[0][n]["work_signature"] for n in lifecycle.SOURCES}
+        lifecycle._check_rows(rows, ["one"], legacy, environment, 2, "fp32")
+        self.assertEqual(rows, original)
+        for changed in ("raw_signature", "duplicate_pool", "work_count", "memory"):
+            bad = deepcopy(rows)
+            target = bad[1]["candidate"]
+            if changed == "raw_signature":
+                target["work_signature"]["one"]["regime_sha256"] = "invalid"
+            elif changed == "duplicate_pool":
+                pools = target["warm"][0][0]["call"]["receiver"]["regime"]["threads"]["library_pools"]
+                pools.append(deepcopy(pools[0]))
+            elif changed == "work_count":
+                target["warm"][0][0]["call"]["receiver"]["work"]["count"] = 4
+            else:
+                target["warm"][0][0]["call"]["receiver"]["regime"]["memory_limit_bytes"] = 1024
+            with self.subTest(changed=changed), self.assertRaises(ValueError):
+                lifecycle._check_rows(bad, ["one"], canonical, environment, 2, "fp32")
+
     def test_manifest_mixed_covers_each_applicable_family_once(self):
         config, _, known = lifecycle.load_manifest()
         for case in config["cases"]:
@@ -167,6 +203,30 @@ class LifecycleInferenceTests(unittest.TestCase):
 
 
 class LifecycleBoundaryTests(unittest.TestCase):
+    def test_failed_pair_keeps_complete_raw_observations_before_validation(self):
+        import time
+        case = {"id": "retained-failure", "kind": "mixed", "device": "cpu", "cache": "process-cold",
+                "members": ["one"], "direct_cycles": 6}
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)/"run"
+            def measured(root, binary, case, families, known, **kwargs):
+                value = pair(kwargs["seed"], cycles=kwargs["cycles"])["reference"]
+                if str(root).endswith("candidate"):
+                    value["first"][0]["call"]["receiver"]["regime"]["tile"] = 512
+                value["compiled_cache"] = {"before_count": 0, "after_count": 0, "new_artifacts": []}
+                return value
+            args = SimpleNamespace(mixed_method="direct",direct_cycles="6",device="cpu",precision="fp32",threads=2,
+                native_threads=1,mode="reuse",anchor_directory=Path(directory)/"anchors",regression_profile="normal",
+                diagnostic=False,minimum_campaign_seconds=60.,maximum_holds=9,model_relative_error=.1)
+            with patch.object(lifecycle, "static_binding", return_value={"same": True}), \
+                 patch.object(lifecycle, "observe", side_effect=measured), \
+                 self.assertRaisesRegex(ValueError, "work regimes differ"):
+                lifecycle.run_case(case, {}, {}, {n: Path(directory)/n for n in lifecycle.SOURCES},
+                    {n: Path(directory)/n for n in lifecycle.SOURCES}, output, args, time.monotonic()+1000)
+            retained = json.loads((output/"mixed-direct-001.json").read_text())
+            self.assertEqual(set(retained), {"reference", "candidate", "pair_id"})
+            self.assertEqual(retained["candidate"]["first"][0]["call"]["receiver"]["regime"]["tile"], 512)
+
     def test_explicit_direct_mixed_executes_full_cycles_without_model_history(self):
         import time
         case = {"id": "direct", "kind": "mixed", "device": "cpu", "cache": "process-cold",
@@ -231,6 +291,7 @@ class LifecycleBoundaryTests(unittest.TestCase):
                 anchor_directory=Path(directory)/"empty",mixed_method="direct",direct_cycles="auto")
             report={"schema":lifecycle.SCHEMA,"mode":"reuse","status":"passed","errors":[],"diagnostic":False,
                 "protocol_sha256":lifecycle.sha(lifecycle.WORKER),"manifest_sha256":lifecycle.sha(lifecycle.MANIFEST),
+                "comparison_contract":lifecycle.comparison_contract(),
                 "regression_profile":"normal","regression_policy":regression_profile("normal"),
                 "mixed_method":"direct","direct_cycles_selection":"auto","cases":[row]}
             with patch.object(lifecycle,"load_manifest",return_value=({"cases":[case],"minimum_campaign_seconds":60.}, {}, {})), \
@@ -311,6 +372,7 @@ class LifecycleBoundaryTests(unittest.TestCase):
         report = {"schema": lifecycle.SCHEMA, "mode": "reuse", "diagnostic": False,
             "status": "passed", "errors": [],
             "protocol_sha256": lifecycle.sha(lifecycle.WORKER), "manifest_sha256": lifecycle.sha(lifecycle.MANIFEST),
+            "comparison_contract": lifecycle.comparison_contract(),
             "regression_profile": "normal", "regression_policy": regression_profile("normal"), "cases": [cold, mixed]}
         with tempfile.TemporaryDirectory() as directory:
             lifecycle.save(Path(directory)/"mixed.lifecycle-anchor.json", original)

@@ -17,8 +17,10 @@ retains the stronger mean-runtime, historical forecast and sustained checks.
 The [coverage and prediction matrix](triad-performance-matrix.md) maps maintained
 paths to cheap checks, full workloads, anchors and unresolved regimes. Neither
 entry point replays historical sensitivity campaigns by default or qualifies
-ordinary Robust performance. The [guard validation record](validation-data/triad-v3/2026-11-04-performance-guard/README.md)
-keeps statistical controls and remaining operational limits explicit.
+ordinary Robust performance. The [current qualification record](validation-data/triad-v3/2026-11-04-performance-completion/README.md)
+records 33 CPU/36 GPU measurement routes, roughly 5.5/7.7-minute routines,
+independently validated sustained forecasts and the limits of the workflow-wide
+blocking policy. Earlier failed models and statistical controls remain preserved.
 The current [broad configuration study](validation-data/triad-v3/2026-11-03-broad/README.md)
 separates unsupported configurations, capture limits, incomplete acquisition and
 receiver failures. It also records corrected high-C/N₀ numerical failures;
