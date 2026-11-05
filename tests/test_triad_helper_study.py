@@ -25,7 +25,8 @@ class StudyOrchestrationTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.folder = Path(self.temporary.name)
         self.manifest = dict(schema='triad-helper-public-v1', sample_rate_hz=200,
-            format=dict(physical_rf_retuning=False, requested_bit_seconds=16., bit_seconds=20.),
+            format=dict(physical_rf_retuning=False, requested_bit_seconds=16., bit_seconds=20.,
+                        occupied_bandwidth_hz=225.),
             calendar=dict(data_sample_offset=7600, capture_lead_seconds=8., capture_samples=18000,
                           arrival_prior_seconds=[-7.035, 7.035], helper_end_seconds=80.),
             helper_plan=dict(low_hz=550., high_hz=2400., pilot_dwell_gating=False),
@@ -182,6 +183,106 @@ class StudyOrchestrationTests(unittest.TestCase):
                 study.frequency_grid(bound, duration)
         with self.assertRaisesRegex(ValueError, 'bounded study work'):
             study.frequency_grid(1, 512)
+
+    def test_endpoint_inclusive_clock_and_rate_grid_helpers(self):
+        clocks = study._inclusive_grid(300., 7)
+        self.assertEqual(clocks[0], -300.)
+        self.assertEqual(clocks[-1], 300.)
+        self.assertEqual(clocks[3], 0.)
+        scales = study._inclusive_grid(150e-6, 3, center=1.)
+        np.testing.assert_allclose(scales, [1 - 150e-6, 1., 1 + 150e-6], rtol=0, atol=1e-15)
+        bank = study.frequency_grid(90.5220261, 23.2, max_points=1_000_000)
+        self.assertEqual(len(bank), 2 * int(np.ceil(90.5220261 * 4 * 23.2)) + 1)
+        with self.assertRaisesRegex(ValueError, 'bounded study work'):
+            study.frequency_grid(90.5220261, 23.2)
+
+    def test_interval_subset_keeps_adjacent_public_clock_candidates(self):
+        public = (-300., -200., -100., 0., 100., 200., 300.)
+        selected = study._bank_subset(public, [[70., 130.]])
+        np.testing.assert_array_equal(selected, [0., 100., 200.])
+        edge = study._bank_subset(public, [[-350., -330.]])
+        np.testing.assert_array_equal(edge, [-300.])
+        with self.assertRaisesRegex(ValueError, 'increasing'):
+            study._bank_subset(public, [[2., 1.]])
+
+    def test_aligned_fft_grid_is_opt_in_and_bound_into_procedure_identity(self):
+        self.receiver.aligned_frequency_offsets.return_value = (-.5, -.25, 0., .25, .5)
+        self.receiver.with_hypotheses.return_value = self.receiver
+        default = study.HelperComparison(self.folder)
+        self.assertEqual(len(default.frequencies), 81)
+        aligned = study.HelperComparison(self.folder, fft_backend='batched',
+                                          aligned_fft_grid=True)
+        np.testing.assert_array_equal(aligned.frequencies, [-.5, -.25, 0., .25, .5])
+        self.receiver.aligned_frequency_offsets.assert_called_once_with(aligned.original_bound)
+        self.receiver.with_hypotheses.assert_called_once_with(frequency_offsets=aligned.frequencies)
+        self.assertNotEqual(default.procedure_id, aligned.procedure_id)
+        with self.assertRaisesRegex(ValueError, 'requires --fft-backend batched'):
+            study.HelperComparison(self.folder, aligned_fft_grid=True)
+
+    def test_workspace_cache_capacity_and_memory_limit_are_explicit(self):
+        cached = study.HelperComparison(self.folder, fft_backend='batched',
+            max_cached_hypotheses=13, memory_limit_bytes=8 * 1024**3)
+        options = self.factory.call_args.kwargs
+        self.assertEqual(options['max_cached_hypotheses'], 13)
+        self.assertEqual(options['memory_limit_bytes'], 8 * 1024**3)
+        self.assertNotEqual(cached.procedure_id,
+            study.HelperComparison(self.folder, fft_backend='batched').procedure_id)
+
+    def test_actual_wider_data_band_is_unsupported_before_receiver_preparation(self):
+        # Fine200 has nominal bandwidth750 Hz. It fits the wide profile under
+        # this selected 6-Hz channel, but not the old fixed330-Hz pass edge.
+        self.manifest['format']['occupied_bandwidth_hz'] = 750.
+        self.manifest['channel']['spread_doppler_hz'] = 6.
+        self.write_manifest()
+        with self.assertRaisesRegex(ValueError, 'unsupported DATA frontend geometry'):
+            study.HelperComparison(self.folder, fft_backend='batched')
+        self.factory.assert_not_called()
+        comparison = study.HelperComparison(self.folder, fft_backend='batched', frontend_profile='wide')
+        self.assertAlmostEqual(comparison.frontend_support['required_nominal_edge_hz'],
+                               375.0000000375 + 12.0000000006 + .5)
+        self.assertFalse(comparison.frontend_support['compact_spectral_support'])
+        self.assertFalse(comparison.frontend_support['receiver_sensitivity_qualification'])
+
+    def test_selected_modulation_sidebands_are_included_in_support_guard(self):
+        self.manifest['channel']['spread_doppler_hz'] = 110.
+        self.manifest['channel']['selective_slow_depth'] = 0.
+        self.manifest['channel']['selective_fast_depth'] = 0.
+        self.write_manifest()
+        study.HelperComparison(self.folder)
+        self.factory.reset_mock()
+        self.manifest['channel']['selective_fast_depth'] = .65
+        self.write_manifest()
+        with self.assertRaisesRegex(ValueError, 'unsupported DATA frontend geometry'):
+            study.HelperComparison(self.folder)
+        self.factory.assert_not_called()
+
+    def test_support_guard_keeps_full_hf_clock_bank_and_rejects_dilation_overflow(self):
+        self.manifest['channel'].update(deterministic_cfo_bound_hz=90.5220261,
+            sample_clock_pair_ppm=300.015, endpoint_uniform_half_bound_ppm=150.)
+        self.write_manifest()
+        comparison = study.HelperComparison(self.folder, fft_backend='batched', frontend_profile='wide',
+            clock_ppm_values=(-300.015, 0., 300.015),
+            doppler_scale_values=(.99985, 1., 1.00015))
+        self.assertLess(comparison.frontend_support['required_nominal_edge_hz'], 400.)
+        self.assertGreater(comparison.frontend_support['required_nominal_edge_hz'], 383.)
+        self.factory.reset_mock()
+        self.manifest['format']['occupied_bandwidth_hz'] = 600.
+        self.manifest['channel'].update(deterministic_cfo_bound_hz=.5,
+            spread_doppler_hz=0., sample_clock_pair_ppm=0., endpoint_uniform_half_bound_ppm=0.)
+        self.write_manifest()
+        with self.assertRaisesRegex(ValueError, 'unsupported DATA frontend geometry'):
+            study.HelperComparison(self.folder, fft_backend='batched', clock_ppm_values=(100000.,))
+        self.factory.assert_not_called()
+
+    def test_support_guard_rejects_invalid_public_geometry(self):
+        self.manifest['channel']['spread_margin'] = 0.
+        with self.assertRaisesRegex(ValueError, 'finite positive public DATA frontend geometry'):
+            study._frontend_support(self.manifest, 'legacy', (0.,), (1.,))
+        self.manifest['channel']['spread_margin'] = 1.
+        for invalid in (float('nan'), 0., -1.):
+            self.manifest['format']['occupied_bandwidth_hz'] = invalid
+            with self.assertRaisesRegex(ValueError, 'finite positive public DATA frontend geometry'):
+                study._frontend_support(self.manifest, 'legacy', (0.,), (1.,))
 
 
 if __name__ == '__main__':

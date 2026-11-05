@@ -48,7 +48,10 @@ def load_json(path):
 
 
 def invoke(binary, output, arguments, timings, *, succeeds=True):
-    command = [str(binary), "--output", str(output), *arguments]
+    command = [str(binary)]
+    if output is not None:
+        command.extend(["--output", str(output)])
+    command.extend(arguments)
     started = time.perf_counter()
     result = subprocess.run(command, capture_output=True, text=True, timeout=30)
     elapsed = time.perf_counter() - started
@@ -60,7 +63,9 @@ def invoke(binary, output, arguments, timings, *, succeeds=True):
     return result
 
 
-def check_capture(directory, scenario, *, data=True, helper=True, bit=0):
+def check_capture(directory, scenario, *, data=True, helper=True, bit=0,
+                  data_if=None, base_oscillator=None, shift_oscillator=None, ramp_seconds=None,
+                  receiver_tail_seconds=0):
     manifest = load_json(directory / "manifest.json")
     truth = load_json(directory / "evaluator-truth.json")
     require(manifest["schema"] == "triad-helper-public-v1", "public schema")
@@ -95,6 +100,7 @@ def check_capture(directory, scenario, *, data=True, helper=True, bit=0):
             "Helper endpoint truncates DATA support")
     require(calendar["composite_source_samples"] % (fs * 2 // 5) == 0, "Helper endpoint must align to a full dwell")
     close(calendar["helper_end_seconds"] * fs, calendar["composite_source_samples"], "Helper endpoint")
+    close(calendar["receiver_tail_seconds"], receiver_tail_seconds, "additional public receiver tail")
 
     fmt, channel, power, plan = (manifest[name] for name in ("format", "channel", "power", "helper_plan"))
     eme = scenario == "eme"
@@ -126,16 +132,29 @@ def check_capture(directory, scenario, *, data=True, helper=True, bit=0):
     require(fmt["fhss_envelope_only"] is eme and fmt["fhss_center_aligned"] is eme, "case FHSS/center alignment")
     require(fmt["physical_rf_retuning"] is False, "fixture must identify envelope-only FHSS")
     close(fmt["quiet_seconds"], .055 if eme else 0, "quiet interval")
-    close(fmt["ramp_seconds"], 2 / 3600 if eme else .02, "ramp")
+    close(fmt["ramp_seconds"], ramp_seconds if ramp_seconds is not None else (2 / 3600 if eme else .02), "ramp")
     close(fmt["margin_seconds"], .005, "source margin")
-    close(channel["nominal_conversion_if_hz"], 4000 if eme else 1725, "default DATA IF")
+    expected_if = data_if if data_if is not None else (4000 if eme else 1725)
+    close(channel["nominal_conversion_if_hz"], expected_if, "DATA IF")
     require(channel["nominal_conversion_if_hz"] >= 1725, "DATA IF floor")
     close(channel["rf_hz"], 5.8e9 if eme else 30e6, "RF center")
     oscillator = "gpsdo-ocxo" if eme else "gpsdo-xo"
-    require(channel["base_oscillator"] == oscillator and channel["shift_oscillator"] == oscillator,
+    expected_base = base_oscillator or oscillator
+    expected_shift = shift_oscillator or expected_base
+    require(channel["base_oscillator"] == expected_base and channel["shift_oscillator"] == expected_shift,
             "canonical oscillator selections")
-    close(channel["relative_pair_ppm_bound"], .0001, "relative pair oscillator bound")
-    close(channel["endpoint_uniform_half_bound_ppm"], .00005, "independent endpoint half bound")
+    ppm = {"gpsdo-xo": .0001, "gpsdo-ocxo": .0001, "crystal": 100, "ic-7100": 1}
+    base_ppm, shift_ppm = ppm[expected_base], ppm[expected_shift]
+    close(channel["relative_pair_ppm_bound"], base_ppm, "legacy/base relative pair oscillator bound")
+    close(channel["base_relative_pair_ppm_bound"], base_ppm, "base relative pair oscillator bound")
+    close(channel["rf_relative_pair_ppm_bound"], shift_ppm, "RF relative pair oscillator bound")
+    close(channel["endpoint_uniform_half_bound_ppm"], base_ppm / 2, "independent audio endpoint half bound")
+    close(channel["rf_endpoint_uniform_half_bound_ppm"], shift_ppm / 2, "independent RF endpoint half bound")
+    close(channel["sample_clock_pair_ppm"], base_ppm / (1 - base_ppm * .5e-6), "corrected sample clock pair")
+    close(channel["nominal_shift_ppm_bound"], shift_ppm, "nominal RF shift bound")
+    close(channel["deterministic_cfo_bound_hz"],
+          (channel["rf_hz"] * shift_ppm + expected_if * base_ppm) * 1e-6 /
+          (1 - base_ppm * .5e-6), "deterministic CFO bound")
     require(channel["independent_base_and_shift"] is True, "base/shift independence")
     require(channel["spread_preset"] == ("eme-focused" if eme else "hf-worst"), "spread preset")
     close(channel["spread_margin"], 1 if eme else 3, "spread margin")
@@ -146,7 +165,8 @@ def check_capture(directory, scenario, *, data=True, helper=True, bit=0):
     require(channel["selective_model"] == "dispersive-dft-v1", "selected dispersive channel")
     close(channel["selective_scale_hz"], 75, "public selective scale")
     close(channel["selective_center_hz"], 0, "public selective center")
-    close(plan["placement_gate_bandwidth_hz"], 3600 if eme else 100, "complete gate allowance")
+    effective_ramp = ramp_seconds if ramp_seconds is not None else (2 / 3600 if eme else .02)
+    close(plan["placement_gate_bandwidth_hz"], 2 / effective_ramp, "complete gate allowance")
     close(plan["low_hz"], 550, "production low pilot")
     close(plan["auxiliary_hz"], 950, "production metadata carrier")
     require(plan["pilot_dwell_gating"] is eme, "production Helper dwell gating")
@@ -199,6 +219,64 @@ def main():
     started = time.perf_counter()
     with tempfile.TemporaryDirectory(prefix="triad-helper-export-smoke-") as temporary:
         root = Path(temporary)
+        # Planning is deliberately available before source/capture allocation.
+        # These cases cross baseline and bounded-layout paths without writing
+        # multi-hour sampled fixtures.
+        plan_cases = [
+            ["--case", "eme", "--plan-only", "--shaping", "auto"],
+            ["--case", "hf", "--plan-only", "--shaping", "auto", "--rate", "36",
+             "--added-symbols", "10", "--fhss", "off"],
+            ["--case", "eme", "--plan-only", "--shaping", "auto", "--rate", "360",
+             "--added-symbols", "1", "--fhss", "on", "--burst-wait-tiles", "3"],
+            ["--case", "eme", "--plan-only", "--shaping", "auto", "--data-if", "1775"],
+            ["--case", "hf", "--plan-only", "--shaping", "auto", "--rate", "1000",
+             "--added-symbols", "1", "--fhss", "on"],
+        ]
+        planned = []
+        for index, command_args in enumerate(plan_cases):
+            result = invoke(binary, None, command_args, timings)
+            plan = json.loads(result.stdout)
+            require(plan["schema"] == "triad-helper-shaping-plan-v1", "planner-only JSON schema")
+            require("geometry_feasible" in plan, "planner-only result must classify geometry")
+            require(not (root / f"plan-{index}").exists(), "planner-only invocation created an output directory")
+            if plan["geometry_feasible"]:
+                require(plan["format"]["inner_rate_hz"] > 0 and plan["format"]["added_symbols"] > 0,
+                        "planner-only format controls")
+                require(plan["spectral_certificate"]["placement_bandwidth_hz"] >=
+                        plan["format"]["occupied_bandwidth_hz"], "placement width below nominal DATA width")
+                require("phase_refinement_error_hz" in plan["spectral_certificate"] and
+                        "sampling_refinement_error_hz" in plan["spectral_certificate"],
+                        "spectral convergence diagnostics omitted")
+                if "--burst-wait-tiles" in command_args:
+                    require(plan["format"]["burst_wait_tiles"] == 3, "burst wait override ignored")
+            else:
+                require(plan["reason"], "infeasible geometry needs a reason")
+            planned.append(plan)
+        require(planned[0]["geometry_feasible"], "standard EME auto shaping should have a bounded plan")
+        require(planned[0]["helper_placement"]["requested_data_if_hz"] == 1725,
+                "auto EME DATA IF did not use standardized low placement")
+        require(planned[1]["geometry_feasible"] and not planned[1]["format"]["fhss"],
+                "rate-aware non-FHSS plan was not preserved")
+        require(planned[2]["geometry_feasible"] and planned[2]["format"]["burst_wait_tiles"] == 3,
+                "FHSS burst plan was not preserved")
+        require(planned[3]["helper_placement"]["requested_data_if_hz"] == 1775,
+                "explicit standardized DATA IF override was ignored")
+        require(planned[4]["scenario"] == "hf",
+                "noncommensurate FHSS planning did not retain its request identity")
+
+        # Starting auto selection from an arbitrary longer ramp can silently
+        # remove protected cells before the planner checks its invariants.
+        for rate in (1200, 3600):
+            formats = []
+            for mode in ("legacy", "auto"):
+                result = invoke(binary, None, ["--case", "eme", "--plan-only", "--shaping", mode,
+                                              "--rate", str(rate)], timings)
+                formats.append(json.loads(result.stdout)["format"])
+            for field in ("fine_coefficients", "inner_coefficients", "payload_fine_cells_per_tile",
+                          "tile_seconds", "tile_count", "elapsed_bit_seconds"):
+                require(formats[0][field] == formats[1][field],
+                        f"auto shaping changed valid input allocation at rate {rate}: {field}")
+
         invalid = root / "invalid-if"
         invoke(binary, invalid, ["--case", "hf", "--data-if", "500"], timings, succeeds=False)
         require(not invalid.exists(), "invalid IF created output")
@@ -207,11 +285,43 @@ def main():
                         timings, succeeds=False)
         require("production Helper plan rejected" in result.stderr, "invalid EME geometry must fail in production placement")
         require(not invalid_geometry.exists(), "invalid Helper placement wrote output")
+        invalid_ramp = root / "invalid-ramp"
+        result = invoke(binary, invalid_ramp, ["--case", "eme", "--data-if", "1725", "--ramp-seconds", ".01",
+                                                "--seconds", "1"], timings, succeeds=False)
+        require("no protected dwell cells" in result.stderr, "10 ms ramp must fail protected-cell placement")
+        require(not invalid_ramp.exists(), "invalid ramp placement wrote output")
+        invalid_hf_ramp = root / "invalid-hf-ramp"
+        invoke(binary, invalid_hf_ramp, ["--case", "hf", "--ramp-seconds", ".006", "--seconds", "1"],
+               timings, succeeds=False)
+        require(not invalid_hf_ramp.exists(), "FHSS-only ramp option created a non-FHSS export")
+        invalid_receiver_tail = root / "invalid-receiver-tail"
+        invoke(binary, invalid_receiver_tail, ["--case", "hf", "--receiver-tail-seconds", "1.001"],
+               timings, succeeds=False)
+        require(not invalid_receiver_tail.exists(), "out-of-range receiver tail created an export")
 
         invoke(binary, root / "hf", ["--case", "hf", "--seconds", "1", "--seed", "91001"], timings)
         hf, hf_truth = check_capture(root / "hf", "hf")
         invoke(binary, root / "eme", ["--case", "eme", "--seconds", "1", "--seed", "91002"], timings)
         check_capture(root / "eme", "eme")
+        invoke(binary, root / "eme-6ms-low-if", ["--case", "eme", "--seconds", "1", "--seed", "91004",
+                                                   "--base-oscillator", "crystal", "--shift-oscillator", "ic-7100",
+                                                   "--data-if", "1725", "--ramp-seconds", ".006"], timings)
+        low_if, _ = check_capture(root / "eme-6ms-low-if", "eme", data_if=1725,
+                                  base_oscillator="crystal", shift_oscillator="ic-7100", ramp_seconds=.006)
+        close(low_if["helper_plan"]["high_hz"], 2654.1666666666665, "low-IF 6 ms production Helper placement")
+        invoke(binary, root / "hf-receiver-tail", ["--case", "hf", "--seconds", "1", "--seed", "91001",
+                                                    "--receiver-tail-seconds", ".25"], timings)
+        tailed, tailed_truth = check_capture(root / "hf-receiver-tail", "hf", receiver_tail_seconds=.25)
+        require(tailed["calendar"]["capture_samples"] == 1315201 + 4500,
+                "explicit receiver tail did not extend the fixed public observation by exactly 0.25 s")
+        require(tailed_truth["channel_report"]["observation_padding_samples"] >= 4500,
+                "explicit receiver tail must extend the fixed capture past the natural physical endpoint")
+        with (root / "hf-receiver-tail" / "observation.c128").open("rb") as stream:
+            stream.seek((tailed["calendar"]["capture_samples"] - 1) * 16)
+            last_noise = struct.unpack("<dd", stream.read(16))
+        require(any(value != 0 for value in last_noise), "receiver tail must contain received noise samples")
+        require((root / "hf-receiver-tail" / "validity.u8").read_bytes()[-1] == 1,
+                "received tail noise is valid input, not a missing-sample marker")
         invoke(binary, root / "both-off", ["--case", "hf", "--seconds", "1", "--seed", "91003",
                                           "--bit", "1", "--data", "off", "--helper", "off"], timings)
         off, off_truth = check_capture(root / "both-off", "hf", data=False, helper=False, bit=1)
@@ -222,7 +332,7 @@ def main():
         require(off_truth["random_seed_roots"] != hf_truth["random_seed_roots"], "distinct fixture seeds were ignored")
         require(hf_truth["random_seed_roots"]["fixture"] == 91001 and off_truth["random_seed_roots"]["fixture"] == 91003,
                 "fixture seed provenance")
-    print(json.dumps({"result": "passed", "captures": 3, "rejected_invocations": 2,
+    print(json.dumps({"result": "passed", "captures": 5, "rejected_invocations": 5,
                       "wall_seconds": time.perf_counter() - started, "commands": timings,
                       "scope": "CLI/export metadata, actual emitted controls and complete files; no receiver or statistical success claim"}))
 

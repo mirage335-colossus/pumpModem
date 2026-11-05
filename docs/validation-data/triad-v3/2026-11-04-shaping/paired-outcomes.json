@@ -1,0 +1,415 @@
+{
+  "schema": "triad-shaping-paired-outcomes-v1",
+  "counts": {
+    "auto1725-1.5": {
+      "baseline": {
+        "correct_admitted": 21,
+        "wrong_admitted": 3,
+        "missed": 8,
+        "false_admitted": 0,
+        "rejected_null": 16,
+        "raw_bit_errors": 5
+      },
+      "assisted": {
+        "correct_admitted": 24,
+        "wrong_admitted": 5,
+        "missed": 3,
+        "false_admitted": 0,
+        "rejected_null": 16,
+        "raw_bit_errors": 6
+      }
+    },
+    "auto1725-helperoff-diagnostic": {
+      "baseline": {
+        "correct_admitted": 21,
+        "wrong_admitted": 3,
+        "missed": 8,
+        "false_admitted": 0,
+        "rejected_null": 16,
+        "raw_bit_errors": 5
+      },
+      "assisted": {
+        "correct_admitted": 21,
+        "wrong_admitted": 3,
+        "missed": 8,
+        "false_admitted": 0,
+        "rejected_null": 16,
+        "raw_bit_errors": 5
+      }
+    },
+    "auto1725-independent": {
+      "baseline": {
+        "correct_admitted": 21,
+        "wrong_admitted": 3,
+        "missed": 8,
+        "false_admitted": 2,
+        "rejected_null": 14,
+        "raw_bit_errors": 8
+      },
+      "assisted": {
+        "correct_admitted": 23,
+        "wrong_admitted": 6,
+        "missed": 3,
+        "false_admitted": 1,
+        "rejected_null": 15,
+        "raw_bit_errors": 7
+      }
+    },
+    "auto1725-physical": {
+      "baseline": {
+        "correct_admitted": 31,
+        "wrong_admitted": 1,
+        "missed": 0,
+        "false_admitted": 0,
+        "rejected_null": 16,
+        "raw_bit_errors": 1
+      },
+      "assisted": {
+        "correct_admitted": 31,
+        "wrong_admitted": 1,
+        "missed": 0,
+        "false_admitted": 1,
+        "rejected_null": 15,
+        "raw_bit_errors": 1
+      }
+    },
+    "auto1775-1.5": {
+      "baseline": {
+        "correct_admitted": 21,
+        "wrong_admitted": 3,
+        "missed": 8,
+        "false_admitted": 0,
+        "rejected_null": 16,
+        "raw_bit_errors": 5
+      },
+      "assisted": {
+        "correct_admitted": 24,
+        "wrong_admitted": 5,
+        "missed": 3,
+        "false_admitted": 0,
+        "rejected_null": 16,
+        "raw_bit_errors": 6
+      }
+    },
+    "auto1775-physical": {
+      "baseline": {
+        "correct_admitted": 31,
+        "wrong_admitted": 1,
+        "missed": 0,
+        "false_admitted": 0,
+        "rejected_null": 16,
+        "raw_bit_errors": 1
+      },
+      "assisted": {
+        "correct_admitted": 31,
+        "wrong_admitted": 1,
+        "missed": 0,
+        "false_admitted": 1,
+        "rejected_null": 15,
+        "raw_bit_errors": 1
+      }
+    },
+    "legacy1725-1.5": {
+      "baseline": {
+        "correct_admitted": 20,
+        "wrong_admitted": 3,
+        "missed": 9,
+        "false_admitted": 0,
+        "rejected_null": 16,
+        "raw_bit_errors": 5
+      },
+      "assisted": {
+        "correct_admitted": 24,
+        "wrong_admitted": 5,
+        "missed": 3,
+        "false_admitted": 0,
+        "rejected_null": 16,
+        "raw_bit_errors": 6
+      }
+    },
+    "legacy1725-physical": {
+      "baseline": {
+        "correct_admitted": 31,
+        "wrong_admitted": 1,
+        "missed": 0,
+        "false_admitted": 0,
+        "rejected_null": 16,
+        "raw_bit_errors": 1
+      },
+      "assisted": {
+        "correct_admitted": 31,
+        "wrong_admitted": 1,
+        "missed": 0,
+        "false_admitted": 1,
+        "rejected_null": 15,
+        "raw_bit_errors": 1
+      }
+    }
+  },
+  "paired": [
+    {
+      "reference": "legacy1725-1.5",
+      "candidate": "auto1725-1.5",
+      "arm": "baseline",
+      "signal_outcome_disagreements": 1,
+      "signal_trials": 32,
+      "per_bit_disagreements": {
+        "0": 1,
+        "1": 0
+      },
+      "per_bit_trials": {
+        "0": 16,
+        "1": 16
+      },
+      "balanced_disagreement_95pct_upper": 0.25411397632117727,
+      "uncertainty": "Average of two97.5%one-sided within-bit CPbounds, Bonferroni95%for equallyweighted bits conditional onbothfrozengates and independentrepresentative paired draws; notsimultaneousacrossconditions/arms.",
+      "null_admission_disagreements": 0,
+      "raw_signal_bit_disagreements": 0,
+      "maximum_absolute_score_change": 0.2421086569260371
+    },
+    {
+      "reference": "legacy1725-1.5",
+      "candidate": "auto1725-1.5",
+      "arm": "assisted",
+      "signal_outcome_disagreements": 0,
+      "signal_trials": 32,
+      "per_bit_disagreements": {
+        "0": 0,
+        "1": 0
+      },
+      "per_bit_trials": {
+        "0": 16,
+        "1": 16
+      },
+      "balanced_disagreement_95pct_upper": 0.2059072142078227,
+      "uncertainty": "Average of two97.5%one-sided within-bit CPbounds, Bonferroni95%for equallyweighted bits conditional onbothfrozengates and independentrepresentative paired draws; notsimultaneousacrossconditions/arms.",
+      "null_admission_disagreements": 0,
+      "raw_signal_bit_disagreements": 0,
+      "maximum_absolute_score_change": 0.2430158585627904
+    },
+    {
+      "reference": "legacy1725-1.5",
+      "candidate": "auto1775-1.5",
+      "arm": "baseline",
+      "signal_outcome_disagreements": 1,
+      "signal_trials": 32,
+      "per_bit_disagreements": {
+        "0": 1,
+        "1": 0
+      },
+      "per_bit_trials": {
+        "0": 16,
+        "1": 16
+      },
+      "balanced_disagreement_95pct_upper": 0.25411397632117727,
+      "uncertainty": "Average of two97.5%one-sided within-bit CPbounds, Bonferroni95%for equallyweighted bits conditional onbothfrozengates and independentrepresentative paired draws; notsimultaneousacrossconditions/arms.",
+      "null_admission_disagreements": 0,
+      "raw_signal_bit_disagreements": 0,
+      "maximum_absolute_score_change": 0.24233564488342374
+    },
+    {
+      "reference": "legacy1725-1.5",
+      "candidate": "auto1775-1.5",
+      "arm": "assisted",
+      "signal_outcome_disagreements": 0,
+      "signal_trials": 32,
+      "per_bit_disagreements": {
+        "0": 0,
+        "1": 0
+      },
+      "per_bit_trials": {
+        "0": 16,
+        "1": 16
+      },
+      "balanced_disagreement_95pct_upper": 0.2059072142078227,
+      "uncertainty": "Average of two97.5%one-sided within-bit CPbounds, Bonferroni95%for equallyweighted bits conditional onbothfrozengates and independentrepresentative paired draws; notsimultaneousacrossconditions/arms.",
+      "null_admission_disagreements": 0,
+      "raw_signal_bit_disagreements": 0,
+      "maximum_absolute_score_change": 0.24324269251349406
+    },
+    {
+      "reference": "legacy1725-physical",
+      "candidate": "auto1725-physical",
+      "arm": "baseline",
+      "signal_outcome_disagreements": 0,
+      "signal_trials": 32,
+      "per_bit_disagreements": {
+        "0": 0,
+        "1": 0
+      },
+      "per_bit_trials": {
+        "0": 16,
+        "1": 16
+      },
+      "balanced_disagreement_95pct_upper": 0.2059072142078227,
+      "uncertainty": "Average of two97.5%one-sided within-bit CPbounds, Bonferroni95%for equallyweighted bits conditional onbothfrozengates and independentrepresentative paired draws; notsimultaneousacrossconditions/arms.",
+      "null_admission_disagreements": 0,
+      "raw_signal_bit_disagreements": 0,
+      "maximum_absolute_score_change": 0.47729052307650477
+    },
+    {
+      "reference": "legacy1725-physical",
+      "candidate": "auto1725-physical",
+      "arm": "assisted",
+      "signal_outcome_disagreements": 0,
+      "signal_trials": 32,
+      "per_bit_disagreements": {
+        "0": 0,
+        "1": 0
+      },
+      "per_bit_trials": {
+        "0": 16,
+        "1": 16
+      },
+      "balanced_disagreement_95pct_upper": 0.2059072142078227,
+      "uncertainty": "Average of two97.5%one-sided within-bit CPbounds, Bonferroni95%for equallyweighted bits conditional onbothfrozengates and independentrepresentative paired draws; notsimultaneousacrossconditions/arms.",
+      "null_admission_disagreements": 0,
+      "raw_signal_bit_disagreements": 0,
+      "maximum_absolute_score_change": 0.4786562745853473
+    },
+    {
+      "reference": "legacy1725-physical",
+      "candidate": "auto1775-physical",
+      "arm": "baseline",
+      "signal_outcome_disagreements": 0,
+      "signal_trials": 32,
+      "per_bit_disagreements": {
+        "0": 0,
+        "1": 0
+      },
+      "per_bit_trials": {
+        "0": 16,
+        "1": 16
+      },
+      "balanced_disagreement_95pct_upper": 0.2059072142078227,
+      "uncertainty": "Average of two97.5%one-sided within-bit CPbounds, Bonferroni95%for equallyweighted bits conditional onbothfrozengates and independentrepresentative paired draws; notsimultaneousacrossconditions/arms.",
+      "null_admission_disagreements": 0,
+      "raw_signal_bit_disagreements": 0,
+      "maximum_absolute_score_change": 0.4762296105103019
+    },
+    {
+      "reference": "legacy1725-physical",
+      "candidate": "auto1775-physical",
+      "arm": "assisted",
+      "signal_outcome_disagreements": 0,
+      "signal_trials": 32,
+      "per_bit_disagreements": {
+        "0": 0,
+        "1": 0
+      },
+      "per_bit_trials": {
+        "0": 16,
+        "1": 16
+      },
+      "balanced_disagreement_95pct_upper": 0.2059072142078227,
+      "uncertainty": "Average of two97.5%one-sided within-bit CPbounds, Bonferroni95%for equallyweighted bits conditional onbothfrozengates and independentrepresentative paired draws; notsimultaneousacrossconditions/arms.",
+      "null_admission_disagreements": 0,
+      "raw_signal_bit_disagreements": 0,
+      "maximum_absolute_score_change": 0.4775937143003546
+    },
+    {
+      "reference": "auto1725-1.5",
+      "candidate": "auto1725-helperoff-diagnostic",
+      "arm": "baseline",
+      "signal_outcome_disagreements": 0,
+      "signal_trials": 32,
+      "per_bit_disagreements": {
+        "0": 0,
+        "1": 0
+      },
+      "per_bit_trials": {
+        "0": 16,
+        "1": 16
+      },
+      "balanced_disagreement_95pct_upper": 0.2059072142078227,
+      "uncertainty": "Average of two97.5%one-sided within-bit CPbounds, Bonferroni95%for equallyweighted bits conditional onbothfrozengates and independentrepresentative paired draws; notsimultaneousacrossconditions/arms.",
+      "null_admission_disagreements": 0,
+      "raw_signal_bit_disagreements": 0,
+      "maximum_absolute_score_change": 0.0021893043524383593
+    }
+  ],
+  "total_captures": 536,
+  "timing": {
+    "auto1725-1.5": {
+      "campaign_wall_seconds": 217.2315857470967,
+      "shared_preparation_seconds": 0.23266112711280584,
+      "native_export_wall_seconds": 180.28918308578432,
+      "comparison_score_seconds": 36.28843012615107,
+      "helper_seconds": 8.849369009723887,
+      "baseline_score_seconds": 13.051526539726183,
+      "extra_assisted_score_seconds": 1.971775165759027,
+      "scope": "Campaign wall includes native subprocess startup/export, one preparation, loading, paired scoring, hashing and result writes; excludes Python import/startup before main. Arm scoring timers are resident-workspace latency, not cold command latency."
+    },
+    "auto1725-helperoff-diagnostic": {
+      "campaign_wall_seconds": 187.99864181200974,
+      "shared_preparation_seconds": 0.23049813811667264,
+      "native_export_wall_seconds": 157.48353501828387,
+      "comparison_score_seconds": 29.824445109115914,
+      "helper_seconds": 4.185845321509987,
+      "baseline_score_seconds": 13.143116889987141,
+      "extra_assisted_score_seconds": 0.0,
+      "scope": "Campaign wall includes native subprocess startup/export, one preparation, loading, paired scoring, hashing and result writes; excludes Python import/startup before main. Arm scoring timers are resident-workspace latency, not cold command latency."
+    },
+    "auto1725-independent": {
+      "campaign_wall_seconds": 219.18881728919223,
+      "shared_preparation_seconds": 0.23063702904619277,
+      "native_export_wall_seconds": 181.80172971775755,
+      "comparison_score_seconds": 36.70663819042966,
+      "helper_seconds": 9.05143498792313,
+      "baseline_score_seconds": 13.279975773533806,
+      "extra_assisted_score_seconds": 1.9742023264989257,
+      "scope": "Campaign wall includes native subprocess startup/export, one preparation, loading, paired scoring, hashing and result writes; excludes Python import/startup before main. Arm scoring timers are resident-workspace latency, not cold command latency."
+    },
+    "auto1725-physical": {
+      "campaign_wall_seconds": 218.6513421998825,
+      "shared_preparation_seconds": 0.2306466910522431,
+      "native_export_wall_seconds": 181.7914450385142,
+      "comparison_score_seconds": 36.21713423007168,
+      "helper_seconds": 8.766297606518492,
+      "baseline_score_seconds": 13.075243159662932,
+      "extra_assisted_score_seconds": 1.9684300122316927,
+      "scope": "Campaign wall includes native subprocess startup/export, one preparation, loading, paired scoring, hashing and result writes; excludes Python import/startup before main. Arm scoring timers are resident-workspace latency, not cold command latency."
+    },
+    "auto1775-1.5": {
+      "campaign_wall_seconds": 218.16849137004465,
+      "shared_preparation_seconds": 0.2271594679914415,
+      "native_export_wall_seconds": 181.13819158193655,
+      "comparison_score_seconds": 36.36291480646469,
+      "helper_seconds": 8.877962374361232,
+      "baseline_score_seconds": 13.138018938945606,
+      "extra_assisted_score_seconds": 1.9590747863985598,
+      "scope": "Campaign wall includes native subprocess startup/export, one preparation, loading, paired scoring, hashing and result writes; excludes Python import/startup before main. Arm scoring timers are resident-workspace latency, not cold command latency."
+    },
+    "auto1775-physical": {
+      "campaign_wall_seconds": 220.77724628709257,
+      "shared_preparation_seconds": 0.2269199970178306,
+      "native_export_wall_seconds": 183.6979019062128,
+      "comparison_score_seconds": 36.38992369780317,
+      "helper_seconds": 9.063596383668482,
+      "baseline_score_seconds": 12.992945308797061,
+      "extra_assisted_score_seconds": 1.9427878295537084,
+      "scope": "Campaign wall includes native subprocess startup/export, one preparation, loading, paired scoring, hashing and result writes; excludes Python import/startup before main. Arm scoring timers are resident-workspace latency, not cold command latency."
+    },
+    "legacy1725-1.5": {
+      "campaign_wall_seconds": 208.6320073560346,
+      "shared_preparation_seconds": 0.23089276091195643,
+      "native_export_wall_seconds": 171.17044808529317,
+      "comparison_score_seconds": 36.75220644962974,
+      "helper_seconds": 9.06083746952936,
+      "baseline_score_seconds": 13.396734313340858,
+      "extra_assisted_score_seconds": 1.9446397721767426,
+      "scope": "Campaign wall includes native subprocess startup/export, one preparation, loading, paired scoring, hashing and result writes; excludes Python import/startup before main. Arm scoring timers are resident-workspace latency, not cold command latency."
+    },
+    "legacy1725-physical": {
+      "campaign_wall_seconds": 209.91424680198543,
+      "shared_preparation_seconds": 0.229771938174963,
+      "native_export_wall_seconds": 172.61172036430798,
+      "comparison_score_seconds": 36.6190877025947,
+      "helper_seconds": 9.066770338453352,
+      "baseline_score_seconds": 13.144727968843654,
+      "extra_assisted_score_seconds": 1.9858271232806146,
+      "scope": "Campaign wall includes native subprocess startup/export, one preparation, loading, paired scoring, hashing and result writes; excludes Python import/startup before main. Arm scoring timers are resident-workspace latency, not cold command latency."
+    }
+  },
+  "scope": "Same seed comparison; no thresholdtuning. Signal uncertainty and nullintervals retainedinoriginalcampaignsummaries. Contended finalstages arenotisolatedlatencybenchmarks."
+}

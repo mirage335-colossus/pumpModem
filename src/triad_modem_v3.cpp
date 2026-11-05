@@ -1,5 +1,6 @@
 #include "datapump/triad_modem_v3.hpp"
 #include "datapump/pattern_pulse.hpp"
+#include "datapump/triad_shaping.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -30,7 +31,6 @@ Crypto child(const Crypto& key,std::string_view purpose,const Format& f,std::uin
         id.insert(id.end(),alignment.begin(),alignment.end());}
     return Crypto(key.mac(id));
 }
-double smooth(double x){x=std::clamp(x,0.,1.);return x*x*x*(10+x*(-15+6*x));}
 std::uint64_t aligned_dwell_cells(const Format& f,double fine){
     require(f.fhss,"triad v3 center-aligned cells require FHSS");
     const long double cells=static_cast<long double>(f.dwell_seconds)*fine;
@@ -90,6 +90,7 @@ double effective_sample_rate(const Format& f){
 }
 
 Geometry geometry(const Format& f){
+    (void)pulse_shape_name(f.pulse_shape);
     const auto sample_rate=effective_sample_rate(f);
     require(std::isfinite(f.inner_rate_hz)&&f.inner_rate_hz>0&&f.inner_rate_hz<=30e6,"triad v3 invalid Rate");
     require(f.added_symbols>=1&&f.added_symbols<=1000&&f.minimum_inner_coefficients>=64,
@@ -259,17 +260,7 @@ struct PatternSource::Impl {
         return slot->chips[static_cast<std::size_t>(fine-slot->first)];
     }
     double envelope(long double t) const {
-        if(t<0||t>=geom.bit_seconds)return 0;
-        const long double edge=std::max(format.ramp_seconds,8/geom.fine_chip_rate_hz);
-        double result=smooth(static_cast<double>(t/edge))*smooth(static_cast<double>((geom.bit_seconds-t)/edge));
-        if(format.burst_wait_tiles){const auto id=static_cast<std::uint64_t>(std::floor(t/geom.tile_seconds));
-            if(!active_tile(id))return 0;
-            const auto within=t-id*static_cast<long double>(geom.tile_seconds);
-            result*=smooth(static_cast<double>(within/edge))*smooth(static_cast<double>((geom.tile_seconds-within)/edge));}
-        if(format.fhss){const auto within=t-std::floor(t/format.dwell_seconds)*format.dwell_seconds;
-            const auto distance=std::min(within,format.dwell_seconds-within);
-            result*=smooth(static_cast<double>((distance-format.quiet_seconds)/format.ramp_seconds));}
-        return result;
+        return shaping_envelope(format,geom,t);
     }
 };
 PatternSource::PatternSource(const Format& f,const Crypto& key,std::uint8_t bit):impl_(std::make_unique<Impl>(f,key,bit)){}
@@ -289,7 +280,7 @@ std::array<Complex,3> PatternSource::carrier_samples_at(long double sample){
     const auto last_real=std::min(static_cast<long double>(g.fine_cells)-1,std::floor(t*g.fine_chip_rate_hz+(8-offset)));
     if(last_real<first_real)return output;
     const auto first=static_cast<std::uint64_t>(first_real),last=static_cast<std::uint64_t>(last_real);
-    for(auto fine=first;fine<=last;++fine){const auto pulse=modem::pattern_pulse(static_cast<double>(t*g.fine_chip_rate_hz-(static_cast<long double>(fine)+offset)));
+    for(auto fine=first;fine<=last;++fine){const auto pulse=shaping_pulse(impl_->format.pulse_shape,static_cast<double>(t*g.fine_chip_rate_hz-(static_cast<long double>(fine)+offset)));
         const auto chip=impl_->chip(fine);for(unsigned c=0;c<3;++c)output[c]+=chip[c]*(carrier_gain*pulse*envelope);}
     return output;
 }

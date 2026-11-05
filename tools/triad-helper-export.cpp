@@ -2,6 +2,7 @@
 // No ordinary Robust receive path is instantiated here.
 #include "datapump/helper_carrier.hpp"
 #include "datapump/triad_modem_v3.hpp"
+#include "datapump/triad_shaping.hpp"
 #include "datapump/tuning.hpp"
 
 #include <algorithm>
@@ -37,12 +38,20 @@ constexpr std::uint64_t maximum_export_bytes = 2ULL * 1024 * 1024 * 1024;
 constexpr double tau = 2 * std::numbers::pi;
 
 struct Options {
-    std::string scenario = "hf", control = "selected";
+    std::string scenario = "hf", control = "selected", shaping = "legacy";
+    std::optional<std::string> base_oscillator, shift_oscillator;
     std::filesystem::path output;
     std::uint64_t seed = 1, key_seed = 72001, epoch = 1793850000;
+    std::optional<std::uint64_t> burst_wait_tiles;
     unsigned bit = 0;
     double seconds = 16, data_if_hz = 1725;
+    std::optional<double> inner_rate_hz, shaping_tail_fraction;
+    std::optional<unsigned> added_symbols;
+    std::optional<double> ramp_seconds;
+    double receiver_tail_seconds = 0;
     std::optional<double> cn0, arrival;
+    std::optional<bool> fhss;
+    bool plan_only = false;
     bool data = true, helper = true, templates = false, explicit_data_if = false;
 };
 
@@ -80,10 +89,14 @@ Options parse(int argc, char** argv) {
         if (arg == "--help") {
             std::cout << "triad_helper_export --case hf|eme --output NEW_DIRECTORY\n"
                 "  [--seed N] [--key-seed N] [--epoch UTC_SECONDS] [--bit 0|1]\n"
-                "  [--seconds 16] [--data-if HZ] [--cn0 DB_HZ]\n"
+                "  [--seconds 16] [--rate HZ] [--added-symbols N] [--burst-wait-tiles N]\n"
+                "  [--fhss on|off] [--shaping legacy|auto] [--shaping-tail-fraction F]\n"
+                "  [--data-if HZ] [--cn0 DB_HZ] [--plan-only]\n"
+                "  [--base-oscillator ID] [--shift-oscillator ID] [--ramp-seconds POSITIVE]\n"
+                "  [--receiver-tail-seconds 0..1]\n"
                 "  [--control selected|flat] [--data on|off] [--helper on|off]\n"
                 "  [--arrival-seconds T] [--templates]\n"
-                "18000 Hz complex samples; default DATA IF 1725 Hz HF, 4000 Hz EME.\n"
+                "18000 Hz complex samples; default DATA IF 1725 Hz HF, 4000 Hz legacy EME.\n"
                 "Physical C/N0 follows powers/loss/N0 unless\n"
                 "overridden. Templates contain all 13 public epoch alternatives and both bits.\n";
             std::exit(0);
@@ -97,19 +110,56 @@ Options parse(int argc, char** argv) {
             if (bit > 1) throw std::invalid_argument("source bit must be 0 or 1");
             o.bit = static_cast<unsigned>(bit);
         } else if (arg == "--seconds") o.seconds = real(next(), "duration");
+        else if (arg == "--rate") o.inner_rate_hz = real(next(), "inner rate");
+        else if (arg == "--added-symbols") {
+            const auto added = integer(next(), "Added Symbols");
+            if (added > std::numeric_limits<unsigned>::max())
+                throw std::invalid_argument("Added Symbols outside unsigned range");
+            o.added_symbols = static_cast<unsigned>(added);
+        } else if (arg == "--burst-wait-tiles") {
+            const auto waits = integer(next(), "burst wait tiles");
+            if (waits > std::numeric_limits<unsigned>::max())
+                throw std::invalid_argument("burst wait tiles outside unsigned range");
+            o.burst_wait_tiles = waits;
+        } else if (arg == "--fhss") o.fhss = enabled(next());
+        else if (arg == "--shaping") o.shaping = next();
+        else if (arg == "--shaping-tail-fraction")
+            o.shaping_tail_fraction = real(next(), "spectral tail fraction");
         else if (arg == "--data-if") { o.data_if_hz = real(next(), "DATA IF"); o.explicit_data_if = true; }
+        else if (arg == "--base-oscillator") o.base_oscillator = std::string(next());
+        else if (arg == "--shift-oscillator") o.shift_oscillator = std::string(next());
+        else if (arg == "--ramp-seconds") o.ramp_seconds = real(next(), "ramp duration");
+        else if (arg == "--receiver-tail-seconds") o.receiver_tail_seconds = real(next(), "receiver tail duration");
         else if (arg == "--cn0") o.cn0 = real(next(), "C/N0");
         else if (arg == "--arrival-seconds") o.arrival = real(next(), "arrival");
         else if (arg == "--control") o.control = next();
         else if (arg == "--data") o.data = enabled(next());
         else if (arg == "--helper") o.helper = enabled(next());
         else if (arg == "--templates") o.templates = true;
+        else if (arg == "--plan-only") o.plan_only = true;
         else throw std::invalid_argument("unknown option: " + std::string(arg));
     }
     if (o.scenario != "hf" && o.scenario != "eme") throw std::invalid_argument("case must be hf or eme");
     if (!o.explicit_data_if && o.scenario == "eme") o.data_if_hz = 4000;
+    if (o.ramp_seconds && *o.ramp_seconds <= 0)
+        throw std::invalid_argument("ramp duration must be positive");
+    if (o.shaping != "legacy" && o.shaping != "auto")
+        throw std::invalid_argument("shaping must be legacy or auto");
+    const bool fhss_enabled = o.fhss.value_or(o.scenario == "eme");
+    if (o.ramp_seconds && !fhss_enabled)
+        throw std::invalid_argument("--ramp-seconds requires FHSS on");
+    if (o.receiver_tail_seconds < 0 || o.receiver_tail_seconds > 1)
+        throw std::invalid_argument("receiver tail duration must be in [0,1] seconds");
+    if (o.inner_rate_hz && (*o.inner_rate_hz <= 0 || *o.inner_rate_hz > 30e6))
+        throw std::invalid_argument("rate must be in (0,30000000] Hz");
+    if (o.added_symbols && (*o.added_symbols < 1 || *o.added_symbols > 1000))
+        throw std::invalid_argument("Added Symbols must be in [1,1000]");
+    if (o.burst_wait_tiles && *o.burst_wait_tiles > 1000)
+        throw std::invalid_argument("burst wait tiles must be in [0,1000]");
+    if (o.shaping_tail_fraction && (*o.shaping_tail_fraction <= 0 || *o.shaping_tail_fraction > .005))
+        throw std::invalid_argument("spectral tail fraction must be in (0,0.005]");
     if (o.control != "selected" && o.control != "flat") throw std::invalid_argument("control must be selected or flat");
-    if (o.output.empty()) throw std::invalid_argument("--output is required");
+    if (o.output.empty() && !o.plan_only) throw std::invalid_argument("--output is required unless --plan-only is selected");
     if (o.seconds <= 0 || o.seconds > 3600) throw std::invalid_argument("seconds must be in (0,3600]");
     if (o.data_if_hz < 1725 || o.data_if_hz >= sample_rate / 2.)
         throw std::invalid_argument("DATA IF must be at least 1725 Hz and below Nyquist");
@@ -155,19 +205,136 @@ Case case_for(const Options& o) {
 Format format_for(const Options& o) {
     Format f;
     const bool eme = o.scenario == "eme";
-    f.inner_rate_hz = eme ? 360 : 36;
-    f.added_symbols = eme ? 1 : 10;
+    f.inner_rate_hz = o.inner_rate_hz.value_or(eme ? 360 : 36);
+    f.added_symbols = o.added_symbols.value_or(eme ? 1 : 10);
     f.added_interleave = true;
     f.sample_rate = sample_rate;
     f.bit_seconds = o.seconds;
-    f.fhss = eme;
-    f.fhss_center_aligned = eme;
-    f.quiet_seconds = eme ? .055 : 0;
-    f.ramp_seconds = eme ? 2. / 3600 : .02;
+    f.fhss = o.fhss.value_or(eme);
+    f.fhss_center_aligned = f.fhss;
+    f.quiet_seconds = f.fhss ? .055 : 0;
+    f.ramp_seconds = o.ramp_seconds.value_or(eme ? 2. / 3600 : .02);
     f.margin_seconds = .005;
+    f.burst_wait_tiles = static_cast<unsigned>(o.burst_wait_tiles.value_or(0));
     f.encrypt = true;
     f.epoch = o.epoch;
     return f;
+}
+
+void json_string(std::ostream&, std::string_view);
+const char* boolean(bool);
+
+triad::v3::ShapingPlan shaped_format(const Options& o, const Format& input) {
+    if (o.shaping == "auto") {
+        triad::v3::ShapingOptions shaping;
+        if (o.shaping_tail_fraction) shaping.tail_energy_fraction = *o.shaping_tail_fraction;
+        return triad::v3::plan_shaping(input, shaping);
+    }
+    triad::v3::ShapingPlan result;
+    result.format = input;
+    result.geometry = triad::v3::geometry(input);
+    result.spectrum.method = "legacy-conservative-ramp-band";
+    result.spectrum.placement_bandwidth_hz = result.geometry.occupied_bandwidth_hz + 2 / input.ramp_seconds;
+    result.spectrum.measured_bandwidth_hz = result.spectrum.placement_bandwidth_hz;
+    result.spectrum.requested_tail_fraction = 0;
+    result.spectrum.measured_tail_fraction = 0;
+    result.spectrum.converged = false;
+    result.spectrum.limitation = "No shaped-spectrum certificate requested; legacy 2/ramp planning allowance retained.";
+    return result;
+}
+
+double data_if_for(const Options& o) {
+    if (o.explicit_data_if) return o.data_if_hz;
+    return (o.scenario == "eme" && o.shaping == "legacy") ? 4000 : 1725;
+}
+
+helper::Options helper_options_for(const Case& physical) {
+    helper::Options result;
+    result.power_w = physical.data_w + physical.helper_w;
+    result.data_power_w = physical.data_w;
+    result.timecode = true;
+    result.callsign = "TRIAD";
+    return result;
+}
+
+void print_plan_json(const Options& o, double data_if_hz,
+                     const triad::v3::ShapingPlan& selected,
+                     const helper::Options& helper_options) {
+    const auto& f = selected.format;
+    const auto& g = selected.geometry;
+    const auto nominal = g.occupied_bandwidth_hz;
+    const auto gate = std::max(0., selected.spectrum.placement_bandwidth_hz - nominal);
+    const auto minimum_data_if = std::max(1725., helper::auxiliary_frequency_hz + 450 +
+                                                     selected.spectrum.placement_bandwidth_hz / 2);
+    double helper_high = 0;
+    std::string helper_error;
+    try {
+        const helper::PlacementBand placement{data_if_hz, nominal, gate, f.fhss};
+        helper_high = helper::plan(helper_options, placement, sample_rate).frequency_hz;
+    } catch (const std::exception& error) {
+        helper_error = error.what();
+    }
+    std::cout << std::setprecision(17)
+        << "{\"schema\":\"triad-helper-shaping-plan-v1\",\"geometry_feasible\":true"
+        << ",\"scenario\":"; json_string(std::cout, o.scenario);
+    std::cout << ",\"shaping\":"; json_string(std::cout, o.shaping);
+    std::cout << ",\"format\":{\"inner_rate_hz\":" << f.inner_rate_hz
+        << ",\"added_symbols\":" << f.added_symbols << ",\"fine_chip_rate_hz\":" << g.fine_chip_rate_hz
+        << ",\"occupied_bandwidth_hz\":" << nominal << ",\"fhss\":" << boolean(f.fhss)
+        << ",\"center_aligned\":" << boolean(f.fhss_center_aligned)
+        << ",\"quiet_seconds\":" << f.quiet_seconds << ",\"ramp_seconds\":" << f.ramp_seconds
+        << ",\"margin_seconds\":" << f.margin_seconds << ",\"pulse_shape\":";
+    json_string(std::cout, triad::v3::pulse_shape_name(f.pulse_shape));
+    std::cout << ",\"burst_wait_tiles\":" << f.burst_wait_tiles << ",\"tile_seconds\":" << g.tile_seconds
+        << ",\"tile_count\":" << g.tile_count << ",\"elapsed_bit_seconds\":" << g.bit_seconds
+        << ",\"fine_coefficients\":" << g.fine_coefficients << ",\"inner_coefficients\":" << g.inner_coefficients
+        << ",\"payload_fine_cells_per_tile\":" << g.payload_fine_cells_per_tile << '}'
+        << ",\"spectral_certificate\":{\"placement_bandwidth_hz\":" << selected.spectrum.placement_bandwidth_hz
+        << ",\"measured_bandwidth_hz\":" << selected.spectrum.measured_bandwidth_hz
+        << ",\"measured_tail_fraction\":" << selected.spectrum.measured_tail_fraction
+        << ",\"requested_tail_fraction\":" << selected.spectrum.requested_tail_fraction
+        << ",\"coarse_width_hz\":" << selected.spectrum.coarse_width_hz
+        << ",\"refined_width_hz\":" << selected.spectrum.refined_width_hz
+        << ",\"phase_refinement_width_hz\":" << selected.spectrum.phase_refinement_width_hz
+        << ",\"phase_refinement_error_hz\":" << selected.spectrum.phase_refinement_error_hz
+        << ",\"sampling_refinement_error_hz\":" << selected.spectrum.sampling_refinement_error_hz
+        << ",\"frequency_bin_hz\":" << selected.spectrum.frequency_bin_hz
+        << ",\"far_outside_energy_fraction\":" << selected.spectrum.far_outside_energy_fraction
+        << ",\"normalized_pulse_energy\":" << selected.spectrum.normalized_pulse_energy
+        << ",\"phase_samples\":" << selected.spectrum.phase_samples << ",\"fft_size\":" << selected.spectrum.fft_size
+        << ",\"kernel_ffts\":" << selected.spectrum.kernel_ffts
+        << ",\"total_kernel_ffts\":" << selected.spectrum.total_kernel_ffts
+        << ",\"phase_refinement_attempts\":" << selected.spectrum.phase_refinement_attempts
+        << ",\"converged\":" << boolean(selected.spectrum.converged) << ",\"method\":";
+    json_string(std::cout, selected.spectrum.method);
+    std::cout << ",\"limitation\":"; json_string(std::cout, selected.spectrum.limitation);
+    std::cout << "},\"helper_placement\":{\"requested_data_if_hz\":" << data_if_hz
+        << ",\"minimum_data_if_hz_from_fixed_low_tones\":" << minimum_data_if
+        << ",\"effective_gate_bandwidth_hz\":" << gate << ",\"planned_high_hz\":" << helper_high
+        << ",\"feasible_at_requested_if\":" << boolean(helper_error.empty())
+        << ",\"unavailable_reason\":";
+    if (helper_error.empty()) std::cout << "null";
+    else json_string(std::cout, helper_error);
+    std::cout << "},\"planner\":{\"fallback\":" << boolean(selected.fallback)
+        << ",\"reason\":";
+    json_string(std::cout, selected.reason);
+    std::cout << ",\"candidate_count\":" << selected.candidate_count
+        << ",\"total_kernel_ffts\":" << selected.total_kernel_ffts
+        << "},\"limitations\":[\"This is a key-independent expected-energy shaping certificate, not a worst-case encrypted pattern or sampled channel bound.\","
+        << "\"The default18kHz fixture sampler rejects unsupported high-rate geometries; planner-only results do not imply receiver availability.\","
+        << "\"Source capture still retains the conservative 2/ramp envelope bound and complete physical channel tails.\"]}\n";
+}
+
+void print_infeasible_plan(const Options& o, std::string_view stage, std::string_view reason) {
+    std::cout << "{\"schema\":\"triad-helper-shaping-plan-v1\",\"geometry_feasible\":false,\"stage\":";
+    json_string(std::cout, stage);
+    std::cout << ",\"reason\":";
+    json_string(std::cout, reason);
+    std::cout << ",\"scenario\":";
+    json_string(std::cout, o.scenario);
+    std::cout << ",\"shaping\":";
+    json_string(std::cout, o.shaping);
+    std::cout << "}\n";
 }
 
 Complex rotation(double frequency, long double seconds) {
@@ -239,10 +406,33 @@ int run(const Options& o) {
     const auto wall_start = std::chrono::steady_clock::now();
     const auto cpu_start = std::clock();
     const auto physical = case_for(o);
+    const auto base_oscillator = tuning::parse_oscillator_preset(
+        o.base_oscillator.value_or(std::string(physical.oscillator.id)));
+    const auto shift_oscillator = tuning::parse_oscillator_preset(
+        o.shift_oscillator.value_or(std::string(base_oscillator.id)));
+    if (!base_oscillator.baseband_supported)
+        throw std::invalid_argument("base oscillator must support the independent audio clock");
     if (o.arrival && (*o.arrival < physical.arrival_low || *o.arrival > physical.arrival_high))
         throw std::invalid_argument("diagnostic arrival override must stay inside the public arrival prior");
-    const auto f = format_for(o);
-    const auto g = geometry(f);
+    const auto data_if_hz = data_if_for(o);
+    auto initial_format = format_for(o);
+    triad::v3::ShapingPlan selected_shaping;
+    try {
+        selected_shaping = shaped_format(o, initial_format);
+    } catch (const std::exception& error) {
+        if (!o.plan_only) throw;
+        print_infeasible_plan(o, "bounded-layout-or-spectrum-search", error.what());
+        return 0;
+    }
+    const auto f = selected_shaping.format;
+    const auto g = selected_shaping.geometry;
+    // Keep the complete finite-envelope source bound until sampled validation
+    // has justified reducing it. The certificate affects only Helper placement.
+    const auto legacy_source_bandwidth = g.occupied_bandwidth_hz + 2 / f.ramp_seconds;
+    if (o.plan_only) {
+        print_plan_json(o, data_if_hz, selected_shaping, helper_options_for(physical));
+        return 0;
+    }
     const auto key = fixture_key(o.key_seed);
     PatternSource reference_source(f, key, 0);
     PatternSource data_source(f, key, static_cast<std::uint8_t>(o.bit));
@@ -256,11 +446,7 @@ int run(const Options& o) {
     const auto composite_samples = ((data_end + dwell_samples - 1) / dwell_samples) * dwell_samples;
     const long double helper_end = static_cast<long double>(composite_samples) / sample_rate;
 
-    helper::Options helper_options;
-    helper_options.power_w = physical.data_w + physical.helper_w;
-    helper_options.data_power_w = physical.data_w;
-    helper_options.timecode = true;
-    helper_options.callsign = "TRIAD";
+    auto helper_options = helper_options_for(physical);
     helper::PowerReference reference;
     reference.epoch = f.epoch;
     reference.begin_seconds = 39;
@@ -286,17 +472,16 @@ int run(const Options& o) {
     if (!reference_nodes || reference_norm <= 0) throw std::runtime_error("empty DATA power reference");
     const auto reference_mean_norm = static_cast<double>(reference_norm / reference_nodes);
     reference.data_mean_power = reference_mean_norm / 2;
-    // Cover remains nonzero on envelope ramps even when protected payload
-    // cells fit wholly inside the dwell. Preserve the full engineering gate
-    // allowance; it is not compact support. EME needs a higher audio IF to
-    // accommodate this band and the production Helper separation guard.
-    const auto gate_bandwidth = 2 / f.ramp_seconds;
-    const auto complete_data_bandwidth = g.occupied_bandwidth_hz + gate_bandwidth;
-    const helper::PlacementBand placement{o.data_if_hz, g.occupied_bandwidth_hz, gate_bandwidth, f.fhss};
+    // The finite pulse/gate spectral certificate selects Helper placement.
+    // Sample bounds below retain the full 2/ramp envelope and all tails.
+    const auto gate_bandwidth = std::max(0., selected_shaping.spectrum.placement_bandwidth_hz -
+                                             g.occupied_bandwidth_hz);
+    const auto complete_data_bandwidth = legacy_source_bandwidth;
+    const helper::PlacementBand placement{data_if_hz, g.occupied_bandwidth_hz, gate_bandwidth, f.fhss};
     helper::Plan plan;
     try { plan = helper::plan(helper_options, placement, sample_rate, 0, 1, &reference); }
     catch (const std::exception& error) {
-        throw std::runtime_error("production Helper plan rejected DATA IF " + std::to_string(o.data_if_hz) +
+        throw std::runtime_error("production Helper plan rejected DATA IF " + std::to_string(data_if_hz) +
                                  " Hz: " + error.what());
     }
     // One public bit-0 reference freezes the gain for both bit choices, all
@@ -319,7 +504,7 @@ int run(const Options& o) {
     effects.sample_rate = sample_rate;
     effects.occupied_bandwidth_hz = g.occupied_bandwidth_hz;
     effects.rf_hz = physical.rf_hz;
-    effects.nominal_conversion_if_hz = o.data_if_hz;
+    effects.nominal_conversion_if_hz = data_if_hz;
     effects.capture_lead_seconds = physical.capture_lead;
     effects.capture_trail_seconds = physical.capture_trail;
     effects.fhss = false; // Public source envelope only: no physical RF retuning.
@@ -331,12 +516,16 @@ int run(const Options& o) {
     const auto static_seed = mix64(o.seed ^ 0x535441544943ULL);
     const auto arrival_seed = mix64(o.seed ^ 0x4152524956414cULL);
     std::mt19937_64 static_rng(static_seed), arrival_rng(arrival_seed);
-    const auto half_ppm = physical.oscillator.clock_error_ppm / 2;
-    const auto endpoint_draw = [&]() { return std::uniform_real_distribution<double>(-half_ppm, half_ppm)(static_rng); };
-    effects.tx.audio_ppm = endpoint_draw(); effects.rx.audio_ppm = endpoint_draw();
-    effects.tx.rf_ppm = endpoint_draw(); effects.rx.rf_ppm = endpoint_draw();
-    const auto one_component_phase = physical.oscillator.phase_noise_degrees_per_sqrt_second * std::numbers::pi / 180;
-    const auto relative_phase = std::hypot(one_component_phase, one_component_phase);
+    const auto base_half_ppm = base_oscillator.clock_error_ppm / 2;
+    const auto shift_half_ppm = shift_oscillator.clock_error_ppm / 2;
+    const auto endpoint_draw = [&](double half_ppm) {
+        return std::uniform_real_distribution<double>(-half_ppm, half_ppm)(static_rng);
+    };
+    effects.tx.audio_ppm = endpoint_draw(base_half_ppm); effects.rx.audio_ppm = endpoint_draw(base_half_ppm);
+    effects.tx.rf_ppm = endpoint_draw(shift_half_ppm); effects.rx.rf_ppm = endpoint_draw(shift_half_ppm);
+    const auto base_phase = base_oscillator.phase_noise_degrees_per_sqrt_second * std::numbers::pi / 180;
+    const auto shift_phase = shift_oscillator.phase_noise_degrees_per_sqrt_second * std::numbers::pi / 180;
+    const auto relative_phase = std::hypot(base_phase, shift_phase);
     effects.tx.phase_noise_rad_per_sqrt_second = relative_phase / std::sqrt(2.);
     effects.rx.phase_noise_rad_per_sqrt_second = relative_phase / std::sqrt(2.);
     const auto arrival_draw = std::uniform_real_distribution<double>(physical.arrival_low, physical.arrival_high)(arrival_rng);
@@ -356,12 +545,17 @@ int run(const Options& o) {
     config.maximum_chunk_samples = 4096;
     // A fixed, public complete observation calendar prevents the random
     // arrival/clock realization from choosing the exported file length.
-    const auto tx_min = 1 - half_ppm * 1e-6;
-    const auto rx_max = 1 + half_ppm * 1e-6;
+    const auto tx_min = 1 - base_half_ppm * 1e-6;
+    const auto rx_max = 1 + base_half_ppm * 1e-6;
+    const auto pair_denominator = 1 - base_oscillator.clock_error_ppm * .5e-6;
+    const auto deterministic_cfo_bound_hz = (physical.rf_hz * shift_oscillator.clock_error_ppm +
+        data_if_hz * base_oscillator.clock_error_ppm) * 1e-6 / pair_denominator;
+    const auto sample_clock_pair_ppm = base_oscillator.clock_error_ppm / pair_denominator;
     const auto tail_bound_seconds = selected_delay_ms * .001 + 2 / (3 * g.carrier_spacing_hz) + 32. / sample_rate;
     config.minimum_capture_samples = static_cast<std::uint64_t>(std::ceil(sample_rate * rx_max *
         (physical.capture_lead + static_cast<double>(helper_end) / tx_min + physical.arrival_high +
-         physical.capture_trail + tail_bound_seconds)));
+         physical.capture_trail + tail_bound_seconds))) +
+        static_cast<std::uint64_t>(std::ceil(sample_rate * o.receiver_tail_seconds));
     const auto template_tail = static_cast<std::uint64_t>(std::ceil(sample_rate * tail_bound_seconds));
     const auto template_samples = g.source_samples + template_tail;
     const auto export_bytes = static_cast<long double>(config.minimum_capture_samples) * 17 +
@@ -376,16 +570,16 @@ int run(const Options& o) {
     emitted.geometry.source_samples = composite_samples;
     emitted.geometry.calendar_origin_sample = 0;
     emitted.minimum_frequency_hz = std::min(-complete_data_bandwidth / 2,
-        helper::low_pilot_frequency_hz - o.data_if_hz) - spectral_skirt_allowance_hz;
+        helper::low_pilot_frequency_hz - data_if_hz) - spectral_skirt_allowance_hz;
     emitted.maximum_frequency_hz = std::max(complete_data_bandwidth / 2,
-        plan.frequency_hz - o.data_if_hz) + spectral_skirt_allowance_hz;
+        plan.frequency_hz - data_if_hz) + spectral_skirt_allowance_hz;
     emitted.working_bytes = data_source.working_bytes() + sizeof(generator);
     emitted.sample_at = [&](std::uint64_t n) {
         const auto seconds = static_cast<long double>(n) / sample_rate;
         Complex raw_data;
         if (o.data && n >= data_offset && n - data_offset < g.source_samples)
             raw_data = data_source.sample_at(static_cast<long double>(n - data_offset));
-        const auto up = rotation(o.data_if_hz, seconds);
+        const auto up = rotation(data_if_hz, seconds);
         const auto data = raw_data * data_gain;
         const auto audio = o.helper ?
             generator.mix_analytic(raw_data * up, seconds, sample_rate, helper_end, 0) * composite_gain : data * up;
@@ -482,6 +676,9 @@ int run(const Options& o) {
         << ",\"inner_coefficients\":" << g.inner_coefficients << ",\"fine_coefficients\":" << g.fine_coefficients
         << ",\"tile_seconds\":" << g.tile_seconds << ",\"tile_count\":" << g.tile_count
         << ",\"fhss_envelope_only\":" << boolean(f.fhss) << ",\"fhss_center_aligned\":" << boolean(f.fhss_center_aligned)
+        << ",\"pulse_shape\":";
+    json_string(manifest, triad::v3::pulse_shape_name(f.pulse_shape));
+    manifest
         << ",\"physical_rf_retuning\":false,\"dwell_seconds\":" << f.dwell_seconds
         << ",\"quiet_seconds\":" << f.quiet_seconds << ",\"ramp_seconds\":" << f.ramp_seconds
         << ",\"margin_seconds\":" << f.margin_seconds << '}'
@@ -492,6 +689,7 @@ int run(const Options& o) {
         << ",\"capture_lead_seconds\":" << physical.capture_lead << ",\"capture_trail_seconds\":" << physical.capture_trail
         << ",\"arrival_prior_seconds\":[" << physical.arrival_low << ',' << physical.arrival_high << ']'
         << ",\"capture_samples\":" << written << ",\"fixed_capture_tail_bound_seconds\":" << tail_bound_seconds
+        << ",\"receiver_tail_seconds\":" << o.receiver_tail_seconds
         << ",\"sample_time_definition\":\"nominal capture time n/Fs-capture_lead_seconds; unknown physical RX clock retained in channel\"}"
         << ",\"helper_plan\":{\"high_hz\":" << plan.frequency_hz << ",\"low_hz\":" << plan.low_frequency_hz
         << ",\"auxiliary_hz\":" << plan.auxiliary_frequency_hz << ",\"data_gain\":" << plan.data_gain
@@ -499,6 +697,36 @@ int run(const Options& o) {
         << ",\"pilot_dwell_gating\":" << boolean(plan.pilot_dwell_gating)
         << ",\"placement_waveform_bandwidth_hz\":" << placement.waveform_bandwidth_hz
         << ",\"placement_gate_bandwidth_hz\":" << placement.gate_bandwidth_hz << '}'
+        << ",\"shaping_plan\":{\"enabled\":" << boolean(o.shaping == "auto")
+        << ",\"selected_pulse_shape\":";
+    json_string(manifest, triad::v3::pulse_shape_name(f.pulse_shape));
+    manifest << ",\"selected_ramp_seconds\":" << f.ramp_seconds << ",\"certificate_method\":";
+    json_string(manifest, selected_shaping.spectrum.method);
+    manifest << ",\"certificate_limitation\":";
+    json_string(manifest, selected_shaping.spectrum.limitation);
+    manifest << ",\"placement_bandwidth_hz\":" << selected_shaping.spectrum.placement_bandwidth_hz
+        << ",\"measured_bandwidth_hz\":" << selected_shaping.spectrum.measured_bandwidth_hz
+        << ",\"measured_tail_fraction\":" << selected_shaping.spectrum.measured_tail_fraction
+        << ",\"requested_tail_fraction\":" << selected_shaping.spectrum.requested_tail_fraction
+        << ",\"coarse_width_hz\":" << selected_shaping.spectrum.coarse_width_hz
+        << ",\"refined_width_hz\":" << selected_shaping.spectrum.refined_width_hz
+        << ",\"phase_refinement_width_hz\":" << selected_shaping.spectrum.phase_refinement_width_hz
+        << ",\"phase_refinement_error_hz\":" << selected_shaping.spectrum.phase_refinement_error_hz
+        << ",\"sampling_refinement_error_hz\":" << selected_shaping.spectrum.sampling_refinement_error_hz
+        << ",\"frequency_bin_hz\":" << selected_shaping.spectrum.frequency_bin_hz
+        << ",\"far_outside_energy_fraction\":" << selected_shaping.spectrum.far_outside_energy_fraction
+        << ",\"normalized_pulse_energy\":" << selected_shaping.spectrum.normalized_pulse_energy
+        << ",\"phase_samples\":" << selected_shaping.spectrum.phase_samples
+        << ",\"fft_size\":" << selected_shaping.spectrum.fft_size
+        << ",\"kernel_ffts\":" << selected_shaping.spectrum.kernel_ffts
+        << ",\"total_kernel_ffts\":" << selected_shaping.spectrum.total_kernel_ffts
+        << ",\"phase_refinement_attempts\":" << selected_shaping.spectrum.phase_refinement_attempts
+        << ",\"converged\":" << boolean(selected_shaping.spectrum.converged)
+        << ",\"fallback\":" << boolean(selected_shaping.fallback) << ",\"fallback_reason\":";
+    json_string(manifest, selected_shaping.reason);
+    manifest << ",\"candidates_evaluated\":" << selected_shaping.candidate_count
+        << ",\"total_planner_kernel_ffts\":" << selected_shaping.total_kernel_ffts
+        << ",\"capture_placement_remains_conservative\":true}"
         << ",\"power\":{\"data_w\":" << physical.data_w << ",\"helper_w\":" << physical.helper_w
         << ",\"composite_w\":" << helper_options.power_w << ",\"path_loss_db\":" << physical.loss_db
         << ",\"noise_n0_dbm_hz\":" << thermal_n0_dbm_hz << ",\"physical_data_cn0_db_hz\":" << physical_cn0
@@ -513,13 +741,20 @@ int run(const Options& o) {
         << ",\"reference_normalized_data_mean_norm\":1,\"reference_measured_helper_to_data_ratio\":" << reference_helper_ratio
         << ",\"nominal_helper_to_data_ratio\":" << physical.helper_w / physical.data_w
         << ",\"reference_scope\":\"fixed public bit0, active DATA samples including nonzero ramps; no Helper-only lead; all controls and epochs retain the same gain\"}"
-        << ",\"channel\":{\"rf_hz\":" << physical.rf_hz << ",\"nominal_conversion_if_hz\":" << o.data_if_hz
-        << ",\"base_oscillator\":"; json_string(manifest, physical.oscillator.id);
-    manifest << ",\"shift_oscillator\":"; json_string(manifest, physical.oscillator.id);
-    manifest << ",\"independent_base_and_shift\":true,\"relative_pair_ppm_bound\":" << physical.oscillator.clock_error_ppm
-        << ",\"endpoint_uniform_half_bound_ppm\":" << half_ppm << ",\"relative_phase_diffusion_rad_sqrt_s\":" << relative_phase
+        << ",\"channel\":{\"rf_hz\":" << physical.rf_hz << ",\"nominal_conversion_if_hz\":" << data_if_hz
+        << ",\"base_oscillator\":"; json_string(manifest, base_oscillator.id);
+    manifest << ",\"shift_oscillator\":"; json_string(manifest, shift_oscillator.id);
+    manifest << ",\"independent_base_and_shift\":true,\"base_relative_pair_ppm_bound\":" << base_oscillator.clock_error_ppm
+        << ",\"rf_relative_pair_ppm_bound\":" << shift_oscillator.clock_error_ppm
+        << ",\"relative_pair_ppm_bound\":" << base_oscillator.clock_error_ppm
+        << ",\"endpoint_uniform_half_bound_ppm\":" << base_half_ppm
+        << ",\"rf_endpoint_uniform_half_bound_ppm\":" << shift_half_ppm
+        << ",\"sample_clock_pair_ppm\":" << sample_clock_pair_ppm
+        << ",\"nominal_shift_ppm_bound\":" << shift_oscillator.clock_error_ppm
+        << ",\"nominal_shift_hz_bound\":" << physical.rf_hz * shift_oscillator.clock_error_ppm * 1e-6
+        << ",\"relative_phase_diffusion_rad_sqrt_s\":" << relative_phase
         << ",\"phase_convention\":\"triad_long: hypot(base,shift) relative pair diffusion divided by sqrt(2) per endpoint\""
-        << ",\"deterministic_cfo_bound_hz\":" << (physical.rf_hz + o.data_if_hz) * physical.oscillator.clock_error_ppm * 1e-6 / tx_min
+        << ",\"deterministic_cfo_bound_hz\":" << deterministic_cfo_bound_hz
         << ",\"spread_preset\":"; json_string(manifest, physical.spread.id);
     manifest << ",\"spread_margin\":" << physical.margin << ",\"spread_delay_ms\":" << effects.spread_delay_ms
         << ",\"spread_doppler_hz\":" << effects.spread_doppler_hz
@@ -527,8 +762,9 @@ int run(const Options& o) {
         << ",\"selective_model\":\"dispersive-dft-v1\",\"selective_scale_hz\":" << g.carrier_spacing_hz
         << ",\"selective_center_hz\":0,\"source_frequency_bounds_hz\":[" << emitted.minimum_frequency_hz << ',' << emitted.maximum_frequency_hz
         << "],\"source_spectral_skirt_allowance_hz\":" << spectral_skirt_allowance_hz
-        << ",\"bandwidth_scope\":\"nominal RRC design band plus full 2/ramp gate allowance and declared Helper skirt allowance; finite pulses, gates and stochastic spectra are not compact support; wideband refinement and Helper-only interference controls remain necessary\""
-        << ",\"data_if_default_reason\":\"EME uses 4000 Hz to retain the conservative fast-gate band in the production Helper placement geometry; HF uses 1725 Hz\""
+        << ",\"source_capture_design_bandwidth_hz\":" << complete_data_bandwidth
+        << ",\"bandwidth_scope\":\"Source/capture preflight retains nominal design width plus the complete legacy 2/ramp allowance and declared 200-Hz skirt; only the Helper placement band uses the key-independent shaping certificate. Finite pulse, gated transmission and stochastic channel spectra are not compact support.\""
+        << ",\"data_if_default_reason\":\"Legacy fixtures preserve HF1725Hz and EME4000Hz defaults. Auto shaping starts at standardized1725Hz; explicit DATA IF takes precedence.\""
         << ",\"composition\":\"production Helper Generator and DATA summed before shared TX oscillator, spread, dispersive selective stage, RX oscillator and noise; no post-channel hop gate\"}"
         << ",\"templates\":{\"enabled\":" << boolean(o.templates) << ",\"file\":";
     if (o.templates) manifest << "\"templates.c128\""; else manifest << "null";

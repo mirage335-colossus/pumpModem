@@ -676,7 +676,7 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
   # complex-baseband channel path and does not link the ordinary modem receiver.
   add_library(triad_experiment STATIC EXCLUDE_FROM_ALL
     src/crypto.cpp src/triad_modem.cpp src/triad_simulation.cpp src/triad_modem_v2.cpp
-    src/triad_statistics.cpp src/triad_modem_v3.cpp src/triad_simulation_stream.cpp
+    src/triad_statistics.cpp src/triad_modem_v3.cpp src/triad_shaping.cpp src/triad_simulation_stream.cpp
     src/triad_receiver_v3.cpp src/search_fft.cpp src/tuning_presets.cpp)
   target_include_directories(triad_experiment PUBLIC include PRIVATE src)
   target_link_libraries(triad_experiment PUBLIC OpenSSL::Crypto Threads::Threads)
@@ -703,6 +703,9 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
   add_executable(test_triad_v3_source EXCLUDE_FROM_ALL tests/test_triad_v3_source.cpp)
   target_include_directories(test_triad_v3_source PRIVATE src)
   target_link_libraries(test_triad_v3_source PRIVATE triad_experiment)
+  add_executable(test_triad_shaping EXCLUDE_FROM_ALL tests/test_triad_shaping.cpp)
+  target_include_directories(test_triad_shaping PRIVATE src)
+  target_link_libraries(test_triad_shaping PRIVATE triad_experiment)
   add_executable(test_triad_v3_channel EXCLUDE_FROM_ALL tests/test_triad_v3_channel.cpp)
   target_include_directories(test_triad_v3_channel PRIVATE src)
   target_link_libraries(test_triad_v3_channel PRIVATE triad_experiment)
@@ -740,10 +743,10 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
   # The direct timer verifies these embedded identities against the selected
   # source tree. Reconfigure when any declared timed dependency changes.
   set(_triad_planner_dependencies
-    src/triad_statistics.cpp src/triad_modem_v3.cpp
+    src/triad_statistics.cpp src/triad_modem_v3.cpp src/triad_shaping.cpp
     include/datapump/triad_statistics.hpp include/datapump/triad_modem_v3.hpp
     include/datapump/triad_modem.hpp include/datapump/triad_simulation.hpp
-    include/datapump/crypto.hpp include/datapump/pattern_pulse.hpp)
+    include/datapump/crypto.hpp include/datapump/pattern_pulse.hpp include/datapump/triad_shaping.hpp)
   set(_triad_planner_hashes "")
   foreach(_dependency IN LISTS _triad_planner_dependencies)
     file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/${_dependency}" _dependency_hash)
@@ -769,12 +772,13 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
   add_test(NAME triad_examples_smoke COMMAND triad_examples --case 2 --trials 1 --threads 2 --diagnostic-clean)
   add_test(NAME triad_statistics COMMAND test_triad_statistics)
   add_test(NAME triad_v3_source COMMAND test_triad_v3_source)
+  add_test(NAME triad_shaping COMMAND test_triad_shaping)
   add_test(NAME triad_v3_channel COMMAND test_triad_v3_channel)
   add_test(NAME triad_v3_receiver COMMAND test_triad_v3_receiver)
   add_test(NAME triad_oscillator_study COMMAND triad_oscillator_study --seconds 7200 --model all)
   set_tests_properties(triad_modem triad_smoke triad_v2 triad_examples_smoke PROPERTIES LABELS "triad" TIMEOUT 180)
   set_tests_properties(triad_v2 triad_examples_smoke PROPERTIES TIMEOUT 300)
-  set_tests_properties(triad_statistics triad_v3_source triad_v3_channel triad_v3_receiver
+  set_tests_properties(triad_statistics triad_v3_source triad_shaping triad_v3_channel triad_v3_receiver
     PROPERTIES LABELS "triad" TIMEOUT 300)
   set_tests_properties(triad_oscillator_study PROPERTIES LABELS "triad" TIMEOUT 300)
   add_test(NAME helper_continuation_recovery COMMAND test_helper_continuation_study --recovery-robustness)
@@ -1236,7 +1240,7 @@ if(NOT DATAPUMP_BUILD_WASM)
     get_target_property(_type ${_target} TYPE)
     if(_type STREQUAL "EXECUTABLE")
       if(_target STREQUAL "test_triad_modem" OR _target STREQUAL "test_triad_v2" OR
-          _target STREQUAL "test_triad_statistics" OR _target STREQUAL "test_triad_v3_source" OR
+          _target STREQUAL "test_triad_statistics" OR _target STREQUAL "test_triad_v3_source" OR _target STREQUAL "test_triad_shaping" OR
           _target STREQUAL "test_triad_v3_channel" OR _target STREQUAL "test_triad_v3_receiver" OR
           _target STREQUAL "triad_study" OR _target STREQUAL "triad_examples" OR
           _target STREQUAL "triad_long" OR _target STREQUAL "triad_audio_capture" OR

@@ -24,6 +24,10 @@ declared timing/epoch bank, measures shared-channel leakage, and calibrates the
 whole adaptive frequency-selection procedure before independent held-out trials.
 Its small focused checks are the routine entry point; the sensitivity campaign
 is not an automatic regression prerequisite.
+For pulse, ramp or placement changes, use the [rate-aware shaping guide](triad-shaping.md).
+Run its planner census and roughly ten-second rendered-waveform check before a sampled
+channel campaign; a nominal spectral width never authorizes dropping sidebands
+or channel tails.
 
 For ADC/DAC cable comparisons, use the [Live/Duplex hierarchy](triad-live-duplex.md).
 It keeps public probe synchronization and measured audio noise separate from

@@ -866,8 +866,9 @@ void erasure_and_noise_checks() {
           "absolute complex noise variance does not match E|n|^2");
 }
 
-void missed_receiver_dwell_checks() {
+void missed_receiver_dwell_checks(PulseShape pulse = PulseShape::LegacyRrc) {
     auto f = fixture_format();
+    f.pulse_shape = pulse;
     const auto key = fixture_key();
     f.fhss = true;
     f.quiet_seconds = .012;
@@ -890,6 +891,16 @@ void missed_receiver_dwell_checks() {
         cfg.effects.perturbation_slow_depth = .01;
         cfg.effects.perturbation_fast_depth = .01;
         cfg.complex_noise_variance = .025;
+        if (pulse == PulseShape::TaperedRrc) {
+            // Exercise the new emitted pulse through the same continuous
+            // channel, including a signal tail longer than its source halo.
+            cfg.effects.spread_delay_ms = 250;
+            cfg.effects.spread_doppler_hz = 6;
+            cfg.effects.perturbation_slow_depth = .65;
+            cfg.effects.perturbation_fast_depth = .65;
+            cfg.effects.noise_enabled = false;
+            cfg.complex_noise_variance = 0;
+        }
         cfg.maximum_chunk_samples = chunk;
         return cfg;
     };
@@ -974,6 +985,17 @@ void missed_receiver_dwell_checks() {
     }
     check(saw_erased && saw_valid_before_or_between,
           "missed-dwell fixture did not contain both absent and observed rows");
+
+    if (pulse == PulseShape::TaperedRrc) {
+        const auto source_end = static_cast<std::size_t>(std::ceil(
+            (static_cast<double>(geometry(f).source_samples) / f.sample_rate +
+             baseline_cfg.effects.capture_lead_seconds) * f.sample_rate * rx_scale)) + 4;
+        check(source_end < baseline.samples.size() &&
+              std::any_of(baseline.samples.begin() + static_cast<std::ptrdiff_t>(source_end),
+                          baseline.samples.end(), [](Complex value) { return std::norm(value) > 1e-14; }),
+              "shaped source lost its actual delayed signal tail");
+        return; // The unchanged legacy path below covers invalid schedules.
+    }
 
     auto no_fhss = make_config(311);
     f.fhss = false;
@@ -1889,6 +1911,7 @@ int main() {
         physical_hop_origin_checks();
         erasure_and_noise_checks();
         missed_receiver_dwell_checks();
+        missed_receiver_dwell_checks(PulseShape::TaperedRrc);
         path_evolution_deterministic_checks();
         path_ou_statistics_checks();
         low_rate_path_configuration_checks();

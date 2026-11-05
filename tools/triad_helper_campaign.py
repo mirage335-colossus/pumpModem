@@ -177,12 +177,36 @@ def source_hashes():
     root = Path(__file__).resolve().parents[1]
     paths = ['tools/' + name for name in (
         'triad_helper_campaign.py', 'triad_helper_statistics.py', 'triad_helper_study.py', 'triad_helper_assistance.py',
+        'triad_helper_fft.py',
         'triad_helper_receiver.py', 'triad_live_receiver.py', 'triad_fft_acquire.py',
         'triad_group_acquire.py', 'triad_gaussian_window.py', 'triad_noise_likelihood.py',
         'triad_state_workspace.py', 'triad-helper-export.cpp')]
     paths += ['src/triad_modem_v3.cpp', 'src/triad_simulation_stream.cpp',
-              'include/datapump/triad_modem_v3.hpp']
+              'src/triad_shaping.cpp', 'include/datapump/triad_modem_v3.hpp',
+              'include/datapump/triad_shaping.hpp']
     return {name: digest(root / name) for name in paths}
+
+
+def append_export_shaping_options(command, args):
+    """Append only explicitly selected geometry/shaping overrides.
+
+    Omitting these options preserves the historical exporter invocation and its
+    legacy shaping defaults. This is important for frozen campaigns whose
+    templates and manifests describe the legacy waveform.
+    """
+    options = (
+        ('shaping', '--shaping'),
+        ('shaping_tail_fraction', '--shaping-tail-fraction'),
+        ('rate', '--rate'),
+        ('added_symbols', '--added-symbols'),
+        ('fhss', '--fhss'),
+        ('burst_wait_tiles', '--burst-wait-tiles'),
+    )
+    for attribute, flag in options:
+        value = getattr(args, attribute, None)
+        if value is not None:
+            command += [flag, str(value)]
+    return command
 
 
 def summary(rows, preparation, elapsed):
@@ -210,7 +234,7 @@ def summary(rows, preparation, elapsed):
                              'Different selected/flat, Helper on/off or C/N0 conditions require their own calibration.'])
 
 
-def main():
+def main(argv=None, *, comparison_factory=None, export_runner=None):
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--case', required=True, choices=('hf', 'eme'))
     p.add_argument('--cn0', default='physical', help='physical or explicit DATA C/N0 in dB-Hz')
@@ -222,13 +246,32 @@ def main():
     p.add_argument('--null-count', type=int, default=8)
     p.add_argument('--seed-base', required=True, type=int)
     p.add_argument('--seconds', type=float, default=16.)
+    p.add_argument('--data-if', type=float,
+                   help='override the exporter DATA IF; the emitted manifest remains procedure identity input')
+    p.add_argument('--ramp-seconds', type=float,
+                   help='optional native FHSS EME edge ramp; recorded in the emitted public manifest')
+    p.add_argument('--shaping', choices=('legacy', 'auto'),
+                   help='optional rate-aware waveform shaping override; omitted preserves legacy')
+    p.add_argument('--shaping-tail-fraction', type=float,
+                   help='optional auto-shaping spectral tail budget in (0, 0.005]')
+    p.add_argument('--rate', type=float, help='optional inner pattern rate override in Hz')
+    p.add_argument('--added-symbols', type=int, help='optional Added Symbols factor [1,1000]')
+    p.add_argument('--fhss', choices=('on', 'off'), help='optional FHSS override')
+    p.add_argument('--burst-wait-tiles', type=int,
+                   help='optional Symbol Burst wait count [0,1000]')
     p.add_argument('--device', default='cpu')
     p.add_argument('--precision', choices=('fp32', 'fp64'), default='fp32')
+    p.add_argument('--fft-backend', choices=('legacy', 'batched'), default='legacy')
+    p.add_argument('--frequency-batch-size', type=int, default=8)
+    p.add_argument('--max-cached-hypotheses', type=int, default=1)
+    p.add_argument('--memory-limit-bytes', type=int, default=2 * 1024**3)
     p.add_argument('--alpha', type=float, default=.05)
     p.add_argument('--control', choices=('selected', 'flat'), default='selected')
     p.add_argument('--helper', choices=('on', 'off'), default='on')
     p.add_argument('--discard-iq', action='store_true')
-    args = p.parse_args()
+    args = p.parse_args(argv)
+    comparison_factory = comparison_factory or HelperComparison
+    export_runner = export_runner or subprocess.run
     started = time.perf_counter()
     try:
         trials = schedule(args.seed_base, args.calibration_count, args.signal_count, args.null_count)
@@ -237,6 +280,24 @@ def main():
             raise ValueError('C/N0 outside native finite [-100, 200] dB-Hz range')
         if not math.isfinite(args.seconds) or args.seconds <= 0 or not 0 < args.alpha < 1:
             raise ValueError('positive finite duration and 0 < alpha < 1 required')
+        if args.data_if is not None and not math.isfinite(args.data_if):
+            raise ValueError('--data-if must be finite')
+        if args.ramp_seconds is not None and (not math.isfinite(args.ramp_seconds) or args.ramp_seconds <= 0):
+            raise ValueError('--ramp-seconds must be positive and finite')
+        if args.shaping_tail_fraction is not None and (
+                not math.isfinite(args.shaping_tail_fraction) or
+                not 0 < args.shaping_tail_fraction <= .005):
+            raise ValueError('--shaping-tail-fraction must be in (0, 0.005]')
+        if args.shaping_tail_fraction is not None and args.shaping != 'auto':
+            raise ValueError('--shaping-tail-fraction requires --shaping auto')
+        if args.rate is not None and (not math.isfinite(args.rate) or not 0 < args.rate <= 30e6):
+            raise ValueError('--rate must be in (0, 30000000] Hz')
+        if args.added_symbols is not None and not 1 <= args.added_symbols <= 1000:
+            raise ValueError('--added-symbols must be in [1,1000]')
+        if args.burst_wait_tiles is not None and not 0 <= args.burst_wait_tiles <= 1000:
+            raise ValueError('--burst-wait-tiles must be in [0,1000]')
+        if args.frequency_batch_size < 1 or args.max_cached_hypotheses < 1 or args.memory_limit_bytes < 1:
+            raise ValueError('frequency batch size, cache capacity, and memory limit must be positive')
         if args.output.exists():
             raise ValueError('output already exists; do not rerun or overwrite frozen evidence')
         exporter = args.exporter.resolve(strict=True)
@@ -249,6 +310,11 @@ def main():
     args.output.mkdir(parents=True)
     protocol = dict(schema='triad-helper-campaign-protocol-v1',
         configuration={k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()},
+        public_overrides=dict(data_if_hz=args.data_if, ramp_seconds=args.ramp_seconds,
+            shaping=args.shaping, shaping_tail_fraction=args.shaping_tail_fraction,
+            rate_hz=args.rate, added_symbols=args.added_symbols, fhss=args.fhss,
+            burst_wait_tiles=args.burst_wait_tiles,
+            identity='Exporter manifest bytes and HelperComparison public procedure identity; no manifest field is rewritten.'),
         source_hashes=source_hashes(), exporter_sha256=digest(exporter),
         template_sha256=digest(template_path), template_manifest_sha256=digest(args.templates / 'manifest.json'),
         python=sys.version, platform=platform.platform(), trial_schedule=trials,
@@ -268,15 +334,23 @@ def main():
                        '--bit', str(trial['bit']), '--data', 'on' if trial['data'] else 'off',
                        '--helper', args.helper, '--control', args.control,
                        '--key-seed', str(tm['key_seed']), '--epoch', str(tm['public_epoch_seconds']),
-                       '--data-if', str(tm['channel']['nominal_conversion_if_hz'])]
+                       '--data-if', str(args.data_if if args.data_if is not None else
+                                        tm['channel']['nominal_conversion_if_hz'])]
+            if args.ramp_seconds is not None:
+                command += ['--ramp-seconds', str(args.ramp_seconds)]
+            append_export_shaping_options(command, args)
             if cn0 is not None:
                 command += ['--cn0', str(cn0)]
             mark = time.perf_counter()
             with (args.output / f'{trial["id"]}-export.log').open('x') as log:
-                subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, check=True)
+                export_runner(command, stdout=log, stderr=subprocess.STDOUT, check=True)
             export_wall = time.perf_counter() - mark
             if comparison is None:
-                comparison = HelperComparison(folder, args.templates, device=args.device, precision=args.precision)
+                comparison = comparison_factory(
+                    folder, args.templates, device=args.device, precision=args.precision,
+                    fft_backend=args.fft_backend, frequency_batch_size=args.frequency_batch_size,
+                    max_cached_hypotheses=args.max_cached_hypotheses,
+                    memory_limit_bytes=args.memory_limit_bytes)
                 write_json(args.output / 'prepared.json', dict(procedure_id=comparison.procedure_id,
                     template_sha256=comparison.template_hash, source_hashes=comparison.sources,
                     public_preparation_seconds=comparison.preparation_seconds))

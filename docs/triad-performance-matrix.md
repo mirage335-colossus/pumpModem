@@ -41,16 +41,32 @@ counts and source-bound coverage receipts **do not cover this extension**.
 | --- | --- | --- | --- |
 | Composite emitted source, unchanged legacy source | Native `test_triad_v3_channel`, source byte-parity check | Complete 18 kHz HF/EME native exports; process startup, generation, propagation and writes timed directly | New native CFG coverage; no runtime forecast across sample rates or longer observation sizes |
 | Opt-in centered FHSS lattice and Added/interleave mapping | Native `test_triad_v3_source`, `test_triad_configuration.py` | Complete EME 66-dwell source with preserved shaped tails | Other lattice/rate combinations remain subject to planner validation |
-| Production Helper placement/power/clock-derived encrypted composition | `test_triad_helper_export.py` (three small complete captures) | Same complete HF/EME exports, no template regeneration per trial | Audio/RF hardware and ordinary receiver excluded |
-| Joint pilot comb CFO profile, interpolation, fallback | `test_triad_helper_assistance.py` | Actual 36-second 18 kHz windows; direct complete estimator timer | Model/operational interval coverage, real retuning and stochastic spread |
-| Continuous FIR, thirteen epochs, full/narrowed FFT banks, FP32/64 | `test_triad_helper_receiver.py`, `test_triad_helper_study.py` | Complete declared HF/EME acquisition; preparation/filter/scoring separated, resident workspaces shared | No cross-geometry performance forecast or CUDA acceleration claim |
-| Frozen adaptive admission procedure and independent holdouts | `test_triad_helper_campaign.py` | Direct campaign wall including exports, loading, hashing, shared setup and all paired scores | Operational daily false-admission and high-reliability reception remain unqualified |
+| Production Helper placement/power/clock-derived encrypted composition | `test_triad_helper_export.py` (five small complete captures and rejected cases) | Same complete HF/EME exports, no template regeneration per trial | Audio/RF hardware and ordinary receiver excluded |
+| Independent audio/RF oscillator bounds; longer FHSS ramp; retained receiver FIR tail | `test_triad_helper_export.py`, `test_triad_helper_ramp_diagnostic.py` | Matched sampled old/new ramp captures plus complete EME source and channel tails | 6 ms DATA ramp raised Helper leakage by 40.6 dB relative to the old format; it remained 64.3 dB below measured noise in the sampled fixture. This is one channel realization, not an RF frontend guarantee. |
+| Joint pilot CFO/audio-clock/RX-time-scale profile and fallback | `test_triad_helper_clock.py` | Actual 36-second, 18 kHz windows; eight paired replays plus two fresh captures, direct estimator timer | 10/10 intervals covered the sampled truth and narrowed 16,803 CFO candidates to 4–6. Only two captures are independent of the convergence correction; no interval-coverage or operational-lock calibration. |
+| Continuous FIR; legacy and wide frontends; epoch/clock/rate/timing/CFO banks | `test_triad_helper_batched_receiver.py`, `test_triad_helper_study.py`, `test_triad_helper_clock_loss.py` | Named sampled HF/EME receivers; retain per-stage FFT, preparation, filter and likelihood times | The 7-clock × 3-RX-rate HF bank is a new regime. Its measured public grid loss is linked in the current sampled validation record; no continuum guarantee follows from finite midpoint/corner probes. |
+| Resident and cold CPU/CUDA FFT path, strict FP32 bulk | `test_triad_helper_gpu_bench.py` (mocked dispatch), paired sampled GPU benchmark | Same EME I/Q and bank, synchronized resident timings and separate preparation | RTX PRO 6000 WK / 4-thread EPYC EME path: about 82× resident correlations, 8× full warm comparison, and 1.6× first comparison with cold preparation. Three measured replays do not establish a confidence-qualified regression threshold. |
+| Frozen adaptive admission procedure and independent holdouts | `test_triad_helper_campaign.py` | Direct campaign wall including exports, loading, hashing, shared setup and all paired scores | Operational daily false-admission and high-reliability reception remain unqualified for the new statistic; global residual-confidence allocation changes the multi-epoch score and needs its own frozen calibration. |
+| Rate-aware pulse/ramp/protected placement, expected-spectrum calculation and fallback | `test_triad_shaping` (about 10 s: rendered bits, erasure masks, fresh-key FFTs); exporter planner-only checks | Bounded `triad_shaping_sweep.py`; optional native `--extended` source checks before sampled qualification | Expected source energy is not a hard mask or channel-output bound. Geometry and workspace failures remain explicit. No new runtime forecast is asserted. |
+| Bidirectional DATA/Helper interference and late overlapping pilot tracking | `test_triad_helper_interference.py` (small synthetic controls and identity failures) | Four matched full-waveform controls with complete tails; fixed late 36 s apertures | Reuse the [shaping evidence](triad-shaping.md); do not put the multi-capture GPU campaign into routine CI. Moving pilots changes physical channel/noise exposure even when cross-interference is negligible. |
 
 Do not add the Monte Carlo sensitivity campaign to routine CI. Reuse its frozen
 fixtures and source identities; choose a small complete estimator/acquisition
 target or validate a cheaper forecast before adding a timing gate. Functional
 unit tests alone are not prediction anchors. A passing historical guard does
 not remove the explicit new-path coverage gaps above.
+
+The extension's very small estimator and structure tests are appropriate for
+routine functional checks. Do not put the full 17,035-CFO × 7-clock × 3-rate
+HF search or sampled admission campaigns into routine CI. They are research
+qualification targets. Historical 33/36-workload coverage and performance
+receipts above do not measure these new Python/CUDA paths. The new RTX PRO
+6000 WK anchor freezes a 397.956 s GPU full-bank forecast before a 406.015 s
+independent full target (2.02% longer), and measures a separate full resident
+target after 207.302 s explicit prewarming. This validates that named forecast
+and timing boundary, not a future-error distribution or regression gate. The
+corresponding 8,196.9 s full CPU forecast remains unvalidated; cross-hardware
+transfer and unmeasured size, arithmetic or memory regimes remain unsupported.
 
 ### Current selected measurement routes
 

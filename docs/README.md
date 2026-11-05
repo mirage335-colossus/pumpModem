@@ -11,6 +11,9 @@ workspace reuse and proportionate testing before larger sampled campaigns.
 The [Helper-assisted triad integration](triad-helper.md) documents production
 Helper composition, the requested HF/EME configurations, acquisition reuse and
 scoped admission controls, separately from ordinary Robust integration.
+Use [rate-aware shaping and Helper placement](triad-shaping.md) before raising
+the DATA or pilot frequency: it combines inexpensive spectral planning with
+paired waveform and bidirectional interference checks.
 For isolated regression computation, follow the required
 [efficient regression workflow](triad-performance.md#required-efficient-regression-workflow)
 and its [confidence and material-slowdown policy](triad-performance.md#confidence-and-material-slowdown):

@@ -15,6 +15,7 @@
 namespace datapump::triad::v3 {
 using Complex = std::complex<double>;
 using Arithmetic = triad::Arithmetic;
+enum class PulseShape { LegacyRrc, TaperedRrc };
 
 // Version3 is a separate one-bit, random-access streaming experiment. All
 // addresses and sample counts are64-bit; no whole-symbol map/capture is held.
@@ -40,6 +41,9 @@ struct Format {
     bool encrypt = true;
     std::uint64_t epoch = 1793404800, symbol_ordinal = 0;
     unsigned burst_wait_tiles = 0;
+    // DATA-only pulse selection. Both retain rolloff .25, full +/-8-cell
+    // support and unit pulse energy; the default preserves existing samples.
+    PulseShape pulse_shape = PulseShape::LegacyRrc;
 };
 double effective_sample_rate(const Format&);
 struct Geometry {

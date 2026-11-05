@@ -1,0 +1,10 @@
+{
+  "schema": "triad-shaping-archive-verification-v1",
+  "archive_members_verified": 2197,
+  "campaigns_verified": 8,
+  "capture_count": 536,
+  "same_frozen_protocols_decisions_and_counts": true,
+  "floating_interval_differences": 33,
+  "maximum_absolute_difference": 2.7755575615628914e-17,
+  "note": "Numerical-library quantile rounding differs by at most this amount; all other retained values match exactly."
+}
