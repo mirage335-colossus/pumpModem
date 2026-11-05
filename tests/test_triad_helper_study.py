@@ -49,6 +49,7 @@ class StudyOrchestrationTests(unittest.TestCase):
         self.prepared = object()
         self.receiver = MagicMock()
         self.receiver.receiver_id = 'mock-full-bank'
+        self.receiver.preprocessing_id = 'mock-preprocessing'
         self.receiver.prepare_observation.return_value = self.prepared
         self.receiver.score_prepared.return_value = dict(bit=0, working_presence=5., receiver_id='mock-full-bank')
         self.child = MagicMock()
@@ -71,6 +72,66 @@ class StudyOrchestrationTests(unittest.TestCase):
     def fallback(samples, **kwargs):
         return dict(status='fallback', selected_frequencies=list(kwargs['original_frequencies']),
                     wall_seconds=.001)
+
+    def test_public_clock_grid_bounds_and_work_cap(self):
+        manifest = {'channel': {'sample_clock_pair_ppm': 100.,
+                    'endpoint_uniform_half_bound_ppm': 50., 'spread_margin': 3.}}
+        clocks, scales = study.public_clock_grids(manifest, 100., 3)
+        np.testing.assert_array_equal(clocks, [-300, -200, -100, 0, 100, 200, 300])
+        self.assertAlmostEqual(scales[0], 1 - 150 / (1 - 50e-6) * 1e-6)
+        self.assertAlmostEqual(scales[-1], 1 + 150 / (1 - 50e-6) * 1e-6)
+        self.assertEqual(study.public_clock_grids(manifest), ((0.,), (1.,)))
+        self.assertEqual(len(study.public_clock_grids(manifest, 600 / 4095)[0]), 4096)
+        with self.assertRaisesRegex(ValueError, '4096-point'):
+            study.public_clock_grids(manifest, 600 / 4096)
+        for step in (-1, float('nan'), 1e-9):
+            with self.assertRaises(ValueError):
+                study.public_clock_grids(manifest, step, 3)
+
+    def test_independent_modulation_rate_is_not_silently_omitted(self):
+        self.manifest['channel'].update(spread_doppler_hz=0, selective_modulation_rate_hz=.7)
+        self.write_manifest()
+        study.HelperComparison(self.folder).score(self.folder)
+        self.assertEqual(self.estimator.call_args.kwargs['modulation_rate_hz'], .7)
+        self.assertEqual(self.factory.call_args.kwargs['lag_step'], 1)
+        self.assertEqual(self.factory.call_args.kwargs['source_half_bandwidth_hz'],112.5)
+        self.assertEqual(self.factory.call_args.kwargs['channel_line_half_width_hz'],.7)
+        self.manifest['channel']['selective_modulation_rate_hz'] = 300.
+        self.write_manifest()
+        with self.assertRaisesRegex(ValueError, 'frontend geometry'):
+            study.HelperComparison(self.folder)
+
+    def test_cli_accepts_explicit_legacy_wide_frontend(self):
+        output = self.folder / 'legacy-wide.json'
+        fake = MagicMock()
+        fake.score.return_value = dict(timing={}, assistance={'status':'fallback'})
+        with patch.object(study, 'HelperComparison', return_value=fake) as factory, \
+             patch.object(sys, 'argv', ['study', '--fixture', str(self.folder),
+                   '--output', str(output), '--frontend-profile', 'wide']), \
+             patch('builtins.print'):
+            study.main()
+        self.assertEqual(factory.call_args.kwargs['frontend_profile'], 'wide')
+        self.assertEqual(factory.call_args.kwargs['fft_backend'], 'legacy')
+        self.assertTrue(output.exists())
+
+    def test_cli_exposes_assisted_only_without_changing_default(self):
+        output = self.folder / 'assisted-only.json'
+        fake = MagicMock()
+        fake.score.return_value = dict(timing={}, assistance={'status': 'narrowed'},
+                                       executed_arms=['assisted'])
+        with patch.object(study, 'HelperComparison', return_value=fake), \
+             patch.object(sys, 'argv', ['study', '--fixture', str(self.folder),
+                   '--output', str(output), '--assisted-only']), \
+             patch('builtins.print'):
+            study.main()
+        self.assertFalse(fake.score.call_args.kwargs['include_baseline'])
+        output_default = self.folder / 'paired-default.json'
+        with patch.object(study, 'HelperComparison', return_value=fake), \
+             patch.object(sys, 'argv', ['study', '--fixture', str(self.folder),
+                   '--output', str(output_default)]), \
+             patch('builtins.print'):
+            study.main()
+        self.assertTrue(fake.score.call_args.kwargs['include_baseline'])
 
     def test_fixed_public_window_dated_availability_and_no_truth_access(self):
         comparison = study.HelperComparison(self.folder)
@@ -100,6 +161,39 @@ class StudyOrchestrationTests(unittest.TestCase):
         self.assertTrue(result['assisted']['score_reused_from_baseline'])
         self.assertEqual(result['timing']['additional_assisted_scoring_seconds'], 0.)
         self.assertNotIn('score_reused_from_baseline', result['baseline'])
+
+    def test_assisted_only_narrowing_skips_full_bank_and_matches_paired_assisted_score(self):
+        self.estimator.side_effect = lambda samples, **kwargs: dict(
+            status='narrowed', selected_frequencies=[0.], wall_seconds=.001)
+        comparison = study.HelperComparison(self.folder)
+        capture = comparison.prepare_capture(self.folder)
+        paired = comparison.score_capture(capture)
+        self.receiver.score_prepared.reset_mock()
+        self.child.score_prepared.reset_mock()
+        assisted_only = comparison.score_capture(capture, include_baseline=False)
+        self.assertIsNone(assisted_only['baseline'])
+        self.assertEqual(assisted_only['executed_arms'], ['assisted'])
+        self.assertNotEqual(paired['execution_policy_id'], assisted_only['execution_policy_id'])
+        self.assertIsNone(assisted_only['timing']['additional_assisted_scoring_seconds'])
+        self.assertGreaterEqual(assisted_only['timing']['assisted_score_seconds'], 0.)
+        self.receiver.score_prepared.assert_not_called()
+        self.child.score_prepared.assert_called_once_with(self.prepared)
+        self.assertEqual(assisted_only['assisted']['bit'], paired['assisted']['bit'])
+        self.assertEqual(assisted_only['assisted']['working_presence'],
+                         paired['assisted']['working_presence'])
+        self.assertEqual(assisted_only['search_banks'], paired['search_banks'])
+
+    def test_assisted_only_fallback_scores_full_bank_once_as_assisted(self):
+        comparison = study.HelperComparison(self.folder)
+        capture = comparison.prepare_capture(self.folder)
+        self.receiver.score_prepared.reset_mock()
+        result = comparison.score_capture(capture, include_baseline=False)
+        self.assertIsNone(result['baseline'])
+        self.assertEqual(result['executed_arms'], ['assisted'])
+        self.assertFalse(result['assisted']['score_reused_from_baseline'])
+        self.receiver.score_prepared.assert_called_once_with(self.prepared)
+        self.receiver.with_frequency_offsets.assert_not_called()
+        self.assertEqual(result['assisted']['bit'], 0)
 
     def test_narrowing_reuses_same_prepared_capture_and_keeps_procedure_identity(self):
         comparison = study.HelperComparison(self.folder)
@@ -136,7 +230,7 @@ class StudyOrchestrationTests(unittest.TestCase):
         valid_path = self.folder / 'validity.u8'
         for values in (np.ones(17999, dtype='u1'), np.r_[np.zeros(1, dtype='u1'), np.ones(17999, dtype='u1')]):
             values.tofile(valid_path)
-            with self.assertRaisesRegex(ValueError, 'complete observation required'):
+            with self.assertRaisesRegex(ValueError, 'capture validity differs'):
                 comparison.score(self.folder)
         np.ones(18000, dtype='u1').tofile(valid_path)
         np.zeros(17999, dtype='<c16').tofile(self.folder / 'observation.c128')
@@ -144,6 +238,37 @@ class StudyOrchestrationTests(unittest.TestCase):
             comparison.score(self.folder)
         self.estimator.assert_not_called()
         self.receiver.prepare_observation.assert_not_called()
+
+    def test_fixed_data_erasure_shared_preparation_and_helper_fallback(self):
+        values = np.ones(18000, dtype='u1')
+        values[15000:15002] = 0  # outside fixed Helper window
+        values.tofile(self.folder / 'validity.u8')
+        comparison = study.HelperComparison(self.folder)
+        np.testing.assert_array_equal(self.factory.call_args.kwargs['capture_validity'], values)
+        capture = comparison.prepare_capture(self.folder)
+        comparison.score_capture(capture)
+        comparison.score_capture(capture)
+        self.estimator.assert_called_once()
+        self.receiver.prepare_observation.assert_called_once()
+        self.receiver.score_prepared.assert_called_with(self.prepared)
+        with self.assertRaisesRegex(ValueError, 'shared capture policy'):
+            comparison.score_capture(dict(capture, shared_capture_id='different'))
+        values[4000] = 0  # inside fixed Helper window: do not infer through lost samples
+        values.tofile(self.folder / 'validity.u8')
+        comparison = study.HelperComparison(self.folder)
+        result = comparison.score(self.folder)
+        self.assertEqual(result['assistance']['reason'], 'known erasure in Helper observation')
+        self.assertTrue(result['assisted']['score_reused_from_baseline'])
+        self.estimator.assert_called_once()
+
+    def test_shared_preparation_rejects_different_noise_reference(self):
+        first = study.HelperComparison(self.folder)
+        capture = first.prepare_capture(self.folder)
+        self.manifest['power']['complex_noise_variance'] *= 2
+        self.write_manifest()
+        second = study.HelperComparison(self.folder)
+        with self.assertRaisesRegex(ValueError, 'shared capture policy differs'):
+            second.score_capture(capture)
 
     def test_insufficient_guaranteed_helper_support_rejected(self):
         self.manifest['calendar']['helper_end_seconds'] = 50.

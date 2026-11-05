@@ -47,7 +47,7 @@ def _number(value, name, *, minimum=None, positive=False):
     return result
 
 
-def tone_offsets(doppler_hz, slow_depth, fast_depth):
+def tone_offsets(doppler_hz, slow_depth, fast_depth, *, modulation_rate_hz=None):
     """Public two-ray/modulation union, including coincident lines only once.
 
     Integer tenths avoid floating-point duplicate representations. With both
@@ -57,6 +57,25 @@ def tone_offsets(doppler_hz, slow_depth, fast_depth):
     doppler = _number(doppler_hz, "doppler_hz", minimum=0)
     slow = _number(slow_depth, "slow_depth", minimum=0)
     fast = _number(fast_depth, "fast_depth", minimum=0)
+    rate = doppler if modulation_rate_hz is None else _number(
+        modulation_rate_hz, "modulation_rate_hz", minimum=0)
+    if rate != doppler:
+        sidebands = [0.]
+        if slow:
+            sidebands.extend((-.1 * rate, .1 * rate))
+        if fast:
+            sidebands.extend((-rate, rate))
+        offsets = sorted({ray + side for ray in (0., doppler) for side in sidebands})
+        unique = []
+        tolerance = 16 * np.finfo(np.float64).eps * max(doppler, rate)
+        for offset in offsets:
+            # Joint clock inference uses the direct carrier as its exact origin.
+            # Cancellation such as D - 0.1*M must not replace zero by a tiny residue.
+            if abs(offset) <= tolerance:
+                offset = 0.
+            if not unique or offset - unique[-1] > tolerance:
+                unique.append(offset)
+        return np.asarray(unique, dtype=np.float64)
     sidebands = {0}
     if slow:
         sidebands.update((-1, 1))
@@ -450,7 +469,7 @@ def estimate_frequency(samples, *, sample_rate=18000, data_if_hz,
                        drift_bound_hz_per_second=0, model_allowance_hz=.01,
                        pilot_dwell_gating=False, physical_rf_retuning=False,
                        pilot_phase_model="continuous", fit_audio_clock=None,
-                       channel_rate_error_bound_ppm=None):
+                       channel_rate_error_bound_ppm=None, modulation_rate_hz=None):
     """Return a JSON-serializable conditional CFO diagnostic and DATA subset.
 
     The input starts at ``first_sample_seconds`` on the capture calendar. Only
@@ -498,7 +517,8 @@ def estimate_frequency(samples, *, sample_rate=18000, data_if_hz,
                               "phase_diffusion_radians_per_sqrt_second", minimum=0)
     drift = _number(drift_bound_hz_per_second, "drift_bound_hz_per_second", minimum=0)
     model_allowance = _number(model_allowance_hz, "model_allowance_hz", minimum=0)
-    offsets = tone_offsets(doppler_hz, slow_depth, fast_depth)
+    offsets = tone_offsets(doppler_hz, slow_depth, fast_depth,
+                           modulation_rate_hz=modulation_rate_hz)
     for name, value in (("pilot_dwell_gating", pilot_dwell_gating),
                         ("physical_rf_retuning", physical_rf_retuning)):
         if not isinstance(value, (bool, np.bool_)):

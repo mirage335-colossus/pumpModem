@@ -57,16 +57,28 @@ def _integer(value, name, minimum=1):
     return int(value)
 
 
-def _frequencies(values, profile="legacy"):
+def _frequencies(values, profile="legacy", *, source_half_bandwidth_hz=112.5,
+                 channel_line_half_width_hz=180.):
     result = tuple(_number(v, "frequency offset") for v in values)
     maximum = 4096 if profile == "legacy" else 1_000_000
     if not result or len(result) > maximum or len(set(result)) != len(result):
         raise ValueError(f"frequency_offsets must be a nonempty unique bank of at most {maximum} entries")
-    # Fixed frontend: nominal HF occupied half-width is 202.5 Hz, plus 90 Hz
-    # spread. Preserve a public allowance rather than inspecting noisy energy.
-    if max(map(abs, result)) + 292.5 > (330 if profile == "legacy" else 400):
+    if profile not in ("legacy", "wide"):
+        raise ValueError("frontend profile must be legacy or wide")
+    # Public nominal support only; complete waveform/filter tails remain present.
+    if max(map(abs, result)) + source_half_bandwidth_hz + channel_line_half_width_hz > (330 if profile == "legacy" else 400):
         raise ValueError("frequency bank exceeds the fixed DATA FIR public passband allowance")
     return result
+
+
+def _channel_support(doppler_hz, source_half_bandwidth_hz, channel_line_half_width_hz):
+    doppler = _number(doppler_hz, "doppler_hz")
+    source = _number(source_half_bandwidth_hz, "source_half_bandwidth_hz", positive=True)
+    lines = 2 * abs(doppler) if channel_line_half_width_hz is None else _number(
+        channel_line_half_width_hz, "channel_line_half_width_hz")
+    if abs(doppler) >= DATA_SAMPLE_RATE / 2 or lines < abs(doppler):
+        raise ValueError("Doppler must be below DATA Nyquist and channel line support must cover it")
+    return doppler, source, lines
 
 
 def data_fir_taps(profile="legacy"):
@@ -147,6 +159,7 @@ class PreparedDataObservation:
     samples: np.ndarray
     preprocessing_id: str
     filtering_seconds: float
+    validity_id: str = "all-valid"
 
 
 class HelperDataReceiver:
@@ -157,21 +170,32 @@ class HelperDataReceiver:
     (normally 38 seconds minus source halo), independently of epoch addressing.
     ``arrival_bounds_seconds`` is a public prior; the lower bound is the one
     fractional anchor. The lattice is integer 900-Hz samples and includes the
-    ceil-rounded upper endpoint. No capture-derived alignment or truth is read.
+    ceil-rounded upper endpoint. The default scores every 900-Hz timing sample;
+    a coarser explicit lag_step remains available for historical reproduction.
+    No capture-derived alignment or truth is read.
     ``reference_variance`` is positive public per-complex-sample variance AFTER
     the FIR. White raw noise gives raw_variance*sum(taps**2); filtering colors
     noise, so only a separately calibrated empirical gate may admit a bit.
+    ``capture_validity`` freezes known missing ADC rows. Every output whose
+    complete FIR support touches a gap is excluded from the likelihood. Masks
+    are receiver identity inputs, not inferred from payload or sample values.
+    ``source_half_bandwidth_hz`` and ``channel_line_half_width_hz`` declare the
+    public nominal spectrum for support checks. The latter defaults to 2*|D|
+    for the historical Doppler-plus-fast-modulation envelope. They never clip
+    samples or alter the two-ray scoring model.
     """
     def __init__(self, raw_templates, epoch_offsets, *, source_offset_seconds,
                  capture_lead_seconds, capture_rows, arrival_bounds_seconds,
                  delay_seconds, doppler_hz, reference_variance,
                  frequency_offsets=(0.,), sample_rate=RAW_SAMPLE_RATE,
-                 output_sample_rate=DATA_SAMPLE_RATE, lag_step=4,
+                 output_sample_rate=DATA_SAMPLE_RATE, lag_step=1,
                  precision="fp32", device="cpu",
                  memory_limit_bytes=512 * 1024 * 1024,
                  fft_backend="legacy", frontend_profile="legacy",
                  clock_ppm_values=(0.,), doppler_scale_values=(1.,),
-                 frequency_batch_size=8, max_cached_hypotheses=1):
+                 frequency_batch_size=8, max_cached_hypotheses=1,
+                 capture_validity=None, source_half_bandwidth_hz=112.5,
+                 channel_line_half_width_hz=None):
         if fft_backend == "batched":
             self._init_batched(raw_templates, epoch_offsets,
                 source_offset_seconds=source_offset_seconds, capture_lead_seconds=capture_lead_seconds,
@@ -181,11 +205,14 @@ class HelperDataReceiver:
                 lag_step=lag_step, precision=precision, device=device, memory_limit_bytes=memory_limit_bytes,
                 frontend_profile=frontend_profile, clock_ppm_values=clock_ppm_values,
                 doppler_scale_values=doppler_scale_values, frequency_batch_size=frequency_batch_size,
-                max_cached_hypotheses=max_cached_hypotheses)
+                max_cached_hypotheses=max_cached_hypotheses, capture_validity=capture_validity,
+                source_half_bandwidth_hz=source_half_bandwidth_hz,
+                channel_line_half_width_hz=channel_line_half_width_hz)
             return
-        if fft_backend != "legacy" or frontend_profile != "legacy" or tuple(clock_ppm_values) != (0.,) or tuple(doppler_scale_values) != (1.,):
-            raise ValueError("new frontend/clock/rate hypotheses require fft_backend='batched'")
+        if fft_backend != "legacy" or tuple(clock_ppm_values) != (0.,) or tuple(doppler_scale_values) != (1.,):
+            raise ValueError("clock/rate hypotheses require fft_backend='batched'")
         self.fft_backend = "legacy"
+        self.frontend_profile = frontend_profile
         started = time.perf_counter()
         source = np.asarray(raw_templates)
         if source.ndim != 3 or source.shape[1] != 2 or source.shape[2] <= 4 or source.dtype.kind != "c":
@@ -202,7 +229,6 @@ class HelperDataReceiver:
             raise ValueError("this public frontend requires 18000-Hz input and 900-Hz output")
         self.capture_rows = _integer(capture_rows, "capture_rows")
         self.memory_limit_bytes = _integer(memory_limit_bytes, "memory_limit_bytes")
-        self.frequency_offsets = _frequencies(frequency_offsets)
         self.reference_variance = _number(reference_variance, "reference_variance", positive=True)
         self.source_offset_seconds = _number(source_offset_seconds, "source_offset_seconds")
         self.capture_lead_seconds = _number(capture_lead_seconds, "capture_lead_seconds")
@@ -215,14 +241,18 @@ class HelperDataReceiver:
             raise ValueError("arrival bounds must be increasing")
         self.arrival_bounds_seconds = (lower, upper)
         self.delay_seconds = _number(delay_seconds, "delay_seconds")
-        self.doppler_hz = _number(doppler_hz, "doppler_hz")
-        if self.delay_seconds < 0 or abs(self.doppler_hz) > 90:
-            raise ValueError("public channel requires nonnegative delay and |Doppler| <= 90 Hz")
+        self.doppler_hz, self.source_half_bandwidth_hz, self.channel_line_half_width_hz = _channel_support(
+            doppler_hz, source_half_bandwidth_hz, channel_line_half_width_hz)
+        if self.delay_seconds < 0:
+            raise ValueError("public channel requires nonnegative delay")
+        self.frequency_offsets = _frequencies(frequency_offsets, self.frontend_profile,
+            source_half_bandwidth_hz=self.source_half_bandwidth_hz,
+            channel_line_half_width_hz=self.channel_line_half_width_hz)
         self.lags = lag_grid(math.ceil((upper - lower) * DATA_SAMPLE_RATE),
                              _integer(lag_step, "lag_step"))
         if len(self.lags) * len(self.frequency_offsets) * len(epochs) > 1_000_000:
             raise ValueError("complete epoch/timing/frequency bank exceeds 1000000 groups")
-        self.taps = data_fir_taps()
+        self.taps = data_fir_taps(self.frontend_profile)
         guard = (len(self.taps) - 1) / RAW_SAMPLE_RATE
         earliest = self.capture_lead_seconds + self.source_offset_seconds + lower
         if earliest < 0:
@@ -234,6 +264,7 @@ class HelperDataReceiver:
         self.samples = (self.capture_rows - 1) // DECIMATION + 1 - self.crop_start_output
         if self.samples <= 4 or self.lags[-1] >= self.samples:
             raise ValueError("capture is too short for the public DATA arrival bank")
+        self._configure_validity(capture_validity)
         anchor_samples = earliest * RAW_SAMPLE_RATE - self.crop_start_raw
         delay_samples = self.delay_seconds * RAW_SAMPLE_RATE
         # Worst-case cubic tail, complete causal FIR tail, and largest lag.
@@ -247,16 +278,17 @@ class HelperDataReceiver:
         score_reserve = min(64, len(self.lags)) * 128 * 1024 + 1024 * 1024
         # Conservative explicit arrays only, not Python/Torch/process RSS.
         self.frontend_array_bound_bytes = max(source.nbytes + support_stop * 160,
-                                              self.capture_rows * 64) + self.samples * 64 + self.taps.nbytes
+                                              self.capture_rows * 64) + self.samples * 64 + self.taps.nbytes + self.validity_array_bound_bytes
         estimate = self.frontend_array_bound_bytes + len(epochs) * per_workspace + score_reserve
         if estimate >= self.memory_limit_bytes:
             raise MemoryError("complete epoch bank and frontend exceed explicit memory limit")
         if not np.isfinite(source).all():
             raise ValueError("raw_templates must be finite")
+        passed, stopped = (330., 430.) if self.frontend_profile == "legacy" else (400., 440.)
         self.preprocessing = dict(
             format="triad-helper-data-frontend-v1", input_sample_rate=RAW_SAMPLE_RATE,
             output_sample_rate=DATA_SAMPLE_RATE, decimation=DECIMATION,
-            pass_edge_hz=330., stop_edge_hz=430., design_attenuation_db=96.,
+            profile=self.frontend_profile, pass_edge_hz=passed, stop_edge_hz=stopped, design_attenuation_db=96.,
             tap_count=len(self.taps), filter_tail_seconds=guard,
             filter_group_delay_seconds=guard / 2,
             noise_variance_gain=float(np.sum(self.taps**2)),
@@ -266,12 +298,15 @@ class HelperDataReceiver:
             fractional_anchor_arrival_seconds=lower,
             arrival_upper_lattice_seconds=lower + int(self.lags[-1]) / DATA_SAMPLE_RATE,
             delay_seconds=self.delay_seconds, doppler_hz=self.doppler_hz,
+            source_half_bandwidth_hz=self.source_half_bandwidth_hz,
+            channel_line_half_width_hz=self.channel_line_half_width_hz,
             delay_raw_samples=delay_samples,
             delay_is_integer=abs(delay_samples - round(delay_samples)) <= 1e-9,
             anchor_raw_samples_from_crop=anchor_samples,
             delay_interpolation="integer exact; fractional causal four-point cubic Lagrange with full three-sample tail",
             observation_filtering="continuous whole capture before crop; output restricted to actually observed capture extent",
-            cfo_order="FIR first, existing FFT CFO hypotheses second; finite-FIR noncommutation remains a declared model mismatch")
+            cfo_order="FIR first, existing FFT CFO hypotheses second; finite-FIR noncommutation remains a declared model mismatch",
+            erasure_support=self._validity_metadata)
         identity = hashlib.sha256(json.dumps(self.preprocessing, sort_keys=True).encode())
         identity.update(self.taps.tobytes())
         self.preprocessing_id = identity.hexdigest()
@@ -300,6 +335,7 @@ class HelperDataReceiver:
                 basis, DATA_SAMPLE_RATE, self.lags,
                 key=dict(arrival_seconds=lower, epoch_offset_seconds=epoch),
                 frequencies=[0., self.doppler_hz, 0., self.doppler_hz],
+                valid=self.output_validity,
                 reference_variance=self.reference_variance, frequency_offsets=self.frequency_offsets,
                 precision=precision, device=device, memory_limit_bytes=child_limit,
                 preprocessing_identity=self.preprocessing_id))
@@ -311,6 +347,58 @@ class HelperDataReceiver:
         self.lags.flags.writeable = False
         self.preparation_seconds = time.perf_counter() - started
         self._bind_identity()
+
+    @staticmethod
+    def _raw_validity(values, rows):
+        mask = np.asarray(values)
+        if mask.shape != (rows,) or mask.dtype.kind not in "bui" or np.any((mask != 0) & (mask != 1)):
+            raise ValueError("capture validity must be a binary vector of capture_rows samples")
+        return mask
+
+    def _configure_validity(self, capture_validity):
+        """Freeze known ADC gaps and conservatively propagate complete FIR support.
+
+        Samples outside the finite capture before index zero are known source
+        zeros, not missing ADC rows. Only actually observed output rows are used.
+        A prefix count avoids a convolution per mask or a per-tap Python loop.
+        """
+        raw = None if capture_validity is None else self._raw_validity(capture_validity, self.capture_rows)
+        self.capture_validity = self.output_validity = None
+        self.validity_id = "all-valid"
+        self.validity_array_bound_bytes = 0
+        raw_lost = output_lost = 0
+        raw_digest = output_digest = "all-valid"
+        if raw is not None and not np.all(raw == 1):
+            whole_rows = (self.capture_rows - 1) // DECIMATION + 1
+            # Owned masks plus simultaneous prefix/index/count construction.
+            self.validity_array_bound_bytes = self.capture_rows * 10 + 8 + whole_rows * 40 + self.samples
+            if self.validity_array_bound_bytes >= self.memory_limit_bytes:
+                raise MemoryError("known-erasure masks and prefix workspace exceed memory limit")
+            raw = np.array(raw, dtype=np.uint8, copy=True)
+            missing = np.empty(self.capture_rows + 1, dtype=np.int64)
+            missing[0] = 0
+            np.cumsum(raw == 0, dtype=np.int64, out=missing[1:])
+            indices = np.arange(self.samples, dtype=np.int64) * DECIMATION + self.crop_start_raw
+            earliest = np.maximum(0, indices - len(self.taps) + 1)
+            output = np.asarray(missing[indices + 1] == missing[earliest], dtype=np.uint8)
+            raw_lost = int(missing[-1])
+            output_lost = self.samples - int(output.sum())
+            if self.samples - output_lost <= 4:
+                raise ValueError("known-erasure mask leaves insufficient valid DATA outputs")
+            raw_digest = hashlib.sha256(raw.tobytes()).hexdigest()
+            output_digest = hashlib.sha256(output.tobytes()).hexdigest()
+            self.validity_id = hashlib.sha256((raw_digest + ":" + output_digest).encode()).hexdigest()
+            raw.flags.writeable = output.flags.writeable = False
+            self.capture_validity, self.output_validity = raw, output
+        self._validity_metadata = dict(
+            policy="fixed-known-ADC-mask-causal-FIR-support-v1", validity_id=self.validity_id,
+            raw_mask_sha256=raw_digest, output_mask_sha256=output_digest,
+            raw_missing_rows=raw_lost, output_missing_rows=output_lost,
+            output_valid_rows=self.samples - output_lost,
+            fir_support_raw_samples=len(self.taps),
+            support_rule="Output j is valid only when every captured raw row in [max(0,20*j-L+1),20*j] is valid; j uses the original capture decimation phase.",
+            missing_samples="Zero-filled before continuous FIR; affected output rows are excluded from correlations, Grams and residual energy.",
+            calibration="Fixed mask is part of receiver identity; changed or random mask policies require matching full-procedure calibration.")
 
     def _bind_identity(self):
         if self.fft_backend == "batched":
@@ -343,7 +431,9 @@ class HelperDataReceiver:
         if self.fft_backend == "batched":
             return self.with_hypotheses(frequency_offsets=frequency_offsets)
         result = copy.copy(self)
-        result.frequency_offsets = _frequencies(frequency_offsets)
+        result.frequency_offsets = _frequencies(frequency_offsets, self.frontend_profile,
+            source_half_bandwidth_hz=self.source_half_bandwidth_hz,
+            channel_line_half_width_hz=self.channel_line_half_width_hz)
         if len(self.lags) * len(result.frequency_offsets) * len(self.epoch_offsets) > 1_000_000:
             raise ValueError("complete epoch/timing/frequency bank exceeds 1000000 groups")
         result._receivers = []
@@ -355,19 +445,27 @@ class HelperDataReceiver:
         return result
 
     def prepare_observation(self, raw_observation, *, valid=None):
-        """Filter all capture rows once; erasures are explicitly unsupported."""
+        """Filter once with the frozen known ADC mask and complete FIR state."""
         raw = np.asarray(raw_observation)
-        if raw.shape != (self.capture_rows,) or raw.dtype.kind != "c" or not np.isfinite(raw).all():
-            raise ValueError("raw_observation must be a finite complex vector of capture_rows samples")
+        if raw.shape != (self.capture_rows,) or raw.dtype.kind != "c":
+            raise ValueError("raw_observation must be a complex vector of capture_rows samples")
         if valid is not None:
-            valid = np.asarray(valid)
-            if valid.shape != raw.shape or valid.dtype.kind not in "bui" or not np.all(valid == 1):
-                raise ValueError("this continuous FIR adapter rejects erasures; all capture rows must be valid")
+            valid = self._raw_validity(valid, self.capture_rows)
+            if ((self.capture_validity is None and not np.all(valid == 1)) or
+                    (self.capture_validity is not None and not np.array_equal(valid, self.capture_validity))):
+                raise ValueError("incoming validity differs from the fixed capture mask")
         started = time.perf_counter()
+        if self.capture_validity is not None:
+            raw = np.array(raw, copy=True)
+            raw[self.capture_validity == 0] = 0
+        if not np.isfinite(raw).all():
+            raise ValueError("valid raw_observation rows must be finite complex samples")
         whole = signal.upfirdn(self.taps, raw, down=DECIMATION)
         cropped = np.array(whole[self.crop_start_output:self.crop_start_output + self.samples], dtype=np.complex128, copy=True)
+        if self.output_validity is not None:
+            cropped[self.output_validity == 0] = 0
         cropped.flags.writeable = False
-        return PreparedDataObservation(cropped, self.preprocessing_id, time.perf_counter() - started)
+        return PreparedDataObservation(cropped, self.preprocessing_id, time.perf_counter() - started, self.validity_id)
 
     def score(self, raw_observation, *, valid=None):
         return self.score_prepared(self.prepare_observation(raw_observation, valid=valid))
@@ -376,7 +474,8 @@ class HelperDataReceiver:
         """Uniform epoch log-mean-exp; presence is max of the two bit mixtures."""
         if self.fft_backend == "batched":
             return self._score_batched(prepared)
-        if not isinstance(prepared, PreparedDataObservation) or prepared.preprocessing_id != self.preprocessing_id:
+        if (not isinstance(prepared, PreparedDataObservation) or prepared.preprocessing_id != self.preprocessing_id or
+                prepared.validity_id != self.validity_id):
             raise ValueError("prepared observation has a different public preprocessing identity")
         if prepared.samples.shape != (self.samples,) or prepared.samples.flags.writeable:
             raise ValueError("prepared observation must retain its owned immutable complete DATA crop")
@@ -442,26 +541,37 @@ class HelperDataReceiver:
         self.epoch_offsets = tuple(map(int, epochs))
         self.clock_ppm_values = self._real_bank(options["clock_ppm_values"], "clock ppm", -10000, 10000)
         self.doppler_scale_values = self._real_bank(options["doppler_scale_values"], "Doppler scale", .99, 1.01)
-        self.frequency_offsets = _frequencies(options["frequency_offsets"], self.frontend_profile)
         self.capture_rows = _integer(options["capture_rows"], "capture_rows")
         self.memory_limit_bytes = _integer(options["memory_limit_bytes"], "memory_limit_bytes")
         self.reference_variance = _number(options["reference_variance"], "reference_variance", positive=True)
         self.source_offset_seconds = _number(options["source_offset_seconds"], "source_offset_seconds")
         self.capture_lead_seconds = _number(options["capture_lead_seconds"], "capture_lead_seconds")
         self.delay_seconds = _number(options["delay_seconds"], "delay_seconds")
-        self.doppler_hz = _number(options["doppler_hz"], "doppler_hz")
+        self.doppler_hz, self.source_half_bandwidth_hz, self.channel_line_half_width_hz = _channel_support(
+            options["doppler_hz"], options["source_half_bandwidth_hz"], options["channel_line_half_width_hz"])
+        self.frequency_offsets = _frequencies(options["frequency_offsets"], self.frontend_profile,
+            source_half_bandwidth_hz=self.source_half_bandwidth_hz,
+            channel_line_half_width_hz=self.channel_line_half_width_hz)
         bounds = options["arrival_bounds_seconds"]
         if len(bounds) != 2:
             raise ValueError("arrival bounds must contain two public endpoints")
         self.arrival_bounds_seconds = tuple(_number(v, "arrival bound") for v in bounds)
         lower, upper = self.arrival_bounds_seconds
-        if upper < lower or self.capture_lead_seconds < 0 or self.delay_seconds < 0 or abs(self.doppler_hz) > 90:
+        if upper < lower or self.capture_lead_seconds < 0 or self.delay_seconds < 0:
             raise ValueError("invalid public arrival/delay/Doppler geometry")
         self._precision, self._device = options["precision"], options["device"]
         if self._precision not in ("fp32", "fp64") or (self._device != "cpu" and not self._device.startswith("cuda")):
             raise ValueError("unsupported bulk precision/device")
         self._batch_size = _integer(options["frequency_batch_size"], "frequency_batch_size")
-        self._cache_capacity = _integer(options["max_cached_hypotheses"], "max_cached_hypotheses")
+        self.requested_cache_capacity = _integer(options["max_cached_hypotheses"], "max_cached_hypotheses")
+        # There can never be more resident workspace keys than the public
+        # epoch × clock × RX-rate Cartesian bank. Subset variants share this
+        # cache and cannot introduce keys outside that original bank, so keep
+        # this effective capacity unchanged on them (even when a subset is
+        # scored). Preserve the requested value for diagnostics.
+        self.reachable_cache_key_count = (len(self.epoch_offsets) * len(self.clock_ppm_values) *
+                                          len(self.doppler_scale_values))
+        self._cache_capacity = min(self.requested_cache_capacity, self.reachable_cache_key_count)
         self._cache = OrderedDict()
         self._cache_lock = threading.RLock()
         self._diagnostic_limit = 1024
@@ -483,6 +593,7 @@ class HelperDataReceiver:
                              _integer(options["lag_step"], "lag_step"))
         if self.samples <= 4 or self.lags[-1] >= self.samples:
             raise ValueError("capture is too short for public timing bank")
+        self._configure_validity(options["capture_validity"])
         # Complete support at every slow-clock, late-arrival and delay endpoint.
         longest = max((self.capture_lead_seconds + upper + self.delay_seconds) / r +
                       (self.source_offset_seconds + (source.shape[2] + 4) / RAW_SAMPLE_RATE) / a
@@ -498,10 +609,13 @@ class HelperDataReceiver:
             crop_output_samples=self.samples, capture_rows=self.capture_rows,
             source_offset_seconds=self.source_offset_seconds, capture_lead_seconds=self.capture_lead_seconds,
             arrival_bounds_seconds=self.arrival_bounds_seconds, delay_seconds=self.delay_seconds, doppler_hz=self.doppler_hz,
+            source_half_bandwidth_hz=self.source_half_bandwidth_hz,
+            channel_line_half_width_hz=self.channel_line_half_width_hz,
             clock_interpolation="18-kHz four-point cubic Lagrange, complete explicit zero extension; source-specific error unqualified",
             clock_coordinate="source_offset/(1+q) then x((1+q)*t); capture lead/arrival/delay divided by Doppler scale=1/RX clock",
             observation_filtering="continuous whole capture before crop; actually observed extent only",
-            cfo_order="FIR first, CFO second; finite-FIR noncommutation remains declared approximation")
+            cfo_order="FIR first, CFO second; finite-FIR noncommutation remains declared approximation",
+            erasure_support=self._validity_metadata)
         identity = hashlib.sha256(json.dumps(self.preprocessing, sort_keys=True).encode())
         identity.update(self.taps.tobytes())
         self.preprocessing_id = identity.hexdigest()
@@ -514,7 +628,7 @@ class HelperDataReceiver:
         factor_bound = len(self.lags) * 4096 + nfft * 64 + self.samples * 48
         self._batch_transient_bound = self._batch_size * (nfft * 80 + self.samples * 48 + len(self.lags) * 2048)
         self.frontend_array_bound_bytes = (self._source.nbytes + self.capture_rows * 64 +
-                                           self.samples * 128 + self.taps.nbytes)
+                                           self.samples * 128 + self.taps.nbytes + self.validity_array_bound_bytes)
         self._child_limit = ((self.memory_limit_bytes - self.frontend_array_bound_bytes - self._batch_transient_bound) //
                              self._cache_capacity + self._batch_transient_bound)
         self.explicit_array_bound_bytes = (self.frontend_array_bound_bytes +
@@ -542,9 +656,8 @@ class HelperDataReceiver:
         if groups > 2**53:
             raise ValueError("full public bank exceeds exact group-count representation")
         pass_edge = self.preprocessing["pass_edge_hz"]
-        # Public selected-HF envelope, including both Doppler and fast AM.
-        edge = (112.5 * max(1 + q * 1e-6 for q in self.clock_ppm_values) +
-                2 * abs(self.doppler_hz) * max(self.doppler_scale_values) + max(map(abs, self.frequency_offsets)))
+        edge = (self.source_half_bandwidth_hz * max(1 + q * 1e-6 for q in self.clock_ppm_values) +
+                self.channel_line_half_width_hz * max(self.doppler_scale_values) + max(map(abs, self.frequency_offsets)))
         if edge > pass_edge:
             raise ValueError("clock/Doppler/CFO bank exceeds fixed DATA FIR public passband")
         # Include returned Python numeric metadata conservatively, as well as
@@ -569,7 +682,9 @@ class HelperDataReceiver:
             raise ValueError("clock/rate variants require batched backend")
         result = copy.copy(self)
         if frequency_offsets is not None:
-            result.frequency_offsets = _frequencies(frequency_offsets, self.frontend_profile)
+            result.frequency_offsets = _frequencies(frequency_offsets, self.frontend_profile,
+                source_half_bandwidth_hz=self.source_half_bandwidth_hz,
+                channel_line_half_width_hz=self.channel_line_half_width_hz)
         for name, values in (("clock_ppm_values", clock_ppm_values), ("doppler_scale_values", doppler_scale_values)):
             if values is not None:
                 bank = tuple(_number(v, name) for v in values)
@@ -641,13 +756,15 @@ class HelperDataReceiver:
             frequencies=[0., self.doppler_hz * scale, 0., self.doppler_hz * scale],
             reference_variance=self.reference_variance, precision=self._precision, device=self._device,
             memory_limit_bytes=self._child_limit, preprocessing_identity=self.preprocessing_id,
-            frequency_batch_size=self._batch_size, minimum_fft_size=self._minimum_fft_size)
+            frequency_batch_size=self._batch_size, minimum_fft_size=self._minimum_fft_size,
+            valid=self.output_validity)
         entry = (child, energy)
         self._cache[cache_key] = entry
         return entry, time.perf_counter() - started
 
     def _score_batched(self, prepared):
         if (not isinstance(prepared, PreparedDataObservation) or prepared.preprocessing_id != self.preprocessing_id or
+                prepared.validity_id != self.validity_id or
                 prepared.samples.shape != (self.samples,) or prepared.samples.flags.writeable):
             raise ValueError("prepared observation has a different public preprocessing identity or extent")
         started = time.perf_counter()
@@ -722,7 +839,9 @@ class HelperDataReceiver:
                 shared_preparation="bounded LRU public factors across CFO/subset variants; capture filtering shared"),
             resources=dict(explicit_array_bound_bytes=self.explicit_array_bound_bytes,
                 memory_limit_bytes=self.memory_limit_bytes, retained_group_scores=False,
+                requested_maximum_cached_hypotheses=self.requested_cache_capacity,
                 maximum_cached_hypotheses=self._cache_capacity,
+                reachable_cache_key_count=self.reachable_cache_key_count,
                 aligned_cfo_evaluations=aligned_cfo_evaluations,
                 retained_hypothesis_diagnostics=len(outcomes), suppressed_hypothesis_diagnostics=total_hypotheses-len(outcomes),
                 hypothesis_diagnostic_limit=self._diagnostic_limit,

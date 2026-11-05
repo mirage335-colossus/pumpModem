@@ -30,13 +30,14 @@ class BatchedFFTReceiver:
 
     def __init__(self, basis, sample_rate, lags, *, key, frequencies,
                  reference_variance, precision, device, memory_limit_bytes,
-                 preprocessing_identity, frequency_batch_size=8, minimum_fft_size=0):
+                 preprocessing_identity, frequency_batch_size=8, minimum_fft_size=0,
+                 valid=None):
         _check_precision(device, precision)
         self.receiver = EmpiricalReceiver(
             basis, sample_rate, lags, key=key, frequencies=frequencies,
             reference_variance=reference_variance, frequency_offsets=(0.,),
             precision=precision, device=device, memory_limit_bytes=memory_limit_bytes,
-            preprocessing_identity=preprocessing_identity)
+            preprocessing_identity=preprocessing_identity, valid=valid)
         self.workspace = self.receiver._workspace
         self.config = self.receiver._config
         self.device = torch.device(device)

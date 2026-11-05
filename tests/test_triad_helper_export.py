@@ -2,7 +2,7 @@
 """Bounded CLI smoke contracts for actual Helper + triad sampled exports.
 
 Run with the built exporter as the sole positional argument. This produces
-five minimal captures, checks their file/metadata contracts, and removes the
+eight minimal captures, checks their file/metadata contracts, and removes the
 temporary arrays. It does not measure receiver success or statistical power.
 """
 
@@ -10,6 +10,7 @@ import argparse
 import json
 import math
 from pathlib import Path
+import shutil
 import struct
 import subprocess
 import tempfile
@@ -118,8 +119,15 @@ def check_capture(directory, scenario, *, data=True, helper=True, bit=0,
     close(power["complex_noise_variance"], fs / 10 ** (physical_cn0 / 10), "sample noise variance")
     require(power["reference_bit"] == 0 and power["reference_window_seconds"] == [39, 41], "public active calibration")
     close(power["reference_data_mean_real_power"] * 2, power["reference_data_mean_norm"], "analytic/real power convention")
-    close(power["template_data_gain"] ** 2 * power["reference_data_mean_norm"], 1, "frozen nominal DATA power")
-    close(plan["data_gain"] * power["post_plan_composite_gain"], power["template_data_gain"], "post-plan DATA gain")
+    require(power["data_power_reference_policy"] == "whole-active" and
+            power["data_power_reference_version"] == 1, "general-rate power calibration default")
+    close(power["template_data_gain"] ** 2 * power["data_reference_mean_norm"], 1, "frozen nominal DATA power")
+    close(plan["data_gain"] * power["post_plan_composite_gain"] * power["post_plan_data_calibration_gain"],
+          power["template_data_gain"], "post-plan DATA-only gain")
+    close(power["helper_preview_normalized_data_mean_norm"],
+          power["template_data_gain"] ** 2 * power["reference_data_mean_norm"], "actual Helper-preview DATA power")
+    require(power["data_reference_refinement_relative_difference"] <= .001 and
+            65536 <= power["data_reference_nodes"] <= 262144, "bounded source-power refinement")
     close(power["nominal_helper_to_data_ratio"], expected["helper_w"] / expected["data_w"], "nominal Helper ratio")
     require(power["reference_measured_helper_to_data_ratio"] > 0, "actual Helper reference power")
 
@@ -211,15 +219,68 @@ def check_capture(directory, scenario, *, data=True, helper=True, bit=0,
     require(energy["rows"] == calendar["composite_source_samples"], "full source energy accounting")
     require((energy["data_energy_samples"] > 0) is data, "actual emitted DATA control")
     require((energy["helper_energy_samples"] > 0) is helper, "actual emitted Helper control")
+    if data and bit == 0:
+        require(abs(energy["data_active_mean_norm"] - 1) <= .003,
+                f"complete sampled bit0 source disagrees with nominal active power: {energy['data_active_mean_norm']}")
     if not data and not helper:
         close(energy["composite_energy_samples"], 0, "both-off emitted signal")
         close(report["signal_energy_samples"], 0, "both-off propagated signal")
     return manifest, truth
 
 
+def power_qualification(binary, root, timings):
+    """Occasional source-power checks, not a receiver Monte Carlo campaign.
+
+    The emitted-energy sum traverses every integer source sample and is
+    independent of the stratified fractional-node calibration. Arrays are
+    removed after each check; no template bank or impaired receiver is run.
+    """
+    cases = [
+        ("rate3p6", ["--case", "hf", "--rate", "3.6", "--added-symbols", "1"]),
+        ("rate10", ["--case", "hf", "--rate", "10", "--added-symbols", "1"]),
+        ("hf36", ["--case", "hf"]),
+        ("eme360", ["--case", "eme"]),
+        ("eme-burst", ["--case", "eme", "--seconds", "30", "--burst-wait-tiles", "3"]),
+        ("rate3p6-bit1", ["--case", "hf", "--rate", "3.6", "--added-symbols", "1", "--bit", "1"]),
+        ("rate10-key2", ["--case", "hf", "--rate", "10", "--added-symbols", "1", "--key-seed", "72002"]),
+    ]
+    results, references = [], {}
+    for name, overrides in cases:
+        directory = root / name
+        invoke(binary, directory, ["--seconds", "1", "--control", "flat", "--helper", "off",
+                                  "--cn0", "200", "--seed", "91011"] + overrides, timings)
+        manifest = load_json(directory / "manifest.json")
+        truth = load_json(directory / "evaluator-truth.json")
+        power, fmt = manifest["power"], manifest["format"]
+        expected_active = fmt["tile_count"] * fmt["tile_seconds"]
+        if fmt["fhss_envelope_only"]:
+            expected_active *= 1 - 2 * fmt["quiet_seconds"] / fmt["dwell_seconds"]
+        close(power["data_reference_active_seconds"], expected_active, "active denominator excludes waits and quiet")
+        energy = truth["source_energy"]["data_energy_samples"]
+        sampled_mean = energy / (18000 * expected_active)
+        close(sampled_mean, truth["source_energy"]["data_active_mean_norm"], "independent complete source accounting")
+        if truth["source_bit"] == 0:
+            require(abs(sampled_mean - 1) <= .003,
+                    f"{name}: sampled active power {sampled_mean} violates whole-source calibration")
+        if name == "rate3p6-bit1":
+            require(power == references["rate3p6"], "source bit altered fixed bit0 calibration")
+        references[name] = power
+        results.append({"case": name, "source_bit": truth["source_bit"], "key_seed": manifest["key_seed"],
+                        "active_seconds": expected_active, "elapsed_seconds": fmt["bit_seconds"],
+                        "sampled_active_mean_norm": sampled_mean,
+                        "sampled_calendar_mean_norm": truth["source_energy"]["data_calendar_mean_norm"],
+                        "refinement_relative_difference": power["data_reference_refinement_relative_difference"],
+                        "data_calibration_db": 20 * math.log10(power["post_plan_data_calibration_gain"]),
+                        "source_samples": manifest["calendar"]["data_source_samples"]})
+        shutil.rmtree(directory)
+    return results
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("exporter", type=Path)
+    parser.add_argument("--power-qualification", action="store_true",
+                        help="occasional complete sampled source-power validation only; no receiver")
     args = parser.parse_args()
     binary = args.exporter.resolve()
     require(binary.is_file(), f"exporter does not exist: {binary}")
@@ -227,6 +288,27 @@ def main():
     started = time.perf_counter()
     with tempfile.TemporaryDirectory(prefix="triad-helper-export-smoke-") as temporary:
         root = Path(temporary)
+        if args.power_qualification:
+            results = power_qualification(binary, root, timings)
+            print(json.dumps({"result": "passed", "power_qualification": results,
+                              "wall_seconds": time.perf_counter() - started, "commands": timings}))
+            return
+
+        power_plans = []
+        for policy in ("whole-active", "legacy-window"):
+            result = invoke(binary, None, ["--case", "hf", "--rate", "3.6", "--added-symbols", "1",
+                                          "--power-plan-only", "--power-reference", policy], timings)
+            plan = json.loads(result.stdout)
+            require(plan["schema"] == "triad-helper-power-plan-v1", "power-plan schema")
+            require(plan["power"]["data_power_reference_policy"] == policy, "power policy selection")
+            close(plan["power"]["template_data_gain"] ** 2 * plan["power"]["data_reference_mean_norm"],
+                  1, "power-plan normalization")
+            power_plans.append(plan)
+        require(power_plans[0]["power"]["post_plan_data_calibration_gain"] < .1,
+                "low-rate birth-ramp calibration defect was not corrected")
+        close(power_plans[1]["power"]["post_plan_data_calibration_gain"], 1, "legacy reproduction correction")
+        close(power_plans[0]["power"]["post_plan_composite_gain"],
+              power_plans[1]["power"]["post_plan_composite_gain"], "preserved Helper composite gain")
         # Planning is deliberately available before source/capture allocation.
         # These cases cross baseline and bounded-layout paths without writing
         # multi-hour sampled fixtures.
@@ -274,6 +356,55 @@ def main():
         require(planned[4]["scenario"] == "hf",
                 "noncommensurate FHSS planning did not retain its request identity")
 
+        # Resolve physics without synthesizing extra observations. These cases
+        # exercise independent rate, clock topology, timing and power controls.
+        physics_cases = [
+            ["--rf-hz", "0", "--base-oscillator", "crystal", "--shift-oscillator", "cb-ssb",
+             "--spread-preset", "none", "--selective-perturbation", "off", "--timing-policy", "bounded"],
+            ["--rf-hz", "500000", "--base-oscillator", "crystal", "--shift-oscillator", "baseband-clock",
+             "--spread-preset", "sub9-worst", "--margin", "1", "--selective-perturbation", "each-25",
+             "--selective-modulation-rate-hz", ".5", "--timing-policy", "bounded",
+             "--data-power-w", ".001", "--helper-power-w", "4", "--cn0", "6"],
+            ["--control", "flat", "--spread-preset", "aurora-worst", "--margin", "3",
+             "--selective-perturbation", "each-65", "--selective-modulation-rate-hz", "1",
+             "--timing-policy", "broad"],
+            ["--helper-power-w", "4e12", "--cn0", "-60"],
+            ["--spread-preset", "none", "--selective-perturbation", "each-65"],
+            ["--spread-preset", "none", "--selective-perturbation", "fast-1",
+             "--selective-modulation-rate-hz", ".05"],
+        ]
+        resolved = []
+        for overrides in physics_cases:
+            result = invoke(binary, None, ["--case", "hf", "--plan-only"] + overrides, timings)
+            resolved.append(json.loads(result.stdout)["physics"])
+        zero, shared, flat, limited, zero_rate, independent_am = resolved
+        require(not zero["shift_active"] and zero["rf_relative_pair_ppm_bound"] == 0,
+                "zero RF must disable the independent RF error")
+        close(zero["relative_phase_diffusion_rad_sqrt_s"], .5 * math.pi / 180,
+              "zero RF must retain only base phase diffusion")
+        close(zero["arrival_prior_seconds"][0], -.0555, "bounded arrival lower edge")
+        close(zero["arrival_prior_seconds"][1], .1255, "bounded arrival upper edge")
+        require(zero["message_epoch_count"] == 13, "bounded timing must retain thirteen epochs")
+        require(shared["shared_shift_clock"] and shared["shift_oscillator"] == "baseband-clock",
+                "shared-clock topology not retained")
+        close(shared["spread_delay_ms"], 5, "selected delay margin")
+        close(shared["spread_doppler_hz"], .05, "selected Doppler margin")
+        close(shared["selective_slow_depth"], .25, "slow modulation selection")
+        close(shared["selective_fast_depth"], .25, "fast modulation selection")
+        close(shared["selective_modulation_rate_hz"], .5, "independent modulation rate")
+        close(shared["effective_helper_cn0_db_hz"], 6 + 10 * math.log10(4000), "independent Helper power")
+        require(flat["spread_delay_ms"] == flat["spread_doppler_hz"] == 0 and
+                not flat["selective_enabled"] and flat["arrival_prior_seconds"] == [-7.035, 7.035],
+                "flat control must bypass requested spread/modulation and preserve the selected prior")
+        require(limited["helper_power_limited"] and limited["requested_helper_w"] == 4e12,
+                "production Helper ratio cap must be explicit")
+        close(limited["effective_helper_w"], 4e9, "effective production Helper cap")
+        close(limited["effective_helper_cn0_db_hz"], 30, "capped Helper C/N0")
+        require(not zero_rate["selective_enabled"] and zero_rate["selective_modulation_rate_hz"] == 0,
+                "None plus AM without a timescale must report the zero-rate bypass")
+        require(independent_am["selective_enabled"] and independent_am["spread_doppler_hz"] == 0,
+                "None plus an explicit AM timescale must retain modulation")
+
         # Starting auto selection from an arbitrary longer ramp can silently
         # remove protected cells before the planner checks its invariants.
         for rate in (1200, 3600):
@@ -308,6 +439,15 @@ def main():
         invoke(binary, invalid_receiver_tail, ["--case", "hf", "--receiver-tail-seconds", "1.001"],
                timings, succeeds=False)
         require(not invalid_receiver_tail.exists(), "out-of-range receiver tail created an export")
+        invalid_controls = [
+            ["--rf-hz", "-1"], ["--margin", "0"], ["--spread-preset", "unknown"],
+            ["--selective-perturbation", "each-2"], ["--selective-modulation-rate-hz", "-1"],
+            ["--timing-policy", "unknown"], ["--data-power-w", "0"], ["--helper-power-w", "0"],
+            ["--base-oscillator", "ic-7100"],
+            ["--power-reference", "unknown"], ["--power-plan-only"],
+        ]
+        for overrides in invalid_controls:
+            invoke(binary, None, ["--case", "hf", "--plan-only"] + overrides, timings, succeeds=False)
 
         invoke(binary, root / "hf", ["--case", "hf", "--seconds", "1", "--seed", "91001"], timings)
         hf, hf_truth = check_capture(root / "hf", "hf")
@@ -342,7 +482,46 @@ def main():
         require(off_truth["random_seed_roots"] != hf_truth["random_seed_roots"], "distinct fixture seeds were ignored")
         require(hf_truth["random_seed_roots"]["fixture"] == 91001 and off_truth["random_seed_roots"]["fixture"] == 91003,
                 "fixture seed provenance")
-    print(json.dumps({"result": "passed", "captures": 5, "rejected_invocations": 5,
+
+        # Actual sampled stage reports verify the new controls are propagated,
+        # rather than only copied into nominal plan metadata.
+        for index in (0, 1, 5):
+            overrides = physics_cases[index]
+            directory = root / f"configured-{index}"
+            invoke(binary, directory, ["--case", "hf", "--seconds", "1", "--seed", "91005"] + overrides, timings)
+            manifest = load_json(directory / "manifest.json")
+            truth = load_json(directory / "evaluator-truth.json")
+            require(manifest["physics"] == resolved[index], "plan/export resolved physics differ")
+            require(manifest["templates"]["epoch_offsets_seconds"] == list(range(-6, 7)),
+                    "timing policy changed the message-epoch bank")
+            require(manifest["calendar"]["data_calendar_start_seconds"] == 38,
+                    "configuration changed the fixed Helper lead")
+            if index == 0:
+                require(truth["tx"]["rf_ppm"] == truth["rx"]["rf_ppm"] == 0,
+                        "zero RF retained a realized RF clock error")
+                require(truth["channel_report"]["selective_perturbation"] is None,
+                        "None/Off must exactly bypass the selective stage")
+            elif index == 1:
+                for endpoint in ("tx", "rx"):
+                    close(truth[endpoint]["rf_ppm"], truth[endpoint]["audio_ppm"], "shared endpoint realization")
+                report = truth["channel_report"]["selective_perturbation"]
+                require(report is not None and report["component_depths"] == [.25, .25],
+                        "selected physical modulation was omitted")
+                close(report["component_rates_hz"][0], .05, "actual slow modulation rate")
+                close(report["component_rates_hz"][1], .5, "actual fast modulation rate")
+            else:
+                report = truth["channel_report"]["selective_perturbation"]
+                require(report is not None and report["component_depths"] == [0, .01],
+                        "independent AM timescale was dropped with None spread")
+                close(report["component_rates_hz"][1], .05, "actual independent AM rate")
+            samples = manifest["calendar"]["capture_samples"]
+            require((directory / "observation.c128").stat().st_size == samples * 16 and
+                    (directory / "validity.u8").stat().st_size == samples,
+                    "configured export did not retain complete sampled rows")
+            require(truth["channel_report"]["natural_complete_samples"] <= samples and
+                    truth["channel_report"]["tail_samples"] > 0,
+                    "configured export truncated physical tails")
+    print(json.dumps({"result": "passed", "captures": 8, "rejected_invocations": 16,
                       "wall_seconds": time.perf_counter() - started, "commands": timings,
                       "scope": "CLI/export metadata, actual emitted controls and complete files; no receiver or statistical success claim"}))
 

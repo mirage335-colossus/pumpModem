@@ -21,6 +21,20 @@ For the strong EME case it supports
 calendar, Helper waveform and power allocation. Read its sampled evidence and
 limits; the conservative legacy placement recipe below remains available explicitly.
 
+**DATA power calibration now defaults to `--power-reference whole-active`.**
+Exact historical sampled reproduction also requires
+`--power-reference legacy-window`; shaping and power-reference policies are
+separate. The old two-second power window made low-rate DATA more powerful
+than declared; read the correction and evidence limits below before reusing
+old sensitivity results.
+
+For the factorized Helper configuration catalog, distinctions between planner
+and sampled evidence, and economical campaign guidance, see the
+[Helper coverage map](triad-helper-coverage.md). The frozen broad sampled
+cohort's outcomes will be recorded in the
+[November 5 campaign report](validation-data/triad-v3/2026-11-05-helper-broad/README.md)
+when integrated; do not treat catalog or planner rows as receiver trials.
+
 ## Implemented composition
 
 `triad_helper_export` uses the actual `helper::Generator`, its placement and power
@@ -65,10 +79,37 @@ with FHSS off and a different interval with FHSS on; see the
 [arrival-prior guidance](triad-development-workflow.md). Integration must carry
 the actual configured public prior rather than infer it from the label Default.
 
-Power and C/N₀ use one fixed public active-DATA reference. Frame-average DATA
-energy is lower with FHSS quiet time; per-trial emitted DATA, Helper and summed
-energies are retained separately. No per-bit or per-channel renormalization
-removes fades, modulation-induced energy changes or guard overhead.
+Power and C/N₀ use one fixed public bit-0 reference over the **complete active
+source**, including its nonzero birth, ending and dwell ramps. The denominator
+excludes FHSS quiet intervals and Symbol Burst waiting tiles. The resulting
+DATA-only gain is frozen for both bits, all thirteen candidate epochs and every
+signal/null control. A different transmitted bit may have different energy; it
+is not independently normalized. Frame-average DATA energy therefore retains
+FHSS quiet and burst-wait losses. Per-trial emitted DATA, Helper and summed
+energies remain separate, and no received channel, outage, fade or
+modulation-induced energy change is renormalized.
+
+The production Helper plan still uses its unchanged 39–41 s preview and
+composite gain. A separate constant DATA correction enforces the active-power
+contract while preserving Helper samples, placement, waveform and lead-in.
+`triad_helper_export --power-plan-only` reports this calculation without
+allocating a capture or template bank. Public metadata identifies the policy,
+reference extent, gain and bounded quadrature refinement. Agreement between
+successive integration grids within 0.1% is an engineering convergence check,
+not a proven integration-error bound; unresolved refinement is rejected.
+Independent full sampled-source checks cover the qualified rates, FHSS and
+burst cases, rather than treating this metadata as measured energy.
+
+The earlier `legacy-window` policy normalized the first 1–3 s of DATA. At
+Rate 3.6 Hz / Added Symbols ×1 and Rate 10 Hz / ×1, this window lay inside the
+long birth ramp, making actual bit-0 active DATA power approximately **28.26 dB
+and 6.35 dB above nominal**, respectively. Those Monte Carlo outcomes remain
+historical evidence for their emitted waveforms; they do not qualify the
+advertised low C/N₀. Default HF36×10 and EME360×1 corrections are only about
++0.024 and +0.039 dB, but old observations and admission gates still belong to
+their original source/power identity. See the
+[power audit and corrected-source validation](validation-data/triad-v3/2026-11-05-helper-broad/README.md)
+before transferring any historical sensitivity or duration conclusion.
 
 The EME source explicitly opts into `fhss_center_aligned`: chip centers lie at
 integer fine periods instead of half periods. At 60 Hz this places a protected
@@ -121,6 +162,68 @@ actual arrival or oscillator draw. A constant phase rotation is already
 absorbed in fitted coefficients, so it offers no extra sensitivity to this
 receiver. Time-varying Helper phase correction is not implemented or claimed.
 
+For bounded GPSDO cases with known missing ADC samples, the optional
+[`triad_helper_raw_study.py`](../tools/triad_helper_raw_study.py) entry point
+reuses the same batched FFT/Gram machinery directly at 18 kHz. It excludes only
+the missing raw rows, with their original white-noise variance, rather than
+discarding every FIR output touched by a gap. The paired 10-ms-per-dwell EME
+failure lost 29–38 dB of pattern-distance energy through the wide FIR exclusion,
+versus 0.024–2.96 dB in the actual raw gaps. The raw path recovered both original
+wrong admissions and subsequently received all sixteen independent-key signal
+captures correctly, with zero admissions on sixteen null captures. Those small
+sets do not establish a daily false-admission or 99% reception guarantee.
+See the [broad study record](validation-data/triad-v3/2026-11-05-helper-broad/README.md).
+
+This optional path currently requires 18 kHz sampled fixtures, singleton nominal
+audio/RX clocks with a checked negligible-drift approximation, CFO within
+±0.6 Hz, at most thirteen epochs and explicitly bounded FFT/cache storage.
+Helper remains in its observations and residual-energy estimate. It needs its
+own Helper-present null calibration; filtered gates cannot be reused. Run the
+entry point from the repository root. Its source-binding label
+`raw_study_adapter.py` is retained from the byte-identical qualification adapter.
+
+Use campaign `--assisted-only`, or broad-protocol `"arms": ["assisted"]`, when
+measuring the Helper-enabled receiver without a repeated unaided comparison.
+Helper selection runs first; a required full-bank fallback still runs exactly
+once. Paired comparison remains the default. Gates record the measured arms
+and execution-policy identity; an unmeasured baseline has no outcome or timing.
+Retain occasional paired cost anchors, rather than repeating an expensive
+unaided search for every calibration capture.
+
+The batched cache has at most `epochs × audio-clock values × RX-rate values`
+reachable keys; CFO alternatives reuse those workspaces. Memory planning caps
+an overlarge requested cache capacity at this count and reports both values.
+Subset views sharing a cache keep its original superset capacity. A requested
+400-entry cache therefore does not reserve400 workspaces for a singleton-clock
+13-epoch case. This is a declared array bound, not a guarantee about allocator
+overhead or total RSS. The [broad study](validation-data/triad-v3/2026-11-05-helper-broad/README.md)
+retains the original false memory rejection and its separate repair evidence.
+
+The campaign's receiver geometry check is derived from the emitted public
+manifest: half the declared DATA occupied bandwidth, the maximum selected
+channel-line offset (including the configured independent selective-modulation
+rate), and the public clock/time-scale and CFO bounds. It rejects nominal
+envelopes that do not fit the selected FIR pass edge (330 Hz legacy, 400 Hz
+wide). DATA Doppler must also remain below the 450 Hz Nyquist frequency of the
+900 Hz post-DDC stream. This replaces earlier fixed `112.5 Hz` source-width and
+`2|D|` line-width shortcuts in campaign geometry checks. It is only a public
+nominal-support guard: pulse/filter tails remain in the samples, and fitting the
+FIR is not a sensitivity or compact-support guarantee.
+
+Capture validity is an immutable public receiver input. For known ADC erasures,
+missing raw rows are zero-filled **before** the same continuous causal FIR used
+for the observation; output samples are invalidated whenever any raw row in
+their complete FIR support window is missing. Invalid outputs are excluded from
+correlations, Gram matrices and residual energy. Raw and expanded-mask hashes
+participate in receiver/procedure identity; changing a mask requires matching
+new calibration. This covers known erasures, not unrecognized clipping,
+dropouts, or hardware faults inferred from sample values.
+
+Selective-modulation rate is independent of its amplitude/depth preset. An
+explicit rate can exercise modulation with `spread-preset none`; an omitted rate
+retains the preset-derived default. Zero is an explicit exact bypass. Do not
+silently equate this rate with Doppler spread or oscillator frequency.
+
 The new GPU comparison ran on an RTX PRO 6000 WK against four EPYC 9355 CPU
 threads using the same EME fixture and strict FP32 bulk arithmetic (TF32 off;
 sensitive preparation/reductions remain FP64). The resident EME correlation
@@ -152,15 +255,20 @@ as a changed likelihood statistic: recalibrate any admission rule for the exact
 new procedure. GPU parity is a CPU/GPU implementation comparison within the
 new statistic, not legacy-statistic equivalence.
 
-The timing grid is 4/900 s, with one fractional anchor and an explicitly included
-endpoint. Earlier GPSDO fixtures use one sample-clock hypothesis; the new
-oscillator study declares seven audio-clock samples and three receiver time-scale
-samples. Its 17,035-point aligned CFO bank covers the margin-scaled public bound;
-the original 16,803-point diagnostic grid is used in the independent Helper
-fitting measurements. These are declared finite banks, not continuous maximum
-likelihood. The DATA two-ray model omits the selected additional modulation
-structure. Complete noisy sampled experiments, rather than a nominal channel
-match, determine its performance.
+The default timing grid scores every integer 900 Hz lag (1/900 s), with one
+fractional anchor and an explicitly included endpoint. An explicit
+`--lag-step 4` reproduces the older 4/900 s grid. That coarse grid selected a
+wrong bit in a low-SNR sampled realization despite its thirteen-epoch search;
+post-outcome isolation with lag step one restored the correct bit at nearly the
+same comparison cost. This repair addresses one failure; it is not independent
+sensitivity qualification. Earlier GPSDO fixtures use one sample-clock
+hypothesis; the newer oscillator study declares seven audio-clock samples and
+three receiver time-scale samples. Its 17,035-point aligned CFO bank covers the
+margin-scaled public bound; the original 16,803-point diagnostic grid is used in
+the independent Helper fitting measurements. These are declared finite banks,
+not continuous maximum likelihood. The DATA two-ray model omits the selected
+additional modulation structure. Complete noisy sampled experiments, rather
+than a nominal channel match, determine its performance.
 
 The historical `--shaping legacy --ramp-seconds .006 --data-if 1725`
 EME export retains the 400 ms dwell, 55 ms quiet time, 5 ms margin, pulse support and 64 protected inner
@@ -238,7 +346,13 @@ the same discovery pattern. Run `./build.sh test triad --cli` for changes to
 native triad source/channel behavior. Do not run the ordinary receiver campaign
 here.
 
-Generate public alternatives once, then reuse them:
+Generate public alternatives once, then reuse them. The broad campaign runner
+also caches source templates across compatible cohorts and shares Helper
+estimation plus continuous-FIR capture preparation across compared lag policies
+for each physical capture. This keeps lag-step comparisons paired without
+re-exporting the waveform or filtering the same I/Q once per arm. Each mask is
+frozen into protocol identity; do not reuse gates after changing validity,
+public geometry, channel or source templates:
 
 ```sh
 build/dev-cli/triad_helper_export --case eme --seconds 16 --seed 87302 \

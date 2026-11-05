@@ -36,17 +36,27 @@ adapter. The native `triad-long` CLI remains part of complete-pipeline timing.
 The [isolated Helper integration](triad-helper.md) adds the following distinct
 paths after the historical 33/36-target qualification below. Those historical
 counts and source-bound coverage receipts **do not cover this extension**.
+The [Helper coverage map](triad-helper-coverage.md) separates requested
+configuration axes, native planning, sampled I/Q and reception claims. The
+[November 5 Helper campaign report](validation-data/triad-v3/2026-11-05-helper-broad/README.md)
+binds the current frozen cohort results and their source identities; it
+must not be inferred from the planned rows below.
 
 | Path / regime | Cheap functional check | Full workload / timing route | Remaining qualification |
 | --- | --- | --- | --- |
 | Composite emitted source, unchanged legacy source | Native `test_triad_v3_channel`, source byte-parity check | Complete 18 kHz HF/EME native exports; process startup, generation, propagation and writes timed directly | New native CFG coverage; no runtime forecast across sample rates or longer observation sizes |
 | Opt-in centered FHSS lattice and Added/interleave mapping | Native `test_triad_v3_source`, `test_triad_configuration.py` | Complete EME 66-dwell source with preserved shaped tails | Other lattice/rate combinations remain subject to planner validation |
-| Production Helper placement/power/clock-derived encrypted composition | `test_triad_helper_export.py` (five small complete captures and rejected cases) | Same complete HF/EME exports, no template regeneration per trial | Audio/RF hardware and ordinary receiver excluded |
+| Production Helper placement/power/clock-derived encrypted composition | `test_triad_helper_export.py` (eight small complete captures and rejected cases) | Same complete HF/EME exports, no template regeneration per trial | Audio/RF hardware and ordinary receiver excluded |
+| Whole-active source power reference, fixed bit0 gain, legacy reproduction | Native `--power-plan-only`; normal exporter smoke checks defaults/rejections | Occasional `test_triad_helper_export.py ... --power-qualification`: seven complete-source energy checks, about49 s; exact legacy and Helper-only I/Q bridge | Historical low-rate startup-window power biases invalidate nominal-C/N0 sensitivity claims; no channel/outage normalization. Quadrature refinement is an engineering diagnostic, not a proven bound. Do not repeat full source qualification for unrelated receiver changes. |
 | Independent audio/RF oscillator bounds; longer FHSS ramp; retained receiver FIR tail | `test_triad_helper_export.py`, `test_triad_helper_ramp_diagnostic.py` | Matched sampled old/new ramp captures plus complete EME source and channel tails | 6 ms DATA ramp raised Helper leakage by 40.6 dB relative to the old format; it remained 64.3 dB below measured noise in the sampled fixture. This is one channel realization, not an RF frontend guarantee. |
 | Joint pilot CFO/audio-clock/RX-time-scale profile and fallback | `test_triad_helper_clock.py` | Actual 36-second, 18 kHz windows; eight paired replays plus two fresh captures, direct estimator timer | 10/10 intervals covered the sampled truth and narrowed 16,803 CFO candidates to 4–6. Only two captures are independent of the convergence correction; no interval-coverage or operational-lock calibration. |
-| Continuous FIR; legacy and wide frontends; epoch/clock/rate/timing/CFO banks | `test_triad_helper_batched_receiver.py`, `test_triad_helper_study.py`, `test_triad_helper_clock_loss.py` | Named sampled HF/EME receivers; retain per-stage FFT, preparation, filter and likelihood times | The 7-clock × 3-RX-rate HF bank is a new regime. Its measured public grid loss is linked in the current sampled validation record; no continuum guarantee follows from finite midpoint/corner probes. |
+| Manifest-derived public source/channel envelope and FIR-fit guard | `test_triad_helper_study.py`, `test_triad_helper_receiver.py`, `test_triad_helper_coverage.py` | Sampled receiver construction on emitted DATA bandwidth, modeled sideband maximum, public clock/time-scale and CFO bounds | DATA Doppler must be `<450 Hz` at 900 Hz post-DDC; the selected line/source/CFO envelope must fit the actual legacy/wide FIR pass edge. This is a necessary nominal-support check, not compact-support or sensitivity qualification. |
+| Independent selective-modulation rate and exact bypass | `test_triad_helper_export.py`, `test_triad_helper_campaign.py`, `test_triad_helper_coverage.py` | Native export and sampled-channel planner probes, including explicit modulation with no spread | Rate and depth are independent public controls; `None` selects the preset-derived rate, zero is an exact bypass. Planner and unit checks do not establish receiver sensitivity. |
+| Continuous FIR; legacy and wide frontends; epoch/clock/rate/timing/CFO banks | `test_triad_helper_batched_receiver.py`, `test_triad_helper_study.py`, `test_triad_helper_clock_loss.py` | Named sampled HF/EME receivers; retain per-stage FFT, preparation, filter and likelihood times | The default timing stride is one 900-Hz sample; explicit lag step four reproduces historical results. The 7-clock × 3-RX-rate HF bank is a distinct regime. Finite grid probes do not bound continuous worst-case loss. |
+| Known ADC erasures; zero-fill and continuous FIR support dilation | `test_triad_helper_receiver.py`, `test_triad_helper_batched_receiver.py`, `test_triad_helper_broad_campaign.py`, CPU/CUDA synthetic parity controls | Matched synthetic masked/unmasked observations through full FIR and receiver workspaces; actual sampled cohorts use fixed public masks | Mask is immutable and hashed into receiver/procedure identity. Invalid FIR outputs are excluded from score/Gram/residual calculations. Synthetic parity is not Helper reception, encryption, calibrated admission, or GPU speedup qualification. |
 | Resident and cold CPU/CUDA FFT path, strict FP32 bulk | `test_triad_helper_gpu_bench.py` (mocked dispatch), paired sampled GPU benchmark | Same EME I/Q and bank, synchronized resident timings and separate preparation | RTX PRO 6000 WK / 4-thread EPYC EME path: about 82× resident correlations, 8× full warm comparison, and 1.6× first comparison with cold preparation. Three measured replays do not establish a confidence-qualified regression threshold. |
-| Frozen adaptive admission procedure and independent holdouts | `test_triad_helper_campaign.py` | Direct campaign wall including exports, loading, hashing, shared setup and all paired scores | Operational daily false-admission and high-reliability reception remain unqualified for the new statistic; global residual-confidence allocation changes the multi-epoch score and needs its own frozen calibration. |
+| Frozen adaptive admission procedure and independent holdouts | `test_triad_helper_campaign.py`, `test_triad_helper_broad_campaign.py` | Direct campaign wall including exports, loading, hashing, cached templates, shared Helper/FIR capture preparation and all paired scores | Broad sampled results and source versions are in the frozen report linked above. Do not infer daily false-admission or population sensitivity from small per-capture gates. The full global residual-confidence statistic still needs procedure-bound calibration. |
+| Reachable cache keys and shared subset capacity | `test_triad_helper_batched_receiver.py` excessive-capacity and subset tests | Same low-rate capture under original failed and corrected memory planning; requested400/effective13 cache entries | Corrected CUDA batch-32 declared array bound9.291 GiB versus183.589 GiB old projection; neither is measured RSS. No runtime extrapolation across cache regimes is asserted. |
 | Rate-aware pulse/ramp/protected placement, expected-spectrum calculation and fallback | `test_triad_shaping` (about 10 s: rendered bits, erasure masks, fresh-key FFTs); exporter planner-only checks | Bounded `triad_shaping_sweep.py`; optional native `--extended` source checks before sampled qualification | Expected source energy is not a hard mask or channel-output bound. Geometry and workspace failures remain explicit. No new runtime forecast is asserted. |
 | Bidirectional DATA/Helper interference and late overlapping pilot tracking | `test_triad_helper_interference.py` (small synthetic controls and identity failures) | Four matched full-waveform controls with complete tails; fixed late 36 s apertures | Reuse the [shaping evidence](triad-shaping.md); do not put the multi-capture GPU campaign into routine CI. Moving pilots changes physical channel/noise exposure even when cross-interference is negligible. |
 
@@ -54,7 +64,24 @@ Do not add the Monte Carlo sensitivity campaign to routine CI. Reuse its frozen
 fixtures and source identities; choose a small complete estimator/acquisition
 target or validate a cheaper forecast before adding a timing gate. Functional
 unit tests alone are not prediction anchors. A passing historical guard does
-not remove the explicit new-path coverage gaps above.
+not remove the explicit new-path coverage gaps above. The factorized Helper
+catalog and its native plan probes are not reception or performance forecasts;
+the broad campaign harness shares source templates and per-capture Helper/FIR
+preparation across lag variants to avoid paying repeated work, while scoring
+each arm separately. Its synthetic CPU/CUDA parity controls check masked
+receiver arithmetic only; they are not broad sampled campaign results or GPU
+acceleration measurements.
+
+The subsequent known-ADC-gap raw path is a separate maintained experimental
+regime: `test_triad_helper_raw_receiver.py` checks exact masked Grams, raw noise
+variance, public timing/epoch/CFO banks, dependency identities, scope/resource
+rejection and CPU precision; its CUDA case runs only where CUDA is available.
+The sampled [broad study](validation-data/triad-v3/2026-11-05-helper-broad/README.md)
+adds actual CUDA parity, exact failed-capture replays and fresh calibrated
+receptions. It does **not** provide a general duration/runtime forecast. Its
+raw FFT workspace and missing-row policy must not inherit a filtered-900-Hz
+performance model. Assisted-only execution likewise reports its actual selected
+bank and full-fallback work; it does not charge or invent an unaided score.
 
 The extension's very small estimator and structure tests are appropriate for
 routine functional checks. Do not put the full 17,035-CFO × 7-clock × 3-rate

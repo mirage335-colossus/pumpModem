@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Bounded hardware-free checks of the isolated Helper DATA adapter."""
 from pathlib import Path
+from dataclasses import replace
 import sys
 import unittest
 
@@ -60,7 +61,7 @@ class HelperDataReceiverTests(unittest.TestCase):
     def test_both_bits_timing_frequency_and_constant_phase(self):
         templates = source_templates()
         rx = receiver(templates)
-        for bit, lag, cfo in ((0, 4, -8.), (1, 12, 8.)):
+        for bit, lag, cfo in ((0, 5, -8.), (1, 13, 8.)):
             raw = capture(templates, rx, bit=bit, lag=lag, frequency=cfo)
             outcome = rx.score(raw)
             self.assertEqual(outcome["bit"], bit)
@@ -133,7 +134,12 @@ class HelperDataReceiverTests(unittest.TestCase):
             for _, stop in child._workspace.support:
                 self.assertLessEqual(stop + rx.lags[-1], rx.samples)
         self.assertEqual(rx.lags[-1], 18)
-        self.assertIn(18, rx.lags)  # Non-step-aligned endpoint is still scored.
+        np.testing.assert_array_equal(rx.lags, np.arange(19))
+        coarse = receiver(templates, delay_seconds=.021, doppler_hz=90.,
+                          frequency_offsets=(0.,), lag_step=4)
+        # Explicit historical grids still include the non-step-aligned endpoint.
+        np.testing.assert_array_equal(coarse.lags, [0, 4, 8, 12, 16, 18])
+        self.assertNotEqual(coarse.receiver_id, rx.receiver_id)
         self.assertGreater(rx.template_energy[0][0][0]["ratio"], .99)
 
     def test_integer_and_fractional_delay_finite_support(self):
@@ -147,13 +153,73 @@ class HelperDataReceiverTests(unittest.TestCase):
         np.testing.assert_allclose(delayed.sum(), values.sum(), atol=1e-14)
         self.assertGreater(abs(delayed[-1]), 0.)
 
+    def test_known_gaps_exclude_complete_fir_support_and_keep_retained_samples_exact(self):
+        templates = source_templates(rows=1800)
+        rng = np.random.default_rng(89321)
+        raw = rng.normal(size=18000) + 1j * rng.normal(size=18000)
+        for profile in ("legacy", "wide"):
+            options = dict(fft_backend="batched", frontend_profile=profile,
+                           frequency_offsets=(0.,))
+            complete = receiver(templates, **options)
+            reference = complete.prepare_observation(raw)
+            for length in (180, 7200):  # 10 ms and a complete 400 ms dwell.
+                valid = np.ones(len(raw), np.uint8)
+                valid[7200:7200 + length] = 0
+                masked = receiver(templates, capture_validity=valid, **options)
+                damaged = raw.copy()
+                damaged[valid == 0] = np.nan  # Unknown input values are ignored.
+                prepared = masked.prepare_observation(damaged, valid=valid)
+                contamination = signal.upfirdn(np.ones(len(masked.taps)), 1 - valid, down=20)
+                expected = contamination[masked.crop_start_output:masked.crop_start_output + masked.samples] == 0
+                np.testing.assert_array_equal(masked.output_validity, expected)
+                np.testing.assert_array_equal(prepared.samples[expected], reference.samples[expected])
+                np.testing.assert_array_equal(prepared.samples[~expected], 0)
+                metadata = masked.preprocessing["erasure_support"]
+                self.assertEqual(metadata["raw_missing_rows"], length)
+                self.assertEqual(metadata["output_missing_rows"], int((~expected).sum()))
+                self.assertGreater(metadata["output_missing_rows"], length // 20)
+                self.assertEqual(prepared.validity_id, masked.validity_id)
+                self.assertFalse(masked.capture_validity.flags.writeable)
+                self.assertFalse(masked.output_validity.flags.writeable)
+                self.assertGreater(masked.validity_array_bound_bytes, valid.nbytes + expected.nbytes)
+                valid[:] = 1  # The caller cannot mutate the frozen mask.
+                self.assertEqual(int((masked.capture_validity == 0).sum()), length)
+                with self.assertRaisesRegex(ValueError, "fixed capture mask"):
+                    masked.prepare_observation(raw, valid=valid)
+                with self.assertRaisesRegex(ValueError, "preprocessing identity"):
+                    masked.score_prepared(replace(prepared, validity_id="different-mask"))
+
+    def test_explicit_all_valid_is_identical_and_masks_are_fixed(self):
+        templates = source_templates(rows=1800)
+        for backend in ("legacy", "batched"):
+            omitted = receiver(templates, fft_backend=backend)
+            explicit = receiver(templates, fft_backend=backend,
+                                capture_validity=np.ones(18000, np.uint8))
+            raw = capture(templates, omitted, bit=1)
+            a, b = omitted.prepare_observation(raw), explicit.prepare_observation(raw)
+            self.assertIsNone(explicit.capture_validity)
+            self.assertIsNone(explicit.output_validity)
+            self.assertEqual(explicit.validity_array_bound_bytes, 0)
+            self.assertEqual(omitted.receiver_id, explicit.receiver_id)
+            np.testing.assert_array_equal(a.samples, b.samples)
+            np.testing.assert_array_equal(omitted.score_prepared(a)["bit_log_likelihoods"],
+                                          explicit.score_prepared(b)["bit_log_likelihoods"])
+            changed = np.ones(18000, np.uint8)
+            changed[6000] = 0
+            with self.assertRaisesRegex(ValueError, "fixed capture mask"):
+                explicit.prepare_observation(raw, valid=changed)
+        for mask in (np.ones(18000, float), np.ones(17999, np.uint8),
+                     np.full(18000, 2, np.uint8), np.zeros(18000, np.uint8)):
+            with self.assertRaises(ValueError):
+                receiver(templates, capture_validity=mask)
+
     def test_invalid_geometry_memory_and_erasures(self):
         templates = source_templates(rows=1800)
         for options in (dict(arrival_bounds_seconds=(1., -1.)),
                         dict(arrival_bounds_seconds=(-1., 0.)),
                         dict(capture_rows=6000), dict(reference_variance=0.),
                         dict(sample_rate=900), dict(delay_seconds=-.1),
-                        dict(frequency_offsets=(38.,))):
+                        dict(frequency_offsets=(206.,))):
             with self.subTest(options=options), self.assertRaises(ValueError):
                 receiver(templates, **options)
         with self.assertRaises(MemoryError):
@@ -168,7 +234,7 @@ class HelperDataReceiverTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             rx.score(raw[:-1])
         mask = np.ones(rx.capture_rows, np.uint8); mask[123] = 0
-        with self.assertRaisesRegex(ValueError, "rejects erasures"):
+        with self.assertRaisesRegex(ValueError, "fixed capture mask"):
             rx.score(raw, valid=mask)
         other = receiver(templates, source_offset_seconds=.21)
         with self.assertRaisesRegex(ValueError, "preprocessing identity"):

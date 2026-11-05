@@ -71,6 +71,27 @@ class HelperFrequencyTests(unittest.TestCase):
         longer = self.estimate(np.r_[noisy, noisy[:128]])
         self.assertEqual(longer["available_at"], result["available_at"])
 
+    def test_modulation_rate_independent_of_ray_separation(self):
+        np.testing.assert_allclose(helper.tone_offsets(0, .65, .65, modulation_rate_hz=.7),
+                                   [-.7, -.07, 0, .07, .7])
+        np.testing.assert_array_equal(helper.tone_offsets(8, .65, .65, modulation_rate_hz=8),
+                                      helper.tone_offsets(8, .65, .65))
+        np.testing.assert_array_equal(helper.tone_offsets(8, .65, .65, modulation_rate_hz=0), [0, 8])
+        envelope = 1 + .65 * np.cos(2 * np.pi * .07 * self.time) + .65 * np.sin(2 * np.pi * .7 * self.time)
+        rng = np.random.default_rng(715)
+        noise = (rng.normal(size=self.count) + 1j * rng.normal(size=self.count)) / np.sqrt(2)
+        result = self.estimate(self.signal() * envelope + noise, slow_depth=.65,
+                               fast_depth=.65, modulation_rate_hz=.7)
+        self.assertEqual(result['status'], 'narrowed', result['reason'])
+        self.assertLess(abs(result['peaks_hz']['joint'] - .27), .01)
+        self.assertEqual(len(result['tone_offsets_hz']), 5)
+        for doppler, modulation in ((.005, .05), (.3, 3.)):
+            self.assertEqual(np.count_nonzero(helper.tone_offsets(
+                doppler, .65, .65, modulation_rate_hz=modulation) == 0), 1)
+        for bad in (-1, float('nan')):
+            with self.assertRaises(ValueError):
+                helper.tone_offsets(0, .65, .65, modulation_rate_hz=bad)
+
     def test_eight_lines_and_full_exact_gram_match_direct_columns(self):
         offsets = helper.tone_offsets(8., .65, .65)
         np.testing.assert_allclose(offsets, [-8, -.8, 0, .8, 7.2, 8, 8.8, 16])

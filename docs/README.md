@@ -11,6 +11,8 @@ workspace reuse and proportionate testing before larger sampled campaigns.
 The [Helper-assisted triad integration](triad-helper.md) documents production
 Helper composition, the requested HF/EME configurations, acquisition reuse and
 scoped admission controls, separately from ordinary Robust integration.
+The [Helper-enabled coverage map](triad-helper-coverage.md) separates broad
+configuration feasibility, sampled reception evidence and remaining fixture limits.
 Use [rate-aware shaping and Helper placement](triad-shaping.md) before raising
 the DATA or pilot frequency: it combines inexpensive spectral planning with
 paired waveform and bidirectional interference checks.
