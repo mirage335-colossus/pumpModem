@@ -106,6 +106,66 @@ prior is a separate contract, not a way to relabel an unsearched continuous
 interval. See the retained failed joint campaign and corrected fallback in the
 results report. Conditioned exact-arrival diagnostics remain separate.
 
+### Frequency assistance survives the phase fallback
+
+Use `HelperFrequencyAcquisition` in `tools/triad_dynamic_acquire.py` for
+Helper-assisted stochastic acquisition. `TiledAcquisition` remains the explicit
+full-frequency reference. The adaptive adapter runs the pilot frequency
+estimator even when the timing guard reports `helper_phase_timing_unresolved`.
+Unknown constant pilot phase or unresolved pilot-to-DATA phase transfer does
+not itself invalidate pilot frequency information.
+
+`triad_dynamic_frequency.py` coherently transforms a public 36-second complex
+pilot aperture, then profiles Gaussian ray-core powers and a local background
+independently for each pilot. It uses phase evolution within that aperture;
+it neither treats instantaneous pilot phase as a DATA reference nor requires
+auxiliary decoding. It retains the union of competitive frequency regions,
+including Doppler aliases, and propagates the public audio-clock and RX-rate
+uncertainties to DATA-center frequency. Clock hypotheses remain unchanged.
+One usable pilot can help. Weak, ambiguous, excessively broad or unsupported
+observations retain the full original bank. A flat but present pilot also
+requires fallback; silently discarding it would invalidate coverage calibration.
+The FFT uses complex FP32; the small batched spectral fits and reductions use
+CPU FP64. Their cost is reported separately and can dominate a large amortized
+campaign. This frontend is not a GPU implementation or a claim that changing
+the receiver precision also changes its arithmetic.
+
+All captures use the same full-prior observation projection. Each frequency
+tile is prepared once for the batch and scored only for captures retaining it.
+Per-capture likelihoods are normalized by their own selected hypothesis count.
+The stable outer procedure identity binds estimation, frequency fallback,
+independent phase fallback, source, templates and configuration. A realized
+subset is an execution receipt, not a new calibration identity.
+
+The spectral score and its default allowances are engineering models, not
+chi-square confidence intervals. Frequency-coverage training, admission
+calibration and validation must use separate seeds. The maintained study CLI
+`tools/triad_dynamic_frequency_study.py` consumes existing native captures,
+shares templates, compares the full and assisted banks, and reads evaluator
+truth only after scoring and admission decisions. Without calibration rows it
+reports rankings and timing only. Its schedule is a JSON array of
+`{id, directory, phase}`, with phase `calibration`, `signal` or `null`.
+Do not replay a historical sensitivity campaign for a routine edit: use
+`python -m unittest discover -s tests -p 'test_triad_dynamic*.py'` first, in the
+prepared NumPy/SciPy/PyTorch study environment.
+
+Frequency information is dated. The wrapper refuses a narrowed result whose
+declared horizon does not cover the scored capture and uses the actual receiver
+block length for its Wiener average-frequency allowance. This is not an
+instantaneous-frequency bound or multi-day drift qualification. The native
+exporter currently uses zero deterministic RF drift; another source requires
+an explicit drift bound or refreshed estimation. Gated pilots and physical
+retuning currently fall back. Broad timing can overlap DATA in the pilot
+aperture only when the public fitting envelopes permit it; actual leakage stays
+in the sampled observation and requires calibration.
+
+For physical motivation and the limits of spectral channel models, see
+[Gappmair and Bergmann's carrier/channel estimation study](https://ietresearch.onlinelibrary.wiley.com/doi/10.1049/iet-com.2015.0080).
+Its Rician, negligible-multipath assumptions do not prove this modem's two-ray,
+random selective-modulation estimator optimal. The separate
+[frequency-assistance qualification](validation-data/triad-v3/2026-11-05-helper-frequency/README.md)
+records the implemented model, measured narrowing, reception and remaining limits.
+
 ## Whole-bit Symbol Burst
 
 The new opt-in calendar is distinct from v3's within-bit `burst_wait_tiles`.

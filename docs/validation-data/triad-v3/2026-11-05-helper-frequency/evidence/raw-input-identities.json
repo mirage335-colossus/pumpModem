@@ -1,0 +1,101 @@
+{
+  "schema": "triad-helper-frequency-raw-identities-v1",
+  "note": "Raw captures and profile archives remain in ignored local-evidence and are not copied here. Checksums permit provenance checks without embedding those arrays.",
+  "inputs": {
+    "frequency_calibration_cutoff": {
+      "path": "local-evidence/triad-helper-frequency/coverage-calibration/cutoff.json",
+      "size_bytes": 64501,
+      "sha256": "26e6169efecd11bc8372b3999c9bd96e85d0e255ce87db45fd1f911940ca8ae2"
+    },
+    "frequency_calibration_protocol": {
+      "path": "local-evidence/triad-helper-frequency/coverage-calibration/protocol.json",
+      "size_bytes": 784,
+      "sha256": "eb7ffbaf78a3193f5be8d27a0317b0cd8d2635ac85188853152255bc59d3fa02"
+    },
+    "frequency_calibration_profiles": {
+      "path": "local-evidence/triad-helper-frequency/coverage-calibration/profiles.jsonl.gz",
+      "size_bytes": 10625377,
+      "sha256": "e51418fe9433af6d12ef8c54481d92ba4f7d1f6876973d150614200c6d8f8e19"
+    },
+    "independent_reception_protocol": {
+      "path": "local-evidence/triad-helper-frequency/hf-free-ic7100-independent/protocol.json",
+      "size_bytes": 45260,
+      "sha256": "07ce75810940d6357cd49e60f4d09f6e93ef0f83430be81f3476eef521b48c91"
+    },
+    "independent_reception_summary": {
+      "path": "local-evidence/triad-helper-frequency/independent-reception/summary.json",
+      "size_bytes": 35302,
+      "sha256": "1dc0193c81dbf4d288042dd908d55b2867c2e510591880b5915757a49f8b5f57"
+    },
+    "independent_reception_raw_rows": {
+      "path": "local-evidence/triad-helper-frequency/independent-reception/rows.json",
+      "size_bytes": 47909809,
+      "sha256": "af7e0e610ec69e0ae2f0eec7d5f49d540a019d96f19602324244e2a7ee054e7a"
+    },
+    "independent_frequency_cutoff": {
+      "path": "local-evidence/triad-helper-frequency/hf-free-ic7100-independent/frozen-frequency-cutoff.json",
+      "size_bytes": 67641,
+      "sha256": "47590f12ddd6c3fe485ac2be41b1f5fbb1d184272a85d55b9b484da2ef48f650"
+    },
+    "frequency_calibration_generation": {
+      "path": "local-evidence/triad-helper-frequency/hf-free-ic7100-independent/frequency-calibration-generation.json",
+      "size_bytes": 461,
+      "sha256": "198c43e10daf409d2002d9e2cd99cb05c677095249a28803310d139cf3c9ddbb"
+    },
+    "admission_calibration_generation": {
+      "path": "local-evidence/triad-helper-frequency/hf-free-ic7100-independent/admission-calibration-generation.json",
+      "size_bytes": 523,
+      "sha256": "5bc42c8b4b703c3334edf7ff8b908f3fe31ad85eaa4c5f98e35d88f25c438a32"
+    },
+    "validation_generation": {
+      "path": "local-evidence/triad-helper-frequency/hf-free-ic7100-independent/validation-generation.json",
+      "size_bytes": 512,
+      "sha256": "89845cae8cae089c2d93226aa1b05e4200f79dbaf51e8ffe7d7e386fbdf32409"
+    },
+    "diagnostic_reception_protocol": {
+      "path": "local-evidence/triad-helper-frequency/diagnostic-reception/protocol.json",
+      "size_bytes": 40208,
+      "sha256": "0ab8f282daef828f34f8a58c0560c959bb9b9ed0b82e89e815383c7a4baa8b12"
+    },
+    "diagnostic_reception_summary": {
+      "path": "local-evidence/triad-helper-frequency/diagnostic-reception/summary.json",
+      "size_bytes": 1643,
+      "sha256": "6de38f24748a535c55513eb1d822c6031d8dc129cf35a4c20f713df0c0743a38"
+    },
+    "diagnostic_reception_raw_rows": {
+      "path": "local-evidence/triad-helper-frequency/diagnostic-reception/rows.json",
+      "size_bytes": 932350,
+      "sha256": "003a21258acaccd9c383fa756dd016fc320eb7937cc8792f3d8e9a5cd2c9b7c1"
+    },
+    "am90_protocol": {
+      "path": "local-evidence/triad-helper-frequency/hf-free-ic7100-am90-frequency/protocol.json",
+      "size_bytes": 12214,
+      "sha256": "9f0c2ce698c50b8bc2786887241b646c03e6e4c98513ba564ccc62f17a63b4ee"
+    },
+    "am90_summary": {
+      "path": "local-evidence/triad-helper-frequency/hf-free-ic7100-am90-frequency/summary.json",
+      "size_bytes": 4243,
+      "sha256": "d51c5d1ba2403aa98c117997e08f20d76352bb935774736ac1c7b8c8d9d18e36"
+    },
+    "am90_profiles": {
+      "path": "local-evidence/triad-helper-frequency/hf-free-ic7100-am90-frequency/profiles.jsonl.gz",
+      "size_bytes": 1697259,
+      "sha256": "d7eafc8091c5c22ac4cb73d03464377241680fe390a8341da284fd2890bbb87f"
+    },
+    "independent_audit": {
+      "path": "local-evidence/triad-helper-frequency/audit.json",
+      "size_bytes": 7186,
+      "sha256": "fbd302730ea789b3ad0c12b461f7fc10b8c80f73ec580f8c109b349261f52807"
+    },
+    "qualification_environment": {
+      "path": "local-evidence/triad-helper-frequency/qualification-environment.json",
+      "size_bytes": 4114,
+      "sha256": "ea69cf1d163558b06276db60f2f9a6c58fbffbe51c943bcf05d5a3e79a0b6d53"
+    },
+    "post_study_identity_fix": {
+      "path": "local-evidence/triad-helper-frequency/post-study-identity-fix.json",
+      "size_bytes": 853,
+      "sha256": "3d20b46544f4edce8dd8e8992e6062817fca1532d784a16e58f5bcbd4cf87307"
+    }
+  }
+}

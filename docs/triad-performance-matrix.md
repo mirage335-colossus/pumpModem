@@ -45,9 +45,10 @@ sensitivity campaigns out of routine CI.
 | Block-first joint DATA/pilot Gaussian likelihood, masks and public spectral guards | `test_triad_dynamic_joint.py`, `test_triad_dynamic_variants.py` | Paired complete sampled scores and explicit preparation; approximate channel model, calibrated per-capture diagnostics only |
 | Parallel affine state scan, serial fallback, strict FP32/FP64 | `test_triad_dynamic_scan.py` | Same-I/Q serial/scan decisions plus synchronized CPU/GPU complete-score timings; synthetic 10,000-block timing is state-only, not a full-runtime forecast |
 | Tiled timing/epoch acquisition, shared projection and weighted mixtures | `test_triad_dynamic_acquire.py` | 103 actual captures ×533 hypotheses, all preparation/scoring timed; coarse pilot-sensitive timing failed and must not become a qualified sensitivity anchor |
+| Independent stochastic Helper frequency selection, per-capture subsets and shared preparation | `test_triad_dynamic_frequency.py`, `test_triad_dynamic_acquire.py`, `test_triad_dynamic_frequency_study.py` | Separate coverage/admission calibration; full-prior projection and clock bank retained. See [frequency study](validation-data/triad-v3/2026-11-05-helper-frequency/README.md); measured timings are not general hardware/runtime forecasts. |
 | Calibration identity, frozen independent trials, replay without regeneration | `test_triad_dynamic_campaign.py` | Gate binds effective receiver identity and source; custom projection/precision requires new calibration, not reuse of an unrelated gate |
 
-Run the five small dynamic Python modules together through unittest discovery;
+Run the small dynamic Python modules together through unittest discovery;
 this takes seconds on the reference CPU. Native exporter qualifications are
 occasional waveform checks, not required for an unchanged receiver-only edit.
 These checks are functional coverage, not new branch-instrumentation or

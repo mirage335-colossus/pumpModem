@@ -11,6 +11,9 @@ workspace reuse and proportionate testing before larger sampled campaigns.
 The [random-channel study](triad-stochastic.md) documents stochastic path and
 selective modulation, joint DATA/pilot inference and whole-bit Helper bursts.
 Fixed-ray campaign successes do not establish random-channel sensitivity.
+Its [frequency-assistance path](triad-stochastic.md#frequency-assistance-survives-the-phase-fallback)
+retains useful Helper frequency narrowing when coherent pilot-to-DATA phase
+transfer is unresolved, with separate coverage and admission calibration.
 The [Helper-assisted triad integration](triad-helper.md) documents production
 Helper composition, the requested HF/EME configurations, acquisition reuse and
 scoped admission controls, separately from ordinary Robust integration.

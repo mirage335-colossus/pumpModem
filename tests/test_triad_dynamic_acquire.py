@@ -8,6 +8,7 @@ import math
 from pathlib import Path
 import sys
 import unittest
+from unittest import mock
 
 import numpy as np
 import torch
@@ -15,7 +16,8 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_triad_dynamic_joint import fixture as base_fixture
-from triad_dynamic_acquire import TiledAcquisition, projection_digest, pilot_timing_guard
+from triad_dynamic_acquire import (TiledAcquisition, HelperFrequencyAcquisition,
+                                   projection_digest, pilot_timing_guard)
 from triad_dynamic_joint import DynamicJointReceiver, public_spectral_bands
 from triad_dynamic_variants import ScanJointReceiver
 
@@ -123,6 +125,16 @@ class TiledAcquisitionTests(unittest.TestCase):
             TiledAcquisition(m, source, (0,), arrival_seconds=(-.01, 0., .01), maximum_candidates=2)
         with self.assertRaisesRegex(ValueError, 'missing'):
             TiledAcquisition(m, source, (0,), selected_epochs=(1,))
+
+    def test_full_bank_identity_does_not_depend_on_capture_batch_size(self):
+        m, source = fixture(False)
+        receiver = TiledAcquisition(m, source, (0,), frequencies_hz=(-1., 1.),
+            block_seconds=.1, coherence_seconds=(.2, math.inf), precision='fp64')
+        raw = np.random.default_rng(912).normal(size=800).astype(np.complex128)
+        single = receiver.score(raw)
+        batch = receiver.score(np.stack((raw, raw)), trial_batch_size=1)
+        self.assertEqual(single['procedure_id'], batch['procedure_id'])
+        np.testing.assert_array_equal(batch['bit_scores'], np.repeat(single['bit_scores'], 2, axis=0))
 
     def test_core_selector_uses_full_frequency_bank_without_mutating_channel(self):
         m, source = fixture(True)
@@ -237,6 +249,112 @@ class TiledAcquisitionTests(unittest.TestCase):
         self.assertEqual(guard['reason'], 'helper_phase_timing_unresolved')
         self.assertIsNone(guard['total_timing_radius_seconds'])
         self.assertEqual(guard['missing_uncertainty_fields'], ['sample_clock_pair_ppm', 'delay_excursion_seconds'])
+
+    def test_heterogeneous_frequency_banks_match_full_projection_references(self):
+        m, source = fixture(False)
+        kwargs = dict(arrival_seconds=(-.01, -.005, 0., .005, .01),
+            frequencies_hz=(-2., 3., 7.), block_seconds=.1,
+            coherence_seconds=(.2, math.inf), precision='fp64', memory_limit_bytes=64*1024**2)
+        tiled = TiledAcquisition(m, source, (0,), timing_tile_size=2, **kwargs)
+        rng = np.random.default_rng(4831)
+        raw = rng.normal(size=(3, 800))+1j*rng.normal(size=(3, 800))
+        banks = ((-2., 3.), (-2., 3., 7.), (7.,))
+        actual = tiled.score(raw, selected_frequency_banks=banks, trial_batch_size=2)
+        expected = []
+        for index, bank in enumerate(banks):
+            config = dict(kwargs, frequencies_hz=bank)
+            full = ScanJointReceiver(m, source, (0,),
+                required_bands_hz=tiled.required_bands_hz,
+                auxiliary_exclusion_hz=tiled.excluded_bands_hz, **config)
+            expected.append(full.score(raw[index:index+1])['hypothesis_log_evidence'])
+        expected = np.concatenate(expected, axis=1)
+        np.testing.assert_allclose(actual['hypothesis_log_evidence'], expected, atol=3e-11)
+        self.assertEqual(actual['work']['candidates_per_trial'], [10, 15, 5])
+        self.assertEqual(actual['work']['total_candidate_trial_evaluations'], 30)
+        self.assertEqual(actual['work']['original_candidates'], 15)
+        self.assertEqual(actual['work']['tiles'], 9)
+        for receipt in actual['tiles']:
+            self.assertEqual(receipt['trial_indices'],
+                [index for index, bank in enumerate(banks) if receipt['frequency_hz'] in bank])
+        # None of the trials needs the middle frequency: avoid its preparation
+        # entirely, while retaining the original full-bank projection.
+        reduced = tiled.score(raw, selected_frequency_banks=((-2.,), (7.,), (7.,)))
+        self.assertEqual(reduced['work']['tiles'], 6)
+        self.assertEqual(reduced['work']['candidates'], 10)
+        self.assertEqual(reduced['work']['total_candidate_trial_evaluations'], 15)
+        self.assertEqual(reduced['work']['projection_sha256'], actual['work']['projection_sha256'])
+
+    def test_subset_validation_and_canonical_order(self):
+        m, source = fixture(False)
+        tiled = TiledAcquisition(m, source, (0,), frequencies_hz=(-2., 3.),
+                                 block_seconds=.1, precision='fp64')
+        raw = np.ones((1, 800), np.complex128)
+        for invalid in ([], [()], [(-2., -2.)], [(4.,)], [(-2.,), (3.,)]):
+            with self.subTest(bank=invalid), self.assertRaises(ValueError):
+                tiled.score(raw, selected_frequency_banks=invalid)
+        first = tiled.score(raw, selected_frequency_banks=[(-2., 3.)])
+        second = tiled.score(raw, selected_frequency_banks=[(3., -2.)])
+        self.assertEqual(first['procedure_id'], second['procedure_id'])
+        np.testing.assert_array_equal(first['bit_scores'], second['bit_scores'])
+
+    def test_frequency_assistance_survives_phase_guard_and_has_stable_identity(self):
+        m, source = fixture(True)
+        kwargs = dict(arrival_seconds=(-.01, 0., .01), frequencies_hz=(-2., 3., 7.),
+            block_seconds=.1, coherence_seconds=(.2, math.inf), precision='fp64',
+            auxiliary_half_width_hz=20., timing_tile_size=2)
+        receiver = HelperFrequencyAcquisition(m, source, (0,), **kwargs)
+        self.assertEqual(receiver.pilot_use, 'none')
+        self.assertEqual(receiver.timing_guard['reason'], 'helper_phase_timing_unresolved')
+        rng = np.random.default_rng(7437)
+        raw = rng.normal(size=(2, 800))+1j*rng.normal(size=(2, 800))
+        replies = [dict(status='narrowed', reason='synthetic_plumbing_fixture',
+                        selected_frequencies=[3.], applicable_horizon=1.),
+                   dict(status='fallback', reason='synthetic_weak_pilot',
+                        selected_frequencies=[-2., 3., 7.])]
+        with mock.patch('triad_dynamic_frequency.estimate_dynamic_frequency', side_effect=replies) as estimator:
+            actual = receiver.score(raw)
+        self.assertEqual(estimator.call_count, 2)
+        self.assertEqual(actual['work']['frequencies_per_trial'], [1, 3])
+        self.assertEqual(actual['work']['effective_pilot_use'], 'none')
+        self.assertEqual(actual['frequency_assistance'], replies)
+        self.assertEqual(actual['phase_assistance'], receiver.timing_guard)
+        self.assertIn('frequency_estimation_seconds', actual['timing'])
+        full = TiledAcquisition(m, source, (0,), **kwargs).score(raw,
+            selected_frequency_banks=((3.,), (-2., 3., 7.)))
+        np.testing.assert_array_equal(actual['bit_scores'], full['bit_scores'])
+        swapped = [replies[1], replies[0]]
+        with mock.patch('triad_dynamic_frequency.estimate_dynamic_frequency', side_effect=swapped):
+            alternate = receiver.score(raw)
+        self.assertEqual(actual['procedure_id'], alternate['procedure_id'])
+        self.assertNotEqual(actual['execution_id'], alternate['execution_id'])
+        self.assertEqual(receiver.clocks, (0.,))
+        self.assertTrue(receiver.manifest['helper_enabled'])
+        self.assertEqual(receiver.frequency_config['data_frequency_aperture_seconds'], .1)
+
+    def test_frequency_fallback_cannot_silently_prune(self):
+        m, source = fixture(False)
+        receiver = HelperFrequencyAcquisition(m, source, (0,), frequencies_hz=(-2., 3.))
+        with mock.patch('triad_dynamic_frequency.estimate_dynamic_frequency',
+                        return_value=dict(status='fallback', selected_frequencies=[3.])):
+            with self.assertRaisesRegex(ValueError, 'complete original bank'):
+                receiver.score(np.ones(800, np.complex128))
+
+    def test_frequency_horizon_and_block_aperture_are_enforced(self):
+        m, source = fixture(False)
+        with self.assertRaisesRegex(ValueError, 'must not exceed'):
+            HelperFrequencyAcquisition(m, source, (0,), block_seconds=.1,
+                frequency_config=dict(data_frequency_aperture_seconds=.25))
+        receiver = HelperFrequencyAcquisition(m, source, (0,), frequencies_hz=(-2., 3.))
+        reply = dict(status='narrowed', selected_frequencies=[3.], applicable_horizon=.1)
+        with mock.patch('triad_dynamic_frequency.estimate_dynamic_frequency', return_value=reply):
+            result = receiver.score(np.ones(800, np.complex128))
+        self.assertEqual(result['frequency_assistance'][0]['reason'],
+                         'frequency_horizon_does_not_cover_capture')
+        self.assertEqual(result['work']['frequencies_per_trial'], [2])
+        with mock.patch('triad_dynamic_frequency.estimate_dynamic_frequency',
+                        return_value=dict(status='narrowed', selected_frequencies=[3.])):
+            with self.assertRaisesRegex(ValueError, 'finite applicability horizon'):
+                receiver.score(np.ones(800, np.complex128))
 
 
 if __name__ == '__main__':

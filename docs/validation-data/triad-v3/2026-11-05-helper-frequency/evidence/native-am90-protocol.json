@@ -1,0 +1,291 @@
+{
+  "build": {
+    "command": [
+      "ninja",
+      "-C",
+      "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli",
+      "-n",
+      "triad_helper_export"
+    ],
+    "stderr": "",
+    "stdout": "ninja: Entering directory `/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli'\nninja: no work to do.\n"
+  },
+  "estimator_source_sha256": "4d6b48b3b39a558769e1d035b46fdf619252245a20be7a4702d12cf524fa9cec",
+  "exporter_sha256": "c497ba10d1255f1e56a2976eb4c1be4854ba5f88b2891f0be15110a06ac22242",
+  "frequency_policies": {
+    "default_modulation_allowance": {
+      "competitive_score_drop": 18.0,
+      "data_frequency_aperture_seconds": 0.25,
+      "modulation_width_allowance": 1.0
+    },
+    "opt_in_zero_modulation_allowance": {
+      "competitive_score_drop": 18.0,
+      "data_frequency_aperture_seconds": 0.25,
+      "modulation_width_allowance": 0.0
+    }
+  },
+  "maximum_workers": 2,
+  "native_arguments_by_geometry": {
+    "bounded": [
+      "--case",
+      "hf",
+      "--rate",
+      "36",
+      "--added-symbols",
+      "10",
+      "--seconds",
+      "16",
+      "--data-power-w",
+      "4",
+      "--helper-power-w",
+      "40",
+      "--cn0",
+      "8",
+      "--rf-hz",
+      "30000000",
+      "--base-oscillator",
+      "crystal",
+      "--shift-oscillator",
+      "ic-7100",
+      "--oscillator-effects",
+      "on",
+      "--channel-evolution",
+      "stochastic",
+      "--random-doppler-width-hz",
+      ".5",
+      "--selective-modulation-rate-hz",
+      "90",
+      "--selective-perturbation",
+      "each-65",
+      "--spread-preset",
+      "hf-worst",
+      "--margin",
+      "3",
+      "--sample-rate",
+      "6000",
+      "--data-if",
+      "1725",
+      "--timing-policy",
+      "bounded",
+      "--arrival-seconds",
+      ".013",
+      "--helper",
+      "on",
+      "--helper-components",
+      "full",
+      "--fhss",
+      "off",
+      "--shaping",
+      "auto",
+      "--key-seed",
+      "2413",
+      "--epoch",
+      "1793850000"
+    ],
+    "broad": [
+      "--case",
+      "hf",
+      "--rate",
+      "36",
+      "--added-symbols",
+      "10",
+      "--seconds",
+      "16",
+      "--data-power-w",
+      "4",
+      "--helper-power-w",
+      "40",
+      "--cn0",
+      "8",
+      "--rf-hz",
+      "30000000",
+      "--base-oscillator",
+      "crystal",
+      "--shift-oscillator",
+      "ic-7100",
+      "--oscillator-effects",
+      "on",
+      "--channel-evolution",
+      "stochastic",
+      "--random-doppler-width-hz",
+      ".5",
+      "--selective-modulation-rate-hz",
+      "90",
+      "--selective-perturbation",
+      "each-65",
+      "--spread-preset",
+      "hf-worst",
+      "--margin",
+      "3",
+      "--sample-rate",
+      "6000",
+      "--data-if",
+      "1725",
+      "--timing-policy",
+      "broad",
+      "--arrival-seconds",
+      ".013",
+      "--helper",
+      "on",
+      "--helper-components",
+      "full",
+      "--fhss",
+      "off",
+      "--shaping",
+      "auto",
+      "--key-seed",
+      "2413",
+      "--epoch",
+      "1793850000"
+    ]
+  },
+  "policy_resolution": "Other settings are the source-bound frequency_policy defaults; both policies are fixed before any AM90 capture.",
+  "schedule": [
+    {
+      "bit": 0,
+      "data": true,
+      "id": "bounded-00",
+      "seed": 1500000,
+      "timing_policy": "bounded"
+    },
+    {
+      "bit": 1,
+      "data": true,
+      "id": "bounded-01",
+      "seed": 1507919,
+      "timing_policy": "bounded"
+    },
+    {
+      "bit": 0,
+      "data": true,
+      "id": "bounded-02",
+      "seed": 1515838,
+      "timing_policy": "bounded"
+    },
+    {
+      "bit": 1,
+      "data": true,
+      "id": "bounded-03",
+      "seed": 1523757,
+      "timing_policy": "bounded"
+    },
+    {
+      "bit": 0,
+      "data": true,
+      "id": "bounded-04",
+      "seed": 1531676,
+      "timing_policy": "bounded"
+    },
+    {
+      "bit": 1,
+      "data": true,
+      "id": "bounded-05",
+      "seed": 1539595,
+      "timing_policy": "bounded"
+    },
+    {
+      "bit": 0,
+      "data": true,
+      "id": "bounded-06",
+      "seed": 1547514,
+      "timing_policy": "bounded"
+    },
+    {
+      "bit": 1,
+      "data": true,
+      "id": "bounded-07",
+      "seed": 1555433,
+      "timing_policy": "bounded"
+    },
+    {
+      "bit": 0,
+      "data": true,
+      "id": "broad-00",
+      "seed": 1563352,
+      "timing_policy": "broad"
+    },
+    {
+      "bit": 1,
+      "data": true,
+      "id": "broad-01",
+      "seed": 1571271,
+      "timing_policy": "broad"
+    },
+    {
+      "bit": 0,
+      "data": true,
+      "id": "broad-02",
+      "seed": 1579190,
+      "timing_policy": "broad"
+    },
+    {
+      "bit": 1,
+      "data": true,
+      "id": "broad-03",
+      "seed": 1587109,
+      "timing_policy": "broad"
+    },
+    {
+      "bit": 0,
+      "data": true,
+      "id": "broad-04",
+      "seed": 1595028,
+      "timing_policy": "broad"
+    },
+    {
+      "bit": 1,
+      "data": true,
+      "id": "broad-05",
+      "seed": 1602947,
+      "timing_policy": "broad"
+    },
+    {
+      "bit": 0,
+      "data": true,
+      "id": "broad-06",
+      "seed": 1610866,
+      "timing_policy": "broad"
+    },
+    {
+      "bit": 1,
+      "data": true,
+      "id": "broad-07",
+      "seed": 1618785,
+      "timing_policy": "broad"
+    }
+  ],
+  "schema": "triad-helper-am90-frequency-diagnostic-plan-v1",
+  "scope": [
+    "16 diagnostics only, eight per timing prior; no admission or operational false-alarm claim.",
+    "AM width90Hz changes physical random modulation; the opt-in zero allowance changes only later frequency-region planning.",
+    "Both later frequency policies must use identical captures. No DATA receiver scoring is performed here.",
+    "Actual arrival .013s remains hidden from estimation; broad prior does not randomize that actual arrival.",
+    "The original99-capture AM0.05 frequency calibration is not AM90 calibration.",
+    "Templates are shared only after checking source format, sample clock, key, epoch and public gain.",
+    "Native full Helper, random rays, oscillator impairments and DATA remain enabled."
+  ],
+  "source_hashes": {
+    "CMakeLists.txt": "8380cd86a6d4f2becd7463456678ea64f4db2fd7c5b91184ef21fc38f6d3c671",
+    "include/datapump/crypto.hpp": "14e681ae6637b453b05fae4125b300e6bc27ec2ec4c2ee449fa3b2ab97214b74",
+    "include/datapump/helper_carrier.hpp": "767c51cc84d8fb120eb8bb69fc6895b13d0dca49047cf9fd4cde7f1476c2ab2c",
+    "include/datapump/pattern_pulse.hpp": "f3053ed41fa5cbca182ae4dcf5ff4796b030a3cb15527f617d7a765e7f989312",
+    "include/datapump/triad_helper_burst.hpp": "f41b30d9ea1ea1d2fa9ba800b33ac5823383e9d586a43de49e3ff9771b2d2fee",
+    "include/datapump/triad_modem_v3.hpp": "5db4cb739c50c62bab9568b92b7040801d64ad02d4a1c5f7e108df8163590495",
+    "include/datapump/triad_simulation.hpp": "55db1c03f95b6bd9b65bf5e3630a506aba40d1e3dbf473f025218454fbbee34d",
+    "local-evidence/triad-helper-frequency/am90_diagnostic.py": "1d7bdd74be92b41f80ded00ba04388a47cd836b05e37f8a6b506f68bac832dfa",
+    "local-evidence/triad-helper-frequency/cohort.py": "93fadf7fcedf03127dfd039eda326a47d640956c68d784ab942afcfe71ae1cd2",
+    "local-evidence/triad-helper-frequency/diagnostic.py": "10339ad0db99b852a9ccbd6356fe4c0d844462212b7329b237b37a52a0cf741b",
+    "src/channel_perturbation.hpp": "fbbe7412d67e16955b858738656dd2466a7e07f21fe97031e5e5e6a0b8214cab",
+    "src/channel_spread.hpp": "bf98698d574869acb79645fa143af7ae563a2f542868e77c672d89d4fb16bdb0",
+    "src/crypto.cpp": "d89108ffba168898e45329fa9040c4155d6012711da1a6163b13dc97e9782224",
+    "src/helper_carrier.cpp": "c6ca4954455325fd957eab9288ba22de8098390dc3138c281bf6f55176a476bf",
+    "src/triad_gaussian_fading.hpp": "97f26b082d7d68123952bde7ccb9f97148c5977cf741cf6c15c76e77fcc20944",
+    "src/triad_modem_v3.cpp": "4bd1c24198b1c285bcc17f032ea94fd8327d4a1f22133039db63322b295b4293",
+    "src/triad_random_process.hpp": "3ea0ab1fcc2a64f58b53751d69d707d278b5fa531b3c126baa443fa8701e7741",
+    "src/triad_shaping.cpp": "8f2ebc70ff225933454c752d75917f29b0e2b0347a1aa3ac6c9fcf68df94b67c",
+    "src/triad_simulation_stream.cpp": "78e7380fb49fb88d347de496bdb82d16e5e7800e8c9faf4fd0091d4462fa1c06",
+    "src/tuning_presets.cpp": "31e1ac552bea10b24036f959485241532066e6aa343931c04a46a65e8734b293",
+    "tools/triad-helper-export.cpp": "543c128412e9d3b31d226a09cfaab7026f1dd504f92c6c3a8ab6d2478226766f"
+  },
+  "template_trial": "bounded-00"
+}

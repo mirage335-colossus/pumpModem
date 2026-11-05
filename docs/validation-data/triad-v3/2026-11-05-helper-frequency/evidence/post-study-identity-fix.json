@@ -1,0 +1,8 @@
+{
+  "schema": "triad-helper-frequency-post-study-identity-fix-v1",
+  "measured_source_sha256": "57cb9b4b5c50b9b2b27c0d36ae83169ae643d2df9ffbe46661ec97dc9c9e4b48",
+  "current_source_sha256": "b59cdf426753eabdab7583024ff9b2f94128311d24d8e1e67cb0466b75098002",
+  "change": "Default full-bank result identity omits repeated per-trial full-bank lists; explicit adaptive subset execution identity remains bound. No scoring, hypotheses, selections, projections or arithmetic changed.",
+  "validation": "18 focused acquisition tests, including identical default procedure identity and bit scores for one versus two captures.",
+  "qualification_scope": "Measured study remains source-bound to archived snapshot. This metadata correction is separately checked; its new source/procedure identities do not authorize implicit reuse of historical admission gates."
+}

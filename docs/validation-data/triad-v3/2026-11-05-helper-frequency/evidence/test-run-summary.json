@@ -1,0 +1,18 @@
+{
+  "schema": "triad-helper-frequency-test-summary-v1",
+  "pre_study_suite": {
+    "tests_run": 61,
+    "passed": 59,
+    "skipped": 2,
+    "skip_reason": "CUDA unavailable on CPU-only host",
+    "wall_seconds": 10.507,
+    "scope": "Existing estimator, adaptive-acquisition, CLI and related dynamic-frequency tests before identity-only fix."
+  },
+  "post_study_focused": {
+    "tests_run": 18,
+    "passed": 18,
+    "wall_seconds": 1.002,
+    "scope": "Acquisition tests after identity-only change; includes one-vs-multiple-capture default result identity and score equivalence."
+  },
+  "coverage_note": "The combined 79 invocations are not 79 distinct tests; 17 post-study tests overlap the 61-test run. The current expanded set has 62 discovered tests and was not rerun wholesale because the post-study change was limited and separately focused."
+}

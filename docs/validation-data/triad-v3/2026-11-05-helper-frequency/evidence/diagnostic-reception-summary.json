@@ -1,0 +1,44 @@
+{
+  "schema": "triad-dynamic-helper-frequency-results-v1",
+  "protocol_sha256": "0ab8f282daef828f34f8a58c0560c959bb9b9ed0b82e89e815383c7a4baa8b12",
+  "procedure_ids": {
+    "adaptive": "e27c2377ca791d5ac002d4e2e8d55f061a3a3ea439a2a38bca0272241d459dff",
+    "baseline": "22e05212b9307ddc18fda96d471f4780b86afc0b0c642ea5e89ff64e6ac8499a"
+  },
+  "timing": {
+    "capture_loading_and_hashing_seconds": 0.010733989009167999,
+    "adaptive_planning_seconds": 0.03300905303331092,
+    "baseline_planning_seconds": 0.029457042983267456,
+    "adaptive_frequency_estimation_seconds": 1.5946556639974006,
+    "adaptive_tile_preparation_seconds": 7.116118535050191,
+    "adaptive_candidate_scoring_seconds": 0.3995804191217758,
+    "baseline_tile_preparation_seconds": 126.41905601101462,
+    "baseline_candidate_scoring_seconds": 8.199163854529615,
+    "adaptive_scoring_seconds": 9.139663425041363,
+    "baseline_scoring_seconds": 135.23989380797138,
+    "complete_wall_seconds": 144.52695916302036,
+    "scope": "Includes observation loading/hashing and complete receiver score calls; native capture creation was external."
+  },
+  "gates": {
+    "adaptive": null,
+    "baseline": null
+  },
+  "outcomes": {
+    "adaptive": null,
+    "baseline": null
+  },
+  "paired_comparison": {
+    "scope": "Same captures; independent gates; descriptive outcomes only.",
+    "adaptive_vs_baseline": null
+  },
+  "admission_status": "diagnostic only; no reception admission claimed",
+  "no_helper_narrowing": 0,
+  "candidate_work": {
+    "original_per_trial": 365,
+    "selected_per_trial": [
+      10,
+      11
+    ],
+    "total_candidate_trial_evaluations": 21
+  }
+}

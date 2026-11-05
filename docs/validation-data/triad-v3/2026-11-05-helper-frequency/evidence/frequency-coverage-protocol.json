@@ -1,0 +1,16 @@
+{
+  "source_hashes": {
+    "tools/triad_dynamic_frequency.py": "4d6b48b3b39a558769e1d035b46fdf619252245a20be7a4702d12cf524fa9cec",
+    "calibrate.py": "cd8789b8d6fc2b35726bb2b424e29d9893d79a7c71f1af9fbe4338d732f31848"
+  },
+  "input_protocol_sha256": "07ce75810940d6357cd49e60f4d09f6e93ef0f83430be81f3476eef521b48c91",
+  "beta": 0.01,
+  "training_count": 99,
+  "original_step_requested_hz": 0.5,
+  "initial_config": {
+    "competitive_score_drop": 18.0,
+    "data_frequency_aperture_seconds": 0.25
+  },
+  "quantile": "ceil((n+1)*(1-beta))-th ordered nonconformity; retain at least engineering cutoff18",
+  "scope": "Marginal nearest-original-CFO retention under matching exchangeable seed distribution; not conditional-on-narrowing coverage or an instantaneous-frequency guarantee."
+}

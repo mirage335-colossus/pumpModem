@@ -1,0 +1,11 @@
+{
+  "complete_wall_seconds": 44.135896485007834,
+  "completed_captures": 39,
+  "evaluator_truth_read": false,
+  "exports_sha256": "020fa5d7164763d85becb2b63b932e5912df7c0d39385d9e9ca6c72fe82065e4",
+  "frequency_cutoff_sha256": "47590f12ddd6c3fe485ac2be41b1f5fbb1d184272a85d55b9b484da2ef48f650",
+  "protocol_sha256": "07ce75810940d6357cd49e60f4d09f6e93ef0f83430be81f3476eef521b48c91",
+  "receiver_scoring_performed": false,
+  "stage": "admission-calibration",
+  "sum_native_and_input_hash_wall_seconds": 85.51696937083034
+}

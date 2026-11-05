@@ -4,6 +4,11 @@
 physical-time random fields, moving delay, complete-waveform selective filtering
 and joint DATA/pilot inference. Run its cheap model and likelihood checks before
 sampled sensitivity campaigns; retain historical deterministic results as controls.
+For stochastic Helper acquisition, use its
+[independent frequency-assistance adapter](triad-stochastic.md#frequency-assistance-survives-the-phase-fallback):
+an unresolved phase relationship must not discard a useful pilot frequency
+estimate. Keep the full-bank receiver as the paired reference and calibrate the
+complete adaptive procedure.
 
 Use this workflow for isolated **three-adjacent-carrier Robust v3** development,
 including its transmitter, simulator, planner, receiver, and integration

@@ -1,0 +1,1937 @@
+{
+  "build": {
+    "command": [
+      "ninja",
+      "-C",
+      "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli",
+      "-n",
+      "triad_helper_export"
+    ],
+    "stderr": "",
+    "stdout": "ninja: Entering directory `/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli'\nninja: no work to do.\n"
+  },
+  "build_ninja_sha256": "33aa35cbfc91b7a4b8df5c8727f6d25c715f304c90cfae30f510f3eecfdfc404",
+  "cmake_cache_sha256": "f17b0762cdeea06073d224123968e496dd23f82ebfdec6abb504ab871c9cc453",
+  "environment": {
+    "cpu_count": 12,
+    "platform": "Linux-7.2.6+deb13-amd64-x86_64-with-glibc2.41"
+  },
+  "exporter_sha256": "c497ba10d1255f1e56a2976eb4c1be4854ba5f88b2891f0be15110a06ac22242",
+  "limitations": [
+    "Generation-only plan; no frequency/receiver algorithm or threshold is qualified here.",
+    "Helper remains physically present under every DATA-absent null.",
+    "All202 native seeds are distinct and separate from the8 diagnostic seeds; key2409 differs.",
+    "No evaluator truth is read by this generator; later cutoff evaluation must record its truth use.",
+    "Admission gating and no-held-out-data tuning are enforced by the later scoring driver, not this generator.",
+    "Arrival remains .013s throughout this cohort, unknown to the receiver; not random-arrival reliability qualification.",
+    "Ninja freshness/source/binary identities are retained; not an independent reproducible-build proof."
+  ],
+  "maximum_native_workers": 2,
+  "native_arguments": [
+    "--case",
+    "hf",
+    "--rate",
+    "36",
+    "--added-symbols",
+    "10",
+    "--seconds",
+    "16",
+    "--data-power-w",
+    "4",
+    "--helper-power-w",
+    "40",
+    "--cn0",
+    "8",
+    "--rf-hz",
+    "30000000",
+    "--base-oscillator",
+    "crystal",
+    "--shift-oscillator",
+    "ic-7100",
+    "--oscillator-effects",
+    "on",
+    "--channel-evolution",
+    "stochastic",
+    "--random-doppler-width-hz",
+    ".5",
+    "--selective-modulation-rate-hz",
+    ".05",
+    "--selective-perturbation",
+    "each-65",
+    "--spread-preset",
+    "hf-worst",
+    "--margin",
+    "3",
+    "--sample-rate",
+    "6000",
+    "--data-if",
+    "1725",
+    "--timing-policy",
+    "bounded",
+    "--arrival-seconds",
+    ".013",
+    "--helper",
+    "on",
+    "--helper-components",
+    "full",
+    "--fhss",
+    "off",
+    "--shaping",
+    "auto",
+    "--key-seed",
+    "2409",
+    "--epoch",
+    "1793850000"
+  ],
+  "phase_order": [
+    "Generate99 DATA-absent frequency-region calibration captures.",
+    "Fit the frequency-region cutoff using only those99 captures and freeze its complete policy.",
+    "Freeze that cutoff artifact using this runner before further capture generation.",
+    "Generate39 separate DATA-absent admission calibration captures.",
+    "Freeze admission gate before scoring32 independent signals and32 independent nulls."
+  ],
+  "schema": "triad-helper-frequency-independent-native-plan-v1",
+  "source_hashes": {
+    "CMakeLists.txt": "8380cd86a6d4f2becd7463456678ea64f4db2fd7c5b91184ef21fc38f6d3c671",
+    "include/datapump/crypto.hpp": "14e681ae6637b453b05fae4125b300e6bc27ec2ec4c2ee449fa3b2ab97214b74",
+    "include/datapump/helper_carrier.hpp": "767c51cc84d8fb120eb8bb69fc6895b13d0dca49047cf9fd4cde7f1476c2ab2c",
+    "include/datapump/pattern_pulse.hpp": "f3053ed41fa5cbca182ae4dcf5ff4796b030a3cb15527f617d7a765e7f989312",
+    "include/datapump/triad_helper_burst.hpp": "f41b30d9ea1ea1d2fa9ba800b33ac5823383e9d586a43de49e3ff9771b2d2fee",
+    "include/datapump/triad_modem_v3.hpp": "5db4cb739c50c62bab9568b92b7040801d64ad02d4a1c5f7e108df8163590495",
+    "include/datapump/triad_simulation.hpp": "55db1c03f95b6bd9b65bf5e3630a506aba40d1e3dbf473f025218454fbbee34d",
+    "local-evidence/triad-helper-frequency/cohort.py": "93fadf7fcedf03127dfd039eda326a47d640956c68d784ab942afcfe71ae1cd2",
+    "local-evidence/triad-helper-frequency/diagnostic.py": "10339ad0db99b852a9ccbd6356fe4c0d844462212b7329b237b37a52a0cf741b",
+    "src/channel_perturbation.hpp": "fbbe7412d67e16955b858738656dd2466a7e07f21fe97031e5e5e6a0b8214cab",
+    "src/channel_spread.hpp": "bf98698d574869acb79645fa143af7ae563a2f542868e77c672d89d4fb16bdb0",
+    "src/crypto.cpp": "d89108ffba168898e45329fa9040c4155d6012711da1a6163b13dc97e9782224",
+    "src/helper_carrier.cpp": "c6ca4954455325fd957eab9288ba22de8098390dc3138c281bf6f55176a476bf",
+    "src/triad_gaussian_fading.hpp": "97f26b082d7d68123952bde7ccb9f97148c5977cf741cf6c15c76e77fcc20944",
+    "src/triad_modem_v3.cpp": "4bd1c24198b1c285bcc17f032ea94fd8327d4a1f22133039db63322b295b4293",
+    "src/triad_random_process.hpp": "3ea0ab1fcc2a64f58b53751d69d707d278b5fa531b3c126baa443fa8701e7741",
+    "src/triad_shaping.cpp": "8f2ebc70ff225933454c752d75917f29b0e2b0347a1aa3ac6c9fcf68df94b67c",
+    "src/triad_simulation_stream.cpp": "78e7380fb49fb88d347de496bdb82d16e5e7800e8c9faf4fd0091d4462fa1c06",
+    "src/tuning_presets.cpp": "31e1ac552bea10b24036f959485241532066e6aa343931c04a46a65e8734b293",
+    "tools/triad-helper-export.cpp": "543c128412e9d3b31d226a09cfaab7026f1dd504f92c6c3a8ab6d2478226766f"
+  },
+  "template_trial": "frequency-calibration-000",
+  "trial_schedule": [
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-000",
+      "index": 0,
+      "phase": "frequency-calibration",
+      "seed": 1200000,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-001",
+      "index": 1,
+      "phase": "frequency-calibration",
+      "seed": 1207919,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-002",
+      "index": 2,
+      "phase": "frequency-calibration",
+      "seed": 1215838,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-003",
+      "index": 3,
+      "phase": "frequency-calibration",
+      "seed": 1223757,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-004",
+      "index": 4,
+      "phase": "frequency-calibration",
+      "seed": 1231676,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-005",
+      "index": 5,
+      "phase": "frequency-calibration",
+      "seed": 1239595,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-006",
+      "index": 6,
+      "phase": "frequency-calibration",
+      "seed": 1247514,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-007",
+      "index": 7,
+      "phase": "frequency-calibration",
+      "seed": 1255433,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-008",
+      "index": 8,
+      "phase": "frequency-calibration",
+      "seed": 1263352,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-009",
+      "index": 9,
+      "phase": "frequency-calibration",
+      "seed": 1271271,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-010",
+      "index": 10,
+      "phase": "frequency-calibration",
+      "seed": 1279190,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-011",
+      "index": 11,
+      "phase": "frequency-calibration",
+      "seed": 1287109,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-012",
+      "index": 12,
+      "phase": "frequency-calibration",
+      "seed": 1295028,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-013",
+      "index": 13,
+      "phase": "frequency-calibration",
+      "seed": 1302947,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-014",
+      "index": 14,
+      "phase": "frequency-calibration",
+      "seed": 1310866,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-015",
+      "index": 15,
+      "phase": "frequency-calibration",
+      "seed": 1318785,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-016",
+      "index": 16,
+      "phase": "frequency-calibration",
+      "seed": 1326704,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-017",
+      "index": 17,
+      "phase": "frequency-calibration",
+      "seed": 1334623,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-018",
+      "index": 18,
+      "phase": "frequency-calibration",
+      "seed": 1342542,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-019",
+      "index": 19,
+      "phase": "frequency-calibration",
+      "seed": 1350461,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-020",
+      "index": 20,
+      "phase": "frequency-calibration",
+      "seed": 1358380,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-021",
+      "index": 21,
+      "phase": "frequency-calibration",
+      "seed": 1366299,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-022",
+      "index": 22,
+      "phase": "frequency-calibration",
+      "seed": 1374218,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-023",
+      "index": 23,
+      "phase": "frequency-calibration",
+      "seed": 1382137,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-024",
+      "index": 24,
+      "phase": "frequency-calibration",
+      "seed": 1390056,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-025",
+      "index": 25,
+      "phase": "frequency-calibration",
+      "seed": 1397975,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-026",
+      "index": 26,
+      "phase": "frequency-calibration",
+      "seed": 1405894,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-027",
+      "index": 27,
+      "phase": "frequency-calibration",
+      "seed": 1413813,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-028",
+      "index": 28,
+      "phase": "frequency-calibration",
+      "seed": 1421732,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-029",
+      "index": 29,
+      "phase": "frequency-calibration",
+      "seed": 1429651,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-030",
+      "index": 30,
+      "phase": "frequency-calibration",
+      "seed": 1437570,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-031",
+      "index": 31,
+      "phase": "frequency-calibration",
+      "seed": 1445489,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-032",
+      "index": 32,
+      "phase": "frequency-calibration",
+      "seed": 1453408,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-033",
+      "index": 33,
+      "phase": "frequency-calibration",
+      "seed": 1461327,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-034",
+      "index": 34,
+      "phase": "frequency-calibration",
+      "seed": 1469246,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-035",
+      "index": 35,
+      "phase": "frequency-calibration",
+      "seed": 1477165,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-036",
+      "index": 36,
+      "phase": "frequency-calibration",
+      "seed": 1485084,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-037",
+      "index": 37,
+      "phase": "frequency-calibration",
+      "seed": 1493003,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-038",
+      "index": 38,
+      "phase": "frequency-calibration",
+      "seed": 1500922,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-039",
+      "index": 39,
+      "phase": "frequency-calibration",
+      "seed": 1508841,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-040",
+      "index": 40,
+      "phase": "frequency-calibration",
+      "seed": 1516760,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-041",
+      "index": 41,
+      "phase": "frequency-calibration",
+      "seed": 1524679,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-042",
+      "index": 42,
+      "phase": "frequency-calibration",
+      "seed": 1532598,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-043",
+      "index": 43,
+      "phase": "frequency-calibration",
+      "seed": 1540517,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-044",
+      "index": 44,
+      "phase": "frequency-calibration",
+      "seed": 1548436,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-045",
+      "index": 45,
+      "phase": "frequency-calibration",
+      "seed": 1556355,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-046",
+      "index": 46,
+      "phase": "frequency-calibration",
+      "seed": 1564274,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-047",
+      "index": 47,
+      "phase": "frequency-calibration",
+      "seed": 1572193,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-048",
+      "index": 48,
+      "phase": "frequency-calibration",
+      "seed": 1580112,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-049",
+      "index": 49,
+      "phase": "frequency-calibration",
+      "seed": 1588031,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-050",
+      "index": 50,
+      "phase": "frequency-calibration",
+      "seed": 1595950,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-051",
+      "index": 51,
+      "phase": "frequency-calibration",
+      "seed": 1603869,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-052",
+      "index": 52,
+      "phase": "frequency-calibration",
+      "seed": 1611788,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-053",
+      "index": 53,
+      "phase": "frequency-calibration",
+      "seed": 1619707,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-054",
+      "index": 54,
+      "phase": "frequency-calibration",
+      "seed": 1627626,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-055",
+      "index": 55,
+      "phase": "frequency-calibration",
+      "seed": 1635545,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-056",
+      "index": 56,
+      "phase": "frequency-calibration",
+      "seed": 1643464,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-057",
+      "index": 57,
+      "phase": "frequency-calibration",
+      "seed": 1651383,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-058",
+      "index": 58,
+      "phase": "frequency-calibration",
+      "seed": 1659302,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-059",
+      "index": 59,
+      "phase": "frequency-calibration",
+      "seed": 1667221,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-060",
+      "index": 60,
+      "phase": "frequency-calibration",
+      "seed": 1675140,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-061",
+      "index": 61,
+      "phase": "frequency-calibration",
+      "seed": 1683059,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-062",
+      "index": 62,
+      "phase": "frequency-calibration",
+      "seed": 1690978,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-063",
+      "index": 63,
+      "phase": "frequency-calibration",
+      "seed": 1698897,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-064",
+      "index": 64,
+      "phase": "frequency-calibration",
+      "seed": 1706816,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-065",
+      "index": 65,
+      "phase": "frequency-calibration",
+      "seed": 1714735,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-066",
+      "index": 66,
+      "phase": "frequency-calibration",
+      "seed": 1722654,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-067",
+      "index": 67,
+      "phase": "frequency-calibration",
+      "seed": 1730573,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-068",
+      "index": 68,
+      "phase": "frequency-calibration",
+      "seed": 1738492,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-069",
+      "index": 69,
+      "phase": "frequency-calibration",
+      "seed": 1746411,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-070",
+      "index": 70,
+      "phase": "frequency-calibration",
+      "seed": 1754330,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-071",
+      "index": 71,
+      "phase": "frequency-calibration",
+      "seed": 1762249,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-072",
+      "index": 72,
+      "phase": "frequency-calibration",
+      "seed": 1770168,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-073",
+      "index": 73,
+      "phase": "frequency-calibration",
+      "seed": 1778087,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-074",
+      "index": 74,
+      "phase": "frequency-calibration",
+      "seed": 1786006,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-075",
+      "index": 75,
+      "phase": "frequency-calibration",
+      "seed": 1793925,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-076",
+      "index": 76,
+      "phase": "frequency-calibration",
+      "seed": 1801844,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-077",
+      "index": 77,
+      "phase": "frequency-calibration",
+      "seed": 1809763,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-078",
+      "index": 78,
+      "phase": "frequency-calibration",
+      "seed": 1817682,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-079",
+      "index": 79,
+      "phase": "frequency-calibration",
+      "seed": 1825601,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-080",
+      "index": 80,
+      "phase": "frequency-calibration",
+      "seed": 1833520,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-081",
+      "index": 81,
+      "phase": "frequency-calibration",
+      "seed": 1841439,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-082",
+      "index": 82,
+      "phase": "frequency-calibration",
+      "seed": 1849358,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-083",
+      "index": 83,
+      "phase": "frequency-calibration",
+      "seed": 1857277,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-084",
+      "index": 84,
+      "phase": "frequency-calibration",
+      "seed": 1865196,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-085",
+      "index": 85,
+      "phase": "frequency-calibration",
+      "seed": 1873115,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-086",
+      "index": 86,
+      "phase": "frequency-calibration",
+      "seed": 1881034,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-087",
+      "index": 87,
+      "phase": "frequency-calibration",
+      "seed": 1888953,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-088",
+      "index": 88,
+      "phase": "frequency-calibration",
+      "seed": 1896872,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-089",
+      "index": 89,
+      "phase": "frequency-calibration",
+      "seed": 1904791,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-090",
+      "index": 90,
+      "phase": "frequency-calibration",
+      "seed": 1912710,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-091",
+      "index": 91,
+      "phase": "frequency-calibration",
+      "seed": 1920629,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-092",
+      "index": 92,
+      "phase": "frequency-calibration",
+      "seed": 1928548,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-093",
+      "index": 93,
+      "phase": "frequency-calibration",
+      "seed": 1936467,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-094",
+      "index": 94,
+      "phase": "frequency-calibration",
+      "seed": 1944386,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-095",
+      "index": 95,
+      "phase": "frequency-calibration",
+      "seed": 1952305,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-096",
+      "index": 96,
+      "phase": "frequency-calibration",
+      "seed": 1960224,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "frequency-calibration-097",
+      "index": 97,
+      "phase": "frequency-calibration",
+      "seed": 1968143,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "frequency-calibration-098",
+      "index": 98,
+      "phase": "frequency-calibration",
+      "seed": 1976062,
+      "stage": "frequency-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "admission-calibration-000",
+      "index": 99,
+      "phase": "admission-calibration",
+      "seed": 1983981,
+      "stage": "admission-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "admission-calibration-001",
+      "index": 100,
+      "phase": "admission-calibration",
+      "seed": 1991900,
+      "stage": "admission-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "admission-calibration-002",
+      "index": 101,
+      "phase": "admission-calibration",
+      "seed": 1999819,
+      "stage": "admission-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "admission-calibration-003",
+      "index": 102,
+      "phase": "admission-calibration",
+      "seed": 2007738,
+      "stage": "admission-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "admission-calibration-004",
+      "index": 103,
+      "phase": "admission-calibration",
+      "seed": 2015657,
+      "stage": "admission-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "admission-calibration-005",
+      "index": 104,
+      "phase": "admission-calibration",
+      "seed": 2023576,
+      "stage": "admission-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "admission-calibration-006",
+      "index": 105,
+      "phase": "admission-calibration",
+      "seed": 2031495,
+      "stage": "admission-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "admission-calibration-007",
+      "index": 106,
+      "phase": "admission-calibration",
+      "seed": 2039414,
+      "stage": "admission-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "admission-calibration-008",
+      "index": 107,
+      "phase": "admission-calibration",
+      "seed": 2047333,
+      "stage": "admission-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "admission-calibration-009",
+      "index": 108,
+      "phase": "admission-calibration",
+      "seed": 2055252,
+      "stage": "admission-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "admission-calibration-010",
+      "index": 109,
+      "phase": "admission-calibration",
+      "seed": 2063171,
+      "stage": "admission-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "admission-calibration-011",
+      "index": 110,
+      "phase": "admission-calibration",
+      "seed": 2071090,
+      "stage": "admission-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "admission-calibration-012",
+      "index": 111,
+      "phase": "admission-calibration",
+      "seed": 2079009,
+      "stage": "admission-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "admission-calibration-013",
+      "index": 112,
+      "phase": "admission-calibration",
+      "seed": 2086928,
+      "stage": "admission-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "admission-calibration-014",
+      "index": 113,
+      "phase": "admission-calibration",
+      "seed": 2094847,
+      "stage": "admission-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "admission-calibration-015",
+      "index": 114,
+      "phase": "admission-calibration",
+      "seed": 2102766,
+      "stage": "admission-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "admission-calibration-016",
+      "index": 115,
+      "phase": "admission-calibration",
+      "seed": 2110685,
+      "stage": "admission-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "admission-calibration-017",
+      "index": 116,
+      "phase": "admission-calibration",
+      "seed": 2118604,
+      "stage": "admission-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "admission-calibration-018",
+      "index": 117,
+      "phase": "admission-calibration",
+      "seed": 2126523,
+      "stage": "admission-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "admission-calibration-019",
+      "index": 118,
+      "phase": "admission-calibration",
+      "seed": 2134442,
+      "stage": "admission-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "admission-calibration-020",
+      "index": 119,
+      "phase": "admission-calibration",
+      "seed": 2142361,
+      "stage": "admission-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "admission-calibration-021",
+      "index": 120,
+      "phase": "admission-calibration",
+      "seed": 2150280,
+      "stage": "admission-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "admission-calibration-022",
+      "index": 121,
+      "phase": "admission-calibration",
+      "seed": 2158199,
+      "stage": "admission-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "admission-calibration-023",
+      "index": 122,
+      "phase": "admission-calibration",
+      "seed": 2166118,
+      "stage": "admission-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "admission-calibration-024",
+      "index": 123,
+      "phase": "admission-calibration",
+      "seed": 2174037,
+      "stage": "admission-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "admission-calibration-025",
+      "index": 124,
+      "phase": "admission-calibration",
+      "seed": 2181956,
+      "stage": "admission-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "admission-calibration-026",
+      "index": 125,
+      "phase": "admission-calibration",
+      "seed": 2189875,
+      "stage": "admission-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "admission-calibration-027",
+      "index": 126,
+      "phase": "admission-calibration",
+      "seed": 2197794,
+      "stage": "admission-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "admission-calibration-028",
+      "index": 127,
+      "phase": "admission-calibration",
+      "seed": 2205713,
+      "stage": "admission-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "admission-calibration-029",
+      "index": 128,
+      "phase": "admission-calibration",
+      "seed": 2213632,
+      "stage": "admission-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "admission-calibration-030",
+      "index": 129,
+      "phase": "admission-calibration",
+      "seed": 2221551,
+      "stage": "admission-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "admission-calibration-031",
+      "index": 130,
+      "phase": "admission-calibration",
+      "seed": 2229470,
+      "stage": "admission-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "admission-calibration-032",
+      "index": 131,
+      "phase": "admission-calibration",
+      "seed": 2237389,
+      "stage": "admission-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "admission-calibration-033",
+      "index": 132,
+      "phase": "admission-calibration",
+      "seed": 2245308,
+      "stage": "admission-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "admission-calibration-034",
+      "index": 133,
+      "phase": "admission-calibration",
+      "seed": 2253227,
+      "stage": "admission-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "admission-calibration-035",
+      "index": 134,
+      "phase": "admission-calibration",
+      "seed": 2261146,
+      "stage": "admission-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "admission-calibration-036",
+      "index": 135,
+      "phase": "admission-calibration",
+      "seed": 2269065,
+      "stage": "admission-calibration"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "admission-calibration-037",
+      "index": 136,
+      "phase": "admission-calibration",
+      "seed": 2276984,
+      "stage": "admission-calibration"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "admission-calibration-038",
+      "index": 137,
+      "phase": "admission-calibration",
+      "seed": 2284903,
+      "stage": "admission-calibration"
+    },
+    {
+      "bit": 0,
+      "data": true,
+      "id": "signal-000",
+      "index": 138,
+      "phase": "signal",
+      "seed": 2292822,
+      "stage": "validation"
+    },
+    {
+      "bit": 1,
+      "data": true,
+      "id": "signal-001",
+      "index": 139,
+      "phase": "signal",
+      "seed": 2300741,
+      "stage": "validation"
+    },
+    {
+      "bit": 0,
+      "data": true,
+      "id": "signal-002",
+      "index": 140,
+      "phase": "signal",
+      "seed": 2308660,
+      "stage": "validation"
+    },
+    {
+      "bit": 1,
+      "data": true,
+      "id": "signal-003",
+      "index": 141,
+      "phase": "signal",
+      "seed": 2316579,
+      "stage": "validation"
+    },
+    {
+      "bit": 0,
+      "data": true,
+      "id": "signal-004",
+      "index": 142,
+      "phase": "signal",
+      "seed": 2324498,
+      "stage": "validation"
+    },
+    {
+      "bit": 1,
+      "data": true,
+      "id": "signal-005",
+      "index": 143,
+      "phase": "signal",
+      "seed": 2332417,
+      "stage": "validation"
+    },
+    {
+      "bit": 0,
+      "data": true,
+      "id": "signal-006",
+      "index": 144,
+      "phase": "signal",
+      "seed": 2340336,
+      "stage": "validation"
+    },
+    {
+      "bit": 1,
+      "data": true,
+      "id": "signal-007",
+      "index": 145,
+      "phase": "signal",
+      "seed": 2348255,
+      "stage": "validation"
+    },
+    {
+      "bit": 0,
+      "data": true,
+      "id": "signal-008",
+      "index": 146,
+      "phase": "signal",
+      "seed": 2356174,
+      "stage": "validation"
+    },
+    {
+      "bit": 1,
+      "data": true,
+      "id": "signal-009",
+      "index": 147,
+      "phase": "signal",
+      "seed": 2364093,
+      "stage": "validation"
+    },
+    {
+      "bit": 0,
+      "data": true,
+      "id": "signal-010",
+      "index": 148,
+      "phase": "signal",
+      "seed": 2372012,
+      "stage": "validation"
+    },
+    {
+      "bit": 1,
+      "data": true,
+      "id": "signal-011",
+      "index": 149,
+      "phase": "signal",
+      "seed": 2379931,
+      "stage": "validation"
+    },
+    {
+      "bit": 0,
+      "data": true,
+      "id": "signal-012",
+      "index": 150,
+      "phase": "signal",
+      "seed": 2387850,
+      "stage": "validation"
+    },
+    {
+      "bit": 1,
+      "data": true,
+      "id": "signal-013",
+      "index": 151,
+      "phase": "signal",
+      "seed": 2395769,
+      "stage": "validation"
+    },
+    {
+      "bit": 0,
+      "data": true,
+      "id": "signal-014",
+      "index": 152,
+      "phase": "signal",
+      "seed": 2403688,
+      "stage": "validation"
+    },
+    {
+      "bit": 1,
+      "data": true,
+      "id": "signal-015",
+      "index": 153,
+      "phase": "signal",
+      "seed": 2411607,
+      "stage": "validation"
+    },
+    {
+      "bit": 0,
+      "data": true,
+      "id": "signal-016",
+      "index": 154,
+      "phase": "signal",
+      "seed": 2419526,
+      "stage": "validation"
+    },
+    {
+      "bit": 1,
+      "data": true,
+      "id": "signal-017",
+      "index": 155,
+      "phase": "signal",
+      "seed": 2427445,
+      "stage": "validation"
+    },
+    {
+      "bit": 0,
+      "data": true,
+      "id": "signal-018",
+      "index": 156,
+      "phase": "signal",
+      "seed": 2435364,
+      "stage": "validation"
+    },
+    {
+      "bit": 1,
+      "data": true,
+      "id": "signal-019",
+      "index": 157,
+      "phase": "signal",
+      "seed": 2443283,
+      "stage": "validation"
+    },
+    {
+      "bit": 0,
+      "data": true,
+      "id": "signal-020",
+      "index": 158,
+      "phase": "signal",
+      "seed": 2451202,
+      "stage": "validation"
+    },
+    {
+      "bit": 1,
+      "data": true,
+      "id": "signal-021",
+      "index": 159,
+      "phase": "signal",
+      "seed": 2459121,
+      "stage": "validation"
+    },
+    {
+      "bit": 0,
+      "data": true,
+      "id": "signal-022",
+      "index": 160,
+      "phase": "signal",
+      "seed": 2467040,
+      "stage": "validation"
+    },
+    {
+      "bit": 1,
+      "data": true,
+      "id": "signal-023",
+      "index": 161,
+      "phase": "signal",
+      "seed": 2474959,
+      "stage": "validation"
+    },
+    {
+      "bit": 0,
+      "data": true,
+      "id": "signal-024",
+      "index": 162,
+      "phase": "signal",
+      "seed": 2482878,
+      "stage": "validation"
+    },
+    {
+      "bit": 1,
+      "data": true,
+      "id": "signal-025",
+      "index": 163,
+      "phase": "signal",
+      "seed": 2490797,
+      "stage": "validation"
+    },
+    {
+      "bit": 0,
+      "data": true,
+      "id": "signal-026",
+      "index": 164,
+      "phase": "signal",
+      "seed": 2498716,
+      "stage": "validation"
+    },
+    {
+      "bit": 1,
+      "data": true,
+      "id": "signal-027",
+      "index": 165,
+      "phase": "signal",
+      "seed": 2506635,
+      "stage": "validation"
+    },
+    {
+      "bit": 0,
+      "data": true,
+      "id": "signal-028",
+      "index": 166,
+      "phase": "signal",
+      "seed": 2514554,
+      "stage": "validation"
+    },
+    {
+      "bit": 1,
+      "data": true,
+      "id": "signal-029",
+      "index": 167,
+      "phase": "signal",
+      "seed": 2522473,
+      "stage": "validation"
+    },
+    {
+      "bit": 0,
+      "data": true,
+      "id": "signal-030",
+      "index": 168,
+      "phase": "signal",
+      "seed": 2530392,
+      "stage": "validation"
+    },
+    {
+      "bit": 1,
+      "data": true,
+      "id": "signal-031",
+      "index": 169,
+      "phase": "signal",
+      "seed": 2538311,
+      "stage": "validation"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "null-000",
+      "index": 170,
+      "phase": "null",
+      "seed": 2546230,
+      "stage": "validation"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "null-001",
+      "index": 171,
+      "phase": "null",
+      "seed": 2554149,
+      "stage": "validation"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "null-002",
+      "index": 172,
+      "phase": "null",
+      "seed": 2562068,
+      "stage": "validation"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "null-003",
+      "index": 173,
+      "phase": "null",
+      "seed": 2569987,
+      "stage": "validation"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "null-004",
+      "index": 174,
+      "phase": "null",
+      "seed": 2577906,
+      "stage": "validation"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "null-005",
+      "index": 175,
+      "phase": "null",
+      "seed": 2585825,
+      "stage": "validation"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "null-006",
+      "index": 176,
+      "phase": "null",
+      "seed": 2593744,
+      "stage": "validation"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "null-007",
+      "index": 177,
+      "phase": "null",
+      "seed": 2601663,
+      "stage": "validation"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "null-008",
+      "index": 178,
+      "phase": "null",
+      "seed": 2609582,
+      "stage": "validation"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "null-009",
+      "index": 179,
+      "phase": "null",
+      "seed": 2617501,
+      "stage": "validation"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "null-010",
+      "index": 180,
+      "phase": "null",
+      "seed": 2625420,
+      "stage": "validation"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "null-011",
+      "index": 181,
+      "phase": "null",
+      "seed": 2633339,
+      "stage": "validation"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "null-012",
+      "index": 182,
+      "phase": "null",
+      "seed": 2641258,
+      "stage": "validation"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "null-013",
+      "index": 183,
+      "phase": "null",
+      "seed": 2649177,
+      "stage": "validation"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "null-014",
+      "index": 184,
+      "phase": "null",
+      "seed": 2657096,
+      "stage": "validation"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "null-015",
+      "index": 185,
+      "phase": "null",
+      "seed": 2665015,
+      "stage": "validation"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "null-016",
+      "index": 186,
+      "phase": "null",
+      "seed": 2672934,
+      "stage": "validation"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "null-017",
+      "index": 187,
+      "phase": "null",
+      "seed": 2680853,
+      "stage": "validation"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "null-018",
+      "index": 188,
+      "phase": "null",
+      "seed": 2688772,
+      "stage": "validation"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "null-019",
+      "index": 189,
+      "phase": "null",
+      "seed": 2696691,
+      "stage": "validation"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "null-020",
+      "index": 190,
+      "phase": "null",
+      "seed": 2704610,
+      "stage": "validation"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "null-021",
+      "index": 191,
+      "phase": "null",
+      "seed": 2712529,
+      "stage": "validation"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "null-022",
+      "index": 192,
+      "phase": "null",
+      "seed": 2720448,
+      "stage": "validation"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "null-023",
+      "index": 193,
+      "phase": "null",
+      "seed": 2728367,
+      "stage": "validation"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "null-024",
+      "index": 194,
+      "phase": "null",
+      "seed": 2736286,
+      "stage": "validation"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "null-025",
+      "index": 195,
+      "phase": "null",
+      "seed": 2744205,
+      "stage": "validation"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "null-026",
+      "index": 196,
+      "phase": "null",
+      "seed": 2752124,
+      "stage": "validation"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "null-027",
+      "index": 197,
+      "phase": "null",
+      "seed": 2760043,
+      "stage": "validation"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "null-028",
+      "index": 198,
+      "phase": "null",
+      "seed": 2767962,
+      "stage": "validation"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "null-029",
+      "index": 199,
+      "phase": "null",
+      "seed": 2775881,
+      "stage": "validation"
+    },
+    {
+      "bit": 0,
+      "data": false,
+      "id": "null-030",
+      "index": 200,
+      "phase": "null",
+      "seed": 2783800,
+      "stage": "validation"
+    },
+    {
+      "bit": 1,
+      "data": false,
+      "id": "null-031",
+      "index": 201,
+      "phase": "null",
+      "seed": 2791719,
+      "stage": "validation"
+    }
+  ]
+}

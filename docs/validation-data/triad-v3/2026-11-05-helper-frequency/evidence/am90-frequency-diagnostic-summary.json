@@ -1,0 +1,148 @@
+{
+  "elapsed_seconds": 13.617181262001395,
+  "frozen_profiles": {
+    "complete_outputs": 32,
+    "evaluator_truth_read": false,
+    "profile_sha256": "d7eafc8091c5c22ac4cb73d03464377241680fe390a8341da284fd2890bbb87f",
+    "scoring_protocol_sha256": "9f0c2ce698c50b8bc2786887241b646c03e6e4c98513ba564ccc62f17a63b4ee",
+    "wall_seconds": 13.61238611198496
+  },
+  "groups": [
+    {
+      "captures": 8,
+      "count_intervals95": {
+        "effective_search_interval_covered": [
+          0.6305833524471807,
+          1.0
+        ],
+        "nearest_original_bin_retained": [
+          0.6305833524471807,
+          1.0
+        ]
+      },
+      "counts": {
+        "effective_search_interval_covered": 8,
+        "nearest_original_bin_retained": 8
+      },
+      "estimator_seconds": 6.596460797067266,
+      "fallback": 8,
+      "geometry": "bounded",
+      "narrowed": 0,
+      "narrowed_continuous_interval_covered": 0,
+      "narrowed_nearest_bin_retained": 0,
+      "original_count": 365,
+      "policy": "default_modulation_allowance",
+      "reasons": {
+        "profile_or_allowance_too_broad": 8
+      },
+      "selected_count_range": [
+        365,
+        365
+      ]
+    },
+    {
+      "captures": 8,
+      "count_intervals95": {
+        "effective_search_interval_covered": [
+          0.6305833524471807,
+          1.0
+        ],
+        "nearest_original_bin_retained": [
+          0.6305833524471807,
+          1.0
+        ]
+      },
+      "counts": {
+        "effective_search_interval_covered": 8,
+        "nearest_original_bin_retained": 8
+      },
+      "estimator_seconds": 6.195535834005568,
+      "fallback": 0,
+      "geometry": "bounded",
+      "narrowed": 8,
+      "narrowed_continuous_interval_covered": 8,
+      "narrowed_nearest_bin_retained": 8,
+      "original_count": 365,
+      "policy": "opt_in_zero_modulation_allowance",
+      "reasons": {
+        "engineering_frequency_regions_selected": 8
+      },
+      "selected_count_range": [
+        10,
+        11
+      ]
+    },
+    {
+      "captures": 8,
+      "count_intervals95": {
+        "effective_search_interval_covered": [
+          0.6305833524471807,
+          1.0
+        ],
+        "nearest_original_bin_retained": [
+          0.6305833524471807,
+          1.0
+        ]
+      },
+      "counts": {
+        "effective_search_interval_covered": 8,
+        "nearest_original_bin_retained": 8
+      },
+      "estimator_seconds": 0.10851927089970559,
+      "fallback": 8,
+      "geometry": "broad",
+      "narrowed": 0,
+      "narrowed_continuous_interval_covered": 0,
+      "narrowed_nearest_bin_retained": 0,
+      "original_count": 365,
+      "policy": "default_modulation_allowance",
+      "reasons": {
+        "no_usable_pilot": 8
+      },
+      "selected_count_range": [
+        365,
+        365
+      ]
+    },
+    {
+      "captures": 8,
+      "count_intervals95": {
+        "effective_search_interval_covered": [
+          0.6305833524471807,
+          1.0
+        ],
+        "nearest_original_bin_retained": [
+          0.6305833524471807,
+          1.0
+        ]
+      },
+      "counts": {
+        "effective_search_interval_covered": 8,
+        "nearest_original_bin_retained": 8
+      },
+      "estimator_seconds": 0.1071207751519978,
+      "fallback": 8,
+      "geometry": "broad",
+      "narrowed": 0,
+      "narrowed_continuous_interval_covered": 0,
+      "narrowed_nearest_bin_retained": 0,
+      "original_count": 365,
+      "policy": "opt_in_zero_modulation_allowance",
+      "reasons": {
+        "no_usable_pilot": 8
+      },
+      "selected_count_range": [
+        365,
+        365
+      ]
+    }
+  ],
+  "limitations": [
+    "Paired16-capture diagnostic, not independent frequency-region calibration or receiver qualification.",
+    "Default and opt-in allowances are separate policies; no tuning after inspecting these outcomes.",
+    "Coverage refers to static direct-ray CFO and its nearest original bank coordinate, not instantaneous Doppler or phase.",
+    "Full-bank fallback counts separately; effective interval coverage credits the full public prior on fallback.",
+    "Small-sample Clopper-Pearson intervals describe this fixed diagnostic distribution, not arbitrary field channels."
+  ],
+  "receiver_scoring_performed": false
+}

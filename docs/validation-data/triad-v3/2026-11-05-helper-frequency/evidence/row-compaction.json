@@ -1,0 +1,1666 @@
+{
+  "schema": "triad-helper-frequency-compact-rows-v1",
+  "original_path": "local-evidence/triad-helper-frequency/independent-reception/rows.json",
+  "original_sha256": "af7e0e610ec69e0ae2f0eec7d5f49d540a019d96f19602324244e2a7ee054e7a",
+  "original_size_bytes": 47909809,
+  "archived_path": "independent-reception-rows.compact.json.gz",
+  "archived_sha256": "661867496a259c41bdfac9e40484403fe437cdfd9163ceda7543e568172ec2c1",
+  "archived_size_bytes": 749008,
+  "uncompressed_compact_sha256": "cd649b61aab5989ef430c16ad23a2fdc73c842e69d482b0d184c8a448b39c3b7",
+  "uncompressed_compact_size_bytes": 3838814,
+  "transform": "Preserve all trial rows and all non-profile fields; remove only each pilot_diagnostics.low/high grid_hz and profile_scores array. Raw source remains in local-evidence.",
+  "removed_arrays": [
+    {
+      "path": "/adaptive/0/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/0/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/0/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/0/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/1/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/1/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/1/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/1/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/2/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/2/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/2/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/2/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/3/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/3/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/3/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/3/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/4/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/4/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/4/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/4/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/5/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/5/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/5/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/5/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/6/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/6/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/6/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/6/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/7/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/7/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/7/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/7/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/8/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/8/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/8/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/8/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/9/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/9/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/9/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/9/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/10/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/10/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/10/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/10/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/11/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/11/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/11/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/11/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/12/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/12/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/12/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/12/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/13/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/13/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/13/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/13/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/14/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/14/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/14/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/14/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/15/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/15/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/15/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/15/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/16/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/16/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/16/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/16/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/17/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/17/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/17/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/17/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/18/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/18/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/18/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/18/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/19/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/19/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/19/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/19/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/20/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/20/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/20/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/20/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/21/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/21/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/21/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/21/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/22/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/22/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/22/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/22/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/23/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/23/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/23/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/23/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/24/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/24/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/24/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/24/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/25/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/25/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/25/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/25/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/26/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/26/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/26/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/26/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/27/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/27/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/27/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/27/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/28/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/28/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/28/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/28/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/29/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/29/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/29/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/29/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/30/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/30/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/30/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/30/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/31/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/31/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/31/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/31/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/32/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/32/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/32/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/32/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/33/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/33/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/33/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/33/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/34/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/34/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/34/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/34/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/35/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/35/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/35/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/35/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/36/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/36/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/36/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/36/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/37/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/37/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/37/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/37/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/38/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/38/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/38/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/38/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/39/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/39/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/39/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/39/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/40/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/40/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/40/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/40/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/41/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/41/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/41/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/41/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/42/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/42/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/42/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/42/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/43/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/43/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/43/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/43/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/44/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/44/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/44/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/44/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/45/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/45/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/45/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/45/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/46/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/46/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/46/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/46/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/47/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/47/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/47/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/47/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/48/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/48/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/48/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/48/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/49/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/49/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/49/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/49/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/50/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/50/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/50/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/50/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/51/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/51/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/51/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/51/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/52/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/52/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/52/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/52/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/53/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/53/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/53/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/53/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/54/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/54/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/54/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/54/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/55/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/55/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/55/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/55/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/56/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/56/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/56/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/56/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/57/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/57/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/57/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/57/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/58/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/58/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/58/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/58/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/59/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/59/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/59/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/59/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/60/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/60/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/60/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/60/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/61/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/61/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/61/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/61/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/62/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/62/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/62/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/62/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/63/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/63/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/63/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/63/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/64/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/64/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/64/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/64/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/65/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/65/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/65/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/65/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/66/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/66/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/66/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/66/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/67/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/67/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/67/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/67/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/68/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/68/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/68/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/68/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/69/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/69/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/69/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/69/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/70/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/70/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/70/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/70/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/71/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/71/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/71/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/71/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/72/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/72/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/72/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/72/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/73/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/73/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/73/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/73/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/74/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/74/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/74/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/74/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/75/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/75/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/75/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/75/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/76/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/76/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/76/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/76/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/77/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/77/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/77/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/77/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/78/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/78/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/78/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/78/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/79/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/79/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/79/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/79/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/80/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/80/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/80/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/80/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/81/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/81/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/81/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/81/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/82/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/82/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/82/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/82/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/83/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/83/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/83/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/83/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/84/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/84/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/84/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/84/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/85/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/85/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/85/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/85/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/86/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/86/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/86/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/86/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/87/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/87/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/87/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/87/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/88/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/88/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/88/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/88/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/89/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/89/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/89/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/89/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/90/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/90/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/90/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/90/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/91/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/91/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/91/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/91/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/92/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/92/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/92/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/92/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/93/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/93/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/93/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/93/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/94/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/94/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/94/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/94/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/95/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/95/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/95/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/95/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/96/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/96/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/96/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/96/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/97/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/97/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/97/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/97/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/98/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/98/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/98/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/98/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/99/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/99/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/99/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/99/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/100/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/100/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/100/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/100/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/101/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/101/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/101/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/101/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/102/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/102/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/102/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/102/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    }
+  ],
+  "rows_per_arm": {
+    "adaptive": 103,
+    "baseline": 103
+  }
+}

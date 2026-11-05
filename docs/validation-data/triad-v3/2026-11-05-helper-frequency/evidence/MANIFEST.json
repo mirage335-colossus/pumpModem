@@ -1,0 +1,213 @@
+{
+  "schema": "triad-helper-frequency-evidence-manifest-v1",
+  "readme": {
+    "path": "README.md",
+    "size_bytes": 13692,
+    "sha256": "b50df9742fd055a4c0cfa8c30fbb3dc13e39db0166795f876b7f8c8e43b27bdd"
+  },
+  "evidence_files": [
+    {
+      "path": "admission-calibration-generation.json",
+      "size_bytes": 523,
+      "sha256": "5bc42c8b4b703c3334edf7ff8b908f3fe31ad85eaa4c5f98e35d88f25c438a32"
+    },
+    {
+      "path": "am90-frequency-diagnostic-protocol.json",
+      "size_bytes": 12214,
+      "sha256": "9f0c2ce698c50b8bc2786887241b646c03e6e4c98513ba564ccc62f17a63b4ee"
+    },
+    {
+      "path": "am90-frequency-diagnostic-summary.json",
+      "size_bytes": 4243,
+      "sha256": "d51c5d1ba2403aa98c117997e08f20d76352bb935774736ac1c7b8c8d9d18e36"
+    },
+    {
+      "path": "am90-outputs-frozen-before-truth.json",
+      "size_bytes": 284,
+      "sha256": "3cf06f92aea89fff715392fb63ee73847fe8593474fe25dbd3b5a5edb75d2ff7"
+    },
+    {
+      "path": "audit.json",
+      "size_bytes": 7186,
+      "sha256": "fbd302730ea789b3ad0c12b461f7fc10b8c80f73ec580f8c109b349261f52807"
+    },
+    {
+      "path": "diagnostic-reception-protocol.json",
+      "size_bytes": 40208,
+      "sha256": "0ab8f282daef828f34f8a58c0560c959bb9b9ed0b82e89e815383c7a4baa8b12"
+    },
+    {
+      "path": "diagnostic-reception-rows.compact.json.gz",
+      "size_bytes": 17136,
+      "sha256": "a973176889044ca09ba903c3e3fa008b168ca8ab38e9d6d79d0ff3749c1f854b"
+    },
+    {
+      "path": "diagnostic-reception-schedule.json",
+      "size_bytes": 981,
+      "sha256": "0fd230cd080077fa7dc8c6b59e634553079f4febf8bd5182e37a88362d30a6c4"
+    },
+    {
+      "path": "diagnostic-reception-summary.json",
+      "size_bytes": 1643,
+      "sha256": "6de38f24748a535c55513eb1d822c6031d8dc129cf35a4c20f713df0c0743a38"
+    },
+    {
+      "path": "diagnostic-reception.log",
+      "size_bytes": 1643,
+      "sha256": "6de38f24748a535c55513eb1d822c6031d8dc129cf35a4c20f713df0c0743a38"
+    },
+    {
+      "path": "diagnostic-row-compaction.json",
+      "size_bytes": 1804,
+      "sha256": "bb5c05f8c1ec0dc0cb04ebafd85ec706f6148bd6168fdfcd02061b9666c26bd3"
+    },
+    {
+      "path": "frequency-calibration-generation.json",
+      "size_bytes": 461,
+      "sha256": "198c43e10daf409d2002d9e2cd99cb05c677095249a28803310d139cf3c9ddbb"
+    },
+    {
+      "path": "frequency-coverage-cutoff.json",
+      "size_bytes": 64501,
+      "sha256": "26e6169efecd11bc8372b3999c9bd96e85d0e255ce87db45fd1f911940ca8ae2"
+    },
+    {
+      "path": "frequency-coverage-protocol.json",
+      "size_bytes": 784,
+      "sha256": "eb7ffbaf78a3193f5be8d27a0317b0cd8d2635ac85188853152255bc59d3fa02"
+    },
+    {
+      "path": "frequency-cutoff-frozen-for-reception.json",
+      "size_bytes": 67641,
+      "sha256": "47590f12ddd6c3fe485ac2be41b1f5fbb1d184272a85d55b9b484da2ef48f650"
+    },
+    {
+      "path": "independent-reception-protocol.json",
+      "size_bytes": 93388,
+      "sha256": "aff6c5d0e4d08b51862c20075de8f8c5439d929ce9ddf977484b15b948d0679d"
+    },
+    {
+      "path": "independent-reception-rows.compact.json.gz",
+      "size_bytes": 749008,
+      "sha256": "661867496a259c41bdfac9e40484403fe437cdfd9163ceda7543e568172ec2c1"
+    },
+    {
+      "path": "independent-reception-summary.json",
+      "size_bytes": 35302,
+      "sha256": "1dc0193c81dbf4d288042dd908d55b2867c2e510591880b5915757a49f8b5f57"
+    },
+    {
+      "path": "native-am90-protocol.json",
+      "size_bytes": 8357,
+      "sha256": "b9c41923585a720b7ac43f0f7c98581a11eace6476e7c8c5f8566b5aab3954f9"
+    },
+    {
+      "path": "native-diagnostic-protocol.json",
+      "size_bytes": 5489,
+      "sha256": "47e04989840cc03f2daa6d7463642eac50e22b1c61c877f783c9082da0be6144"
+    },
+    {
+      "path": "native-independent-protocol.json",
+      "size_bytes": 45260,
+      "sha256": "07ce75810940d6357cd49e60f4d09f6e93ef0f83430be81f3476eef521b48c91"
+    },
+    {
+      "path": "post-study-identity-fix.json",
+      "size_bytes": 853,
+      "sha256": "3d20b46544f4edce8dd8e8992e6062817fca1532d784a16e58f5bcbd4cf87307"
+    },
+    {
+      "path": "qualification-environment.json",
+      "size_bytes": 4114,
+      "sha256": "ea69cf1d163558b06276db60f2f9a6c58fbffbe51c943bcf05d5a3e79a0b6d53"
+    },
+    {
+      "path": "raw-input-identities.json",
+      "size_bytes": 4942,
+      "sha256": "33c1378741920d03d9554cf3476b4d0dba598c60ce1eb07f419d673f037040a5"
+    },
+    {
+      "path": "recipes/am90_diagnostic.py",
+      "size_bytes": 7685,
+      "sha256": "1d7bdd74be92b41f80ded00ba04388a47cd836b05e37f8a6b506f68bac832dfa"
+    },
+    {
+      "path": "recipes/am90_score.py",
+      "size_bytes": 9003,
+      "sha256": "58403c6b519c51bad6a5a86436460a60d41598ef26317cc6099e53bf67b6482d"
+    },
+    {
+      "path": "recipes/audit_receipts.py",
+      "size_bytes": 10961,
+      "sha256": "e63cd4d2c0f1dd88ea1c7005a3eb1a56d2ac0582c50793f331255fbf4c278509"
+    },
+    {
+      "path": "recipes/calibrate.py",
+      "size_bytes": 5104,
+      "sha256": "cd8789b8d6fc2b35726bb2b424e29d9893d79a7c71f1af9fbe4338d732f31848"
+    },
+    {
+      "path": "recipes/cohort.py",
+      "size_bytes": 10571,
+      "sha256": "93fadf7fcedf03127dfd039eda326a47d640956c68d784ab942afcfe71ae1cd2"
+    },
+    {
+      "path": "recipes/diagnostic.py",
+      "size_bytes": 10204,
+      "sha256": "10339ad0db99b852a9ccbd6356fe4c0d844462212b7329b237b37a52a0cf741b"
+    },
+    {
+      "path": "row-compaction.json",
+      "size_bytes": 52357,
+      "sha256": "6c394ee170dd882c57353f48abe2e279e1d8cbd3ccd08ee4f673c22d518b9479"
+    },
+    {
+      "path": "source-identities.json",
+      "size_bytes": 2540,
+      "sha256": "ed2cf486f9f83056aaea0c36482ed81afb4ab0487d601d02ed0895f1de0832d4"
+    },
+    {
+      "path": "source-snapshot/tests/test_triad_dynamic_acquire.py",
+      "size_bytes": 21591,
+      "sha256": "127e9b645b7788f735a766933c6216efae45ac0f21102c06c6bb31f1e43cfb24"
+    },
+    {
+      "path": "source-snapshot/tests/test_triad_dynamic_frequency.py",
+      "size_bytes": 9323,
+      "sha256": "5efebc095dfc01d65759a17434362f669cf488c89d1cd794571a4d14969f36cb"
+    },
+    {
+      "path": "source-snapshot/tests/test_triad_dynamic_frequency_study.py",
+      "size_bytes": 8195,
+      "sha256": "d0e70d3cb0b8eace40fb65d165e23ecd13eb36785df147c124edb52536e4326f"
+    },
+    {
+      "path": "source-snapshot/tools/triad_dynamic_acquire.py",
+      "size_bytes": 37243,
+      "sha256": "57cb9b4b5c50b9b2b27c0d36ae83169ae643d2df9ffbe46661ec97dc9c9e4b48"
+    },
+    {
+      "path": "source-snapshot/tools/triad_dynamic_frequency.py",
+      "size_bytes": 21419,
+      "sha256": "4d6b48b3b39a558769e1d035b46fdf619252245a20be7a4702d12cf524fa9cec"
+    },
+    {
+      "path": "source-snapshot/tools/triad_dynamic_frequency_study.py",
+      "size_bytes": 17980,
+      "sha256": "e57a7610c9479d21bcc690d5dfdd5d84c91a5dd418165ef2256d75b10d8f1fee"
+    },
+    {
+      "path": "test-run-summary.json",
+      "size_bytes": 852,
+      "sha256": "7923345c1a529630045d00dab136d2adf9772b08505f5fa7af7d1b1dc2542926"
+    },
+    {
+      "path": "validation-generation.json",
+      "size_bytes": 512,
+      "sha256": "89845cae8cae089c2d93226aa1b05e4200f79dbaf51e8ffe7d7e386fbdf32409"
+    }
+  ],
+  "total_evidence_bytes": 1232743,
+  "max_regular_file_bytes": 749008,
+  "scope": "No I/Q, validity, templates, native binary or raw calibration-profile arrays embedded. Paired row profile grids/scores are the only row fields removed; raw source identities and removed-array paths are recorded."
+}

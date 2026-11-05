@@ -1,0 +1,22 @@
+[
+  {
+    "id": "diagnostic-00",
+    "phase": "signal",
+    "directory": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-helper-frequency/hf-free-ic7100/diagnostic-00",
+    "hashes": {
+      "input_sha256": "5a4a1f15eef3dcf4b17f22247e341a3d2c1e417bc6a9d9c1de3dcc1f99b56973",
+      "validity_sha256": "1a4d92bbd7d445650549999c919e17a103dfd18fb1874270f9474fa65ac6c2ab",
+      "manifest_sha256": "bfae07403f44dcd8a444b124daa4dec9ec7c161ac9b68925a6a1470f7f47e63c"
+    }
+  },
+  {
+    "id": "diagnostic-01",
+    "phase": "signal",
+    "directory": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-helper-frequency/hf-free-ic7100/diagnostic-01",
+    "hashes": {
+      "input_sha256": "c616e9991c3ecfcb84ae294c62f565489971f88651b1071958a74d3cd2a33f97",
+      "validity_sha256": "1a4d92bbd7d445650549999c919e17a103dfd18fb1874270f9474fa65ac6c2ab",
+      "manifest_sha256": "55a2fcdae5dad0757435549642717d2de5a534e7b0e5494e1c47b48f205f6dd5"
+    }
+  }
+]

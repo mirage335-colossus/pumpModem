@@ -1,0 +1,46 @@
+{
+  "schema": "triad-helper-frequency-compact-rows-v1",
+  "original_path": "local-evidence/triad-helper-frequency/diagnostic-reception/rows.json",
+  "original_sha256": "003a21258acaccd9c383fa756dd016fc320eb7937cc8792f3d8e9a5cd2c9b7c1",
+  "original_size_bytes": 932350,
+  "archived_path": "diagnostic-reception-rows.compact.json.gz",
+  "archived_sha256": "a973176889044ca09ba903c3e3fa008b168ca8ab38e9d6d79d0ff3749c1f854b",
+  "archived_size_bytes": 17136,
+  "uncompressed_compact_sha256": "9d9e6b4ecc43bb1d914368579db3be9c6f5263d22024690681df0c11c38ec733",
+  "uncompressed_compact_size_bytes": 74985,
+  "transform": "Preserve all trial rows and all non-profile fields; remove only each pilot_diagnostics.low/high grid_hz and profile_scores array. Raw source remains in local-evidence.",
+  "removed_arrays": [
+    {
+      "path": "/adaptive/0/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/0/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/0/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/0/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/1/frequency_assistance/pilot_diagnostics/low/grid_hz",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/1/frequency_assistance/pilot_diagnostics/low/profile_scores",
+      "array_length": 2899
+    },
+    {
+      "path": "/adaptive/1/frequency_assistance/pilot_diagnostics/high/grid_hz",
+      "array_length": 2895
+    },
+    {
+      "path": "/adaptive/1/frequency_assistance/pilot_diagnostics/high/profile_scores",
+      "array_length": 2895
+    }
+  ]
+}

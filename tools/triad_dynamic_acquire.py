@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 """Bounded-memory execution tiling of the existing dynamic acquisition bank.
 
-Every public Cartesian candidate is scored exactly once. A public timing guard
+Every selected Cartesian candidate is scored exactly once. A public timing guard
 first selects DATA-only reception when a continuous arrival grid cannot resolve
 the requested pilot/DATA phase relationship. This deterministic selection needs
 its own procedure calibration; it never consults received samples. All tiles use a common projection planned
 from the COMPLETE frequency/clock bank. Tile log means are converted back to
 weighted sums before combining H0, bit0 and bit1 separately. No candidate is
-pruned using its observed score, Helper result or evaluator truth.
+pruned using its DATA score or evaluator truth. ``TiledAcquisition`` defaults to
+the complete bank. ``HelperFrequencyAcquisition`` independently estimates a
+frequency subset for each capture, while retaining that complete bank's common
+projection and the independent pilot phase guard. Its entire adaptive procedure
+requires its own admission calibration.
 
 Preparation is amortized over every supplied trial batch before a tile is
 released. A subsequent ``score`` call prepares the tiles again. Keep independent
@@ -307,7 +311,8 @@ class TiledAcquisition:
             required_bands_hz=required, auxiliary_exclusion_hz=excluded,
             device=str(device), precision=precision, source_hashes=sources,
             template_sha256=hashlib.sha256(np.ascontiguousarray(self.templates).view(np.uint8)).hexdigest(),
-            mixture='Equal complete-Cartesian candidate prior under H0 and both bits; no pruning.',
+            mixture='Equal selected-Cartesian candidate prior under H0 and both bits; '
+                    'the complete bank is used when no per-trial subset is supplied.',
             projection_scope='One full-bank public projection shared by every tile; core is explicitly lossy.'
                 if projection == 'core' else 'One full-bank public envelope projection shared by every tile.',
             scope='Finite public timing/frequency/clock/epoch bank. No continuous-grid or operational admission guarantee.')
@@ -333,7 +338,16 @@ class TiledAcquisition:
             auxiliary_half_width_hz=self.auxiliary_half_width_hz, valid=valid,
             device=self.device, precision=self.precision, memory_limit_bytes=memory_budget)
 
-    def score(self, raw, valid=None, *, trial_batch_size=None, progress=None):
+    def score(self, raw, valid=None, *, trial_batch_size=None, progress=None,
+              selected_frequency_banks=None):
+        """Score full banks, or declared per-trial subsets with shared preparation.
+
+        A frequency tile is prepared once when at least one trial needs it.
+        Only those trials are scored. Subsets never change the public projection,
+        clock bank, phase guard or timing/epoch alternatives. The caller owns
+        calibration of any data-dependent subset rule; this method alone does
+        not grant calibrated admission to a reduced search.
+        """
         started = time.perf_counter()
         data = np.asarray(raw)
         if data.ndim == 1:
@@ -343,6 +357,28 @@ class TiledAcquisition:
                 not np.iscomplexobj(data)):
             raise ValueError('complex raw input needs [trials,public capture samples]')
         trials = data.shape[0]
+        if selected_frequency_banks is None:
+            selected_banks = [self.frequencies] * trials
+        else:
+            supplied_banks = tuple(selected_frequency_banks)
+            if len(supplied_banks) != trials:
+                raise ValueError('one selected frequency bank is required per trial')
+            selected_banks = []
+            for supplied in supplied_banks:
+                chosen = _bank(supplied, 'selected frequency bank')
+                if any(value not in self.frequencies for value in chosen):
+                    raise ValueError('selected frequencies must belong to the original public bank')
+                # A selection is a set; canonical public order makes execution
+                # and identities independent of caller ordering.
+                selected_banks.append(tuple(value for value in self.frequencies if value in chosen))
+        selected_sets = [set(bank) for bank in selected_banks]
+        per_frequency_candidates = len(self.selected_epochs)*len(self.arrivals)*len(self.clocks)
+        selected_counts = np.asarray([len(bank)*per_frequency_candidates for bank in selected_banks],
+                                     dtype=np.int64)
+        visited_counts = np.zeros(trials, np.int64)
+        selected_union = set().union(*selected_sets)
+        expected_tiles = (len(self.selected_epochs)*len(selected_union)*len(self.clocks)*
+                          math.ceil(len(self.arrivals)/self.tile_size))
         if trial_batch_size is None:
             trial_batch_size = trials
         if (not isinstance(trial_batch_size, int) or isinstance(trial_batch_size, bool) or
@@ -355,7 +391,8 @@ class TiledAcquisition:
         accumulator_bytes = len(self.coherences)*trials*3*8
         # Three evidence arrays allow accumulator, tile result and logaddexp
         # scratch; input/template borrowing is still reserved in total cost.
-        reserved = data.nbytes+self.templates.nbytes+valid.nbytes+3*accumulator_bytes
+        reserved = (data.nbytes+self.templates.nbytes+valid.nbytes+3*accumulator_bytes+
+                    selected_counts.nbytes+visited_counts.nbytes)
         tile_budget = self.memory_limit_bytes-reserved
         if tile_budget <= 0:
             raise MemoryError('raw/template/result inputs leave no memory for a tile workspace')
@@ -367,6 +404,9 @@ class TiledAcquisition:
         peak_owned = peak_preparation = 0
         cls_device = torch.device(self.device)
         for tile_index, tile in enumerate(self.tiles()):
+            active_trials = [index for index, bank in enumerate(selected_sets) if tile.frequency in bank]
+            if not active_trials:
+                continue
             mark = time.perf_counter()
             receiver = self._receiver(tile, valid, tile_budget)
             if cls_device.type == 'cuda':
@@ -382,8 +422,17 @@ class TiledAcquisition:
                 raise RuntimeError('tile receiver candidate count differs from public partition')
             tile_correlation = tile_state = tile_wall = 0.
             fallback = []
-            for first in range(0, trials, trial_batch_size):
-                stop = min(trials, first+trial_batch_size)
+            # Consecutive slices avoid copying a potentially large raw I/Q
+            # batch through NumPy advanced indexing. Nonconsecutive selected
+            # trials still share this prepared receiver workspace.
+            batches = []
+            for index in active_trials:
+                if (batches and index == batches[-1][1] and
+                        batches[-1][1]-batches[-1][0] < trial_batch_size):
+                    batches[-1][1] += 1
+                else:
+                    batches.append([index, index+1])
+            for first, stop in batches:
                 mark = time.perf_counter()
                 result = receiver.score(data[first:stop])
                 if cls_device.type == 'cuda':
@@ -407,6 +456,7 @@ class TiledAcquisition:
             peak_preparation = max(peak_preparation, int(work['preparation_peak_bytes_estimate']))
             receipt.append(dict(index=tile_index, epoch=tile.epoch, arrivals=tile.arrivals,
                 frequency_hz=tile.frequency, clock_ppm=tile.clock_ppm, candidates=tile.candidates,
+                trial_indices=active_trials, candidate_trial_evaluations=tile.candidates*len(active_trials),
                 projection_sha256=resolved, receiver_procedure_id=receiver.procedure_id,
                 preparation_seconds=prep_seconds, correlation_seconds=tile_correlation,
                 state_seconds=tile_state, score_wall_seconds=tile_wall,
@@ -416,26 +466,39 @@ class TiledAcquisition:
             if progress is not None:
                 progress(dict(receipt[-1]))
             candidate_count += tile.candidates
+            visited_counts[active_trials] += tile.candidates
             correlation += tile_correlation
             state += tile_state
             scoring_wall += tile_wall
             # Drop the workspace before constructing the next one. CUDA's
             # allocator may cache freed blocks; that is not a live second tile.
             del receiver, result
-        if candidate_count != self.candidates or len(receipt) != self.tile_count:
+        if (candidate_count != per_frequency_candidates*len(selected_union) or
+                len(receipt) != expected_tiles or not np.array_equal(visited_counts, selected_counts)):
             raise RuntimeError('tiled bank did not visit exactly the declared candidate count')
-        combined -= math.log(self.candidates)
+        combined -= np.log(selected_counts)[None, :, None]
         mixed = logsumexp(combined, axis=0)-math.log(len(self.coherences))
         validity_hash = hashlib.sha256(valid.tobytes()).hexdigest()
+        execution = dict(base=self.procedure_id, valid_sha256=validity_hash,
+                         resolved_projection_sha256=projection_hash)
+        # The unchanged full-bank procedure must not acquire a different
+        # identity merely because captures are scored in a larger batch.
+        # Explicit per-trial selection remains a realized execution detail;
+        # HelperFrequencyAcquisition supplies its stable outer policy ID.
+        if selected_frequency_banks is not None:
+            execution['selected_frequency_banks'] = selected_banks
         return dict(hypothesis_log_evidence=combined,
             model_bit_scores=combined[:, :, 1:]-combined[:, :, :1],
             bit_scores=mixed[:, 1:]-mixed[:, :1],
-            procedure_id=_digest(dict(base=self.procedure_id, valid_sha256=validity_hash,
-                                      resolved_projection_sha256=projection_hash)),
+            procedure_id=_digest(execution),
             policy=self.policy, tiles=receipt,
-            work=dict(trials=trials, samples=samples, candidates=self.candidates, tiles=self.tile_count,
+            work=dict(trials=trials, samples=samples, candidates=candidate_count, tiles=len(receipt),
+                original_candidates=self.candidates, original_tiles=self.tile_count,
+                candidates_per_trial=selected_counts.tolist(),
+                frequencies_per_trial=[len(bank) for bank in selected_banks],
+                selected_frequency_banks=selected_banks,
                 maximum_candidates_per_tile=min(len(self.arrivals), self.tile_size),
-                trial_batch_size=trial_batch_size, total_candidate_trial_evaluations=trials*self.candidates,
+                trial_batch_size=trial_batch_size, total_candidate_trial_evaluations=int(selected_counts.sum()),
                 input_template_result_reserved_bytes=reserved, per_tile_memory_budget=tile_budget,
                 peak_tile_owned_bytes_estimate=peak_owned,
                 peak_tile_preparation_bytes_estimate=peak_preparation,
@@ -449,3 +512,86 @@ class TiledAcquisition:
                 total_score_call_seconds=time.perf_counter()-started,
                 scope='Complete tiled score call includes every tile preparation and trial batch. '
                       'Native generation, input loading and object planning are separate.'))
+
+
+class HelperFrequencyAcquisition(TiledAcquisition):
+    """Independent Helper frequency selection followed by tiled DATA acquisition.
+
+    The stable outer ``procedure_id`` describes the complete selection, fallback
+    and phase-guard policy. The realized subset identity is returned separately
+    as ``execution_id``. Calibrate the entire procedure, including its full-bank
+    fallbacks, rather than reusing a gate from any individual selected bank.
+    Frequency inference never grants cross-frequency coherent phase authority.
+    """
+
+    def __init__(self, manifest, raw_templates, epoch_offsets, *, frequency_config=None, **kwargs):
+        from triad_dynamic_frequency import frequency_policy
+        super().__init__(manifest, raw_templates, epoch_offsets, **kwargs)
+        if frequency_config is not None and not isinstance(frequency_config, dict):
+            raise ValueError('frequency config must be a dictionary')
+        self.frequency_config = copy.deepcopy(frequency_config or {})
+        self.frequency_config.setdefault('data_frequency_aperture_seconds', self.block_seconds)
+        estimator_policy = frequency_policy(self.frequency_config)
+        if estimator_policy['data_frequency_aperture_seconds'] > self.block_seconds:
+            raise ValueError('frequency allowance aperture must not exceed the acquisition block duration')
+        self.acquisition_policy = self.policy
+        self.acquisition_procedure_id = self.procedure_id
+        self.policy = dict(schema='triad-helper-frequency-acquisition-v1',
+            acquisition=self.acquisition_policy, frequency=estimator_policy,
+            frequency_source_sha256=hashlib.sha256(
+                (Path(__file__).parent/'triad_dynamic_frequency.py').read_bytes()).hexdigest(),
+            frequency_phase_independent=True,
+            clock_policy='Preserve the complete public clock bank; frequency selection grants no clock estimate.',
+            projection_policy='Preserve the complete original frequency/clock bank projection for every capture.',
+            horizon_policy='A narrowed frequency region must cover the entire scored capture; '
+                           'expired regions revert to the complete bank.',
+            calibration_scope='Complete adaptive frequency selection, fallback and independent phase guard; '
+                              'no inherited gate or operational false-admission guarantee.')
+        self.procedure_id = _digest(dict(acquisition=self.acquisition_procedure_id, policy=self.policy))
+
+    def score(self, raw, valid=None, *, trial_batch_size=None, progress=None):
+        from triad_dynamic_frequency import estimate_dynamic_frequency
+        started = time.perf_counter()
+        data = np.asarray(raw)
+        if data.ndim == 1:
+            data = data[None, :]
+        samples = int(self.manifest['calendar']['capture_samples'])
+        if (data.ndim != 2 or data.shape[0] < 1 or data.shape[1] != samples or
+                not np.iscomplexobj(data)):
+            raise ValueError('complex raw input needs [trials,public capture samples]')
+        validity = np.ones(samples, bool) if valid is None else np.asarray(valid)
+        if validity.shape != (samples,) or not np.isin(validity, (0, 1)).all():
+            raise ValueError('public validity must be a binary raw-sample vector')
+        mark = time.perf_counter()
+        assistance = [estimate_dynamic_frequency(row, self.manifest, self.frequencies,
+            valid=validity, config=self.frequency_config) for row in data]
+        estimator_seconds = time.perf_counter()-mark
+        capture_end = (samples-1)/float(self.manifest['sample_rate_hz'])-float(
+            self.manifest['calendar']['capture_lead_seconds'])
+        for result in assistance:
+            if result.get('status') not in ('narrowed', 'fallback'):
+                raise ValueError('frequency estimator returned an unsupported status')
+            chosen = _bank(result['selected_frequencies'], 'estimated frequency bank')
+            if result['status'] == 'fallback' and set(chosen) != set(self.frequencies):
+                raise ValueError('frequency fallback must retain the complete original bank')
+            if result['status'] == 'narrowed':
+                horizon = result.get('applicable_horizon')
+                if horizon is None or not math.isfinite(horizon):
+                    raise ValueError('narrowed frequency estimate requires a finite applicability horizon')
+                if horizon+1e-12 < capture_end:
+                    result.update(status='fallback', reason='frequency_horizon_does_not_cover_capture',
+                        selected_frequencies=list(self.frequencies), selected_count=len(self.frequencies))
+        result = super().score(data, validity, trial_batch_size=trial_batch_size, progress=progress,
+                              selected_frequency_banks=[row['selected_frequencies'] for row in assistance])
+        result['execution_id'] = result['procedure_id']
+        result['procedure_id'] = _digest(dict(base=self.procedure_id,
+            valid_sha256=result['work']['validity_sha256'],
+            resolved_projection_sha256=result['work']['projection_sha256']))
+        result['frequency_assistance'] = assistance
+        result['phase_assistance'] = copy.deepcopy(self.timing_guard)
+        result['timing']['frequency_estimation_seconds'] = estimator_seconds
+        result['timing']['total_score_call_seconds'] = time.perf_counter()-started
+        result['timing']['scope'] = ('Complete adaptive call includes Helper frequency estimation, '
+            'selected tile preparation and all selected trial scoring. Native generation, '
+            'input loading and object planning are separate.')
+        return result

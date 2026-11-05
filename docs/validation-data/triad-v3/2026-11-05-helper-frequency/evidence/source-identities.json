@@ -1,0 +1,47 @@
+{
+  "schema": "triad-helper-frequency-source-identities-v1",
+  "measured_snapshot": [
+    {
+      "path": "source-snapshot/tests/test_triad_dynamic_acquire.py",
+      "size_bytes": 21591,
+      "sha256": "127e9b645b7788f735a766933c6216efae45ac0f21102c06c6bb31f1e43cfb24"
+    },
+    {
+      "path": "source-snapshot/tests/test_triad_dynamic_frequency.py",
+      "size_bytes": 9323,
+      "sha256": "5efebc095dfc01d65759a17434362f669cf488c89d1cd794571a4d14969f36cb"
+    },
+    {
+      "path": "source-snapshot/tests/test_triad_dynamic_frequency_study.py",
+      "size_bytes": 8195,
+      "sha256": "d0e70d3cb0b8eace40fb65d165e23ecd13eb36785df147c124edb52536e4326f"
+    },
+    {
+      "path": "source-snapshot/tools/triad_dynamic_acquire.py",
+      "size_bytes": 37243,
+      "sha256": "57cb9b4b5c50b9b2b27c0d36ae83169ae643d2df9ffbe46661ec97dc9c9e4b48"
+    },
+    {
+      "path": "source-snapshot/tools/triad_dynamic_frequency.py",
+      "size_bytes": 21419,
+      "sha256": "4d6b48b3b39a558769e1d035b46fdf619252245a20be7a4702d12cf524fa9cec"
+    },
+    {
+      "path": "source-snapshot/tools/triad_dynamic_frequency_study.py",
+      "size_bytes": 17980,
+      "sha256": "e57a7610c9479d21bcc690d5dfdd5d84c91a5dd418165ef2256d75b10d8f1fee"
+    }
+  ],
+  "current_after_study": {
+    "tools/triad_dynamic_frequency.py": "4d6b48b3b39a558769e1d035b46fdf619252245a20be7a4702d12cf524fa9cec",
+    "tools/triad_dynamic_acquire.py": "b59cdf426753eabdab7583024ff9b2f94128311d24d8e1e67cb0466b75098002",
+    "tools/triad_dynamic_frequency_study.py": "e57a7610c9479d21bcc690d5dfdd5d84c91a5dd418165ef2256d75b10d8f1fee",
+    "tests/test_triad_dynamic_frequency.py": "5efebc095dfc01d65759a17434362f669cf488c89d1cd794571a4d14969f36cb",
+    "tests/test_triad_dynamic_acquire.py": "8902e227837d2442cf15a791460a9ac0a011542768614d27ec33e28805c750ea",
+    "tests/test_triad_dynamic_frequency_study.py": "d0e70d3cb0b8eace40fb65d165e23ecd13eb36785df147c124edb52536e4326f"
+  },
+  "measurement_snapshot_acquire_sha256": "57cb9b4b5c50b9b2b27c0d36ae83169ae643d2df9ffbe46661ec97dc9c9e4b48",
+  "post_study_acquire_sha256": "b59cdf426753eabdab7583024ff9b2f94128311d24d8e1e67cb0466b75098002",
+  "post_study_note": "The focused post-study metadata fix changes default full-bank result identity and outer procedure hash only; post-study-identity-fix.json describes the narrow change and checks. Historical gate IDs remain bound to the measured snapshot and are not implicitly reusable under new procedure IDs.",
+  "git_base_revision": "fefa8ce0c081b66d4075624f72326fad1373966d"
+}

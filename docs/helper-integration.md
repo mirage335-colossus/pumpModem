@@ -26,6 +26,11 @@ Useful assistance can be frequency-only, relative clock/phase correction, or
 the complete buffered combination. Offer the information actually supported
 and retain ordinary search/recovery for unresolved quantities; do not require
 every optional capability to qualify before exposing any useful measurement.
+The isolated three-carrier stochastic receiver now has a
+[separate frequency-assistance adapter](triad-stochastic.md#frequency-assistance-survives-the-phase-fallback).
+It keeps pilot frequency selection active when the pilot-to-DATA phase guard
+falls back, with its own sampled qualification and explicit limits. This is
+separate from ordinary Robust integration.
 
 ## Transmission facts needed by a receiver
 

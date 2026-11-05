@@ -1,0 +1,1031 @@
+{
+  "schema": "triad-dynamic-helper-frequency-results-v1",
+  "protocol_sha256": "aff6c5d0e4d08b51862c20075de8f8c5439d929ce9ddf977484b15b948d0679d",
+  "procedure_ids": {
+    "adaptive": "b74362cffe69a74f72e7ab31e47dcd0f52e482980661fd7b35f1c56bd341075d",
+    "baseline": "bc5e425bcafa937d1cbd31e39ead85878f6d0ff6d8150d83c4162725e268ba8b"
+  },
+  "timing": {
+    "capture_loading_and_hashing_seconds": 0.48478485172381625,
+    "adaptive_planning_seconds": 0.036736831010784954,
+    "baseline_planning_seconds": 0.03055790002690628,
+    "adaptive_frequency_estimation_seconds": 88.12194090004778,
+    "adaptive_tile_preparation_seconds": 47.70974966842914,
+    "adaptive_candidate_scoring_seconds": 23.123771727608982,
+    "baseline_tile_preparation_seconds": 125.69099792046472,
+    "baseline_candidate_scoring_seconds": 164.79786639480153,
+    "adaptive_scoring_seconds": 159.24390349001624,
+    "baseline_scoring_seconds": 291.70252141699893,
+    "complete_wall_seconds": 453.09799680497963,
+    "scope": "Includes observation loading/hashing and complete receiver score calls; native capture creation was external."
+  },
+  "gates": {
+    "adaptive": {
+      "schema": "triad-dynamic-rank-gate-v1",
+      "procedure_id": "b74362cffe69a74f72e7ab31e47dcd0f52e482980661fd7b35f1c56bd341075d",
+      "condition_id": "helper-frequency-stochastic",
+      "count": 39,
+      "alpha": 0.05,
+      "scores": {
+        "static": [
+          -4.737302799172733,
+          -5.134166903857185,
+          -6.228206896453131,
+          -6.793571996284282,
+          -5.87891357256849,
+          -6.7695981183892275,
+          -4.370500386188017,
+          -6.391596560570736,
+          -7.523968725320806,
+          -6.263042306998251,
+          -6.57222699986738,
+          -5.269407777475505,
+          -5.0324726628868035,
+          -6.824461293154889,
+          -6.868793694032382,
+          -5.993450085428625,
+          -6.5228776004429765,
+          -6.0878342211862355,
+          -6.908365451537471,
+          -5.788321578296547,
+          -5.919182596718106,
+          -5.4366149146397085,
+          -7.096528361018407,
+          -4.097333901943049,
+          -5.963068358482059,
+          -6.434050170089373,
+          -6.010467196619282,
+          -5.314815981146911,
+          -6.261861327530087,
+          -6.49619977567292,
+          -6.122640284734707,
+          -6.075678313277199,
+          -6.60280578579409,
+          -6.887649084204472,
+          -6.5018439063192135,
+          -6.698625979550133,
+          -4.888575305163066,
+          -4.037564636457881,
+          -5.890937627828999
+        ],
+        "dynamic": [
+          -4.737302799172733,
+          -5.134166903857185,
+          -6.228206896453131,
+          -6.793571996284282,
+          -5.87891357256849,
+          -6.7695981183892275,
+          -4.370500386188017,
+          -6.391596560570736,
+          -7.523968725320806,
+          -6.263042306998251,
+          -6.57222699986738,
+          -5.269407777475505,
+          -5.0324726628868035,
+          -6.824461293154889,
+          -6.868793694032382,
+          -5.993450085428625,
+          -6.5228776004429765,
+          -6.0878342211862355,
+          -6.908365451537471,
+          -5.788321578296547,
+          -5.919182596718106,
+          -5.4366149146397085,
+          -7.096528361018407,
+          -4.097333901943049,
+          -5.963068358482059,
+          -6.434050170089373,
+          -6.010467196619282,
+          -5.314815981146911,
+          -6.261861327530087,
+          -6.49619977567292,
+          -6.122640284734707,
+          -6.075678313277199,
+          -6.60280578579409,
+          -6.887649084204472,
+          -6.5018439063192135,
+          -6.698625979550133,
+          -4.888575305163066,
+          -4.037564636457881,
+          -5.890937627828999
+        ]
+      },
+      "minimum_p": 0.025,
+      "rule": "(1 + count(calibration >= held-out score))/(n+1) <= alpha",
+      "scope": "Separate marginal per-arm, per-capture exchangeable rank tests; ties are conservative. Not simultaneous across arms or conditions, not a fixed-gate conditional false-alarm bound, and not an operational daily guarantee."
+    },
+    "baseline": {
+      "schema": "triad-dynamic-rank-gate-v1",
+      "procedure_id": "bc5e425bcafa937d1cbd31e39ead85878f6d0ff6d8150d83c4162725e268ba8b",
+      "condition_id": "helper-frequency-stochastic",
+      "count": 39,
+      "alpha": 0.05,
+      "scores": {
+        "static": [
+          -5.308125950065694,
+          -5.608100161808696,
+          -5.502897107349552,
+          -5.782166614572691,
+          -5.016580129181157,
+          -5.813496718062345,
+          -5.296042526295114,
+          -5.301849119525146,
+          -5.693496272421261,
+          -4.442443121116111,
+          -5.339793232458441,
+          -3.636530373659923,
+          -5.292601256244237,
+          -5.8634160931018675,
+          -6.0142785870832105,
+          -4.389785617544731,
+          -5.08378152323012,
+          -4.112046613677434,
+          -5.322162907099887,
+          -5.62877096469144,
+          -5.652131955384387,
+          -3.536784574026654,
+          -5.815282848749309,
+          -5.496086328662024,
+          -5.874483271051165,
+          -4.652792257539933,
+          -4.6731416538736195,
+          -1.090038335352361,
+          -5.514890798368508,
+          -6.058885425119634,
+          -5.301938352151659,
+          -5.510183688944688,
+          -5.850122616261289,
+          -5.48928136493846,
+          -5.849837359263505,
+          -5.203046835058579,
+          -5.874880228944792,
+          -5.4367894760982445,
+          -5.766514681585189
+        ],
+        "dynamic": [
+          -5.308125950065694,
+          -5.608100161808696,
+          -5.502897107349552,
+          -5.782166614572691,
+          -5.016580129181157,
+          -5.813496718062345,
+          -5.296042526295114,
+          -5.301849119525146,
+          -5.693496272421261,
+          -4.442443121116111,
+          -5.339793232458441,
+          -3.636530373659923,
+          -5.292601256244237,
+          -5.8634160931018675,
+          -6.0142785870832105,
+          -4.389785617544731,
+          -5.08378152323012,
+          -4.112046613677434,
+          -5.322162907099887,
+          -5.62877096469144,
+          -5.652131955384387,
+          -3.536784574026654,
+          -5.815282848749309,
+          -5.496086328662024,
+          -5.874483271051165,
+          -4.652792257539933,
+          -4.6731416538736195,
+          -1.090038335352361,
+          -5.514890798368508,
+          -6.058885425119634,
+          -5.301938352151659,
+          -5.510183688944688,
+          -5.850122616261289,
+          -5.48928136493846,
+          -5.849837359263505,
+          -5.203046835058579,
+          -5.874880228944792,
+          -5.4367894760982445,
+          -5.766514681585189
+        ]
+      },
+      "minimum_p": 0.025,
+      "rule": "(1 + count(calibration >= held-out score))/(n+1) <= alpha",
+      "scope": "Separate marginal per-arm, per-capture exchangeable rank tests; ties are conservative. Not simultaneous across arms or conditions, not a fixed-gate conditional false-alarm bound, and not an operational daily guarantee."
+    }
+  },
+  "outcomes": {
+    "adaptive": {
+      "signal": {
+        "schema": "triad-helper-balanced-signal-statistics-v1",
+        "counts": {
+          "correct_admitted": 25,
+          "wrong_admitted": 0,
+          "missed": 7,
+          "raw_bit_errors": 4
+        },
+        "signal_trials": 32,
+        "per_bit": {
+          "0": {
+            "trials": 16,
+            "counts": {
+              "correct_admitted": 12,
+              "wrong_admitted": 0,
+              "missed": 4,
+              "raw_bit_errors": 3
+            },
+            "intervals": {
+              "correct_admitted": {
+                "count": 12,
+                "trials": 16,
+                "fraction": 0.75,
+                "confidence": 0.95,
+                "two_sided": [
+                  0.4762291801038728,
+                  0.9273379617471178
+                ],
+                "one_sided_upper": 0.9097475669695725,
+                "qualified": true,
+                "qualification": "Exact binomial interval conditional on independent representative within-stratum draws and the frozen gate."
+              },
+              "wrong_admitted": {
+                "count": 0,
+                "trials": 16,
+                "fraction": 0.0,
+                "confidence": 0.95,
+                "two_sided": [
+                  0.0,
+                  0.2059072142078227
+                ],
+                "one_sided_upper": 0.1707497229824809,
+                "qualified": true,
+                "qualification": "Exact binomial interval conditional on independent representative within-stratum draws and the frozen gate."
+              },
+              "missed": {
+                "count": 4,
+                "trials": 16,
+                "fraction": 0.25,
+                "confidence": 0.95,
+                "two_sided": [
+                  0.0726620382528822,
+                  0.5237708198961273
+                ],
+                "one_sided_upper": 0.4843964210936691,
+                "qualified": true,
+                "qualification": "Exact binomial interval conditional on independent representative within-stratum draws and the frozen gate."
+              },
+              "raw_bit_errors": {
+                "count": 3,
+                "trials": 16,
+                "fraction": 0.1875,
+                "confidence": 0.95,
+                "two_sided": [
+                  0.0404737339059459,
+                  0.4564565462316117
+                ],
+                "one_sided_upper": 0.4165722807061528,
+                "qualified": true,
+                "qualification": "Exact binomial interval conditional on independent representative within-stratum draws and the frozen gate."
+              }
+            }
+          },
+          "1": {
+            "trials": 16,
+            "counts": {
+              "correct_admitted": 13,
+              "wrong_admitted": 0,
+              "missed": 3,
+              "raw_bit_errors": 1
+            },
+            "intervals": {
+              "correct_admitted": {
+                "count": 13,
+                "trials": 16,
+                "fraction": 0.8125,
+                "confidence": 0.95,
+                "two_sided": [
+                  0.5435434537683883,
+                  0.9595262660940541
+                ],
+                "one_sided_upper": 0.9468540155173362,
+                "qualified": true,
+                "qualification": "Exact binomial interval conditional on independent representative within-stratum draws and the frozen gate."
+              },
+              "wrong_admitted": {
+                "count": 0,
+                "trials": 16,
+                "fraction": 0.0,
+                "confidence": 0.95,
+                "two_sided": [
+                  0.0,
+                  0.2059072142078227
+                ],
+                "one_sided_upper": 0.1707497229824809,
+                "qualified": true,
+                "qualification": "Exact binomial interval conditional on independent representative within-stratum draws and the frozen gate."
+              },
+              "missed": {
+                "count": 3,
+                "trials": 16,
+                "fraction": 0.1875,
+                "confidence": 0.95,
+                "two_sided": [
+                  0.0404737339059459,
+                  0.4564565462316117
+                ],
+                "one_sided_upper": 0.4165722807061528,
+                "qualified": true,
+                "qualification": "Exact binomial interval conditional on independent representative within-stratum draws and the frozen gate."
+              },
+              "raw_bit_errors": {
+                "count": 1,
+                "trials": 16,
+                "fraction": 0.0625,
+                "confidence": 0.95,
+                "two_sided": [
+                  0.0015811117227658884,
+                  0.3023207384345319
+                ],
+                "one_sided_upper": 0.2639573972885685,
+                "qualified": true,
+                "qualification": "Exact binomial interval conditional on independent representative within-stratum draws and the frozen gate."
+              }
+            }
+          }
+        },
+        "balanced_population": {
+          "correct_admitted": {
+            "confidence": 0.95,
+            "weights": [
+              0.5,
+              0.5
+            ],
+            "fraction": 0.78125,
+            "two_sided": [
+              0.47462367646560877,
+              0.9548711397642264
+            ],
+            "one_sided_upper": 0.9434321139205859,
+            "component_confidence": 0.975,
+            "component_bounds": [
+              {
+                "count": 12,
+                "trials": 16,
+                "fraction": 0.75,
+                "confidence": 0.975,
+                "two_sided": [
+                  0.4414264686716845,
+                  0.9409055026190956
+                ],
+                "one_sided_upper": 0.9273379617471178,
+                "qualified": true,
+                "qualification": "Exact binomial interval conditional on independent representative within-stratum draws and the frozen gate."
+              },
+              {
+                "count": 13,
+                "trials": 16,
+                "fraction": 0.8125,
+                "confidence": 0.975,
+                "two_sided": [
+                  0.5078208842595331,
+                  0.9688367769093573
+                ],
+                "one_sided_upper": 0.9595262660940541,
+                "qualified": true,
+                "qualification": "Exact binomial interval conditional on independent representative within-stratum draws and the frozen gate."
+              }
+            ],
+            "qualified": true,
+            "method": "Average of per-bit Bonferroni Clopper-Pearson bounds; fixed equal population weights.",
+            "qualification": "Conditional on independent representative within-bit draws and the frozen gate."
+          },
+          "wrong_admitted": {
+            "confidence": 0.95,
+            "weights": [
+              0.5,
+              0.5
+            ],
+            "fraction": 0.0,
+            "two_sided": [
+              0.0,
+              0.2395741431463415
+            ],
+            "one_sided_upper": 0.2059072142078227,
+            "component_confidence": 0.975,
+            "component_bounds": [
+              {
+                "count": 0,
+                "trials": 16,
+                "fraction": 0.0,
+                "confidence": 0.975,
+                "two_sided": [
+                  0.0,
+                  0.2395741431463415
+                ],
+                "one_sided_upper": 0.2059072142078227,
+                "qualified": true,
+                "qualification": "Exact binomial interval conditional on independent representative within-stratum draws and the frozen gate."
+              },
+              {
+                "count": 0,
+                "trials": 16,
+                "fraction": 0.0,
+                "confidence": 0.975,
+                "two_sided": [
+                  0.0,
+                  0.2395741431463415
+                ],
+                "one_sided_upper": 0.2059072142078227,
+                "qualified": true,
+                "qualification": "Exact binomial interval conditional on independent representative within-stratum draws and the frozen gate."
+              }
+            ],
+            "qualified": true,
+            "method": "Average of per-bit Bonferroni Clopper-Pearson bounds; fixed equal population weights.",
+            "qualification": "Conditional on independent representative within-bit draws and the frozen gate."
+          },
+          "missed": {
+            "confidence": 0.95,
+            "weights": [
+              0.5,
+              0.5
+            ],
+            "fraction": 0.21875,
+            "two_sided": [
+              0.04512886023577366,
+              0.5253763235343915
+            ],
+            "one_sided_upper": 0.4901136830638695,
+            "component_confidence": 0.975,
+            "component_bounds": [
+              {
+                "count": 4,
+                "trials": 16,
+                "fraction": 0.25,
+                "confidence": 0.975,
+                "two_sided": [
+                  0.059094497380904554,
+                  0.5585735313283158
+                ],
+                "one_sided_upper": 0.5237708198961273,
+                "qualified": true,
+                "qualification": "Exact binomial interval conditional on independent representative within-stratum draws and the frozen gate."
+              },
+              {
+                "count": 3,
+                "trials": 16,
+                "fraction": 0.1875,
+                "confidence": 0.975,
+                "two_sided": [
+                  0.03116322309064276,
+                  0.4921791157404672
+                ],
+                "one_sided_upper": 0.4564565462316117,
+                "qualified": true,
+                "qualification": "Exact binomial interval conditional on independent representative within-stratum draws and the frozen gate."
+              }
+            ],
+            "qualified": true,
+            "method": "Average of per-bit Bonferroni Clopper-Pearson bounds; fixed equal population weights.",
+            "qualification": "Conditional on independent representative within-bit draws and the frozen gate."
+          },
+          "raw_bit_errors": {
+            "confidence": 0.95,
+            "weights": [
+              0.5,
+              0.5
+            ],
+            "fraction": 0.125,
+            "two_sided": [
+              0.015974544012424787,
+              0.41504099311603837
+            ],
+            "one_sided_upper": 0.3793886423330718,
+            "component_confidence": 0.975,
+            "component_bounds": [
+              {
+                "count": 3,
+                "trials": 16,
+                "fraction": 0.1875,
+                "confidence": 0.975,
+                "two_sided": [
+                  0.03116322309064276,
+                  0.4921791157404672
+                ],
+                "one_sided_upper": 0.4564565462316117,
+                "qualified": true,
+                "qualification": "Exact binomial interval conditional on independent representative within-stratum draws and the frozen gate."
+              },
+              {
+                "count": 1,
+                "trials": 16,
+                "fraction": 0.0625,
+                "confidence": 0.975,
+                "two_sided": [
+                  0.0007858649342068146,
+                  0.3379028704916095
+                ],
+                "one_sided_upper": 0.3023207384345319,
+                "qualified": true,
+                "qualification": "Exact binomial interval conditional on independent representative within-stratum draws and the frozen gate."
+              }
+            ],
+            "qualified": true,
+            "method": "Average of per-bit Bonferroni Clopper-Pearson bounds; fixed equal population weights.",
+            "qualification": "Conditional on independent representative within-bit draws and the frozen gate."
+          }
+        },
+        "pooled_observed_fractions": {
+          "correct_admitted": 0.78125,
+          "wrong_admitted": 0.0,
+          "missed": 0.21875,
+          "raw_bit_errors": 0.125
+        },
+        "uncertainty_scope": "Fixed source-bit strata; balanced-population weights are .5 each. Pooled fractions are descriptive only, with no pooled iid-binomial interval. Coverage is per named category, not simultaneous across categories or receiver arms."
+      },
+      "null": {
+        "false_admitted": 2,
+        "rejected_null": 30,
+        "trials": 32,
+        "uncertainty": {
+          "count": 2,
+          "trials": 32,
+          "fraction": 0.0625,
+          "confidence": 0.95,
+          "two_sided": [
+            0.007660736346456389,
+            0.20806942989500743
+          ],
+          "one_sided_upper": 0.18394346817692872,
+          "qualified": true,
+          "qualification": "Exact binomial interval conditional on independent representative within-stratum draws and the frozen gate."
+        }
+      },
+      "uncertainty_scope": "Conditional held-out uncertainty assumes independent representative seeds within fixed source-bit strata and the frozen gate. Bounds are per metric, not simultaneous."
+    },
+    "baseline": {
+      "signal": {
+        "schema": "triad-helper-balanced-signal-statistics-v1",
+        "counts": {
+          "correct_admitted": 24,
+          "wrong_admitted": 1,
+          "missed": 7,
+          "raw_bit_errors": 4
+        },
+        "signal_trials": 32,
+        "per_bit": {
+          "0": {
+            "trials": 16,
+            "counts": {
+              "correct_admitted": 12,
+              "wrong_admitted": 0,
+              "missed": 4,
+              "raw_bit_errors": 1
+            },
+            "intervals": {
+              "correct_admitted": {
+                "count": 12,
+                "trials": 16,
+                "fraction": 0.75,
+                "confidence": 0.95,
+                "two_sided": [
+                  0.4762291801038728,
+                  0.9273379617471178
+                ],
+                "one_sided_upper": 0.9097475669695725,
+                "qualified": true,
+                "qualification": "Exact binomial interval conditional on independent representative within-stratum draws and the frozen gate."
+              },
+              "wrong_admitted": {
+                "count": 0,
+                "trials": 16,
+                "fraction": 0.0,
+                "confidence": 0.95,
+                "two_sided": [
+                  0.0,
+                  0.2059072142078227
+                ],
+                "one_sided_upper": 0.1707497229824809,
+                "qualified": true,
+                "qualification": "Exact binomial interval conditional on independent representative within-stratum draws and the frozen gate."
+              },
+              "missed": {
+                "count": 4,
+                "trials": 16,
+                "fraction": 0.25,
+                "confidence": 0.95,
+                "two_sided": [
+                  0.0726620382528822,
+                  0.5237708198961273
+                ],
+                "one_sided_upper": 0.4843964210936691,
+                "qualified": true,
+                "qualification": "Exact binomial interval conditional on independent representative within-stratum draws and the frozen gate."
+              },
+              "raw_bit_errors": {
+                "count": 1,
+                "trials": 16,
+                "fraction": 0.0625,
+                "confidence": 0.95,
+                "two_sided": [
+                  0.0015811117227658884,
+                  0.3023207384345319
+                ],
+                "one_sided_upper": 0.2639573972885685,
+                "qualified": true,
+                "qualification": "Exact binomial interval conditional on independent representative within-stratum draws and the frozen gate."
+              }
+            }
+          },
+          "1": {
+            "trials": 16,
+            "counts": {
+              "correct_admitted": 12,
+              "wrong_admitted": 1,
+              "missed": 3,
+              "raw_bit_errors": 3
+            },
+            "intervals": {
+              "correct_admitted": {
+                "count": 12,
+                "trials": 16,
+                "fraction": 0.75,
+                "confidence": 0.95,
+                "two_sided": [
+                  0.4762291801038728,
+                  0.9273379617471178
+                ],
+                "one_sided_upper": 0.9097475669695725,
+                "qualified": true,
+                "qualification": "Exact binomial interval conditional on independent representative within-stratum draws and the frozen gate."
+              },
+              "wrong_admitted": {
+                "count": 1,
+                "trials": 16,
+                "fraction": 0.0625,
+                "confidence": 0.95,
+                "two_sided": [
+                  0.0015811117227658884,
+                  0.3023207384345319
+                ],
+                "one_sided_upper": 0.2639573972885685,
+                "qualified": true,
+                "qualification": "Exact binomial interval conditional on independent representative within-stratum draws and the frozen gate."
+              },
+              "missed": {
+                "count": 3,
+                "trials": 16,
+                "fraction": 0.1875,
+                "confidence": 0.95,
+                "two_sided": [
+                  0.0404737339059459,
+                  0.4564565462316117
+                ],
+                "one_sided_upper": 0.4165722807061528,
+                "qualified": true,
+                "qualification": "Exact binomial interval conditional on independent representative within-stratum draws and the frozen gate."
+              },
+              "raw_bit_errors": {
+                "count": 3,
+                "trials": 16,
+                "fraction": 0.1875,
+                "confidence": 0.95,
+                "two_sided": [
+                  0.0404737339059459,
+                  0.4564565462316117
+                ],
+                "one_sided_upper": 0.4165722807061528,
+                "qualified": true,
+                "qualification": "Exact binomial interval conditional on independent representative within-stratum draws and the frozen gate."
+              }
+            }
+          }
+        },
+        "balanced_population": {
+          "correct_admitted": {
+            "confidence": 0.95,
+            "weights": [
+              0.5,
+              0.5
+            ],
+            "fraction": 0.75,
+            "two_sided": [
+              0.4414264686716845,
+              0.9409055026190956
+            ],
+            "one_sided_upper": 0.9273379617471178,
+            "component_confidence": 0.975,
+            "component_bounds": [
+              {
+                "count": 12,
+                "trials": 16,
+                "fraction": 0.75,
+                "confidence": 0.975,
+                "two_sided": [
+                  0.4414264686716845,
+                  0.9409055026190956
+                ],
+                "one_sided_upper": 0.9273379617471178,
+                "qualified": true,
+                "qualification": "Exact binomial interval conditional on independent representative within-stratum draws and the frozen gate."
+              },
+              {
+                "count": 12,
+                "trials": 16,
+                "fraction": 0.75,
+                "confidence": 0.975,
+                "two_sided": [
+                  0.4414264686716845,
+                  0.9409055026190956
+                ],
+                "one_sided_upper": 0.9273379617471178,
+                "qualified": true,
+                "qualification": "Exact binomial interval conditional on independent representative within-stratum draws and the frozen gate."
+              }
+            ],
+            "qualified": true,
+            "method": "Average of per-bit Bonferroni Clopper-Pearson bounds; fixed equal population weights.",
+            "qualification": "Conditional on independent representative within-bit draws and the frozen gate."
+          },
+          "wrong_admitted": {
+            "confidence": 0.95,
+            "weights": [
+              0.5,
+              0.5
+            ],
+            "fraction": 0.03125,
+            "two_sided": [
+              0.0003929324671034073,
+              0.2887385068189755
+            ],
+            "one_sided_upper": 0.25411397632117727,
+            "component_confidence": 0.975,
+            "component_bounds": [
+              {
+                "count": 0,
+                "trials": 16,
+                "fraction": 0.0,
+                "confidence": 0.975,
+                "two_sided": [
+                  0.0,
+                  0.2395741431463415
+                ],
+                "one_sided_upper": 0.2059072142078227,
+                "qualified": true,
+                "qualification": "Exact binomial interval conditional on independent representative within-stratum draws and the frozen gate."
+              },
+              {
+                "count": 1,
+                "trials": 16,
+                "fraction": 0.0625,
+                "confidence": 0.975,
+                "two_sided": [
+                  0.0007858649342068146,
+                  0.3379028704916095
+                ],
+                "one_sided_upper": 0.3023207384345319,
+                "qualified": true,
+                "qualification": "Exact binomial interval conditional on independent representative within-stratum draws and the frozen gate."
+              }
+            ],
+            "qualified": true,
+            "method": "Average of per-bit Bonferroni Clopper-Pearson bounds; fixed equal population weights.",
+            "qualification": "Conditional on independent representative within-bit draws and the frozen gate."
+          },
+          "missed": {
+            "confidence": 0.95,
+            "weights": [
+              0.5,
+              0.5
+            ],
+            "fraction": 0.21875,
+            "two_sided": [
+              0.04512886023577366,
+              0.5253763235343915
+            ],
+            "one_sided_upper": 0.4901136830638695,
+            "component_confidence": 0.975,
+            "component_bounds": [
+              {
+                "count": 4,
+                "trials": 16,
+                "fraction": 0.25,
+                "confidence": 0.975,
+                "two_sided": [
+                  0.059094497380904554,
+                  0.5585735313283158
+                ],
+                "one_sided_upper": 0.5237708198961273,
+                "qualified": true,
+                "qualification": "Exact binomial interval conditional on independent representative within-stratum draws and the frozen gate."
+              },
+              {
+                "count": 3,
+                "trials": 16,
+                "fraction": 0.1875,
+                "confidence": 0.975,
+                "two_sided": [
+                  0.03116322309064276,
+                  0.4921791157404672
+                ],
+                "one_sided_upper": 0.4564565462316117,
+                "qualified": true,
+                "qualification": "Exact binomial interval conditional on independent representative within-stratum draws and the frozen gate."
+              }
+            ],
+            "qualified": true,
+            "method": "Average of per-bit Bonferroni Clopper-Pearson bounds; fixed equal population weights.",
+            "qualification": "Conditional on independent representative within-bit draws and the frozen gate."
+          },
+          "raw_bit_errors": {
+            "confidence": 0.95,
+            "weights": [
+              0.5,
+              0.5
+            ],
+            "fraction": 0.125,
+            "two_sided": [
+              0.015974544012424787,
+              0.41504099311603837
+            ],
+            "one_sided_upper": 0.3793886423330718,
+            "component_confidence": 0.975,
+            "component_bounds": [
+              {
+                "count": 1,
+                "trials": 16,
+                "fraction": 0.0625,
+                "confidence": 0.975,
+                "two_sided": [
+                  0.0007858649342068146,
+                  0.3379028704916095
+                ],
+                "one_sided_upper": 0.3023207384345319,
+                "qualified": true,
+                "qualification": "Exact binomial interval conditional on independent representative within-stratum draws and the frozen gate."
+              },
+              {
+                "count": 3,
+                "trials": 16,
+                "fraction": 0.1875,
+                "confidence": 0.975,
+                "two_sided": [
+                  0.03116322309064276,
+                  0.4921791157404672
+                ],
+                "one_sided_upper": 0.4564565462316117,
+                "qualified": true,
+                "qualification": "Exact binomial interval conditional on independent representative within-stratum draws and the frozen gate."
+              }
+            ],
+            "qualified": true,
+            "method": "Average of per-bit Bonferroni Clopper-Pearson bounds; fixed equal population weights.",
+            "qualification": "Conditional on independent representative within-bit draws and the frozen gate."
+          }
+        },
+        "pooled_observed_fractions": {
+          "correct_admitted": 0.75,
+          "wrong_admitted": 0.03125,
+          "missed": 0.21875,
+          "raw_bit_errors": 0.125
+        },
+        "uncertainty_scope": "Fixed source-bit strata; balanced-population weights are .5 each. Pooled fractions are descriptive only, with no pooled iid-binomial interval. Coverage is per named category, not simultaneous across categories or receiver arms."
+      },
+      "null": {
+        "false_admitted": 0,
+        "rejected_null": 32,
+        "trials": 32,
+        "uncertainty": {
+          "count": 0,
+          "trials": 32,
+          "fraction": 0.0,
+          "confidence": 0.95,
+          "two_sided": [
+            0.0,
+            0.10888116067935288
+          ],
+          "one_sided_upper": 0.08936819898626475,
+          "qualified": true,
+          "qualification": "Exact binomial interval conditional on independent representative within-stratum draws and the frozen gate."
+        }
+      },
+      "uncertainty_scope": "Conditional held-out uncertainty assumes independent representative seeds within fixed source-bit strata and the frozen gate. Bounds are per metric, not simultaneous."
+    }
+  },
+  "paired_comparison": {
+    "scope": "Same captures; independent gates; descriptive outcomes only.",
+    "adaptive_vs_baseline": {
+      "correct / correct": 24,
+      "miss / miss": 7,
+      "correct / wrong": 1,
+      "reject-null / reject-null": 30,
+      "false / reject-null": 2
+    }
+  },
+  "admission_status": "empirical calibration gate applied",
+  "no_helper_narrowing": 0,
+  "candidate_work": {
+    "original_per_trial": 365,
+    "selected_per_trial": [
+      10,
+      10,
+      10,
+      11,
+      11,
+      11,
+      10,
+      11,
+      10,
+      11,
+      10,
+      11,
+      11,
+      11,
+      11,
+      11,
+      22,
+      11,
+      10,
+      11,
+      11,
+      11,
+      10,
+      11,
+      10,
+      11,
+      10,
+      10,
+      11,
+      11,
+      10,
+      10,
+      11,
+      10,
+      11,
+      11,
+      11,
+      10,
+      11,
+      10,
+      11,
+      11,
+      11,
+      10,
+      11,
+      20,
+      10,
+      10,
+      11,
+      11,
+      10,
+      11,
+      10,
+      10,
+      11,
+      11,
+      11,
+      11,
+      10,
+      11,
+      11,
+      11,
+      11,
+      11,
+      11,
+      10,
+      10,
+      11,
+      10,
+      10,
+      10,
+      11,
+      11,
+      11,
+      11,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      11,
+      11,
+      11,
+      11,
+      10,
+      11,
+      11,
+      11,
+      10,
+      10,
+      11,
+      10,
+      11,
+      11,
+      10,
+      11,
+      10,
+      11,
+      11,
+      11,
+      11,
+      10
+    ],
+    "total_candidate_trial_evaluations": 1112
+  }
+}

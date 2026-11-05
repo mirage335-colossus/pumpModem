@@ -1,0 +1,166 @@
+{
+  "build": {
+    "cmake_cache_sha256": "f17b0762cdeea06073d224123968e496dd23f82ebfdec6abb504ab871c9cc453",
+    "ninja_file_sha256": "33aa35cbfc91b7a4b8df5c8727f6d25c715f304c90cfae30f510f3eecfdfc404",
+    "stderr": "",
+    "stdout": "ninja: Entering directory `/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli'\nninja: no work to do.\n",
+    "up_to_date_command": [
+      "ninja",
+      "-C",
+      "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli",
+      "-n",
+      "triad_helper_export"
+    ],
+    "verification_scope": "Ninja dependency graph reports no pending work; binary and relevant native sources retained, not an independent reproducible-build proof."
+  },
+  "controls": {
+    "first_requested_indices": [
+      0,
+      1
+    ],
+    "maximum_invocation_wall_seconds": 30,
+    "maximum_native_workers": 2,
+    "template_trial": "diagnostic-00"
+  },
+  "environment": {
+    "cpu_count": 12,
+    "platform": "Linux-7.2.6+deb13-amd64-x86_64-with-glibc2.41"
+  },
+  "exporter_sha256": "c497ba10d1255f1e56a2976eb4c1be4854ba5f88b2891f0be15110a06ac22242",
+  "native_arguments": [
+    "--case",
+    "hf",
+    "--rate",
+    "36",
+    "--added-symbols",
+    "10",
+    "--seconds",
+    "16",
+    "--data-power-w",
+    "4",
+    "--helper-power-w",
+    "40",
+    "--cn0",
+    "8",
+    "--rf-hz",
+    "30000000",
+    "--base-oscillator",
+    "crystal",
+    "--shift-oscillator",
+    "ic-7100",
+    "--oscillator-effects",
+    "on",
+    "--channel-evolution",
+    "stochastic",
+    "--random-doppler-width-hz",
+    ".5",
+    "--selective-modulation-rate-hz",
+    ".05",
+    "--selective-perturbation",
+    "each-65",
+    "--spread-preset",
+    "hf-worst",
+    "--margin",
+    "3",
+    "--sample-rate",
+    "6000",
+    "--data-if",
+    "1725",
+    "--timing-policy",
+    "bounded",
+    "--arrival-seconds",
+    ".013",
+    "--helper",
+    "on",
+    "--helper-components",
+    "full",
+    "--fhss",
+    "off",
+    "--shaping",
+    "auto",
+    "--key-seed",
+    "2403",
+    "--epoch",
+    "1793850000"
+  ],
+  "schema": "triad-helper-stochastic-frequency-diagnostic-v1",
+  "scope": [
+    "Eight predeclared diagnostic seeds, not independent calibration or reception validation.",
+    "Actual native oscillator/channel/noise draws; no receiver or estimator is called.",
+    "Arrival .013 seconds is evaluator-known but must remain unknown to a receiver.",
+    "Physical4W/180dB/-164dBmHz C/N0 differs from the explicit8dB-Hz injected override.",
+    "Shared templates contain all13 keyed epochs and two bits, without channel or arrival truth.",
+    "All source, Helper auxiliary, random channel and oscillator effects remain enabled."
+  ],
+  "source_hashes": {
+    "CMakeLists.txt": "8380cd86a6d4f2becd7463456678ea64f4db2fd7c5b91184ef21fc38f6d3c671",
+    "include/datapump/crypto.hpp": "14e681ae6637b453b05fae4125b300e6bc27ec2ec4c2ee449fa3b2ab97214b74",
+    "include/datapump/helper_carrier.hpp": "767c51cc84d8fb120eb8bb69fc6895b13d0dca49047cf9fd4cde7f1476c2ab2c",
+    "include/datapump/pattern_pulse.hpp": "f3053ed41fa5cbca182ae4dcf5ff4796b030a3cb15527f617d7a765e7f989312",
+    "include/datapump/triad_helper_burst.hpp": "f41b30d9ea1ea1d2fa9ba800b33ac5823383e9d586a43de49e3ff9771b2d2fee",
+    "include/datapump/triad_modem_v3.hpp": "5db4cb739c50c62bab9568b92b7040801d64ad02d4a1c5f7e108df8163590495",
+    "include/datapump/triad_simulation.hpp": "55db1c03f95b6bd9b65bf5e3630a506aba40d1e3dbf473f025218454fbbee34d",
+    "local-evidence/triad-helper-frequency/diagnostic.py": "10339ad0db99b852a9ccbd6356fe4c0d844462212b7329b237b37a52a0cf741b",
+    "src/channel_perturbation.hpp": "fbbe7412d67e16955b858738656dd2466a7e07f21fe97031e5e5e6a0b8214cab",
+    "src/channel_spread.hpp": "bf98698d574869acb79645fa143af7ae563a2f542868e77c672d89d4fb16bdb0",
+    "src/crypto.cpp": "d89108ffba168898e45329fa9040c4155d6012711da1a6163b13dc97e9782224",
+    "src/helper_carrier.cpp": "c6ca4954455325fd957eab9288ba22de8098390dc3138c281bf6f55176a476bf",
+    "src/triad_gaussian_fading.hpp": "97f26b082d7d68123952bde7ccb9f97148c5977cf741cf6c15c76e77fcc20944",
+    "src/triad_modem_v3.cpp": "4bd1c24198b1c285bcc17f032ea94fd8327d4a1f22133039db63322b295b4293",
+    "src/triad_random_process.hpp": "3ea0ab1fcc2a64f58b53751d69d707d278b5fa531b3c126baa443fa8701e7741",
+    "src/triad_shaping.cpp": "8f2ebc70ff225933454c752d75917f29b0e2b0347a1aa3ac6c9fcf68df94b67c",
+    "src/triad_simulation_stream.cpp": "78e7380fb49fb88d347de496bdb82d16e5e7800e8c9faf4fd0091d4462fa1c06",
+    "src/tuning_presets.cpp": "31e1ac552bea10b24036f959485241532066e6aa343931c04a46a65e8734b293",
+    "tools/triad-helper-export.cpp": "543c128412e9d3b31d226a09cfaab7026f1dd504f92c6c3a8ab6d2478226766f"
+  },
+  "trial_schedule": [
+    {
+      "bit": 0,
+      "data": true,
+      "id": "diagnostic-00",
+      "seed": 1080000
+    },
+    {
+      "bit": 1,
+      "data": true,
+      "id": "diagnostic-01",
+      "seed": 1087919
+    },
+    {
+      "bit": 0,
+      "data": true,
+      "id": "diagnostic-02",
+      "seed": 1095838
+    },
+    {
+      "bit": 1,
+      "data": true,
+      "id": "diagnostic-03",
+      "seed": 1103757
+    },
+    {
+      "bit": 0,
+      "data": true,
+      "id": "diagnostic-04",
+      "seed": 1111676
+    },
+    {
+      "bit": 1,
+      "data": true,
+      "id": "diagnostic-05",
+      "seed": 1119595
+    },
+    {
+      "bit": 0,
+      "data": true,
+      "id": "diagnostic-06",
+      "seed": 1127514
+    },
+    {
+      "bit": 1,
+      "data": true,
+      "id": "diagnostic-07",
+      "seed": 1135433
+    }
+  ]
+}

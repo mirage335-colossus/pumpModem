@@ -1,0 +1,306 @@
+{
+  "capture_protocol_sha256": "b9c41923585a720b7ac43f0f7c98581a11eace6476e7c8c5f8566b5aab3954f9",
+  "generation_receipt_sha256": "27b9ba188076fc4526c14a967350518cb2b945635dd653ce0221a7594a8dee71",
+  "limits": [
+    "Paired16-capture diagnostic, not independent frequency-region calibration or receiver qualification.",
+    "Default and opt-in allowances are separate policies; no tuning after inspecting these outcomes.",
+    "Coverage refers to static direct-ray CFO and its nearest original bank coordinate, not instantaneous Doppler or phase.",
+    "Full-bank fallback counts separately; effective interval coverage credits the full public prior on fallback.",
+    "Small-sample Clopper-Pearson intervals describe this fixed diagnostic distribution, not arbitrary field channels."
+  ],
+  "original_bank_rule": "endpoint-inclusive +/-public deterministic CFO bound*margin; half-count ceil(bound/.5Hz)",
+  "policies": {
+    "default_modulation_allowance": {
+      "calibration": "Freeze and calibrate complete selection/fallback procedure, including one-pilot use, on independent matching captures.",
+      "clock_narrowing": false,
+      "competitive_score_drop": 18.0,
+      "data_frequency_aperture_seconds": 0.25,
+      "drift_bound_hz_per_second": 0.0,
+      "drift_scope": "Default zero drift matches the native exporter constant-frequency oscillator model; configure nonzero drift for other sources.",
+      "edge_guard_seconds": 0.02,
+      "future_horizon_seconds": null,
+      "future_scope": "Wiener average frequency over declared finite apertures, union allowance over future horizon; no instantaneous-frequency bound.",
+      "interval_kind": "engineering competitive regions plus declared allowances; not calibrated confidence",
+      "maximum_fft_samples": 8000000,
+      "maximum_fit_bins": 300000,
+      "maximum_profile_points": 16385,
+      "maximum_retained_fraction": 0.8,
+      "minimum_peak_background_ratio": 2.0,
+      "minimum_presence_score": 18.0,
+      "model_allowance_hz": 0.02,
+      "modulation_width_allowance": 1.0,
+      "observation_seconds": 36.0,
+      "oscillator_tail_probability": 0.001,
+      "phase_correction": false,
+      "pilot_use": "both",
+      "profile_batch_size": 128,
+      "profile_iterations": 28,
+      "ray_width_allowance": 3.0,
+      "require_data_free": false,
+      "schema": "triad-dynamic-frequency-policy-v1",
+      "statistic": "Hann periodogram working Whittle profile; independent nonnegative Gaussian ray powers and background per pilot"
+    },
+    "opt_in_zero_modulation_allowance": {
+      "calibration": "Freeze and calibrate complete selection/fallback procedure, including one-pilot use, on independent matching captures.",
+      "clock_narrowing": false,
+      "competitive_score_drop": 18.0,
+      "data_frequency_aperture_seconds": 0.25,
+      "drift_bound_hz_per_second": 0.0,
+      "drift_scope": "Default zero drift matches the native exporter constant-frequency oscillator model; configure nonzero drift for other sources.",
+      "edge_guard_seconds": 0.02,
+      "future_horizon_seconds": null,
+      "future_scope": "Wiener average frequency over declared finite apertures, union allowance over future horizon; no instantaneous-frequency bound.",
+      "interval_kind": "engineering competitive regions plus declared allowances; not calibrated confidence",
+      "maximum_fft_samples": 8000000,
+      "maximum_fit_bins": 300000,
+      "maximum_profile_points": 16385,
+      "maximum_retained_fraction": 0.8,
+      "minimum_peak_background_ratio": 2.0,
+      "minimum_presence_score": 18.0,
+      "model_allowance_hz": 0.02,
+      "modulation_width_allowance": 0.0,
+      "observation_seconds": 36.0,
+      "oscillator_tail_probability": 0.001,
+      "phase_correction": false,
+      "pilot_use": "both",
+      "profile_batch_size": 128,
+      "profile_iterations": 28,
+      "ray_width_allowance": 3.0,
+      "require_data_free": false,
+      "schema": "triad-dynamic-frequency-policy-v1",
+      "statistic": "Hann periodogram working Whittle profile; independent nonnegative Gaussian ray powers and background per pilot"
+    }
+  },
+  "read_order": "Write all32 complete frequency results, close profile file and freeze its hash before opening any evaluator truth.",
+  "schema": "triad-am90-paired-frequency-diagnostic-v1",
+  "source_hashes": {
+    "local-evidence/triad-helper-frequency/am90_score.py": "58403c6b519c51bad6a5a86436460a60d41598ef26317cc6099e53bf67b6482d",
+    "tools/triad_dynamic_frequency.py": "4d6b48b3b39a558769e1d035b46fdf619252245a20be7a4702d12cf524fa9cec"
+  },
+  "trial_inputs": [
+    {
+      "input_hashes": {
+        "manifest.json": "4f6ce7989ac37f34fa972e8f774e74998382589a7cae88057d0da8fb11f59abc",
+        "observation.c128": "dc9a45870087fec169ed7ac73a86083de1fe40aeffcc0d09733654f44533c11a",
+        "validity.u8": "1a4d92bbd7d445650549999c919e17a103dfd18fb1874270f9474fa65ac6c2ab"
+      },
+      "trial": {
+        "bit": 0,
+        "data": true,
+        "id": "bounded-00",
+        "seed": 1500000,
+        "timing_policy": "bounded"
+      }
+    },
+    {
+      "input_hashes": {
+        "manifest.json": "4815bf0199471a0807610695426db09e95319792e3d6ec396a848b3c6ee93dd7",
+        "observation.c128": "ccebab4c581cc03285c15a212464feef2a0bd0f3808dd5e0d36aea359be8bf8a",
+        "validity.u8": "1a4d92bbd7d445650549999c919e17a103dfd18fb1874270f9474fa65ac6c2ab"
+      },
+      "trial": {
+        "bit": 1,
+        "data": true,
+        "id": "bounded-01",
+        "seed": 1507919,
+        "timing_policy": "bounded"
+      }
+    },
+    {
+      "input_hashes": {
+        "manifest.json": "b0e5c3bade38c7dccc6b8f746c8cb848964737ec6d9954a6ebd6bfc4c37d3e2a",
+        "observation.c128": "e746d09ff700445c40f0dca73286cbe3da9fd9fb0e87570bdcf8724bbd48b02c",
+        "validity.u8": "1a4d92bbd7d445650549999c919e17a103dfd18fb1874270f9474fa65ac6c2ab"
+      },
+      "trial": {
+        "bit": 0,
+        "data": true,
+        "id": "bounded-02",
+        "seed": 1515838,
+        "timing_policy": "bounded"
+      }
+    },
+    {
+      "input_hashes": {
+        "manifest.json": "0e38f7362c4393e52a69e6d3b20e40ad12896f09af35f6d1a4f16f5695be416a",
+        "observation.c128": "4123068b3064cd28d84c44cf62dd7b13c3f50230e8c2e495d436a5ad9ee00cd6",
+        "validity.u8": "1a4d92bbd7d445650549999c919e17a103dfd18fb1874270f9474fa65ac6c2ab"
+      },
+      "trial": {
+        "bit": 1,
+        "data": true,
+        "id": "bounded-03",
+        "seed": 1523757,
+        "timing_policy": "bounded"
+      }
+    },
+    {
+      "input_hashes": {
+        "manifest.json": "83bc0748fc9d13f9899c20634867f0e6b0326b83560c945a211a07b57a731889",
+        "observation.c128": "022b0d61af5e285001d98b3874289ce0b6076f9d67878ec1f86a21c471bd8198",
+        "validity.u8": "1a4d92bbd7d445650549999c919e17a103dfd18fb1874270f9474fa65ac6c2ab"
+      },
+      "trial": {
+        "bit": 0,
+        "data": true,
+        "id": "bounded-04",
+        "seed": 1531676,
+        "timing_policy": "bounded"
+      }
+    },
+    {
+      "input_hashes": {
+        "manifest.json": "1baa70aed2c1038447877b5b8538ed80a7248460ad7dc8aa37d09495fa215261",
+        "observation.c128": "2284e74b9407e73867025156da3f2a96d6132e1f4ea7a22a0d056ce7a3e0cd02",
+        "validity.u8": "1a4d92bbd7d445650549999c919e17a103dfd18fb1874270f9474fa65ac6c2ab"
+      },
+      "trial": {
+        "bit": 1,
+        "data": true,
+        "id": "bounded-05",
+        "seed": 1539595,
+        "timing_policy": "bounded"
+      }
+    },
+    {
+      "input_hashes": {
+        "manifest.json": "9a3ba038028d088d6fdf708d683beffaa033047526518a16b1c30ae8448fe493",
+        "observation.c128": "149a14ff3783aa93bc8ea969dccad1644f633a4235047ae89a389e5b941277d1",
+        "validity.u8": "1a4d92bbd7d445650549999c919e17a103dfd18fb1874270f9474fa65ac6c2ab"
+      },
+      "trial": {
+        "bit": 0,
+        "data": true,
+        "id": "bounded-06",
+        "seed": 1547514,
+        "timing_policy": "bounded"
+      }
+    },
+    {
+      "input_hashes": {
+        "manifest.json": "c09265e09ad68a9cedaa7f080d8faf03c2d8ad5eca147d5f4dc60cbea3ed75b2",
+        "observation.c128": "6aba87615f83ec690ce37c602755b0ad9f0ec8b792976494d42f3aef98c492ed",
+        "validity.u8": "1a4d92bbd7d445650549999c919e17a103dfd18fb1874270f9474fa65ac6c2ab"
+      },
+      "trial": {
+        "bit": 1,
+        "data": true,
+        "id": "bounded-07",
+        "seed": 1555433,
+        "timing_policy": "bounded"
+      }
+    },
+    {
+      "input_hashes": {
+        "manifest.json": "1000938be097ed995df0261c18f7274097b1f81c742528d700100adb32d47a8a",
+        "observation.c128": "0d7c861c8b94beffce4d396323037b66217a70b8e51c6351b4570abbcfcefe06",
+        "validity.u8": "094aceda373345e9423b36bd5248eca2c23a94a7dbb1006e87ffc5b1822e580f"
+      },
+      "trial": {
+        "bit": 0,
+        "data": true,
+        "id": "broad-00",
+        "seed": 1563352,
+        "timing_policy": "broad"
+      }
+    },
+    {
+      "input_hashes": {
+        "manifest.json": "f78321b456ee62427c1530beca4a96a4f6ac32eb9b402aa28be9ab4f71bd686e",
+        "observation.c128": "58b88b48ab069f7a94ffb57e2794c955b3987ad30f2b7213a5029d554dd884ea",
+        "validity.u8": "094aceda373345e9423b36bd5248eca2c23a94a7dbb1006e87ffc5b1822e580f"
+      },
+      "trial": {
+        "bit": 1,
+        "data": true,
+        "id": "broad-01",
+        "seed": 1571271,
+        "timing_policy": "broad"
+      }
+    },
+    {
+      "input_hashes": {
+        "manifest.json": "8c8a5405b158750c2a556606cb1c9be15084a54f959385438f314a53a2398296",
+        "observation.c128": "5bceb05890ebc38c99416c5419ddbcdd631b56dc0dcbae575143ddf97f5504f4",
+        "validity.u8": "094aceda373345e9423b36bd5248eca2c23a94a7dbb1006e87ffc5b1822e580f"
+      },
+      "trial": {
+        "bit": 0,
+        "data": true,
+        "id": "broad-02",
+        "seed": 1579190,
+        "timing_policy": "broad"
+      }
+    },
+    {
+      "input_hashes": {
+        "manifest.json": "d2f1b01dd250ae5a038b429b3b946ecf42254d01642a1616da4ac96b6ccb24f6",
+        "observation.c128": "6c1979c9e375cc79e76a8247b69665b1b6c751664f659751efe02a9c077d3ce0",
+        "validity.u8": "094aceda373345e9423b36bd5248eca2c23a94a7dbb1006e87ffc5b1822e580f"
+      },
+      "trial": {
+        "bit": 1,
+        "data": true,
+        "id": "broad-03",
+        "seed": 1587109,
+        "timing_policy": "broad"
+      }
+    },
+    {
+      "input_hashes": {
+        "manifest.json": "a7b2e667a4e2a3a46fe076fe7b5eeaf00d47cbb9c8308a346a157129c9e2f637",
+        "observation.c128": "ce0a0776f1de851a092a110f695a646cdc7e8604f5ad414e0dbcbed4ef3e8168",
+        "validity.u8": "094aceda373345e9423b36bd5248eca2c23a94a7dbb1006e87ffc5b1822e580f"
+      },
+      "trial": {
+        "bit": 0,
+        "data": true,
+        "id": "broad-04",
+        "seed": 1595028,
+        "timing_policy": "broad"
+      }
+    },
+    {
+      "input_hashes": {
+        "manifest.json": "8b5161c2427ecdd9f3402940569d712cfa347d01ce5522eb4965b9002bf50ba0",
+        "observation.c128": "11f9ffb294708a7b12944e9b8c7e872b5c219af159cf83914ef5133ab515e5bb",
+        "validity.u8": "094aceda373345e9423b36bd5248eca2c23a94a7dbb1006e87ffc5b1822e580f"
+      },
+      "trial": {
+        "bit": 1,
+        "data": true,
+        "id": "broad-05",
+        "seed": 1602947,
+        "timing_policy": "broad"
+      }
+    },
+    {
+      "input_hashes": {
+        "manifest.json": "d47c9f2b7b687d08d8d4ef68095764cfb1f7a17f68cd9a7efb038b46256301d2",
+        "observation.c128": "192524a8ab4d66c8a0593e359a44e14e424777c21cb8db7bd413ade63e0c361e",
+        "validity.u8": "094aceda373345e9423b36bd5248eca2c23a94a7dbb1006e87ffc5b1822e580f"
+      },
+      "trial": {
+        "bit": 0,
+        "data": true,
+        "id": "broad-06",
+        "seed": 1610866,
+        "timing_policy": "broad"
+      }
+    },
+    {
+      "input_hashes": {
+        "manifest.json": "04c81e73c3025720cb8115144d5758d56e0ef3f44d9c494986c60fccd376aaee",
+        "observation.c128": "34cfc95403d69bb508eef818d26a3235452644e6c71bfb830811d112c957a00b",
+        "validity.u8": "094aceda373345e9423b36bd5248eca2c23a94a7dbb1006e87ffc5b1822e580f"
+      },
+      "trial": {
+        "bit": 1,
+        "data": true,
+        "id": "broad-07",
+        "seed": 1618785,
+        "timing_policy": "broad"
+      }
+    }
+  ]
+}
