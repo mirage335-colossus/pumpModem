@@ -1,0 +1,104 @@
+{
+  "schema": "triad-helper-long-duration-bound-extract-v1",
+  "scope": "Scalar known-waveform complex-AWGN presence reference; not sampled modem or Helper decoder performance.",
+  "source": {
+    "path": "local-evidence/triad-helper-extended/long-limits/result.json",
+    "sha256": "b6345aaffbbcfcfe7864be7341f37c156660540ff43b73164155cd8b088b781e",
+    "review_path": "local-evidence/triad-helper-extended/long-limits/REVIEW.md",
+    "review_sha256": "c3ce3a4b587957200f66c5e3da655113064bccbea9bbe10efe024031f3ec9d6c",
+    "calculation_source_sha256": "b132f0c2637bb9595dbac0ed6491d956fa88c2a9322db8a01d7f2f2bee15c483"
+  },
+  "assumptions": {
+    "data_cn0_db_hz": -60.0,
+    "complex_noise": "E[|n|^2]=N0",
+    "rho": "(C/N0)*T with linear C/N0 in Hz^-1",
+    "hypotheses": "one known fixed complex waveform, known phase/channel and alignment; fixed single-test threshold; no acquisition search or repeated-attempt multiplicity",
+    "statistic": "Z under H0 is N(0,1/2); under H1 is N(sqrt(rho),1/2); standardized mean is sqrt(2*rho)",
+    "probability": "P_D=Phi(sqrt(2*rho)-Phi^-1(1-alpha))"
+  },
+  "fixed_helper_lead": {
+    "schedule_seconds": 38.0,
+    "schedule": "95 x 0.4-second dwells: 90 observation dwells (36 seconds), then five detection dwells",
+    "evaluated_observation_seconds": 36.0,
+    "data_cn0_db_hz": -60.0,
+    "cases": [
+      {
+        "name": "fixed-EME-15kW-helper/40W-DATA",
+        "helper_cn0_db_hz": -34.25968732272281,
+        "helper_rho": 0.0135,
+        "helper_to_data_power_ratio_db": 25.74031267727719,
+        "ideal_presence_pd_alpha_1e-4": 0.0001892054974185925,
+        "ideal_presence_pd_alpha_0p01": 0.015307889283115134,
+        "mc_h0_trials": 1000000,
+        "mc_h1_trials": 1000000
+      },
+      {
+        "name": "fixed-HF-40W-helper/4W-DATA",
+        "helper_cn0_db_hz": -50.0,
+        "helper_rho": 0.00036,
+        "helper_to_data_power_ratio_db": 10.0,
+        "ideal_presence_pd_alpha_1e-4": 0.0001111683991396241,
+        "ideal_presence_pd_alpha_0p01": 0.010737854646386298,
+        "mc_h0_trials": 1000000,
+        "mc_h1_trials": 1000000
+      }
+    ]
+  },
+  "data_minus60_known_waveform_duration_points": [
+    {"days": 38.0, "seconds": 3283200.0, "rho": 3.2832, "ideal_presence_pd_alpha_1e-4": 0.12373473095673049, "ideal_presence_pd_alpha_0p01": 0.5933422134286486},
+    {"days": 75.32950443380174, "seconds": 6508469.18308047, "rho": 6.50846918308047, "target_pd": 0.9, "single_test_alpha": 0.01},
+    {"days": 144.7088011150754, "seconds": 12502840.416342515, "rho": 12.502840416342515, "target_pd": 0.9, "single_test_alpha": 0.0001},
+    {"days": 125.2753340521838, "seconds": 10823788.86210868, "rho": 10.823788862108678, "target_pd": 0.99, "single_test_alpha": 0.01},
+    {"days": 211.49554536499494, "seconds": 18273215.11953556, "rho": 18.27321511953556, "target_pd": 0.99, "single_test_alpha": 0.0001}
+  ],
+  "850_day_18khz_raw_export_reference": {
+    "sample_rate_hz": 18000,
+    "duration_seconds": 73440000,
+    "sample_count": 1321920000000,
+    "bytes_per_complex_sample_plus_validity": 17,
+    "raw_bytes": 22472640000000,
+    "raw_decimal_tb": 22.47264,
+    "fixture_budget_bytes": 2147483648,
+    "budget_multiple": 10464.638471603394,
+    "interpretation": "Resource arithmetic for raw full-rate export; standalone v3 streaming statistics avoid this file. Fixed-rate Helper export fixture limit is 3600 seconds/2 GiB."
+  },
+  "38_day_chunk_equivalence_scope": {
+    "test_source": "tests/test_triad_v3_channel.cpp",
+    "test_function": "multiweek_chunk_equivalence_checks",
+    "test_source_sha256": "3ad4867c519b657162f59d8a91e2abef6efa0d3750d4daf51b3745c390b5d425",
+    "requested_bit_seconds": 3283200,
+    "effective_sample_rate_hz": "1/64",
+    "channel": "Sub9-best: 0.001 Hz Doppler, 0.005 ms delay; Each65; one-day ray-coherence time",
+    "comparison": "full stream including tile rounding/source/channel tail; 257-sample vs 4096-sample chunks require exact I/Q and validity-mask equality",
+    "resource_assertions": "reported channel working set below 1 MiB and observation below 100000 samples",
+    "scope_exclusions": ["noise", "oscillator error", "Helper transmitter/acquisition", "DATA receiver trial", "checkpoint/restart", "operational multi-day session"]
+  },
+  "ideal_helper_frequency_search_reference": {
+    "helper_cn0_db_hz": 30,
+    "helper_observation_seconds": 36,
+    "single_known_complex_tone_frequency_sigma_crlb_hz": 0.00005707448556124998,
+    "asymptotic_normal_95pct_halfwidth_hz": 0.0001118639361362013,
+    "interpretation": "Known amplitude, unknown phase, no Helper line split or channel fitting; asymptotic CRLB reference, not measured estimator coverage.",
+    "850_day_coherent_grid_step_hz_at_0p22db_rectangular_bound": 3.4041394335511984e-09,
+    "crlb_interval_grid_cells_approx": 65723.29975874098
+  },
+  "standalone_850_day_followup": {
+    "source": "docs/validation-data/triad-v3/2026-11-03-broad/long_followup/README.md",
+    "source_sha256": "b203b77d43b533ac786bf4194641267372d348d4dfb36840ad4d113e275854d5",
+    "total_jobs": 136,
+    "signal_observations": 128,
+    "null_controls": 4,
+    "wrong_key_controls": 4,
+    "helper_assisted": false,
+    "calendar_was_full_850_days": true,
+    "scope": "Standalone v3 sampled receiver; not Helper-assisted operation"
+  },
+  "correction_provenance": {
+    "first_calculation": "days were incorrectly treated as seconds and rejected",
+    "original_unit_error_result_file": "local-evidence/triad-helper-extended/long-limits/original-unit-error/first-result.json",
+    "original_unit_error_file_is": "a reproduction of the failed calculation, not the untouched original output",
+    "original_agent_reported_output_sha256": "8ab91e69947a2aa5840c8da3503345dd50151e0b693bd3c6f0092d4181995dd6",
+    "corrected_calculation": "explicit day-to-second conversion; checked against rho=(C/N0)*T and the scalar normal-tail equation",
+    "receiver_or_waveform_run": false
+  }
+}

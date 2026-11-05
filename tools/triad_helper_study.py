@@ -18,7 +18,8 @@ import time
 import numpy as np
 
 from triad_helper_assistance import estimate_frequency, tone_offsets
-from triad_helper_receiver import HelperDataReceiver, data_fir_taps
+from triad_helper_receiver import (HelperDataReceiver, data_fir_taps,
+                                   rate_aware_frontend)
 
 
 def digest(path):
@@ -95,6 +96,44 @@ def _bank_subset(bank, intervals):
     return bank[keep]
 
 
+def _helper_bands_relative_to_data(manifest, audio_clock_bound_ppm, channel_scale, cfo_bound_hz):
+    """Public Helper line intervals relative to the zero-centered DATA frame.
+
+    The estimator scores raw composite samples before the DATA decimator. The
+    subsequent DATA filter must leave the public pilot/auxiliary envelopes in
+    its stopband. These intervals are necessary planning guards; finite pilot
+    ramps, gated harmonics, channel filter tails, and DATA skirts remain.
+
+    Source audio-clock ratio a already includes RX clock error. In the native
+    DATA frame a Helper line is (tone-DATA_IF)*a + offset/RX_scale + CFO.
+    The independent inverse-RX factor applies only to physical path/AM lines;
+    multiplying the carrier center by it again can move a guard outward.
+    """
+    helper = manifest['helper_plan']
+    channel = manifest['channel']
+    offsets = tone_offsets(channel['spread_doppler_hz'], channel['selective_slow_depth'],
+        channel['selective_fast_depth'],
+        modulation_rate_hz=channel.get('selective_modulation_rate_hz'))
+    line_low = float(np.min(offsets)) * channel_scale
+    line_high = float(np.max(offsets)) * channel_scale
+    gated_allowance = 200. if bool(helper.get('pilot_dwell_gating', False)) else 0.
+    data_if = float(channel['nominal_conversion_if_hz'])
+    bands = []
+    for name, tone_hz, envelope_allowance in (
+            ('low-pilot', helper['low_hz'], gated_allowance),
+            ('high-pilot', helper['high_hz'], gated_allowance),
+            ('auxiliary', helper.get('auxiliary_hz', 950.), 200.)):
+        center = float(tone_hz) - data_if
+        audio_extent = abs(center) * float(audio_clock_bound_ppm) * 1e-6
+        # The nominal auxiliary/gate envelope is emitted on the source clock,
+        # so its explicit engineering allowance follows the same audio ratio.
+        envelope_extent = envelope_allowance * (1 + float(audio_clock_bound_ppm) * 1e-6)
+        allowance = float(cfo_bound_hz) + audio_extent + envelope_extent
+        bands.append([center + line_low - allowance,
+                      center + line_high + allowance])
+    return bands
+
+
 def _frontend_support(manifest, profile, clock_ppm_values, doppler_scale_values):
     """Reject a nominal public DATA envelope outside the actual FIR passband.
 
@@ -102,7 +141,7 @@ def _frontend_support(manifest, profile, clock_ppm_values, doppler_scale_values)
     that the declared nominal band, selected line offsets and acquisition bank
     fit the chosen frontend; it is not a compact-support or sensitivity bound.
     """
-    if profile not in ('legacy', 'wide'):
+    if profile not in ('legacy', 'wide', 'rate-aware'):
         raise ValueError('unknown DATA frontend profile')
     ch = manifest['channel']
     bandwidth = float(manifest['format']['occupied_bandwidth_hz'])
@@ -130,18 +169,37 @@ def _frontend_support(manifest, profile, clock_ppm_values, doppler_scale_values)
     half_source = bandwidth * .5 * source_scale
     line_edge = float(np.max(np.abs(offsets))) * channel_scale
     edge = half_source + line_edge + cfo
-    pass_edge = 330. if profile == 'legacy' else 400.
+    helper_bands = (_helper_bands_relative_to_data(manifest, pair_ppm, channel_scale, cfo)
+                    if profile == 'rate-aware' else [])
+    if profile == 'rate-aware':
+        frontend = rate_aware_frontend(int(manifest['sample_rate_hz']), edge,
+                                       rejected_bands_hz=helper_bands)
+        pass_edge = float(frontend['pass_edge_hz'])
+        stop_edge = float(frontend['stop_edge_hz'])
+        output_sample_rate = int(frontend['output_sample_rate'])
+        decimation = int(frontend['decimation'])
+    else:
+        pass_edge = 330. if profile == 'legacy' else 400.
+        stop_edge = 430. if profile == 'legacy' else 440.
+        output_sample_rate = 900
+        decimation = int(manifest['sample_rate_hz']) // output_sample_rate
     if edge > pass_edge:
         raise ValueError(
             f'unsupported DATA frontend geometry: public nominal band + channel lines + CFO '
             f'requires {edge:.6g} Hz, beyond {profile} pass edge {pass_edge:g} Hz; '
             'use a supported frontend/workload, not a sensitivity-failure classification')
-    return dict(profile=profile, pass_edge_hz=pass_edge,
+    return dict(profile=profile, pass_edge_hz=pass_edge, stop_edge_hz=stop_edge,
+                input_sample_rate_hz=int(manifest['sample_rate_hz']),
+                output_sample_rate_hz=output_sample_rate, decimation=decimation,
                 nominal_source_half_width_hz=bandwidth * .5,
                 maximum_source_clock_scale=source_scale,
                 maximum_channel_time_scale=channel_scale,
                 maximum_selected_line_offset_hz=float(np.max(np.abs(offsets))),
                 cfo_half_bound_hz=cfo, required_nominal_edge_hz=edge,
+                rejected_helper_bands_hz=helper_bands,
+                nearest_rejected_band_edge_hz=(frontend['nearest_rejected_band_edge_hz']
+                    if profile == 'rate-aware' else None),
+                helper_band_scope='Public Helper lines expanded by oscillator, channel-line and explicit envelope allowances; skirts remain.',
                 scope='Nominal source band and selected line/acquisition envelope only; finite spectral tails remain emitted.',
                 compact_spectral_support=False, receiver_sensitivity_qualification=False)
 
@@ -165,7 +223,10 @@ class HelperComparison:
             raise ValueError('physical RF retuning is not qualified in this comparison')
         # Public templates are independent of the selected channel/noise. Their
         # source geometry and fixed calibration must match exactly.
-        for key in ('format', 'key_seed', 'epoch', 'data_gain'):
+        # Templates contain raw samples at the capture clock. A matching
+        # PatternSource format alone does not make samples generated at
+        # different clocks interchangeable.
+        for key in ('format', 'rate', 'key_seed', 'epoch', 'data_gain'):
             if public_geometry(m)[key] != public_geometry(tm)[key]:
                 raise ValueError(f'template source mismatch: {key}')
         if not tm['templates']['enabled']:
@@ -199,8 +260,20 @@ class HelperComparison:
             doppler_hz=m['channel']['spread_doppler_hz'],
             source_half_bandwidth_hz=self.frontend_support['nominal_source_half_width_hz'],
             channel_line_half_width_hz=self.frontend_support['maximum_selected_line_offset_hz'],
-            reference_variance=m['power']['complex_noise_variance'] * float(np.sum(data_fir_taps(frontend_profile)**2)),
-            frequency_offsets=self.frequencies, lag_step=lag_step, precision=precision, device=device,
+            reference_variance=m['power']['complex_noise_variance'] * float(np.sum(
+                data_fir_taps(frontend_profile, sample_rate=m['sample_rate_hz'],
+                    output_sample_rate=self.frontend_support['output_sample_rate_hz'],
+                    pass_edge_hz=(self.frontend_support['pass_edge_hz']
+                        if frontend_profile == 'rate-aware' else None),
+                    stop_edge_hz=(self.frontend_support['stop_edge_hz']
+                        if frontend_profile == 'rate-aware' else None))**2)),
+            frequency_offsets=self.frequencies, sample_rate=m['sample_rate_hz'],
+            output_sample_rate=self.frontend_support['output_sample_rate_hz'],
+            pass_edge_hz=(self.frontend_support['pass_edge_hz']
+                if frontend_profile == 'rate-aware' else None),
+            stop_edge_hz=(self.frontend_support['stop_edge_hz']
+                if frontend_profile == 'rate-aware' else None),
+            lag_step=lag_step, precision=precision, device=device,
             fft_backend=fft_backend, frontend_profile=frontend_profile,
             clock_ppm_values=self.clock_ppm_values, doppler_scale_values=self.doppler_scale_values,
             frequency_batch_size=frequency_batch_size,
@@ -379,9 +452,10 @@ def main():
     p.add_argument('--device', default='cpu')
     p.add_argument('--precision', choices=('fp32', 'fp64'), default='fp32')
     p.add_argument('--fft-backend', choices=('legacy', 'batched'), default='legacy')
-    p.add_argument('--frontend-profile', choices=('legacy', 'wide'), default='legacy')
+    p.add_argument('--frontend-profile', choices=('legacy', 'wide', 'rate-aware'), default='legacy')
     p.add_argument('--clock-step-ppm', type=float, default=0.)
-    p.add_argument('--lag-step', type=int, default=1, help='positive 900-Hz timing stride; 4 reproduces the historical coarse grid')
+    p.add_argument('--lag-step', type=int, default=1,
+                   help='positive stride in selected receiver-output samples; 4 reproduces the historical coarse grid')
     p.add_argument('--doppler-scale-count', type=int, choices=(1, 3, 5, 7), default=1)
     p.add_argument('--frequency-batch-size', type=int, default=8)
     p.add_argument('--max-cached-hypotheses', type=int, default=1,

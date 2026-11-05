@@ -113,6 +113,16 @@ class StudyOrchestrationTests(unittest.TestCase):
         self.assertEqual(factory.call_args.kwargs['frontend_profile'], 'wide')
         self.assertEqual(factory.call_args.kwargs['fft_backend'], 'legacy')
         self.assertTrue(output.exists())
+        # Parsing the new profile is an independent workflow entry point. The
+        # rate-aware geometry itself is exercised by the constructor test.
+        rate_output = self.folder / 'rate-aware.json'
+        with patch.object(study, 'HelperComparison', return_value=fake) as rate_factory, \
+             patch.object(sys, 'argv', ['study', '--fixture', str(self.folder),
+                   '--output', str(rate_output), '--frontend-profile', 'rate-aware']), \
+             patch('builtins.print'):
+            study.main()
+        self.assertEqual(rate_factory.call_args.kwargs['frontend_profile'], 'rate-aware')
+        self.assertTrue(rate_output.exists())
 
     def test_cli_exposes_assisted_only_without_changing_default(self):
         output = self.folder / 'assisted-only.json'
@@ -367,6 +377,108 @@ class StudyOrchestrationTests(unittest.TestCase):
                                375.0000000375 + 12.0000000006 + .5)
         self.assertFalse(comparison.frontend_support['compact_spectral_support'])
         self.assertFalse(comparison.frontend_support['receiver_sensitivity_qualification'])
+
+    def test_rate_aware_frontend_selects_public_band_clock_and_forwards_it(self):
+        # A 225-Hz triplet plus the configured line/CFO envelope needs just
+        # under 300 Hz. The cheapest divisor of 6000 with a 0.4 pass fraction
+        # is 750 Hz; timing remains on that output clock.
+        self.manifest['sample_rate_hz'] = 6000
+        self.manifest['calendar']['data_sample_offset'] = 228000
+        self.manifest['calendar']['capture_samples'] = 250000
+        self.write_manifest()
+        np.ones(250000, dtype='u1').tofile(self.folder / 'validity.u8')
+        comparison = study.HelperComparison(self.folder, fft_backend='batched',
+            frontend_profile='rate-aware')
+        self.assertEqual(comparison.frontend_support['output_sample_rate_hz'], 750)
+        self.assertEqual(comparison.frontend_support['decimation'], 8)
+        self.assertLess(comparison.frontend_support['pass_edge_hz'],
+                        comparison.frontend_support['stop_edge_hz'])
+        helper_edges = comparison.frontend_support['rejected_helper_bands_hz']
+        self.assertEqual(len(helper_edges), 3)
+        # Preserve the signed two-ray/Each65 union: D90 lines reach −90 and
+        # +180 Hz, not a symmetric ±180-Hz overestimate on the high pilot.
+        self.assertAlmostEqual(helper_edges[1][0], 2400. - 1725. - 90. - .5, delta=.001)
+        self.assertAlmostEqual(helper_edges[1][1], 2400. - 1725. + 180. + .5, delta=.001)
+        self.assertGreater(min(abs(edge) for band in helper_edges for edge in band),
+                           comparison.frontend_support['stop_edge_hz'])
+        options = self.factory.call_args.kwargs
+        self.assertEqual(options['sample_rate'], 6000)
+        self.assertEqual(options['output_sample_rate'], 750)
+        self.assertEqual(options['frontend_profile'], 'rate-aware')
+        self.assertEqual(options['pass_edge_hz'], comparison.frontend_support['pass_edge_hz'])
+        self.assertEqual(options['stop_edge_hz'], comparison.frontend_support['stop_edge_hz'])
+        self.assertEqual(options['source_offset_seconds'], 38.)
+        self.assertFalse(comparison.frontend_support['compact_spectral_support'])
+
+    def test_rate_aware_frontend_rejects_band_beyond_input_passband(self):
+        self.manifest['sample_rate_hz'] = 6000
+        self.manifest['format']['occupied_bandwidth_hz'] = 5000.
+        self.write_manifest()
+        with self.assertRaisesRegex(ValueError, 'exceeds rate-aware input passband'):
+            study._frontend_support(self.manifest, 'rate-aware', (0.,), (1.,))
+
+    def test_helper_band_does_not_scale_carrier_center_twice(self):
+        bands = study._helper_bands_relative_to_data(self.manifest,
+            audio_clock_bound_ppm=0., channel_scale=1.00015, cfo_bound_hz=0.)
+        # Matched TX/RX clocks have source audio ratio a=1, even when both
+        # clocks differ from ideal. A physical path sideband advances in true
+        # seconds and therefore has a separate inverse-RX scale. Construct
+        # sampled phase independently of the interval helper's arithmetic.
+        raw_rate, inverse_rx = 18000., 1.00015
+        tx_scale = rx_scale = 1 / inverse_rx
+        physical_times = np.arange(2) / (raw_rate * rx_scale)
+        phase = 2 * np.pi * (675. * tx_scale * physical_times - 90. * physical_times)
+        tone = np.exp(1j * phase)
+        measured_frequency = np.angle(tone[1] * tone[0].conjugate()) * raw_rate / (2 * np.pi)
+        self.assertAlmostEqual(measured_frequency, bands[1][0], delta=1e-10)
+        self.assertAlmostEqual(bands[1][0], 675. - 90. * inverse_rx,
+                               delta=1e-10)
+        self.assertAlmostEqual(bands[1][1], 675. + 180. * inverse_rx,
+                               delta=1e-10)
+        old_incorrect_lower = 675. * inverse_rx - 90. * inverse_rx
+        self.assertGreater(old_incorrect_lower, measured_frequency + .1)
+
+    def test_helper_bands_cover_independent_source_and_physical_clock_extrema(self):
+        q_bound, inverse_rx_bound, cfo_bound = 300., 1.00015, .7
+        bands = study._helper_bands_relative_to_data(self.manifest,
+            audio_clock_bound_ppm=q_bound, channel_scale=inverse_rx_bound,
+            cfo_bound_hz=cfo_bound)
+        physical_offsets = (-90., -9., 0., 9., 81., 90., 99., 180.)
+        for index, center in enumerate((-1175., 675., -775.)):
+            for q in (-q_bound, 0., q_bound):
+                for inverse_rx in (.99985, 1., inverse_rx_bound):
+                    tx_scale = (1 + q * 1e-6) / inverse_rx
+                    rx_scale = 1 / inverse_rx
+                    physical_times = np.arange(2) / (18000. * rx_scale)
+                    for offset in physical_offsets:
+                        for cfo in (-cfo_bound, cfo_bound):
+                            # The auxiliary nominal envelope is source-timed,
+                            # unlike Doppler and selective channel modulation.
+                            for auxiliary_offset in ((-200., 200.) if index == 2 else (0.,)):
+                                phase = 2 * np.pi * ((center + auxiliary_offset) * tx_scale * physical_times +
+                                    offset * physical_times + cfo * np.arange(2) / 18000.)
+                                waveform = np.exp(1j * phase)
+                                observed = np.angle(waveform[1] * waveform[0].conjugate()) * 18000 / (2 * np.pi)
+                                self.assertGreaterEqual(observed, bands[index][0] - 1e-10)
+                                self.assertLessEqual(observed, bands[index][1] + 1e-10)
+
+    def test_rate_aware_frontend_rejects_data_band_that_reaches_helper_line(self):
+        self.manifest['sample_rate_hz'] = 6000
+        self.manifest['format']['occupied_bandwidth_hz'] = 1000.
+        self.write_manifest()
+        with self.assertRaisesRegex(ValueError, 'overlaps a declared Helper'):
+            study._frontend_support(self.manifest, 'rate-aware', (0.,), (1.,))
+
+    def test_templates_at_different_raw_sample_rate_are_rejected(self):
+        template_folder = self.folder / 'other-rate-templates'
+        template_folder.mkdir()
+        (template_folder / 'templates.c128').write_bytes((self.folder / 'templates.c128').read_bytes())
+        template_manifest = deepcopy(self.manifest)
+        template_manifest['sample_rate_hz'] = 18000
+        (template_folder / 'manifest.json').write_text(json.dumps(template_manifest))
+        with self.assertRaisesRegex(ValueError, 'template source mismatch: rate'):
+            study.HelperComparison(self.folder, template_folder)
+        self.factory.assert_not_called()
 
     def test_selected_modulation_sidebands_are_included_in_support_guard(self):
         self.manifest['channel']['spread_doppler_hz'] = 110.

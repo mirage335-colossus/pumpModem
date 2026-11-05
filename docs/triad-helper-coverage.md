@@ -3,10 +3,16 @@
 This is the implementation and evidence map for the isolated Helper-assisted
 three-carrier experiment. Read it before starting another broad parameter
 campaign. The 2.5-billion-point requested configuration space is a catalog, not
-a test plan: native feasibility planning and a deliberately factorized set of
-sampled receiver cases are the only practical way to explore it. Ordinary
+a reception test plan: a complete factorized necessary-constraint census and
+a deliberately factorized set of sampled receiver cases provide different
+evidence. Ordinary
 Robust receiver integration and physical-radio performance are outside this
 study.
+
+The [November 5 extended qualification report](validation-data/triad-v3/2026-11-05-helper-extended/README.md)
+records the new sampled high-rate and maximum-spreading outcomes, GPU timing
+and quantitative multi-day boundaries. Do not infer a received configuration
+from the domain census or a planning pass.
 
 **Check source power before interpreting a low-rate C/N0 result.** The final
 exporter defaults to `--power-reference whole-active`; the old two-second
@@ -53,12 +59,88 @@ but no 0.001–1 Hz reception, Added ×100/×1000 reception, MHz-rate reception 
 multi-day Helper observation. The 160.4-second maximum is simulated observation
 duration, not a sustained-compute benchmark. The archived manifest-backed axis
 inventory records missing combinations; successful native planning must never
-fill those gaps implicitly.
+fill those gaps implicitly. The subsequent extended campaign adds actual
+Rate 1 Hz / Added ×1000 and Rate 10 Hz / Added ×100 observations and rates
+3.6/12/18/24 kHz. It does not add 0.001–0.1 Hz, MHz-rate or multi-day
+Helper-assisted reception; its maximum-spreading cases have measured misses.
+
+### Exact factorized census, default 18 kHz path
+
+`tools/triad_helper_domain.py` classifies the complete requested Cartesian
+catalog (2,500,485,120 tuples) under a deliberately small set of necessary
+constraints for the exporter’s **default 18 kHz audio sample rate** and the
+wide DATA receiver frontend (400 Hz pass edge). It evaluates 408 combinations
+of only Rate, DATA-center mode, Added Symbols and whole-bit Symbol Burst, then
+weights each by the other nine axes (6,128,640 tuples per projection). The executable
+report binds the classifier, axis source, native source geometry, Helper
+placement, exporter and DATA receiver source hashes. Reproduce it with:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 /tmp/triad-weak-env/bin/python \
+  tools/triad_helper_domain.py \
+  --output local-evidence/triad-helper-extended/domain-final.json
+```
+
+The mutually exclusive classification below applies precedence in the order
+shown. If a tuple violates more than one condition, it appears once in this
+table; the nonexclusive counts include it under every necessary constraint it
+violates. The residual means **not excluded by these checks**, and remains
+unqualified for native planning, waveform emission and reception.
+
+| Mutually exclusive classification | Tuples |
+| --- | ---: |
+| Whole-bit Symbol Burst ×3 has no matching Helper-exporter calendar | 1,250,242,560 |
+| DATA center below the 1725 Hz Helper floor | 269,660,160 |
+| DATA center at or above the default 9 kHz Nyquist | 98,058,240 |
+| Nominal triplet upper edge at or above Nyquist | 471,905,280 |
+| Nominal DATA half-bandwidth exceeds the wide frontend’s 400 Hz pass edge | 67,415,040 |
+| Pattern sampling inequalities fail after earlier exclusions | 0 |
+| Native pulse calendar origin exceeds the fixed 38 s lead | 122,572,800 |
+| Not excluded by this census; still unqualified | 220,631,040 |
+| **Total** | **2,500,485,120** |
+
+The corresponding nonexclusive counts are: whole-bit burst unsupported,
+1,250,242,560; center below the floor, 539,320,320; center at/above Nyquist,
+196,116,480; nominal triplet edge at/above Nyquist, 1,237,985,280; DATA
+half-bandwidth above 400 Hz, 1,470,873,600; source sampling inequalities
+`Fs < 4*fine` or `Fs <= 1.1*occupied`, 1,029,611,520; and pulse calendar
+origin beyond the lead, 367,718,400. These overlap and must not be summed.
+
+The pulse test matches native integer coordinates:
+`calendar_origin = ceil(8*Fs/fine) + 2` samples, which must be no later than
+`38*Fs`. Therefore an ideal eight-chip halo of exactly 38 seconds fails by the
+two-sample guard. The upper DATA edge equality is excluded. The 400 Hz check
+uses only nominal source half-bandwidth (`occupied/2`); it does not include
+clock, CFO or channel-line allowances. Nominal occupancy is not compact
+spectral support and says nothing about residual skirts or sensitivity.
+
+The census intentionally does not classify other axes as passing. FHSS dwell
+aperture/protected-cell fit, margin-dependent propagation and oscillator
+uncertainty, selective-modulation sidebands, Helper placement and leakage,
+shaping, source tile workspace, capture/output size, and all receiver
+performance remain unqualified pending the relevant native plan or sampled
+test. Its energy helper separately reports ideal one-known-waveform presence
+references; those do not cover unknown acquisition, bit discrimination,
+outages, repeated searches or multi-day channel tracking.
+
+The legacy frontend has a narrower 330 Hz pass edge, so it can reject additional
+source widths that the 400 Hz census leaves unexcluded; these extra exclusions
+are not counted here. The exporter now also has an opt-in `--sample-rate` control; the
+`--frontend-profile rate-aware` receiver derives a DATA decimator from its
+declared public pass edge. Those configurations, including higher-rate audio
+fixtures, are **outside the 18 kHz census above** and require a new sample-rate-
+aware classification and native plan. The default exporter remains 18 kHz.
+Current CLI sample-rate inputs are multiples of 5 Hz in `[6000, 4294967295]`;
+this range is only a parser bound, not assurance that memory, spectral
+placement, receiver geometry or runtime supports every rate. Whole-bit Symbol
+Burst ×3 remains unsupported; the exporter’s within-symbol wait tiles are a
+different control.
 
 ## Supported and unsupported operating regions
 
-The native Helper exporter produces 18 kHz complex audio samples. The public
-receiver converts to zero-centered 900 Hz complex DATA samples. The legacy
+The native Helper exporter defaults to 18 kHz complex audio samples and also
+supports an explicit `--sample-rate` option. The public receiver converts to
+zero-centered 900 Hz complex DATA samples by default. The legacy
 profile uses a 330 Hz pass edge and the opt-in wide profile a 400 Hz pass edge;
 this is a post-DDC processing bandwidth, not an absolute limit on DATA IF.
 Helper placement follows the standardized DATA floor of 1725 Hz, with 1775 Hz
@@ -174,7 +256,7 @@ preserve the exporter defaults):
 
 `--shaping auto` remains the campaign default. `--shaping legacy` is retained
 for historical matched comparisons. Campaign receiver controls include
-`--frontend-profile legacy|wide`, `--clock-step-ppm`,
+`--frontend-profile legacy|wide|rate-aware`, `--clock-step-ppm`,
 `--doppler-scale-count 1|3|5|7`, `--aligned-fft-grid`, and `--lag-step`.
 The public clock and Doppler banks are derived from the exported public
 manifest; receiver construction does not inspect evaluator truth. The optional

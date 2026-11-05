@@ -1517,6 +1517,86 @@ void long_extent_prefix_and_tail_checks() {
     check(echo_energy > 0, "delayed FHSS energy was gated from the channel tail");
 }
 
+// Exercise the complete sampled stream over a multi-week physical coordinate
+// span. This is a deterministic chunk-equivalence/resource check: it is not a
+// modem-reception trial, and the stochastic channel here is only the declared
+// stationary sampled OU stress law.
+void multiweek_chunk_equivalence_checks() {
+    auto f = fixture_format();
+    f.inner_rate_hz = .001;
+    f.added_symbols = 1;
+    f.minimum_inner_coefficients = 64;
+    f.sample_rate = 1;
+    f.sample_rate_denominator = 64;
+    f.bit_seconds = 38. * 86400.;
+    const auto g = geometry(f);
+    const auto fs = effective_sample_rate(f);
+    const auto key = fixture_key();
+
+    auto observe = [&](std::size_t chunk_size) {
+        PatternSource source(f, key, 1);
+        StreamChannelConfig cfg;
+        cfg.effects.sample_rate = fs;
+        cfg.effects.occupied_bandwidth_hz = g.occupied_bandwidth_hz;
+        cfg.effects.rf_hz = 500'000;
+        cfg.effects.noise_enabled = false;
+        cfg.effects.spread_delay_ms = .005;
+        cfg.effects.spread_doppler_hz = .001;
+        cfg.effects.perturbation_slow_depth = .65;
+        cfg.effects.perturbation_fast_depth = .65;
+        cfg.path_evolution.ray_coherence_seconds = 86'400;
+        cfg.path_seed = 0x4d554c5449444159ULL;
+        cfg.maximum_chunk_samples = chunk_size;
+        cfg.selective_model.model = SelectiveModel::DispersiveDft;
+        cfg.selective_model.modulation_rate_hz = .001;
+        cfg.selective_model.correlation_spacing_hz = g.carrier_spacing_hz;
+
+        StreamingChannel channel(source, cfg);
+        const auto extent = channel.total_samples();
+        check(extent > static_cast<std::uint64_t>(f.bit_seconds * fs),
+              "multiweek observation omitted its source/tail allowance");
+        check(extent < 100'000,
+              "multiweek low-rate observation unexpectedly requires duration-sized storage");
+        check(channel.report().working_bytes < 1024 * 1024,
+              "multiweek low-rate channel workspace is not bounded");
+
+        std::vector<Complex> samples(static_cast<std::size_t>(extent));
+        std::vector<std::uint8_t> validity(static_cast<std::size_t>(extent));
+        std::uint64_t cursor = 0;
+        while (cursor < extent) {
+            const auto count = std::min<std::uint64_t>(chunk_size, extent - cursor);
+            const auto got = channel.read(
+                std::span(samples).subspan(static_cast<std::size_t>(cursor),
+                                           static_cast<std::size_t>(count)),
+                std::span(validity).subspan(static_cast<std::size_t>(cursor),
+                                            static_cast<std::size_t>(count)));
+            check(got == count,
+                  "multiweek stream ended before its declared physical observation");
+            cursor += got;
+        }
+        check(channel.position() == extent && channel.read(std::span<Complex>{}) == 0,
+              "multiweek stream did not stop exactly at its complete channel endpoint");
+        const auto& report = channel.report();
+        check(report.samples == extent && report.source_samples > 0 &&
+              report.tail_samples == extent - report.source_samples,
+              "multiweek stream report lost its full source/tail work count");
+        check(report.selective_perturbation &&
+              report.selective_perturbation->model == SelectiveModel::DispersiveDft &&
+              report.selective_perturbation->processed_rows == extent,
+              "multiweek stream did not advance continuous modulation state through its tail");
+        check(std::all_of(validity.begin(), validity.end(),
+                          [](std::uint8_t value) { return value == 1; }),
+              "unconfigured erasures appeared during the multiweek stream");
+        return std::pair{std::move(samples), std::move(validity)};
+    };
+
+    const auto small_chunks = observe(257);
+    const auto large_chunks = observe(4096);
+    check(small_chunks.first == large_chunks.first &&
+          small_chunks.second == large_chunks.second,
+          "multiweek oscillator, OU-ray, or selective-filter state changed at chunk boundaries");
+}
+
 struct SelectiveToneResponse {
     double complex_rms = 0;
     double amplitude_rms = 0;
@@ -1919,6 +1999,7 @@ int main() {
         gaussian_path_kernel_and_statistics_checks();
         gaussian_path_sampled_channel_checks();
         long_extent_prefix_and_tail_checks();
+        multiweek_chunk_equivalence_checks();
         selective_response_checks();
         std::cout << "triad v3 streaming channel checks passed\n";
         return 0;

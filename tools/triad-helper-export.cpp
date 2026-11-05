@@ -29,8 +29,7 @@
 namespace {
 using namespace datapump;
 using namespace datapump::triad::v3;
-constexpr std::uint32_t sample_rate = 18000;
-constexpr std::uint64_t dwell_samples = 7200;
+constexpr std::uint32_t default_sample_rate = 18000;
 constexpr double data_start_seconds = 38;
 constexpr double thermal_n0_dbm_hz = -164;
 constexpr double spectral_skirt_allowance_hz = 200;
@@ -49,6 +48,7 @@ struct Options {
     std::uint64_t seed = 1, key_seed = 72001, epoch = 1793850000;
     std::optional<std::uint64_t> burst_wait_tiles;
     unsigned bit = 0;
+    std::uint32_t sample_rate = default_sample_rate;
     double seconds = 16, data_if_hz = 1725;
     std::optional<double> inner_rate_hz, shaping_tail_fraction;
     std::optional<unsigned> added_symbols;
@@ -96,7 +96,7 @@ Options parse(int argc, char** argv) {
                 "  [--seed N] [--key-seed N] [--epoch UTC_SECONDS] [--bit 0|1]\n"
                 "  [--seconds 16] [--rate HZ] [--added-symbols N] [--burst-wait-tiles N]\n"
                 "  [--fhss on|off] [--shaping auto|legacy (default: auto)] [--shaping-tail-fraction F]\n"
-                "  [--data-if HZ] [--cn0 DB_HZ] [--plan-only]\n"
+                "  [--data-if HZ] [--sample-rate INTEGER_HZ] [--cn0 DB_HZ] [--plan-only]\n"
                 "  [--power-reference whole-active|legacy-window] [--power-plan-only]\n"
                 "  [--base-oscillator ID] [--shift-oscillator ID] [--ramp-seconds POSITIVE]\n"
                 "  [--rf-hz HZ] [--spread-preset ID] [--margin FACTOR]\n"
@@ -106,7 +106,8 @@ Options parse(int argc, char** argv) {
                 "  [--receiver-tail-seconds 0..1]\n"
                 "  [--control selected|flat] [--data on|off] [--helper on|off]\n"
                 "  [--arrival-seconds T] [--templates]\n"
-                "18000 Hz complex samples; default DATA IF 1725 Hz HF, 4000 Hz legacy EME.\n"
+                "Default 18000 Hz complex samples; sample rate must be a multiple of 5.\n"
+                "Default DATA IF 1725 Hz HF, 4000 Hz legacy EME.\n"
                 "Physical C/N0 follows powers/loss/N0 unless\n"
                 "overridden. Templates contain all 13 public epoch alternatives and both bits.\n";
             std::exit(0);
@@ -121,6 +122,12 @@ Options parse(int argc, char** argv) {
             o.bit = static_cast<unsigned>(bit);
         } else if (arg == "--seconds") o.seconds = real(next(), "duration");
         else if (arg == "--rate") o.inner_rate_hz = real(next(), "inner rate");
+        else if (arg == "--sample-rate") {
+            const auto rate = integer(next(), "sample rate");
+            if (rate < 6000 || rate > std::numeric_limits<std::uint32_t>::max() || rate % 5)
+                throw std::invalid_argument("sample rate must be a multiple of 5 in [6000,4294967295] Hz");
+            o.sample_rate = static_cast<std::uint32_t>(rate);
+        }
         else if (arg == "--added-symbols") {
             const auto added = integer(next(), "Added Symbols");
             if (added > std::numeric_limits<unsigned>::max())
@@ -196,7 +203,7 @@ Options parse(int argc, char** argv) {
     if (o.output.empty() && !o.plan_only && !o.power_plan_only)
         throw std::invalid_argument("--output is required unless a plan-only mode is selected");
     if (o.seconds <= 0 || o.seconds > 3600) throw std::invalid_argument("seconds must be in (0,3600]");
-    if (o.data_if_hz < 1725 || o.data_if_hz >= sample_rate / 2.)
+    if (o.data_if_hz < 1725 || o.data_if_hz >= o.sample_rate / 2.)
         throw std::invalid_argument("DATA IF must be at least 1725 Hz and below Nyquist");
     if (o.epoch < 6 || o.epoch > 4294967289ULL)
         throw std::invalid_argument("epoch must support all thirteen alternatives and Helper metadata");
@@ -262,7 +269,7 @@ Format format_for(const Options& o) {
     f.inner_rate_hz = o.inner_rate_hz.value_or(eme ? 360 : 36);
     f.added_symbols = o.added_symbols.value_or(eme ? 1 : 10);
     f.added_interleave = true;
-    f.sample_rate = sample_rate;
+    f.sample_rate = o.sample_rate;
     f.bit_seconds = o.seconds;
     f.fhss = o.fhss.value_or(eme);
     f.fhss_center_aligned = f.fhss;
@@ -402,6 +409,7 @@ void print_plan_json(const Options& o, double data_if_hz,
                      const ResolvedPhysics& physics) {
     const auto& f = selected.format;
     const auto& g = selected.geometry;
+    const auto sample_rate = f.sample_rate;
     const auto nominal = g.occupied_bandwidth_hz;
     const auto gate = std::max(0., selected.spectrum.placement_bandwidth_hz - nominal);
     const auto minimum_data_if = std::max(1725., helper::auxiliary_frequency_hz + 450 +
@@ -468,7 +476,7 @@ void print_plan_json(const Options& o, double data_if_hz,
     std::cout << ",\"candidate_count\":" << selected.candidate_count
         << ",\"total_kernel_ffts\":" << selected.total_kernel_ffts
         << "},\"limitations\":[\"This is a key-independent expected-energy shaping certificate, not a worst-case encrypted pattern or sampled channel bound.\","
-        << "\"The default18kHz fixture sampler rejects unsupported high-rate geometries; planner-only results do not imply receiver availability.\","
+        << "\"The selected sampler and explicit export budget reject unsupported geometries; planner-only results do not imply receiver availability.\","
         << "\"Source capture still retains the conservative 2/ramp envelope bound and complete physical channel tails.\"]}\n";
 }
 
@@ -524,9 +532,12 @@ const char* boolean(bool value) { return value ? "true" : "false"; }
 struct DataPowerReference {
     double active_seconds = 0, mean_norm = 0, refinement_relative_difference = 0;
     unsigned nodes = 0;
+    const char* method = "stratified-fractional-v1";
+    bool sampled_complete = false;
 };
 
 DataPowerReference whole_active_power(PatternSource& source, const Format& f, const Geometry& g) {
+    const auto sample_rate = f.sample_rate;
     // Integrate the complete bit-0 source in active-time coordinates. Quiet
     // FHSS intervals and burst waits cost elapsed time, never extra transmit
     // power; nonzero ramps remain in the energy and the active denominator.
@@ -560,6 +571,36 @@ DataPowerReference whole_active_power(PatternSource& source, const Format& f, co
     };
     DataPowerReference result;
     result.active_seconds = static_cast<double>(active_seconds);
+    const auto sampled_reference = [&](double fractional_estimate) {
+        // A rich pattern can appear converged on two undersampled fractional
+        // grids. Calibrate such cases on EVERY emitted integer source sample,
+        // using bounded scalar state and the actual selected sample clock.
+        // This is exact for the sampled transmit-power definition; it is not
+        // a continuous-time quadrature or propagation normalization.
+        constexpr std::uint64_t maximum_power_samples = 4ULL * 1024 * 1024;
+        if (g.source_samples > maximum_power_samples)
+            throw std::runtime_error("whole-active DATA power requires complete sampled calibration beyond the explicit 4194304-source-sample work budget");
+        long double energy = 0;
+        for (std::uint64_t row = 0; row < g.source_samples; ++row)
+            energy += std::norm(source.sample_at(static_cast<long double>(row)));
+        auto exact = result;
+        exact.mean_norm = static_cast<double>(energy / (active_seconds * sample_rate));
+        if (!(exact.mean_norm > 0) || !std::isfinite(exact.mean_norm))
+            throw std::runtime_error("empty complete sampled DATA power reference");
+        exact.nodes = static_cast<unsigned>(g.source_samples);
+        exact.method = "complete-integer-source-v1";
+        exact.sampled_complete = true;
+        exact.refinement_relative_difference = fractional_estimate > 0 ?
+            std::abs(exact.mean_norm - fractional_estimate) / exact.mean_norm : 0.;
+        return exact;
+    };
+    // Sixteen fractional nodes per fine period is an engineering guard against
+    // accepting accidental coarse-grid agreement, not an integration theorem.
+    // The complete sampled calculation supplies the power definition when the
+    // first refinement would not meet it. Established smaller fixtures retain
+    // their historical gain and bytes.
+    if (active_seconds * g.fine_chip_rate_hz > helper::power_reference_nodes / 8.L)
+        return sampled_reference(0.);
     auto previous = estimate(helper::power_reference_nodes);
     for (unsigned nodes = 2 * helper::power_reference_nodes; nodes <= 8 * helper::power_reference_nodes; nodes *= 2) {
         const auto current = estimate(nodes);
@@ -571,15 +612,15 @@ DataPowerReference whole_active_power(PatternSource& source, const Format& f, co
         if (result.refinement_relative_difference <= .001) return result;
         previous = current;
     }
-    // This refinement diagnostic is not a certified quadrature error bound.
-    // Refuse an unresolved case instead of silently changing nominal C/N0.
-    throw std::runtime_error("whole-active DATA power quadrature did not converge within 262144 nodes");
+    return sampled_reference(previous);
 }
 
 void data_power_json(std::ostream& out, const Options& o, const DataPowerReference& power,
                      double calibration_gain, double data_gain) {
     out << "\"data_power_reference_policy\":"; json_string(out, o.power_reference);
-    out << ",\"data_power_reference_version\":1,\"data_reference_bit\":0"
+    out << ",\"data_power_reference_version\":2,\"data_reference_bit\":0"
+        << ",\"data_reference_integration_method\":"; json_string(out, power.method);
+    out << ",\"data_reference_complete_sampled_source\":" << boolean(power.sampled_complete)
         << ",\"data_reference_active_seconds\":" << power.active_seconds
         << ",\"data_reference_mean_norm\":" << power.mean_norm
         << ",\"data_reference_nodes\":" << power.nodes
@@ -645,6 +686,9 @@ int run(const Options& o) {
     }
     const auto f = selected_shaping.format;
     const auto g = selected_shaping.geometry;
+    const auto sample_rate = f.sample_rate;
+    // Exactly 400 ms for the accepted integer multiple-of-five sample clocks.
+    const std::uint64_t dwell_samples = 2ULL * sample_rate / 5;
     // Keep the complete finite-envelope source bound until sampled validation
     // has justified reducing it. The certificate affects only Helper placement.
     const auto legacy_source_bandwidth = g.occupied_bandwidth_hz + 2 / f.ramp_seconds;
@@ -712,6 +756,7 @@ int run(const Options& o) {
     auto data_reference = o.power_reference == "whole-active" ? whole_active_power(reference_source, f, g) :
         DataPowerReference{g.tile_count * g.tile_seconds * (f.fhss ? 1 - 2 * f.quiet_seconds / f.dwell_seconds : 1),
                            reference_mean_norm, 0, reference_nodes};
+    if (o.power_reference == "legacy-window") data_reference.method = "legacy-window-v1";
     const auto data_calibration_gain = o.power_reference == "whole-active" ?
         std::sqrt(reference_mean_norm / data_reference.mean_norm) : 1.;
     const auto data_gain = plan.data_gain * composite_gain * data_calibration_gain;

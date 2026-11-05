@@ -120,14 +120,20 @@ def check_capture(directory, scenario, *, data=True, helper=True, bit=0,
     require(power["reference_bit"] == 0 and power["reference_window_seconds"] == [39, 41], "public active calibration")
     close(power["reference_data_mean_real_power"] * 2, power["reference_data_mean_norm"], "analytic/real power convention")
     require(power["data_power_reference_policy"] == "whole-active" and
-            power["data_power_reference_version"] == 1, "general-rate power calibration default")
+            power["data_power_reference_version"] == 2, "general-rate power calibration default")
     close(power["template_data_gain"] ** 2 * power["data_reference_mean_norm"], 1, "frozen nominal DATA power")
     close(plan["data_gain"] * power["post_plan_composite_gain"] * power["post_plan_data_calibration_gain"],
           power["template_data_gain"], "post-plan DATA-only gain")
     close(power["helper_preview_normalized_data_mean_norm"],
           power["template_data_gain"] ** 2 * power["reference_data_mean_norm"], "actual Helper-preview DATA power")
-    require(power["data_reference_refinement_relative_difference"] <= .001 and
-            65536 <= power["data_reference_nodes"] <= 262144, "bounded source-power refinement")
+    if power["data_reference_complete_sampled_source"]:
+        require(power["data_reference_integration_method"] == "complete-integer-source-v1" and
+                power["data_reference_nodes"] == calendar["data_source_samples"],
+                "complete source-power sample accounting")
+    else:
+        require(power["data_reference_integration_method"] == "stratified-fractional-v1" and
+                power["data_reference_refinement_relative_difference"] <= .001 and
+                65536 <= power["data_reference_nodes"] <= 262144, "bounded source-power refinement")
     close(power["nominal_helper_to_data_ratio"], expected["helper_w"] / expected["data_w"], "nominal Helper ratio")
     require(power["reference_measured_helper_to_data_ratio"] > 0, "actual Helper reference power")
 
@@ -281,6 +287,8 @@ def main():
     parser.add_argument("exporter", type=Path)
     parser.add_argument("--power-qualification", action="store_true",
                         help="occasional complete sampled source-power validation only; no receiver")
+    parser.add_argument("--rate-qualification", action="store_true",
+                        help="occasional high-rate sampling/placement and complete source-power checks")
     args = parser.parse_args()
     binary = args.exporter.resolve()
     require(binary.is_file(), f"exporter does not exist: {binary}")
@@ -288,6 +296,37 @@ def main():
     started = time.perf_counter()
     with tempfile.TemporaryDirectory(prefix="triad-helper-export-smoke-") as temporary:
         root = Path(temporary)
+        if args.rate_qualification:
+            results = []
+            for rate, fs, center in ((3600, 48000, 3600), (12000, 48000, 7800),
+                                      (18000, 96000, 10800), (24000, 96000, 13800)):
+                directory = root / f"rate-{rate}"
+                overrides = ["--case", "hf", "--seconds", "8", "--rate", str(rate),
+                    "--added-symbols", "1", "--sample-rate", str(fs), "--data-if", str(center),
+                    "--fhss", "off", "--rf-hz", "0", "--spread-preset", "none",
+                    "--selective-perturbation", "off", "--margin", "1", "--base-oscillator", "gpsdo-ocxo",
+                    "--shift-oscillator", "baseband-clock", "--timing-policy", "bounded",
+                    "--helper", "off", "--control", "flat"]
+                invoke(binary, directory, overrides, timings)
+                manifest = load_json(directory / "manifest.json")
+                truth = load_json(directory / "evaluator-truth.json")
+                power = manifest["power"]
+                require(manifest["sample_rate_hz"] == fs, "explicit sample clock ignored")
+                require(power["data_reference_complete_sampled_source"] and
+                        power["data_reference_integration_method"] == "complete-integer-source-v1",
+                        "rich source did not receive complete sampled calibration")
+                require(power["data_reference_nodes"] == manifest["calendar"]["data_source_samples"],
+                        "calibration did not traverse every complete source row")
+                actual = truth["source_energy"]["data_active_mean_norm"]
+                require(abs(actual - 1) < 1e-10, "complete source normalization differs from emitted source")
+                results.append(dict(rate_hz=rate, sample_rate_hz=fs, data_if_hz=center,
+                    helper_high_hz=manifest["helper_plan"]["high_hz"],
+                    sampled_active_mean_norm=actual, source_samples=power["data_reference_nodes"],
+                    integration_method=power["data_reference_integration_method"]))
+                shutil.rmtree(directory)
+            print(json.dumps(dict(result="passed", rate_qualification=results,
+                                  wall_seconds=time.perf_counter() - started, commands=timings)))
+            return
         if args.power_qualification:
             results = power_qualification(binary, root, timings)
             print(json.dumps({"result": "passed", "power_qualification": results,

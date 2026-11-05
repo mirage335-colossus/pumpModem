@@ -219,6 +219,7 @@ def append_export_shaping_options(command, args):
     options = (
         ('shaping', '--shaping'),
         ('shaping_tail_fraction', '--shaping-tail-fraction'),
+        ('sample_rate', '--sample-rate'),
         ('rf_hz', '--rf-hz'),
         ('base_oscillator', '--base-oscillator'),
         ('shift_oscillator', '--shift-oscillator'),
@@ -299,6 +300,8 @@ def main(argv=None, *, comparison_factory=None, export_runner=None):
     p.add_argument('--shaping-tail-fraction', type=float,
                    help='optional auto-shaping spectral tail budget in (0, 0.005]')
     p.add_argument('--rate', type=float, help='optional inner pattern rate override in Hz')
+    p.add_argument('--sample-rate', type=int,
+                   help='optional native composite sample rate; legacy default is 18000 Hz')
     p.add_argument('--added-symbols', type=int, help='optional Added Symbols factor [1,1000]')
     p.add_argument('--fhss', choices=('on', 'off'), help='optional FHSS override')
     p.add_argument('--burst-wait-tiles', type=int,
@@ -325,13 +328,13 @@ def main(argv=None, *, comparison_factory=None, export_runner=None):
     p.add_argument('--frequency-batch-size', type=int, default=8)
     p.add_argument('--max-cached-hypotheses', type=int, default=1)
     p.add_argument('--memory-limit-bytes', type=int, default=2 * 1024**3)
-    p.add_argument('--frontend-profile', choices=('legacy', 'wide'), default='legacy')
+    p.add_argument('--frontend-profile', choices=('legacy', 'wide', 'rate-aware'), default='legacy')
     p.add_argument('--clock-step-ppm', type=float, default=0.,
                    help='public audio-clock search step in ppm; zero fixes the clock at nominal')
     p.add_argument('--doppler-scale-count', type=int, choices=(1, 3, 5, 7), default=1)
     p.add_argument('--aligned-fft-grid', action='store_true')
     p.add_argument('--lag-step', type=int, default=1,
-                   help='arrival-lattice spacing in receiver samples (default: one sample)')
+                   help='arrival-lattice spacing in selected receiver-output samples (default: one sample)')
     p.add_argument('--alpha', type=float, default=.05)
     p.add_argument('--control', choices=('selected', 'flat'), default='selected')
     p.add_argument('--helper', choices=('on', 'off'), default='on')
@@ -383,6 +386,11 @@ def main(argv=None, *, comparison_factory=None, export_runner=None):
             raise ValueError('frequency batch size, cache capacity, and memory limit must be positive')
         if args.fft_backend == 'legacy' and (args.clock_step_ppm > 0 or args.doppler_scale_count != 1):
             raise ValueError('clock/rate grids require --fft-backend batched')
+        if args.sample_rate is not None:
+            if args.sample_rate < 6000 or args.sample_rate % 5:
+                raise ValueError('native sample rate must be at least 6000 Hz and divisible by five')
+            if args.sample_rate != 18000 and args.frontend_profile != 'rate-aware':
+                raise ValueError('nondefault sample rates require --frontend-profile rate-aware')
         if args.output.exists():
             raise ValueError('output already exists; do not rerun or overwrite frozen evidence')
         exporter = args.exporter.resolve(strict=True)
@@ -407,6 +415,7 @@ def main(argv=None, *, comparison_factory=None, export_runner=None):
             helper_power_w=args.helper_power_w,
             rate_hz=args.rate, added_symbols=args.added_symbols, fhss=args.fhss,
             burst_wait_tiles=args.burst_wait_tiles, frontend_profile=args.frontend_profile,
+            sample_rate=args.sample_rate,
             clock_step_ppm=args.clock_step_ppm, doppler_scale_count=args.doppler_scale_count,
             aligned_fft_grid=args.aligned_fft_grid, lag_step=args.lag_step,
             identity='Exporter manifest bytes and HelperComparison public procedure identity; no manifest field is rewritten.'),

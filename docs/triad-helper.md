@@ -72,6 +72,58 @@ complex direct conversion about the DATA center. `--cn0` weakens the entire
 composite by increasing noise at fixed Helper/DATA ratio. It does not confuse
 the planning target with the physical link budget.
 
+The native Helper exporter keeps 18 kHz as its default input clock. Its
+explicit `--sample-rate` accepts integer clocks of at least 6 kHz that are
+divisible by five, so each 400-ms dwell contains an integer sample count. The
+`legacy` and `wide` receiver profiles remain fixed at 18-kHz input and 900-Hz
+DATA output. For a different input clock, select
+`--frontend-profile rate-aware` in the study or campaign. Campaign
+`--sample-rate` is forwarded to the native exporter and recorded in its
+protocol; template and capture raw sample rates must match exactly.
+
+The rate-aware profile selects the lowest output sample rate that divides the
+input clock and has enough passband for the public DATA envelope. The study
+derives that envelope from triplet bandwidth, public audio-clock and CFO
+bounds, and the selected Doppler/modulation line union. It also derives the
+Helper low/high pilot and auxiliary bands after DATA zero-centering, including
+their oscillator, channel-line and configured envelope allowances. The FIR
+stop edge is placed before the nearest rejected Helper band and below 0.49 of
+the output clock; the pass edge is the public DATA envelope edge. If these
+bands overlap, the fixed front end rejects the plan. This is an implementation
+front-end limit, not proof that the transmitted waveforms are physically
+inseparable. The estimator still uses raw composite samples before the DATA
+decimator. The rate-aware DATA filter targets 96-dB stop-band attenuation in
+its causal Kaiser design; its
+complete tail, decimation phase, validity dilation, actual FIR noise gain,
+sample-rate identity and custom pass/stop edges enter receiver identity.
+Finite pulse skirts, gated pilot harmonics and channel tails remain, so planner
+edges do not certify zero interference or sensitivity.
+
+The maintained export qualification exercises 3.6, 12, 18 and 24 kHz DATA
+rates with higher native sample clocks and corresponding DATA centers. It
+checks sample-rate geometry, Helper placement planning, complete source-power
+normalization and export bounds. These exporter controls alone are not reception results. The separate
+[extended sampled qualification](validation-data/triad-v3/2026-11-05-helper-extended/README.md)
+records actual high-rate reception, maximum-spreading failures, and the
+remaining multi-day boundaries; none are physical-radio measurements. Use the cheap frontend/FIR tests
+for routine code-path checks; run the optional
+`test_triad_helper_export.py EXPORTER --rate-qualification` only when changing
+source clocks, high-rate geometry or complete-source power calibration. High-
+rate captures are costly because templates and channel output grow with source
+rate and duration, so this optional check is not routine CI.
+
+Whole-active DATA power-reference version 2 retains the complete-active source
+normalization and explicit `legacy-window` reproduction mode. For rich sources
+above 4,096 fine cells, or when the 32,768-to-262,144-node stratified refinement
+does not converge within 0.1%, it sums every emitted integer source sample
+without allocating a full source array. This sampled-power path rejects
+sources above its 4,194,304-sample work cap rather than returning an
+unqualified gain. The source planner separately caps a tile at 1,000,000 fine
+cells; the exporter has its own explicit 2-GiB fixture cap. These are bounded
+implementation limits, not communication-duration or receiver-sensitivity
+limits. The complete-source sum calibrates emitted transmit power only; it
+does not normalize propagation, outages, channel fades or received energy.
+
 These arrival ranges implement the requested default-style study cases; they
 are explicit exporter settings, not a claim about every CLI/GUI default. In
 particular, ordinary `triad_long --clock-sync default` alone gives a singleton
@@ -152,7 +204,12 @@ delayed-Doppler DATA coefficients. The whole capture is filtered continuously,
 then decimated to 900 Hz. The legacy frontend uses 330/430 Hz pass/stop edges.
 The experimental `wide` frontend uses 400/440 Hz to admit the new broad HF
 oscillator search; use the exporter's `--receiver-tail-seconds .25` to retain
-its longer causal FIR tail. The batched path caches public channel/Gram factors,
+its longer causal FIR tail. The opt-in `rate-aware` frontend handles explicit
+input clocks by designing a pass/stop pair from the DATA envelope and nearest
+public Helper band. Its low-pass/decimator is exercised on synthetic sampled
+DATA/pilot mixtures in both receiver backends; it does not imply that high-rate
+Helper-assisted cohorts or radio reception have passed. The batched path
+caches public channel/Gram factors,
 processes CFOs in bounded batches, reuses one observation FFT for aligned CFO
 lattice shifts, and streams the likelihood mixture without storing the complete
 timing-by-frequency score cube. Its clock and RX-rate alternatives are explicit

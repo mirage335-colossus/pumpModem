@@ -13,6 +13,10 @@ Helper composition, the requested HF/EME configurations, acquisition reuse and
 scoped admission controls, separately from ordinary Robust integration.
 The [Helper-enabled coverage map](triad-helper-coverage.md) separates broad
 configuration feasibility, sampled reception evidence and remaining fixture limits.
+The [extended Helper qualification](validation-data/triad-v3/2026-11-05-helper-extended/README.md)
+records the rate-aware frontend, high-rate/maximal-spreading tests, exact
+fixed-fixture domain census and quantitative multi-day Helper boundaries.
+Its sampled campaigns are occasional qualification, not routine CI workloads.
 Use [rate-aware shaping and Helper placement](triad-shaping.md) before raising
 the DATA or pilot frequency: it combines inexpensive spectral planning with
 paired waveform and bidirectional interference checks.

@@ -35,12 +35,14 @@ class CampaignTests(unittest.TestCase):
                          command + ['--shaping', 'legacy'])
 
         selected = SimpleNamespace(shaping='auto', shaping_tail_fraction=.001, rate=360.,
+            sample_rate=12000,
             rf_hz=500e3, base_oscillator='crystal', shift_oscillator='ic-7100',
             spread_preset='hf-worst', margin=3., selective_perturbation='each-65',
             selective_modulation_rate_hz=.05, timing_policy='bounded', data_power_w=4.,
             helper_power_w=40., added_symbols=10, fhss='on', burst_wait_tiles=3)
         self.assertEqual(campaign.append_export_shaping_options(command.copy(), selected),
             command + ['--shaping', 'auto', '--shaping-tail-fraction', '0.001',
+                       '--sample-rate', '12000',
                        '--rf-hz', '500000.0', '--base-oscillator', 'crystal',
                        '--shift-oscillator', 'ic-7100', '--spread-preset', 'hf-worst',
                        '--margin', '3.0', '--selective-perturbation', 'each-65',
@@ -264,6 +266,7 @@ class CampaignTests(unittest.TestCase):
                     '--exporter', str(exporter), '--seed-base', '94300', '--calibration-count', '1',
                     '--signal-count', '0', '--null-count', '0', '--data-if', '1725',
                     '--ramp-seconds', '.006', '--fft-backend', 'batched',
+                    '--sample-rate', '6000',
                     '--shaping-tail-fraction', '.001', '--rate', '360',
                     '--rf-hz', '500000', '--base-oscillator', 'crystal', '--shift-oscillator', 'ic-7100',
                     '--spread-preset', 'hf-worst', '--margin', '3', '--selective-perturbation', 'each-65',
@@ -271,7 +274,7 @@ class CampaignTests(unittest.TestCase):
                     '--data-power-w', '4', '--helper-power-w', '40',
                     '--added-symbols', '10', '--fhss', 'on', '--burst-wait-tiles', '3',
                     '--frequency-batch-size', '4', '--max-cached-hypotheses', '13',
-                    '--memory-limit-bytes', str(8 * 1024**3), '--frontend-profile', 'wide',
+                    '--memory-limit-bytes', str(8 * 1024**3), '--frontend-profile', 'rate-aware',
                     '--clock-step-ppm', '.1', '--doppler-scale-count', '3', '--aligned-fft-grid',
                     '--lag-step', '4',
                 ], comparison_factory=FakeComparison, export_runner=mock_export)
@@ -281,6 +284,7 @@ class CampaignTests(unittest.TestCase):
             command = export_calls[0]
             self.assertEqual(command[command.index('--data-if') + 1], '1725.0')
             self.assertEqual(command[command.index('--ramp-seconds') + 1], '0.006')
+            self.assertEqual(command[command.index('--sample-rate') + 1], '6000')
             self.assertEqual(command[command.index('--shaping') + 1], 'auto')
             self.assertEqual(command[command.index('--shaping-tail-fraction') + 1], '0.001')
             for flag, value in (
@@ -297,13 +301,14 @@ class CampaignTests(unittest.TestCase):
             self.assertEqual(study_options, [{'device': 'cpu', 'precision': 'fp32',
                 'fft_backend': 'batched', 'frequency_batch_size': 4,
                 'max_cached_hypotheses': 13, 'memory_limit_bytes': 8 * 1024**3,
-                'frontend_profile': 'wide', 'clock_ppm_values': (0.,),
+                'frontend_profile': 'rate-aware', 'clock_ppm_values': (0.,),
                 'doppler_scale_values': (1.,), 'aligned_fft_grid': True, 'lag_step': 4}])
             grids.assert_called_once_with(json.loads((output / 'calibration-0000' / 'manifest.json').read_text()),
                                           .1, 3)
             protocol = json.loads((output / 'protocol.json').read_text())
             self.assertEqual(protocol['public_overrides']['data_if_hz'], 1725.)
             self.assertEqual(protocol['public_overrides']['ramp_seconds'], .006)
+            self.assertEqual(protocol['public_overrides']['sample_rate'], 6000)
             self.assertEqual(protocol['public_overrides']['shaping'], 'auto')
             self.assertEqual(protocol['public_overrides']['shaping_tail_fraction'], .001)
             for key, value in dict(rf_hz=500000., base_oscillator='crystal',
