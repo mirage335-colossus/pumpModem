@@ -23,11 +23,15 @@ def score(value, bit=0, procedure='whole-adaptive-rule'):
 
 
 class CampaignTests(unittest.TestCase):
-    def test_export_shaping_options_are_opt_in_and_explicit(self):
+    def test_export_shaping_options_are_explicit(self):
         command = ['exporter', '--case', 'eme']
         defaults = SimpleNamespace(shaping=None, shaping_tail_fraction=None, rate=None,
             added_symbols=None, fhss=None, burst_wait_tiles=None)
         self.assertEqual(campaign.append_export_shaping_options(command.copy(), defaults), command)
+
+        defaults.shaping = 'legacy'
+        self.assertEqual(campaign.append_export_shaping_options(command.copy(), defaults),
+                         command + ['--shaping', 'legacy'])
 
         selected = SimpleNamespace(shaping='auto', shaping_tail_fraction=.001, rate=360.,
             added_symbols=10, fhss='on', burst_wait_tiles=3)
@@ -201,7 +205,7 @@ class CampaignTests(unittest.TestCase):
                 '--exporter', str(exporter), '--seed-base', '94300', '--calibration-count', '1',
                 '--signal-count', '0', '--null-count', '0', '--data-if', '1725',
                 '--ramp-seconds', '.006', '--fft-backend', 'batched',
-                '--shaping', 'auto', '--shaping-tail-fraction', '.001', '--rate', '360',
+                '--shaping-tail-fraction', '.001', '--rate', '360',
                 '--added-symbols', '10', '--fhss', 'on', '--burst-wait-tiles', '3',
                 '--frequency-batch-size', '4', '--max-cached-hypotheses', '13',
                 '--memory-limit-bytes', str(8 * 1024**3),

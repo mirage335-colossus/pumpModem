@@ -188,11 +188,10 @@ def source_hashes():
 
 
 def append_export_shaping_options(command, args):
-    """Append only explicitly selected geometry/shaping overrides.
+    """Freeze the selected shaping mode and any optional geometry overrides.
 
-    Omitting these options preserves the historical exporter invocation and its
-    legacy shaping defaults. This is important for frozen campaigns whose
-    templates and manifests describe the legacy waveform.
+    The CLI defaults to auto and forwards it explicitly. Historical legacy
+    campaigns must select legacy and use matching templates and manifests.
     """
     options = (
         ('shaping', '--shaping'),
@@ -250,8 +249,8 @@ def main(argv=None, *, comparison_factory=None, export_runner=None):
                    help='override the exporter DATA IF; the emitted manifest remains procedure identity input')
     p.add_argument('--ramp-seconds', type=float,
                    help='optional native FHSS EME edge ramp; recorded in the emitted public manifest')
-    p.add_argument('--shaping', choices=('legacy', 'auto'),
-                   help='optional rate-aware waveform shaping override; omitted preserves legacy')
+    p.add_argument('--shaping', choices=('legacy', 'auto'), default='auto',
+                   help='waveform shaping mode (default: auto); legacy reproduces historical fixtures')
     p.add_argument('--shaping-tail-fraction', type=float,
                    help='optional auto-shaping spectral tail budget in (0, 0.005]')
     p.add_argument('--rate', type=float, help='optional inner pattern rate override in Hz')

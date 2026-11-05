@@ -13,11 +13,13 @@ The later [clock, GPU and low-IF ramp record](validation-data/triad-v3/2026-11-0
 records the mixed free-running/IC-7100 HF study, the opt-in batched GPU path,
 and an EME FHSS ramp that restores the 1725 Hz DATA center. It extends, and
 does not replace, the earlier admission results.
-The [rate-aware shaping planner](triad-shaping.md) now provides an opt-in
-general DATA pulse/ramp/lattice selection. For the strong EME case it supports
+The [rate-aware shaping planner](triad-shaping.md) now provides the default
+general DATA pulse/ramp/lattice selection in the exporter and campaign runner.
+Use `--shaping legacy` to reproduce the historical waveform explicitly.
+For the strong EME case it supports
 1725 Hz DATA with the standard 2400 Hz high pilot, preserving the existing
 calendar, Helper waveform and power allocation. Read its sampled evidence and
-limits before replacing the historical conservative placement recipe below.
+limits; the conservative legacy placement recipe below remains available explicitly.
 
 ## Implemented composition
 
@@ -41,14 +43,14 @@ The two preset exports implement:
 | Spread after margin | HF worst ×3: 90 Hz, 21 ms | EME focused ×1: 6 Hz, 0.5 ms |
 | Additional modulation | Each 65% | Each 65% |
 | FHSS / Symbol Burst | Off / off | Fake FCC envelope / off |
-| DATA audio center / high Helper pilot | 1725 / 2400 Hz | 4000 / 6412.5 Hz |
+| DATA audio center / high Helper pilot (default auto) | 1725 / 2400 Hz | 1725 / 2400 Hz |
 | Explicit study arrival prior | [−7.035, +7.035] s | [−0.055, +0.125] s |
 | Epoch alternatives | −6 through +6 seconds | −6 through +6 seconds |
 | DATA C/N₀ at −164 dBm/Hz noise density | 20.0206 dB-Hz | 10.0206 dB-Hz |
 | Separate requested planning target | 8 dB-Hz | 1.5 dB-Hz |
 
-The legacy EME DATA center is higher to retain the production placement guard for the
-fast FHSS ramps, including cover-chip energy. This complies with the requested
+With `--shaping legacy`, EME defaults to DATA 4000 Hz / high pilot 6412.5 Hz
+to retain the production placement guard for the fast FHSS ramps, including cover-chip energy. This complies with the requested
 1725/1775 Hz **or higher** convention, but is not an SSB audio-passband
 qualification. Both presets have 60 fine symbols/s/carrier, 75 Hz spacing and
 225 Hz nominal triplet bandwidth. The sample rate is 18 kHz; all processing uses
@@ -160,15 +162,15 @@ likelihood. The DATA two-ray model omits the selected additional modulation
 structure. Complete noisy sampled experiments, rather than a nominal channel
 match, determine its performance.
 
-The opt-in `--ramp-seconds .006 --data-if 1725` EME export retains the 400 ms
-dwell, 55 ms quiet time, 5 ms margin, pulse support and 64 protected inner
+The historical `--shaping legacy --ramp-seconds .006 --data-if 1725`
+EME export retains the 400 ms dwell, 55 ms quiet time, 5 ms margin, pulse support and 64 protected inner
 symbols across the 26.4 s DATA tile. The production Helper planner raises its
 high pilot to 2654.17 Hz. In the matched sampled ramp comparison, the new ramp
 increased Helper energy at the DATA FIR output from 104.8 dB below measured
 noise to 64.3 dB below noise. Leakage remained below noise in this fixture, but
 the 40.6 dB relative change makes this a measured placement tradeoff, not a
-metadata-only guard proof. The exporter keeps the old ramp unless explicitly
-overridden.
+metadata-only guard proof. Legacy mode keeps the old ramp unless explicitly
+overridden; default auto mode jointly plans the pulse and ramp instead.
 
 Fresh 6 ms / 1725 Hz sampled campaigns admitted all eight physical-link EME
 messages, but only five of eight at an injected 1.5 dB-Hz, for both receiver

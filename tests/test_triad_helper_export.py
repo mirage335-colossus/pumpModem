@@ -2,7 +2,7 @@
 """Bounded CLI smoke contracts for actual Helper + triad sampled exports.
 
 Run with the built exporter as the sole positional argument. This produces
-three minimal captures, checks their file/metadata contracts, and removes the
+five minimal captures, checks their file/metadata contracts, and removes the
 temporary arrays. It does not measure receiver success or statistical power.
 """
 
@@ -65,7 +65,7 @@ def invoke(binary, output, arguments, timings, *, succeeds=True):
 
 def check_capture(directory, scenario, *, data=True, helper=True, bit=0,
                   data_if=None, base_oscillator=None, shift_oscillator=None, ramp_seconds=None,
-                  receiver_tail_seconds=0):
+                  receiver_tail_seconds=0, shaping="auto"):
     manifest = load_json(directory / "manifest.json")
     truth = load_json(directory / "evaluator-truth.json")
     require(manifest["schema"] == "triad-helper-public-v1", "public schema")
@@ -132,9 +132,16 @@ def check_capture(directory, scenario, *, data=True, helper=True, bit=0,
     require(fmt["fhss_envelope_only"] is eme and fmt["fhss_center_aligned"] is eme, "case FHSS/center alignment")
     require(fmt["physical_rf_retuning"] is False, "fixture must identify envelope-only FHSS")
     close(fmt["quiet_seconds"], .055 if eme else 0, "quiet interval")
-    close(fmt["ramp_seconds"], ramp_seconds if ramp_seconds is not None else (2 / 3600 if eme else .02), "ramp")
+    expected_ramp = ((119 / fs if eme else .02) if shaping == "auto" else
+                     (ramp_seconds if ramp_seconds is not None else (2 / 3600 if eme else .02)))
+    close(fmt["ramp_seconds"], expected_ramp, "ramp")
+    require(manifest["shaping_plan"]["enabled"] is (shaping == "auto"), "selected shaping mode")
+    if shaping == "auto":
+        require(manifest["shaping_plan"]["converged"] and not manifest["shaping_plan"]["fallback"],
+                "default presets must use the qualified spectral plan")
+        require(fmt["pulse_shape"] == "rrc-025-span8-c2-tail2", "default planned pulse")
     close(fmt["margin_seconds"], .005, "source margin")
-    expected_if = data_if if data_if is not None else (4000 if eme else 1725)
+    expected_if = data_if if data_if is not None else (4000 if eme and shaping == "legacy" else 1725)
     close(channel["nominal_conversion_if_hz"], expected_if, "DATA IF")
     require(channel["nominal_conversion_if_hz"] >= 1725, "DATA IF floor")
     close(channel["rf_hz"], 5.8e9 if eme else 30e6, "RF center")
@@ -165,8 +172,9 @@ def check_capture(directory, scenario, *, data=True, helper=True, bit=0,
     require(channel["selective_model"] == "dispersive-dft-v1", "selected dispersive channel")
     close(channel["selective_scale_hz"], 75, "public selective scale")
     close(channel["selective_center_hz"], 0, "public selective center")
-    effective_ramp = ramp_seconds if ramp_seconds is not None else (2 / 3600 if eme else .02)
-    close(plan["placement_gate_bandwidth_hz"], 2 / effective_ramp, "complete gate allowance")
+    gate_width = (max(0, manifest["shaping_plan"]["placement_bandwidth_hz"] - 225)
+                  if shaping == "auto" else 2 / expected_ramp)
+    close(plan["placement_gate_bandwidth_hz"], gate_width, "selected placement allowance")
     close(plan["low_hz"], 550, "production low pilot")
     close(plan["auxiliary_hz"], 950, "production metadata carrier")
     require(plan["pilot_dwell_gating"] is eme, "production Helper dwell gating")
@@ -223,8 +231,8 @@ def main():
         # These cases cross baseline and bounded-layout paths without writing
         # multi-hour sampled fixtures.
         plan_cases = [
-            ["--case", "eme", "--plan-only", "--shaping", "auto"],
-            ["--case", "hf", "--plan-only", "--shaping", "auto", "--rate", "36",
+            ["--case", "eme", "--plan-only"],
+            ["--case", "hf", "--plan-only", "--rate", "36",
              "--added-symbols", "10", "--fhss", "off"],
             ["--case", "eme", "--plan-only", "--shaping", "auto", "--rate", "360",
              "--added-symbols", "1", "--fhss", "on", "--burst-wait-tiles", "3"],
@@ -252,6 +260,8 @@ def main():
             else:
                 require(plan["reason"], "infeasible geometry needs a reason")
             planned.append(plan)
+        require(planned[0]["shaping"] == planned[1]["shaping"] == "auto",
+                "omitted shaping mode must select the planner for both presets")
         require(planned[0]["geometry_feasible"], "standard EME auto shaping should have a bounded plan")
         require(planned[0]["helper_placement"]["requested_data_if_hz"] == 1725,
                 "auto EME DATA IF did not use standardized low placement")
@@ -281,12 +291,12 @@ def main():
         invoke(binary, invalid, ["--case", "hf", "--data-if", "500"], timings, succeeds=False)
         require(not invalid.exists(), "invalid IF created output")
         invalid_geometry = root / "invalid-eme-geometry"
-        result = invoke(binary, invalid_geometry, ["--case", "eme", "--data-if", "1725", "--seconds", "1"],
+        result = invoke(binary, invalid_geometry, ["--case", "eme", "--shaping", "legacy", "--data-if", "1725", "--seconds", "1"],
                         timings, succeeds=False)
         require("production Helper plan rejected" in result.stderr, "invalid EME geometry must fail in production placement")
         require(not invalid_geometry.exists(), "invalid Helper placement wrote output")
         invalid_ramp = root / "invalid-ramp"
-        result = invoke(binary, invalid_ramp, ["--case", "eme", "--data-if", "1725", "--ramp-seconds", ".01",
+        result = invoke(binary, invalid_ramp, ["--case", "eme", "--shaping", "legacy", "--data-if", "1725", "--ramp-seconds", ".01",
                                                 "--seconds", "1"], timings, succeeds=False)
         require("no protected dwell cells" in result.stderr, "10 ms ramp must fail protected-cell placement")
         require(not invalid_ramp.exists(), "invalid ramp placement wrote output")
@@ -303,11 +313,11 @@ def main():
         hf, hf_truth = check_capture(root / "hf", "hf")
         invoke(binary, root / "eme", ["--case", "eme", "--seconds", "1", "--seed", "91002"], timings)
         check_capture(root / "eme", "eme")
-        invoke(binary, root / "eme-6ms-low-if", ["--case", "eme", "--seconds", "1", "--seed", "91004",
+        invoke(binary, root / "eme-6ms-low-if", ["--case", "eme", "--shaping", "legacy", "--seconds", "1", "--seed", "91004",
                                                    "--base-oscillator", "crystal", "--shift-oscillator", "ic-7100",
                                                    "--data-if", "1725", "--ramp-seconds", ".006"], timings)
         low_if, _ = check_capture(root / "eme-6ms-low-if", "eme", data_if=1725,
-                                  base_oscillator="crystal", shift_oscillator="ic-7100", ramp_seconds=.006)
+                                  base_oscillator="crystal", shift_oscillator="ic-7100", ramp_seconds=.006, shaping="legacy")
         close(low_if["helper_plan"]["high_hz"], 2654.1666666666665, "low-IF 6 ms production Helper placement")
         invoke(binary, root / "hf-receiver-tail", ["--case", "hf", "--seconds", "1", "--seed", "91001",
                                                     "--receiver-tail-seconds", ".25"], timings)

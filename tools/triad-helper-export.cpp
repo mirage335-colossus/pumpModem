@@ -38,7 +38,7 @@ constexpr std::uint64_t maximum_export_bytes = 2ULL * 1024 * 1024 * 1024;
 constexpr double tau = 2 * std::numbers::pi;
 
 struct Options {
-    std::string scenario = "hf", control = "selected", shaping = "legacy";
+    std::string scenario = "hf", control = "selected", shaping = "auto";
     std::optional<std::string> base_oscillator, shift_oscillator;
     std::filesystem::path output;
     std::uint64_t seed = 1, key_seed = 72001, epoch = 1793850000;
@@ -90,7 +90,7 @@ Options parse(int argc, char** argv) {
             std::cout << "triad_helper_export --case hf|eme --output NEW_DIRECTORY\n"
                 "  [--seed N] [--key-seed N] [--epoch UTC_SECONDS] [--bit 0|1]\n"
                 "  [--seconds 16] [--rate HZ] [--added-symbols N] [--burst-wait-tiles N]\n"
-                "  [--fhss on|off] [--shaping legacy|auto] [--shaping-tail-fraction F]\n"
+                "  [--fhss on|off] [--shaping auto|legacy (default: auto)] [--shaping-tail-fraction F]\n"
                 "  [--data-if HZ] [--cn0 DB_HZ] [--plan-only]\n"
                 "  [--base-oscillator ID] [--shift-oscillator ID] [--ramp-seconds POSITIVE]\n"
                 "  [--receiver-tail-seconds 0..1]\n"

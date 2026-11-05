@@ -1,8 +1,9 @@
 # Rate-aware three-carrier shaping and Helper placement
 
-This guide describes the opt-in shaping planner for the isolated three-carrier
-source and production Helper waveform. It does not change the ordinary Robust
-receiver. Start with [the v3 format](triad-v3.md), [Helper integration](triad-helper.md)
+This guide describes the default shaping planner for the isolated three-carrier
+Helper exporter and campaign runner. Both default to `--shaping auto`; use
+`--shaping legacy` for historical reproduction with matching legacy templates.
+It does not change the ordinary Robust receiver. Start with [the v3 format](triad-v3.md), [Helper integration](triad-helper.md)
 and [the channel-model contract](channel-models.md).
 
 ## What the planner chooses
@@ -15,7 +16,9 @@ only when the finite-kernel spectrum converges within its declared numerical
 allowance. The default tail-energy request is 0.001. The selectable
 `rrc-025-span8-c2-tail2` pulse keeps the existing eight-chip support while
 tapering the outer two chip periods to zero with a smooth C2 edge. The legacy
-unit-energy RRC remains available and remains the format default.
+unit-energy RRC remains available through `--shaping legacy`. The low-level
+`Format` descriptor still starts from that legacy pulse; exporter defaults
+invoke the joint planner rather than changing unrelated resolved formats.
 
 The planner may lengthen a dwell ramp only up to the space available around a
 protected symbol, while retaining the configured quiet interval and margin. It
@@ -188,10 +191,12 @@ one frozen binary and one shared source identity, then run
 `tools/triad_helper_interference.py` with a Helper aperture that overlaps
 received DATA. Use the same configuration and stochastic roots for all
 controls. Run a different seed as independent validation after freezing the
-planner choice. For receiver comparisons, the `--shaping`, rate, Added Symbols,
-FHSS and burst options in `tools/triad_helper_campaign.py` are opt-in; generate
-templates from the exact same public format. Do not reuse legacy templates for
-the tapered pulse.
+planner choice. For receiver comparisons, the campaign runner records and
+forwards `--shaping auto` by default;
+rate, Added Symbols, FHSS and burst overrides remain optional. Generate
+templates from the exact same public format. Explicitly select `--shaping legacy`
+for historical campaigns; archived evidence and its source snapshots remain
+unchanged. Do not reuse legacy templates for the tapered pulse.
 
 The [completed validation record](validation-data/triad-v3/2026-11-04-shaping/README.md)
 retains 536 GPU campaign captures, independent holdouts, the Helper-off control,
