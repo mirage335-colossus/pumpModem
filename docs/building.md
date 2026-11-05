@@ -463,6 +463,12 @@ audio. `./build.sh test triad --cli` builds the isolated group's prerequisites
 and runs its registered checks; optional Python research tools also have their
 own focused tests that are not all registered in this group.
 
+The opt-in `triad_helper_export` executable reuses the production Helper
+transmitter through `datapump`; it does not run the ordinary receiver or open
+audio devices. Its `triad-helper` CTest label and optional Python checks are
+documented in [the isolated Helper integration](triad-helper.md). They are kept
+outside the hardware-free `triad` group's build dependencies.
+
 The [isolated receiver performance suite](triad-performance.md) runs in a
 separate normal-CI job unless `devfast` is selected. Its fast entrypoints are
 `triad_perf_guard.py --profile ci` for CPU and

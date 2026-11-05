@@ -18,6 +18,13 @@ predictive chains where they save total work and direct full-target timing where
 that is cheaper. Shared-code and ordinary-receiver changes retain their own
 requirements.
 
+For the new Helper transmitter/triad receiver composition, use
+[Helper-assisted triad acquisition](triad-helper.md). It retains the complete
+declared timing/epoch bank, measures shared-channel leakage, and calibrates the
+whole adaptive frequency-selection procedure before independent held-out trials.
+Its small focused checks are the routine entry point; the sensitivity campaign
+is not an automatic regression prerequisite.
+
 For ADC/DAC cable comparisons, use the [Live/Duplex hierarchy](triad-live-duplex.md).
 It keeps public probe synchronization and measured audio noise separate from
 operational receiver acquisition/admission. Do not feed physical captures to a

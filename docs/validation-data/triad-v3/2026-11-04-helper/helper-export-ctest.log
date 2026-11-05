@@ -1,0 +1,11 @@
+Internal ctest changing into directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli
+Test project /home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli
+    Start 530: triad_helper_export
+1/1 Test #530: triad_helper_export ..............   Passed   11.57 sec
+
+100% tests passed, 0 tests failed out of 1
+
+Label Time Summary:
+triad-helper    =  11.57 sec*proc (1 test)
+
+Total Test time (real) =  11.58 sec

@@ -31,6 +31,27 @@ adapter. The native `triad-long` CLI remains part of complete-pipeline timing.
 
 ## Fast guard versus qualification
 
+### New Helper composition extension
+
+The [isolated Helper integration](triad-helper.md) adds the following distinct
+paths after the historical 33/36-target qualification below. Those historical
+counts and source-bound coverage receipts **do not cover this extension**.
+
+| Path / regime | Cheap functional check | Full workload / timing route | Remaining qualification |
+| --- | --- | --- | --- |
+| Composite emitted source, unchanged legacy source | Native `test_triad_v3_channel`, source byte-parity check | Complete 18 kHz HF/EME native exports; process startup, generation, propagation and writes timed directly | New native CFG coverage; no runtime forecast across sample rates or longer observation sizes |
+| Opt-in centered FHSS lattice and Added/interleave mapping | Native `test_triad_v3_source`, `test_triad_configuration.py` | Complete EME 66-dwell source with preserved shaped tails | Other lattice/rate combinations remain subject to planner validation |
+| Production Helper placement/power/clock-derived encrypted composition | `test_triad_helper_export.py` (three small complete captures) | Same complete HF/EME exports, no template regeneration per trial | Audio/RF hardware and ordinary receiver excluded |
+| Joint pilot comb CFO profile, interpolation, fallback | `test_triad_helper_assistance.py` | Actual 36-second 18 kHz windows; direct complete estimator timer | Model/operational interval coverage, real retuning and stochastic spread |
+| Continuous FIR, thirteen epochs, full/narrowed FFT banks, FP32/64 | `test_triad_helper_receiver.py`, `test_triad_helper_study.py` | Complete declared HF/EME acquisition; preparation/filter/scoring separated, resident workspaces shared | No cross-geometry performance forecast or CUDA acceleration claim |
+| Frozen adaptive admission procedure and independent holdouts | `test_triad_helper_campaign.py` | Direct campaign wall including exports, loading, hashing, shared setup and all paired scores | Operational daily false-admission and high-reliability reception remain unqualified |
+
+Do not add the Monte Carlo sensitivity campaign to routine CI. Reuse its frozen
+fixtures and source identities; choose a small complete estimator/acquisition
+target or validate a cheaper forecast before adding a timing gate. Functional
+unit tests alone are not prediction anchors. A passing historical guard does
+not remove the explicit new-path coverage gaps above.
+
 ### Current selected measurement routes
 
 The routine guard selects a direct complete target for the current named

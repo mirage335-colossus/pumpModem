@@ -718,6 +718,12 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
   add_executable(triad_long EXCLUDE_FROM_ALL tools/triad-long.cpp)
   target_include_directories(triad_long PRIVATE src)
   target_link_libraries(triad_long PRIVATE triad_experiment)
+  # Isolated composite-signal study. Reuse the production Helper transmitter
+  # (whose object also contains Config adapters); no ordinary receiver is run.
+  # Keep that linkage out of triad_experiment and the hardware-free triad group.
+  add_executable(triad_helper_export EXCLUDE_FROM_ALL tools/triad-helper-export.cpp)
+  target_include_directories(triad_helper_export PRIVATE include src)
+  target_link_libraries(triad_helper_export PRIVATE triad_experiment datapump)
   # Opt-in physical cable characterization. Keep native audio out of the
   # isolated triad library and its ordinary, hardware-free test group.
   if(NOT EMSCRIPTEN)
@@ -1120,6 +1126,10 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
       ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_triad_live_source.py $<TARGET_FILE:triad_long>)
     set_tests_properties(triad_live_source PROPERTIES LABELS "triad" TIMEOUT 90)
     add_custom_target(test_triad_live_source DEPENDS triad_long)
+    add_test(NAME triad_helper_export COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_triad_helper_export.py $<TARGET_FILE:triad_helper_export>)
+    set_tests_properties(triad_helper_export PROPERTIES LABELS "triad-helper" TIMEOUT 90)
+    add_custom_target(test_triad_helper_export DEPENDS triad_helper_export)
     if(TARGET triad_audio_capture)
       add_test(NAME triad_audio_capture_guards COMMAND ${CMAKE_COMMAND} -E env
         TRIAD_AUDIO_CAPTURE_BINARY=$<TARGET_FILE:triad_audio_capture> ${Python3_EXECUTABLE}
@@ -1230,6 +1240,7 @@ if(NOT DATAPUMP_BUILD_WASM)
           _target STREQUAL "test_triad_v3_channel" OR _target STREQUAL "test_triad_v3_receiver" OR
           _target STREQUAL "triad_study" OR _target STREQUAL "triad_examples" OR
           _target STREQUAL "triad_long" OR _target STREQUAL "triad_audio_capture" OR
+          _target STREQUAL "triad_helper_export" OR
           _target STREQUAL "triad_planner_perf" OR
           _target STREQUAL "triad_oscillator_study")
         # Isolated simulations and the standalone cable adapter supply their

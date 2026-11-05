@@ -108,6 +108,184 @@ void exact_bypass_checks() {
           "absolute noise variance was altered by a whole-waveform estimate");
 }
 
+void emitted_source_checks() {
+    auto f = fixture_format();
+    f.sample_rate = 1024;
+    const auto key = fixture_key();
+    PatternSource pattern(f, key, 1);
+    const auto g = pattern.geometry();
+    StreamChannelConfig cfg;
+    cfg.effects.sample_rate = f.sample_rate;
+    cfg.effects.occupied_bandwidth_hz = g.occupied_bandwidth_hz;
+    cfg.effects.noise_enabled = false;
+    cfg.complex_noise_variance = 0;
+    cfg.maximum_chunk_samples = 4096;
+    struct Observation {
+        std::vector<Complex> samples;
+        std::vector<std::uint8_t> validity;
+        StreamChannelReport report;
+    };
+    auto drain = [&](StreamingChannel& channel, std::size_t chunk) {
+        Observation result;
+        result.samples.resize(static_cast<std::size_t>(channel.total_samples()));
+        result.validity.resize(result.samples.size());
+        std::size_t offset = 0;
+        while (offset < result.samples.size()) {
+            const auto count = std::min(chunk, result.samples.size() - offset);
+            const auto got = channel.read(std::span(result.samples).subspan(offset, count),
+                                          std::span(result.validity).subspan(offset, count));
+            check(got == count, "emitted source channel truncated its complete tail");
+            offset += got;
+        }
+        result.report = channel.report();
+        check(result.report.samples == channel.total_samples(), "emitted source channel lost tail rows");
+        return result;
+    };
+    EmittedSource descriptor;
+    descriptor.format = f;
+    descriptor.geometry = g;
+    descriptor.minimum_frequency_hz = -g.occupied_bandwidth_hz * .5;
+    descriptor.maximum_frequency_hz = g.occupied_bandwidth_hz * .5;
+    descriptor.working_bytes = 1234;
+    std::uint64_t calls = 0;
+    descriptor.sample_at = [&](std::uint64_t n) {
+        check(n == calls++ && n < g.source_samples,
+              "emitted source callback was repeated, skipped or called outside its extent");
+        return pattern.sample_at(static_cast<long double>(n));
+    };
+    for (bool impaired : {false, true}) {
+        auto settings = cfg;
+        if (impaired) {
+            settings.effects.noise_enabled = true;
+            settings.complex_noise_variance = .01;
+            settings.effects.tx.audio_ppm = 3;
+            settings.effects.rx.audio_ppm = -2;
+            settings.effects.spread_delay_ms = 5;
+            settings.effects.spread_doppler_hz = .3;
+            settings.effects.perturbation_slow_depth = .65;
+            settings.effects.perturbation_fast_depth = .65;
+            settings.tx_spectrum.white_fm_hz_sqrt_seconds = .001;
+            settings.frontend.dac.nominal_bits = 16;
+            settings.frontend.dac.dither_rms_lsb = .2;
+        }
+        calls = 0;
+        StreamingChannel old_channel(pattern, settings), new_channel(descriptor, settings);
+        const auto old_result = drain(old_channel, 73), new_result = drain(new_channel, 997);
+        check(old_result.samples == new_result.samples && old_result.validity == new_result.validity,
+              "equivalent emitted descriptor changed legacy samples, RNG or validity");
+        check(calls == g.source_samples, "emitted callback did not traverse the complete finite source");
+        check(new_result.report.working_bytes == old_result.report.working_bytes + descriptor.working_bytes,
+              "declared emitted source storage was omitted or counted twice");
+    }
+
+    // Two independently shaped components share one source calendar and the
+    // same continuous linear channel. Their sum must propagate as a whole,
+    // including zeros, filter memory, source-end echoes and erased observations.
+    descriptor.geometry.source_samples = 1024;
+    descriptor.geometry.calendar_origin_sample = 128;
+    descriptor.minimum_frequency_hz = -300;
+    descriptor.maximum_frequency_hz = 320;
+    descriptor.working_bytes = 0;
+    descriptor.format.fhss = true;
+    auto component = [](std::uint64_t n, unsigned which) {
+        const bool active = which == 0 ? (n >= 200 && n < 800 && (n < 400 || n >= 450)) :
+            (n < 256 || n >= 700);
+        if (!active) return Complex{};
+        const double frequency = which == 0 ? -280 : 310;
+        return std::polar(which == 0 ? .3 : .2,
+            2 * std::numbers::pi * frequency * static_cast<double>(n) / 1024);
+    };
+    for (unsigned mode = 0; mode < 3; ++mode) {
+        auto settings = cfg;
+        settings.effects.capture_lead_seconds = .03125;
+        settings.effects.capture_trail_seconds = .02;
+        settings.effects.timing_offset_seconds = .003;
+        settings.effects.tx.audio_ppm = 3;
+        settings.effects.rx.audio_ppm = -2;
+        settings.effects.tx.rf_ppm = .0001;
+        settings.effects.rx.rf_ppm = -.0001;
+        settings.effects.rf_hz = 30e6;
+        settings.tx_spectrum.white_fm_hz_sqrt_seconds = .001;
+        settings.effects.spread_delay_ms = mode != 1 ? 31.25 : 0;
+        settings.effects.spread_doppler_hz = mode != 1 ? .3 : 0;
+        settings.selective_model.model = SelectiveModel::DispersiveDft;
+        settings.selective_model.modulation_rate_hz = mode != 0 ? .3 : 0;
+        settings.effects.perturbation_slow_depth = settings.effects.perturbation_fast_depth = .65;
+        settings.missed_receiver_dwell_indices = {1};
+        auto observe = [&](unsigned which, std::size_t chunk) {
+            auto src = descriptor;
+            std::uint64_t next = 0;
+            src.sample_at = [&](std::uint64_t n) {
+                check(n == next++ && n < descriptor.geometry.source_samples,
+                      "composite callback lost once-per-emission ordering");
+                return which == 2 ? component(n, 0) + component(n, 1) : component(n, which);
+            };
+            StreamingChannel channel(src, settings);
+            auto result = drain(channel, chunk);
+            check(next == descriptor.geometry.source_samples, "composite source endpoint was skipped");
+            return result;
+        };
+        const auto sum = observe(2, 73), rechunked = observe(2, 997);
+        const auto a = observe(0, 127), b = observe(1, 257);
+        check(sum.samples == rechunked.samples && sum.validity == rechunked.validity,
+              "composite channel or validity state reset across chunks");
+        check(sum.samples.size() == a.samples.size() && sum.samples.size() == b.samples.size(),
+              "component identity changed the complete channel extent");
+        for (std::size_t n = 0; n < sum.samples.size(); ++n)
+            check(std::abs(sum.samples[n] - a.samples[n] - b.samples[n]) < 1e-11,
+                  "spread/selective channel did not propagate the complete complex sum linearly");
+        check(sum.report.erased_samples > 0 && sum.report.tail_samples > 10,
+              "composite path omitted public masks or propagation/filter tails");
+        const auto after_source = static_cast<std::size_t>(descriptor.geometry.source_samples + 40);
+        check(std::any_of(sum.samples.begin() + static_cast<std::ptrdiff_t>(after_source), sum.samples.end(),
+                         [](Complex z) { return std::norm(z) > 1e-14; }),
+              "composite path discarded source-end echoes or filter memory");
+        if (mode != 0)
+            check(sum.report.selective_perturbation &&
+                  sum.report.selective_perturbation->correlation_spacing_hz == g.carrier_spacing_hz &&
+                  sum.report.selective_perturbation->processed_rows == sum.samples.size(),
+                  "composite width changed DATA selective spacing or tail processing");
+    }
+
+    descriptor.sample_at = [&](std::uint64_t) { ++calls; return Complex{1, 0}; };
+    calls = 0;
+    auto disabled = cfg;
+    disabled.effects.signal_enabled = false;
+    StreamingChannel absent(descriptor, disabled);
+    const auto silence = drain(absent, 127);
+    check(calls == 0 && std::all_of(silence.samples.begin(), silence.samples.end(),
+                                  [](Complex z) { return z == Complex{}; }),
+          "disabled composite transmitter invoked its source callback");
+    auto reject_source = [&](EmittedSource src) {
+        rejects([&] { StreamingChannel channel(src, cfg); }, "malformed emitted source was accepted");
+    };
+    auto malformed = descriptor; malformed.sample_at = {}; reject_source(malformed);
+    malformed = descriptor; malformed.geometry.source_samples = 0; reject_source(malformed);
+    malformed = descriptor; malformed.geometry.source_samples = UINT64_MAX; reject_source(malformed);
+    malformed = descriptor; malformed.geometry.calendar_origin_sample = malformed.geometry.source_samples;
+    reject_source(malformed);
+    malformed = descriptor; malformed.format.dwell_seconds = 1e-300; reject_source(malformed);
+    malformed = descriptor; malformed.geometry.carrier_spacing_hz = 0; reject_source(malformed);
+    malformed = descriptor; malformed.minimum_frequency_hz = 321; reject_source(malformed);
+    malformed = descriptor; malformed.maximum_frequency_hz = std::numeric_limits<double>::quiet_NaN();
+    reject_source(malformed);
+    malformed = descriptor; malformed.minimum_frequency_hz = -513; reject_source(malformed);
+    malformed = descriptor; malformed.maximum_frequency_hz = 513; reject_source(malformed);
+    malformed = descriptor; malformed.working_bytes = std::numeric_limits<std::size_t>::max();
+    reject_source(malformed);
+    // A narrow DATA width cannot certify an outlying component, and a faster
+    // TX clock or TX translation must fit before RX translation is applied.
+    auto narrow = cfg; narrow.effects.sample_rate = 512;
+    malformed = descriptor; malformed.format.sample_rate = 512;
+    rejects([&] { StreamingChannel channel(malformed, narrow); }, "wide source bypassed capture Nyquist");
+    auto clocked = cfg; clocked.effects.tx.audio_ppm = 1e6;
+    rejects([&] { StreamingChannel channel(descriptor, clocked); }, "wide source ignored TX clock scaling");
+    auto offset = cfg; offset.effects.rf_hz = 1e6; offset.effects.tx.rf_ppm = 250;
+    rejects([&] { StreamingChannel channel(descriptor, offset); }, "wide source ignored TX oscillator offset");
+    offset = cfg; offset.effects.rf_hz = 1e6; offset.effects.rx.rf_ppm = 250;
+    rejects([&] { StreamingChannel channel(descriptor, offset); }, "wide source ignored final RX oscillator offset");
+}
+
 void chunk_and_impairment_checks() {
     auto f = fixture_format();
     f.fhss = true;
@@ -1699,6 +1877,7 @@ void selective_response_checks() {
 int main() {
     try {
         exact_bypass_checks();
+        emitted_source_checks();
         chunk_and_impairment_checks();
         historical_phase_and_energy_checks();
         zero_shift_and_emission_drift_checks();

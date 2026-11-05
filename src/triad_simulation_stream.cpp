@@ -13,6 +13,7 @@
 #include <memory>
 #include <numbers>
 #include <random>
+#include <utility>
 #include <vector>
 
 namespace datapump::triad::v3 {
@@ -339,12 +340,24 @@ StreamChannelConfig checked_config(const StreamChannelConfig& cfg, const Format&
     return cfg;
 }
 
+EmittedSource pattern_descriptor(PatternSource& source) {
+    EmittedSource result;
+    result.format = source.format();
+    result.geometry = source.geometry();
+    result.sample_at = [&source](std::uint64_t n) {
+        return source.sample_at(static_cast<long double>(n));
+    };
+    // The historical report accounts for channel storage only. Callers of
+    // the explicit descriptor declare their source storage separately.
+    return result;
+}
+
 } // namespace
 
 struct StreamingChannel::Impl {
-    PatternSource& source;
-    const Format& format;
-    const Geometry& geometry;
+    Format format;
+    Geometry geometry;
+    std::function<Complex(std::uint64_t)> source_sample;
     StreamChannelConfig config;
     SimulationConfig& effects;
     double tx_scale = 1, rx_scale = 1, dt_tx = 0, dt_rx = 0;
@@ -372,7 +385,11 @@ struct StreamingChannel::Impl {
     StreamChannelReport stats;
 
     Impl(PatternSource& src, const StreamChannelConfig& cfg)
-        : source(src), format(src.format()), geometry(src.geometry()), config(checked_config(cfg, src.format())),
+        : Impl(pattern_descriptor(src), cfg, false) {}
+
+    Impl(EmittedSource src, const StreamChannelConfig& cfg, bool explicit_source = true)
+        : format(src.format), geometry(src.geometry), source_sample(std::move(src.sample_at)),
+          config(checked_config(cfg, format)),
           effects(config.effects), tx_rng(root_seed(cfg.oscillator_seed,cfg.effects.seed) ^ 0x3254494154545801ULL),
           rx_rng(root_seed(cfg.oscillator_seed,cfg.effects.seed) ^ 0x3254494154525802ULL),
           thermal_rng(root_seed(cfg.noise_seed,cfg.effects.seed) ^ 0x3254494154415747ULL),
@@ -382,6 +399,18 @@ struct StreamingChannel::Impl {
           adc_rng(root_seed(cfg.frontend_seed,cfg.effects.seed) ^ 0x414443434f4e5631ULL),
           interference_rng(root_seed(cfg.frontend_seed,cfg.effects.seed) ^ 0x494e544552464531ULL),
           path_rng(root_seed(cfg.path_seed,cfg.effects.seed) ^ 0x504154484741494eULL) {
+        if (explicit_source) {
+            require(static_cast<bool>(source_sample), "emitted source needs a sample callback");
+            require(geometry.source_samples > 0 && geometry.source_samples < UINT64_MAX - 16 &&
+                    geometry.calendar_origin_sample < geometry.source_samples &&
+                    std::isfinite(format.dwell_seconds) && format.dwell_seconds > 0 &&
+                    std::isfinite(geometry.carrier_spacing_hz) && geometry.carrier_spacing_hz > 0 &&
+                    std::isfinite(geometry.occupied_bandwidth_hz) && geometry.occupied_bandwidth_hz > 0,
+                    "emitted source extent, calendar or DATA geometry is invalid");
+            require(std::isfinite(src.minimum_frequency_hz) && std::isfinite(src.maximum_frequency_hz) &&
+                    src.minimum_frequency_hz <= src.maximum_frequency_hz,
+                    "emitted source needs finite ordered signed frequency bounds");
+        }
         validate_effects(effects, format);
         validate_spectrum(config.tx_spectrum);
         validate_spectrum(config.rx_spectrum);
@@ -493,6 +522,46 @@ struct StreamingChannel::Impl {
                 effects.sample_rate * rx_scale > effects.occupied_bandwidth_hz * tx_scale + 2 * cfo_bound + gaussian_allowance,
                 "stream channel sample clock cannot contain deterministic offsets and Gaussian-tail allowance");
 
+        if (explicit_source) {
+            const long double source_seconds = static_cast<long double>(geometry.source_samples) * dt_tx;
+            const long double receive_start = -static_cast<long double>(effects.capture_lead_seconds);
+            const long double receive_end = static_cast<long double>(total) * dt_rx + receive_start;
+            const long double rx_time_bound = std::max(std::abs(receive_start), std::abs(receive_end));
+            // Check the complete calendar before a read can convert it to a
+            // signed dwell index. Include the TX and delayed-arrival calendars.
+            const long double calendar_bound = std::max(source_seconds, rx_time_bound) +
+                std::abs(static_cast<long double>(effects.timing_offset_seconds)) +
+                std::abs(static_cast<long double>(effects.retune_offset_seconds)) +
+                effects.spread_delay_ms * .001L + hop_origin_seconds;
+            require(std::isfinite(calendar_bound) && calendar_bound / effects.dwell_seconds < INT64_MAX - 1.L &&
+                    calendar_bound / format.dwell_seconds < INT64_MAX - 1.L,
+                    "emitted source calendar exceeds signed dwell coordinates");
+            const long double rf_bound = effects.rf_hz + maximum_hop;
+            const long double tx_offset = rf_bound * (std::abs(effects.tx.rf_ppm) +
+                std::abs(effects.tx.rf_drift_ppm_per_second) * source_seconds) * 1e-6L +
+                effects.nominal_conversion_if_hz * std::abs(tx_scale - 1.L) +
+                std::abs(config.tx_frequency_drift_hz_per_second) * source_seconds;
+            const long double rx_offset = rf_bound * (std::abs(effects.rx.rf_ppm) +
+                std::abs(effects.rx.rf_drift_ppm_per_second) * rx_time_bound) * 1e-6L +
+                effects.nominal_conversion_if_hz * std::abs(rx_scale - 1.L) +
+                std::abs(effects.static_doppler_hz);
+            const long double propagation_allowance = (spread_enabled ? effects.spread_doppler_hz : 0) +
+                selective_capture_allowance + gaussian_allowance * .5L +
+                config.path_evolution.diurnal_phase_amplitude_radians / config.path_evolution.diurnal_period_seconds;
+            const long double low = static_cast<long double>(src.minimum_frequency_hz) * tx_scale;
+            const long double high = static_cast<long double>(src.maximum_frequency_hz) * tx_scale;
+            auto contained = [&](long double nyquist, long double allowance) {
+                return std::isfinite(nyquist) && std::isfinite(allowance) &&
+                    low - allowance > -nyquist && high + allowance < nyquist;
+            };
+            require(contained(effects.sample_rate * tx_scale * .5L, tx_offset),
+                    "emitted source and TX oscillator exceed the TX sample clock");
+            require(contained(effects.sample_rate * rx_scale * .5L, tx_offset + propagation_allowance),
+                    "emitted source exceeds the pre-selective RX capture band");
+            require(contained(effects.sample_rate * rx_scale * .5L, tx_offset + propagation_allowance + rx_offset),
+                    "emitted source exceeds the final RX capture band");
+        }
+
         if (config.path_evolution.gaussian_doppler_width_hz > 0) {
             gaussian_path = std::make_unique<detail::GaussianRayFading>(
                 config.path_evolution.gaussian_doppler_width_hz, dt_rx,
@@ -522,6 +591,11 @@ struct StreamingChannel::Impl {
                 sizeof(FrequencySelectivePerturbation)) : 0);
         require(stats.working_bytes <= kHistoryLimitBytes + 1024 * 1024,
                 "stream channel workspace exceeds its fixed bound");
+        if (explicit_source) {
+            require(src.working_bytes <= kHistoryLimitBytes + 1024 * 1024 - stats.working_bytes,
+                    "emitted source and channel workspace exceed the fixed bound");
+            stats.working_bytes += src.working_bytes;
+        }
         tx_history.resize(history_count);
 
         if (spread_enabled) spread = std::make_unique<SpreadRay>(
@@ -614,7 +688,7 @@ struct StreamingChannel::Impl {
             if (config.tx_frequency_drift_hz_per_second != 0)
                 tx_osc.phase += tau * config.tx_frequency_drift_hz_per_second * t * dt_tx;
             tx_osc.phase = std::remainder(tx_osc.phase, tau);
-            auto value = effects.signal_enabled ? source.sample_at(static_cast<long double>(tx_next)) : Complex{};
+            auto value = effects.signal_enabled ? source_sample(tx_next) : Complex{};
             if (effects.signal_enabled && (config.frontend.dac.nominal_bits || config.frontend.dac.gain != 1))
                 value = convert(value, config.frontend.dac, dac_rng, stats.dac_clipped_components);
             const double white_pm = config.tx_spectrum.white_pm_rms_radians * tx_spectrum_rng.gaussian();
@@ -802,6 +876,8 @@ struct StreamingChannel::Impl {
 
 StreamingChannel::StreamingChannel(PatternSource& source, const StreamChannelConfig& cfg)
     : impl_(std::make_unique<Impl>(source, cfg)) {}
+StreamingChannel::StreamingChannel(EmittedSource source, const StreamChannelConfig& cfg)
+    : impl_(std::make_unique<Impl>(std::move(source), cfg)) {}
 StreamingChannel::~StreamingChannel() = default;
 StreamingChannel::StreamingChannel(StreamingChannel&&) noexcept = default;
 StreamingChannel& StreamingChannel::operator=(StreamingChannel&&) noexcept = default;

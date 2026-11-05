@@ -8,6 +8,9 @@ assumptions and limits before applying their findings.
 the [development workflow](triad-development-workflow.md). It maps the efficient
 simulation tools, evidence-backed receiver choices, small runnable diagnostics,
 workspace reuse and proportionate testing before larger sampled campaigns.
+The [Helper-assisted triad integration](triad-helper.md) documents production
+Helper composition, the requested HF/EME configurations, acquisition reuse and
+scoped admission controls, separately from ordinary Robust integration.
 For isolated regression computation, follow the required
 [efficient regression workflow](triad-performance.md#required-efficient-regression-workflow)
 and its [confidence and material-slowdown policy](triad-performance.md#confidence-and-material-slowdown):

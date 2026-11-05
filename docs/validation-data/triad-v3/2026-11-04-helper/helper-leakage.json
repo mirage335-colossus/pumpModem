@@ -1,0 +1,353 @@
+{
+  "schema": "triad-helper-linear-paired-component-leakage-v1",
+  "method": "Subtract matched raw Helper-on minus Helper-off I/Q, then use actual data_fir_taps and scipy.signal.upfirdn down=20 continuously before the identical saved DATA crop.",
+  "source_hashes": {
+    "tools/triad_helper_receiver.py": "e68de7800c5b9bfeedbfe911d29579caa795dd775cbb5fda4b16b1e993f69ba6",
+    "tools/triad-helper-export.cpp": "ab65cd02419a011983a24c1fcc7782372c74aee078f389a40aa5286373f88f1f",
+    "src/triad_simulation_stream.cpp": "f30bbf489a80544c89d63abbb05485179bbecc80181373ae71ef53d0bb79b6ce",
+    "src/channel_perturbation.hpp": "fae3b1b345e3dc19c8b85a5010e4434530bd0a34d595dd4de8cd55349d8d879a",
+    "src/channel_spread.hpp": "bf98698d574869acb79645fa143af7ae563a2f542868e77c672d89d4fb16bdb0"
+  },
+  "fir_taps_sha256": "96bfbbb83b98ec9b4b4f1c25bf4da84ed65a43071356a994d6e637bdf9cffce0",
+  "tap_count": 1105,
+  "tap_energy_gain": 0.041233606360846144,
+  "cases": [
+    {
+      "case": "hf",
+      "fixture_seed": 87301,
+      "raw_inputs": {
+        "on": {
+          "path": "local-evidence/triad-helper-001/hf-selected-preflight/observation.c128",
+          "sha256": "fc9125e73d2cb44f7f4c41176936d35bbb3c157301a338aa256af2968996c76b",
+          "manifest_sha256": "bd3a14fd950f02c701d299cb27e2d2df7f7571f0891d4d290208ee02ccdbb8a7",
+          "truth_sha256": "ee2142da890501b4c4f07c20ac2b418ca52133adbfd40d9e05061519d03f6d85",
+          "validity_sha256": "514037d9cf26fea585fd2bd9859e55b0d912ff546ade4b7ac6297358df380698"
+        },
+        "off": {
+          "path": "local-evidence/triad-helper-001/hf-helper-off/observation.c128",
+          "sha256": "4c9b1ddbdc381d8267ca7bd1b2c787155f46a6bc0f1c13a42b45eaf1d90392f8",
+          "manifest_sha256": "8f7bdef739b8ea31d37835dae0e07e4b986a9685045547d2be22cf066c2b175a",
+          "truth_sha256": "d40bea551fb6776c125223641dadd8451f307fff336d64a72245ca61631d99bf",
+          "validity_sha256": "514037d9cf26fea585fd2bd9859e55b0d912ff546ade4b7ac6297358df380698"
+        }
+      },
+      "existing_score_sha256": "d9c1419877a7391b0dbd3ff5bbf6a1304eddf14de6ae581df4b32164488e441d",
+      "preprocessing": {
+        "format": "triad-helper-data-frontend-v1",
+        "input_sample_rate": 18000,
+        "output_sample_rate": 900,
+        "decimation": 20,
+        "pass_edge_hz": 330.0,
+        "stop_edge_hz": 430.0,
+        "design_attenuation_db": 96.0,
+        "tap_count": 1105,
+        "filter_tail_seconds": 0.06133333333333333,
+        "filter_group_delay_seconds": 0.030666666666666665,
+        "noise_variance_gain": 0.041233606360846144,
+        "crop_start_raw_sample": 697860,
+        "crop_output_samples": 41308,
+        "capture_rows": 1524001,
+        "source_offset_seconds": 37.86655555555556,
+        "capture_lead_seconds": 8.0,
+        "fractional_anchor_arrival_seconds": -7.035,
+        "arrival_upper_lattice_seconds": 7.035,
+        "delay_seconds": 0.021,
+        "doppler_hz": 90.0,
+        "delay_raw_samples": 378.0,
+        "delay_is_integer": true,
+        "anchor_raw_samples_from_crop": 1108.0,
+        "delay_interpolation": "integer exact; fractional causal four-point cubic Lagrange with full three-sample tail",
+        "observation_filtering": "continuous whole capture before crop; output restricted to actually observed capture extent",
+        "cfo_order": "FIR first, existing FFT CFO hypotheses second; finite-FIR noncommutation remains a declared model mismatch"
+      },
+      "pair_contract": {
+        "public_fields_equal": [
+          "sample_rate_hz",
+          "observation",
+          "validity",
+          "format",
+          "calendar",
+          "helper_plan",
+          "power",
+          "channel",
+          "public_epoch_seconds",
+          "key_seed",
+          "encrypted_source",
+          "encrypted_helper_metadata"
+        ],
+        "realization_fields_equal": [
+          "source_bit",
+          "source_epoch_offset_seconds",
+          "arrival_seconds",
+          "tx",
+          "rx",
+          "random_seed_roots"
+        ],
+        "native_data_energy_equal": {
+          "rows": 1108800,
+          "data_energy_samples": 415278.294927429,
+          "data_full_support_mean_norm": 0.9831282653553556,
+          "data_calendar_mean_norm": 0.994440361416257
+        },
+        "native_template_data_gain_equal": 1.0007904702592478,
+        "native_helper_plan_data_gain_equal": 0.15373628067955006,
+        "helper_source_energy_on": 11093447.603343002,
+        "helper_source_energy_off": 0,
+        "same_noise_oscillator_and_path_seed_roots": {
+          "fixture": 87301,
+          "channel": 16288235210901979910,
+          "static_endpoint": 3095177960202300233,
+          "arrival": 1269304887422015934,
+          "oscillator": 8705291214930724277,
+          "noise": 18326192743633169682,
+          "frontend": 11289184915682936139,
+          "path": 8981209299147364426
+        },
+        "both_all_samples_valid": true
+      },
+      "expected_filtered_thermal_variance_per_complex_sample": 7.386927462014915,
+      "raw_difference_mean_energy_per_complex_sample": 11.512383660197855,
+      "data_receiver_crop": {
+        "samples": 41308,
+        "duration_seconds": 45.897777777777776,
+        "mean_helper_energy_per_complex_sample": 2.1649030546493913e-07,
+        "mean_helper_to_expected_filtered_thermal_ratio": 2.930721962252592e-08,
+        "mean_helper_to_expected_filtered_thermal_db": -75.33025381147736,
+        "maximum_single_sample_energy_ratio": 6.419843466097733e-05,
+        "capture_calendar_first_sample_seconds": 30.770000000000003,
+        "capture_calendar_end_exclusive_seconds": 76.66777777777777,
+        "peak_sliding_block_means": [
+          {
+            "block_seconds": 0.4,
+            "block_samples": 360,
+            "start_capture_calendar_seconds": 63.653333333333336,
+            "mean_helper_energy_per_complex_sample": 1.0917437324049648e-05,
+            "ratio_to_expected_filtered_thermal": 1.4779402370186161e-06,
+            "db_relative_to_expected_filtered_thermal": -58.30343127008711,
+            "search": "all complete blocks at every 900-Hz output-sample start; overlapping diagnostic windows"
+          },
+          {
+            "block_seconds": 1.0,
+            "block_samples": 900,
+            "start_capture_calendar_seconds": 63.05444444444444,
+            "mean_helper_energy_per_complex_sample": 4.472219121179646e-06,
+            "ratio_to_expected_filtered_thermal": 6.054234516551986e-07,
+            "db_relative_to_expected_filtered_thermal": -62.17940760242379,
+            "search": "all complete blocks at every 900-Hz output-sample start; overlapping diagnostic windows"
+          }
+        ]
+      },
+      "guaranteed_helper_only_lead": {
+        "samples": 21057,
+        "duration_seconds": 23.39666666666667,
+        "mean_helper_energy_per_complex_sample": 1.7003001517750523e-07,
+        "mean_helper_to_expected_filtered_thermal_ratio": 2.3017691191883795e-08,
+        "mean_helper_to_expected_filtered_thermal_db": -76.37938240780572,
+        "maximum_single_sample_energy_ratio": 7.416589522391452e-07,
+        "capture_calendar_first_sample_seconds": 7.435555555555556,
+        "capture_calendar_end_exclusive_seconds": 30.83222222222222,
+        "peak_sliding_block_means": [
+          {
+            "block_seconds": 0.4,
+            "block_samples": 360,
+            "start_capture_calendar_seconds": 16.871111111111112,
+            "mean_helper_energy_per_complex_sample": 2.2229742201902292e-07,
+            "ratio_to_expected_filtered_thermal": 3.009335385545905e-08,
+            "db_relative_to_expected_filtered_thermal": -75.21529408147248,
+            "search": "all complete blocks at every 900-Hz output-sample start; overlapping diagnostic windows"
+          },
+          {
+            "block_seconds": 1.0,
+            "block_samples": 900,
+            "start_capture_calendar_seconds": 16.41888888888889,
+            "mean_helper_energy_per_complex_sample": 2.0597230950773717e-07,
+            "ratio_to_expected_filtered_thermal": 2.7883353473672066e-08,
+            "db_relative_to_expected_filtered_thermal": -75.54654995727233,
+            "search": "all complete blocks at every 900-Hz output-sample start; overlapping diagnostic windows"
+          }
+        ]
+      },
+      "lead_selection_public_calendar_interval_seconds": [
+        7.4350000000000005,
+        30.831555555555557
+      ],
+      "compute_wall_seconds": 0.6078278350178152
+    },
+    {
+      "case": "eme",
+      "fixture_seed": 87302,
+      "raw_inputs": {
+        "on": {
+          "path": "local-evidence/triad-helper-001/eme-selected-preflight/observation.c128",
+          "sha256": "49562e97fd533de287950a07beda2ec7d3ecece8befad5d6f5aa1ca6f5ce5b60",
+          "manifest_sha256": "c86ee6efa73bd4484a0faf31f5adfe933167516eb98962350875f3b79cc9e9ba",
+          "truth_sha256": "0d02b5eab295d2a28407a438f53f06c7b0dc909017826112e5591061bbd158fe",
+          "validity_sha256": "18a8fd22b248267c2f0de27b06f2280303b3e58d3ea2a8c694f5da37759016fe"
+        },
+        "off": {
+          "path": "local-evidence/triad-helper-001/eme-helper-off/observation.c128",
+          "sha256": "238dd1a19816e903a58a53b07aecfb43bdb4f6977736256426fa71ddd06d746e",
+          "manifest_sha256": "da13d821c997e101107bfa1aa0abc02c35fb6649aec66df1ec2e6af2f278ff40",
+          "truth_sha256": "dd45af99706a59c23743aff593fc029b6cc33230f3a4ce19755f3458c19c9b08",
+          "validity_sha256": "18a8fd22b248267c2f0de27b06f2280303b3e58d3ea2a8c694f5da37759016fe"
+        }
+      },
+      "existing_score_sha256": "f7318a327968112f631800b65a54f6b808c20cfd0a845d489c257119a196ef33",
+      "preprocessing": {
+        "format": "triad-helper-data-frontend-v1",
+        "input_sample_rate": 18000,
+        "output_sample_rate": 900,
+        "decimation": 20,
+        "pass_edge_hz": 330.0,
+        "stop_edge_hz": 430.0,
+        "design_attenuation_db": 96.0,
+        "tap_count": 1105,
+        "filter_tail_seconds": 0.06133333333333333,
+        "filter_group_delay_seconds": 0.030666666666666665,
+        "noise_variance_gain": 0.041233606360846144,
+        "crop_start_raw_sample": 683100,
+        "crop_output_samples": 24738,
+        "capture_rows": 1177852,
+        "source_offset_seconds": 37.86655555555556,
+        "capture_lead_seconds": 0.2,
+        "fractional_anchor_arrival_seconds": -0.055,
+        "arrival_upper_lattice_seconds": 0.125,
+        "delay_seconds": 0.0005,
+        "doppler_hz": 6.0,
+        "delay_raw_samples": 9.0,
+        "delay_is_integer": true,
+        "anchor_raw_samples_from_crop": 1108.0000000001164,
+        "delay_interpolation": "integer exact; fractional causal four-point cubic Lagrange with full three-sample tail",
+        "observation_filtering": "continuous whole capture before crop; output restricted to actually observed capture extent",
+        "cfo_order": "FIR first, existing FFT CFO hypotheses second; finite-FIR noncommutation remains a declared model mismatch"
+      },
+      "pair_contract": {
+        "public_fields_equal": [
+          "sample_rate_hz",
+          "observation",
+          "validity",
+          "format",
+          "calendar",
+          "helper_plan",
+          "power",
+          "channel",
+          "public_epoch_seconds",
+          "key_seed",
+          "encrypted_source",
+          "encrypted_helper_metadata"
+        ],
+        "realization_fields_equal": [
+          "source_bit",
+          "source_epoch_offset_seconds",
+          "arrival_seconds",
+          "tx",
+          "rx",
+          "random_seed_roots"
+        ],
+        "native_data_energy_equal": {
+          "rows": 1166400,
+          "data_energy_samples": 341097.3934475111,
+          "data_full_support_mean_norm": 0.7106121674722369,
+          "data_calendar_mean_norm": 0.7177975451336511
+        },
+        "native_template_data_gain_equal": 0.9981204288991044,
+        "native_helper_plan_data_gain_equal": 0.028975938396165034,
+        "helper_source_energy_on": 432135055.8595371,
+        "helper_source_energy_off": 0,
+        "same_noise_oscillator_and_path_seed_roots": {
+          "fixture": 87302,
+          "channel": 5851993155278727698,
+          "static_endpoint": 16645020725738092479,
+          "arrival": 6534805747091620135,
+          "oscillator": 1415018951092565148,
+          "noise": 9198411887408309346,
+          "frontend": 16178883350950807602,
+          "path": 5401393589306708074
+        },
+        "both_all_samples_valid": true
+      },
+      "expected_filtered_thermal_variance_per_complex_sample": 73.86927462014914,
+      "raw_difference_mean_energy_per_complex_sample": 580.0389003226754,
+      "data_receiver_crop": {
+        "samples": 24738,
+        "duration_seconds": 27.486666666666668,
+        "mean_helper_energy_per_complex_sample": 2.4105648471835847e-09,
+        "mean_helper_to_expected_filtered_thermal_ratio": 3.263284849593014e-11,
+        "mean_helper_to_expected_filtered_thermal_db": -104.86345015330407,
+        "maximum_single_sample_energy_ratio": 2.0301031176391777e-08,
+        "capture_calendar_first_sample_seconds": 37.75,
+        "capture_calendar_end_exclusive_seconds": 65.23666666666666,
+        "peak_sliding_block_means": [
+          {
+            "block_seconds": 0.4,
+            "block_samples": 360,
+            "start_capture_calendar_seconds": 51.288888888888884,
+            "mean_helper_energy_per_complex_sample": 8.554379294165414e-09,
+            "ratio_to_expected_filtered_thermal": 1.1580429533325966e-10,
+            "db_relative_to_expected_filtered_thermal": -99.36275331757663,
+            "search": "all complete blocks at every 900-Hz output-sample start; overlapping diagnostic windows"
+          },
+          {
+            "block_seconds": 1.0,
+            "block_samples": 900,
+            "start_capture_calendar_seconds": 51.498888888888885,
+            "mean_helper_energy_per_complex_sample": 4.291384227979683e-09,
+            "ratio_to_expected_filtered_thermal": 5.809430578609111e-11,
+            "db_relative_to_expected_filtered_thermal": -102.35866433648765,
+            "search": "all complete blocks at every 900-Hz output-sample start; overlapping diagnostic windows"
+          }
+        ]
+      },
+      "guaranteed_helper_only_lead": {
+        "samples": 33558,
+        "duration_seconds": 37.28666666666667,
+        "mean_helper_energy_per_complex_sample": 2.427114271120871e-09,
+        "mean_helper_to_expected_filtered_thermal_ratio": 3.2856885133928647e-11,
+        "mean_helper_to_expected_filtered_thermal_db": -104.83373610507365,
+        "maximum_single_sample_energy_ratio": 2.0169112043980124e-08,
+        "capture_calendar_first_sample_seconds": 0.5255555555555556,
+        "capture_calendar_end_exclusive_seconds": 37.81222222222222,
+        "peak_sliding_block_means": [
+          {
+            "block_seconds": 0.4,
+            "block_samples": 360,
+            "start_capture_calendar_seconds": 11.28888888888889,
+            "mean_helper_energy_per_complex_sample": 8.534852588197932e-09,
+            "ratio_to_expected_filtered_thermal": 1.155399539536009e-10,
+            "db_relative_to_expected_filtered_thermal": -99.37267809874933,
+            "search": "all complete blocks at every 900-Hz output-sample start; overlapping diagnostic windows"
+          },
+          {
+            "block_seconds": 1.0,
+            "block_samples": 900,
+            "start_capture_calendar_seconds": 11.496666666666668,
+            "mean_helper_energy_per_complex_sample": 4.2938935899726844e-09,
+            "ratio_to_expected_filtered_thermal": 5.812827609385309e-11,
+            "db_relative_to_expected_filtered_thermal": -102.35612556693167,
+            "search": "all complete blocks at every 900-Hz output-sample start; overlapping diagnostic windows"
+          }
+        ]
+      },
+      "lead_selection_public_calendar_interval_seconds": [
+        0.525,
+        37.81155555555556
+      ],
+      "compute_wall_seconds": 0.43856787303229794
+    }
+  ],
+  "limits": [
+    "Linear paired-component diagnostic in the existing sampled capture bandwidth; this is not a capture-bandwidth or aliasing bound.",
+    "Identical random seeds and linear source/channel configuration cancel DATA and the shared thermal-noise realization up to floating-point subtraction error.",
+    "The expected filtered thermal reference is complex_noise_variance*sum(taps^2); filtering colors noise. It is not a measured independent noise estimate or admission threshold.",
+    "All peak block means are descriptive maxima over correlated sliding windows, not statistical confidence bounds.",
+    "No DATA receiver was constructed, prepared, or scored; no new capture or source simulation was generated.",
+    "Current source hashes describe the diagnostic contract; the retained native captures remain bound by their manifests and existing provenance."
+  ],
+  "environment": {
+    "interpreter": "/tmp/triad-weak-env/bin/python",
+    "OPENBLAS_NUM_THREADS": 2,
+    "OMP_NUM_THREADS": 2
+  },
+  "wall_seconds_excluding_import": 1.0553853969904594,
+  "process_cpu_seconds_excluding_import": 1.0540204709999998
+}

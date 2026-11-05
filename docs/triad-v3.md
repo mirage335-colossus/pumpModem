@@ -1,5 +1,10 @@
 # Three-carrier modem v3 study
 
+For the production Helper transmitter combined with this isolated source/channel
+and frequency-assisted acquisition, use [the triad Helper guide](triad-helper.md).
+It preserves the full declared timing/epoch search and distinguishes measured
+frequency-bank savings from unqualified phase gain and operational admission.
+
 **Development and integration entry point:** use the
 [three-carrier development workflow](triad-development-workflow.md) for efficient
 simulation recipes, evidence-backed receiver choices and scope-based validation.

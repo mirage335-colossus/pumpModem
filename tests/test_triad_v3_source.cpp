@@ -1,4 +1,5 @@
 #include "datapump/triad_modem_v3.hpp"
+#include "datapump/pattern_pulse.hpp"
 
 #include <algorithm>
 #include <array>
@@ -157,6 +158,72 @@ void protected_waveform_checks() {
     }
 }
 
+void center_aligned_fhss_checks() {
+    auto key=fixture_key();Format f;f.inner_rate_hz=360;f.added_symbols=1;
+    f.sample_rate=960;f.bit_seconds=8;f.fhss=true;f.quiet_seconds=.055;
+    f.ramp_seconds=2./3600.;f.margin_seconds=.005;
+    const auto rejects=[](const Format& format){
+        try{(void)geometry(format);return false;}catch(const std::exception&){return true;}};
+    check(rejects(f),"legacy half-cell FHSS unexpectedly accepted the narrow aperture");
+    f.fhss_center_aligned=true;
+    const auto g=geometry(f);
+    check(g.dwells==66&&g.fine_cells==66*24&&g.inner_coefficients==64&&
+          g.payload_fine_cells_per_tile==64&&std::abs(g.bit_seconds-26.4)<1e-12,
+          "center-aligned FHSS did not retain 64 inner cells in 66 dwells");
+    auto invalid=f;invalid.fhss=false;
+    check(rejects(invalid),"center alignment was accepted without FHSS");
+    invalid=f;invalid.inner_rate_hz=359.3;
+    check(rejects(invalid),"center alignment was accepted on a noncommensurate dwell grid");
+    invalid=f;invalid.quiet_seconds=.062;
+    check(rejects(invalid),"center alignment admitted a center outside protected support");
+
+    // One protected center per interior dwell. Its bit-dependent difference
+    // must be exactly a full, uncut eight-chip pulse on every carrier.
+    for(bool interleave:{false,true})for(unsigned added:{1U,3U}){
+        f.added_symbols=added;f.inner_rate_hz=360./added;f.added_interleave=interleave;
+        PatternSource zero(f,key,0),one(f,key,1);const auto& shape=zero.geometry();
+        check(shape.inner_coefficients==64&&shape.fine_coefficients==64*added&&
+              shape.dwells==64*added+2,"interleave split the aligned inner-cell allocation");
+        // Fs/fine=16: specify support endpoints as exact integer samples.
+        const auto at=[&](PatternSource& source,long double chips){
+            return source.carrier_samples_at(shape.calendar_origin_sample+576+chips*16);};
+        const auto a=at(zero,0),b=at(one,0);
+        double difference=0;for(unsigned c=0;c<3;++c)difference+=std::norm(a[c]-b[c]);
+        check(difference>1e-8,"aligned protected center carries no bit information");
+        for(long double chips:{-8.00001L,-8.L,-7.5L,-4.25L,0.L,4.25L,7.5L,8.L,8.00001L}){
+            const auto x=at(zero,chips),y=at(one,chips);
+            const auto ratio=datapump::modem::pattern_pulse(static_cast<double>(chips))/datapump::modem::pattern_pulse(0);
+            for(unsigned c=0;c<3;++c)
+                check(std::abs((x[c]-y[c])-(a[c]-b[c])*ratio)<1e-11,
+                      "aligned fine cell lost or shifted its complete pulse support");
+        }
+        for(long double within:{.01L,.054L,.0549L,.399L})
+            check(zero.sample_at(shape.calendar_origin_sample+(.4L+within)*f.sample_rate)==Complex{},
+                  "center-aligned source leaked into the FHSS quiet interval");
+
+        // Probe both sides of each tile transition, with and without a wait,
+        // through sequential chunks and deliberately reordered random access.
+        for(unsigned waits:{0U,1U}){
+            f.bit_seconds=2*shape.tile_seconds;f.burst_wait_tiles=waits;
+            PatternSource whole(f,key,1),split(f,key,1),random(f,key,1);
+            for(unsigned transition=1;transition<=waits+1;++transition){
+                const auto first=whole.geometry().calendar_origin_sample+
+                    static_cast<std::uint64_t>(std::llround(transition*shape.tile_seconds*f.sample_rate))-211;
+                std::vector<Complex> expected(503),actual(503);whole.render(first,expected);
+                for(std::size_t offset=0;offset<actual.size();){
+                    const auto count=std::min<std::size_t>(37,actual.size()-offset);
+                    split.render(first+offset,std::span(actual).subspan(offset,count));offset+=count;}
+                check(actual==expected,"aligned samples changed across rendering chunks or tile boundaries");
+                for(std::size_t i=0;i<expected.size();++i){const auto index=(i*97)%expected.size();
+                    check(random.sample_at(first+index)==expected[index],"aligned random-access sample differs");}
+            }
+            check(whole.sample_at(-1)==Complex{}&&whole.sample_at(whole.geometry().source_samples)==Complex{},
+                  "aligned source escaped its finite sample support");
+        }
+        f.bit_seconds=8;f.burst_wait_tiles=0;
+    }
+}
+
 void complete_tile_duration_checks() {
     for(double rate:{3.6,36.,359.3})for(unsigned waits:{0U,1U}) {
         Format f;f.inner_rate_hz=rate;f.sample_rate=9600;f.burst_wait_tiles=waits;
@@ -306,6 +373,7 @@ int main() {
         geometry_checks();
         random_access_and_chunk_checks();
         protected_waveform_checks();
+        center_aligned_fhss_checks();
         complete_tile_duration_checks();
         tile_search_checks();
         month_and_low_sample_rate_checks();

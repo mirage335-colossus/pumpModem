@@ -83,7 +83,7 @@ struct Options {
     unsigned burst_wait_tiles = 0;
     unsigned trials = 1;
     std::uint8_t signal_bit = 0;
-    bool encrypt = true, now = false, fhss = false;
+    bool encrypt = true, now = false, fhss = false, fhss_center_aligned = false;
     bool performance_trace = false;
     bool assume_model_bounds = false;
     bool stats_noisy = false;
@@ -330,6 +330,7 @@ Options parse(int argc, char** argv) {
                               Erases received I/Q after channel/noise/frontend; physical state continues.
   --minimum-observed-fraction F  Run-mode coverage gate in (0,1], default0.9; does not alter evidence thresholds.
   --fhss                      Source envelope only; no physical RF-retuning claim.
+  --fhss-center-aligned       Opt-in whole-cell centers on the FHSS dwell grid; requires --fhss.
   --burst-wait-tiles N         Silent tile waits within this one-bit v3 observation.
   --seed N --epoch UTC | --now --trials N --signal-bit 0|1 --no-encrypt
   --key-seed N --channel-seed N   Key/channel seeds (default to --seed).
@@ -468,6 +469,7 @@ Examples:
         else if (key == "--signal-bit") o.signal_bit = bounded_integer<std::uint8_t>(need(), "signal bit");
         else if (key == "--no-encrypt") o.encrypt = false;
         else if (key == "--fhss") o.fhss = true;
+        else if (key == "--fhss-center-aligned") o.fhss_center_aligned = true;
         else if (key == "--stats-noisy") o.stats_noisy = true;
         else if (key == "--dac-bits") o.frontend.dac.nominal_bits=bounded_integer<unsigned>(need(),"DAC bits");
         else if (key == "--adc-bits") o.frontend.adc.nominal_bits=bounded_integer<unsigned>(need(),"ADC bits");
@@ -673,6 +675,7 @@ Format format_for(const Options& o) {
     f.sample_rate_denominator=o.sample_rate_denominator;
     f.bit_seconds=o.seconds; f.minimum_inner_coefficients=64;
     f.fhss=o.fhss; f.dwell_seconds=.4; f.quiet_seconds=o.fhss?.055:0;
+    f.fhss_center_aligned=o.fhss_center_aligned;
     f.ramp_seconds=o.fhss?(2./3600.):.02; f.margin_seconds=.005;
     f.encrypt=o.encrypt; f.epoch=o.epoch; f.symbol_ordinal=0;f.burst_wait_tiles=o.burst_wait_tiles;
     if(o.symbol_burst_wait){const auto shape=geometry(f);f.epoch=whole_bit_calendar(o,f,shape).payload_begin.epoch;}
@@ -825,6 +828,7 @@ void json_configuration(std::ostream& out,const Options& o,const Format& f,const
     const auto supplied_frequency=std::floor((o.frequency_high-o.frequency_low)/o.frequency_step+1e-9)+1;
     const long double supplied_bank=2.L*supplied_timing*supplied_frequency*o.clocks_ppm.size()*o.epoch_offsets.size()*o.frequency_drifts.size()*(o.basis=="two-ray"?2:1);
     out<<"{\"new_controls_active\":"<<(r.active?"true":"false")<<",\"oscillator_presets_active\":"<<(r.oscillators?"true":"false")
+       <<",\"fhss_center_aligned\":"<<(f.fhss_center_aligned?"true":"false")
        <<",\"base_oscillator\":";json_string(out,r.base_id);out<<",\"shift_oscillator\":";json_string(out,r.shift_id);
     out<<",\"topology\":";
     json_string(out,o.rf_hz==0?"no RF shift oscillator; baseband reference only":r.shared_shift_clock?
@@ -983,6 +987,7 @@ void json_provenance(std::ostream& out,const Options& o,const Format& f,const Ge
        <<",\"command_argv\":[";
     for(std::size_t i=0;i<o.command_argv.size();++i){if(i)out<<',';json_string(out,o.command_argv[i]);}
     out<<"],\"source_format\":{\"version\":3,\"inner_rate_hz\":"<<f.inner_rate_hz
+       <<",\"fhss_center_aligned\":"<<(f.fhss_center_aligned?"true":"false")
        <<",\"added_symbols\":"<<f.added_symbols<<",\"added_interleave\":"<<(f.added_interleave?"true":"false")
        <<",\"encrypted\":"<<(f.encrypt?"true":"false")<<",\"symbol_ordinal\":"<<f.symbol_ordinal
        <<",\"minimum_inner_coefficients\":"<<f.minimum_inner_coefficients
@@ -1186,6 +1191,7 @@ void print_plan(const Options& o) {
     const auto active_seconds=result.duration_found?
         std::round((result.duration_seconds-input.duration_offset_seconds)/input.duration_quantum_seconds)*shape.tile_seconds:0;
     std::cout<<std::setprecision(12)<<"{\"mode\":\"plan\",\"target_correct_probability\":"<<o.correct
+        <<",\"fhss_center_aligned\":"<<(format.fhss_center_aligned?"true":"false")
         <<",\"false_admission_probability_per_horizon\":"<<o.false_probability
         <<",\"monitoring_horizon_seconds\":"<<o.horizon<<",\"duration_alternatives\":"<<o.duration_alternatives<<",\"cn0_db_hz\":"<<o.cn0
         <<",\"status\":\""<<result.status_name
@@ -1502,6 +1508,7 @@ void json_performance_geometry(std::ostream& out,const Options& o) {
     const auto block_count=calendar.samples/block+(calendar.samples%block?1:0);
     const auto fs=effective_sample_rate(f);
     out<<std::setprecision(17)<<"{\"sample_rate_hz\":"<<fs
+       <<",\"fhss_center_aligned\":"<<(f.fhss_center_aligned?"true":"false")
        <<",\"sample_rate_numerator\":"<<f.sample_rate
        <<",\"sample_rate_denominator\":"<<f.sample_rate_denominator
        <<",\"source_samples\":"<<g.source_samples
@@ -1603,6 +1610,7 @@ void run(const Options& o) {
             <<",\"occupied_bandwidth_hz\":"<<nominal.occupied_bandwidth_hz
             <<",\"requested_active_seconds\":"<<base.bit_seconds<<",\"bit_seconds\":"<<nominal.bit_seconds<<",\"inner_rate_hz\":"<<base.inner_rate_hz
             <<",\"added_symbols\":"<<base.added_symbols<<",\"fine_rate_hz\":"<<nominal.fine_chip_rate_hz
+            <<",\"fhss_center_aligned\":"<<(base.fhss_center_aligned?"true":"false")
             <<",\"rf_hz\":"<<o.rf_hz<<",\"truth_arrival_seconds\":"<<truth_arrival(channel_cfg)
             <<",\"truth_frequency_hz\":"<<truth_frequency(channel_cfg)
             <<",\"sample_clock_reference\":";
@@ -1765,6 +1773,7 @@ void export_basis(const Options& o) {
         <<",\"relative_flicker_fm_rms_hz\":"<<o.flicker_fm<<",\"relative_white_pm_rms_rad\":"<<o.white_pm
         <<",\"flicker_tau_seconds\":["<<o.flicker_min_tau<<','<<o.flicker_max_tau<<"],\"flicker_bands\":"<<o.flicker_bands
         <<",\"burst_wait_tiles\":"<<o.burst_wait_tiles<<",\"fhss_envelope_only\":"<<(o.fhss?"true":"false")
+        <<",\"fhss_center_aligned\":"<<(f.fhss_center_aligned?"true":"false")
         <<",\"export_bytes\":"<<static_cast<std::uint64_t>(total_bytes)<<",\"bitlabels\":[";
     for(std::size_t i=0;i<candidates.size();++i){if(i)manifest<<',';manifest<<static_cast<unsigned>(candidates[i].source_bit);}
     manifest<<"],\"candidateparams\":[";
@@ -1876,6 +1885,7 @@ void export_source_window(const Options& o) {
         <<",\"active_payload_first_sample\":"<<payload_begin<<",\"active_payload_end_sample_exclusive\":"<<payload_end
         <<",\"signal_bit\":"<<static_cast<unsigned>(o.signal_bit)<<",\"candidate_bits\":[0,1]"
         <<",\"fhss_envelope_only\":"<<(f.fhss?"true":"false")<<",\"burst_wait_tiles\":"<<f.burst_wait_tiles
+        <<",\"fhss_center_aligned\":"<<(f.fhss_center_aligned?"true":"false")
         <<",\"export_bytes\":"<<static_cast<std::uint64_t>(output_bytes)<<",\"note\":\"Source samples at original absolute sample coordinates; no skipped prefix was rendered. Channel, oscillator, converter, noise, and erasure effects are absent. Full propagated waveform validation requires export/export-sampled.\"}\n";
     manifest.close();if(!manifest)throw std::runtime_error("failed writing source-window manifest");
     std::filesystem::rename(directory/"source_candidates.c64.partial",directory/"source_candidates.c64");
@@ -1999,7 +2009,9 @@ void export_sampled(const Options& o) {
         <<",\"sampled_observation_wall_seconds\":"<<sampled_seconds<<",\"basis_generation_and_write_wall_seconds\":"<<basis_seconds
         <<",\"export_bytes\":"<<static_cast<std::uint64_t>(total_bytes)<<",\"channel\":";
     json_string(manifest,o.channel);manifest<<",\"control\":";json_string(manifest,o.control);
-    manifest<<",\"fhss_envelope_only\":"<<(o.fhss?"true":"false")<<",\"oscillator_model\":{\"relative_phase_diffusion_rad_sqrt_s\":"<<resolve_configuration(o).phase_diffusion
+    manifest<<",\"fhss_envelope_only\":"<<(o.fhss?"true":"false")
+        <<",\"fhss_center_aligned\":"<<(f.fhss_center_aligned?"true":"false")
+        <<",\"oscillator_model\":{\"relative_phase_diffusion_rad_sqrt_s\":"<<resolve_configuration(o).phase_diffusion
         <<",\"relative_white_fm_hz_sqrt_s\":"<<o.white_fm<<",\"relative_random_walk_fm_hz_sqrt_s\":"<<o.random_walk_fm
         <<",\"relative_flicker_fm_rms_hz\":"<<o.flicker_fm<<",\"flicker_tau_seconds\":["<<o.flicker_min_tau<<','<<o.flicker_max_tau
         <<"],\"flicker_bands\":"<<o.flicker_bands<<",\"relative_white_pm_rms_rad\":"<<o.white_pm<<'}'

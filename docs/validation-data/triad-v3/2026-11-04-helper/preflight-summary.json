@@ -1,0 +1,98 @@
+{
+  "hf": {
+    "procedure_id": "73bf1898d9862d27e22053ff84ddfec1a25599f5a6dd9135a4f666a02f914142",
+    "input_sha256": "fc9125e73d2cb44f7f4c41176936d35bbb3c157301a338aa256af2968996c76b",
+    "template_sha256": "b3489882c4dfed049d3c4c9b79a845138a5f8c7e39937e57ab87db747913b56f",
+    "source_hashes": {
+      "triad_helper_study.py": "b46bc685abff613235ead4fb311576da8c0c7f786591dfadb793d94918df13e5",
+      "triad_helper_assistance.py": "dbc6efc54ccd673aac845f9a37668ec586d3390032e773d8310fdd8b9d6bd65c",
+      "triad_helper_receiver.py": "e68de7800c5b9bfeedbfe911d29579caa795dd775cbb5fda4b16b1e993f69ba6"
+    },
+    "timing": {
+      "public_preparation_seconds": 6.355553976958618,
+      "helper_seconds": 0.2301924889907241,
+      "additional_assisted_scoring_seconds": 0.0,
+      "command_score_seconds": 6.907377665978856
+    },
+    "raw_result_sha256": "d9c1419877a7391b0dbd3ff5bbf6a1304eddf14de6ae581df4b32164488e441d",
+    "baseline": {
+      "bit": 0,
+      "score": 2264.8671686525986,
+      "opposite_bit_margin": 2267.8765582807764,
+      "timing": {
+        "total_preparation_seconds": 6.247317379980814,
+        "whole_capture_filter_seconds": 0.2855346090509556,
+        "epoch_receiver_seconds": 6.3387975910445675,
+        "total_score_prepared_seconds": 6.371088943968061,
+        "shared_preparation": "with_frequency_offsets shares all public epoch FFT/Gram workspaces; score_prepared reuses the same filtered capture"
+      }
+    },
+    "assisted": {
+      "bit": 0,
+      "score": 2264.8671686525986,
+      "opposite_bit_margin": 2267.8765582807764,
+      "timing": {
+        "total_preparation_seconds": 6.247317379980814,
+        "whole_capture_filter_seconds": 0.2855346090509556,
+        "epoch_receiver_seconds": 6.3387975910445675,
+        "total_score_prepared_seconds": 6.371088943968061,
+        "shared_preparation": "with_frequency_offsets shares all public epoch FFT/Gram workspaces; score_prepared reuses the same filtered capture"
+      }
+    },
+    "assistance": {
+      "status": "fallback",
+      "reason": "no_bank_shrink",
+      "original_count": 3,
+      "selected_count": 3,
+      "wall_seconds": 0.2301924889907241
+    }
+  },
+  "eme": {
+    "procedure_id": "2106d1b3359caf8f85587f4374d83230abcecf2dc5627f2b39e046621ed9ca8a",
+    "input_sha256": "49562e97fd533de287950a07beda2ec7d3ecece8befad5d6f5aa1ca6f5ce5b60",
+    "template_sha256": "1cdb79c90e8bbf87903568dd2893b32a35b93537cfeca484ad01e0d22acc3d60",
+    "source_hashes": {
+      "triad_helper_study.py": "b46bc685abff613235ead4fb311576da8c0c7f786591dfadb793d94918df13e5",
+      "triad_helper_assistance.py": "af64fb6cf3d1c68f8630942fc01e86973d42525fb7f51fa1bea76745d38e6953",
+      "triad_helper_receiver.py": "e68de7800c5b9bfeedbfe911d29579caa795dd775cbb5fda4b16b1e993f69ba6"
+    },
+    "timing": {
+      "public_preparation_seconds": 6.910956681007519,
+      "helper_seconds": 0.30402385198976845,
+      "additional_assisted_scoring_seconds": 0.4669095650315285,
+      "command_score_seconds": 13.491744914965238
+    },
+    "raw_result_sha256": "f7318a327968112f631800b65a54f6b808c20cfd0a845d489c257119a196ef33",
+    "baseline": {
+      "bit": 0,
+      "score": 133.32966931967815,
+      "opposite_bit_margin": 19.50654146111235,
+      "timing": {
+        "total_preparation_seconds": 6.7920237249927595,
+        "whole_capture_filter_seconds": 0.28927354101324454,
+        "epoch_receiver_seconds": 12.394007471972145,
+        "total_score_prepared_seconds": 12.414430189004634,
+        "shared_preparation": "with_frequency_offsets shares all public epoch FFT/Gram workspaces; score_prepared reuses the same filtered capture"
+      }
+    },
+    "assisted": {
+      "bit": 0,
+      "score": 136.999681229637,
+      "opposite_bit_margin": 19.564601669728077,
+      "timing": {
+        "total_preparation_seconds": 6.7920237249927595,
+        "whole_capture_filter_seconds": 0.28927354101324454,
+        "epoch_receiver_seconds": 0.44772503309650347,
+        "total_score_prepared_seconds": 0.46636143198702484,
+        "shared_preparation": "with_frequency_offsets shares all public epoch FFT/Gram workspaces; score_prepared reuses the same filtered capture"
+      }
+    },
+    "assistance": {
+      "status": "narrowed",
+      "reason": "conditional_model_checks_passed",
+      "original_count": 125,
+      "selected_count": 5,
+      "wall_seconds": 0.30402385198976845
+    }
+  }
+}

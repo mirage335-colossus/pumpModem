@@ -41,6 +41,29 @@ def check(condition, message):
         raise AssertionError(message)
 
 
+def center_aligned_fhss_checks():
+    check(not configure()["fhss_center_aligned"], "default source silently selected center alignment")
+    options = ("--rate", "360", "--added", "1", "--sample-rate", "960", "--fhss")
+    rejected = invoke("--mode", "configure", *COMMON, *options, ok=False)
+    check("protected dwell cells" in rejected.stderr, "legacy narrow FHSS geometry failed for an unrelated reason")
+    aligned = configure(*options, "--fhss-center-aligned")
+    check(aligned["fhss_center_aligned"], "configuration omitted center-aligned source identity")
+    near(aligned["duration"]["rounded_active_seconds"], 26.4, "center-aligned CLI allocation")
+    for invalid in (("--fhss-center-aligned", "--sample-rate", "960"),
+                    (*options, "--fhss-center-aligned", "--rate", "359.3")):
+        rejected = invoke("--mode", "configure", *COMMON, *invalid, ok=False)
+        check("center-aligned" in rejected.stderr, "invalid alignment failed for an unrelated reason")
+    with tempfile.TemporaryDirectory() as root:
+        destination = pathlib.Path(root)/"aligned"
+        invoke("--mode", "export-source-window", *options, "--fhss-center-aligned",
+               "--seconds", "8", "--epoch", "1800000001", "--seed", "71231",
+               "--source-window-seconds", ".4", "--source-window-center", "--output", str(destination))
+        manifest = json.loads((destination/"manifest.json").read_text())
+        check(manifest["fhss_center_aligned"], "source export omitted center-aligned source identity")
+        check(25604 <= manifest["full_source_samples"] <= 25605,
+              "source export lost complete support or added another dwell")
+
+
 def observation_control_checks():
     wide = configure("--clock-sync", "default", "--arrival-prior-seconds", "-7.035", "7.035",
                      "--start", "-7.035", "7.035", "1.005")
@@ -229,6 +252,7 @@ def topology_and_independent_modulation_checks():
 
 
 def main():
+    center_aligned_fhss_checks()
     topology_and_independent_modulation_checks()
     observation_control_checks()
     configured_selective = configure()["selective_channel"]

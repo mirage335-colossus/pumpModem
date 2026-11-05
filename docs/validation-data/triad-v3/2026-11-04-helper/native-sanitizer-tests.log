@@ -1,0 +1,26 @@
+Internal ctest changing into directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build/sanitize
+Test project /home/user/___quick/p/_cur/dataPump/pumpModem/build/sanitize
+    Start 426: triad_v3_source
+1/2 Test #426: triad_v3_source ..................***Failed    0.47 sec
+==4==LeakSanitizer has encountered a fatal error.
+==4==HINT: For debugging, try setting environment variable LSAN_OPTIONS=verbosity=1:log_threads=1
+==4==HINT: LeakSanitizer does not work under ptrace (strace, gdb, etc)
+
+    Start 427: triad_v3_channel
+2/2 Test #427: triad_v3_channel .................***Failed   26.00 sec
+==6==LeakSanitizer has encountered a fatal error.
+==6==HINT: For debugging, try setting environment variable LSAN_OPTIONS=verbosity=1:log_threads=1
+==6==HINT: LeakSanitizer does not work under ptrace (strace, gdb, etc)
+
+
+0% tests passed, 2 tests failed out of 2
+
+Label Time Summary:
+triad    =  26.47 sec*proc (2 tests)
+
+Total Test time (real) =  26.48 sec
+
+The following tests FAILED:
+	426 - triad_v3_source (Failed)                          triad
+	427 - triad_v3_channel (Failed)                         triad
+Errors while running CTest

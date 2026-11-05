@@ -1,0 +1,98 @@
+Configuring dev in /home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli
+Preset CMake variables:
+
+  BUILD_TESTING="ON"
+  CMAKE_BUILD_TYPE="Release"
+  CMAKE_EXPORT_COMPILE_COMMANDS="ON"
+  DATAPUMP_COMPILER_CACHE="ON"
+  DATAPUMP_SANITIZERS="OFF"
+
+-- DataPump native dependency prefix: /home/user/___quick/p/_cur/dataPump/pumpModem/third_party/build-support/cache/sysroot/usr
+-- DataPump compiler cache: /usr/bin/ccache
+-- Could NOT find Gettext (missing: GETTEXT_MSGMERGE_EXECUTABLE GETTEXT_MSGFMT_EXECUTABLE) 
+-- DataPump build: /home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli (Release, fltk, portable=OFF)
+-- DataPump targeted receive mitigation: index=compiler target supported; barrier=compiler target supported
+-- Configuring done (0.3s)
+-- Generating done (0.4s)
+-- Build files have been written to: /home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli
+Building datapump-tests-triad with 2 compile jobs
+[1/19] Building CXX object CMakeFiles/triad_experiment.dir/src/triad_modem_v3.cpp.o
+[2/19] Building CXX object CMakeFiles/triad_experiment.dir/src/triad_simulation_stream.cpp.o
+[3/19] Building CXX object CMakeFiles/test_triad_v3_source.dir/tests/test_triad_v3_source.cpp.o
+[4/19] Building CXX object CMakeFiles/triad_experiment.dir/src/triad_receiver_v3.cpp.o
+[5/19] Linking CXX static library libtriad_experiment.a
+[6/19] Building CXX object CMakeFiles/test_triad_v3_receiver.dir/tests/test_triad_v3_receiver.cpp.o
+[7/19] Building CXX object CMakeFiles/test_triad_v3_channel.dir/tests/test_triad_v3_channel.cpp.o
+[8/19] Building CXX object CMakeFiles/triad_oscillator_study.dir/tools/triad-oscillator-study.cpp.o
+[9/19] Linking CXX executable test_triad_modem
+[10/19] Linking CXX executable test_triad_v2
+[11/19] Linking CXX executable test_triad_statistics
+[12/19] Linking CXX executable test_triad_v3_source
+[13/19] Linking CXX executable test_triad_v3_channel
+[14/19] Linking CXX executable test_triad_v3_receiver
+[15/19] Linking CXX executable triad_study
+[16/19] Linking CXX executable triad_examples
+[17/19] Linking CXX executable triad_oscillator_study
+[18/19] Building CXX object CMakeFiles/triad_long.dir/tools/triad-long.cpp.o
+[19/19] Linking CXX executable triad_long
+Internal ctest changing into directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli
+Test project /home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli
+      Start 532: triad_diversity_export
+      Start 427: triad_v3_channel
+ 1/15 Test #427: triad_v3_channel .................   Passed    8.03 sec
+      Start 429: triad_oscillator_study
+ 2/15 Test #429: triad_oscillator_study ...........   Passed    3.82 sec
+      Start 527: triad_long_smoke
+ 3/15 Test #527: triad_long_smoke .................   Passed    3.09 sec
+      Start 528: triad_configuration
+ 4/15 Test #528: triad_configuration ..............***Failed    0.07 sec
+Traceback (most recent call last):
+  File "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_triad_configuration.py", line 748, in <module>
+    main()
+    ~~~~^^
+  File "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_triad_configuration.py", line 254, in main
+    center_aligned_fhss_checks()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_triad_configuration.py", line 58, in center_aligned_fhss_checks
+    invoke("--mode", "export-source-window", *COMMON, *options, "--fhss-center-aligned",
+    ~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+           "--source-window-seconds", ".4", "--source-window-center", "--output", str(destination))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_triad_configuration.py", line 22, in invoke
+    raise AssertionError(f"unexpected status {result.returncode}: {args}\n{result.stderr[-2000:]}")
+AssertionError: unexpected status 2: ('--mode', 'export-source-window', '--rate', '36', '--added', '1', '--sample-rate', '64', '--seconds', '8', '--rf-hz', '500000', '--epoch', '1800000001', '--seed', '71231', '--base-oscillator', 'gpsdo-xo', '--shift-oscillator', 'gpsdo-xo', '--clock-sync', 'GPS_10ms-1ms_region-0ms_offset', '--audio-error-ms', '70', '--margin', '1', '--spread-preset', 'hf-best', '--selective-perturbation', 'each-1', '--rate', '360', '--added', '1', '--sample-rate', '960', '--fhss', '--fhss-center-aligned', '--source-window-seconds', '.4', '--source-window-center', '--output', '/tmp/tmpksov6ss0/aligned')
+triad_long: export-source-window is source-only; remove propagation/oscillator/frontend/erasure selections or use a propagated export mode
+
+
+      Start 531: triad_bounded_run
+ 5/15 Test #531: triad_bounded_run ................   Passed    1.86 sec
+      Start 529: triad_live_source
+ 6/15 Test #529: triad_live_source ................   Passed    0.24 sec
+      Start 533: triad_lowrate_campaign
+ 7/15 Test #533: triad_lowrate_campaign ...........   Passed    1.51 sec
+      Start 422: triad_smoke
+ 8/15 Test #422: triad_smoke ......................   Passed    0.88 sec
+      Start 423: triad_v2
+ 9/15 Test #423: triad_v2 .........................   Passed    0.70 sec
+      Start 421: triad_modem
+10/15 Test #421: triad_modem ......................   Passed    0.50 sec
+      Start 428: triad_v3_receiver
+11/15 Test #428: triad_v3_receiver ................   Passed    0.47 sec
+      Start 425: triad_statistics
+12/15 Test #425: triad_statistics .................   Passed    0.19 sec
+      Start 424: triad_examples_smoke
+13/15 Test #424: triad_examples_smoke .............   Passed    0.05 sec
+      Start 426: triad_v3_source
+14/15 Test #426: triad_v3_source ..................   Passed    0.11 sec
+15/15 Test #532: triad_diversity_export ...........   Passed   24.87 sec
+
+93% tests passed, 1 tests failed out of 15
+
+Label Time Summary:
+triad    =  46.40 sec*proc (15 tests)
+
+Total Test time (real) =  24.88 sec
+
+The following tests FAILED:
+	528 - triad_configuration (Failed)                      triad
+Errors while running CTest

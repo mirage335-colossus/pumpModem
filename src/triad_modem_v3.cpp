@@ -8,6 +8,7 @@
 #include <numeric>
 #include <optional>
 #include <string_view>
+#include <utility>
 
 namespace datapump::triad::v3 {
 namespace {
@@ -25,13 +26,34 @@ Crypto child(const Crypto& key,std::string_view purpose,const Format& f,std::uin
     const std::string_view prefix="datapump/experimental-triad/v3/tiled-1/";
     Bytes id(prefix.begin(),prefix.end());id.insert(id.end(),purpose.begin(),purpose.end());id.push_back(0);
     append64(id,f.epoch);append64(id,f.symbol_ordinal);append64(id,tile);
+    if(f.fhss_center_aligned){const std::string_view alignment="/fhss-center-aligned";
+        id.insert(id.end(),alignment.begin(),alignment.end());}
     return Crypto(key.mac(id));
 }
 double smooth(double x){x=std::clamp(x,0.,1.);return x*x*x*(10+x*(-15+6*x));}
+std::uint64_t aligned_dwell_cells(const Format& f,double fine){
+    require(f.fhss,"triad v3 center-aligned cells require FHSS");
+    const long double cells=static_cast<long double>(f.dwell_seconds)*fine;
+    const auto nearest=std::round(cells);
+    require(nearest>=1&&std::abs(cells-nearest)<=4*std::numeric_limits<double>::epsilon()*nearest,
+            "triad v3 center-aligned FHSS requires integer fine cells per dwell");
+    return coordinate(nearest,"triad v3 aligned dwell extent overflow");
+}
+std::pair<std::uint64_t,std::uint64_t> aligned_protected_range(const Format& f,double fine){
+    const auto cells=aligned_dwell_cells(f,fine);
+    const long double guard=f.quiet_seconds+f.ramp_seconds+f.margin_seconds+8/fine;
+    const auto first=std::ceil(guard*fine),last=std::floor(cells-guard*fine);
+    require(first<=last&&first>=0&&last<cells,"triad v3 FHSS has no protected dwell cells");
+    return {static_cast<std::uint64_t>(first),static_cast<std::uint64_t>(last)};
+}
 std::uint64_t lower_cells(const Format& f,double fine,std::uint64_t dwells){
     const long double edge=8/fine+std::max(f.ramp_seconds,8/fine)+f.margin_seconds;
     if(!f.fhss){const auto width=dwells*static_cast<long double>(f.dwell_seconds)-2*edge;
         return width>0?static_cast<std::uint64_t>(std::floor(width*fine)):0;}
+    // A commensurate, phase-zero grid repeats the same exact protected center
+    // set in every dwell. Retain the existing two endpoint-dwell exclusion.
+    if(f.fhss_center_aligned){const auto [first,last]=aligned_protected_range(f,fine);
+        return (dwells-2)*(last-first+1);}
     const long double guard=f.quiet_seconds+f.ramp_seconds+f.margin_seconds+8/fine;
     const auto width=(static_cast<long double>(f.dwell_seconds)-2*guard)*fine;
     require(width>=1,"triad v3 FHSS aperture cannot contain a protected fine cell");
@@ -78,6 +100,7 @@ Geometry geometry(const Format& f){
     require(std::isfinite(f.quiet_seconds)&&f.quiet_seconds>=0&&std::isfinite(f.ramp_seconds)&&f.ramp_seconds>0&&
         std::isfinite(f.margin_seconds)&&f.margin_seconds>=.001&&f.burst_wait_tiles<=1000,"triad v3 invalid margins/burst");
     Geometry g;g.inner_chip_rate_hz=f.inner_rate_hz/6;g.fine_chip_rate_hz=g.inner_chip_rate_hz*f.added_symbols;
+    if(f.fhss_center_aligned)(void)aligned_dwell_cells(f,g.fine_chip_rate_hz);
     g.carrier_spacing_hz=1.25*g.fine_chip_rate_hz;g.occupied_bandwidth_hz=3*g.carrier_spacing_hz;
     require(sample_rate>=4*g.fine_chip_rate_hz&&sample_rate>1.1*g.occupied_bandwidth_hz,
             "triad v3 sample rate cannot contain shaped adjacent carriers");
@@ -86,8 +109,8 @@ Geometry geometry(const Format& f){
     const long double endpoint=8/g.fine_chip_rate_hz+
         std::max(f.ramp_seconds,8/g.fine_chip_rate_hz)+f.margin_seconds;
     const long double hop_guard=f.quiet_seconds+f.ramp_seconds+f.margin_seconds+8/g.fine_chip_rate_hz;
-    const long double guaranteed_per_dwell=std::floor((f.fhss?
-        f.dwell_seconds-2*hop_guard:f.dwell_seconds)*g.fine_chip_rate_hz);
+    const long double guaranteed_per_dwell=f.fhss_center_aligned?lower_cells(f,g.fine_chip_rate_hz,3):
+        std::floor((f.fhss?f.dwell_seconds-2*hop_guard:f.dwell_seconds)*g.fine_chip_rate_hz);
     if(f.fhss)require(guaranteed_per_dwell>=1,"triad v3 FHSS has no protected dwell cells");
     std::uint64_t tile_dwells=20;
     if(guaranteed_per_dwell>=1){
@@ -142,6 +165,12 @@ Geometry geometry(const Format& f){
     g.bit_seconds=static_cast<double>(elapsed);
     g.dwells=coordinate(elapsed/f.dwell_seconds,"triad v3 dwell extent overflow");
     g.fine_cells=coordinate(elapsed*g.fine_chip_rate_hz,"triad v3 fine calendar overflow");
+    if(f.fhss_center_aligned){
+        const auto physical_tiles=static_cast<long double>(g.tile_count)+(g.tile_count-1)*static_cast<long double>(f.burst_wait_tiles);
+        g.dwells=coordinate(physical_tiles*tile_dwells,"triad v3 aligned dwell extent overflow");
+        g.fine_cells=coordinate(static_cast<long double>(g.dwells)*aligned_dwell_cells(f,g.fine_chip_rate_hz),
+                                "triad v3 aligned fine calendar overflow");
+    }
     g.fine_coefficients=coordinate(static_cast<long double>(g.tile_count)*g.payload_fine_cells_per_tile,"triad v3 pattern extent overflow");
     g.inner_coefficients=g.fine_coefficients/f.added_symbols;
     // A guaranteed allocation bound, not measured energy after finite shaping.
@@ -158,10 +187,17 @@ Geometry geometry(const Format& f){
 struct PatternSource::Impl {
     struct Tile {std::uint64_t id=0,first=0;std::vector<Chip> chips;};
     Format format;Geometry geom;Crypto master;unsigned bit=0;std::uint64_t halo=0;double sample_rate=0;
+    std::uint64_t dwell_cells=0,tile_cells=0,protected_first=0,protected_last=0;
     std::array<std::optional<Tile>,2> tiles;
     Impl(const Format& f,const Crypto& key,std::uint8_t source_bit):format(f),geom(v3::geometry(f)),master(key){
         require(source_bit<=1,"triad v3 source must be one binary bit");
         halo=geom.calendar_origin_sample;sample_rate=effective_sample_rate(f);
+        if(f.fhss_center_aligned){
+            dwell_cells=aligned_dwell_cells(f,geom.fine_chip_rate_hz);
+            tile_cells=static_cast<std::uint64_t>(std::llround(geom.tile_seconds/f.dwell_seconds))*dwell_cells;
+            const auto range=aligned_protected_range(f,geom.fine_chip_rate_hz);
+            protected_first=range.first;protected_last=range.second;
+        }
         const auto mask=child(master,"payload",f,0).stream(StreamPurpose::Data,f.epoch,0,1);
         bit=source_bit^(f.encrypt?(mask[0]&1U):0U);
     }
@@ -169,14 +205,17 @@ struct PatternSource::Impl {
         return physical_tile%(format.burst_wait_tiles+1)==0&&
                physical_tile/(format.burst_wait_tiles+1)<geom.tile_count;
     }
-    bool eligible(long double t,long double start,long double end) const {
+    long double center_offset() const {return format.fhss_center_aligned?0.L:.5L;}
+    bool eligible(std::uint64_t fine,long double t,long double start,long double end) const {
         const long double edge=8/geom.fine_chip_rate_hz+
             std::max(format.ramp_seconds,8/geom.fine_chip_rate_hz)+format.margin_seconds;
         // Burst starts/ends have their own source ramps. Contiguous tile
         // boundaries do not introduce a public envelope or reset the phase.
         if(format.burst_wait_tiles){if(t<start+edge||t>end-edge)return false;}
         else if(t<edge||t>geom.bit_seconds-edge)return false;
-        if(format.fhss){const long double guard=format.quiet_seconds+format.ramp_seconds+
+        if(format.fhss_center_aligned){const auto position=fine%dwell_cells;
+            if(position<protected_first||position>protected_last)return false;}
+        else if(format.fhss){const long double guard=format.quiet_seconds+format.ramp_seconds+
             format.margin_seconds+8/geom.fine_chip_rate_hz;
             const auto position=t-std::floor(t/format.dwell_seconds)*format.dwell_seconds;
             if(position<guard||position>format.dwell_seconds-guard)return false;}
@@ -185,8 +224,10 @@ struct PatternSource::Impl {
     Tile make_tile(std::uint64_t id){
         Tile tile;tile.id=id;
         const long double start=id*static_cast<long double>(geom.tile_seconds),end=start+geom.tile_seconds;
-        const auto first=std::max(0.L,std::ceil(start*geom.fine_chip_rate_hz-.5L));
-        const auto last=std::max(first,std::ceil(end*geom.fine_chip_rate_hz-.5L));
+        const auto first=format.fhss_center_aligned?static_cast<long double>(id)*tile_cells:
+            std::max(0.L,std::ceil(start*geom.fine_chip_rate_hz-.5L));
+        const auto last=format.fhss_center_aligned?first+tile_cells:
+            std::max(first,std::ceil(end*geom.fine_chip_rate_hz-.5L));
         tile.first=coordinate(first,"triad v3 tile coordinate overflow");
         const auto count=static_cast<std::size_t>(last-first);require(count<=maximum_tile_cells,"triad v3 tile cell cap");
         tile.chips.resize(count);
@@ -195,8 +236,8 @@ struct PatternSource::Impl {
         const auto cover=child(master,"cover",format,ordinal).stream(StreamPurpose::Scrambler,format.epoch,0,count*8);
         std::vector<std::size_t> payload;payload.reserve(count);
         for(std::size_t i=0;i<count;++i){tile.chips[i]=pattern(cover.data()+i*8,0,nullptr);
-            const auto t=(static_cast<long double>(tile.first+i)+.5L)/geom.fine_chip_rate_hz;
-            if(eligible(t,start,end))payload.push_back(i);}
+            const auto t=(static_cast<long double>(tile.first+i)+center_offset())/geom.fine_chip_rate_hz;
+            if(eligible(tile.first+i,t,start,end))payload.push_back(i);}
         const auto n=(payload.size()/format.added_symbols)*format.added_symbols;
         require(n>=geom.payload_fine_cells_per_tile,"triad v3 tile violated protected allocation bound");
         const auto inner=child(master,"inner",format,ordinal).stream(StreamPurpose::Scrambler,format.epoch,0,n/format.added_symbols*8);
@@ -209,8 +250,9 @@ struct PatternSource::Impl {
         return tile;
     }
     Chip chip(std::uint64_t fine){
-        const long double center=(static_cast<long double>(fine)+.5L)/geom.fine_chip_rate_hz;
-        const auto id=static_cast<std::uint64_t>(std::floor(center/geom.tile_seconds));
+        const long double center=(static_cast<long double>(fine)+center_offset())/geom.fine_chip_rate_hz;
+        const auto id=format.fhss_center_aligned?fine/tile_cells:
+            static_cast<std::uint64_t>(std::floor(center/geom.tile_seconds));
         if(!active_tile(id)||center>=geom.bit_seconds)return {};
         auto& slot=tiles[id%2];if(!slot||slot->id!=id){slot.reset();slot=make_tile(id);}
         require(fine>=slot->first&&fine-slot->first<slot->chips.size(),"triad v3 tile lookup mismatch");
@@ -242,11 +284,12 @@ std::array<Complex,3> PatternSource::carrier_samples_at(long double sample){
     if(!std::isfinite(sample)||sample<0||sample>=g.source_samples)return output;
     const long double t=(sample-impl_->halo)/impl_->sample_rate;
     const auto envelope=impl_->envelope(t);if(envelope==0)return output;
-    const auto first_real=std::max(0.L,std::ceil(t*g.fine_chip_rate_hz-8.5L));
-    const auto last_real=std::min(static_cast<long double>(g.fine_cells)-1,std::floor(t*g.fine_chip_rate_hz+7.5L));
+    const auto offset=impl_->center_offset();
+    const auto first_real=std::max(0.L,std::ceil(t*g.fine_chip_rate_hz-(8+offset)));
+    const auto last_real=std::min(static_cast<long double>(g.fine_cells)-1,std::floor(t*g.fine_chip_rate_hz+(8-offset)));
     if(last_real<first_real)return output;
     const auto first=static_cast<std::uint64_t>(first_real),last=static_cast<std::uint64_t>(last_real);
-    for(auto fine=first;fine<=last;++fine){const auto pulse=modem::pattern_pulse(static_cast<double>(t*g.fine_chip_rate_hz-(static_cast<long double>(fine)+.5L)));
+    for(auto fine=first;fine<=last;++fine){const auto pulse=modem::pattern_pulse(static_cast<double>(t*g.fine_chip_rate_hz-(static_cast<long double>(fine)+offset)));
         const auto chip=impl_->chip(fine);for(unsigned c=0;c<3;++c)output[c]+=chip[c]*(carrier_gain*pulse*envelope);}
     return output;
 }

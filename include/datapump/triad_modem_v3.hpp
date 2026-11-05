@@ -6,6 +6,7 @@
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
@@ -30,6 +31,11 @@ struct Format {
     double bit_seconds = 16;
     std::uint64_t minimum_inner_coefficients = 64;
     bool fhss = false; // Envelope only; RF retuning is a channel operation.
+    // Explicit experimental lattice: centers at k/fine_rate instead of
+    // (k+.5)/fine_rate. Requires FHSS and an integer number of cells/dwell;
+    // preserves the eight-chip pulse and all quiet/ramp/margin intervals.
+    // Default false retains the established waveform and allocation.
+    bool fhss_center_aligned = false;
     double dwell_seconds = .4, quiet_seconds = 0, ramp_seconds = .02, margin_seconds = .005;
     bool encrypt = true;
     std::uint64_t epoch = 1793404800, symbol_ordinal = 0;
@@ -73,6 +79,19 @@ public:
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
+};
+
+// An already-composed finite transmitter in the nominal pre-TX-oscillator
+// complex frame. The channel propagates its entire sum, including delayed
+// echoes and selective-filter tails. It never separates carrier identities.
+// The callback is invoked once per generated integer source sample in order;
+// captured objects must remain alive until the channel is destroyed.
+struct EmittedSource {
+    Format format{};
+    Geometry geometry{}; // Composite extent/calendar; DATA spacing retained.
+    double minimum_frequency_hz = 0, maximum_frequency_hz = 0;
+    std::size_t working_bytes = 0; // Caller-owned source storage, for reporting.
+    std::function<Complex(std::uint64_t)> sample_at;
 };
 
 struct OscillatorSpectrum {
@@ -244,6 +263,7 @@ struct StreamChannelReport {
 class StreamingChannel {
 public:
     StreamingChannel(PatternSource&, const StreamChannelConfig&);
+    StreamingChannel(EmittedSource, const StreamChannelConfig&);
     ~StreamingChannel();
     StreamingChannel(StreamingChannel&&) noexcept;
     StreamingChannel& operator=(StreamingChannel&&) noexcept;

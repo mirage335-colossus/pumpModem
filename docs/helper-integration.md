@@ -1,5 +1,10 @@
 # Helper Carrier integration: start here
 
+The [isolated three-carrier integration](triad-helper.md) combines the production
+Helper waveform with the new v3 DATA source before shared sampled propagation.
+It has its own finite-bank receiver and controls; it does not qualify ordinary
+Robust reception or replace the complete-stream techniques described below.
+
 This is the current starting point for agents implementing or integrating Helper
 Carrier. It brings together the inexpensive **implemented and tested standalone
 techniques**. Read this before treating the older Live receiver's architecture

@@ -1,0 +1,8 @@
+{
+  "checks": {
+    "basis.c128": true,
+    "observation.c128": true,
+    "validity.u8": true
+  },
+  "all_equal": true
+}
