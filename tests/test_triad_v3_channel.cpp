@@ -2,6 +2,7 @@
 #include "channel_perturbation.hpp"
 #include "channel_spread.hpp"
 #include "triad_gaussian_fading.hpp"
+#include "triad_random_process.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -1974,6 +1975,183 @@ void selective_response_checks() {
                 "nonfinite independent AM rate was accepted");
     }
 }
+void fixed_time_random_process_checks() {
+    using detail::FixedGaussianProcess;
+    using detail::SmoothRandomDelay;
+    FixedGaussianProcess coarse(.05,712), fine(.05,712), random_access(.05,712);
+    for(unsigned n=0;n<512;++n) {
+        const long double t=static_cast<long double>(n)/4-9;
+        const auto a=coarse.value(t);
+        (void)fine.value(t-.125L); // additional output rate must not alter field
+        check(a==fine.value(t),"fixed random process depends on output sample rate");
+        (void)random_access.value(1000000-t);
+        check(a==random_access.value(t),"fixed random process depends on query/chunk history");
+    }
+    long double sum=0,power=0,bounded_sum=0,bounded_power=0,covariance=0;
+    constexpr unsigned count=4096;
+    for(unsigned seed=0;seed<count;++seed) {
+        FixedGaussianProcess p(.2,seed+50000);
+        const auto a=p.value(1.2345L), b=p.value(1.2345L+1.25L);
+        const auto u=p.bounded_value(1.2345L);
+        check(std::abs(u)<=1,"random modulation exceeded its peak depth");
+        sum+=a;power+=a*a;bounded_sum+=u;bounded_power+=u*u;covariance+=a*b;
+    }
+    check(std::abs(sum/count)<.06 && std::abs(power/count-1)<.06,
+          "fixed-time Gaussian field lost stationary unit-normal marginals");
+    check(std::abs(bounded_sum/count)<.04 && std::abs(bounded_power/count-1.L/3)<.03,
+          "erf random modulation lost uniform marginal/RMS convention");
+    const double target=std::exp(-.5*std::pow(std::numbers::pi*.25,2));
+    check(std::abs(covariance/count-target)<.07,
+          "fixed-time Gaussian field covariance differs from declared width");
+    std::cout << "fixed-time Gaussian diagnostic independent_seeds=" << count
+              << " mean=" << static_cast<double>(sum/count)
+              << " power=" << static_cast<double>(power/count)
+              << " erf_power=" << static_cast<double>(bounded_power/count)
+              << " covariance=" << static_cast<double>(covariance/count)
+              << " target=" << target << '\n';
+    SmoothRandomDelay motion(.005,.004,20,431);
+    double previous=motion.value(-20);
+    for(unsigned n=1;n<10000;++n) {
+        const auto value=motion.value(-20+static_cast<long double>(n)*.01L);
+        check(value>=.001 && value<=.009,"smooth random delay escaped public bounds");
+        check(std::abs(value-previous)/.01<=SmoothRandomDelay::maximum_slope(.004,20)+1e-12,
+              "smooth random delay exceeded public derivative bound");
+        previous=value;
+    }
+    rejects([]{SmoothRandomDelay bad(.01,.02,1,0);},"negative random delay was accepted");
+    rejects([]{SmoothRandomDelay bad(1,1,1,0);},"superluminal delay slope was accepted");
+    rejects([&]{(void)coarse.value(std::numeric_limits<long double>::infinity());},
+            "unbounded physical random-process coordinate was accepted");
+}
+
+void random_channel_waveform_checks() {
+    auto f=fixture_format();
+    StreamChannelConfig c;
+    c.effects.noise_enabled=false;
+    c.effects.spread_delay_ms=1.5;c.effects.spread_doppler_hz=.3;
+    c.effects.perturbation_slow_depth=c.effects.perturbation_fast_depth=.65;
+    c.path_evolution.random_doppler_width_hz=.2;
+    c.path_evolution.delay_excursion_seconds=.0001;
+    c.path_evolution.delay_knot_seconds=1000; // <=11.25Hz motion at30MHz
+    c.selective_model.coefficient_law=SelectiveCoefficientLaw::GaussianErf;
+    c.path_seed=414;
+    StreamChannelReport report;
+    const auto a=capture(73,c,f,&report), b=capture(257,c,f);
+    check(a==b,"random path/delay/selective state changed across stream chunks");
+    check(report.selective_perturbation &&
+          report.selective_perturbation->coefficient_law==SelectiveCoefficientLaw::GaussianErf &&
+          report.selective_perturbation->processed_rows==a.size(),
+          "random selective law or complete tail missing from report");
+    auto off=c;off.path_evolution.random_doppler_width_hz=0;
+    off.path_evolution.delay_excursion_seconds=0;
+    off.effects.perturbation_slow_depth=off.effects.perturbation_fast_depth=0;
+    auto legacy=off;legacy.selective_model.coefficient_law=SelectiveCoefficientLaw::Sinusoidal;
+    check(capture(73,off,f)==capture(257,legacy,f),"zero random effects changed legacy samples");
+    auto invalid=c;invalid.path_evolution.ray_coherence_seconds=10;
+    rejects([&]{(void)capture(73,invalid,f);},"mixed random ray models accepted");
+    invalid=c;invalid.selective_model.model=SelectiveModel::LegacyAllpass;
+    rejects([&]{(void)capture(73,invalid,f);},"random coefficients silently ignored by legacy model");
+    invalid=c;invalid.path_evolution.delay_excursion_seconds=.002;
+    rejects([&]{(void)capture(73,invalid,f);},"negative physical ray delay accepted");
+    invalid=c;invalid.path_evolution.delay_knot_seconds=.00001;
+    rejects([&]{(void)capture(73,invalid,f);},"invalid variable-delay slope accepted");
+    invalid=c;invalid.selective_model.modulation_rate_hz=100;
+    rejects([&]{(void)capture(73,invalid,f);},"random spectral-tail allowance ignored");
+
+    // Known narrow tone independently exposes total RF+IF delay phase, and
+    // envelope time shift; no channel truth is used by a receiver here.
+    f.sample_rate=1024;
+    const double fs=f.sample_rate,tone=8,rf=1000,data_if=200;
+    EmittedSource src;src.format=f;src.geometry=geometry(f);
+    src.geometry.source_samples=4096;src.geometry.calendar_origin_sample=0;
+    src.minimum_frequency_hz=src.maximum_frequency_hz=tone;
+    src.sample_at=[=](std::uint64_t n){return std::polar(1.,2*std::numbers::pi*tone*n/fs);};
+    StreamChannelConfig motion;motion.effects.sample_rate=fs;
+    motion.effects.occupied_bandwidth_hz=225;motion.effects.rf_hz=rf;
+    motion.effects.nominal_conversion_if_hz=data_if;motion.effects.noise_enabled=false;
+    motion.effects.seed=126;motion.path_seed=834;
+    motion.effects.spread_delay_ms=30;
+    motion.path_evolution.delay_excursion_seconds=.005;motion.path_evolution.delay_knot_seconds=20;
+    motion.maximum_chunk_samples=4096;
+    StreamingChannel channel(src,motion);
+    std::vector<Complex> samples(4096);check(channel.read(samples)==samples.size(),"moving-tone capture too short");
+    detail::SmoothRandomDelay delay(.03,.005,20,*motion.path_seed^0x52414e4444454c41ULL);
+    modem::detail::SpreadRay ray(fs,0,motion.effects.seed^0x325449415443484eULL);
+    double maximum_error=0;
+    for(unsigned n=0;n<samples.size();++n) {
+        const long double t=static_cast<long double>(n)/fs;
+        const auto direct=src.sample_at(n);
+        const auto delayed=direct*std::polar(1.,-2*std::numbers::pi*(rf+data_if+tone)*delay.value(t));
+        const auto expected=ray.process(direct,delayed);
+        if(n>=128 && n+128<samples.size())maximum_error=std::max(maximum_error,std::abs(samples[n]-expected));
+    }
+    check(maximum_error<2e-4,"moving delay lost envelope timing or total RF+IF propagation phase");
+    std::cout << "moving-delay tone diagnostic max_complex_error=" << maximum_error
+              << " public_max_delay_seconds=.035 actual_tail_samples=" << channel.report().tail_samples << '\n';
+    check(channel.report().tail_samples>=static_cast<std::uint64_t>(std::ceil(.035*fs)),
+          "moving delay tail used realized or nominal rather than maximum delay");
+}
+
+void random_selective_response_checks() {
+    using Dft=modem::detail::DispersiveSelectivePerturbation;
+    // Spectra overlap heavily:0.05Hz shifts versus0.00075Hz carrier spacing.
+    // Each isolated tone measures the SAME whole-waveform random operator.
+    // A summed input must equal summed outputs, including startup and tails.
+    constexpr double spacing=.00075,width=.05;
+    std::array<std::vector<std::array<Complex,3>>,2> coarse_gains;
+    for(const double fs:{1.,2.})for(const double offset:{0.,.05}) {
+        const unsigned offset_index=offset==0?0U:1U;
+        auto& reference=coarse_gains[offset_index];
+        std::array<std::unique_ptr<Dft>,3> filters;
+        for(auto& p:filters)p=std::make_unique<Dft>(fs,0,spacing,width,.65,.65,412,true);
+        Dft sum_filter(fs,0,spacing,width,.65,.65,412,true);
+        std::array<long double,3> differential{},amplitude{};
+        std::array<Complex,3> phase_mean{};
+        long double refinement_error=0,refinement_reference=0;
+        const unsigned first=static_cast<unsigned>(1000*fs),end=static_cast<unsigned>(6000*fs);
+        for(unsigned n=0;n<end;++n) {
+            const long double t=static_cast<long double>(n)/fs;
+            std::array<Complex,3> gain{};
+            Complex input{},separate{};
+            for(unsigned i=0;i<3;++i) {
+                const auto carrier=std::polar(1.,2*std::numbers::pi*(offset+i*spacing)*static_cast<double>(t));
+                const auto value=filters[i]->process(carrier,t);
+                input+=carrier;separate+=value;gain[i]=value*std::conj(carrier);
+            }
+            check(std::abs(sum_filter.process(input,t)-separate)<1e-11,
+                  "random dispersive channel became carrier-label dependent");
+            if(fs==1)reference.push_back(gain);
+            if(n<first)continue;
+            if(fs==2 && n%2==0)for(unsigned i=0;i<3;++i) {
+                refinement_error+=std::norm(gain[i]-reference[n/2][i]);
+                refinement_reference+=std::norm(gain[i]);
+            }
+            for(unsigned i=0;i<3;++i) {
+                const unsigned j=(i+1)%3;
+                differential[i]+=std::norm(gain[i]-gain[j]);
+                amplitude[i]+=std::pow(std::abs(gain[i])-std::abs(gain[j]),2);
+                const auto relative=gain[i]*std::conj(gain[j]);
+                if(std::abs(relative)>1e-12)phase_mean[i]+=relative/std::abs(relative);
+            }
+        }
+        const auto count=static_cast<double>(end-first);
+        double minimum_complex=1e100,minimum_amplitude=1e100,minimum_phase=1e100;
+        for(unsigned i=0;i<3;++i) {
+            check(std::sqrt(differential[i]/count)>.4 && std::sqrt(amplitude[i]/count)>.2,
+                  "random selective modulation collapsed to common gain after displacement/refinement");
+            if(offset!=0)check(std::abs(phase_mean[i]/count)<.999,
+                  "random dispersive channel discarded complex phase variation");
+            minimum_complex=std::min(minimum_complex,std::sqrt(static_cast<double>(differential[i]/count)));
+            minimum_amplitude=std::min(minimum_amplitude,std::sqrt(static_cast<double>(amplitude[i]/count)));
+            minimum_phase=std::min(minimum_phase,std::sqrt(std::max(0.,1-std::norm(phase_mean[i]/count))));
+        }
+        const auto refinement_rms=refinement_reference>0?std::sqrt(static_cast<double>(refinement_error/refinement_reference)):0;
+        if(fs==2)check(refinement_rms<.001,"random DFT waveform failed twofold sampling refinement");
+        std::cout << "random selective response Fs=" << fs << " spacing=" << spacing << " offset=" << offset
+                  << " min_pair_complex_rms=" << minimum_complex << " amplitude_rms=" << minimum_amplitude
+                  << " phase_dispersion=" << minimum_phase << " refinement_relative_rms=" << refinement_rms << '\n';
+    }
+}
 } // namespace
 
 int main() {
@@ -2001,6 +2179,9 @@ int main() {
         long_extent_prefix_and_tail_checks();
         multiweek_chunk_equivalence_checks();
         selective_response_checks();
+        fixed_time_random_process_checks();
+        random_channel_waveform_checks();
+        random_selective_response_checks();
         std::cout << "triad v3 streaming channel checks passed\n";
         return 0;
     } catch (const std::exception& e) {

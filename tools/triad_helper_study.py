@@ -30,10 +30,23 @@ def digest(path):
     return h.hexdigest()
 
 
+def _helper_enabled(manifest):
+    # Older source-bound fixtures predate this field and emitted Helper.
+    enabled = manifest.get('helper_enabled', True)
+    if not isinstance(enabled, bool):
+        raise ValueError('helper_enabled must be a public boolean')
+    return enabled
+
+
 def public_geometry(m):
-    """Exclude realization, on/off controls, timing costs and file locations."""
+    """Exclude realization, DATA on/off controls, costs and file locations.
+
+    Helper presence is part of the receiver procedure, not a hidden control:
+    DATA-only operation must neither inspect nor require a pilot aperture.
+    """
     return {"rate": m['sample_rate_hz'], "format": {k: v for k, v in m['format'].items()
              if k != 'requested_bit_seconds'}, "calendar": m['calendar'],
+            "helper_enabled": _helper_enabled(m),
             "helper_plan": m['helper_plan'], "channel": m['channel'],
             "key_seed": m['key_seed'], "epoch": m['public_epoch_seconds'],
             "data_gain": m['power']['template_data_gain']}
@@ -144,6 +157,17 @@ def _frontend_support(manifest, profile, clock_ppm_values, doppler_scale_values)
     if profile not in ('legacy', 'wide', 'rate-aware'):
         raise ValueError('unknown DATA frontend profile')
     ch = manifest['channel']
+    # Both this FIR envelope and Helper estimation use a finite sinusoidal
+    # line family. New random coefficients and moving delays have spectral
+    # tails, so merely falling back to the broad CFO bank would still pass an
+    # invalid envelope to the DATA frontend. Reject before any DSP preparation;
+    # the separately calibrated dynamic joint adapter handles those models.
+    if (ch.get('channel_evolution', 'legacy') != 'legacy' or
+            ch.get('selective_coefficient_law', 'sinusoidal') != 'sinusoidal' or
+            float(ch.get('random_doppler_width_hz', 0.)) != 0. or
+            float(ch.get('delay_excursion_seconds', 0.)) != 0.):
+        raise ValueError('stochastic channel is unsupported by the static Helper comparison; '
+                         'use the separately calibrated dynamic joint receiver')
     bandwidth = float(manifest['format']['occupied_bandwidth_hz'])
     margin = float(ch.get('spread_margin', 1.))
     cfo = float(ch['deterministic_cfo_bound_hz']) * margin
@@ -170,7 +194,7 @@ def _frontend_support(manifest, profile, clock_ppm_values, doppler_scale_values)
     line_edge = float(np.max(np.abs(offsets))) * channel_scale
     edge = half_source + line_edge + cfo
     helper_bands = (_helper_bands_relative_to_data(manifest, pair_ppm, channel_scale, cfo)
-                    if profile == 'rate-aware' else [])
+                    if profile == 'rate-aware' and _helper_enabled(manifest) else [])
     if profile == 'rate-aware':
         frontend = rate_aware_frontend(int(manifest['sample_rate_hz']), edge,
                                        rejected_bands_hz=helper_bands)
@@ -330,42 +354,49 @@ class HelperComparison:
         valid = np.memmap(directory / m['validity']['file'], dtype='u1', mode='r')
         if valid.shape != raw.shape or not np.array_equal(valid, self.capture_validity):
             raise ValueError('capture validity differs from fixed mask; new calibration required')
-        fs = m['sample_rate_hz']
-        c, h, ch = m['calendar'], m['helper_plan'], m['channel']
-        margin = float(ch.get('spread_margin', 1.))
-        audio_bound = float(ch.get('sample_clock_pair_ppm',
-                                   ch.get('base_relative_pair_ppm_bound',
-                                          ch['relative_pair_ppm_bound']))) * margin
-        endpoint_audio = float(ch.get('endpoint_uniform_half_bound_ppm',
-                                      .5 * ch['relative_pair_ppm_bound']))
-        channel_rate_bound = endpoint_audio / (1 - endpoint_audio * 1e-6) * margin
-        # Fixed public window: every allowed source has started. Its delayed
-        # availability is explicitly reported, never relabeled a 36-s frontier.
-        begin_seconds = c['capture_lead_seconds'] + c['arrival_prior_seconds'][1] + .4
-        first, rows = round(begin_seconds * fs), round(36 * fs)
-        earliest_end = c['capture_lead_seconds'] + c['helper_end_seconds'] + c['arrival_prior_seconds'][0]
-        if first + rows > len(raw) or (first + rows) / fs >= earliest_end - .02:
-            raise ValueError('public timing uncertainty leaves insufficient guaranteed Helper support')
-        if np.any(valid[first:first + rows] != 1):
-            assistance = dict(status='fallback', reason='known erasure in Helper observation',
+        if not _helper_enabled(m):
+            assistance = dict(status='fallback', reason='helper_disabled',
                 selected_frequencies=self.frequencies.tolist(), selected_count=len(self.frequencies),
                 original_count=len(self.frequencies), expanded_intervals_hz=[],
-                available_at=first / fs + 36 - c['capture_lead_seconds'], observation_seconds=36.,
+                available_at=0., observation_seconds=0.,
                 wall_seconds=0., clock_status='fallback', presence_is_formal_pilot_lock=False)
         else:
-            assistance = estimate_frequency(raw[first:first + rows], sample_rate=fs,
-                data_if_hz=ch['nominal_conversion_if_hz'], low_pilot_hz=h['low_hz'],
-                high_pilot_hz=h['high_hz'], original_frequencies=self.frequencies,
-                prior_half_width_hz=self.original_bound,
-                doppler_hz=ch['spread_doppler_hz'], slow_depth=ch['selective_slow_depth'],
-                fast_depth=ch['selective_fast_depth'],
-                modulation_rate_hz=ch.get('selective_modulation_rate_hz'),
-                noise_variance=m['power']['complex_noise_variance'],
-                first_sample_seconds=first / fs - c['capture_lead_seconds'],
-                phase_diffusion_radians_per_sqrt_second=ch['relative_phase_diffusion_rad_sqrt_s'],
-                audio_error_bound_ppm=audio_bound,
-                channel_rate_error_bound_ppm=channel_rate_bound,
-                pilot_dwell_gating=h['pilot_dwell_gating'])
+            fs = m['sample_rate_hz']
+            c, h, ch = m['calendar'], m['helper_plan'], m['channel']
+            margin = float(ch.get('spread_margin', 1.))
+            audio_bound = float(ch.get('sample_clock_pair_ppm',
+                                       ch.get('base_relative_pair_ppm_bound',
+                                              ch['relative_pair_ppm_bound']))) * margin
+            endpoint_audio = float(ch.get('endpoint_uniform_half_bound_ppm',
+                                          .5 * ch['relative_pair_ppm_bound']))
+            channel_rate_bound = endpoint_audio / (1 - endpoint_audio * 1e-6) * margin
+            # Fixed public window: every allowed source has started. Its delayed
+            # availability is explicitly reported, never relabeled a 36-s frontier.
+            begin_seconds = c['capture_lead_seconds'] + c['arrival_prior_seconds'][1] + .4
+            first, rows = round(begin_seconds * fs), round(36 * fs)
+            earliest_end = c['capture_lead_seconds'] + c['helper_end_seconds'] + c['arrival_prior_seconds'][0]
+            if first + rows > len(raw) or (first + rows) / fs >= earliest_end - .02:
+                raise ValueError('public timing uncertainty leaves insufficient guaranteed Helper support')
+            if np.any(valid[first:first + rows] != 1):
+                assistance = dict(status='fallback', reason='known erasure in Helper observation',
+                    selected_frequencies=self.frequencies.tolist(), selected_count=len(self.frequencies),
+                    original_count=len(self.frequencies), expanded_intervals_hz=[],
+                    available_at=first / fs + 36 - c['capture_lead_seconds'], observation_seconds=36.,
+                    wall_seconds=0., clock_status='fallback', presence_is_formal_pilot_lock=False)
+            else:
+                assistance = estimate_frequency(raw[first:first + rows], sample_rate=fs,
+                    data_if_hz=ch['nominal_conversion_if_hz'], low_pilot_hz=h['low_hz'],
+                    high_pilot_hz=h['high_hz'], original_frequencies=self.frequencies,
+                    prior_half_width_hz=self.original_bound,
+                    doppler_hz=ch['spread_doppler_hz'], slow_depth=ch['selective_slow_depth'],
+                    fast_depth=ch['selective_fast_depth'],
+                    modulation_rate_hz=ch.get('selective_modulation_rate_hz'),
+                    noise_variance=m['power']['complex_noise_variance'],
+                    first_sample_seconds=first / fs - c['capture_lead_seconds'],
+                    phase_diffusion_radians_per_sqrt_second=ch['relative_phase_diffusion_rad_sqrt_s'],
+                    audio_error_bound_ppm=audio_bound,
+                    channel_rate_error_bound_ppm=channel_rate_bound,
+                    pilot_dwell_gating=h['pilot_dwell_gating'])
         prepared = self.receiver.prepare_observation(raw, valid=valid)
         return dict(shared_capture_id=self.shared_capture_id, prepared=prepared,
                     assistance=assistance, input_sha256=digest(path),

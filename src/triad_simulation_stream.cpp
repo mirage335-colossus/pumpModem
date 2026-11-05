@@ -3,6 +3,7 @@
 #include "channel_perturbation.hpp"
 #include "channel_spread.hpp"
 #include "triad_gaussian_fading.hpp"
+#include "triad_random_process.hpp"
 #include "datapump/types.hpp"
 
 #include <algorithm>
@@ -83,14 +84,21 @@ void validate_frontend(const SampledFrontendConfig& f, double sample_rate) {
 void validate_path_evolution(const PathEvolutionConfig& p) {
     require(finite_nonnegative(p.ray_coherence_seconds) &&
             finite_nonnegative(p.gaussian_doppler_width_hz) &&
+            finite_nonnegative(p.random_doppler_width_hz) &&
+            finite_nonnegative(p.delay_excursion_seconds) &&
+            std::isfinite(p.delay_knot_seconds) && p.delay_knot_seconds > 0 &&
+            detail::SmoothRandomDelay::maximum_slope(p.delay_excursion_seconds,p.delay_knot_seconds) < 1 &&
             finite_nonnegative(p.diurnal_phase_amplitude_radians) &&
             std::isfinite(p.diurnal_period_seconds) && p.diurnal_period_seconds > 0 &&
             std::isfinite(p.outage_start_seconds) && std::isfinite(p.outage_end_seconds) &&
             std::isfinite(p.outage_gain) && p.outage_gain >= 0 && p.outage_gain <= 1 &&
             finite_nonnegative(p.outage_ramp_seconds), "invalid physical-path evolution");
-    require(!(p.ray_coherence_seconds > 0 && p.gaussian_doppler_width_hz > 0),
-            "OU and Gaussian Doppler ray evolution are mutually exclusive");
-    require(std::isfinite(6*p.gaussian_doppler_width_hz), "Gaussian path capture allowance overflow");
+    require(static_cast<int>(p.ray_coherence_seconds > 0) +
+            static_cast<int>(p.gaussian_doppler_width_hz > 0) +
+            static_cast<int>(p.random_doppler_width_hz > 0) <= 1,
+            "OU, sampled Gaussian and fixed-time Gaussian ray evolution are mutually exclusive");
+    require(std::isfinite(6*(p.gaussian_doppler_width_hz+p.random_doppler_width_hz)),
+            "Gaussian path capture allowance overflow");
     const bool outage_off = p.outage_start_seconds == -1 && p.outage_end_seconds == -1;
     require(outage_off || (p.outage_start_seconds >= 0 && p.outage_end_seconds > p.outage_start_seconds &&
             p.outage_ramp_seconds <= (p.outage_end_seconds-p.outage_start_seconds)*.5),
@@ -311,6 +319,8 @@ StreamChannelConfig checked_config(const StreamChannelConfig& cfg, const Format&
     validate_spectrum(cfg.rx_spectrum);
     validate_frontend(cfg.frontend, cfg.effects.sample_rate*(1+cfg.effects.rx.audio_ppm*1e-6));
     validate_path_evolution(cfg.path_evolution);
+    require(cfg.path_evolution.delay_excursion_seconds <= cfg.effects.spread_delay_ms*.001,
+            "random delay excursion exceeds nominal excess delay");
     require((cfg.selective_model.model == SelectiveModel::LegacyAllpass ||
              cfg.selective_model.model == SelectiveModel::DispersiveDft) &&
             (!cfg.selective_model.modulation_rate_hz ||
@@ -319,6 +329,10 @@ StreamChannelConfig checked_config(const StreamChannelConfig& cfg, const Format&
             std::isfinite(cfg.selective_model.center_hz) &&
             finite_nonnegative(cfg.selective_tail_floor_seconds),
             "invalid versioned selective modulation model");
+    require(cfg.selective_model.coefficient_law == SelectiveCoefficientLaw::Sinusoidal ||
+            (cfg.selective_model.coefficient_law == SelectiveCoefficientLaw::GaussianErf &&
+             cfg.selective_model.model == SelectiveModel::DispersiveDft),
+            "random selective coefficients require the isolated dispersive DFT model");
     require(std::isfinite(cfg.tx_frequency_drift_hz_per_second),
             "invalid supplemental TX frequency drift");
     require(cfg.missed_receiver_dwell_indices.size() <= 4096,
@@ -373,6 +387,8 @@ struct StreamingChannel::Impl {
     Complex direct_gain{1,0}, delayed_gain{1,0};
     double path_gain_decay = 1, path_gain_innovation = 0;
     std::unique_ptr<detail::GaussianRayFading> gaussian_path;
+    std::array<std::unique_ptr<detail::FixedGaussianRay>,2> random_path;
+    std::unique_ptr<detail::SmoothRandomDelay> random_delay;
     std::unique_ptr<SpreadRay> spread;
     std::unique_ptr<FrequencySelectivePerturbation> perturbation;
     std::unique_ptr<DispersiveSelectivePerturbation> dispersive_perturbation;
@@ -432,7 +448,9 @@ struct StreamingChannel::Impl {
         hop_origin_seconds = static_cast<long double>(geometry.calendar_origin_sample) /
             effects.sample_rate;
 
-        const long double delay_real = effects.spread_delay_ms * .001L *
+        const long double maximum_delay_seconds = effects.spread_delay_ms * .001L +
+            config.path_evolution.delay_excursion_seconds;
+        const long double delay_real = maximum_delay_seconds *
             effects.sample_rate * tx_scale;
         require(std::isfinite(delay_real) && delay_real <=
             static_cast<long double>(kHistoryLimitBytes / sizeof(Complex) - 64),
@@ -449,7 +467,11 @@ struct StreamingChannel::Impl {
             (effects.perturbation_slow_depth > 0 || effects.perturbation_fast_depth > 0);
         const double selective_sideband = selective_rate * (effects.perturbation_fast_depth > 0 ? 1 :
             effects.perturbation_slow_depth > 0 ? .1 : 0);
-        const double selective_capture_allowance = config.selective_model.modulation_rate_hz ?
+        const bool random_selective = config.selective_model.coefficient_law == SelectiveCoefficientLaw::GaussianErf;
+        // erf broadens a Gaussian spectrum. Ten B per edge is an explicit
+        // engineering allowance, never a compact-support guarantee.
+        const double selective_capture_allowance = random_selective ? 10*selective_sideband :
+            config.selective_model.modulation_rate_hz ?
             selective_sideband : (perturb_enabled ? effects.spread_doppler_hz : 0);
         const bool dispersive = config.selective_model.model == SelectiveModel::DispersiveDft;
         const double selective_spacing = config.selective_model.correlation_spacing_hz > 0 ?
@@ -465,7 +487,7 @@ struct StreamingChannel::Impl {
                 "selective observation tail floor overflows sample coordinates");
         const auto perturb_tail = std::max(actual_perturb_tail,
             static_cast<std::uint64_t>(selective_floor_real));
-        const long double delay_tail_real = effects.spread_delay_ms * .001L *
+        const long double delay_tail_real = maximum_delay_seconds *
             effects.sample_rate * rx_scale;
         require(perturb_tail <= UINT64_MAX - tx_interpolation_tail &&
                 std::isfinite(delay_tail_real) && delay_tail_real <
@@ -503,6 +525,11 @@ struct StreamingChannel::Impl {
         const double maximum_hop = effects.fhss ? std::max(
             std::abs(*std::min_element(effects.hop_offsets_hz.begin(), effects.hop_offsets_hz.end())),
             std::abs(*std::max_element(effects.hop_offsets_hz.begin(), effects.hop_offsets_hz.end()))) : 0;
+        const double delay_motion_allowance = detail::SmoothRandomDelay::maximum_slope(
+            config.path_evolution.delay_excursion_seconds,config.path_evolution.delay_knot_seconds) *
+            (effects.rf_hz + effects.nominal_conversion_if_hz + maximum_hop +
+             (explicit_source ? std::max(std::abs(src.minimum_frequency_hz),std::abs(src.maximum_frequency_hz)) :
+              effects.occupied_bandwidth_hz*.5));
         const double elapsed = static_cast<double>(total) * dt_rx;
         const double cfo_bound = (effects.rf_hz + maximum_hop) *
             (std::abs(effects.tx.rf_ppm) + std::abs(effects.rx.rf_ppm) +
@@ -512,12 +539,13 @@ struct StreamingChannel::Impl {
                 (std::abs(effects.tx.audio_ppm) + std::abs(effects.rx.audio_ppm)) * 1e-6 +
             std::abs(effects.static_doppler_hz) +
             (spread_enabled ? effects.spread_doppler_hz : 0) +
-            selective_capture_allowance + std::abs(config.tx_frequency_drift_hz_per_second) *
+            selective_capture_allowance + delay_motion_allowance + std::abs(config.tx_frequency_drift_hz_per_second) *
                 (static_cast<double>(geometry.source_samples) * dt_tx) +
             config.path_evolution.diurnal_phase_amplitude_radians/config.path_evolution.diurnal_period_seconds;
         // Six sigma at each spectral edge: declared allowance for Gaussian
         // tails, not a proof that a stochastic finite-FIR spectrum is compact.
-        const double gaussian_allowance = 6*config.path_evolution.gaussian_doppler_width_hz;
+        const double gaussian_allowance = 6*(config.path_evolution.gaussian_doppler_width_hz +
+            config.path_evolution.random_doppler_width_hz);
         require(std::isfinite(cfo_bound) &&
                 effects.sample_rate * rx_scale > effects.occupied_bandwidth_hz * tx_scale + 2 * cfo_bound + gaussian_allowance,
                 "stream channel sample clock cannot contain deterministic offsets and Gaussian-tail allowance");
@@ -532,7 +560,7 @@ struct StreamingChannel::Impl {
             const long double calendar_bound = std::max(source_seconds, rx_time_bound) +
                 std::abs(static_cast<long double>(effects.timing_offset_seconds)) +
                 std::abs(static_cast<long double>(effects.retune_offset_seconds)) +
-                effects.spread_delay_ms * .001L + hop_origin_seconds;
+                maximum_delay_seconds + hop_origin_seconds;
             require(std::isfinite(calendar_bound) && calendar_bound / effects.dwell_seconds < INT64_MAX - 1.L &&
                     calendar_bound / format.dwell_seconds < INT64_MAX - 1.L,
                     "emitted source calendar exceeds signed dwell coordinates");
@@ -546,7 +574,7 @@ struct StreamingChannel::Impl {
                 effects.nominal_conversion_if_hz * std::abs(rx_scale - 1.L) +
                 std::abs(effects.static_doppler_hz);
             const long double propagation_allowance = (spread_enabled ? effects.spread_doppler_hz : 0) +
-                selective_capture_allowance + gaussian_allowance * .5L +
+                selective_capture_allowance + delay_motion_allowance + gaussian_allowance * .5L +
                 config.path_evolution.diurnal_phase_amplitude_radians / config.path_evolution.diurnal_period_seconds;
             const long double low = static_cast<long double>(src.minimum_frequency_hz) * tx_scale;
             const long double high = static_cast<long double>(src.maximum_frequency_hz) * tx_scale;
@@ -570,6 +598,15 @@ struct StreamingChannel::Impl {
             stats.path_gaussian_fir_coefficients.assign(coefficients.begin(), coefficients.end());
             stats.path_gaussian_sample_interval_seconds = dt_rx;
         }
+        if (config.path_evolution.random_doppler_width_hz > 0)
+            for(std::size_t ray=0;ray<random_path.size();++ray)
+                random_path[ray]=std::make_unique<detail::FixedGaussianRay>(
+                    config.path_evolution.random_doppler_width_hz,
+                    root_seed(config.path_seed,effects.seed)^mix64(0x52414e4452415900ULL+ray));
+        if (config.path_evolution.delay_excursion_seconds > 0)
+            random_delay=std::make_unique<detail::SmoothRandomDelay>(effects.spread_delay_ms*.001,
+                config.path_evolution.delay_excursion_seconds,config.path_evolution.delay_knot_seconds,
+                root_seed(config.path_seed,effects.seed)^0x52414e4444454c41ULL);
 
         const auto history_count = static_cast<std::size_t>(delay_samples + 64);
         const auto prefix_count = effects.fhss ? effects.hop_offsets_hz.size() + 1 : 0;
@@ -583,11 +620,14 @@ struct StreamingChannel::Impl {
             config.missed_receiver_dwell_indices.capacity() * sizeof(std::uint64_t) +
             spectrum_values * 2 * sizeof(double) +
             (gaussian_path ? gaussian_path->working_bytes() : 0) +
+            (random_path[0] ? 2*sizeof(detail::FixedGaussianRay) : 0) +
+            (random_delay ? sizeof(detail::SmoothRandomDelay) : 0) +
             stats.path_gaussian_fir_coefficients.capacity()*sizeof(double) +
             (spread_enabled ? sizeof(SpreadRay) : 0) +
             (perturb_enabled ? (dispersive ? sizeof(DispersiveSelectivePerturbation) +
                 DispersiveSelectivePerturbation::memory_samples(effects.sample_rate * rx_scale,
-                                                               selective_spacing)*sizeof(Complex) :
+                                                               selective_spacing)*sizeof(Complex) +
+                (random_selective ? DispersiveSelectivePerturbation::maximum_random_working_bytes() : 0) :
                 sizeof(FrequencySelectivePerturbation)) : 0);
         require(stats.working_bytes <= kHistoryLimitBytes + 1024 * 1024,
                 "stream channel workspace exceeds its fixed bound");
@@ -605,13 +645,14 @@ struct StreamingChannel::Impl {
             const auto seed = effects.seed ^ 0x3254494154504552ULL;
             auto& diagnostic = stats.selective_perturbation.emplace();
             diagnostic.model = config.selective_model.model;
+            diagnostic.coefficient_law = config.selective_model.coefficient_law;
             diagnostic.sample_rate_hz = effects.sample_rate * rx_scale;
             diagnostic.component_depths = {effects.perturbation_slow_depth, effects.perturbation_fast_depth};
             if (dispersive) {
                 dispersive_perturbation = std::make_unique<DispersiveSelectivePerturbation>(
                     effects.sample_rate * rx_scale, config.selective_model.center_hz, selective_spacing,
                     selective_rate, effects.perturbation_slow_depth,
-                    effects.perturbation_fast_depth, seed);
+                    effects.perturbation_fast_depth, seed, random_selective);
                 diagnostic.correlation_spacing_hz = selective_spacing;
                 diagnostic.center_hz = config.selective_model.center_hz;
                 diagnostic.response_period_hz = dispersive_perturbation->response_period_hz;
@@ -621,7 +662,7 @@ struct StreamingChannel::Impl {
                 diagnostic.band_width_hz = dispersive_perturbation->band_width_hz;
                 diagnostic.component_rates_hz = dispersive_perturbation->rates_hz;
                 diagnostic.band_centers_hz = dispersive_perturbation->band_centers_hz;
-                diagnostic.initial_phases_radians = dispersive_perturbation->initial_phases;
+                if(!random_selective) diagnostic.initial_phases_radians = dispersive_perturbation->initial_phases;
             } else {
                 // Exact historical operator, including zero-centered geometry,
                 // initial phases and RNG domains. No ordinary path changes.
@@ -703,14 +744,18 @@ struct StreamingChannel::Impl {
         const long double physical_time = static_cast<long double>(n) /
             (static_cast<long double>(effects.sample_rate) * rx_scale) - effects.capture_lead_seconds;
         const double t = static_cast<double>(physical_time);
+        const double excess_delay_seconds = random_delay ? random_delay->value(physical_time) :
+            effects.spread_delay_ms*.001;
         // Preserve the exact integer lattice when the clocks/offset agree;
         // avoid a lossy double sample -> seconds -> sample round trip.
         const long double direct_pos = static_cast<long double>(n) *
             (static_cast<long double>(tx_scale) / rx_scale) -
             (static_cast<long double>(effects.capture_lead_seconds) + effects.timing_offset_seconds) *
                 effects.sample_rate * tx_scale;
-        const long double delayed_pos = direct_pos -
-            static_cast<long double>(effects.spread_delay_ms) * .001L * tx_scale * effects.sample_rate;
+        // Keep legacy off-path multiplication ordering exactly unchanged.
+        const long double delay_seconds = random_delay ? static_cast<long double>(excess_delay_seconds) :
+            static_cast<long double>(effects.spread_delay_ms)*.001L;
+        const long double delayed_pos = direct_pos - delay_seconds * tx_scale * effects.sample_rate;
         auto needed_last = [&](long double position) {
             require(std::isfinite(position), "stream channel source coordinate overflow");
             const auto last = geometry.source_samples - 1;
@@ -731,7 +776,7 @@ struct StreamingChannel::Impl {
         const double direct_calendar = static_cast<double>(physical_time -
             effects.timing_offset_seconds - hop_origin_seconds);
         const double delayed_calendar = static_cast<double>(physical_time -
-            effects.timing_offset_seconds - effects.spread_delay_ms * .001L - hop_origin_seconds);
+            effects.timing_offset_seconds - delay_seconds - hop_origin_seconds);
         const double rx_hop = hop_at(effects, receive_calendar);
         const double direct_hop = hop_at(effects, direct_calendar);
         const double delayed_hop = hop_at(effects, delayed_calendar);
@@ -746,7 +791,11 @@ struct StreamingChannel::Impl {
             hop_cycles(effects, delayed_calendar, hop_prefix) - hop_cycles(effects, receive_calendar, hop_prefix)), 1.0);
         direct *= std::polar(1.0, direct_phase);
         delayed *= std::polar(1.0, delayed_phase);
-        delayed *= std::polar(1.0, -tau * std::remainder(effects.rf_hz *
+        if(random_delay) {
+            const auto cycles=std::remainder((static_cast<long double>(effects.rf_hz)+
+                effects.nominal_conversion_if_hz)*delay_seconds,1.L);
+            delayed*=std::polar(1.0,-tau*static_cast<double>(cycles));
+        } else delayed *= std::polar(1.0, -tau * std::remainder(effects.rf_hz *
             effects.spread_delay_ms * .001, 1.0));
         if (config.path_evolution.ray_coherence_seconds > 0) {
             direct *= direct_gain;
@@ -766,6 +815,10 @@ struct StreamingChannel::Impl {
             direct *= gains[0];
             delayed *= gains[1];
         }
+        if(random_path[0]) {
+            direct*=random_path[0]->value(physical_time);
+            delayed*=random_path[1]->value(physical_time);
+        }
         Complex propagated = spread ? spread->process(direct, delayed) : direct;
         const auto& path = config.path_evolution;
         if (path.diurnal_phase_amplitude_radians > 0) {
@@ -778,7 +831,7 @@ struct StreamingChannel::Impl {
         if (perturbation || dispersive_perturbation) {
             auto& diagnostic = *stats.selective_perturbation;
             diagnostic.pre_selective_energy_samples += std::norm(propagated);
-            propagated = dispersive_perturbation ? dispersive_perturbation->process(propagated) :
+            propagated = dispersive_perturbation ? dispersive_perturbation->process(propagated,physical_time) :
                 perturbation->process(propagated);
             diagnostic.post_selective_energy_samples += std::norm(propagated);
             ++diagnostic.processed_rows;

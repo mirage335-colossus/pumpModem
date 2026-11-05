@@ -1,5 +1,9 @@
 # Helper-assisted three-carrier acquisition
 
+For random channel evolution and the new joint three-carrier/two-pilot adapter,
+see [the stochastic study](triad-stochastic.md). Its stochastic width and
+auxiliary-separation limits differ from the finite-line estimator below.
+
 This is the isolated v3 integration of the **production Helper transmitter** with
 the streaming three-carrier source and sampled channel. It does not integrate
 the ordinary Robust receiver, GUI, live audio or physical radio retuning. Start

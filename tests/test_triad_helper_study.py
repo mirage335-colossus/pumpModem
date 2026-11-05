@@ -172,6 +172,88 @@ class StudyOrchestrationTests(unittest.TestCase):
         self.assertEqual(result['timing']['additional_assisted_scoring_seconds'], 0.)
         self.assertNotIn('score_reused_from_baseline', result['baseline'])
 
+    def test_helper_disabled_skips_aperture_and_estimation(self):
+        self.manifest['helper_enabled'] = False
+        self.manifest['calendar'].update(capture_samples=4000, data_sample_offset=0)
+        # A twenty-second DATA-only capture cannot contain a 36-second pilot
+        # aperture. Its receiver need not even have a Helper endpoint.
+        self.manifest['calendar'].pop('helper_end_seconds')
+        self.manifest['observation']['shape'] = [4000]
+        self.write_manifest()
+        np.ones(4000, dtype='<c16').tofile(self.folder / 'observation.c128')
+        np.ones(4000, dtype='u1').tofile(self.folder / 'validity.u8')
+        comparison = study.HelperComparison(self.folder)
+        result = comparison.score(self.folder)
+        self.estimator.assert_not_called()
+        self.receiver.prepare_observation.assert_called_once()
+        self.receiver.score_prepared.assert_called_once_with(self.prepared)
+        self.receiver.with_frequency_offsets.assert_not_called()
+        assistance = result['assistance']
+        self.assertEqual(assistance['reason'], 'helper_disabled')
+        self.assertEqual(assistance['observation_seconds'], 0.)
+        self.assertEqual(assistance['wall_seconds'], 0.)
+        self.assertEqual(assistance['selected_frequencies'], comparison.frequencies.tolist())
+        self.assertFalse(assistance['presence_is_formal_pilot_lock'])
+
+    def test_helper_enable_policy_is_bound_to_geometry_and_procedure(self):
+        historical = study.HelperComparison(self.folder)
+        self.manifest['helper_enabled'] = True
+        self.write_manifest()
+        explicit = study.HelperComparison(self.folder)
+        self.assertEqual(historical.procedure_id, explicit.procedure_id)
+        self.manifest['helper_enabled'] = False
+        self.write_manifest()
+        disabled = study.HelperComparison(self.folder)
+        self.assertNotEqual(disabled.procedure_id, explicit.procedure_id)
+        self.assertNotEqual(disabled.shared_capture_id, explicit.shared_capture_id)
+        with self.assertRaisesRegex(ValueError, 'capture geometry changed'):
+            explicit.prepare_capture(self.folder)
+        # DATA absence remains a calibration control under the same procedure.
+        before = study.public_geometry(self.manifest)
+        self.manifest['data_enabled'] = False
+        self.assertEqual(before, study.public_geometry(self.manifest))
+        self.manifest['helper_enabled'] = 'false'
+        with self.assertRaisesRegex(ValueError, 'public boolean'):
+            study.public_geometry(self.manifest)
+
+    def test_stochastic_models_are_rejected_before_static_frontend_or_estimation(self):
+        original = deepcopy(self.manifest)
+        for helper_enabled in (False, True):
+            for change in ({'channel_evolution': 'fixed-time-gaussian-v1'},
+                           {'selective_coefficient_law': 'gaussian-erf-v1'},
+                           {'random_doppler_width_hz': .01},
+                           {'delay_excursion_seconds': .001}):
+                with self.subTest(helper=helper_enabled, change=change):
+                    self.manifest = deepcopy(original)
+                    self.manifest['helper_enabled'] = helper_enabled
+                    self.manifest['channel'].update(change)
+                    self.write_manifest()
+                    with self.assertRaisesRegex(ValueError, 'stochastic channel is unsupported'):
+                        study.HelperComparison(self.folder)
+        self.factory.assert_not_called()
+        self.estimator.assert_not_called()
+        # A requested stochastic profile cleared by the flat control is a
+        # legacy effective channel and remains usable by the old receiver.
+        self.manifest = original
+        self.manifest['channel'].update(requested_channel_evolution='stochastic',
+            channel_evolution='legacy', selective_coefficient_law='sinusoidal',
+            random_doppler_width_hz=0., delay_excursion_seconds=0.)
+        self.write_manifest()
+        study.HelperComparison(self.folder).score(self.folder)
+        self.estimator.assert_called_once()
+
+    def test_data_only_frontend_does_not_reserve_absent_helper_bands(self):
+        self.manifest['sample_rate_hz'] = 6000
+        self.manifest['helper_enabled'] = False
+        # An alleged auxiliary at DATA center would reject Helper-on operation.
+        self.manifest['helper_plan']['auxiliary_hz'] = 1725.
+        support = study._frontend_support(self.manifest, 'rate-aware', (0.,), (1.,))
+        self.assertEqual(support['rejected_helper_bands_hz'], [])
+        self.assertIsNone(support['nearest_rejected_band_edge_hz'])
+        self.manifest['helper_enabled'] = True
+        with self.assertRaisesRegex(ValueError, 'overlaps a declared Helper'):
+            study._frontend_support(self.manifest, 'rate-aware', (0.,), (1.,))
+
     def test_assisted_only_narrowing_skips_full_bank_and_matches_paired_assisted_score(self):
         self.estimator.side_effect = lambda samples, **kwargs: dict(
             status='narrowed', selected_frequencies=[0.], wall_seconds=.001)

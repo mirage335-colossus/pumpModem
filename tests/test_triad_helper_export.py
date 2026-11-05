@@ -7,6 +7,8 @@ temporary arrays. It does not measure receiver success or statistical power.
 """
 
 import argparse
+from array import array
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -56,7 +58,7 @@ def invoke(binary, output, arguments, timings, *, succeeds=True):
     started = time.perf_counter()
     result = subprocess.run(command, capture_output=True, text=True, timeout=30)
     elapsed = time.perf_counter() - started
-    timings.append({"arguments": arguments, "wall_seconds": elapsed,
+    timings.append({"arguments": arguments, "output_requested": output is not None, "wall_seconds": elapsed,
                     "returncode": result.returncode})
     require((result.returncode == 0) == succeeds,
             f"unexpected exporter status {result.returncode}: {command}\n"
@@ -289,6 +291,12 @@ def main():
                         help="occasional complete sampled source-power validation only; no receiver")
     parser.add_argument("--rate-qualification", action="store_true",
                         help="occasional high-rate sampling/placement and complete source-power checks")
+    parser.add_argument("--whole-bit-qualification", action="store_true",
+                        help="one complete two-bit Helper burst fixture including keyed template banks")
+    parser.add_argument("--component-qualification", action="store_true",
+                        help="paired source-component decomposition through the complete sampled channel")
+    parser.add_argument("--previous-exporter", type=Path,
+                        help="optional previous binary for the component qualification's default waveform bridge")
     args = parser.parse_args()
     binary = args.exporter.resolve()
     require(binary.is_file(), f"exporter does not exist: {binary}")
@@ -296,6 +304,129 @@ def main():
     started = time.perf_counter()
     with tempfile.TemporaryDirectory(prefix="triad-helper-export-smoke-") as temporary:
         root = Path(temporary)
+        if args.component_qualification:
+            common = ["--case", "eme", "--seconds", "1", "--sample-rate", "6000", "--data-if", "1725", "--seed", "92017",
+                "--channel-evolution", "stochastic", "--random-doppler-width-hz", ".1",
+                "--selective-modulation-rate-hz", ".2", "--delay-excursion-ms", ".00001",
+                "--delay-knot-seconds", "100", "--cn0", "200"]
+            captures = {}
+            for name, extra in (("default", []), ("full", ["--helper-components", "full"]),
+                    ("pilots", ["--helper-components", "pilots"]),
+                    ("auxiliary", ["--helper-components", "auxiliary"]),
+                    ("low", ["--helper-components", "low"]),
+                    ("high", ["--helper-components", "high"]), ("data-only", ["--helper", "off"])):
+                directory = root / name
+                invoke(binary, directory, common + extra, timings)
+                captures[name] = (load_json(directory / "manifest.json"), load_json(directory / "evaluator-truth.json"))
+            full, full_truth = captures["full"]
+            for name, (manifest, truth) in captures.items():
+                require(manifest["power"] == full["power"] and manifest["helper_plan"] == full["helper_plan"] and
+                        manifest["calendar"] == full["calendar"] and manifest["channel"] == full["channel"],
+                        "component removal changed full-waveform calibration, geometry or channel")
+                require(truth["random_seed_roots"] == full_truth["random_seed_roots"] and
+                        truth["source_energy"]["data_energy_samples"] == full_truth["source_energy"]["data_energy_samples"],
+                        "component removal changed DATA source or physical random streams")
+                expected = name if name in ("pilots", "auxiliary", "low", "high") else "full"
+                require(manifest["helper_component_control"] == truth["helper_component_control"] == expected,
+                        "diagnostic component selection missing from public/evaluator metadata")
+                require(truth["channel_report"]["natural_complete_samples"] <= full["calendar"]["capture_samples"],
+                        "diagnostic component capture truncated channel tails")
+            def file_hash(directory, filename="observation.c128"):
+                return hashlib.sha256((directory / filename).read_bytes()).hexdigest()
+            require(file_hash(root / "default") == file_hash(root / "full") and
+                    file_hash(root / "default", "validity.u8") == file_hash(root / "full", "validity.u8"),
+                    "explicit full selection changed default samples")
+            previous_bridge = None
+            if args.previous_exporter:
+                previous = args.previous_exporter.resolve()
+                require(previous.is_file(), "previous exporter does not exist")
+                invoke(previous, root / "previous", common, timings)
+                previous_bridge = file_hash(root / "previous") == file_hash(root / "default")
+                require(previous_bridge and file_hash(root / "previous", "validity.u8") ==
+                        file_hash(root / "default", "validity.u8"), "default waveform differs from previous exporter")
+            def decomposition_error(names):
+                # Every capture has the same DATA and same thermal realization.
+                # A-B-C+D removes their duplicated contribution. No independent
+                # noise approximation or output renormalization is used.
+                residual_energy = reference_energy = 0.
+                streams = [(root / name / "observation.c128").open("rb") for name in names]
+                try:
+                    while True:
+                        values = [array("d", stream.read(65536 * 16)) for stream in streams]
+                        if not values[0]: break
+                        require(all(len(value) == len(values[0]) for value in values), "paired lengths differ")
+                        residual_energy += math.fsum((a-b-c+d)**2 for a,b,c,d in zip(*values))
+                        reference_energy += math.fsum((a-d)**2 for a,d in zip(values[0], values[3]))
+                finally:
+                    for stream in streams: stream.close()
+                require(reference_energy > 0, "empty component metrology reference")
+                return math.sqrt(residual_energy / reference_energy)
+            full_error = decomposition_error(("full", "pilots", "auxiliary", "data-only"))
+            pilots_error = decomposition_error(("pilots", "low", "high", "data-only"))
+            require(full_error < 2e-12 and pilots_error < 2e-12,
+                    f"shared-channel source decomposition failed: {full_error}, {pilots_error}")
+            print(json.dumps(dict(result="passed", wall_seconds=time.perf_counter()-started,
+                full_equals_pilots_plus_auxiliary_relative_rms=full_error,
+                pilots_equals_low_plus_high_relative_rms=pilots_error,
+                explicit_full_default_byte_identity=True, previous_default_byte_identity=previous_bridge,
+                commands=timings,
+                scope="source diagnostic decomposition through the same random channel with common DATA/noise canceled; full production waveform and fixed power reference preserved")))
+            return
+        if args.whole_bit_qualification:
+            directory = root / "two-bit"
+            command = ["--case", "hf", "--seconds", "1", "--sample-rate", "6000",
+                "--whole-bit-count", "2", "--whole-bit-wait-count", "3", "--templates",
+                "--oscillator-effects", "off", "--arrival-seconds", "0", "--timing-policy", "bounded",
+                "--channel-evolution", "stochastic", "--random-doppler-width-hz", ".1",
+                "--spread-preset", "sub9-worst", "--margin", "1", "--selective-modulation-rate-hz", ".2",
+                "--delay-excursion-ms", ".001", "--delay-knot-seconds", "100", "--cn0", "20"]
+            invoke(binary, directory, command, timings)
+            manifest = load_json(directory / "manifest.json")
+            truth = load_json(directory / "evaluator-truth.json")
+            require(manifest["schema"] == "triad-helper-whole-bit-public-v1",
+                    "multi-bit fixtures must not masquerade as the old single-bit schema")
+            fs, calendar = manifest["sample_rate_hz"], manifest["whole_bit_calendar"]
+            require(calendar["count"] == 2 and calendar["wait_count"] == 3,
+                    "whole-bit calendar controls ignored")
+            require(manifest["channel"]["random_doppler_width_hz"] == .1 and
+                    manifest["channel"]["deterministic_cfo_bound_hz"] == 0,
+                    "oscillator diagnostic must retain random channel while clearing oscillator bounds")
+            slots = calendar["slots"]
+            require(len(slots) == 2 and truth["source_bits"] == [0, 1], "complete independent source bits")
+            for index, slot in enumerate(slots):
+                require(slot["support_begin_sample"] - slot["helper_begin_sample"] == 38 * fs,
+                        "complete pulse support must follow the fresh38-second Helper lead")
+                require((manifest["public_epoch_seconds"] * fs + slot["support_begin_sample"]) % (30 * fs) == 0,
+                        "whole-bit support must use the UTC30-second calendar")
+                require(slot["pattern_begin_sample"] - slot["support_begin_sample"] ==
+                        manifest["calendar"]["data_calendar_origin_sample"], "pattern halo placement")
+                require(slot["key_epoch_seconds"] == manifest["public_epoch_seconds"] + slot["pattern_begin_sample"] // fs and
+                        slot["pattern_phase_samples"] == slot["pattern_begin_sample"] % fs and
+                        slot["symbol_ordinal"] == index, "key epoch/ordinal and fractional placement must be explicit")
+                require(slot["support_end_sample"] - slot["support_begin_sample"] ==
+                        manifest["calendar"]["data_source_samples"], "source support was truncated")
+            quiet = slots[1]["helper_begin_sample"] - slots[0]["helper_end_sample"]
+            bit_samples = slots[0]["pattern_end_sample"] - slots[0]["pattern_begin_sample"]
+            require(quiet >= 3 * bit_samples and
+                    slots[1]["support_begin_sample"] - slots[0]["support_begin_sample"] >= 76 * fs,
+                    "Helper lead must not consume receiver backlog quiet time")
+            checks = truth["whole_bit_source_checks"]
+            require(all(value > 0 for value in checks["data_energy_by_slot"]) and
+                    all(value > 0 for value in checks["helper_lead_energy_by_slot"]) and
+                    checks["data_energy_inside_helper_leads"] == checks["helper_energy_inside_source_quiet"] == 0,
+                    "actual sampled emission violates DATA lead or Helper quiet intervals")
+            shape = manifest["templates"]["shape"]
+            require(shape[:3] == [2, 13, 2] and
+                    (directory / "templates.c128").stat().st_size == math.prod(shape) * 16,
+                    "per-slot complete keyed template banks omitted")
+            require(truth["channel_report"]["source_samples"] == slots[-1]["helper_end_sample"] and
+                    truth["channel_report"]["natural_complete_samples"] <= manifest["calendar"]["capture_samples"],
+                    "complete continuous channel/tail calendar was not retained")
+            print(json.dumps(dict(result="passed", wall_seconds=time.perf_counter() - started,
+                source_seconds=manifest["calendar"]["composite_source_samples"] / fs,
+                quiet_seconds=quiet / fs, sampled_checks=checks, commands=timings,
+                scope="actual two-bit random-channel fixture, keyed banks, source lead/quiet checks and complete tails; no receiver sensitivity claim")))
+            return
         if args.rate_qualification:
             results = []
             for rate, fs, center in ((3600, 48000, 3600), (12000, 48000, 7800),
@@ -444,6 +575,39 @@ def main():
         require(independent_am["selective_enabled"] and independent_am["spread_doppler_hz"] == 0,
                 "None plus an explicit AM timescale must retain modulation")
 
+        stochastic_args = ["--channel-evolution", "stochastic", "--random-doppler-width-hz", ".2",
+                           "--delay-excursion-ms", ".1", "--delay-knot-seconds", "30000"]
+        random_plan = json.loads(invoke(binary, None, ["--case", "hf", "--plan-only"] +
+                                       stochastic_args, timings).stdout)["physics"]
+        require(random_plan["channel_evolution"] == "fixed-time-gaussian-v1" and
+                random_plan["selective_coefficient_law"] == "gaussian-erf-v1",
+                "stochastic process selections must be public")
+        close(random_plan["random_doppler_width_hz"], .2, "independent Gaussian Doppler width")
+        close(random_plan["spread_doppler_hz"], 90, "random width must not reinterpret ray center separation")
+        close(random_plan["maximum_excess_delay_seconds"], .0211, "bounded variable-delay support")
+        close(random_plan["maximum_delay_slope"], 3.75 * .0001 / 30000, "motion slope bound")
+        close(random_plan["nominal_propagation_reference_hz"], 30001725, "motion physical phase reference")
+        close(random_plan["nominal_delay_motion_phase_bound_hz"], 30001725 * 3.75 * .0001 / 30000,
+              "nominal propagation phase Doppler bound")
+        close(random_plan["delay_motion_doppler_bound_hz"], (30001725 + 9000) * 3.75 * .0001 / 30000,
+              "delay motion Doppler bound")
+        close(random_plan["random_ray_total_bandwidth_allowance_hz"], 1.2, "ray spectral allowance")
+        close(random_plan["random_selective_total_bandwidth_allowance_hz"], 1800, "selective spectral allowance")
+        random_flat = json.loads(invoke(binary, None, ["--case", "hf", "--plan-only", "--control", "flat"] +
+                                       stochastic_args, timings).stdout)["physics"]
+        require(random_flat["requested_channel_evolution"] == "stochastic" and
+                random_flat["channel_evolution"] == "legacy" and
+                random_flat["random_doppler_width_hz"] == random_flat["delay_excursion_seconds"] == 0,
+                "flat must bypass every random impairment without hiding the requested selection")
+        no_oscillator = json.loads(invoke(binary, None, ["--case", "hf", "--plan-only",
+            "--oscillator-effects", "off"] + stochastic_args, timings).stdout)["physics"]
+        require(not no_oscillator["oscillator_effects"] and
+                no_oscillator["base_relative_pair_ppm_bound"] == no_oscillator["rf_relative_pair_ppm_bound"] ==
+                no_oscillator["deterministic_cfo_bound_hz"] == no_oscillator["relative_phase_diffusion_rad_sqrt_s"] == 0 and
+                no_oscillator["requested_base_relative_pair_ppm_bound"] > 0 and
+                no_oscillator["random_doppler_width_hz"] == .2,
+                "oscillator-only diagnostic must not disable the stochastic channel")
+
         # Starting auto selection from an arbitrary longer ramp can silently
         # remove protected cells before the planner checks its invariants.
         for rate in (1200, 3600):
@@ -484,12 +648,34 @@ def main():
             ["--timing-policy", "unknown"], ["--data-power-w", "0"], ["--helper-power-w", "0"],
             ["--base-oscillator", "ic-7100"],
             ["--power-reference", "unknown"], ["--power-plan-only"],
+            ["--channel-evolution", "unknown"], ["--channel-evolution", "stochastic"],
+            ["--random-doppler-width-hz", "1"],
+            ["--channel-evolution", "stochastic", "--random-doppler-width-hz", "-1"],
+            ["--channel-evolution", "stochastic", "--random-doppler-width-hz", "0", "--delay-excursion-ms", "1"],
+            ["--channel-evolution", "stochastic", "--random-doppler-width-hz", "0", "--delay-knot-seconds", "0"],
+            ["--channel-evolution", "stochastic", "--random-doppler-width-hz", "0",
+             "--delay-excursion-ms", "22", "--delay-knot-seconds", "30000"],
+            ["--whole-bit-count", "0"], ["--whole-bit-count", "17"], ["--whole-bit-wait-count", "1"],
+            ["--helper-components", "unknown"],
         ]
         for overrides in invalid_controls:
             invoke(binary, None, ["--case", "hf", "--plan-only"] + overrides, timings, succeeds=False)
 
         invoke(binary, root / "hf", ["--case", "hf", "--seconds", "1", "--seed", "91001"], timings)
         hf, hf_truth = check_capture(root / "hf", "hf")
+        invoke(binary, root / "hf-random", ["--case", "hf", "--seconds", "1", "--seed", "91001"] +
+               stochastic_args, timings)
+        random_capture = load_json(root / "hf-random" / "manifest.json")
+        random_truth = load_json(root / "hf-random" / "evaluator-truth.json")
+        require(random_capture["physics"] == random_plan, "plan/export random parameters differ")
+        require(random_capture["channel"]["channel_evolution"] == "fixed-time-gaussian-v1" and
+                random_capture["channel"]["selective_coefficient_law"] == "gaussian-erf-v1",
+                "random controls were not exported to the receiver")
+        require(random_truth["channel_report"]["signal_energy_samples"] !=
+                hf_truth["channel_report"]["signal_energy_samples"], "random controls did not alter sampled propagation")
+        require(random_capture["calendar"]["capture_samples"] >= hf["calendar"]["capture_samples"] and
+                random_truth["channel_report"]["natural_complete_samples"] <=
+                random_capture["calendar"]["capture_samples"], "variable-delay complete tail was truncated")
         invoke(binary, root / "eme", ["--case", "eme", "--seconds", "1", "--seed", "91002"], timings)
         check_capture(root / "eme", "eme")
         invoke(binary, root / "eme-6ms-low-if", ["--case", "eme", "--shaping", "legacy", "--seconds", "1", "--seed", "91004",
@@ -560,7 +746,8 @@ def main():
             require(truth["channel_report"]["natural_complete_samples"] <= samples and
                     truth["channel_report"]["tail_samples"] > 0,
                     "configured export truncated physical tails")
-    print(json.dumps({"result": "passed", "captures": 8, "rejected_invocations": 16,
+    print(json.dumps({"result": "passed", "captures": sum(row["output_requested"] and row["returncode"] == 0 for row in timings),
+                      "rejected_invocations": sum(row["returncode"] != 0 for row in timings),
                       "wall_seconds": time.perf_counter() - started, "commands": timings,
                       "scope": "CLI/export metadata, actual emitted controls and complete files; no receiver or statistical success claim"}))
 

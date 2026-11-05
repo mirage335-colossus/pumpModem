@@ -1,5 +1,10 @@
 # Developing the isolated three-carrier Robust modem
 
+**Random-channel work:** use the [stochastic guide](triad-stochastic.md) for
+physical-time random fields, moving delay, complete-waveform selective filtering
+and joint DATA/pilot inference. Run its cheap model and likelihood checks before
+sampled sensitivity campaigns; retain historical deterministic results as controls.
+
 Use this workflow for isolated **three-adjacent-carrier Robust v3** development,
 including its transmitter, simulator, planner, receiver, and integration
 planning. The experiment remains separate from the ordinary Robust modem; its

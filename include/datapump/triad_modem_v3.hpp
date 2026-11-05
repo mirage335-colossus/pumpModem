@@ -159,6 +159,16 @@ struct PathEvolutionConfig {
     // Capture allows an additional6*B total bandwidth (6sigma each edge),
     // a declared spectral-tail convention, never a hard support guarantee.
     double gaussian_doppler_width_hz = 0;
+    // fixed-grid-gaussian-v1 alternative: physical knots at16*B Hz, stationary
+    // Gaussian FIR and variance-normalized cubic interpolation. Same seeded
+    // physical realization across RX sample rates/chunks; B=2sigma, independent
+    // of ray-center separation. Mutually exclusive with both older ray laws.
+    double random_doppler_width_hz = 0;
+    // C2 random geometric excess-delay motion about effects.spread_delay_ms.
+    // Bounded uniform knots; maximum slope3.75*A/T must be<1, A<=nominal delay.
+    // The moving delay changes both waveform time and total RF+IF phase. Its
+    // Doppler is additional to the independently declared ray-center shift.
+    double delay_excursion_seconds = 0, delay_knot_seconds = 1;
     double diurnal_phase_amplitude_radians = 0;
     double diurnal_period_seconds = 86400;
     // One signal-only attenuation interval [start,end). Ramps lie inside the
@@ -170,8 +180,14 @@ struct PathEvolutionConfig {
 // The ordinary sampled/physical channels retain the legacy operator. This
 // versioned selection belongs to the isolated triad study only.
 enum class SelectiveModel { LegacyAllpass, DispersiveDft };
+enum class SelectiveCoefficientLaw { Sinusoidal, GaussianErf };
 struct SelectiveModelConfig {
     SelectiveModel model = SelectiveModel::DispersiveDft;
+    // GaussianErf is isolated dispersive-dft random-v1 only. Each bounded
+    // excursion is depth*erf(g/sqrt2), g a unit fixed-time Gaussian process:
+    // peak depth, RMS depth/sqrt3. Existing rates become widths B=2sigma.
+    // Slow and fast states are independent; no energy normalization follows.
+    SelectiveCoefficientLaw coefficient_law = SelectiveCoefficientLaw::Sinusoidal;
     // Effective physical fast-component rate; slow runs at one tenth of it.
     // Unset retains the historical linkage to effects.spread_doppler_hz.
     // Explicit zero disables added modulation even with nonzero ray Doppler.
@@ -228,9 +244,11 @@ struct StreamChannelConfig {
 };
 struct SelectivePerturbationReport {
     // Fixed-size seeded-model diagnostics, never receiver channel estimates.
-    // Initial phases apply to capture row zero, before its first phase step.
+    // Initial phases apply to capture row zero for Sinusoidal only; zeros for
+    // GaussianErf, whose counter seed instead addresses physical-time knots.
     double sample_rate_hz = 0, band_width_hz = 0;
     SelectiveModel model = SelectiveModel::LegacyAllpass;
+    SelectiveCoefficientLaw coefficient_law = SelectiveCoefficientLaw::Sinusoidal;
     // response_period_hz is the ideal continuous-delay law's period; cubic
     // sampled delays perturb it. Actual sampled transfer has period Fs.
     double correlation_spacing_hz = 0, center_hz = 0, response_period_hz = 0;

@@ -1,5 +1,10 @@
 # Doppler/delay spread and frequency-selective amplitude modulation
 
+For the new isolated random-channel implementation, see the
+[stochastic three-carrier guide](triad-stochastic.md). It distinguishes random
+ray width, ray-center separation, bounded delay motion and random dispersive
+coefficients, and preserves the earlier deterministic laws for replay.
+
 Use these models when building simulations that need Doppler/delay spread or
 frequency-selective amplitude changes. They are explicit channel impairments;
 the presets do not claim calibrated field measurements. Apply them on the

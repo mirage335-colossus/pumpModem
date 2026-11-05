@@ -8,6 +8,9 @@ assumptions and limits before applying their findings.
 the [development workflow](triad-development-workflow.md). It maps the efficient
 simulation tools, evidence-backed receiver choices, small runnable diagnostics,
 workspace reuse and proportionate testing before larger sampled campaigns.
+The [random-channel study](triad-stochastic.md) documents stochastic path and
+selective modulation, joint DATA/pilot inference and whole-bit Helper bursts.
+Fixed-ray campaign successes do not establish random-channel sensitivity.
 The [Helper-assisted triad integration](triad-helper.md) documents production
 Helper composition, the requested HF/EME configurations, acquisition reuse and
 scoped admission controls, separately from ordinary Robust integration.

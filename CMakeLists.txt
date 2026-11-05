@@ -727,6 +727,10 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
   add_executable(triad_helper_export EXCLUDE_FROM_ALL tools/triad-helper-export.cpp)
   target_include_directories(triad_helper_export PRIVATE include src)
   target_link_libraries(triad_helper_export PRIVATE triad_experiment datapump)
+  add_executable(test_triad_helper_burst EXCLUDE_FROM_ALL tests/test_triad_helper_burst.cpp)
+  target_link_libraries(test_triad_helper_burst PRIVATE triad_experiment datapump)
+  add_test(NAME triad_helper_burst COMMAND test_triad_helper_burst)
+  set_tests_properties(triad_helper_burst PROPERTIES LABELS "triad-helper" TIMEOUT 30)
   # Opt-in physical cable characterization. Keep native audio out of the
   # isolated triad library and its ordinary, hardware-free test group.
   if(NOT EMSCRIPTEN)
@@ -1244,7 +1248,7 @@ if(NOT DATAPUMP_BUILD_WASM)
           _target STREQUAL "test_triad_v3_channel" OR _target STREQUAL "test_triad_v3_receiver" OR
           _target STREQUAL "triad_study" OR _target STREQUAL "triad_examples" OR
           _target STREQUAL "triad_long" OR _target STREQUAL "triad_audio_capture" OR
-          _target STREQUAL "triad_helper_export" OR
+          _target STREQUAL "triad_helper_export" OR _target STREQUAL "test_triad_helper_burst" OR
           _target STREQUAL "triad_planner_perf" OR
           _target STREQUAL "triad_oscillator_study")
         # Isolated simulations and the standalone cable adapter supply their

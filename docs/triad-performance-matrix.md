@@ -31,6 +31,29 @@ adapter. The native `triad-long` CLI remains part of complete-pipeline timing.
 
 ## Fast guard versus qualification
 
+### Random-channel and joint-receiver extension
+
+The [random-channel study](triad-stochastic.md) adds explicit stochastic ray,
+moving-delay and selective-coefficient paths. Historical performance forecasts
+and green guard results do **not** qualify these additions. Keep their sampled
+sensitivity campaigns out of routine CI.
+
+| Path / regime | Cheap functional check | Measured full work / remaining gap |
+| --- | --- | --- |
+| Fixed physical-time Gaussian field, bounded random AM, moving-delay tails and overlapping spectra | `test_triad_v3_channel` (moments, covariance, cross-rate tone response, chunk equivalence, moving phase) | Complete native HF sampled exports; no general duration/rate runtime forecast |
+| Whole-bit Helper lead, waits, UTC grid, multiday arithmetic | `test_triad_helper_burst`; occasional exporter `--whole-bit-qualification` | Actual two-bit continuous source/channel export; receiver train adapter still unsupported |
+| Block-first joint DATA/pilot Gaussian likelihood, masks and public spectral guards | `test_triad_dynamic_joint.py`, `test_triad_dynamic_variants.py` | Paired complete sampled scores and explicit preparation; approximate channel model, calibrated per-capture diagnostics only |
+| Parallel affine state scan, serial fallback, strict FP32/FP64 | `test_triad_dynamic_scan.py` | Same-I/Q serial/scan decisions plus synchronized CPU/GPU complete-score timings; synthetic 10,000-block timing is state-only, not a full-runtime forecast |
+| Tiled timing/epoch acquisition, shared projection and weighted mixtures | `test_triad_dynamic_acquire.py` | 103 actual captures ×533 hypotheses, all preparation/scoring timed; coarse pilot-sensitive timing failed and must not become a qualified sensitivity anchor |
+| Calibration identity, frozen independent trials, replay without regeneration | `test_triad_dynamic_campaign.py` | Gate binds effective receiver identity and source; custom projection/precision requires new calibration, not reuse of an unrelated gate |
+
+Run the five small dynamic Python modules together through unittest discovery;
+this takes seconds on the reference CPU. Native exporter qualifications are
+occasional waveform checks, not required for an unchanged receiver-only edit.
+These checks are functional coverage, not new branch-instrumentation or
+predictive-performance qualification. The report states unavailable GPU cases
+separately from executed GPU parity checks.
+
 ### New Helper composition extension
 
 The [isolated Helper integration](triad-helper.md) adds the following distinct

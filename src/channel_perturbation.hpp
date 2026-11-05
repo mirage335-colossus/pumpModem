@@ -1,11 +1,14 @@
 #pragma once
 #include "datapump/types.hpp"
+#include "triad_random_process.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <complex>
 #include <cstdint>
 #include <numbers>
+#include <memory>
+#include <limits>
 #include <vector>
 
 namespace datapump::modem::detail {
@@ -115,6 +118,9 @@ class DispersiveSelectivePerturbation {
     std::array<Complex,2> step_{};
     std::array<double,2> depth_{};
     std::array<std::array<Complex,3>,3> dft_{};
+    std::array<std::array<std::unique_ptr<triad::v3::detail::FixedGaussianProcess>,2>,3> random_{};
+    double sample_rate_ = 1;
+    bool random_coefficients_ = false;
     std::vector<Complex> history_;
     std::size_t cursor_=0;
     std::uint64_t count_=0;
@@ -147,10 +153,20 @@ public:
     static std::uint64_t memory_samples(double sample_rate,double spacing) {
         return tail_samples(sample_rate,spacing)+1;
     }
-    std::size_t working_bytes() const {return sizeof(*this)+history_.capacity()*sizeof(Complex);}
+    static constexpr std::size_t maximum_random_working_bytes() {
+        return 6*sizeof(triad::v3::detail::FixedGaussianProcess);
+    }
+    std::size_t working_bytes() const {
+        std::size_t bytes=sizeof(*this)+history_.capacity()*sizeof(Complex);
+        for(const auto& band:random_)for(const auto& component:band)
+            if(component)bytes+=sizeof(triad::v3::detail::FixedGaussianProcess);
+        return bytes;
+    }
     DispersiveSelectivePerturbation(double sample_rate,double center_hz,double spacing,
-                                   double doppler_hz,double slow,double fast,std::uint64_t seed)
-        :depth_{slow,fast},rates_hz{.1*doppler_hz,doppler_hz},
+                                   double doppler_hz,double slow,double fast,std::uint64_t seed,
+                                   bool random_coefficients=false)
+        :depth_{slow,fast},sample_rate_(sample_rate),random_coefficients_(random_coefficients),
+         rates_hz{.1*doppler_hz,doppler_hz},
          band_centers_hz{center_hz-spacing,center_hz,center_hz+spacing},
          branch_delays_seconds{0,1/(3*spacing),2/(3*spacing)},
          band_width_hz(spacing),response_period_hz(3*spacing) {
@@ -186,12 +202,15 @@ public:
                 const auto bits=mix(seed^mix(2*band+component+0x9072d5ULL));
                 initial_phases[band][component]=tau*(static_cast<double>(bits>>11)+.5)/9007199254740992.;
                 phase_[band][component]=std::polar(1.,initial_phases[band][component]);
+                if(random_coefficients_ && rates_hz[component]>0 && depth_[component]>0)
+                    random_[band][component]=std::make_unique<triad::v3::detail::FixedGaussianProcess>(
+                        rates_hz[component],seed^mix(2*band+component+0x52414e444f4dULL));
             }
         }
         for(std::size_t component=0;component<2;++component)
             step_[component]=std::polar(1.,tau*rates_hz[component]/sample_rate);
     }
-    Complex process(Complex input) {
+    Complex process(Complex input,long double physical_seconds=std::numeric_limits<long double>::quiet_NaN()) {
         history_[cursor_]=input;
         std::array<Complex,3> delayed{input,Complex{},Complex{}};
         for(std::size_t m=0;m<2;++m)for(std::size_t tap=0;tap<4;++tap) {
@@ -204,8 +223,15 @@ public:
         // The unity path is exact; depths zero never introduce a numerical
         // filter or latency. All added paths and their complex phase remain.
         Complex output=input;
+        if(random_coefficients_ && std::isnan(physical_seconds))
+            physical_seconds=static_cast<long double>(count_)/sample_rate_;
         for(std::size_t band=0;band<3;++band) {
-            const double excursion=depth_[0]*phase_[band][0].imag()+depth_[1]*phase_[band][1].imag();
+            double excursion=0;
+            if(random_coefficients_) {
+                for(std::size_t component=0;component<2;++component)
+                    if(random_[band][component]) excursion+=depth_[component]*
+                        random_[band][component]->bounded_value(physical_seconds);
+            } else excursion=depth_[0]*phase_[band][0].imag()+depth_[1]*phase_[band][1].imag();
             Complex branch{};
             for(std::size_t m=0;m<3;++m)branch+=dft_[band][m]*delayed[m];
             output+=excursion*branch;

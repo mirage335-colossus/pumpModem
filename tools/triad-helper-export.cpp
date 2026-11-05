@@ -3,6 +3,7 @@
 #include "datapump/helper_carrier.hpp"
 #include "datapump/triad_modem_v3.hpp"
 #include "datapump/triad_shaping.hpp"
+#include "datapump/triad_helper_burst.hpp"
 #include "datapump/tuning.hpp"
 
 #include <algorithm>
@@ -18,6 +19,7 @@
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <numbers>
 #include <optional>
 #include <random>
@@ -39,6 +41,9 @@ constexpr double tau = 2 * std::numbers::pi;
 struct Options {
     std::string scenario = "hf", control = "selected", shaping = "auto";
     std::string power_reference = "whole-active";
+    std::string helper_components = "full";
+    std::string channel_evolution = "legacy";
+    std::optional<double> random_doppler_width_hz, delay_excursion_ms, delay_knot_seconds;
     std::optional<std::string> base_oscillator, shift_oscillator;
     std::optional<std::string> spread_preset, selective_perturbation;
     std::string timing_policy = "case-default";
@@ -47,6 +52,8 @@ struct Options {
     std::filesystem::path output;
     std::uint64_t seed = 1, key_seed = 72001, epoch = 1793850000;
     std::optional<std::uint64_t> burst_wait_tiles;
+    unsigned whole_bit_count = 1, whole_bit_wait_count = 0;
+    bool whole_bit_calendar = false;
     unsigned bit = 0;
     std::uint32_t sample_rate = default_sample_rate;
     double seconds = 16, data_if_hz = 1725;
@@ -58,6 +65,7 @@ struct Options {
     std::optional<bool> fhss;
     bool plan_only = false, power_plan_only = false;
     bool data = true, helper = true, templates = false, explicit_data_if = false;
+    bool oscillator_effects = true;
 };
 
 double real(std::string_view text, const char* name) {
@@ -95,16 +103,21 @@ Options parse(int argc, char** argv) {
             std::cout << "triad_helper_export --case hf|eme --output NEW_DIRECTORY\n"
                 "  [--seed N] [--key-seed N] [--epoch UTC_SECONDS] [--bit 0|1]\n"
                 "  [--seconds 16] [--rate HZ] [--added-symbols N] [--burst-wait-tiles N]\n"
+                "  [--whole-bit-count 1..16] [--whole-bit-wait-count 0..1000]\n"
                 "  [--fhss on|off] [--shaping auto|legacy (default: auto)] [--shaping-tail-fraction F]\n"
                 "  [--data-if HZ] [--sample-rate INTEGER_HZ] [--cn0 DB_HZ] [--plan-only]\n"
                 "  [--power-reference whole-active|legacy-window] [--power-plan-only]\n"
                 "  [--base-oscillator ID] [--shift-oscillator ID] [--ramp-seconds POSITIVE]\n"
+                "  [--oscillator-effects on|off] (off is an explicit diagnostic control)\n"
                 "  [--rf-hz HZ] [--spread-preset ID] [--margin FACTOR]\n"
                 "  [--selective-perturbation off|slow-N|fast-N|each-N]\n"
                 "  [--selective-modulation-rate-hz HZ] [--timing-policy case-default|bounded|broad]\n"
+                "  [--channel-evolution legacy|stochastic] [--random-doppler-width-hz B]\n"
+                "  [--delay-excursion-ms A] [--delay-knot-seconds T]\n"
                 "  [--data-power-w W] [--helper-power-w W]\n"
                 "  [--receiver-tail-seconds 0..1]\n"
                 "  [--control selected|flat] [--data on|off] [--helper on|off]\n"
+                "  [--helper-components full|pilots|auxiliary|low|high] (source diagnostic only)\n"
                 "  [--arrival-seconds T] [--templates]\n"
                 "Default 18000 Hz complex samples; sample rate must be a multiple of 5.\n"
                 "Default DATA IF 1725 Hz HF, 4000 Hz legacy EME.\n"
@@ -138,6 +151,11 @@ Options parse(int argc, char** argv) {
             if (waits > std::numeric_limits<unsigned>::max())
                 throw std::invalid_argument("burst wait tiles outside unsigned range");
             o.burst_wait_tiles = waits;
+        } else if (arg == "--whole-bit-count" || arg == "--whole-bit-wait-count") {
+            const auto value = integer(next(), "whole-bit calendar control");
+            if (value > 1000) throw std::invalid_argument("whole-bit calendar control exceeds its bounded fixture range");
+            if (arg == "--whole-bit-count") { o.whole_bit_count = static_cast<unsigned>(value); o.whole_bit_calendar = true; }
+            else o.whole_bit_wait_count = static_cast<unsigned>(value);
         } else if (arg == "--fhss") o.fhss = enabled(next());
         else if (arg == "--shaping") o.shaping = next();
         else if (arg == "--shaping-tail-fraction")
@@ -145,12 +163,18 @@ Options parse(int argc, char** argv) {
         else if (arg == "--data-if") { o.data_if_hz = real(next(), "DATA IF"); o.explicit_data_if = true; }
         else if (arg == "--base-oscillator") o.base_oscillator = std::string(next());
         else if (arg == "--shift-oscillator") o.shift_oscillator = std::string(next());
+        else if (arg == "--oscillator-effects") o.oscillator_effects = enabled(next());
         else if (arg == "--rf-hz") o.rf_hz = real(next(), "RF shift");
         else if (arg == "--spread-preset") o.spread_preset = std::string(next());
         else if (arg == "--margin") o.spread_margin = real(next(), "spread/search margin");
         else if (arg == "--selective-perturbation") o.selective_perturbation = std::string(next());
         else if (arg == "--selective-modulation-rate-hz")
             o.selective_modulation_rate_hz = real(next(), "selective modulation rate");
+        else if (arg == "--channel-evolution") o.channel_evolution = next();
+        else if (arg == "--random-doppler-width-hz")
+            o.random_doppler_width_hz = real(next(), "random Doppler width");
+        else if (arg == "--delay-excursion-ms") o.delay_excursion_ms = real(next(), "delay excursion");
+        else if (arg == "--delay-knot-seconds") o.delay_knot_seconds = real(next(), "delay knot interval");
         else if (arg == "--timing-policy") o.timing_policy = next();
         else if (arg == "--data-power-w") o.data_power_w = real(next(), "DATA power");
         else if (arg == "--helper-power-w") o.helper_power_w = real(next(), "Helper power");
@@ -161,6 +185,7 @@ Options parse(int argc, char** argv) {
         else if (arg == "--control") o.control = next();
         else if (arg == "--data") o.data = enabled(next());
         else if (arg == "--helper") o.helper = enabled(next());
+        else if (arg == "--helper-components") o.helper_components = next();
         else if (arg == "--templates") o.templates = true;
         else if (arg == "--plan-only") o.plan_only = true;
         else if (arg == "--power-plan-only") o.power_plan_only = true;
@@ -188,14 +213,38 @@ Options parse(int argc, char** argv) {
         throw std::invalid_argument("Added Symbols must be in [1,1000]");
     if (o.burst_wait_tiles && *o.burst_wait_tiles > 1000)
         throw std::invalid_argument("burst wait tiles must be in [0,1000]");
+    if (o.whole_bit_count < 1 || o.whole_bit_count > 16)
+        throw std::invalid_argument("whole-bit count must be in [1,16]");
+    if (o.whole_bit_wait_count && !o.whole_bit_calendar)
+        throw std::invalid_argument("whole-bit wait count requires explicit --whole-bit-count");
+    if (o.whole_bit_calendar && o.plan_only)
+        throw std::invalid_argument("whole-bit calendar requires an emitted fixture, not shaping-only planning");
     if (o.shaping_tail_fraction && (*o.shaping_tail_fraction <= 0 || *o.shaping_tail_fraction > .005))
         throw std::invalid_argument("spectral tail fraction must be in (0,0.005]");
     if (o.control != "selected" && o.control != "flat") throw std::invalid_argument("control must be selected or flat");
+    if (o.helper_components != "full" && o.helper_components != "pilots" &&
+        o.helper_components != "auxiliary" && o.helper_components != "low" && o.helper_components != "high")
+        throw std::invalid_argument("Helper components must be full, pilots, auxiliary, low or high");
     if (o.rf_hz && *o.rf_hz < 0) throw std::invalid_argument("RF shift must be nonnegative");
     if (o.spread_margin && (*o.spread_margin <= 0 || *o.spread_margin > 1000))
         throw std::invalid_argument("spread/search margin must be in (0,1000]");
     if (o.selective_modulation_rate_hz && *o.selective_modulation_rate_hz < 0)
         throw std::invalid_argument("selective modulation rate must be nonnegative");
+    if (o.channel_evolution != "legacy" && o.channel_evolution != "stochastic")
+        throw std::invalid_argument("channel evolution must be legacy or stochastic");
+    if (o.channel_evolution == "stochastic" && !o.random_doppler_width_hz)
+        throw std::invalid_argument("stochastic evolution requires explicit --random-doppler-width-hz (B=2sigma; zero disables ray fading)");
+    if (o.channel_evolution == "legacy" &&
+        (o.random_doppler_width_hz || o.delay_excursion_ms || o.delay_knot_seconds))
+        throw std::invalid_argument("random Doppler and delay motion controls require --channel-evolution stochastic");
+    if (o.random_doppler_width_hz && *o.random_doppler_width_hz < 0)
+        throw std::invalid_argument("random Doppler width must be nonnegative");
+    if (o.delay_excursion_ms && *o.delay_excursion_ms < 0)
+        throw std::invalid_argument("delay excursion must be nonnegative");
+    if (o.delay_knot_seconds && *o.delay_knot_seconds <= 0)
+        throw std::invalid_argument("delay knot interval must be positive");
+    if (o.delay_excursion_ms.value_or(0) > 0 && !o.delay_knot_seconds)
+        throw std::invalid_argument("nonzero delay excursion requires explicit --delay-knot-seconds");
     for (const auto power : {o.data_power_w, o.helper_power_w})
         if (power && *power <= 0) throw std::invalid_argument("DATA and Helper powers must be positive");
     if (o.timing_policy != "case-default" && o.timing_policy != "bounded" && o.timing_policy != "broad")
@@ -323,9 +372,12 @@ struct ResolvedPhysics {
     bool shift_active = false, shared_shift_clock = false, helper_power_limited = false;
     std::string shift_id, requested_modulation_id;
     double rf_pair_ppm = 0, phase_diffusion = 0;
+    double requested_base_pair_ppm = 0, requested_rf_pair_ppm = 0;
     double selected_delay_ms = 0, selected_doppler_hz = 0;
     double delay_ms = 0, doppler_hz = 0, slow_depth = 0, fast_depth = 0, modulation_rate_hz = 0;
     double physical_cn0 = 0, data_cn0 = 0, effective_helper_w = 0;
+    bool stochastic = false;
+    double random_doppler_width_hz = 0, delay_excursion_seconds = 0, delay_knot_seconds = 1;
 };
 
 ResolvedPhysics resolve_physics(const Options& o, const Case& physical) {
@@ -343,6 +395,12 @@ ResolvedPhysics resolve_physics(const Options& o, const Case& physical) {
     const auto base_phase = r.base.phase_noise_degrees_per_sqrt_second * std::numbers::pi / 180;
     const auto shift_phase = r.shift.phase_noise_degrees_per_sqrt_second * std::numbers::pi / 180;
     r.phase_diffusion = r.shift_active && !r.shared_shift_clock ? std::hypot(base_phase, shift_phase) : base_phase;
+    r.requested_base_pair_ppm = r.base.clock_error_ppm;
+    r.requested_rf_pair_ppm = r.rf_pair_ppm;
+    if (!o.oscillator_effects) {
+        r.base.clock_error_ppm = r.shift.clock_error_ppm = 0;
+        r.rf_pair_ppm = r.phase_diffusion = 0;
+    }
     r.selected_delay_ms = physical.spread.delay_ms * physical.margin;
     r.selected_doppler_hz = physical.spread.doppler_hz * physical.margin;
     r.requested_modulation_id = o.selective_perturbation.value_or(
@@ -360,6 +418,16 @@ ResolvedPhysics resolve_physics(const Options& o, const Case& physical) {
         r.delay_ms = r.selected_delay_ms; r.doppler_hz = r.selected_doppler_hz;
         r.slow_depth = slow; r.fast_depth = fast;
         r.modulation_rate_hz = o.selective_modulation_rate_hz.value_or(r.doppler_hz);
+        r.stochastic = o.channel_evolution == "stochastic";
+        if (r.stochastic) {
+            r.random_doppler_width_hz = o.random_doppler_width_hz.value_or(0);
+            r.delay_excursion_seconds = o.delay_excursion_ms.value_or(0) * .001;
+            r.delay_knot_seconds = o.delay_knot_seconds.value_or(1);
+            if (r.delay_excursion_seconds > r.delay_ms * .001)
+                throw std::invalid_argument("delay excursion exceeds nominal excess delay and would permit negative delay");
+            if (3.75 * r.delay_excursion_seconds / r.delay_knot_seconds >= 1)
+                throw std::invalid_argument("delay motion must have absolute slope below one");
+        }
     }
     r.physical_cn0 = 10 * std::log10(physical.data_w * 1000) - physical.loss_db - thermal_n0_dbm_hz;
     r.data_cn0 = o.cn0.value_or(r.physical_cn0);
@@ -370,12 +438,42 @@ ResolvedPhysics resolve_physics(const Options& o, const Case& physical) {
     return r;
 }
 
+void evolution_json(std::ostream& out, const Options& o, const ResolvedPhysics& r,
+                    double propagation_reference_hz) {
+    const auto slope = 3.75 * r.delay_excursion_seconds / r.delay_knot_seconds;
+    const auto selective_width = r.stochastic && (r.slow_depth > 0 || r.fast_depth > 0) ?
+        r.modulation_rate_hz * (r.fast_depth > 0 ? 1. : .1) : 0.;
+    out << "\"requested_channel_evolution\":"; json_string(out, o.channel_evolution);
+    out << ",\"channel_evolution\":"; json_string(out, r.stochastic ? "fixed-time-gaussian-v1" : "legacy");
+    out << ",\"random_doppler_width_hz\":" << r.random_doppler_width_hz
+        << ",\"random_doppler_width_definition\":\"B=2sigma of each ray Gaussian spectrum; independent of ray center separation\""
+        << ",\"selective_coefficient_law\":"; json_string(out, r.stochastic ? "gaussian-erf-v1" : "sinusoidal");
+    out << ",\"selective_depth_definition\":";
+    json_string(out, r.stochastic ? "bounded peak excursion; each component has uniform marginal and RMS depth/sqrt(3)" :
+                                  "bounded sinusoidal peak excursion; component RMS depth/sqrt(2)");
+    out << ",\"delay_excursion_seconds\":" << r.delay_excursion_seconds
+        << ",\"delay_knot_seconds\":" << r.delay_knot_seconds
+        << ",\"maximum_excess_delay_seconds\":" << r.delay_ms * .001 + r.delay_excursion_seconds
+        << ",\"maximum_delay_slope\":" << slope
+        << ",\"nominal_delay_motion_phase_bound_hz\":" << std::abs(propagation_reference_hz) * slope
+        << ",\"delay_motion_doppler_bound_hz\":" << (std::abs(propagation_reference_hz) + o.sample_rate / 2.) * slope
+        << ",\"delay_motion_doppler_bound_scope\":\"nominal carrier plus entire source Nyquist interval; includes envelope time-warp as well as propagation phase\""
+        << ",\"nominal_propagation_reference_hz\":" << propagation_reference_hz
+        << ",\"random_ray_total_bandwidth_allowance_hz\":" << 6 * r.random_doppler_width_hz
+        << ",\"random_selective_total_bandwidth_allowance_hz\":" << 20 * selective_width
+        << ",\"random_sampling_policy\":\"fixed physical-time knots at16*B; variance-normalized cubic interpolation; stationary indexed innovations independent of receiver sample rate and chunk boundaries\""
+        << ",\"random_spectral_allowance_scope\":\"engineering spectral-tail allowance, not compact support or a physical measurement; delay-motion Doppler is additional and is counted once\"";
+}
+
 void physics_json(std::ostream& out, const Options& o, const Case& physical,
                   const ResolvedPhysics& r, double data_if_hz) {
     const auto denominator = 1 - r.base.clock_error_ppm * .5e-6;
     out << "{\"rf_hz\":" << physical.rf_hz << ",\"data_if_hz\":" << data_if_hz
         << ",\"base_oscillator\":"; json_string(out, r.base.id);
     out << ",\"shift_oscillator\":"; json_string(out, r.shift_id);
+    out << ",\"oscillator_effects\":" << boolean(o.oscillator_effects)
+        << ",\"requested_base_relative_pair_ppm_bound\":" << r.requested_base_pair_ppm
+        << ",\"requested_rf_relative_pair_ppm_bound\":" << r.requested_rf_pair_ppm;
     out << ",\"shift_active\":" << boolean(r.shift_active)
         << ",\"shared_shift_clock\":" << boolean(r.shared_shift_clock)
         << ",\"base_relative_pair_ppm_bound\":" << r.base.clock_error_ppm
@@ -391,7 +489,9 @@ void physics_json(std::ostream& out, const Options& o, const Case& physical,
     out << ",\"selective_slow_depth\":" << r.slow_depth << ",\"selective_fast_depth\":" << r.fast_depth
         << ",\"selective_modulation_rate_hz\":" << r.modulation_rate_hz
         << ",\"selective_enabled\":" << boolean(r.modulation_rate_hz > 0 && (r.slow_depth > 0 || r.fast_depth > 0))
-        << ",\"timing_policy\":"; json_string(out, o.timing_policy);
+        << ',';
+    evolution_json(out, o, r, physical.rf_hz + data_if_hz);
+    out << ",\"timing_policy\":"; json_string(out, o.timing_policy);
     out << ",\"arrival_prior_seconds\":[" << physical.arrival_low << ',' << physical.arrival_high << ']'
         << ",\"capture_lead_seconds\":" << physical.capture_lead << ",\"capture_trail_seconds\":" << physical.capture_trail
         << ",\"message_epoch_count\":13,\"data_w\":" << physical.data_w
@@ -497,6 +597,35 @@ void print_infeasible_plan(const Options& o, std::string_view stage, std::string
 
 Complex rotation(double frequency, long double seconds) {
     return std::polar(1., tau * static_cast<double>(std::remainder(frequency * seconds, 1.L)));
+}
+
+// Diagnostic decomposition only. Preserve the production Generator's literal
+// pilot calendar, quintic4ms envelopes, multiplication order and public power
+// fractions. The complete waveform still comes from Generator; its encrypted
+// auxiliary is obtained by subtracting these public straight-tone components.
+// Full/default emission does not call this function or alter a production sample.
+std::array<Complex, 2> public_helper_pilots(const helper::Plan& plan, std::uint64_t epoch,
+                                         long double seconds, long double begin, long double end) {
+    constexpr long double dwell = .4L, ramp = .004L;
+    const auto smooth = [](long double x) {
+        const auto t = static_cast<double>(std::clamp(x, 0.L, 1.L));
+        return t * t * t * (10 + t * (-15 + 6 * t));
+    };
+    auto local = std::fmod(static_cast<long double>(epoch % 2) + seconds, 2.L);
+    if (local < 0) local += 2;
+    local -= std::floor(local / dwell) * dwell;
+    auto envelope = plan.pilot_dwell_gating ? smooth(std::min(local, dwell - local) / ramp) : 1.;
+    envelope *= smooth((end - seconds) / ramp);
+    envelope *= smooth((seconds - begin) / ramp);
+    const auto high = std::polar(1., tau * static_cast<double>(
+        std::fmod(static_cast<long double>(plan.frequency_hz) * seconds, 1.L)));
+    std::array<Complex, 2> result{plan.helper_gain * envelope * (helper::pilot_amplitude_fraction * high), Complex{}};
+    if (plan.low_frequency_hz > 0) {
+        const auto low = std::polar(1., tau * static_cast<double>(
+            std::fmod(static_cast<long double>(plan.low_frequency_hz) * seconds, 1.L)));
+        result[1] = plan.helper_gain * envelope * helper::low_pilot_amplitude_fraction * low;
+    }
+    return result;
 }
 
 std::ofstream output_file(const std::filesystem::path& path, bool binary = false) {
@@ -643,7 +772,9 @@ void endpoint_json(std::ostream& out, const triad::Oscillator& endpoint) {
 void selective_json(std::ostream& out, const std::optional<SelectivePerturbationReport>& selected) {
     if (!selected) { out << "null"; return; }
     const auto& r = *selected;
-    out << "{\"model\":\"dispersive-dft-v1\",\"sample_rate_hz\":" << r.sample_rate_hz
+    out << "{\"model\":\"dispersive-dft-v1\",\"coefficient_law\":";
+    json_string(out, r.coefficient_law == SelectiveCoefficientLaw::GaussianErf ? "gaussian-erf-v1" : "sinusoidal");
+    out << ",\"sample_rate_hz\":" << r.sample_rate_hz
         << ",\"correlation_spacing_hz\":" << r.correlation_spacing_hz << ",\"center_hz\":" << r.center_hz
         << ",\"response_period_hz\":" << r.response_period_hz << ",\"memory_samples\":" << r.memory_samples
         << ",\"decay_tail_samples\":" << r.decay_tail_samples << ",\"seed\":" << r.seed
@@ -700,13 +831,37 @@ int run(const Options& o) {
     PatternSource reference_source(f, key, 0);
     PatternSource data_source(f, key, static_cast<std::uint8_t>(o.bit));
     const auto lead_samples = static_cast<std::uint64_t>(std::llround(data_start_seconds * sample_rate));
-    if (g.calendar_origin_sample > lead_samples)
+    if (!o.whole_bit_calendar && g.calendar_origin_sample > lead_samples)
         throw std::runtime_error("DATA pulse padding exceeds the fixed Helper lead");
-    const auto data_offset = lead_samples - g.calendar_origin_sample;
+    // Power planning retains its public historical preview coordinate. The
+    // opt-in emitted calendar below instead places the entire DATA support
+    // after a fresh38-second Helper lead.
+    const auto preview_data_offset = static_cast<long double>(lead_samples) - g.calendar_origin_sample;
+    auto data_offset = o.whole_bit_calendar ? std::uint64_t{0} : lead_samples - g.calendar_origin_sample;
     if (g.source_samples > UINT64_MAX - data_offset - dwell_samples)
         throw std::runtime_error("composite source extent overflow");
     const auto data_end = data_offset + g.source_samples;
-    const auto composite_samples = ((data_end + dwell_samples - 1) / dwell_samples) * dwell_samples;
+    auto composite_samples = ((data_end + dwell_samples - 1) / dwell_samples) * dwell_samples;
+    std::vector<HelperBurstSlot> whole_slots;
+    std::optional<HelperBurstPlan> burst_plan;
+    const HelperBurstCoordinate calendar_origin{f.epoch, 0};
+    if (o.whole_bit_calendar) {
+        const auto bit_samples_real = static_cast<long double>(g.bit_seconds) * sample_rate;
+        if (bit_samples_real < 1 || bit_samples_real > UINT64_MAX)
+            throw std::runtime_error("whole-bit logical calendar extent overflow");
+        burst_plan.emplace(HelperBurstConfig{sample_rate, static_cast<std::uint64_t>(std::llround(bit_samples_real)),
+            g.source_samples, g.calendar_origin_sample, o.whole_bit_wait_count, o.helper});
+        auto slot = burst_plan->first_slot(burst_plan->add(calendar_origin, o.helper ? lead_samples : 0));
+        for (unsigned i = 0; i < o.whole_bit_count; ++i) {
+            if (slot.pattern_begin.epoch < 6 || slot.pattern_begin.epoch > 4294967289ULL ||
+                slot.helper_end.epoch >= 4294967296ULL)
+                throw std::runtime_error("whole-bit calendar exceeds keyed epoch or Helper metadata range");
+            whole_slots.push_back(slot);
+            if (i + 1 < o.whole_bit_count) slot = burst_plan->successor(slot);
+        }
+        data_offset = burst_plan->distance(calendar_origin, whole_slots.front().support_begin);
+        composite_samples = burst_plan->distance(calendar_origin, whole_slots.back().helper_end);
+    }
     const long double helper_end = static_cast<long double>(composite_samples) / sample_rate;
 
     auto helper_options = helper_options_for(physical);
@@ -716,7 +871,7 @@ int run(const Options& o) {
     reference.end_seconds = 41;
     reference.time_key = key;
     reference.helper_start_seconds = 0;
-    reference.helper_end_seconds = helper_end;
+    reference.helper_end_seconds = o.whole_bit_calendar ? std::max(helper_end, 42.L) : helper_end;
     reference.active = [f](long double seconds) {
         if (!f.fhss) return true;
         auto within = std::fmod(seconds - data_start_seconds, static_cast<long double>(f.dwell_seconds));
@@ -728,7 +883,7 @@ int run(const Options& o) {
     for (unsigned i = 0; i < helper::power_reference_nodes; ++i) {
         const auto seconds = helper::power_reference_node(reference, i);
         if (!reference.active(seconds)) continue;
-        const auto value = reference_source.sample_at(seconds * sample_rate - data_offset);
+        const auto value = reference_source.sample_at(seconds * sample_rate - preview_data_offset);
         reference_norm += std::norm(value);
         ++reference_nodes;
     }
@@ -765,7 +920,8 @@ int run(const Options& o) {
     for (unsigned i = 0; i < helper::power_reference_nodes; ++i) {
         const auto seconds = helper::power_reference_node(reference, i);
         if (reference.active(seconds))
-            measured_helper_norm += std::norm(generator.mix_analytic({}, seconds, sample_rate, helper_end, 0) * composite_gain);
+            measured_helper_norm += std::norm(generator.mix_analytic({}, seconds, sample_rate,
+                reference.helper_end_seconds, 0) * composite_gain);
     }
     const auto reference_helper_ratio = static_cast<double>(measured_helper_norm / reference_nodes);
 
@@ -834,6 +990,12 @@ int run(const Options& o) {
     config.selective_model.center_hz = 0;
     if (o.selective_modulation_rate_hz && o.control == "selected")
         config.selective_model.modulation_rate_hz = *o.selective_modulation_rate_hz;
+    if (physics.stochastic) {
+        config.selective_model.coefficient_law = SelectiveCoefficientLaw::GaussianErf;
+        config.path_evolution.random_doppler_width_hz = physics.random_doppler_width_hz;
+        config.path_evolution.delay_excursion_seconds = physics.delay_excursion_seconds;
+        config.path_evolution.delay_knot_seconds = physics.delay_knot_seconds;
+    }
     config.signal_gain = 1;
     config.complex_noise_variance = sample_rate / std::pow(10., cn0 / 10);
     config.maximum_chunk_samples = 4096;
@@ -845,7 +1007,8 @@ int run(const Options& o) {
     const auto deterministic_cfo_bound_hz = (physical.rf_hz * physics.rf_pair_ppm +
         data_if_hz * base_oscillator.clock_error_ppm) * 1e-6 / pair_denominator;
     const auto sample_clock_pair_ppm = base_oscillator.clock_error_ppm / pair_denominator;
-    const auto tail_bound_seconds = selected_delay_ms * .001 + 2 / (3 * g.carrier_spacing_hz) + 32. / sample_rate;
+    const auto tail_bound_seconds = selected_delay_ms * .001 + physics.delay_excursion_seconds +
+        2 / (3 * g.carrier_spacing_hz) + 32. / sample_rate;
     config.minimum_capture_samples = static_cast<std::uint64_t>(std::ceil(sample_rate * rx_max *
         (physical.capture_lead + static_cast<double>(helper_end) / tx_min + physical.arrival_high +
          physical.capture_trail + tail_bound_seconds))) +
@@ -853,10 +1016,23 @@ int run(const Options& o) {
     const auto template_tail = static_cast<std::uint64_t>(std::ceil(sample_rate * tail_bound_seconds));
     const auto template_samples = g.source_samples + template_tail;
     const auto export_bytes = static_cast<long double>(config.minimum_capture_samples) * 17 +
-        (o.templates ? static_cast<long double>(template_samples) * 26 * 16 : 0);
+        (o.templates ? static_cast<long double>(template_samples) * 26 * 16 * o.whole_bit_count : 0);
     if (export_bytes > maximum_export_bytes) throw std::runtime_error("export exceeds the explicit 2 GiB fixture budget");
 
+    // The complete output bound is checked before allocating additional source
+    // workspaces for a multi-bit fixture that may be rejected for its span.
+    std::vector<std::unique_ptr<PatternSource>> whole_sources;
+    for (const auto& slot : whole_slots) {
+        auto source_format = f;
+        source_format.epoch = slot.pattern_begin.epoch;
+        source_format.symbol_ordinal = slot.index;
+        whole_sources.push_back(std::make_unique<PatternSource>(source_format, key,
+            static_cast<std::uint8_t>(o.bit ^ (slot.index & 1))));
+    }
+
     long double source_data_energy = 0, source_helper_energy = 0, source_composite_energy = 0;
+    std::vector<long double> whole_data_energy(whole_slots.size()), whole_lead_helper_energy(whole_slots.size());
+    long double whole_lead_data_energy = 0, whole_quiet_helper_energy = 0;
     std::uint64_t source_rows = 0;
     EmittedSource emitted;
     emitted.format = f;
@@ -868,18 +1044,52 @@ int run(const Options& o) {
     emitted.maximum_frequency_hz = std::max(complete_data_bandwidth / 2,
         plan.frequency_hz - data_if_hz) + spectral_skirt_allowance_hz;
     emitted.working_bytes = data_source.working_bytes() + sizeof(generator);
+    for (const auto& source : whole_sources) emitted.working_bytes += source->working_bytes();
+    std::size_t whole_slot_index = 0;
     emitted.sample_at = [&](std::uint64_t n) {
         const auto seconds = static_cast<long double>(n) / sample_rate;
         Complex raw_data;
-        if (o.data && n >= data_offset && n - data_offset < g.source_samples)
+        long double active_helper_begin = 0, active_helper_end = helper_end;
+        bool helper_active = o.helper;
+        if (o.whole_bit_calendar) {
+            while (whole_slot_index + 1 < whole_slots.size() &&
+                   n >= burst_plan->distance(calendar_origin, whole_slots[whole_slot_index].helper_end))
+                ++whole_slot_index;
+            const auto& slot = whole_slots[whole_slot_index];
+            const auto offset = burst_plan->distance(calendar_origin, slot.support_begin);
+            if (o.data && n >= offset && n - offset < g.source_samples)
+                raw_data = whole_sources[whole_slot_index]->sample_at(static_cast<long double>(n - offset));
+            active_helper_begin = burst_plan->relative_seconds(calendar_origin, slot.helper_begin);
+            active_helper_end = burst_plan->relative_seconds(calendar_origin, slot.helper_end);
+            helper_active = o.helper && seconds >= active_helper_begin && seconds < active_helper_end;
+        } else if (o.data && n >= data_offset && n - data_offset < g.source_samples)
             raw_data = data_source.sample_at(static_cast<long double>(n - data_offset));
         const auto up = rotation(data_if_hz, seconds);
         const auto data = raw_data * data_gain;
         const auto helper_input = o.power_reference == "legacy-window" ? raw_data : raw_data * data_calibration_gain;
-        const auto audio = o.helper ?
-            generator.mix_analytic(helper_input * up, seconds, sample_rate, helper_end, 0) * composite_gain : data * up;
-        const auto helper_component = o.helper ? audio - data * up : Complex{};
+        auto audio = helper_active ?
+            generator.mix_analytic(helper_input * up, seconds, sample_rate, active_helper_end, active_helper_begin) * composite_gain : data * up;
+        auto helper_component = helper_active ? audio - data * up : Complex{};
+        if (helper_active && o.helper_components != "full") {
+            const auto pilots = public_helper_pilots(plan, f.epoch, seconds, active_helper_begin, active_helper_end);
+            const auto high = pilots[0] * composite_gain, low = pilots[1] * composite_gain;
+            if (o.helper_components == "pilots") helper_component = high + low;
+            else if (o.helper_components == "auxiliary") helper_component -= high + low;
+            else if (o.helper_components == "high") helper_component = high;
+            else helper_component = low;
+            audio = data * up + helper_component;
+        }
         const auto value = audio * std::conj(up);
+        if (o.whole_bit_calendar) {
+            whole_data_energy[whole_slot_index] += std::norm(data);
+            const auto& slot = whole_slots[whole_slot_index];
+            if (n >= burst_plan->distance(calendar_origin, slot.helper_begin) &&
+                n < burst_plan->distance(calendar_origin, slot.support_begin)) {
+                whole_lead_data_energy += std::norm(data);
+                whole_lead_helper_energy[whole_slot_index] += std::norm(helper_component);
+            }
+            if (!helper_active) whole_quiet_helper_energy += std::norm(helper_component);
+        }
         source_data_energy += std::norm(data);
         source_helper_energy += std::norm(helper_component);
         source_composite_energy += std::norm(value);
@@ -907,9 +1117,12 @@ int run(const Options& o) {
 
     if (o.templates) {
         auto templates = output_file(o.output / "templates.c128", true);
+        for (unsigned whole_bit = 0; whole_bit < o.whole_bit_count; ++whole_bit) {
         for (int epoch_offset = -6; epoch_offset <= 6; ++epoch_offset) {
             auto candidate_format = f;
-            candidate_format.epoch = static_cast<std::uint64_t>(static_cast<std::int64_t>(f.epoch) + epoch_offset);
+            candidate_format.epoch = static_cast<std::uint64_t>(static_cast<std::int64_t>(
+                o.whole_bit_calendar ? whole_slots[whole_bit].pattern_begin.epoch : f.epoch) + epoch_offset);
+            if (o.whole_bit_calendar) candidate_format.symbol_ordinal = whole_bit;
             for (std::uint8_t bit = 0; bit < 2; ++bit) {
                 PatternSource candidate(candidate_format, key, bit);
                 for (std::uint64_t first = 0; first < template_samples;) {
@@ -921,6 +1134,7 @@ int run(const Options& o) {
                 }
             }
         }
+        }
         templates.close();
     }
 
@@ -928,8 +1142,20 @@ int run(const Options& o) {
     const auto elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - wall_start).count();
     const auto cpu = static_cast<double>(std::clock() - cpu_start) / CLOCKS_PER_SEC;
     auto truth = output_file(o.output / "evaluator-truth.json");
-    truth << "{\"schema\":\"triad-helper-evaluator-truth-v1\",\"receiver_input\":false,\"source_bit\":" << o.bit
-        << ",\"source_epoch_offset_seconds\":0,\"arrival_seconds\":" << effects.timing_offset_seconds
+    truth << "{\"schema\":\"triad-helper-evaluator-truth-v1\",\"receiver_input\":false,\"source_bit\":" << o.bit;
+    truth << ",\"helper_component_control\":"; json_string(truth, o.helper_components);
+    if (o.whole_bit_calendar) {
+        truth << ",\"source_bits\":[";
+        for (unsigned i = 0; i < o.whole_bit_count; ++i) { if (i) truth << ','; truth << (o.bit ^ (i & 1)); }
+        truth << "],\"whole_bit_source_checks\":{\"data_energy_by_slot\":[";
+        for (std::size_t i = 0; i < whole_data_energy.size(); ++i) { if (i) truth << ','; truth << whole_data_energy[i]; }
+        truth << "],\"helper_lead_energy_by_slot\":[";
+        for (std::size_t i = 0; i < whole_lead_helper_energy.size(); ++i) { if (i) truth << ','; truth << whole_lead_helper_energy[i]; }
+        truth << "],\"data_energy_inside_helper_leads\":" << whole_lead_data_energy
+            << ",\"helper_energy_inside_source_quiet\":" << whole_quiet_helper_energy
+            << ",\"scope\":\"sampled emission before propagation; receiver still contains continuous channel echoes\"}";
+    }
+    truth << ",\"source_epoch_offset_seconds\":0,\"arrival_seconds\":" << effects.timing_offset_seconds
         << ",\"arrival_override\":" << boolean(o.arrival.has_value()) << ",\"unmodified_arrival_draw_seconds\":" << arrival_draw
         << ",\"tx\":"; endpoint_json(truth, effects.tx);
     truth << ",\"rx\":"; endpoint_json(truth, effects.rx);
@@ -940,9 +1166,9 @@ int run(const Options& o) {
         << "},\"source_energy\":{\"rows\":" << source_rows
         << ",\"data_energy_samples\":" << source_data_energy << ",\"helper_energy_samples\":" << source_helper_energy
         << ",\"composite_energy_samples\":" << source_composite_energy
-        << ",\"data_full_support_mean_norm\":" << source_data_energy / g.source_samples
-        << ",\"data_calendar_mean_norm\":" << source_data_energy / (g.bit_seconds * sample_rate)
-        << ",\"data_active_mean_norm\":" << source_data_energy / (data_reference.active_seconds * sample_rate)
+        << ",\"data_full_support_mean_norm\":" << source_data_energy / (g.source_samples * o.whole_bit_count)
+        << ",\"data_calendar_mean_norm\":" << source_data_energy / (g.bit_seconds * sample_rate * o.whole_bit_count)
+        << ",\"data_active_mean_norm\":" << source_data_energy / (data_reference.active_seconds * sample_rate * o.whole_bit_count)
         << ",\"scope\":\"emitted components before shared propagation; one fixed public reference gain; no per-bit normalization\"}"
         << ",\"channel_report\":{\"samples\":" << report.samples << ",\"source_samples\":" << report.source_samples
         << ",\"tail_samples\":" << report.tail_samples << ",\"natural_complete_samples\":" << report.natural_complete_samples
@@ -955,7 +1181,9 @@ int run(const Options& o) {
     truth.close();
 
     auto manifest = output_file(o.output / "manifest.json");
-    manifest << "{\"schema\":\"triad-helper-public-v1\",\"case\":"; json_string(manifest, o.scenario);
+    manifest << "{\"schema\":";
+    json_string(manifest, o.whole_bit_calendar ? "triad-helper-whole-bit-public-v1" : "triad-helper-public-v1");
+    manifest << ",\"case\":"; json_string(manifest, o.scenario);
     manifest << ",\"control\":"; json_string(manifest, o.control);
     manifest << ",\"sample_rate_hz\":" << sample_rate
         << ",\"observation\":{\"file\":\"observation.c128\",\"dtype\":\"<c16\",\"shape\":[" << written
@@ -963,6 +1191,9 @@ int run(const Options& o) {
         << ",\"validity\":{\"file\":\"validity.u8\",\"dtype\":\"u1\",\"shape\":[" << written << "]}"
         << ",\"evaluator_truth_file\":\"evaluator-truth.json\",\"evaluator_truth_is_receiver_input\":false"
         << ",\"data_enabled\":" << boolean(o.data) << ",\"helper_enabled\":" << boolean(o.helper)
+        << ",\"helper_component_control\":";
+    json_string(manifest, o.helper_components);
+    manifest << ",\"helper_component_control_scope\":\"full is the unchanged production waveform; partial modes are source-only metrology/fault diagnostics, with full production power calibration and all channel effects retained\""
         << ",\"public_epoch_seconds\":" << f.epoch << ",\"key_seed\":" << o.key_seed
         << ",\"encrypted_source\":true,\"encrypted_helper_metadata\":true,\"helper_callsign\":\"TRIAD\""
         << ",\"format\":{\"inner_rate_hz\":" << f.inner_rate_hz << ",\"added_symbols\":" << f.added_symbols
@@ -978,16 +1209,45 @@ int run(const Options& o) {
         << ",\"physical_rf_retuning\":false,\"dwell_seconds\":" << f.dwell_seconds
         << ",\"quiet_seconds\":" << f.quiet_seconds << ",\"ramp_seconds\":" << f.ramp_seconds
         << ",\"margin_seconds\":" << f.margin_seconds << '}'
-        << ",\"calendar\":{\"data_calendar_start_seconds\":38,\"data_sample_offset\":" << data_offset
+        << ",\"calendar\":{\"data_calendar_start_seconds\":" <<
+            (o.whole_bit_calendar ? burst_plan->relative_seconds(calendar_origin, whole_slots.front().pattern_begin) : 38.L)
+        << ",\"data_sample_offset\":" << data_offset
         << ",\"data_calendar_origin_sample\":" << g.calendar_origin_sample << ",\"data_source_samples\":" << g.source_samples
         << ",\"composite_source_samples\":" << composite_samples << ",\"composite_calendar_origin_sample\":0"
-        << ",\"helper_start_seconds\":0,\"helper_end_seconds\":" << helper_end
+        << ",\"helper_start_seconds\":" <<
+            (o.whole_bit_calendar ? burst_plan->relative_seconds(calendar_origin, whole_slots.front().helper_begin) : 0.L)
+        << ",\"helper_end_seconds\":" << helper_end
         << ",\"capture_lead_seconds\":" << physical.capture_lead << ",\"capture_trail_seconds\":" << physical.capture_trail
         << ",\"arrival_prior_seconds\":[" << physical.arrival_low << ',' << physical.arrival_high << ']'
         << ",\"capture_samples\":" << written << ",\"fixed_capture_tail_bound_seconds\":" << tail_bound_seconds
         << ",\"receiver_tail_seconds\":" << o.receiver_tail_seconds
-        << ",\"sample_time_definition\":\"nominal capture time n/Fs-capture_lead_seconds; unknown physical RX clock retained in channel\"}"
-        << ",\"helper_plan\":{\"high_hz\":" << plan.frequency_hz << ",\"low_hz\":" << plan.low_frequency_hz
+        << ",\"sample_time_definition\":\"nominal capture time n/Fs-capture_lead_seconds; unknown physical RX clock retained in channel\"}";
+    if (o.whole_bit_calendar) {
+        manifest << ",\"whole_bit_calendar\":{\"count\":" << o.whole_bit_count
+            << ",\"wait_count\":" << o.whole_bit_wait_count << ",\"support_grid_seconds\":30"
+            << ",\"minimum_support_separation_seconds\":" << (o.helper ? 76 : 60)
+            << ",\"fresh_helper_lead_seconds\":" << (o.helper ? 38 : 0)
+            << ",\"key_addressing\":\"existing v3 integer-second epoch=floor(pattern UTC), symbol_ordinal=slot index; fractional phase preserved in placement, not added to the unchanged key format\""
+            << ",\"emission\":\"complete independent keyed bit sources; alternating evaluator bits; one absolute-phase Helper generator and one continuous channel; only source is gated\",\"slots\":[";
+        for (std::size_t i = 0; i < whole_slots.size(); ++i) {
+            if (i) manifest << ',';
+            const auto& slot = whole_slots[i];
+            manifest << "{\"symbol_ordinal\":" << slot.index
+                << ",\"key_epoch_seconds\":" << slot.pattern_begin.epoch
+                << ",\"pattern_phase_samples\":" << slot.pattern_begin.phase;
+            const std::array<std::pair<const char*, HelperBurstCoordinate>, 6> coordinates{{
+                {"helper_begin", slot.helper_begin}, {"support_begin", slot.support_begin},
+                {"pattern_begin", slot.pattern_begin}, {"pattern_end", slot.pattern_end},
+                {"support_end", slot.support_end}, {"helper_end", slot.helper_end}}};
+            for (const auto& [name, coordinate] : coordinates) {
+                manifest << ','; json_string(manifest, std::string(name) + "_sample");
+                manifest << ':' << burst_plan->distance(calendar_origin, coordinate);
+            }
+            manifest << '}';
+        }
+        manifest << "]}";
+    }
+    manifest << ",\"helper_plan\":{\"high_hz\":" << plan.frequency_hz << ",\"low_hz\":" << plan.low_frequency_hz
         << ",\"auxiliary_hz\":" << plan.auxiliary_frequency_hz << ",\"data_gain\":" << plan.data_gain
         << ",\"helper_gain\":" << plan.helper_gain << ",\"effective_power_w\":" << plan.effective_power_w
         << ",\"pilot_dwell_gating\":" << boolean(plan.pilot_dwell_gating)
@@ -1044,10 +1304,14 @@ int run(const Options& o) {
         << ",\"reference_normalized_data_mean_norm\":1,\"reference_measured_helper_to_data_ratio\":" << reference_helper_ratio
         << ",\"helper_preview_normalized_data_mean_norm\":" << data_gain * data_gain * reference_mean_norm
         << ",\"nominal_helper_to_data_ratio\":" << physics.effective_helper_w / physical.data_w
+        << ",\"helper_component_reference_policy\":\"full production Helper power reference retained; diagnostic component removal does not redistribute power; actual emitted component energy is reported separately\""
         << ",\"reference_scope\":\"39-41s preview belongs to production Helper planning only; measured Helper norm is relative to nominal active DATA norm1; DATA normalization follows data_power_reference_policy\"}"
         << ",\"channel\":{\"rf_hz\":" << physical.rf_hz << ",\"nominal_conversion_if_hz\":" << data_if_hz
         << ",\"base_oscillator\":"; json_string(manifest, base_oscillator.id);
     manifest << ",\"shift_oscillator\":"; json_string(manifest, physics.shift_id);
+    manifest << ",\"oscillator_effects\":" << boolean(o.oscillator_effects)
+        << ",\"requested_base_relative_pair_ppm_bound\":" << physics.requested_base_pair_ppm
+        << ",\"requested_rf_relative_pair_ppm_bound\":" << physics.requested_rf_pair_ppm;
     // The shared-clock request is a topology, not a separate oscillator preset.
     // Keep the public request ID instead of silently substituting the base ID.
     manifest << ",\"shift_reference\":"; json_string(manifest, physics.shift_id);
@@ -1073,7 +1337,9 @@ int run(const Options& o) {
         << ",\"selective_perturbation\":"; json_string(manifest, physics.requested_modulation_id);
     manifest << ",\"selective_modulation_rate_hz\":" << physics.modulation_rate_hz
         << ",\"selective_enabled\":" << boolean(physics.modulation_rate_hz > 0 && (physics.slow_depth > 0 || physics.fast_depth > 0))
-        << ",\"selective_model\":\"dispersive-dft-v1\",\"selective_scale_hz\":" << g.carrier_spacing_hz
+        << ',';
+    evolution_json(manifest, o, physics, physical.rf_hz + data_if_hz);
+    manifest << ",\"selective_model\":\"dispersive-dft-v1\",\"selective_scale_hz\":" << g.carrier_spacing_hz
         << ",\"selective_center_hz\":0,\"source_frequency_bounds_hz\":[" << emitted.minimum_frequency_hz << ',' << emitted.maximum_frequency_hz
         << "],\"source_spectral_skirt_allowance_hz\":" << spectral_skirt_allowance_hz
         << ",\"source_capture_design_bandwidth_hz\":" << complete_data_bandwidth
@@ -1084,11 +1350,16 @@ int run(const Options& o) {
     physics_json(manifest, o, physical, physics, data_if_hz);
     manifest << ",\"templates\":{\"enabled\":" << boolean(o.templates) << ",\"file\":";
     if (o.templates) manifest << "\"templates.c128\""; else manifest << "null";
-    manifest << ",\"dtype\":\"<c16\",\"shape\":[13,2," << template_samples
+    manifest << ",\"dtype\":\"<c16\",\"shape\":[";
+    if (o.whole_bit_calendar) manifest << o.whole_bit_count << ',';
+    manifest << "13,2," << template_samples
         << "],\"epoch_offsets_seconds\":[-6,-5,-4,-3,-2,-1,0,1,2,3,4,5,6],\"bits\":[0,1]"
         << ",\"source_support_samples\":" << g.source_samples << ",\"zero_tail_samples\":" << template_tail
-        << ",\"frame\":\"zero-centered DATA source; insert at calendar.data_sample_offset in composite source\""
-        << ",\"scope\":\"public encrypted source alternatives only; fixed shared calibration; no Helper, arrival or channel realization\"}"
+        << ",\"frame\":";
+    json_string(manifest, o.whole_bit_calendar ?
+        "zero-centered per-slot DATA source; first dimension selects whole_bit_calendar.slots; insert at each support_begin_sample" :
+        "zero-centered DATA source; insert at calendar.data_sample_offset in composite source");
+    manifest << ",\"scope\":\"public encrypted source alternatives only; fixed shared calibration; no Helper, arrival or channel realization\"}"
         << ",\"cost\":{\"wall_seconds\":" << elapsed << ",\"process_cpu_seconds\":" << cpu
         << ",\"binary_export_bytes\":" << static_cast<std::uint64_t>(export_bytes)
         << ",\"channel_working_bytes\":" << report.working_bytes
