@@ -111,11 +111,38 @@ For FHSS/bursts, it separately accounts for the known intentional envelope;
 duty correction is a measurement baseline, not rescaling the waveform or
 restoring energy lost in a missed hop. Actual gaps remain actual gaps.
 
-The sampled Rate-36/Added-10 cases pass that screen at 150 ms; the FHSS case
-passes at 400 ms. High spreading and the high-rate case pass below 100 ms.
-Low rates can fail at 800 ms by many dB. See the record for exact settings and
-the distinction between dense and sparsely placed windows. **Do not claim
-universal sub-800-ms AGC compatibility from constant coefficient power.**
+The early sampled Rate-36/Added-10 fixtures passed that screen at 150 ms; a
+fresh eight-seed source-only holdout found its worst window at 0.554 dB, just
+above the screen, and passed at 200 ms (0.341 dB worst) and 800 ms (0.101 dB).
+Other earlier cases passed at 400 ms (FHSS) and below 100 ms (high spreading
+and high rate). Low rates can fail at 800 ms by many dB. Exact settings and
+window populations are in the [pattern qualification record](validation-data/triad-v3/2026-11-06-independent-patterns/README.md)
+and [spacing follow-up](validation-data/triad-v3/2026-11-06-spacing/README.md).
+These are source measurements, not confidence bounds or physical AGC
+qualification. **Do not claim universal sub-800-ms AGC compatibility from
+constant coefficient power.**
+
+The follow-up measured slightly wider carrier spacing and a wider linear RRC
+rolloff using the same keyed coefficients. At HF 36 × 10, changing 75 to 90 Hz
+reduced the worst 100-ms excursion only from 0.722 to 0.703 dB over eight fresh
+fixtures; it still exceeded the 0.5103-dB engineering screen. Wider RRC rolloff
+0.25→0.5 with 90-Hz spacing reduced it to 0.543 dB and the 150-ms excursion to
+0.370 dB, but increased the nominal band from 225 to 270 Hz (20%). The
+illustrative 100-ms power-detector gain shape loss improved by only 0.000315
+dB. Since 200-ms windows already passed in the holdout and neither detector
+model nor audio-radio AGC law is physically calibrated, this marginal benefit
+does not justify changing the default spacing or pulse, or adding public
+spacing/rolloff controls. The source envelope per carrier is invariant to
+spacing; FHSS ramp and per-carrier pulse variation cannot be fixed by spacing.
+
+For reproducible source-only comparisons, use
+[`triad_spacing_diagnostic.py`](../tools/triad_spacing_diagnostic.py) on saved
+native probes. It reconstructs candidate spacing from exact shaped carrier
+envelopes and reports the 80–800 ms window neighborhood, per-carrier power,
+one-pole detector screens and finite-record spectrum. The synthetic sweep does
+not propagate a channel, change DATA center or Helper pilot, prove placement
+feasibility, measure receiver sensitivity, or certify radio AGC behavior.
+Avoid interpreting a rectangular-window beat notch as broad improvement.
 
 The IC-7100's documented SSB AGC time settings include 0.1 seconds, but they do
 not specify the complete detector/control transfer law; see the

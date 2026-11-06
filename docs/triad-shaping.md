@@ -20,6 +20,16 @@ unit-energy RRC remains available through `--shaping legacy`. The low-level
 `Format` descriptor still starts from that legacy pulse; exporter defaults
 invoke the joint planner rather than changing unrelated resolved formats.
 
+The default carrier-spacing ratio remains `1.25 × fine rate` and the existing
+RRC rolloff remains 0.25. A separate source-only screen tried modest spacing increases and wider RRC
+rolloff with the same coefficients. At HF 36 × 10, the rolloff-0.5/90-Hz
+option used 270 Hz nominal bandwidth instead of 225 Hz and still
+slightly missed the strict 100-ms envelope screen on a fresh holdout. Its
+illustrative AGC-template gain was only 0.000315 dB. No general spacing or
+rolloff knob was added: the measured margin did not support the extra occupied
+bandwidth, Helper placement checks and waveform/template compatibility work.
+The measurements and source-only command are in the [spacing follow-up](validation-data/triad-v3/2026-11-06-spacing/README.md).
+
 The planner may lengthen a dwell ramp only up to the space available around a
 protected symbol, while retaining the configured quiet interval and margin. It
 can choose a center-aligned protected symbol where the current lattice permits

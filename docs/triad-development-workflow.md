@@ -4,6 +4,13 @@
 before regenerating templates or transferring old sensitivity results. Use its
 small source/envelope probes first; constant coefficient power is not a guarantee
 of fast composite-envelope balance, especially at sub-Hz rates.
+For a question about modest carrier spacing, start with
+[`triad_spacing_diagnostic.py`](../tools/triad_spacing_diagnostic.py) and the
+[measured spacing follow-up](validation-data/triad-v3/2026-11-06-spacing/README.md).
+It reuses saved native source probes without rebuilding symbols or simulating a
+channel. Its finite-window results do not establish Helper placement,
+propagation, sensitivity, or physical AGC behavior; do not rerun a sampled
+receiver campaign unless a source candidate shows a material benefit.
 
 **Random-channel work:** use the [stochastic guide](triad-stochastic.md) for
 physical-time random fields, moving delay, complete-waveform selective filtering
