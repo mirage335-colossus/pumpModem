@@ -22,7 +22,7 @@ def fixture(stochastic=True):
             relative_phase_diffusion_rad_sqrt_s=.00877, spread_delay_ms=21.,
             spread_doppler_hz=90., selective_enabled=True, delay_excursion_seconds=2e-7,
             data_w=4., effective_helper_w=40.),
-        export_constraints=dict(fixed_helper_lead_seconds=38.))
+        export_constraints=dict(fixed_helper_lead_seconds=38., sample_rate_hz=6000))
 
 
 class DurationModelTests(unittest.TestCase):

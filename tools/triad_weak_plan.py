@@ -194,11 +194,23 @@ def execute(argv=None):
                                     error=geometry_error)
     planned['native_geometry_verified'] = geometry_verified
     planned['export_supported'] = bool(planned.get('export_supported') and geometry_verified)
+    if geometry_verified and 'padded_source_samples' in selected_probe.get('geometry', {}):
+        limits = selected_probe.get('export_constraints', {})
+        count = selected_probe['geometry']['padded_source_samples']
+        # A necessary preflight, not permission to bypass native full-calendar
+        # and template-bank byte checks. Streaming requires neither artifact.
+        bytes_per_sample = 17 + (26*16 if args.templates else 0)
+        if count*bytes_per_sample > limits.get('maximum_export_bytes', 2*1024**3):
+            planned['export_supported'] = False
+        if limits.get('power_reference_policy', 'whole-active') == 'whole-active' and count > limits.get('whole_active_calibration_sample_limit', 4194304):
+            planned['export_supported'] = False
     availability = dict(duration_forecast_available=chosen is not None,
         modeled_detection_allocation_met=None if chosen is None else chosen.get('meets_detection_allocation', False),
         native_geometry_verified=geometry_verified,
         sampled_export_preflight_available=planned['export_supported'],
-        sampled_export_limit_active_seconds=probe.get('export_constraints', {}).get('maximum_sampled_active_seconds', 3600),
+        sampled_export_limit_active_seconds=probe.get('export_constraints', {}).get('maximum_sampled_active_seconds'),
+        continuous_stream_geometry_available=geometry_verified,
+        continuous_stream_scope='Use triad_continuous with the selected duration, bounded-tiles power policy and an explicit receiver bank. Runtime, acquisition and sensitivity require separate qualification.',
         receiver_duration_qualified=False,
         scope='Geometry verification does not generate samples, verify acquisition or qualify reception; sampled preflight retains independent native execution limits.')
     report = dict(schema='triad-weak-plan-export-v1', created_unix_seconds=time.time(),

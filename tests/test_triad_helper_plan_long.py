@@ -41,7 +41,7 @@ def main():
         assert plan['geometry_feasible']
         assert plan['geometry']['status'] == 'checked-integer-geometry-only'
         assert plan['geometry']['allocates_samples_or_templates'] is False
-        assert plan['export_constraints']['maximum_sampled_active_seconds'] == 3600
+        assert plan['export_constraints']['maximum_sampled_active_seconds'] is None
         assert 'no sampled-duration cap' in plan['export_constraints']['plan_only_duration_limit']
         fmt, geometry = plan['format'], plan['geometry']
         assert geometry['active_tiles'] == fmt['tile_count'] > 0
@@ -67,8 +67,8 @@ def main():
 
     with tempfile.TemporaryDirectory() as temp:
         sample = Path(temp) / 'long-sample'
-        # The same numerical duration remains rejected on execution paths that
-        # would generate/calibrate samples; these failures occur before output.
+        # Exact whole-active calibration still enforces its sample-work budget;
+        # there is no arbitrary duration cap. Failures occur before output.
         invoke(binary, 3601, success=False, output=sample)
         assert not sample.exists()
         invoke(binary, 86400, '--power-plan-only', success=False)
@@ -94,7 +94,7 @@ def main():
     print(json.dumps({'status': 'passed', 'plan_only_durations_seconds': durations,
                       'long_burst_active_seconds': bg['active_data_seconds'],
                       'long_burst_elapsed_seconds': bg['elapsed_data_seconds'],
-                      'sampled_export_limit_seconds': 3600,
+                      'sampled_export_limit_seconds': None,
                       'plan_only_shapes_or_allocates_waveforms': False}))
 
 

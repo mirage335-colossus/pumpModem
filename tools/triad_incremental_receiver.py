@@ -1,0 +1,297 @@
+#!/usr/bin/env python3
+"""Bounded-memory blockwise Gaussian likelihood for a continuous triad input.
+
+This component preserves likelihood state across the declared observation. It
+does not repeatedly admit on prefixes and it does not implement the operational
+threshold/search-family policy. Callers must keep the public candidate/model
+bank fixed from the first sample through the endpoint.
+"""
+from __future__ import annotations
+
+import math
+import time
+
+import numpy as np
+import torch
+
+from triad_dynamic_joint import BlockProjection
+from triad_gaussian_state import GaussianPrior, GaussianStateFilter
+
+
+class IncrementalGaussianReceiver:
+    """Consume one continuous observation with a fixed candidate bank.
+
+    ``basis(start, stop)`` returns the public basis for exactly one block in
+    ``[H0, bit0, bit1, candidate, tap, raw_sample]`` order. Only the current
+    block basis and one bounded input remainder are retained. A final short
+    block is merged with its predecessor just as in ``ProjectedJointReceiver``.
+
+    ``push`` accepts contiguous chunks beginning at sample zero. Prefix scores
+    are available for diagnostics only; this class never makes an admission.
+    ``finish`` returns complete likelihood evidence only at the declared
+    endpoint. Early EOF remains incomplete.
+    """
+
+    def __init__(self, *, sample_rate, samples, block_samples,
+                 basis, required_bands, excluded_bands=(), noise_variance=1.,
+                 stationary_power=(.5, .5), coherence_seconds=(.5, math.inf),
+                 device="cpu", precision="fp32", memory_limit_bytes=512*1024**2,
+                 maximum_candidates=4096, candidate_count=1,
+                 projection_mode="dft", maximum_input_chunk_samples=1_048_576):
+        started = time.perf_counter()
+        self.sample_rate = float(sample_rate)
+        if not math.isfinite(self.sample_rate) or self.sample_rate <= 0:
+            raise ValueError("sample rate must be finite and positive")
+        if isinstance(samples, bool) or not isinstance(samples, int) or not 1 <= samples < (1 << 64):
+            raise ValueError("sample count must be a positive integer")
+        if isinstance(block_samples, bool) or not isinstance(block_samples, int) or not 1 <= block_samples < (1 << 64):
+            raise ValueError("block size must be a positive integer")
+        if isinstance(candidate_count, bool) or not isinstance(candidate_count, int) or not 1 <= candidate_count <= maximum_candidates:
+            raise ValueError("candidate count exceeds the declared finite bank")
+        if precision not in ("fp32", "fp64"):
+            raise ValueError("precision must be fp32 or fp64")
+        if projection_mode not in ("dft", "valid-rows"):
+            raise ValueError("projection mode must be dft or valid-rows")
+        if projection_mode == "valid-rows" and excluded_bands:
+            raise ValueError("raw-row selection cannot exclude auxiliary bands")
+        self.variance = float(noise_variance)
+        if not math.isfinite(self.variance) or self.variance <= 0:
+            raise ValueError("noise variance must be finite and positive")
+        if not isinstance(maximum_input_chunk_samples, int) or not 1 <= maximum_input_chunk_samples <= 1_048_576:
+            raise ValueError("input chunk limit must be in [1,1048576]")
+        self.samples, self.block_samples = samples, block_samples
+        powers = tuple(float(x) for x in stationary_power)
+        self.candidates, self.taps = candidate_count, len(powers)
+        if not 1 <= self.taps <= 16:
+            raise ValueError("receiver needs 1..16 channel taps")
+        coherences = tuple(float(x) for x in coherence_seconds)
+        if not coherences or len(set(coherences)) != len(coherences) or any(not x > 0 or math.isnan(x) for x in coherences):
+            raise ValueError("coherences must be unique and positive or infinite")
+        for coherence in coherences:
+            GaussianPrior(powers, coherence)
+        self.coherences = coherences
+        self.precision = precision
+        self.dtype = torch.complex64 if precision == "fp32" else torch.complex128
+        self.real_dtype = torch.float32 if precision == "fp32" else torch.float64
+        self.device = torch.device(device)
+        if self.device.type == "cuda":
+            if not torch.cuda.is_available():
+                raise RuntimeError("requested CUDA device is unavailable")
+            if self.device.index is None:
+                self.device = torch.device("cuda", torch.cuda.current_device())
+            if precision == "fp32" and (torch.backends.cuda.matmul.allow_tf32 or
+                    torch.get_float32_matmul_precision() != "highest"):
+                raise ValueError("FP32 minimum requires TF32 disabled and highest matmul precision")
+        self.projection_mode = projection_mode
+        self.memory_limit_bytes = int(memory_limit_bytes)
+        if self.memory_limit_bytes <= 0:
+            raise MemoryError("positive workspace memory budget required")
+        self.maximum_input_chunk_samples = maximum_input_chunk_samples
+        self.basis_callback = basis
+        # Determine the public block calendar without retaining an O(duration)
+        # layout table. A short terminal remainder is merged into its previous
+        # full block, matching the batch receiver's DFT noise convention.
+        full, remainder = divmod(samples, block_samples)
+        if full == 0:
+            self.block_count = 1
+        elif remainder:
+            self.block_count = full
+        else:
+            self.block_count = full
+        self.merge_terminal_remainder = bool(full and remainder)
+        if samples < block_samples:
+            self.maximum_block_rows = samples
+        elif self.merge_terminal_remainder:
+            self.maximum_block_rows = block_samples + remainder
+        else:
+            self.maximum_block_rows = block_samples
+        # Conservative preflight for input, complex basis, projected basis,
+        # transform scratch and the one-block state. Do this before calling the
+        # basis provider, which may synthesize keyed templates.
+        hck = 3 * candidate_count * self.taps
+        item = 8 if precision == "fp32" else 16
+        block = self.maximum_block_rows
+        estimate = (block * (item + 16) + hck * block * (item * 2 + 24) +
+                    3 * candidate_count * self.taps * self.taps * (item * 4 + 64) +
+                    len(coherences) * 3 * candidate_count * (self.taps * self.taps * item * 8 + self.taps * item * 4 + 64))
+        if estimate > self.memory_limit_bytes:
+            raise MemoryError("incremental Gaussian block workspace exceeds memory limit before basis generation")
+        self.owned_bytes_estimate = estimate
+        self.projection = None
+        if projection_mode == "dft":
+            # Every full DFT block has the same projection. For a merged final
+            # block, construct that size only when it is reached.
+            self.projection = BlockProjection.make(min(block_samples, samples), self.sample_rate,
+                required_bands, excluded_bands)
+        self.required_bands = tuple(tuple(x) for x in required_bands)
+        self.excluded_bands = tuple(tuple(x) for x in excluded_bands)
+        self.runtimes = [GaussianStateFilter(GaussianPrior(powers, coh),
+            dtype=self.dtype, check_inputs=True) for coh in coherences]
+        self.next_input_sample = 0
+        self.current_block_index = 0
+        self.pending = np.empty(0, dtype=np.complex64 if precision == "fp32" else np.complex128)
+        self.pending_valid = np.empty(0, dtype=np.uint8)
+        self.previous_center_twice = None
+        self.processed_rows = 0
+        self.scored_rows = 0
+        self.observed_rows = 0
+        self.erased_rows = 0
+        self.block_updates = 0
+        self.projection_modes = 0
+        self.complete_observation = False
+        self.push_cpu_seconds = 0.
+        self.preparation_seconds = time.perf_counter() - started
+
+    def _block_bounds(self, index):
+        if not 0 <= index < self.block_count:
+            raise IndexError("block index outside fixed observation")
+        start = index * self.block_samples
+        if self.samples < self.block_samples:
+            return 0, self.samples
+        if self.merge_terminal_remainder and index == self.block_count - 1:
+            start = (self.block_count - 1) * self.block_samples
+            return start, self.samples
+        return start, min(start + self.block_samples, self.samples)
+
+    def _score_block(self, start, stop, values, valid):
+        rows = stop - start
+        if values.shape != (rows,) or valid.shape != (rows,):
+            raise ValueError("internal block extent mismatch")
+        if self.projection_mode == "dft":
+            any_valid = bool(np.any(valid))
+            if any_valid and not bool(np.all(valid)):
+                raise ValueError("partial erasures with auxiliary DFT projection require a covariance adapter")
+            projection = (self.projection if rows == self.projection.samples else
+                BlockProjection.make(rows, self.sample_rate, self.required_bands, self.excluded_bands))
+            if any_valid:
+                projected_y = projection.numpy(values)
+            else:
+                projected_y = np.zeros(len(projection.indices), dtype=values.dtype)
+        else:
+            projection = BlockProjection.valid_rows(self.sample_rate, valid.astype(bool, copy=False))
+            projected_y = values[projection.indices]
+        self.projection_modes += len(projection.indices)
+        self.erased_rows += int(rows - np.count_nonzero(valid))
+        self.scored_rows += rows
+        if len(projection.indices) == 0 or not np.any(valid):
+            r = torch.zeros((3, self.candidates, self.taps), dtype=self.dtype, device=self.device)
+            gram = torch.zeros((3, self.candidates, self.taps, self.taps), dtype=self.dtype, device=self.device)
+        else:
+            raw_basis = np.asarray(self.basis_callback(start, stop), dtype=np.complex128)
+            if (raw_basis.shape != (3, self.candidates, self.taps, rows) or
+                    not np.isfinite(raw_basis).all()):
+                raise ValueError("basis callback must return finite [3,candidates,taps,block_rows]")
+            projected_basis = projection.numpy(raw_basis)
+            if not np.isfinite(projected_basis).all() or not np.isfinite(projected_y).all():
+                raise ValueError("projected observations or basis are nonfinite")
+            gram_np = np.einsum("hctn,hcsn->hcts", projected_basis.conj(), projected_basis,
+                                optimize=True) / self.variance
+            # Same complex arithmetic floor and Gram/correlation definitions as
+            # the batch receiver; accumulated state likelihood remains FP64.
+            y = torch.as_tensor(np.asarray(projected_y).copy(), dtype=self.dtype, device=self.device)
+            b = torch.as_tensor(projected_basis, dtype=self.dtype, device=self.device)
+            flat = b.reshape(-1, b.shape[-1])
+            r = (y @ flat.conj().T / self.variance).reshape(3, self.candidates, self.taps)
+            gram = torch.as_tensor(gram_np, dtype=self.dtype, device=self.device)
+        center_twice = start + stop - 1
+        elapsed = 0. if self.previous_center_twice is None else (
+            (center_twice - self.previous_center_twice) / (2 * self.sample_rate))
+        for runtime in self.runtimes:
+            runtime.update(r, gram, elapsed)
+        self.previous_center_twice = center_twice
+        self.block_updates += 1
+        self.processed_rows += rows
+        self.observed_rows += int(np.count_nonzero(valid))
+        self.current_block_index += 1
+
+    def push(self, first_sample, values, valid=None):
+        started = time.process_time()
+        if isinstance(first_sample, bool) or not isinstance(first_sample, (int, np.integer)):
+            raise ValueError("first sample must be an integer")
+        if int(first_sample) != self.next_input_sample:
+            raise ValueError("input samples must be contiguous from sample zero")
+        source = np.asarray(values)
+        if source.ndim != 1 or source.size > self.maximum_input_chunk_samples:
+            raise ValueError("input chunk must be a bounded one-dimensional vector")
+        if valid is None:
+            mask = np.ones(source.size, dtype=np.uint8)
+        else:
+            mask = np.asarray(valid)
+            if mask.shape != source.shape or not np.isin(mask, (0, 1, False, True)).all():
+                raise ValueError("validity must be a matching binary vector")
+            mask = mask.astype(np.uint8, copy=False)
+        if self.next_input_sample + source.size > self.samples:
+            raise ValueError("input exceeds declared observation endpoint")
+        if not np.isfinite(source).all():
+            raise ValueError("input contains nonfinite samples")
+        dtype = np.complex64 if self.precision == "fp32" else np.complex128
+        source = np.asarray(source, dtype=dtype)
+        if not np.isfinite(source).all():
+            raise ValueError("input overflows the selected arithmetic precision")
+        offset = 0
+        while offset < len(source):
+            start, stop = self._block_bounds(self.current_block_index)
+            need = stop - start - len(self.pending)
+            take = min(need, len(source) - offset)
+            if take <= 0:
+                raise RuntimeError("streaming block calendar did not advance")
+            if len(self.pending):
+                self.pending = np.concatenate((self.pending, source[offset:offset+take]))
+                self.pending_valid = np.concatenate((self.pending_valid, mask[offset:offset+take]))
+            elif take == len(source) - offset and take == stop-start:
+                self._score_block(start, stop, source[offset:offset+take], mask[offset:offset+take])
+            else:
+                self.pending = source[offset:offset+take].copy()
+                self.pending_valid = mask[offset:offset+take].copy()
+            offset += take
+            self.next_input_sample += take
+            if len(self.pending) == stop-start:
+                self._score_block(start, stop, self.pending, self.pending_valid)
+                self.pending = np.empty(0, dtype=dtype)
+                self.pending_valid = np.empty(0, dtype=np.uint8)
+        if self.device.type == "cuda":
+            torch.cuda.synchronize(self.device)
+        self.push_cpu_seconds += time.process_time() - started
+
+    def progress(self):
+        """Return diagnostic prefix scores; never an admission decision."""
+        if not self.block_updates:
+            raise ValueError("no complete likelihood block has been observed")
+        per_model = torch.stack([runtime.scores() for runtime in self.runtimes])
+        if not bool(torch.isfinite(per_model).all()):
+            raise FloatingPointError("incremental likelihood became nonfinite")
+        candidate_by_model = torch.logsumexp(per_model, dim=-1) - math.log(self.candidates)
+        mixed = torch.logsumexp(candidate_by_model, dim=0) - math.log(len(self.runtimes))
+        bit_scores = (mixed[1:] - mixed[:1]).detach().cpu().numpy().tolist()
+        model_bit_scores = (candidate_by_model[:, 1:] - candidate_by_model[:, :1]).detach().cpu().numpy().tolist()
+        return dict(status="complete" if self.complete_observation else "prefix_diagnostic",
+            complete_observation=self.complete_observation, admission=None,
+            bit_scores=bit_scores, model_bit_scores=model_bit_scores,
+            hypothesis_log_evidence=candidate_by_model.detach().cpu().numpy().tolist(), consumed_samples=self.next_input_sample,
+            processed_rows=self.processed_rows, scored_rows=self.scored_rows,
+            observed_rows=self.observed_rows, erased_rows=self.erased_rows, blocks=self.block_updates,
+            pending_rows=len(self.pending), working_bytes_estimate=self.owned_bytes_estimate,
+            push_process_cpu_seconds=self.push_cpu_seconds)
+
+    def finish(self):
+        if self.next_input_sample != self.samples or self.current_block_index != self.block_count or len(self.pending):
+            result = self.progress() if self.block_updates else dict(status="incomplete", admission=None,
+                complete_observation=False, consumed_samples=self.next_input_sample,
+                processed_rows=self.processed_rows, observed_rows=self.observed_rows, blocks=self.block_updates,
+                pending_rows=len(self.pending), working_bytes_estimate=self.owned_bytes_estimate)
+            result["status"] = "incomplete"
+            result["complete_observation"] = False
+            result["admission"] = None
+            return result
+        for runtime in self.runtimes:
+            runtime.finish()
+        self.complete_observation = True
+        result = self.progress()
+        result["status"] = "scored"
+        result["complete_observation"] = True
+        return result
+
+
+# Concise compatibility name for frontends that already distinguish this
+# bounded stream object from ProjectedJointReceiver's finite batch adapter.
+IncrementalReceiver = IncrementalGaussianReceiver

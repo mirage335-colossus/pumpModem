@@ -1,5 +1,10 @@
 # Three-carrier modem v3 study
 
+The current default is the [independently keyed APSK pattern revision](triad-patterns.md).
+Earlier experiments below used `legacy-v1` unless explicitly labeled otherwise;
+select that revision when reproducing their samples. The new revision changes
+codewords and requires matching template/calibration identities.
+
 For the production Helper transmitter combined with this isolated source/channel
 and frequency-assisted acquisition, use [the triad Helper guide](triad-helper.md).
 It preserves the full declared timing/epoch search and distinguishes measured
@@ -70,6 +75,9 @@ adds low-rate representation, sampled month-long observations, evolving-ray
 stress cases and conditional-channel phase-particle likelihoods. Its measured
 reception probabilities apply to the declared sampled models and acquisition
 conditions; the record separates these from ideal presence-detection bounds.
+For the current bounded pull transmitter and incremental fixed-bank receiver,
+see the [continuous execution guide](triad-continuous.md). It describes actual
+streaming interfaces and their remaining real-time/acquisition qualification.
 The [spread-boundary study](validation-data/triad-v3/2026-11-02-spread/README.md)
 separates deterministic ray-center changes from stochastic Doppler width and
 tests the receiver's block/window approximations under explicit duration limits.
@@ -100,14 +108,16 @@ times that spacing. The shared pulse is a unit-energy, roll-off-0.25 root-raised
 cosine truncated at eight fine-chip periods on each side. The total triplet
 power is divided among the three carriers.
 
-Each fine chip has nonzero nominal amplitude (the three levels are
-approximately 0.632, 1.0 and 1.265), an 8-PSK phase, and one of six amplitude
-orders. The two bit choices rotate the amplitude order across carriers. Added
-Symbols repeats the inner triplet and applies per-carrier keyed QPSK rotations
-before whole-cell interleaving. Thus interleave moves complete fine cells and
-does not cut a pattern symbol. The sample waveform sums the shaped adjacent
-carriers; pulse overlap and carrier summation can still create instantaneous
-envelope zeros. This construction is noise-like, but is not a proof of Gaussian
+Base amplitudes are approximately 0.632, 1.0 and 1.265, with an 8-PSK phase and
+one of six amplitude orders. The default now derives each bit alternative's
+amplitude and phase independently. Added Symbols uses independently keyed
+two-radius/two-phase 4-APSK factors followed by common coefficient-power
+normalization before whole-cell interleaving. Interleave still moves complete
+fine cells and does not cut a pattern symbol. Explicit `legacy-v1` retains the
+old cyclic amplitude relationship and QPSK Added rotations for replay.
+The [pattern guide](triad-patterns.md) specifies the derivation, alphabet and
+short-window power measurements. Pulse overlap and carrier summation can still
+create envelope zeros, particularly at low rates. This is not proof of Gaussian
 white statistics, low probability of intercept, or equal sensitivity to the
 ordinary modem.
 

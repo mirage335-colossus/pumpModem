@@ -8,6 +8,9 @@ assumptions and limits before applying their findings.
 the [development workflow](triad-development-workflow.md). It maps the efficient
 simulation tools, evidence-backed receiver choices, small runnable diagnostics,
 workspace reuse and proportionate testing before larger sampled campaigns.
+The [current independently keyed pattern revision](triad-patterns.md) replaces
+the predictable bit-amplitude permutation, uses 4-APSK Added factors, and
+documents measured short-window power balance and unavoidable low-spacing limits.
 The [random-channel study](triad-stochastic.md) documents stochastic path and
 selective modulation, joint DATA/pilot inference and whole-bit Helper bursts.
 Fixed-ray campaign successes do not establish random-channel sensitivity.
@@ -29,6 +32,12 @@ fixture, use the [provisional duration-planning guide](triad-duration-planning.m
 Its [multi-day forecast checks](validation-data/triad-v3/2026-11-06-long-forecast/README.md)
 verify long integer geometry without waveform generation and report remaining
 frequency/clock search requirements separately from receiver qualification.
+The [continuous v3 implementation and measurements](validation-data/triad-v3/2026-11-06-continuous/README.md)
+cover a separate bounded fixed-bank incremental likelihood path: a 7,265-second
+6 kHz run, a 39.2-day reciprocal-rate likelihood comparison, and a strict
+64-second cable check. These results do not qualify blind multi-day acquisition,
+physical false admissions, or multi-day hardware uptime; they are not results
+for the finite-window weak receiver.
 The [cryptographic background-noise feature](triad-background-noise.md) adds an
 optional fresh AES-256 noise floor at the shared final-rate audio output layer
 for native and host/browser backends, with explicit effective-bit, dB and

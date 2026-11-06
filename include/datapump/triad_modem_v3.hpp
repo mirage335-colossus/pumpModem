@@ -17,6 +17,8 @@ namespace datapump::triad::v3 {
 using Complex = std::complex<double>;
 using Arithmetic = triad::Arithmetic;
 enum class PulseShape { LegacyRrc, TaperedRrc };
+enum class PatternRevision { LegacyV1, IndependentApskV2 };
+const char* pattern_revision_name(PatternRevision);
 
 // Version3 is a separate one-bit, random-access streaming experiment. All
 // addresses and sample counts are64-bit; no whole-symbol map/capture is held.
@@ -24,6 +26,12 @@ struct Format {
     double inner_rate_hz = 36;
     unsigned added_symbols = 10;
     bool added_interleave = true;
+    // Independent keyed bit alternatives, with two-phase/two-radius Added
+    // Symbols. LegacyV1 is only for explicitly replaying historical waveforms.
+    PatternRevision pattern_revision = PatternRevision::IndependentApskV2;
+    // The unnormalized Added symbol powers are 1-depth and 1+depth. A common
+    // positive gain then preserves the total three-carrier coefficient power.
+    double added_amplitude_depth = .25;
     std::uint32_t sample_rate = 960;
     // Integer samples/second, or (when sample_rate == 1) one sample every
     // sample_rate_denominator seconds. This keeps sub-Hz UTC steps integral.
@@ -79,6 +87,10 @@ public:
     // complete finite waveform support the source is exactly zero.
     Complex sample_at(long double source_sample);
     std::array<Complex,3> carrier_samples_at(long double source_sample);
+    // Keyed physical-cell coefficients before pulse shaping, carrier rotation
+    // and common 1/sqrt(3) scale. Returns zero outside the active calendar.
+    // This diagnostic uses the same bounded cache as rendered samples.
+    std::array<Complex,3> pattern_coefficient_at(std::uint64_t fine_cell);
     void render(std::uint64_t first_sample, std::span<Complex> output);
     std::size_t working_bytes() const;
 private:

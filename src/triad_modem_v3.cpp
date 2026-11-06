@@ -23,7 +23,18 @@ std::uint64_t coordinate(long double x,const char* msg){
     return static_cast<std::uint64_t>(std::ceil(x));
 }
 void append64(Bytes& b,std::uint64_t v){for(int s=56;s>=0;s-=8)b.push_back(static_cast<std::uint8_t>(v>>s));}
-Crypto child(const Crypto& key,std::string_view purpose,const Format& f,std::uint64_t tile){
+Crypto child(const Crypto& key,std::string_view purpose,const Format& f,std::uint64_t tile,
+             unsigned alternative=2){
+    if(f.pattern_revision==PatternRevision::IndependentApskV2){
+        const std::string_view prefix="datapump/experimental-triad/v3/independent-apsk-2/";
+        Bytes id(prefix.begin(),prefix.end());
+        append64(id,purpose.size());id.insert(id.end(),purpose.begin(),purpose.end());
+        append64(id,f.epoch);append64(id,f.symbol_ordinal);append64(id,tile);
+        // 0/1 identify independent encrypted alternatives; 2 is common cover,
+        // payload masking or permutation. All variable fields are fixed-width.
+        append64(id,alternative);append64(id,f.fhss_center_aligned?1:0);
+        return Crypto(key.mac(id));
+    }
     const std::string_view prefix="datapump/experimental-triad/v3/tiled-1/";
     Bytes id(prefix.begin(),prefix.end());id.insert(id.end(),purpose.begin(),purpose.end());id.push_back(0);
     append64(id,f.epoch);append64(id,f.symbol_ordinal);append64(id,tile);
@@ -80,6 +91,49 @@ Chip pattern(const std::uint8_t* bytes,unsigned bit,const std::uint8_t* outer){
         result[c]=std::polar(amplitude[order[(c+bit)%3]],phase);}
     return result;
 }
+
+// Rejection sampling avoids the old byte%6 permutation bias. Refill a bounded
+// bulk AES stream only if needed; neither encryption nor MAC runs per sample.
+Bytes amplitude_orders(std::size_t count,const Crypto& key,std::uint64_t epoch){
+    Bytes result;result.reserve(count);
+    const auto batch=std::min<std::size_t>(16384,std::max<std::size_t>(256,count+count/32+64));
+    std::uint64_t offset=0;
+    while(result.size()<count){
+        require(offset<=UINT64_MAX-batch,"triad v3 amplitude stream offset overflow");
+        const auto bytes=key.stream(StreamPurpose::Scrambler,epoch,offset,batch);offset+=batch;
+        for(const auto byte:bytes){
+            if(byte<252)result.push_back(byte%6);
+            if(result.size()==count)break;
+        }
+    }
+    return result;
+}
+
+Chip independent_pattern(std::uint8_t order_index,const std::uint8_t* phases,
+                         const std::uint8_t* outer_radii,const std::uint8_t* outer_phases,
+                         double depth){
+    constexpr std::array<std::array<unsigned,3>,6> orders{{{0,1,2},{0,2,1},{1,0,2},{1,2,0},{2,0,1},{2,1,0}}};
+    constexpr std::array<double,3> powers{.4,1.,1.6};
+    const auto& order=orders[order_index];Chip result{};double total=0;
+    for(unsigned c=0;c<3;++c){
+        const auto power=powers[order[c]]*(outer_radii?1+((outer_radii[c]&1U)?depth:-depth):1);
+        const auto phase=(phases[c]&7U)*std::numbers::pi/4;
+        const auto sign=outer_phases&&(outer_phases[c]&1U)?-1.:1.;
+        result[c]=sign*std::polar(std::sqrt(power),phase);total+=power;
+    }
+    // This balances coefficient power, not the beating envelope of the shaped
+    // sum. It preserves every inter-carrier amplitude ratio and phase.
+    const auto gain=std::sqrt(3/total);for(auto& value:result)value*=gain;
+    return result;
+}
+}
+
+const char* pattern_revision_name(PatternRevision revision){
+    switch(revision){
+    case PatternRevision::LegacyV1:return "legacy-v1";
+    case PatternRevision::IndependentApskV2:return "independent-apsk-v2";
+    }
+    throw Error("triad v3 unknown pattern revision");
 }
 
 double effective_sample_rate(const Format& f){
@@ -91,6 +145,10 @@ double effective_sample_rate(const Format& f){
 
 Geometry geometry(const Format& f){
     (void)pulse_shape_name(f.pulse_shape);
+    (void)pattern_revision_name(f.pattern_revision);
+    require(f.pattern_revision==PatternRevision::LegacyV1||
+            (std::isfinite(f.added_amplitude_depth)&&f.added_amplitude_depth>0&&f.added_amplitude_depth<1),
+            "triad v3 Added amplitude depth must be strictly between zero and one");
     const auto sample_rate=effective_sample_rate(f);
     require(std::isfinite(f.inner_rate_hz)&&f.inner_rate_hz>0&&f.inner_rate_hz<=30e6,"triad v3 invalid Rate");
     require(f.added_symbols>=1&&f.added_symbols<=1000&&f.minimum_inner_coefficients>=64,
@@ -234,20 +292,45 @@ struct PatternSource::Impl {
         tile.chips.resize(count);
         if(!active_tile(id))return tile;
         const auto ordinal=id/(format.burst_wait_tiles+1);
-        const auto cover=child(master,"cover",format,ordinal).stream(StreamPurpose::Scrambler,format.epoch,0,count*8);
+        const bool independent=format.pattern_revision==PatternRevision::IndependentApskV2;
+        const auto cover=child(master,independent?"cover-phase":"cover",format,ordinal)
+            .stream(StreamPurpose::Scrambler,format.epoch,0,count*(independent?3:8));
+        const auto cover_orders=independent?
+            amplitude_orders(count,child(master,"cover-amplitude",format,ordinal),format.epoch):Bytes{};
         std::vector<std::size_t> payload;payload.reserve(count);
-        for(std::size_t i=0;i<count;++i){tile.chips[i]=pattern(cover.data()+i*8,0,nullptr);
+        for(std::size_t i=0;i<count;++i){
+            tile.chips[i]=independent?independent_pattern(cover_orders[i],cover.data()+i*3,nullptr,nullptr,0):
+                pattern(cover.data()+i*8,0,nullptr);
             const auto t=(static_cast<long double>(tile.first+i)+center_offset())/geom.fine_chip_rate_hz;
             if(eligible(tile.first+i,t,start,end))payload.push_back(i);}
         const auto n=(payload.size()/format.added_symbols)*format.added_symbols;
         require(n>=geom.payload_fine_cells_per_tile,"triad v3 tile violated protected allocation bound");
-        const auto inner=child(master,"inner",format,ordinal).stream(StreamPurpose::Scrambler,format.epoch,0,n/format.added_symbols*8);
-        const auto outer=child(master,"outer",format,ordinal).stream(StreamPurpose::Dsss,format.epoch,0,n*3);
         std::vector<std::size_t> order;
         if(format.added_interleave)order=permutation(n,child(master,"permutation",format,ordinal),format.epoch);
-        for(std::size_t i=0;i<n;++i){const auto logical=format.added_interleave?order[i]:i;
-            tile.chips[payload[i]]=pattern(inner.data()+(logical/format.added_symbols)*8,bit,
-                format.added_symbols>1?outer.data()+logical*3:nullptr);}
+        if(independent){
+            const auto inner_count=n/format.added_symbols;
+            const auto inner_orders=amplitude_orders(inner_count,
+                child(master,"inner-amplitude",format,ordinal,bit),format.epoch);
+            const auto inner_phase=child(master,"inner-phase",format,ordinal,bit)
+                .stream(StreamPurpose::Scrambler,format.epoch,0,inner_count*3);
+            const auto outer_radii=format.added_symbols>1?child(master,"added-amplitude",format,ordinal,bit)
+                .stream(StreamPurpose::Dsss,format.epoch,0,n*3):Bytes{};
+            const auto outer_phase=format.added_symbols>1?child(master,"added-phase",format,ordinal,bit)
+                .stream(StreamPurpose::Dsss,format.epoch,0,n*3):Bytes{};
+            // Three consecutive byte addresses are the three carrier lanes;
+            // logical/Added selects the inner symbol without splitting it.
+            for(std::size_t i=0;i<n;++i){const auto logical=format.added_interleave?order[i]:i;
+                tile.chips[payload[i]]=independent_pattern(inner_orders[logical/format.added_symbols],
+                    inner_phase.data()+(logical/format.added_symbols)*3,
+                    outer_radii.empty()?nullptr:outer_radii.data()+logical*3,
+                    outer_phase.empty()?nullptr:outer_phase.data()+logical*3,format.added_amplitude_depth);}
+        }else{
+            const auto inner=child(master,"inner",format,ordinal).stream(StreamPurpose::Scrambler,format.epoch,0,n/format.added_symbols*8);
+            const auto outer=child(master,"outer",format,ordinal).stream(StreamPurpose::Dsss,format.epoch,0,n*3);
+            for(std::size_t i=0;i<n;++i){const auto logical=format.added_interleave?order[i]:i;
+                tile.chips[payload[i]]=pattern(inner.data()+(logical/format.added_symbols)*8,bit,
+                    format.added_symbols>1?outer.data()+logical*3:nullptr);}
+        }
         return tile;
     }
     Chip chip(std::uint64_t fine){
@@ -270,6 +353,10 @@ PatternSource& PatternSource::operator=(PatternSource&&) noexcept=default;
 const Format& PatternSource::format()const{return impl_->format;}
 const Geometry& PatternSource::geometry()const{return impl_->geom;}
 std::size_t PatternSource::working_bytes()const{return impl_->geom.source_workspace_bytes;}
+std::array<Complex,3> PatternSource::pattern_coefficient_at(std::uint64_t fine){
+    if(fine>=impl_->geom.fine_cells)return {};
+    return impl_->chip(fine);
+}
 std::array<Complex,3> PatternSource::carrier_samples_at(long double sample){
     Chip output{};const auto& g=impl_->geom;
     if(!std::isfinite(sample)||sample<0||sample>=g.source_samples)return output;

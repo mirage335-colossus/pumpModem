@@ -42,16 +42,18 @@ plan still reports the model forecast and records that geometry verification
 failed. `availability.duration_forecast_available` means a candidate duration
 has a forecast; `availability.modeled_detection_allocation_met` separately
 states whether it meets the surrogate detection criterion. A manually requested
-duration can have a valid forecast while failing that criterion. A verified long plan has
-`availability.native_geometry_verified=true`, while
-`availability.sampled_export_preflight_available=false`. Sampled exports and
-power-only calibration remain limited to 3,600 requested active seconds, plus
-their independent sample, byte and calibration limits. If sampled export was
-requested but is unsupported, the wrapper exits nonzero and retains the plan.
-Geometry verification does not establish that the current receiver can search
-or decode a multi-day waveform. The reported source workspace is the native
-reusable-tile bound; it is not total process RSS or an estimate of the complete
-sampled artifact size.
+duration can have a valid forecast while failing that criterion. A verified
+long plan has `availability.native_geometry_verified=true`. There is no general
+3,600-second limit on native waveform generation. File exports remain subject
+to the 2 GiB artifact limit and independent geometry/sample checks; exact
+`whole-active` power calibration has a 4,194,304-source-sample work limit. The
+wrapper's sampled-export preflight estimates necessary geometry and artifact
+constraints, but native execution can still reject a calibration or other
+limit. For a long continuous source without a duration-sized artifact, see the
+[continuous execution guide](triad-continuous.md). Geometry verification does
+not establish that a receiver can search or decode a multi-day waveform. The
+reported source workspace is the native reusable-tile bound; it is not total
+process RSS or an estimate of the complete sampled artifact size.
 
 Use `--seconds` for a manual active-duration override. It is rounded up to the
 native tile lattice and still receives a forecast; the report says

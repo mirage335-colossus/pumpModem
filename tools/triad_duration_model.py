@@ -408,9 +408,11 @@ def plan_from_native(native, target_cn0_db_hz, *, correct_probability=.99,
         ideal_scope='Known received waveform and declared search accounting; true-candidate detection reference only.',
         assumptions=assumptions, unmodeled_selected_effects=unmodeled,
         helper_present=helper_available, helper_acquisition_qualified=False,
-        export_supported=chosen is not None and chosen['active_seconds']<=3600 and bool(native['geometry_feasible']) and helper_available and placement_available,
-        export_support_scope='Preflight availability estimate; native sample/byte/alias limits still apply during export.',
-        export_limit_seconds=3600, native_plan=native)
+        export_supported=chosen is not None and bool(native['geometry_feasible']) and helper_available and placement_available
+            and chosen['elapsed_data_seconds']*float(native['export_constraints']['sample_rate_hz'])*17
+                <= float(native['export_constraints'].get('maximum_export_bytes', 2*1024**3)),
+        export_support_scope='Necessary geometry/byte preflight only; selected native sample/calibration/alias budgets still apply. Continuous streaming does not create these artifacts.',
+        export_limit_seconds=None, native_plan=native)
     result['forecast_horizon'] = dict(configured_max_active_seconds=limit,
         configured_max_active_days=limit/SECONDS_PER_DAY,
         configured_max_active_julian_years=limit/JULIAN_YEAR_SECONDS,

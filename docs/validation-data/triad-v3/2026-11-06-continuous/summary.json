@@ -1,0 +1,316 @@
+{
+  "schema": "triad-continuous-qualification-v1",
+  "git_base": "2f37dad18ed4cf74c06c8ac159487bc8646d545b",
+  "scope": "Isolated fixed-public-bank bounded streaming; no ordinary receiver integration",
+  "environment": {
+    "os": "Linux-7.2.6+deb13-amd64-x86_64-with-glibc2.41",
+    "python": "3.13.5",
+    "numpy": "2.5.4",
+    "scipy": "1.18.1",
+    "torch": "2.8.0+cpu",
+    "cpu": "AMD Ryzen 5 PRO 5650U with Radeon Graphics",
+    "numerical_threads": 2
+  },
+  "source_hashes": {
+    "CMakeLists.txt": "654ff54ace6c27e96aaaa32858a10f269341087abd35b9e209526752d3911632",
+    "docs/README.md": "53cabe2c392e08d978cd4a56033808894686fee41c37a151f71355e0ea9eaaf4",
+    "docs/triad-continuous.md": "60ff25c126ce4ab1fc32202c5d956e1028aa552a8d61e10fc693754ca03e3826",
+    "docs/triad-development-workflow.md": "b63faefb70517f5991bdf98d9967a8d772dac8c89b200377e483f9fccea0dec4",
+    "docs/triad-duration-planning.md": "b48826230024977aab63fc8541f4f7a345bcdfbb6cf9185c22b418364f7685b0",
+    "docs/triad-performance-matrix.md": "d1bab862276199d124a187bd33f37f8fd3cfbba045c8ca4123425bddcb8a1b1a",
+    "docs/triad-v3.md": "9d2ba630ffbc7868208f10d155e123d67bda988434145acc3e59d905e17ef876",
+    "tests/test_triad_audio_stream.py": "7fb4c5c06c688daf8ab36dc51d1b1db78fa8d26291cac55150ae5e68cb7db903",
+    "tests/test_triad_continuous.py": "b3d296741ba620eca613c44572bd9e3f30109aa8eb1c1b0b7f4017fc74ea3d45",
+    "tests/test_triad_duration_model.py": "489d01532b3abca4a4dd1b842052a0ff1bafed182803c090609721aec2941724",
+    "tests/test_triad_helper_plan_long.py": "418386006dcdfb4dfd2de1067c4ea8b6d54d7b4ed8a6fa37c443528bc4568cf6",
+    "tests/test_triad_incremental_receiver.py": "9ca6ee44dae266ad221c4daac108f94a39d304d4a5a70edd31fcd794808f426b",
+    "tests/test_triad_stream_source.py": "07be0cf9e0dd8a7804766d468b8331d787b80942e0e0acfa9f910f2f304ceb84",
+    "tools/triad-audio-stream.cpp": "bd845b384f05dd97d1a71865dac43a316cc333457744e358cecc21fc9a2a219e",
+    "tools/triad-helper-export.cpp": "d8d4c53b7ce43f3a5623123c1eaa591d7202259803095e61896d18a0f124db0b",
+    "tools/triad_continuous.py": "73f7bee9d4fd4fd1bc30d4fa31bfba1ef2179366955b874aa4af39dbe2a35b94",
+    "tools/triad_duration_model.py": "5aadb0e813c1271d8db4171bc4b281d9ee38683adca6cbeeb0487a9b1a6b7f12",
+    "tools/triad_incremental_receiver.py": "9c4ea5cf318ba8cb1fa3ff469b1f7a9f762961acb51964d4a762b64160ee1d15",
+    "tools/triad_weak_plan.py": "3dfbdda4199cea38dee323e3cdd84a1a835c715e3f1d657c8c7c3249d2c11121",
+    "src/triad_modem_v3.cpp": "4bd1c24198b1c285bcc17f032ea94fd8327d4a1f22133039db63322b295b4293",
+    "src/triad_simulation.cpp": "3096a14cc68f9ed468e04ed08021b62c5633b83c6024dba3cbf9e36eafde1900",
+    "include/datapump/triad_modem_v3.hpp": "b0f6186332e80bd3920d2a064512f88b6e0624158e1cc3ecfc9d521fd900aba5",
+    "tools/triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba",
+    "tools/triad_dynamic_joint.py": "071a435406d43e5d322f4304ae821469f5b3a107134b5e50b5fb15eeab528832",
+    "tools/triad_operational_admission.py": "9cc99ce26c445c4c87d72600fc621b60ff9d0b61da9bed3e4f3174272904d0ea",
+    "build/dev-cli/triad_helper_export": "793cc3f5d15ea854e75270135f6ee34dcf4f9d4c23507e2f72bee43df003d51d",
+    "build/dev-cli/triad_audio_stream": "857d41ca8591faf47a457aa64b82a5388603e567a9afa997c33a51a4f7658539",
+    "build/dev-cli/triad_long": "19c0dcfc54059016fc4d47775246877b223fd3cb3082c5d89c8f4c093dadcba8",
+    "build/dev-cli/CMakeCache.txt": "a99c45cad16d011f2162735da967fafcbc472044163f1847aa62f8e25d150256"
+  },
+  "full_source_revision_frozen_at_original_launch": false,
+  "provenance_note": "Original two-hour run predates final guards/metadata and launch-time identity recording. Final-flat-holdout.json records final executable/modules before processing and reproduces bit evidence exactly. Live-strict identities were recorded at completion; helper executable was rebuilt for metadata during that run. See README.",
+  "simulation_rows": [
+    {
+      "file": "first-integrated-valid-bank.json",
+      "complete": true,
+      "admitted": true,
+      "candidate_bit": 0,
+      "conditional_model_pass": true,
+      "processed_samples": 507896,
+      "processed_seconds": 84.64933333333333,
+      "preparation_wall_seconds": 1.3082167929969728,
+      "wall_seconds": 2.8513239440508187,
+      "python_cpu_seconds": 2.685084232,
+      "child_cpu_seconds": 0.9153189999999999,
+      "all_process_cpu_seconds_per_input_second": 0.04253315519712697,
+      "log_e": 144.34640944066467
+    },
+    {
+      "file": "two-hours.json",
+      "complete": true,
+      "admitted": true,
+      "candidate_bit": 1,
+      "conditional_model_pass": true,
+      "processed_samples": 43590296,
+      "processed_seconds": 7265.049333333333,
+      "preparation_wall_seconds": 1.0305260340101086,
+      "wall_seconds": 171.59153399401112,
+      "python_cpu_seconds": 62.954248753,
+      "child_cpu_seconds": 153.422564,
+      "all_process_cpu_seconds_per_input_second": 0.029783254431628544,
+      "log_e": 167.26767310049112
+    },
+    {
+      "file": "flat-holdout.json",
+      "complete": true,
+      "admitted": true,
+      "candidate_bit": 1,
+      "conditional_model_pass": true,
+      "processed_samples": 1134296,
+      "processed_seconds": 189.04933333333332,
+      "preparation_wall_seconds": 1.0155168150085956,
+      "wall_seconds": 6.320240439963527,
+      "python_cpu_seconds": 6.927164524,
+      "child_cpu_seconds": 3.198093,
+      "all_process_cpu_seconds_per_input_second": 0.053558811054610085,
+      "log_e": 129.30841346845045
+    },
+    {
+      "file": "noise-holdout.json",
+      "complete": true,
+      "admitted": false,
+      "candidate_bit": 1,
+      "conditional_model_pass": false,
+      "processed_samples": 1134296,
+      "processed_seconds": 189.04933333333332,
+      "preparation_wall_seconds": 1.0296858199872077,
+      "wall_seconds": 5.273918134975247,
+      "python_cpu_seconds": 6.832615888,
+      "child_cpu_seconds": 2.1660880000000002,
+      "all_process_cpu_seconds_per_input_second": 0.04759976525351409,
+      "log_e": -5.41587070957524
+    },
+    {
+      "file": "hf-random-valid-options.json",
+      "complete": true,
+      "admitted": false,
+      "candidate_bit": 1,
+      "conditional_model_pass": true,
+      "processed_samples": 1134422,
+      "processed_seconds": 189.07033333333334,
+      "preparation_wall_seconds": 1.0604199439985678,
+      "wall_seconds": 12.32212038099533,
+      "python_cpu_seconds": 8.907635108,
+      "child_cpu_seconds": 8.481395,
+      "all_process_cpu_seconds_per_input_second": 0.09197122468358336,
+      "log_e": 480.42977432506547
+    },
+    {
+      "file": "helper-null-valid-options.json",
+      "complete": true,
+      "admitted": false,
+      "candidate_bit": 0,
+      "conditional_model_pass": false,
+      "processed_samples": 1134422,
+      "processed_seconds": 189.07033333333334,
+      "preparation_wall_seconds": 1.2059765640296973,
+      "wall_seconds": 10.708490296034142,
+      "python_cpu_seconds": 8.532823474,
+      "child_cpu_seconds": 6.989329,
+      "all_process_cpu_seconds_per_input_second": 0.0820972396903445,
+      "log_e": -9.93588266788091
+    },
+    {
+      "file": "final-flat-holdout.json",
+      "complete": true,
+      "admitted": true,
+      "candidate_bit": 1,
+      "conditional_model_pass": true,
+      "processed_samples": 1134296,
+      "processed_seconds": 189.04933333333332,
+      "preparation_wall_seconds": 1.0796669489936903,
+      "wall_seconds": 10.381362321961205,
+      "python_cpu_seconds": 7.366153721,
+      "child_cpu_seconds": 7.349755,
+      "all_process_cpu_seconds_per_input_second": 0.07784163245396264,
+      "log_e": 129.30841346845045
+    }
+  ],
+  "long_sampled_comparison": {
+    "schema": "triad-38day-incremental-vs-batch-v1",
+    "sample_count": 52937,
+    "sample_rate_hz": 0.015625,
+    "physical_duration_seconds": 3387968.0,
+    "block_samples": 64,
+    "noise_variance": 156.25,
+    "full_bank": [
+      "known public epoch, arrival0.05s,CFO0,clock0; matched two-ray basis delay5us/Doppler.001Hz; both bits"
+    ],
+    "source_status": "native encrypted waveform and sampled path; one public timing/CFO/clock/epoch position, not blind acquisition",
+    "results": [
+      {
+        "precision": "fp32",
+        "batch_preparation_seconds": 0.8837433899752796,
+        "batch_scoring_seconds": 0.32135453599039465,
+        "incremental_total_seconds": 2.1307653689873405,
+        "incremental_push_cpu_seconds": 2.1300518360000003,
+        "block_updates": 827,
+        "incremental_working_bytes": 23880,
+        "observation_complete": true,
+        "batch_hypothesis_log_evidence": [
+          [
+            0.0,
+            41.84702047936936,
+            -20.66994467228439
+          ],
+          [
+            0.0,
+            41.84702047936936,
+            -20.66994467228439
+          ],
+          [
+            0.0,
+            340.45488005162923,
+            -9.12191368659789
+          ]
+        ],
+        "incremental_hypothesis_log_evidence": [
+          [
+            0.0,
+            41.84701959793165,
+            -20.669939933766727
+          ],
+          [
+            0.0,
+            41.84701959793165,
+            -20.669939933766727
+          ],
+          [
+            0.0,
+            340.4548804016927,
+            -9.121905942966748
+          ]
+        ],
+        "batch_bit_scores": [
+          339.3562677629611,
+          -10.220506665381832
+        ],
+        "incremental_bit_scores": [
+          339.3562681130246,
+          -10.220498921808717
+        ],
+        "max_absolute_bit_score_difference": 7.743573114282754e-06,
+        "max_absolute_evidence_difference": 7.743631142531626e-06,
+        "candidate_bit": 0,
+        "matched_decision": true,
+        "peak_rss_kib": 240364
+      },
+      {
+        "precision": "fp64",
+        "batch_preparation_seconds": 0.792074675031472,
+        "batch_scoring_seconds": 0.29218161100288853,
+        "incremental_total_seconds": 1.8263770309858955,
+        "incremental_push_cpu_seconds": 1.8256060420000022,
+        "block_updates": 827,
+        "incremental_working_bytes": 34736,
+        "observation_complete": true,
+        "batch_hypothesis_log_evidence": [
+          [
+            0.0,
+            41.847038176300785,
+            -20.669930095471045
+          ],
+          [
+            0.0,
+            41.847038176300785,
+            -20.669930095471045
+          ],
+          [
+            0.0,
+            340.4548996641893,
+            -9.121911111202861
+          ]
+        ],
+        "incremental_hypothesis_log_evidence": [
+          [
+            0.0,
+            41.847038176300785,
+            -20.669930095471045
+          ],
+          [
+            0.0,
+            41.847038176300785,
+            -20.669930095471045
+          ],
+          [
+            0.0,
+            340.4548996641893,
+            -9.121911111202861
+          ]
+        ],
+        "batch_bit_scores": [
+          339.3562873755212,
+          -10.220504089755057
+        ],
+        "incremental_bit_scores": [
+          339.3562873755212,
+          -10.220504089755057
+        ],
+        "max_absolute_bit_score_difference": 0.0,
+        "max_absolute_evidence_difference": 0.0,
+        "candidate_bit": 0,
+        "matched_decision": true,
+        "peak_rss_kib": 250476
+      }
+    ],
+    "sha256": {
+      "manifest.json": "03743732a2f0666f95f3f2c085069f4a4952d9ec9260868ef57b7818c6400b28",
+      "basis.c128": "fbab4db57323b6cea83ac76c41bd6310917475cbea1c50c2cce12906bf6139a4",
+      "observation.c128": "c8502fc0bc954e421308c35d3f3072fa5f72ad341eb815d595f087c58c4c7bb5",
+      "validity.u8": "0252f2fc8d5e014e908a44e5c2f6596bf7e6c4b54d04f33cdf887bc1c060e1b8"
+    }
+  },
+  "strict_cable": {
+    "frames_sent": 369600,
+    "frames_received": 381600,
+    "errors": [],
+    "wall_seconds": 63.9601196940057,
+    "python_cpu_seconds": 2.148265115,
+    "child_cpu_seconds": 6.089015000000001,
+    "expected_bit_evaluation_only": 0,
+    "scope": "Short actual cable streaming at fixed predeclared timing bank; high-SNR flow check, not marginal sensitivity or multi-day uptime.",
+    "cpu_seconds_per_input_second": 0.12951698294025157
+  },
+  "test_results": {
+    "native_ctest_entries": 3,
+    "native_seconds": 3.92,
+    "python_tests": 38,
+    "python_test_seconds": 0.301,
+    "existing_finite_export_regression_seconds": 40.58
+  },
+  "remaining_limits": [
+    "Fixed predeclared bank only; no general blind acquisition or multi-day drift/Helper tracking",
+    "One finite bit per source session; no checkpoint/restart",
+    "No physical or Helper Gaussian-null certification",
+    "Partial DFT-block erasures explicitly rejected; raw-row erasures supported",
+    "No multi-day hardware uptime qualification",
+    "No GPU qualification for the new adapter",
+    "Few observations; no 99 percent reliability or rare false-admission estimate",
+    "Long sample evidence at -40 dB-Hz; selected -44/-46 cases missed; no new -60 result"
+  ]
+}

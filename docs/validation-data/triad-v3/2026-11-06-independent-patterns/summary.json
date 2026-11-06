@@ -1,0 +1,1880 @@
+{
+  "schema": "triad-independent-patterns-qualification-v1",
+  "base_revision": "2f37dad18ed4cf74c06c8ac159487bc8646d545b",
+  "source_identity_note": "Existing uncommitted continuous-streaming work is preserved. Source snapshot plus tracked patch is relative to this base. All candidate generation is explicitly revisioned. Early random-HF legacy row has a separately recorded pre-metadata-repair binary hash.",
+  "source_sha256": {
+    "CMakeLists.txt": "f8d1a19af483a4484897db27666bc3ea8702ae09dbfc07a03cc05459c5eef164",
+    "docs/README.md": "935eafb637b5a46769ae6211472301bc2b8cf9e51b660b84a20ed4059577bfa0",
+    "docs/triad-continuous.md": "60ff25c126ce4ab1fc32202c5d956e1028aa552a8d61e10fc693754ca03e3826",
+    "docs/triad-development-workflow.md": "5a24b871eeec02d64c7e28541e2ba27d7075e1e58a2d2a27e7b8eabcf1cf77a8",
+    "docs/triad-duration-planning.md": "b48826230024977aab63fc8541f4f7a345bcdfbb6cf9185c22b418364f7685b0",
+    "docs/triad-patterns.md": "e616d371ae2d80693177efad54685046e09ef50e985d39ff9160ac4e2e462faa",
+    "docs/triad-performance-matrix.md": "014ad362d02cb5d8b9883a79c94814f97b7226f7fa7fe7a4845726bb68c2ffa7",
+    "docs/triad-v3.md": "4b2234d222977f87c85f05708ff6db150acb75edaa06247a9a6a2260d277d8a0",
+    "include/datapump/triad_modem_v3.hpp": "9a0d3d7cbe025d655137ff388d074a13872475233d2c6b4022aecb325d205590",
+    "src/triad_modem_v3.cpp": "04020855f5001b78d56909689b8d6d29928bb8fe162e78c40a766e659028eddd",
+    "tests/test_triad_audio_stream.py": "7fb4c5c06c688daf8ab36dc51d1b1db78fa8d26291cac55150ae5e68cb7db903",
+    "tests/test_triad_continuous.py": "abf2111eaaf8f14e927cc8f29343458cdf3fb3c049f6b59c552c6f431704044f",
+    "tests/test_triad_duration_model.py": "489d01532b3abca4a4dd1b842052a0ff1bafed182803c090609721aec2941724",
+    "tests/test_triad_helper_plan_long.py": "418386006dcdfb4dfd2de1067c4ea8b6d54d7b4ed8a6fa37c443528bc4568cf6",
+    "tests/test_triad_incremental_receiver.py": "9ca6ee44dae266ad221c4daac108f94a39d304d4a5a70edd31fcd794808f426b",
+    "tests/test_triad_pattern_metrics.py": "6ddf2ce4ced059a7f1010ad77766f57c8974a232281646dfb3559c3d4d016994",
+    "tests/test_triad_pattern_probe.py": "a353b7f74bb2f8b18ce161160374b2e7ff2f822387d43e17ba98e91e86750912",
+    "tests/test_triad_stream_source.py": "2dea63d24de59b02bdc0cd3aa2715ad85d021d5f90d930e0b89ca9036579ecca",
+    "tests/test_triad_v3_source.cpp": "b8bbe3e28a55b18e2311272dd6f42fd562de0330a3d08a6b503fd343a6ec6a3a",
+    "tools/triad-audio-stream.cpp": "bd845b384f05dd97d1a71865dac43a316cc333457744e358cecc21fc9a2a219e",
+    "tools/triad-helper-export.cpp": "73886930c4dab67728e320cf038d92576ea79f979431134bbed00244d1a6946c",
+    "tools/triad-long.cpp": "f0ef67c4bbce34b3eb551f36a08b8df86f187f1a717e1e268c1f7e971aacbd28",
+    "tools/triad-pattern-probe.cpp": "8b72270944b4d1727863f52c04e5e0425dea2d715a392022d7c04c35e3aefcb3",
+    "tools/triad_continuous.py": "a86881ce02103ab1957ce6bc7116d184d12a57d9414dca81375005b744c8919c",
+    "tools/triad_duration_model.py": "5aadb0e813c1271d8db4171bc4b281d9ee38683adca6cbeeb0487a9b1a6b7f12",
+    "tools/triad_incremental_receiver.py": "9c4ea5cf318ba8cb1fa3ff469b1f7a9f762961acb51964d4a762b64160ee1d15",
+    "tools/triad_pattern_metrics.py": "5c95c1f169c41a326c7ae57268672eab205b3641f7b68e45e90cdc780ea2bd22",
+    "tools/triad_weak_plan.py": "3dfbdda4199cea38dee323e3cdd84a1a835c715e3f1d657c8c7c3249d2c11121",
+    "build/dev-cli/triad_helper_export": "1bdd7eafcede27bda0ffbde40d5179200fceac26aaf74681eedcdcf17b392e5e",
+    "build/dev-cli/triad_pattern_probe": "80db5cdfe6d4f018f12c4f26c1d8e2e59135104ae05bd79c04cd744d51822859",
+    "build/dev-cli/triad_long": "31e06c3c443b93e5fc1ebfebcc717e91b66917d3abe53c00157a432e4815d986",
+    "build/dev-cli/triad_audio_stream": "857d41ca8591faf47a457aa64b82a5388603e567a9afa997c33a51a4f7658539",
+    "build/dev-cli/CMakeCache.txt": "a99c45cad16d011f2162735da967fafcbc472044163f1847aa62f8e25d150256",
+    "src/crypto.cpp": "d89108ffba168898e45329fa9040c4155d6012711da1a6163b13dc97e9782224",
+    "include/datapump/crypto.hpp": "14e681ae6637b453b05fae4125b300e6bc27ec2ec4c2ee449fa3b2ab97214b74"
+  },
+  "environment": {
+    "platform": "Linux-7.2.6+deb13-amd64-x86_64-with-glibc2.41",
+    "cpu": "AMD Ryzen 5 PRO 5650U",
+    "numerical_threads": 2,
+    "python": "3.13.5",
+    "numpy": "2.5.4",
+    "scipy": "1.18.1",
+    "torch": "2.8.0+cpu"
+  },
+  "source_comparisons": [
+    {
+      "name": "burst-73002",
+      "energy_change_db": [
+        -0.0004375524125191452,
+        0.0014723222102089664
+      ],
+      "new_oob": [
+        1.8715872716412083e-05,
+        1.762310506593427e-05
+      ],
+      "old_oob": [
+        2.3069478182283682e-05,
+        1.7853940588156793e-05
+      ],
+      "quarter_step_seconds": 0.4,
+      "moments": [
+        7.823977005837354,
+        7.805287534458425
+      ]
+    },
+    {
+      "name": "hf36-plain-73002",
+      "energy_change_db": [
+        0.004958107901707514,
+        0.013300412064426302
+      ],
+      "new_oob": [
+        1.3795625165451636e-05,
+        1.5767980544830095e-05
+      ],
+      "old_oob": [
+        2.217669353998565e-05,
+        1.8567194063412503e-05
+      ],
+      "quarter_step_seconds": null,
+      "moments": [
+        1.673757687449998,
+        1.663774607262075
+      ]
+    },
+    {
+      "name": "hf36-spread10-73002",
+      "energy_change_db": [
+        0.0019337343566701785,
+        0.0001450372999447768
+      ],
+      "new_oob": [
+        1.59476153262822e-05,
+        1.2124676345777686e-05
+      ],
+      "old_oob": [
+        1.5660469646908968e-05,
+        1.561330963226883e-05
+      ],
+      "quarter_step_seconds": 0.15,
+      "moments": [
+        1.6915183621563605,
+        1.6868152378210097
+      ]
+    },
+    {
+      "name": "hf36-spread10-73003",
+      "energy_change_db": [
+        0.0009225514686178388,
+        -0.0006751317401867123
+      ],
+      "new_oob": [
+        1.179169401017184e-05,
+        1.908169972925095e-05
+      ],
+      "old_oob": [
+        1.3203052988280546e-05,
+        1.6814078072779194e-05
+      ],
+      "quarter_step_seconds": 0.15,
+      "moments": [
+        1.700198462107088,
+        1.690866383139145
+      ]
+    },
+    {
+      "name": "high24000-73002",
+      "energy_change_db": [
+        -0.0002489885287103724,
+        -0.00023115730529589773
+      ],
+      "new_oob": [
+        1.436781480506186e-05,
+        1.6317132541904515e-05
+      ],
+      "old_oob": [
+        1.4239194980648887e-05,
+        1.4970872743721551e-05
+      ],
+      "quarter_step_seconds": 0.05,
+      "moments": [
+        1.6967211299934883,
+        1.696406846494025
+      ]
+    },
+    {
+      "name": "high24000-73003",
+      "energy_change_db": [
+        -0.00015087453733551856,
+        -1.1136578004987258e-06
+      ],
+      "new_oob": [
+        1.6892393029339895e-05,
+        1.6071923571051884e-05
+      ],
+      "old_oob": [
+        1.7814045530491452e-05,
+        1.4953637913852969e-05
+      ],
+      "quarter_step_seconds": 0.05,
+      "moments": [
+        1.6939734358596716,
+        1.6907791650891761
+      ]
+    },
+    {
+      "name": "low-max-spread-73002",
+      "energy_change_db": [
+        0.00195951189555025,
+        -0.0006602694299174706
+      ],
+      "new_oob": [
+        1.2963244585682192e-05,
+        1.6334411419279494e-05
+      ],
+      "old_oob": [
+        1.0394028835556299e-05,
+        1.5385667131711977e-05
+      ],
+      "quarter_step_seconds": null,
+      "moments": [
+        1.6610954816711312,
+        1.664920243844459
+      ]
+    },
+    {
+      "name": "low-point1-73002",
+      "energy_change_db": [
+        -0.03697122268200389,
+        -0.013191543523188307
+      ],
+      "new_oob": [
+        1.2653811166197814e-05,
+        2.945728609112522e-05
+      ],
+      "old_oob": [
+        6.41806478308184e-05,
+        3.0332125328937102e-05
+      ],
+      "quarter_step_seconds": null,
+      "moments": [
+        1.6884792206978845,
+        1.7103186957288243
+      ]
+    },
+    {
+      "name": "max-spread-73002",
+      "energy_change_db": [
+        6.165352297418704e-05,
+        -2.2814012616505316e-05
+      ],
+      "new_oob": [
+        1.560106440020983e-05,
+        1.561312225442484e-05
+      ],
+      "old_oob": [
+        1.5810739853914966e-05,
+        1.4948930357228934e-05
+      ],
+      "quarter_step_seconds": 0.05,
+      "moments": [
+        1.6859677108548796,
+        1.688903566471351
+      ]
+    },
+    {
+      "name": "max-spread-73003",
+      "energy_change_db": [
+        9.489130481698111e-05,
+        0.00012462094336129558
+      ],
+      "new_oob": [
+        1.6023239642314235e-05,
+        1.462816475924747e-05
+      ],
+      "old_oob": [
+        1.5679875280720905e-05,
+        1.5675709620740273e-05
+      ],
+      "quarter_step_seconds": 0.05,
+      "moments": [
+        1.6955448037642975,
+        1.6826677776937593
+      ]
+    },
+    {
+      "name": "microwave-fhss-73002",
+      "energy_change_db": [
+        0.00346446703422672,
+        0.003968349885500251
+      ],
+      "new_oob": [
+        0.0032511876919937514,
+        0.003267225029082624
+      ],
+      "old_oob": [
+        0.0027330947470517214,
+        0.00273638752378197
+      ],
+      "quarter_step_seconds": 0.4,
+      "moments": [
+        2.392641238336537,
+        2.394180855991368
+      ]
+    },
+    {
+      "name": "microwave-fhss-73003",
+      "energy_change_db": [
+        0.005303595784198825,
+        0.005272774091518145
+      ],
+      "new_oob": [
+        0.002490720691406951,
+        0.0024841825482873805
+      ],
+      "old_oob": [
+        0.0026228309965840783,
+        0.00261653567889249
+      ],
+      "quarter_step_seconds": 0.4,
+      "moments": [
+        2.4196416360072237,
+        2.4168441169279298
+      ]
+    },
+    {
+      "name": "no-interleave-73002",
+      "energy_change_db": [
+        -0.0012806979676036054,
+        0.00013871650442270873
+      ],
+      "new_oob": [
+        1.5742005189409787e-05,
+        1.3147605080425534e-05
+      ],
+      "old_oob": [
+        1.5656756667268116e-05,
+        1.4659875541930955e-05
+      ],
+      "quarter_step_seconds": 0.2,
+      "moments": [
+        1.7806354969645242,
+        1.730996501150421
+      ]
+    },
+    {
+      "name": "sub9-low-73002",
+      "energy_change_db": [
+        0.025415651840414447,
+        0.024700027759366874
+      ],
+      "new_oob": [
+        2.3804500910252643e-05,
+        1.4848493367742359e-05
+      ],
+      "old_oob": [
+        2.1183684126767596e-05,
+        1.623129021240051e-05
+      ],
+      "quarter_step_seconds": null,
+      "moments": [
+        1.6686478634908868,
+        1.680241157311077
+      ]
+    }
+  ],
+  "initial_depth_screen": [
+    {
+      "name": "legacy",
+      "command": [
+        "build/dev-cli/triad_pattern_probe",
+        "--output",
+        "local-evidence/triad-pattern-revision/initial-legacy",
+        "--pattern-revision",
+        "legacy-v1",
+        "--added-amplitude-depth",
+        ".25",
+        "--seed",
+        "73001"
+      ],
+      "seconds": 0.43646831397200003,
+      "returncode": 0,
+      "stderr": "",
+      "coefficient": {
+        "cells": 960,
+        "payload_cells": 954,
+        "maximum_summed_power_error": 1.3322676295501878e-15,
+        "smallest_carrier_radius": 0.6324555320336759,
+        "best_fixed_amplitude_permutation": [
+          1,
+          2,
+          0
+        ],
+        "best_fixed_amplitude_permutation_mse": 6.292178669461359e-33,
+        "amplitude_ratio_distance_squared": 0.20175560259931494,
+        "bit_alternative_power_correlation": -0.5000000000000001
+      },
+      "energy": [
+        0.999685438248526,
+        0.9997648795557951
+      ],
+      "window_max_db": [
+        [
+          0.5949006703873468,
+          0.07536249213558491
+        ],
+        [
+          0.6877322448508878,
+          0.07068218842283239
+        ]
+      ],
+      "separation_penalty_db": 0.18845584771423463
+    },
+    {
+      "name": "apsk10",
+      "command": [
+        "build/dev-cli/triad_pattern_probe",
+        "--output",
+        "local-evidence/triad-pattern-revision/initial-apsk10",
+        "--pattern-revision",
+        "independent-apsk-v2",
+        "--added-amplitude-depth",
+        ".1",
+        "--seed",
+        "73001"
+      ],
+      "seconds": 0.4280367000028491,
+      "returncode": 0,
+      "stderr": "",
+      "coefficient": {
+        "cells": 960,
+        "payload_cells": 954,
+        "maximum_summed_power_error": 1.7763568394002505e-15,
+        "smallest_carrier_radius": 0.5791405068790082,
+        "best_fixed_amplitude_permutation": [
+          0,
+          1,
+          2
+        ],
+        "best_fixed_amplitude_permutation_mse": 0.13209230927784307,
+        "amplitude_ratio_distance_squared": 0.13209230927784305,
+        "bit_alternative_power_correlation": 0.03327159816519812
+      },
+      "energy": [
+        0.9998564878461887,
+        1.000109606863357
+      ],
+      "window_max_db": [
+        [
+          0.7252461311207727,
+          0.07884146187680145
+        ],
+        [
+          0.6086978861578728,
+          0.0767405603838987
+        ]
+      ],
+      "separation_penalty_db": 0.24464639603117422
+    },
+    {
+      "name": "apsk25",
+      "command": [
+        "build/dev-cli/triad_pattern_probe",
+        "--output",
+        "local-evidence/triad-pattern-revision/initial-apsk25",
+        "--pattern-revision",
+        "independent-apsk-v2",
+        "--added-amplitude-depth",
+        ".25",
+        "--seed",
+        "73001"
+      ],
+      "seconds": 0.39675989997340366,
+      "returncode": 0,
+      "stderr": "",
+      "coefficient": {
+        "cells": 960,
+        "payload_cells": 954,
+        "maximum_summed_power_error": 1.3322676295501878e-15,
+        "smallest_carrier_radius": 0.5035088149780135,
+        "best_fixed_amplitude_permutation": [
+          0,
+          1,
+          2
+        ],
+        "best_fixed_amplitude_permutation_mse": 0.14503941702808837,
+        "amplitude_ratio_distance_squared": 0.14503941702808837,
+        "bit_alternative_power_correlation": 0.03648738486493578
+      },
+      "energy": [
+        0.9998431162488745,
+        1.0000844386216041
+      ],
+      "window_max_db": [
+        [
+          0.7089423039375957,
+          0.07761076206529915
+        ],
+        [
+          0.5926054281074471,
+          0.07846271892764534
+        ]
+      ],
+      "separation_penalty_db": 0.24819909514667396
+    },
+    {
+      "name": "apsk50",
+      "command": [
+        "build/dev-cli/triad_pattern_probe",
+        "--output",
+        "local-evidence/triad-pattern-revision/initial-apsk50",
+        "--pattern-revision",
+        "independent-apsk-v2",
+        "--added-amplitude-depth",
+        ".5",
+        "--seed",
+        "73001"
+      ],
+      "seconds": 0.4013388759922236,
+      "returncode": 0,
+      "stderr": "",
+      "coefficient": {
+        "cells": 960,
+        "payload_cells": 954,
+        "maximum_summed_power_error": 1.7763568394002505e-15,
+        "smallest_carrier_radius": 0.38254602783800284,
+        "best_fixed_amplitude_permutation": [
+          0,
+          1,
+          2
+        ],
+        "best_fixed_amplitude_permutation_mse": 0.19614977610321213,
+        "amplitude_ratio_distance_squared": 0.1961497761032122,
+        "bit_alternative_power_correlation": 0.038031769042338986
+      },
+      "energy": [
+        0.9998188781701568,
+        1.0000352660313858
+      ],
+      "window_max_db": [
+        [
+          0.6719043359588366,
+          0.0763240302974982
+        ],
+        [
+          0.5629419837541396,
+          0.07985042798277213
+        ]
+      ],
+      "separation_penalty_db": 0.2523138357950628
+    }
+  ],
+  "receiver": {
+    "schema": "triad-pattern-receiver-comparison-v1",
+    "scope": "Known public alignment; native complete sampled captures and conditional fixed-bank Helper streaming. No blind-acquisition or rare-tail guarantee.",
+    "native_independent": [
+      {
+        "cn0_db_hz": 2,
+        "actual_active_seconds": 23.2,
+        "requested_seconds": 16,
+        "versions": {
+          "legacy-v1": {
+            "n": 16,
+            "correct_admissions": 9,
+            "wrong_admissions": 0,
+            "misses": 7,
+            "correct_probability_wilson95": [
+              0.331785563988119,
+              0.7690134759450765
+            ],
+            "cpu_seconds": 4.031604,
+            "energy_mean_samples": 22116.24553544375
+          },
+          "independent-apsk-v2": {
+            "n": 16,
+            "correct_admissions": 13,
+            "wrong_admissions": 0,
+            "misses": 3,
+            "correct_probability_wilson95": [
+              0.5699111903802586,
+              0.9340840092857187
+            ],
+            "cpu_seconds": 3.959919,
+            "energy_mean_samples": 22116.27811493125
+          }
+        },
+        "paired": {
+          "new_only_correct": 5,
+          "old_only_correct": 1,
+          "new_old_energy_db_mean": 6.397713038913195e-06,
+          "new_old_energy_db_range": [
+            -0.00046627829741963106,
+            0.0004929565322131227
+          ]
+        }
+      },
+      {
+        "cn0_db_hz": 4,
+        "actual_active_seconds": 23.2,
+        "requested_seconds": 16,
+        "versions": {
+          "legacy-v1": {
+            "n": 16,
+            "correct_admissions": 16,
+            "wrong_admissions": 0,
+            "misses": 0,
+            "correct_probability_wilson95": [
+              0.8063923194655637,
+              1.0
+            ],
+            "cpu_seconds": 3.966562,
+            "energy_mean_samples": 22116.24553544375
+          },
+          "independent-apsk-v2": {
+            "n": 16,
+            "correct_admissions": 16,
+            "wrong_admissions": 0,
+            "misses": 0,
+            "correct_probability_wilson95": [
+              0.8063923194655637,
+              1.0
+            ],
+            "cpu_seconds": 4.084169,
+            "energy_mean_samples": 22116.27811493125
+          }
+        },
+        "paired": {
+          "new_only_correct": 0,
+          "old_only_correct": 0,
+          "new_old_energy_db_mean": 6.397713038913195e-06,
+          "new_old_energy_db_range": [
+            -0.00046627829741963106,
+            0.0004929565322131227
+          ]
+        }
+      }
+    ],
+    "native_nulls": {
+      "legacy-v1": {
+        "n": 8,
+        "false_admissions": 0,
+        "one_sided95_upper_if_zero": 0.31234397806636793
+      },
+      "independent-apsk-v2": {
+        "n": 8,
+        "false_admissions": 0,
+        "one_sided95_upper_if_zero": 0.31234397806636793
+      }
+    },
+    "random_hf": [
+      {
+        "file": "independent-random-hf-null-85003-independent-apsk-v2.json",
+        "status": "complete",
+        "complete": true,
+        "candidate_bit": 1,
+        "conditional_model_pass": false,
+        "admitted": false,
+        "log_e": -12.385851717191557,
+        "bit_scores": [
+          -12.68045280556561,
+          -12.158579619281399
+        ],
+        "observed_seconds": 189.07033333333334,
+        "cpu_per_input_second": 0.11254403674999253,
+        "wall_seconds": 16.590638588008005,
+        "source_data_energy": 0,
+        "identities": [
+          {
+            "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/triad_helper_export",
+            "sha256": "1bdd7eafcede27bda0ffbde40d5179200fceac26aaf74681eedcdcf17b392e5e"
+          },
+          {
+            "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_continuous.py",
+            "sha256": "a86881ce02103ab1957ce6bc7116d184d12a57d9414dca81375005b744c8919c"
+          },
+          {
+            "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_incremental_receiver.py",
+            "sha256": "9c4ea5cf318ba8cb1fa3ff469b1f7a9f762961acb51964d4a762b64160ee1d15"
+          },
+          {
+            "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_state.py",
+            "sha256": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba"
+          }
+        ],
+        "expected_bit": null,
+        "correct_selection": null,
+        "conditional_log_threshold": 21.493378688261398
+      },
+      {
+        "file": "independent-random-hf-null-85003-legacy-v1.json",
+        "status": "complete",
+        "complete": true,
+        "candidate_bit": 1,
+        "conditional_model_pass": false,
+        "admitted": false,
+        "log_e": -9.975266321831395,
+        "bit_scores": [
+          -10.692316237822697,
+          -9.561958935723114
+        ],
+        "observed_seconds": 189.07033333333334,
+        "cpu_per_input_second": 0.11902038801257381,
+        "wall_seconds": 17.47841173398774,
+        "source_data_energy": 0,
+        "identities": [
+          {
+            "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/triad_helper_export",
+            "sha256": "1bdd7eafcede27bda0ffbde40d5179200fceac26aaf74681eedcdcf17b392e5e"
+          },
+          {
+            "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_continuous.py",
+            "sha256": "a86881ce02103ab1957ce6bc7116d184d12a57d9414dca81375005b744c8919c"
+          },
+          {
+            "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_incremental_receiver.py",
+            "sha256": "9c4ea5cf318ba8cb1fa3ff469b1f7a9f762961acb51964d4a762b64160ee1d15"
+          },
+          {
+            "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_state.py",
+            "sha256": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba"
+          }
+        ],
+        "expected_bit": null,
+        "correct_selection": null,
+        "conditional_log_threshold": 21.493378688261398
+      },
+      {
+        "file": "independent-random-hf-signal-85001-independent-apsk-v2.json",
+        "status": "complete",
+        "complete": true,
+        "candidate_bit": 0,
+        "conditional_model_pass": true,
+        "admitted": false,
+        "log_e": 363.4202328071785,
+        "bit_scores": [
+          364.1133799877384,
+          -11.880051073007225
+        ],
+        "observed_seconds": 189.07033333333334,
+        "cpu_per_input_second": 0.1336541229366144,
+        "wall_seconds": 20.188791544991545,
+        "source_data_energy": 761648.6839561117,
+        "identities": [
+          {
+            "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/triad_helper_export",
+            "sha256": "1bdd7eafcede27bda0ffbde40d5179200fceac26aaf74681eedcdcf17b392e5e"
+          },
+          {
+            "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_continuous.py",
+            "sha256": "a86881ce02103ab1957ce6bc7116d184d12a57d9414dca81375005b744c8919c"
+          },
+          {
+            "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_incremental_receiver.py",
+            "sha256": "9c4ea5cf318ba8cb1fa3ff469b1f7a9f762961acb51964d4a762b64160ee1d15"
+          },
+          {
+            "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_state.py",
+            "sha256": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba"
+          }
+        ],
+        "expected_bit": 0,
+        "correct_selection": true,
+        "conditional_log_threshold": 21.493378688261398
+      },
+      {
+        "file": "independent-random-hf-signal-85001-legacy-v1.json",
+        "status": "complete",
+        "complete": true,
+        "candidate_bit": 0,
+        "conditional_model_pass": true,
+        "admitted": false,
+        "log_e": 422.83751336051324,
+        "bit_scores": [
+          423.5306605410732,
+          -10.997158756807211
+        ],
+        "observed_seconds": 189.07033333333334,
+        "cpu_per_input_second": 0.1424349003580678,
+        "wall_seconds": 21.454406939970795,
+        "source_data_energy": 766678.6211354044,
+        "identities": [
+          {
+            "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/triad_helper_export",
+            "sha256": "0d5fc3c3d0d4b256e22cdf8e6437707d1565a33a875b8227989e097ed2789f7f"
+          },
+          {
+            "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_continuous.py",
+            "sha256": "a86881ce02103ab1957ce6bc7116d184d12a57d9414dca81375005b744c8919c"
+          },
+          {
+            "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_incremental_receiver.py",
+            "sha256": "9c4ea5cf318ba8cb1fa3ff469b1f7a9f762961acb51964d4a762b64160ee1d15"
+          },
+          {
+            "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_state.py",
+            "sha256": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba"
+          }
+        ],
+        "expected_bit": 0,
+        "correct_selection": true,
+        "conditional_log_threshold": 21.493378688261398
+      },
+      {
+        "file": "independent-random-hf-signal-85002-independent-apsk-v2.json",
+        "status": "complete",
+        "complete": true,
+        "candidate_bit": 1,
+        "conditional_model_pass": true,
+        "admitted": false,
+        "log_e": 302.4518195395045,
+        "bit_scores": [
+          -11.044156707052197,
+          303.1449667200645
+        ],
+        "observed_seconds": 189.07033333333334,
+        "cpu_per_input_second": 0.12979953375727904,
+        "wall_seconds": 19.501279731979594,
+        "source_data_energy": 767662.09999249,
+        "identities": [
+          {
+            "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/triad_helper_export",
+            "sha256": "1bdd7eafcede27bda0ffbde40d5179200fceac26aaf74681eedcdcf17b392e5e"
+          },
+          {
+            "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_continuous.py",
+            "sha256": "a86881ce02103ab1957ce6bc7116d184d12a57d9414dca81375005b744c8919c"
+          },
+          {
+            "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_incremental_receiver.py",
+            "sha256": "9c4ea5cf318ba8cb1fa3ff469b1f7a9f762961acb51964d4a762b64160ee1d15"
+          },
+          {
+            "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_state.py",
+            "sha256": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba"
+          }
+        ],
+        "expected_bit": 1,
+        "correct_selection": true,
+        "conditional_log_threshold": 21.493378688261398
+      },
+      {
+        "file": "independent-random-hf-signal-85002-legacy-v1.json",
+        "status": "complete",
+        "complete": true,
+        "candidate_bit": 1,
+        "conditional_model_pass": true,
+        "admitted": false,
+        "log_e": 323.9050324481704,
+        "bit_scores": [
+          -11.102074409700608,
+          324.59817962873035
+        ],
+        "observed_seconds": 189.07033333333334,
+        "cpu_per_input_second": 0.12986724684464865,
+        "wall_seconds": 19.690147327026352,
+        "source_data_energy": 770213.1986066059,
+        "identities": [
+          {
+            "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/triad_helper_export",
+            "sha256": "1bdd7eafcede27bda0ffbde40d5179200fceac26aaf74681eedcdcf17b392e5e"
+          },
+          {
+            "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_continuous.py",
+            "sha256": "a86881ce02103ab1957ce6bc7116d184d12a57d9414dca81375005b744c8919c"
+          },
+          {
+            "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_incremental_receiver.py",
+            "sha256": "9c4ea5cf318ba8cb1fa3ff469b1f7a9f762961acb51964d4a762b64160ee1d15"
+          },
+          {
+            "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_state.py",
+            "sha256": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba"
+          }
+        ],
+        "expected_bit": 1,
+        "correct_selection": true,
+        "conditional_log_threshold": 21.493378688261398
+      }
+    ],
+    "provenance": "Per-run command, source metadata, binary identity and raw rows retained. Native HF pilot alone uses Gaussian-FIR ray variation with sinusoidal selective coefficients; random_hf uses fixed-time Gaussian rays and Gaussian-erf selective coefficients through shared sampled channel.",
+    "metadata_smoke_checks": [
+      {
+        "command": [
+          "build/dev-cli/triad_long",
+          "--mode",
+          "configure",
+          "--rate",
+          "36",
+          "--added",
+          "10",
+          "--sample-rate",
+          "960",
+          "--seconds",
+          "16",
+          "--phase-diffusion",
+          "0",
+          "--pattern-revision",
+          "legacy-v1",
+          "--added-amplitude-depth",
+          ".25"
+        ],
+        "returncode": 0,
+        "stderr": "",
+        "observed_revisions": [
+          "legacy-v1"
+        ],
+        "passed": true
+      },
+      {
+        "command": [
+          "build/dev-cli/triad_long",
+          "--mode",
+          "export-source-window",
+          "--rate",
+          "36",
+          "--added",
+          "10",
+          "--sample-rate",
+          "960",
+          "--seconds",
+          "16",
+          "--phase-diffusion",
+          "0",
+          "--pattern-revision",
+          "legacy-v1",
+          "--added-amplitude-depth",
+          ".25",
+          "--source-window-seconds",
+          ".2",
+          "--source-window-center",
+          "--output",
+          "local-evidence/triad-pattern-revision/receiver/metadata-export-source-window-legacy-v1"
+        ],
+        "returncode": 0,
+        "stderr": "",
+        "observed_revisions": [
+          "legacy-v1"
+        ],
+        "passed": true
+      },
+      {
+        "command": [
+          "build/dev-cli/triad_long",
+          "--mode",
+          "configure",
+          "--rate",
+          "36",
+          "--added",
+          "10",
+          "--sample-rate",
+          "960",
+          "--seconds",
+          "16",
+          "--phase-diffusion",
+          "0",
+          "--pattern-revision",
+          "independent-apsk-v2",
+          "--added-amplitude-depth",
+          ".25"
+        ],
+        "returncode": 0,
+        "stderr": "",
+        "observed_revisions": [
+          "independent-apsk-v2"
+        ],
+        "passed": true
+      },
+      {
+        "command": [
+          "build/dev-cli/triad_long",
+          "--mode",
+          "export-source-window",
+          "--rate",
+          "36",
+          "--added",
+          "10",
+          "--sample-rate",
+          "960",
+          "--seconds",
+          "16",
+          "--phase-diffusion",
+          "0",
+          "--pattern-revision",
+          "independent-apsk-v2",
+          "--added-amplitude-depth",
+          ".25",
+          "--source-window-seconds",
+          ".2",
+          "--source-window-center",
+          "--output",
+          "local-evidence/triad-pattern-revision/receiver/metadata-export-source-window-independent-apsk-v2"
+        ],
+        "returncode": 0,
+        "stderr": "",
+        "observed_revisions": [
+          "independent-apsk-v2"
+        ],
+        "passed": true
+      }
+    ],
+    "provenance_note": "First HF legacy seed85001 launched before a metadata-only Helper power-identity rebuild; other HF reports bind rebuilt binary. Exact per-run identities are retained. Native binary and default DSP did not change in that rebuild.",
+    "random_hf_pair_energy_db": {
+      "85001": -0.0285865709677823,
+      "85002": -0.014408568343182795
+    }
+  },
+  "strong_helper_microwave": {
+    "scope": "One paired complete 15kW-Helper/40W-DATA EME/FHSS waveform at declared1.5dB-Hz with fixed public bank; legacy sinusoidal selective law; no reliability or Helper null qualification.",
+    "plan_file": "eme-plan.json",
+    "requested_seconds": 60,
+    "actual_data_seconds": 79.2,
+    "path_loss_db": 200,
+    "physical_data_cn0_db_hz": 10.020599913279625,
+    "injected_data_cn0_db_hz": 1.5,
+    "data_if_hz": 1725,
+    "high_pilot_hz": 2400,
+    "rows": [
+      {
+        "candidate_bit": 1,
+        "conditional_model_pass": true,
+        "admitted": false,
+        "log_e": 81.48610125530205,
+        "processed_seconds": 118.23983333333334,
+        "preparation_wall_seconds": 0.9870502250269055,
+        "wall_seconds": 6.679578647017479,
+        "python_cpu_seconds": 5.679164995,
+        "child_cpu_seconds": 4.048399,
+        "all_process_cpu_seconds_per_input_second": 0.0822697708612016,
+        "revision": "legacy-v1",
+        "source_energy": {
+          "stopped": true,
+          "complete": true,
+          "consumed_samples": 709439,
+          "total_samples": 709439,
+          "source_generated_samples": 705600,
+          "source_data_energy": 343982.7744290648,
+          "source_helper_energy": 261838742.9434857,
+          "workspace_bytes": 2626176
+        },
+        "bit_scores": [
+          71.80417932059231,
+          82.17921723464677
+        ],
+        "physics": {
+          "rf_hz": 5800000000,
+          "data_if_hz": 1725,
+          "base_oscillator": "gpsdo-ocxo",
+          "shift_oscillator": "gpsdo-ocxo",
+          "oscillator_effects": false,
+          "requested_base_relative_pair_ppm_bound": 0.0001,
+          "requested_rf_relative_pair_ppm_bound": 0.0001,
+          "shift_active": true,
+          "shared_shift_clock": false,
+          "base_relative_pair_ppm_bound": 0,
+          "rf_relative_pair_ppm_bound": 0,
+          "sample_clock_pair_ppm": 0,
+          "deterministic_cfo_bound_hz": 0,
+          "relative_phase_diffusion_rad_sqrt_s": 0,
+          "spread_preset": "eme-focused",
+          "spread_margin": 1,
+          "spread_delay_ms": 0.5,
+          "spread_doppler_hz": 6,
+          "requested_selective_perturbation": "each-65",
+          "selective_slow_depth": 0.65,
+          "selective_fast_depth": 0.65,
+          "selective_modulation_rate_hz": 6,
+          "selective_enabled": true,
+          "requested_channel_evolution": "legacy",
+          "channel_evolution": "legacy",
+          "random_doppler_width_hz": 0,
+          "random_doppler_width_definition": "B=2sigma of each ray Gaussian spectrum; independent of ray center separation",
+          "selective_coefficient_law": "sinusoidal",
+          "selective_depth_definition": "bounded sinusoidal peak excursion; component RMS depth/sqrt(2)",
+          "delay_excursion_seconds": 0,
+          "delay_knot_seconds": 1,
+          "maximum_excess_delay_seconds": 0.0005,
+          "maximum_delay_slope": 0,
+          "nominal_delay_motion_phase_bound_hz": 0,
+          "delay_motion_doppler_bound_hz": 0,
+          "delay_motion_doppler_bound_scope": "nominal carrier plus entire source Nyquist interval; includes envelope time-warp as well as propagation phase",
+          "nominal_propagation_reference_hz": 5800001725,
+          "random_ray_total_bandwidth_allowance_hz": 0,
+          "random_selective_total_bandwidth_allowance_hz": 0,
+          "random_sampling_policy": "fixed physical-time knots at16*B; variance-normalized cubic interpolation; stationary indexed innovations independent of receiver sample rate and chunk boundaries",
+          "random_spectral_allowance_scope": "engineering spectral-tail allowance, not compact support or a physical measurement; delay-motion Doppler is additional and is counted once",
+          "timing_policy": "case-default",
+          "arrival_prior_seconds": [
+            -0.055,
+            0.125
+          ],
+          "capture_lead_seconds": 0.2,
+          "capture_trail_seconds": 0.3,
+          "message_epoch_count": 13,
+          "data_w": 40,
+          "requested_helper_w": 15000,
+          "effective_helper_w": 15000,
+          "helper_ratio_limit_db": 90,
+          "helper_power_limited": false,
+          "physical_data_cn0_db_hz": 10.020599913279625,
+          "data_cn0_db_hz": 1.5,
+          "effective_helper_cn0_db_hz": 27.24031267727719,
+          "cn0_scope": "nominal active DATA reference and effective production Helper/DATA power ratio; actual finite-calendar component energies are reported separately"
+        },
+        "high_pilot_hz": 2400,
+        "sample_rate_hz": 6000,
+        "identities": [
+          {
+            "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/triad_helper_export",
+            "sha256": "1bdd7eafcede27bda0ffbde40d5179200fceac26aaf74681eedcdcf17b392e5e"
+          },
+          {
+            "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_continuous.py",
+            "sha256": "a86881ce02103ab1957ce6bc7116d184d12a57d9414dca81375005b744c8919c"
+          },
+          {
+            "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_incremental_receiver.py",
+            "sha256": "9c4ea5cf318ba8cb1fa3ff469b1f7a9f762961acb51964d4a762b64160ee1d15"
+          },
+          {
+            "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_state.py",
+            "sha256": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba"
+          }
+        ]
+      },
+      {
+        "candidate_bit": 1,
+        "conditional_model_pass": true,
+        "admitted": false,
+        "log_e": 81.287282274299,
+        "processed_seconds": 118.23983333333334,
+        "preparation_wall_seconds": 1.292222658987157,
+        "wall_seconds": 6.5170029700384475,
+        "python_cpu_seconds": 5.531458304,
+        "child_cpu_seconds": 3.7473470000000004,
+        "all_process_cpu_seconds_per_input_second": 0.07847444505306306,
+        "revision": "independent-apsk-v2",
+        "source_energy": {
+          "stopped": true,
+          "complete": true,
+          "consumed_samples": 709439,
+          "total_samples": 709439,
+          "source_generated_samples": 705600,
+          "source_data_energy": 349429.4990462393,
+          "source_helper_energy": 261838742.94348565,
+          "workspace_bytes": 2626176
+        },
+        "bit_scores": [
+          77.5229219018509,
+          81.96877053521149
+        ],
+        "physics": {
+          "rf_hz": 5800000000,
+          "data_if_hz": 1725,
+          "base_oscillator": "gpsdo-ocxo",
+          "shift_oscillator": "gpsdo-ocxo",
+          "oscillator_effects": false,
+          "requested_base_relative_pair_ppm_bound": 0.0001,
+          "requested_rf_relative_pair_ppm_bound": 0.0001,
+          "shift_active": true,
+          "shared_shift_clock": false,
+          "base_relative_pair_ppm_bound": 0,
+          "rf_relative_pair_ppm_bound": 0,
+          "sample_clock_pair_ppm": 0,
+          "deterministic_cfo_bound_hz": 0,
+          "relative_phase_diffusion_rad_sqrt_s": 0,
+          "spread_preset": "eme-focused",
+          "spread_margin": 1,
+          "spread_delay_ms": 0.5,
+          "spread_doppler_hz": 6,
+          "requested_selective_perturbation": "each-65",
+          "selective_slow_depth": 0.65,
+          "selective_fast_depth": 0.65,
+          "selective_modulation_rate_hz": 6,
+          "selective_enabled": true,
+          "requested_channel_evolution": "legacy",
+          "channel_evolution": "legacy",
+          "random_doppler_width_hz": 0,
+          "random_doppler_width_definition": "B=2sigma of each ray Gaussian spectrum; independent of ray center separation",
+          "selective_coefficient_law": "sinusoidal",
+          "selective_depth_definition": "bounded sinusoidal peak excursion; component RMS depth/sqrt(2)",
+          "delay_excursion_seconds": 0,
+          "delay_knot_seconds": 1,
+          "maximum_excess_delay_seconds": 0.0005,
+          "maximum_delay_slope": 0,
+          "nominal_delay_motion_phase_bound_hz": 0,
+          "delay_motion_doppler_bound_hz": 0,
+          "delay_motion_doppler_bound_scope": "nominal carrier plus entire source Nyquist interval; includes envelope time-warp as well as propagation phase",
+          "nominal_propagation_reference_hz": 5800001725,
+          "random_ray_total_bandwidth_allowance_hz": 0,
+          "random_selective_total_bandwidth_allowance_hz": 0,
+          "random_sampling_policy": "fixed physical-time knots at16*B; variance-normalized cubic interpolation; stationary indexed innovations independent of receiver sample rate and chunk boundaries",
+          "random_spectral_allowance_scope": "engineering spectral-tail allowance, not compact support or a physical measurement; delay-motion Doppler is additional and is counted once",
+          "timing_policy": "case-default",
+          "arrival_prior_seconds": [
+            -0.055,
+            0.125
+          ],
+          "capture_lead_seconds": 0.2,
+          "capture_trail_seconds": 0.3,
+          "message_epoch_count": 13,
+          "data_w": 40,
+          "requested_helper_w": 15000,
+          "effective_helper_w": 15000,
+          "helper_ratio_limit_db": 90,
+          "helper_power_limited": false,
+          "physical_data_cn0_db_hz": 10.020599913279625,
+          "data_cn0_db_hz": 1.5,
+          "effective_helper_cn0_db_hz": 27.24031267727719,
+          "cn0_scope": "nominal active DATA reference and effective production Helper/DATA power ratio; actual finite-calendar component energies are reported separately"
+        },
+        "high_pilot_hz": 2400,
+        "sample_rate_hz": 6000,
+        "identities": [
+          {
+            "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/triad_helper_export",
+            "sha256": "1bdd7eafcede27bda0ffbde40d5179200fceac26aaf74681eedcdcf17b392e5e"
+          },
+          {
+            "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_continuous.py",
+            "sha256": "a86881ce02103ab1957ce6bc7116d184d12a57d9414dca81375005b744c8919c"
+          },
+          {
+            "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_incremental_receiver.py",
+            "sha256": "9c4ea5cf318ba8cb1fa3ff469b1f7a9f762961acb51964d4a762b64160ee1d15"
+          },
+          {
+            "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_gaussian_state.py",
+            "sha256": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba"
+          }
+        ]
+      }
+    ],
+    "new_old_data_energy_db": 0.06822870573125822,
+    "new_old_helper_energy_db": -9.643274665532873e-16
+  },
+  "dense_low_rate": [
+    {
+      "revision": "legacy-v1",
+      "spacing_hz": 0.00075,
+      "sample_rate_hz": 100,
+      "window_locations": 24,
+      "scope": "24 predeclared sparse dense windows; true100/800ms samples across9.26days ofcalendar, not continuous high-rate longrun; observed extrema only",
+      "statistics": {
+        "0.1": {
+          "min_db": [
+            -10.633731911957385,
+            -10.391717385719728
+          ],
+          "max_db": [
+            5.354905814098321,
+            7.142170337511347
+          ],
+          "median_power": [
+            0.6587811370215002,
+            0.564818398317926
+          ]
+        },
+        "0.8": {
+          "min_db": [
+            -10.693396557435905,
+            -10.354401258913043
+          ],
+          "max_db": [
+            5.360476767749038,
+            7.141099594052038
+          ],
+          "median_power": [
+            0.658596900266755,
+            0.565092249136359
+          ]
+        }
+      }
+    },
+    {
+      "revision": "independent-apsk-v2",
+      "spacing_hz": 0.00075,
+      "sample_rate_hz": 100,
+      "window_locations": 24,
+      "scope": "24 predeclared sparse dense windows; true100/800ms samples across9.26days ofcalendar, not continuous high-rate longrun; observed extrema only",
+      "statistics": {
+        "0.1": {
+          "min_db": [
+            -20.117074022148927,
+            -28.283475926034058
+          ],
+          "max_db": [
+            5.701394351189041,
+            4.829670468272246
+          ],
+          "median_power": [
+            0.850820381367624,
+            0.9518179806952227
+          ]
+        },
+        "0.8": {
+          "min_db": [
+            -20.064380929133627,
+            -28.29752767472057
+          ],
+          "max_db": [
+            5.704123929279533,
+            4.8204778309033305
+          ],
+          "median_power": [
+            0.8514802659537153,
+            0.952796222219742
+          ]
+        }
+      }
+    }
+  ],
+  "illustrative_agc": {
+    "scope": "Illustrative DATA-only high-SNR power detector: one-pole squared-envelope smoother, gainclamp0.1..10, no channel/noise/Helper. Applygain to actualcomposite; report normalizedmatched-template shape loss, not decode sensitivity or calibrated IC7100 model.",
+    "rows": [
+      {
+        "case": "hf36-spread10",
+        "revision": "legacy-v1",
+        "bit": 0,
+        "time_constant_seconds": 0.1,
+        "coherent_shape_loss_db": 0.0006234390016270532,
+        "gain_1_99": [
+          0.9726821237679403,
+          1.0284832019389316
+        ]
+      },
+      {
+        "case": "hf36-spread10",
+        "revision": "legacy-v1",
+        "bit": 1,
+        "time_constant_seconds": 0.1,
+        "coherent_shape_loss_db": 0.0006839089365577959,
+        "gain_1_99": [
+          0.9708652336283858,
+          1.030638946238841
+        ]
+      },
+      {
+        "case": "hf36-spread10",
+        "revision": "legacy-v1",
+        "bit": 0,
+        "time_constant_seconds": 0.8,
+        "coherent_shape_loss_db": 9.699673098457428e-06,
+        "gain_1_99": [
+          0.9964801506489551,
+          1.0035043488523767
+        ]
+      },
+      {
+        "case": "hf36-spread10",
+        "revision": "legacy-v1",
+        "bit": 1,
+        "time_constant_seconds": 0.8,
+        "coherent_shape_loss_db": 1.0592137876008355e-05,
+        "gain_1_99": [
+          0.996250350780569,
+          1.0037408736127387
+        ]
+      },
+      {
+        "case": "hf36-spread10",
+        "revision": "independent-apsk-v2",
+        "bit": 0,
+        "time_constant_seconds": 0.1,
+        "coherent_shape_loss_db": 0.0006250117406923186,
+        "gain_1_99": [
+          0.9733444418177867,
+          1.0297306185099422
+        ]
+      },
+      {
+        "case": "hf36-spread10",
+        "revision": "independent-apsk-v2",
+        "bit": 1,
+        "time_constant_seconds": 0.1,
+        "coherent_shape_loss_db": 0.000655454638906682,
+        "gain_1_99": [
+          0.9714307645786974,
+          1.029833322790238
+        ]
+      },
+      {
+        "case": "hf36-spread10",
+        "revision": "independent-apsk-v2",
+        "bit": 0,
+        "time_constant_seconds": 0.8,
+        "coherent_shape_loss_db": 1.0142403229233481e-05,
+        "gain_1_99": [
+          0.9964285532631798,
+          1.003586842951974
+        ]
+      },
+      {
+        "case": "hf36-spread10",
+        "revision": "independent-apsk-v2",
+        "bit": 1,
+        "time_constant_seconds": 0.8,
+        "coherent_shape_loss_db": 1.0366712069678898e-05,
+        "gain_1_99": [
+          0.9962484718254941,
+          1.00364641461773
+        ]
+      },
+      {
+        "case": "hf36-plain",
+        "revision": "legacy-v1",
+        "bit": 0,
+        "time_constant_seconds": 0.1,
+        "coherent_shape_loss_db": 0.05004139188590892,
+        "gain_1_99": [
+          0.8068816691557781,
+          1.3423308336730222
+        ]
+      },
+      {
+        "case": "hf36-plain",
+        "revision": "legacy-v1",
+        "bit": 1,
+        "time_constant_seconds": 0.1,
+        "coherent_shape_loss_db": 0.05103307706142121,
+        "gain_1_99": [
+          0.7933311454396411,
+          1.3173366344664996
+        ]
+      },
+      {
+        "case": "hf36-plain",
+        "revision": "legacy-v1",
+        "bit": 0,
+        "time_constant_seconds": 0.8,
+        "coherent_shape_loss_db": 0.0010156343292357713,
+        "gain_1_99": [
+          0.9662931402642015,
+          1.0377992234216131
+        ]
+      },
+      {
+        "case": "hf36-plain",
+        "revision": "legacy-v1",
+        "bit": 1,
+        "time_constant_seconds": 0.8,
+        "coherent_shape_loss_db": 0.001044925423288847,
+        "gain_1_99": [
+          0.9661429190853543,
+          1.0385906997220071
+        ]
+      },
+      {
+        "case": "hf36-plain",
+        "revision": "independent-apsk-v2",
+        "bit": 0,
+        "time_constant_seconds": 0.1,
+        "coherent_shape_loss_db": 0.04599342546950483,
+        "gain_1_99": [
+          0.8165644224596308,
+          1.3083808583147545
+        ]
+      },
+      {
+        "case": "hf36-plain",
+        "revision": "independent-apsk-v2",
+        "bit": 1,
+        "time_constant_seconds": 0.1,
+        "coherent_shape_loss_db": 0.048042302022947375,
+        "gain_1_99": [
+          0.804039592011212,
+          1.3528383377252464
+        ]
+      },
+      {
+        "case": "hf36-plain",
+        "revision": "independent-apsk-v2",
+        "bit": 0,
+        "time_constant_seconds": 0.8,
+        "coherent_shape_loss_db": 0.0009487271699710413,
+        "gain_1_99": [
+          0.9649721720906985,
+          1.0337741964073273
+        ]
+      },
+      {
+        "case": "hf36-plain",
+        "revision": "independent-apsk-v2",
+        "bit": 1,
+        "time_constant_seconds": 0.8,
+        "coherent_shape_loss_db": 0.0009911481563992886,
+        "gain_1_99": [
+          0.9646056865217201,
+          1.0407602560567826
+        ]
+      },
+      {
+        "case": "no-interleave",
+        "revision": "legacy-v1",
+        "bit": 0,
+        "time_constant_seconds": 0.1,
+        "coherent_shape_loss_db": 0.0006364631292540758,
+        "gain_1_99": [
+          0.9736082718745281,
+          1.030909950328448
+        ]
+      },
+      {
+        "case": "no-interleave",
+        "revision": "legacy-v1",
+        "bit": 1,
+        "time_constant_seconds": 0.1,
+        "coherent_shape_loss_db": 0.0006998914092990815,
+        "gain_1_99": [
+          0.9706479891424961,
+          1.0317604705924164
+        ]
+      },
+      {
+        "case": "no-interleave",
+        "revision": "legacy-v1",
+        "bit": 0,
+        "time_constant_seconds": 0.8,
+        "coherent_shape_loss_db": 1.0305028015893849e-05,
+        "gain_1_99": [
+          0.9965841177233946,
+          1.003946550751072
+        ]
+      },
+      {
+        "case": "no-interleave",
+        "revision": "legacy-v1",
+        "bit": 1,
+        "time_constant_seconds": 0.8,
+        "coherent_shape_loss_db": 1.1291853895033575e-05,
+        "gain_1_99": [
+          0.9961434274387907,
+          1.0038485807947755
+        ]
+      },
+      {
+        "case": "no-interleave",
+        "revision": "independent-apsk-v2",
+        "bit": 0,
+        "time_constant_seconds": 0.1,
+        "coherent_shape_loss_db": 0.001044354249862191,
+        "gain_1_99": [
+          0.9618090217492603,
+          1.0414904227202784
+        ]
+      },
+      {
+        "case": "no-interleave",
+        "revision": "independent-apsk-v2",
+        "bit": 1,
+        "time_constant_seconds": 0.1,
+        "coherent_shape_loss_db": 0.0009440833658855864,
+        "gain_1_99": [
+          0.9645784019144471,
+          1.037087725017748
+        ]
+      },
+      {
+        "case": "no-interleave",
+        "revision": "independent-apsk-v2",
+        "bit": 0,
+        "time_constant_seconds": 0.8,
+        "coherent_shape_loss_db": 1.691536966433905e-05,
+        "gain_1_99": [
+          0.9949259978189364,
+          1.0051094104976617
+        ]
+      },
+      {
+        "case": "no-interleave",
+        "revision": "independent-apsk-v2",
+        "bit": 1,
+        "time_constant_seconds": 0.8,
+        "coherent_shape_loss_db": 1.515748464413654e-05,
+        "gain_1_99": [
+          0.9953891266428772,
+          1.0045392788186875
+        ]
+      },
+      {
+        "case": "low-max-spread",
+        "revision": "legacy-v1",
+        "bit": 0,
+        "time_constant_seconds": 0.1,
+        "coherent_shape_loss_db": 0.8295265635672502,
+        "gain_1_99": [
+          0.5476882937697567,
+          5.850056959563188
+        ]
+      },
+      {
+        "case": "low-max-spread",
+        "revision": "legacy-v1",
+        "bit": 1,
+        "time_constant_seconds": 0.1,
+        "coherent_shape_loss_db": 0.8320926170527683,
+        "gain_1_99": [
+          0.5517398169121012,
+          6.329308908383441
+        ]
+      },
+      {
+        "case": "low-max-spread",
+        "revision": "legacy-v1",
+        "bit": 0,
+        "time_constant_seconds": 0.8,
+        "coherent_shape_loss_db": 0.3415590533777867,
+        "gain_1_99": [
+          0.6243060513298301,
+          2.290097405126161
+        ]
+      },
+      {
+        "case": "low-max-spread",
+        "revision": "legacy-v1",
+        "bit": 1,
+        "time_constant_seconds": 0.8,
+        "coherent_shape_loss_db": 0.3498028593329589,
+        "gain_1_99": [
+          0.6323451856054289,
+          2.360377020635715
+        ]
+      },
+      {
+        "case": "low-max-spread",
+        "revision": "independent-apsk-v2",
+        "bit": 0,
+        "time_constant_seconds": 0.1,
+        "coherent_shape_loss_db": 0.7803752273061924,
+        "gain_1_99": [
+          0.5534001547807207,
+          6.003691641273049
+        ]
+      },
+      {
+        "case": "low-max-spread",
+        "revision": "independent-apsk-v2",
+        "bit": 1,
+        "time_constant_seconds": 0.1,
+        "coherent_shape_loss_db": 0.7914909851131623,
+        "gain_1_99": [
+          0.5533815106151322,
+          6.216045829125605
+        ]
+      },
+      {
+        "case": "low-max-spread",
+        "revision": "independent-apsk-v2",
+        "bit": 0,
+        "time_constant_seconds": 0.8,
+        "coherent_shape_loss_db": 0.3084125176938303,
+        "gain_1_99": [
+          0.6345584673854872,
+          2.295594147201303
+        ]
+      },
+      {
+        "case": "low-max-spread",
+        "revision": "independent-apsk-v2",
+        "bit": 1,
+        "time_constant_seconds": 0.8,
+        "coherent_shape_loss_db": 0.3217821641166836,
+        "gain_1_99": [
+          0.6328486011494161,
+          2.2753161210635997
+        ]
+      }
+    ]
+  },
+  "live": {
+    "identities": {
+      "build/dev-cli/triad_audio_stream": "857d41ca8591faf47a457aa64b82a5388603e567a9afa997c33a51a4f7658539",
+      "build/dev-cli/triad_helper_export": "1bdd7eafcede27bda0ffbde40d5179200fceac26aaf74681eedcdcf17b392e5e",
+      "tools/triad_incremental_receiver.py": "9c4ea5cf318ba8cb1fa3ff469b1f7a9f762961acb51964d4a762b64160ee1d15",
+      "tools/triad_continuous.py": "a86881ce02103ab1957ce6bc7116d184d12a57d9414dca81375005b744c8919c"
+    },
+    "schema": "triad-live-stream-check-v1",
+    "configuration": [
+      "--case",
+      "hf",
+      "--sample-rate",
+      "6000",
+      "--rate",
+      "36",
+      "--added-symbols",
+      "10",
+      "--seconds",
+      "16",
+      "--key-seed",
+      "73005",
+      "--epoch",
+      "1793850000",
+      "--spread-preset",
+      "none",
+      "--selective-perturbation",
+      "off",
+      "--base-oscillator",
+      "gpsdo-ocxo",
+      "--shift-oscillator",
+      "gpsdo-ocxo",
+      "--oscillator-effects",
+      "off",
+      "--arrival-seconds",
+      "0",
+      "--helper",
+      "on"
+    ],
+    "source": {
+      "schema": "triad-stream-source-v1",
+      "sample_rate_hz": 6000,
+      "emitted_samples": 369600,
+      "capture_samples": 507896,
+      "simulation_channel_constructed": false,
+      "total_samples": 369600,
+      "data_offset_samples": 227198,
+      "source_samples": 140805,
+      "capture_lead_seconds": 0,
+      "noise_variance": 0,
+      "template_data_gain": 1.0008283204656714,
+      "data_if_hz": 1725,
+      "epoch": 1793850000,
+      "pattern_revision": "independent-apsk-v2",
+      "added_amplitude_depth": 0.25,
+      "helper_enabled": true,
+      "conditional_gaussian_null_supported": false,
+      "helper_high_hz": 2400,
+      "helper_low_hz": 550,
+      "maximum_rows": 16384,
+      "maximum_columns": 128,
+      "workspace_budget_bytes": 67108864,
+      "fixed_workspace_bytes": 1049688,
+      "stream_kind": "emitted",
+      "key_source": "explicit-test-fixture-seed",
+      "power": {
+        "data_power_reference_policy": "bounded-tiles",
+        "pattern_revision": "independent-apsk-v2",
+        "added_amplitude_depth": 0.25,
+        "data_power_reference_version": 2,
+        "data_reference_bit": 0,
+        "data_reference_integration_method": "bounded-keyed-tile-quadrature-v1",
+        "data_reference_complete_sampled_source": false,
+        "data_reference_active_seconds": 23.200000000000003,
+        "data_reference_mean_norm": 0.9983454151420983,
+        "data_reference_nodes": 4096,
+        "data_reference_refinement_relative_difference": 0,
+        "data_reference_refinement_tolerance": 0.001,
+        "data_reference_sampled_tiles": 2,
+        "data_reference_tile_relative_standard_error": 0.0008743510368796925,
+        "data_reference_statistical_error_is_bound": false,
+        "post_plan_data_calibration_gain": 1.0011943208736203,
+        "template_data_gain": 1.0008283204656714,
+        "data_reference_scope": "fixed public bit0; at most16 stratified keyed tiles with2048 fractional nodes each; active-time mean omits finite outer halo; between-tile standard error is diagnostic, not a confidence bound or integration guarantee; one unchanged gain for the entire stream"
+      },
+      "basis_scope": "Public DATA pattern only; arrival is absolute seconds in the requested observation coordinate. Fixed key/epoch per session; all three carriers retained.",
+      "scope": "Bounded pull source, not a receiver or real-time guarantee. Emitted kind has no channel or thermal noise. Physical null and full-duration power accuracy require qualification."
+    },
+    "coordinates": [
+      [
+        0,
+        0.95,
+        0,
+        0
+      ],
+      [
+        0,
+        0.975,
+        0,
+        0
+      ],
+      [
+        0,
+        1.0,
+        0,
+        0
+      ],
+      [
+        0,
+        1.025,
+        0,
+        0
+      ],
+      [
+        0,
+        1.05,
+        0,
+        0
+      ],
+      [
+        0,
+        1.075,
+        0,
+        0
+      ],
+      [
+        0,
+        1.1,
+        0,
+        0
+      ],
+      [
+        0,
+        1.125,
+        0,
+        0
+      ],
+      [
+        0,
+        1.15,
+        0,
+        0
+      ],
+      [
+        0,
+        1.175,
+        0,
+        0
+      ],
+      [
+        0,
+        1.2,
+        0,
+        0
+      ],
+      [
+        0,
+        1.225,
+        0,
+        0
+      ],
+      [
+        0,
+        1.25,
+        0,
+        0
+      ]
+    ],
+    "receiver": {
+      "status": "scored",
+      "complete_observation": true,
+      "admission": null,
+      "bit_scores": [
+        97099.33537980306,
+        1742.45174690196
+      ],
+      "model_bit_scores": [
+        [
+          96729.14946762328,
+          1743.1448940825198
+        ],
+        [
+          97100.02852698362,
+          40.950370097432305
+        ]
+      ],
+      "hypothesis_log_evidence": [
+        [
+          0.0,
+          96729.14946762328,
+          1743.1448940825198
+        ],
+        [
+          0.0,
+          97100.02852698362,
+          40.950370097432305
+        ]
+      ],
+      "consumed_samples": 381600,
+      "processed_rows": 381600,
+      "scored_rows": 381600,
+      "observed_rows": 381600,
+      "erased_rows": 0,
+      "blocks": 127,
+      "pending_rows": 0,
+      "working_bytes_estimate": 5718624,
+      "push_process_cpu_seconds": 0.9497471499999992
+    },
+    "frames_sent": 369600,
+    "frames_received": 381600,
+    "peak_capture": 0.024547580629587173,
+    "errors": [],
+    "wall_seconds": 63.94303071103059,
+    "python_cpu_seconds": 1.9958622699999997,
+    "child_cpu_seconds": 14.471678,
+    "source_completion": {
+      "stopped": true,
+      "complete": true,
+      "consumed_samples": 369600,
+      "total_samples": 369600,
+      "source_generated_samples": 369600,
+      "source_data_energy": 138468.06777935615,
+      "source_helper_energy": 3698395.0595202367,
+      "workspace_bytes": 1049688
+    },
+    "physical_null_qualified": false,
+    "expected_bit_evaluation_only": 0,
+    "scope": "Short actual cable streaming at fixed predeclared timing bank; high-SNR flow check, not marginal sensitivity or multi-day uptime."
+  },
+  "checks": {
+    "native_source_shaping_channel_receiver": true,
+    "native_stream_probe": true,
+    "native_long_configuration_and_helper": true,
+    "python_focused_tests": 39,
+    "python_metrics_tests": 3
+  },
+  "limitations": [
+    "No replay authentication",
+    "4-APSK factors followed by common power normalization; final radii are not four absolute points",
+    "No universal low-rate sub800ms envelope guarantee; direct failure measured",
+    "No proven improved LPI",
+    "Small sensitivity cohorts do not qualify99percent reception or rare physical false admissions",
+    "Static finite public acquisition bank; Helper physical null unqualified",
+    "EME single-pair margin decreased; no bound on microwave sensitivity change",
+    "No GPU qualification needed or performed"
+  ]
+}

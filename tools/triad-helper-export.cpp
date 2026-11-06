@@ -21,6 +21,9 @@
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <map>
+#include <sstream>
+#include <openssl/crypto.h>
 #include <numbers>
 #include <optional>
 #include <random>
@@ -28,6 +31,10 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#endif
 
 namespace {
 using namespace datapump;
@@ -40,8 +47,14 @@ constexpr std::uint64_t maximum_export_bytes = 2ULL * 1024 * 1024 * 1024;
 constexpr double tau = 2 * std::numbers::pi;
 
 struct Options {
+    PatternRevision pattern_revision = PatternRevision::IndependentApskV2;
+    double added_amplitude_depth = .25;
     std::string scenario = "hf", control = "selected", shaping = "auto";
     std::string power_reference = "whole-active";
+    bool explicit_power_reference = false;
+    bool stream_server = false, explicit_key_seed = false, explicit_epoch = false, now = false;
+    std::string stream_kind = "channel";
+    std::filesystem::path key_file;
     std::string helper_components = "full";
     std::string channel_evolution = "legacy";
     std::optional<double> random_doppler_width_hz, delay_excursion_ms, delay_knot_seconds;
@@ -93,6 +106,12 @@ bool enabled(std::string_view text) {
     throw std::invalid_argument("component selection must be on or off");
 }
 
+PatternRevision parse_pattern_revision(std::string_view text) {
+    if (text == "legacy-v1") return PatternRevision::LegacyV1;
+    if (text == "independent-apsk-v2") return PatternRevision::IndependentApskV2;
+    throw std::invalid_argument("pattern revision must be legacy-v1 or independent-apsk-v2");
+}
+
 Options parse(int argc, char** argv) {
     Options o;
     for (int i = 1; i < argc; ++i) {
@@ -109,12 +128,15 @@ Options parse(int argc, char** argv) {
                 "  [--diagnostic-iq-noise-reference-watts W --diagnostic-iq-noise-reference-rms RMS]\n"
                 "  Diagnostic noise is confined to sampled complex-IQ Nyquist; it is not full-rate DAC/audio noise.\n"
                 "  [--seconds 16] [--rate HZ] [--added-symbols N] [--burst-wait-tiles N]\n"
+                "  [--pattern-revision independent-apsk-v2|legacy-v1] [--added-amplitude-depth D (0<D<1)]\n"
                 "  [--whole-bit-count 1..16] [--whole-bit-wait-count 0..1000]\n"
                 "  [--fhss on|off] [--shaping auto|legacy (default: auto)] [--shaping-tail-fraction F]\n"
                 "  [--data-if HZ] [--sample-rate INTEGER_HZ] [--cn0 DB_HZ] [--plan-only]\n"
                 "  --plan-only checks long integer geometry without generating waveform samples or templates.\n"
-                "  Sampled exports and --power-plan-only remain limited to 3600 active seconds.\n"
-                "  [--power-reference whole-active|legacy-window] [--power-plan-only]\n"
+                "  Sampled exports retain a2GiB budget; whole-active calibration has a4194304-sample budget.\n"
+                "  [--power-reference whole-active|legacy-window|bounded-tiles] [--power-plan-only]\n"
+                "  [--stream-server --stream-kind emitted|channel --key-file RAW_32_BYTE_KEY | --key-seed TEST_SEED]\n"
+                "  [--now] Streaming defaults to the current epoch and bounded-tiles calibration.\n"
                 "  [--base-oscillator ID] [--shift-oscillator ID] [--ramp-seconds POSITIVE]\n"
                 "  [--oscillator-effects on|off] (off is an explicit diagnostic control)\n"
                 "  [--rf-hz HZ] [--spread-preset ID] [--margin FACTOR]\n"
@@ -135,20 +157,30 @@ Options parse(int argc, char** argv) {
         } else if (arg == "--case") o.scenario = next();
         else if (arg == "--output") o.output = std::string(next());
         else if (arg == "--seed") o.seed = integer(next(), "seed");
-        else if (arg == "--key-seed") o.key_seed = integer(next(), "key seed");
+        else if (arg == "--key-seed") { o.key_seed = integer(next(), "key seed"); o.explicit_key_seed = true; }
+        else if (arg == "--key-file") o.key_file = std::string(next());
+        else if (arg == "--stream-server") o.stream_server = true;
+        else if (arg == "--stream-kind") o.stream_kind = next();
+        else if (arg == "--now") o.now = true;
         else if (arg == "--diagnostic-iq-noise-bits" || arg == "--diagnostic-iq-noise-obscured-bits" ||
                  arg == "--diagnostic-iq-noise-db" || arg == "--diagnostic-iq-noise-watts" ||
                  arg == "--diagnostic-iq-noise-reference-watts" || arg == "--diagnostic-iq-noise-reference-rms")
             o.diagnostic_iq_noise.consume(arg, next());
         else if (arg.starts_with("--background-noise-"))
             throw std::invalid_argument("--background-noise-* denotes shared full-rate audio noise and is not a triad complex-I/Q option; use --diagnostic-iq-noise-* only for the narrower diagnostic (not a full-rate DAC/audio floor)");
-        else if (arg == "--epoch") o.epoch = integer(next(), "epoch");
+        else if (arg == "--epoch") { o.epoch = integer(next(), "epoch"); o.explicit_epoch = true; }
         else if (arg == "--bit") {
             const auto bit = integer(next(), "source bit");
             if (bit > 1) throw std::invalid_argument("source bit must be 0 or 1");
             o.bit = static_cast<unsigned>(bit);
         } else if (arg == "--seconds") o.seconds = real(next(), "duration");
         else if (arg == "--rate") o.inner_rate_hz = real(next(), "inner rate");
+        else if (arg == "--pattern-revision") o.pattern_revision = parse_pattern_revision(next());
+        else if (arg == "--added-amplitude-depth") {
+            o.added_amplitude_depth = real(next(), "Added Symbols amplitude depth");
+            if (!(o.added_amplitude_depth > 0 && o.added_amplitude_depth < 1))
+                throw std::invalid_argument("Added Symbols amplitude depth must be in (0,1)");
+        }
         else if (arg == "--sample-rate") {
             const auto rate = integer(next(), "sample rate");
             if (rate < 6000 || rate > std::numeric_limits<std::uint32_t>::max() || rate % 5)
@@ -203,17 +235,34 @@ Options parse(int argc, char** argv) {
         else if (arg == "--templates") o.templates = true;
         else if (arg == "--plan-only") o.plan_only = true;
         else if (arg == "--power-plan-only") o.power_plan_only = true;
-        else if (arg == "--power-reference") o.power_reference = next();
+        else if (arg == "--power-reference") { o.power_reference = next(); o.explicit_power_reference = true; }
         else throw std::invalid_argument("unknown option: " + std::string(arg));
     }
+    if (o.now && o.explicit_epoch) throw std::invalid_argument("--now and --epoch are mutually exclusive");
+    if (o.now || (o.stream_server && !o.explicit_epoch)) {
+        const auto now = std::time(nullptr);
+        if (now < 0) throw std::runtime_error("system clock is unavailable");
+        o.epoch = static_cast<std::uint64_t>(now);
+    }
+    if (o.stream_server && !o.explicit_power_reference) o.power_reference = "bounded-tiles";
+    if (o.stream_kind != "emitted" && o.stream_kind != "channel")
+        throw std::invalid_argument("stream kind must be emitted or channel");
+    if (o.stream_server && (o.plan_only || o.power_plan_only || o.templates || !o.output.empty()))
+        throw std::invalid_argument("stream server cannot export files, templates or plan-only output");
+    if (o.stream_server && o.whole_bit_count != 1)
+        throw std::invalid_argument("stream server currently supports one complete bit per session");
+    if (o.stream_server && o.key_file.empty() && !o.explicit_key_seed)
+        throw std::invalid_argument("stream server requires --key-file or explicit --key-seed for a reproducible test fixture");
+    if (!o.key_file.empty() && o.explicit_key_seed)
+        throw std::invalid_argument("--key-file and --key-seed are mutually exclusive");
     if (o.scenario != "hf" && o.scenario != "eme") throw std::invalid_argument("case must be hf or eme");
     if (!o.explicit_data_if && o.scenario == "eme") o.data_if_hz = 4000;
     if (o.ramp_seconds && *o.ramp_seconds <= 0)
         throw std::invalid_argument("ramp duration must be positive");
     if (o.shaping != "legacy" && o.shaping != "auto")
         throw std::invalid_argument("shaping must be legacy or auto");
-    if (o.power_reference != "whole-active" && o.power_reference != "legacy-window")
-        throw std::invalid_argument("power reference must be whole-active or legacy-window");
+    if (o.power_reference != "whole-active" && o.power_reference != "legacy-window" && o.power_reference != "bounded-tiles")
+        throw std::invalid_argument("power reference must be whole-active, legacy-window or bounded-tiles");
     if (o.plan_only && o.power_plan_only)
         throw std::invalid_argument("--plan-only and --power-plan-only are mutually exclusive");
     if (o.diagnostic_iq_noise.enabled() && (o.plan_only || o.power_plan_only))
@@ -265,12 +314,10 @@ Options parse(int argc, char** argv) {
         if (power && *power <= 0) throw std::invalid_argument("DATA and Helper powers must be positive");
     if (o.timing_policy != "case-default" && o.timing_policy != "bounded" && o.timing_policy != "broad")
         throw std::invalid_argument("timing policy must be case-default, bounded or broad");
-    if (o.output.empty() && !o.plan_only && !o.power_plan_only)
+    if (o.output.empty() && !o.plan_only && !o.power_plan_only && !o.stream_server)
         throw std::invalid_argument("--output is required unless a plan-only mode is selected");
     if (!std::isfinite(o.seconds) || o.seconds <= 0)
         throw std::invalid_argument("seconds must be finite and positive");
-    if (o.seconds > 3600 && (!o.plan_only || o.power_plan_only))
-        throw std::invalid_argument("sampled export and power-plan-only duration must be in (0,3600]; longer durations are available only with --plan-only");
     if (o.data_if_hz < 1725 || o.data_if_hz >= o.sample_rate / 2.)
         throw std::invalid_argument("DATA IF must be at least 1725 Hz and below Nyquist");
     if (o.epoch < 6 || o.epoch > 4294967289ULL)
@@ -295,6 +342,20 @@ Crypto fixture_key(std::uint64_t seed) {
     std::array<std::uint8_t, 32> material{};
     for (auto& b : material) b = static_cast<std::uint8_t>(engine());
     return Crypto(material);
+}
+
+Crypto selected_key(const Options& o) {
+    if (o.key_file.empty()) return fixture_key(o.key_seed);
+    std::ifstream input(o.key_file, std::ios::binary);
+    std::array<std::uint8_t, 32> bytes{};
+    input.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+    if (input.gcount() != 32 || input.peek() != std::char_traits<char>::eof()) {
+        OPENSSL_cleanse(bytes.data(), bytes.size());
+        throw std::invalid_argument("key file must contain exactly 32 raw bytes");
+    }
+    Crypto result(bytes);
+    OPENSSL_cleanse(bytes.data(), bytes.size());
+    return result;
 }
 
 struct Case {
@@ -333,6 +394,8 @@ Case case_for(const Options& o) {
 
 Format format_for(const Options& o) {
     Format f;
+    f.pattern_revision = o.pattern_revision;
+    f.added_amplitude_depth = o.added_amplitude_depth;
     const bool eme = o.scenario == "eme";
     f.inner_rate_hz = o.inner_rate_hz.value_or(eme ? 360 : 36);
     f.added_symbols = o.added_symbols.value_or(eme ? 1 : 10);
@@ -552,6 +615,8 @@ void print_plan_json(const Options& o, double data_if_hz,
         << ",\"scenario\":"; json_string(std::cout, o.scenario);
     std::cout << ",\"shaping\":"; json_string(std::cout, o.shaping);
     std::cout << ",\"format\":{\"inner_rate_hz\":" << f.inner_rate_hz
+        << ",\"pattern_revision\":\"" << pattern_revision_name(f.pattern_revision)
+        << "\",\"added_amplitude_depth\":" << f.added_amplitude_depth
         << ",\"added_symbols\":" << f.added_symbols << ",\"fine_chip_rate_hz\":" << g.fine_chip_rate_hz
         << ",\"occupied_bandwidth_hz\":" << nominal << ",\"fhss\":" << boolean(f.fhss)
         << ",\"center_aligned\":" << boolean(f.fhss_center_aligned)
@@ -604,8 +669,11 @@ void print_plan_json(const Options& o, double data_if_hz,
     physics_json(std::cout, o, physical, physics, data_if_hz);
     std::cout << ",\"export_constraints\":{\"sample_rate_hz\":" << sample_rate
         << ",\"maximum_export_bytes\":" << maximum_export_bytes << ",\"fixed_helper_lead_seconds\":38"
-        << ",\"maximum_sampled_active_seconds\":3600"
+        << ",\"maximum_sampled_active_seconds\":null"
+        << ",\"sampled_duration_constraint\":\"No time cap; sampled export byte budget and chosen power-reference work budget remain enforced.\""
         << ",\"plan_only_duration_limit\":\"checked uint64 geometry with no sampled-duration cap\""
+        << ",\"power_reference_policy\":"; json_string(std::cout, o.power_reference);
+    std::cout << ",\"stream_supported\":true"
         << ",\"whole_active_calibration_sample_limit\":4194304"
         << ",\"pulse_halo_seconds\":" << 8 / g.fine_chip_rate_hz
         << ",\"pulse_halo_fits_lead\":" << boolean(g.calendar_origin_sample <= data_start_seconds * sample_rate)
@@ -630,6 +698,8 @@ void print_infeasible_plan(const Options& o, std::string_view stage, std::string
     json_string(std::cout, o.scenario);
     std::cout << ",\"shaping\":";
     json_string(std::cout, o.shaping);
+    std::cout << ",\"pattern_revision\":\"" << pattern_revision_name(o.pattern_revision)
+        << "\",\"added_amplitude_depth\":" << o.added_amplitude_depth;
     std::cout << ",\"physics\":";
     physics_json(std::cout, o, physical, physics, data_if_hz);
     std::cout << "}\n";
@@ -703,6 +773,8 @@ struct DataPowerReference {
     unsigned nodes = 0;
     const char* method = "stratified-fractional-v1";
     bool sampled_complete = false;
+    unsigned sampled_tiles = 0;
+    double tile_relative_standard_error = 0;
 };
 
 DataPowerReference whole_active_power(PatternSource& source, const Format& f, const Geometry& g) {
@@ -784,10 +856,56 @@ DataPowerReference whole_active_power(PatternSource& source, const Format& f, co
     return sampled_reference(previous);
 }
 
+DataPowerReference bounded_tile_power(PatternSource& source, const Format& f, const Geometry& g) {
+    // Sample at most sixteen independently keyed active tiles. No duration-sized
+    // pass or per-chunk gain is used. This is a statistical power reference, not
+    // a certificate of a particular complete waveform's energy.
+    constexpr unsigned maximum_tiles = 16, nodes_per_tile = 2048;
+    const auto tiles = static_cast<unsigned>(std::min<std::uint64_t>(maximum_tiles, g.tile_count));
+    const long double active_dwell = f.dwell_seconds - 2 * f.quiet_seconds;
+    const long double active_tile = g.tile_seconds * (f.fhss ? active_dwell / f.dwell_seconds : 1.L);
+    DataPowerReference result;
+    result.active_seconds = static_cast<double>(active_tile * g.tile_count);
+    result.method = "bounded-keyed-tile-quadrature-v1";
+    result.sampled_tiles = tiles;
+    result.nodes = tiles * nodes_per_tile;
+    long double sum = 0, squares = 0;
+    for (unsigned j = 0; j < tiles; ++j) {
+        const auto begin = static_cast<std::uint64_t>(static_cast<long double>(g.tile_count) * j / tiles);
+        const auto end = static_cast<std::uint64_t>(static_cast<long double>(g.tile_count) * (j + 1) / tiles);
+        const auto tile = begin + mix64(f.epoch ^ (0x54494c45504f57ULL + j)) % (end - begin);
+        long double energy = 0;
+        for (unsigned i = 0; i < nodes_per_tile; ++i) {
+            const auto random = mix64(f.epoch ^ tile ^ (0x4e4f4445504f57ULL + i));
+            const auto fraction = static_cast<long double>(random >> 11) / 9007199254740992.L;
+            const auto coordinate = active_tile * (i + fraction) / nodes_per_tile;
+            long double within = coordinate;
+            if (f.fhss) {
+                const auto dwell = std::floor(coordinate / active_dwell);
+                within = dwell * f.dwell_seconds + f.quiet_seconds + coordinate - dwell * active_dwell;
+            }
+            const auto seconds = tile * (static_cast<long double>(f.burst_wait_tiles) + 1) * g.tile_seconds + within;
+            energy += std::norm(source.sample_at(g.calendar_origin_sample + seconds * f.sample_rate));
+        }
+        const auto mean = energy / nodes_per_tile;
+        sum += mean; squares += mean * mean;
+    }
+    result.mean_norm = static_cast<double>(sum / tiles);
+    if (!(result.mean_norm > 0) || !std::isfinite(result.mean_norm))
+        throw std::runtime_error("invalid bounded tile power reference");
+    if (tiles > 1) {
+        const auto variance = std::max(0.L, (squares - sum * sum / tiles) / (tiles - 1));
+        result.tile_relative_standard_error = static_cast<double>(std::sqrt(variance / tiles) / result.mean_norm);
+    }
+    return result;
+}
+
 void data_power_json(std::ostream& out, const Options& o, const DataPowerReference& power,
                      double calibration_gain, double data_gain) {
     out << "\"data_power_reference_policy\":"; json_string(out, o.power_reference);
-    out << ",\"data_power_reference_version\":2,\"data_reference_bit\":0"
+    out << ",\"pattern_revision\":\"" << pattern_revision_name(o.pattern_revision)
+        << "\",\"added_amplitude_depth\":" << o.added_amplitude_depth
+        << ",\"data_power_reference_version\":2,\"data_reference_bit\":0"
         << ",\"data_reference_integration_method\":"; json_string(out, power.method);
     out << ",\"data_reference_complete_sampled_source\":" << boolean(power.sampled_complete)
         << ",\"data_reference_active_seconds\":" << power.active_seconds
@@ -795,10 +913,14 @@ void data_power_json(std::ostream& out, const Options& o, const DataPowerReferen
         << ",\"data_reference_nodes\":" << power.nodes
         << ",\"data_reference_refinement_relative_difference\":" << power.refinement_relative_difference
         << ",\"data_reference_refinement_tolerance\":0.001"
+        << ",\"data_reference_sampled_tiles\":" << power.sampled_tiles
+        << ",\"data_reference_tile_relative_standard_error\":" << power.tile_relative_standard_error
+        << ",\"data_reference_statistical_error_is_bound\":false"
         << ",\"post_plan_data_calibration_gain\":" << calibration_gain
         << ",\"template_data_gain\":" << data_gain
         << ",\"data_reference_scope\":";
-    json_string(out, o.power_reference == "whole-active" ?
+    json_string(out, o.power_reference == "bounded-tiles" ?
+        "fixed public bit0; at most16 stratified keyed tiles with2048 fractional nodes each; active-time mean omits finite outer halo; between-tile standard error is diagnostic, not a confidence bound or integration guarantee; one unchanged gain for the entire stream" : o.power_reference == "whole-active" ?
         "fixed public bit0 before channel; full active tiles including nonzero ramps; excluding FHSS quiet and burst waits; all bits, epochs and controls retain this gain; refinement difference is not a proven integration bound" :
         "historical39-41s active preview only, potentially inside low-rate birth ramp; active_seconds reports full-source denominator but is not the calibration extent; all bits, epochs and controls retain this gain");
 }
@@ -867,7 +989,7 @@ int run(const Options& o) {
         print_plan_json(o, data_if_hz, selected_shaping, helper_options_for(physical), physical, physics);
         return 0;
     }
-    const auto key = fixture_key(o.key_seed);
+    const auto key = selected_key(o);
     PatternSource reference_source(f, key, 0);
     PatternSource data_source(f, key, static_cast<std::uint8_t>(o.bit));
     const auto lead_samples = static_cast<std::uint64_t>(std::llround(data_start_seconds * sample_rate));
@@ -903,6 +1025,8 @@ int run(const Options& o) {
         composite_samples = burst_plan->distance(calendar_origin, whole_slots.back().helper_end);
     }
     const long double helper_end = static_cast<long double>(composite_samples) / sample_rate;
+    if (o.helper && static_cast<long double>(f.epoch) + std::ceil(helper_end) >= 4294967296.L)
+        throw std::runtime_error("source endpoint exceeds Helper32-bit epoch calendar");
 
     auto helper_options = helper_options_for(physical);
     helper::PowerReference reference;
@@ -948,11 +1072,12 @@ int run(const Options& o) {
     // correction enforces configured active transmit power without changing a
     // Helper sample, duty cycle, waveform, or propagation effect.
     const auto composite_gain = 1 / (plan.data_gain * std::sqrt(reference_mean_norm));
-    auto data_reference = o.power_reference == "whole-active" ? whole_active_power(reference_source, f, g) :
+    auto data_reference = o.power_reference == "bounded-tiles" ? bounded_tile_power(reference_source, f, g) :
+        o.power_reference == "whole-active" ? whole_active_power(reference_source, f, g) :
         DataPowerReference{g.tile_count * g.tile_seconds * (f.fhss ? 1 - 2 * f.quiet_seconds / f.dwell_seconds : 1),
                            reference_mean_norm, 0, reference_nodes};
     if (o.power_reference == "legacy-window") data_reference.method = "legacy-window-v1";
-    const auto data_calibration_gain = o.power_reference == "whole-active" ?
+    const auto data_calibration_gain = o.power_reference != "legacy-window" ?
         std::sqrt(reference_mean_norm / data_reference.mean_norm) : 1.;
     const auto data_gain = plan.data_gain * composite_gain * data_calibration_gain;
     helper::Generator generator(helper_options, plan, f.epoch, true, key);
@@ -970,6 +1095,8 @@ int run(const Options& o) {
             << "{\"schema\":\"triad-helper-power-plan-v1\",\"sample_rate_hz\":" << sample_rate
             << ",\"key_seed\":" << o.key_seed << ",\"public_epoch_seconds\":" << f.epoch
             << ",\"format\":{\"inner_rate_hz\":" << f.inner_rate_hz << ",\"added_symbols\":" << f.added_symbols
+            << ",\"pattern_revision\":\"" << pattern_revision_name(f.pattern_revision)
+            << "\",\"added_amplitude_depth\":" << f.added_amplitude_depth
             << ",\"bit_seconds\":" << g.bit_seconds << ",\"tile_seconds\":" << g.tile_seconds
             << ",\"tile_count\":" << g.tile_count << ",\"burst_wait_tiles\":" << f.burst_wait_tiles
             << ",\"fhss\":" << boolean(f.fhss) << ",\"dwell_seconds\":" << f.dwell_seconds
@@ -1071,7 +1198,7 @@ int run(const Options& o) {
     const auto template_samples = g.source_samples + template_tail;
     const auto export_bytes = static_cast<long double>(config.minimum_capture_samples) * 17 +
         (o.templates ? static_cast<long double>(template_samples) * 26 * 16 * o.whole_bit_count : 0);
-    if (export_bytes > maximum_export_bytes) throw std::runtime_error("export exceeds the explicit 2 GiB fixture budget");
+    if (!o.stream_server && export_bytes > maximum_export_bytes) throw std::runtime_error("export exceeds the explicit 2 GiB fixture budget");
 
     // The complete output bound is checked before allocating additional source
     // workspaces for a multi-bit fixture that may be rejected for its span.
@@ -1150,9 +1277,178 @@ int run(const Options& o) {
         ++source_rows;
         return value;
     };
-    StreamingChannel channel(emitted, config);
-    if (channel.total_samples() != config.minimum_capture_samples)
+    std::unique_ptr<StreamingChannel> channel;
+    if (!o.stream_server || o.stream_kind == "channel")
+        channel = std::make_unique<StreamingChannel>(emitted, config);
+    if (channel && channel->total_samples() != config.minimum_capture_samples)
         throw std::runtime_error("public observation bound did not cover the complete channel tail");
+    if (o.stream_server) {
+#ifdef _WIN32
+        if (_setmode(_fileno(stdout), _O_BINARY) == -1)
+            throw std::runtime_error("cannot select binary standard output");
+#endif
+        // The protocol is intentionally pull-based: pipes/backends provide
+        // backpressure, and neither observations nor templates are accumulated.
+        // Emission and basis generation own separate PatternSource instances.
+        constexpr std::size_t stream_budget = 64ULL * 1024 * 1024;
+        constexpr std::size_t maximum_rows = 16384, maximum_columns = 128;
+        const auto total = o.stream_kind == "channel" ? channel->total_samples() : composite_samples;
+        auto candidate_format = f;
+        if (o.whole_bit_calendar) candidate_format.epoch = whole_slots.front().pattern_begin.epoch;
+        std::map<std::pair<int, unsigned>, std::unique_ptr<PatternSource>> templates;
+        std::size_t template_bytes = 0;
+        std::uint64_t cursor = 0;
+        std::vector<Complex> samples(maximum_rows);
+        std::vector<std::uint8_t> valid(maximum_rows, 1);
+        const auto fixed_bytes = emitted.working_bytes + (channel ? channel->report().working_bytes : 0) +
+            reference_source.working_bytes() + samples.size() * sizeof(Complex) * 2 + valid.size();
+        if (fixed_bytes > stream_budget) throw std::runtime_error("stream source exceeds64MiB workspace budget");
+        std::cout.exceptions(std::ios::badbit | std::ios::failbit);
+        print_plan_json(o, data_if_hz, selected_shaping, helper_options, physical, physics);
+        std::cout << "{\"schema\":\"triad-stream-source-v1\",\"sample_rate_hz\":" << sample_rate
+            << ",\"emitted_samples\":" << composite_samples << ",\"capture_samples\":" << config.minimum_capture_samples
+            << ",\"simulation_channel_constructed\":" << boolean(static_cast<bool>(channel))
+            << ",\"total_samples\":" << total << ",\"data_offset_samples\":" << data_offset
+            << ",\"source_samples\":" << g.source_samples
+            << ",\"capture_lead_seconds\":" << (o.stream_kind == "channel" ? physical.capture_lead : 0)
+            << ",\"noise_variance\":" << (o.stream_kind == "channel" ? config.complex_noise_variance : 0)
+            << ",\"template_data_gain\":" << data_gain << ",\"data_if_hz\":" << data_if_hz
+            << ",\"epoch\":" << candidate_format.epoch
+            << ",\"pattern_revision\":\"" << pattern_revision_name(f.pattern_revision)
+            << "\",\"added_amplitude_depth\":" << f.added_amplitude_depth
+            << ",\"helper_enabled\":" << boolean(o.helper)
+            << ",\"conditional_gaussian_null_supported\":"
+            << boolean(o.stream_kind == "channel" && !o.helper && !o.diagnostic_iq_noise.enabled())
+            << ",\"helper_high_hz\":" << plan.frequency_hz
+            << ",\"helper_low_hz\":" << plan.low_frequency_hz
+            << ",\"maximum_rows\":" << maximum_rows << ",\"maximum_columns\":" << maximum_columns
+            << ",\"workspace_budget_bytes\":" << stream_budget << ",\"fixed_workspace_bytes\":" << fixed_bytes
+            << ",\"stream_kind\":"; json_string(std::cout, o.stream_kind);
+        std::cout << ",\"key_source\":"; json_string(std::cout, o.key_file.empty() ? "explicit-test-fixture-seed" : "raw-key-file");
+        std::cout << ",\"power\":{"; data_power_json(std::cout, o, data_reference, data_calibration_gain, data_gain);
+        std::cout << "},\"basis_scope\":\"Public DATA pattern only; arrival is absolute seconds in the requested observation coordinate. Fixed key/epoch per session; all three carriers retained.\""
+            << ",\"scope\":\"Bounded pull source, not a receiver or real-time guarantee. Emitted kind has no channel or thermal noise. Physical null and full-duration power accuracy require qualification.\"}\n" << std::flush;
+        const auto read_line = []() {
+            std::string line;
+            line.reserve(1024);
+            for (;;) {
+                const auto next = std::cin.get();
+                if (next == std::char_traits<char>::eof())
+                    throw std::runtime_error("stream protocol ended without quit; observation remains incomplete");
+                if (next == '\n') return line;
+                // Reject before appending byte1025, rather than allowing getline
+                // to allocate an arbitrarily large command before validation.
+                if (line.size() == 1024) throw std::invalid_argument("stream command exceeds1024bytes");
+                line.push_back(static_cast<char>(next));
+            }
+        };
+        const auto no_extra = [](std::istringstream& line) {
+            std::string extra;
+            if (line >> extra) throw std::invalid_argument("extra stream command fields");
+        };
+        while (true) {
+            std::istringstream command(read_line());
+            std::string name;
+            command >> name;
+            if (name == "quit") {
+                no_extra(command);
+                std::cout << "{\"stopped\":true,\"complete\":" << boolean(cursor == total)
+                    << ",\"consumed_samples\":" << cursor << ",\"total_samples\":" << total
+                    << ",\"source_generated_samples\":" << source_rows
+                    << ",\"source_data_energy\":" << static_cast<double>(source_data_energy)
+                    << ",\"source_helper_energy\":" << static_cast<double>(source_helper_energy)
+                    << ",\"workspace_bytes\":" << fixed_bytes + template_bytes << "}\n" << std::flush;
+                return 0;
+            }
+            if (name == "next") {
+                std::string count_text;
+                if (!(command >> count_text)) throw std::invalid_argument("next requires COUNT");
+                no_extra(command);
+                const auto requested = integer(count_text, "stream count");
+                if (!requested || requested > maximum_rows) throw std::invalid_argument("next COUNT must be in[1,16384]");
+                const auto first = cursor;
+                const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(requested, total - cursor));
+                if (o.stream_kind == "emitted") {
+                    for (std::size_t i = 0; i < count; ++i) samples[i] = emitted.sample_at(cursor + i);
+                    std::fill_n(valid.begin(), count, std::uint8_t{1});
+                } else {
+                    std::size_t received = 0;
+                    while (received < count) {
+                        const auto chunk = std::min<std::size_t>(config.maximum_chunk_samples, count - received);
+                        const auto got = channel->read(std::span(samples).subspan(received, chunk), std::span(valid).subspan(received, chunk));
+                        if (!got) throw std::runtime_error("channel ended before declared stream endpoint");
+                        received += got;
+                    }
+                }
+                cursor += count;
+                std::cout << "{\"count\":" << count << ",\"first_sample\":" << first
+                    << ",\"complete\":" << boolean(cursor == total) << "}\n";
+                write_complex(std::cout, std::span(samples).first(count));
+                std::cout.write(reinterpret_cast<const char*>(valid.data()), static_cast<std::streamsize>(count));
+                std::cout.flush();
+            } else if (name == "basis") {
+                std::string first_text, count_text, columns_text;
+                if (!(command >> first_text >> count_text >> columns_text)) throw std::invalid_argument("basis requires FIRST COUNT N");
+                no_extra(command);
+                const auto first = integer(first_text, "basis first");
+                const auto rows64 = integer(count_text, "basis count");
+                const auto columns64 = integer(columns_text, "basis columns");
+                if (!rows64 || rows64 > maximum_rows || !columns64 || columns64 > maximum_columns || first > UINT64_MAX - rows64)
+                    throw std::invalid_argument("basis count/column/coordinate exceeds bounded protocol extent");
+                const auto rows = static_cast<std::size_t>(rows64), columns = static_cast<std::size_t>(columns64);
+                std::vector<Candidate> requests;
+                requests.reserve(columns);
+                for (std::size_t c = 0; c < columns; ++c) {
+                    std::istringstream line(read_line());
+                    std::array<std::string, 7> fields;
+                    for (auto& field : fields) if (!(line >> field)) throw std::invalid_argument("basis row needs7fields");
+                    no_extra(line);
+                    const auto bit = integer(fields[0], "basis bit");
+                    const auto epoch_real = real(fields[1], "basis epoch offset");
+                    if (bit > 1 || std::floor(epoch_real) != epoch_real || epoch_real < -6 || epoch_real > 6)
+                        throw std::invalid_argument("basis bit/epoch outside public alternatives");
+                    Candidate candidate;
+                    candidate.source_bit = static_cast<std::uint8_t>(bit);
+                    candidate.epoch_offset_seconds = static_cast<int>(epoch_real);
+                    candidate.arrival_seconds = real(fields[2], "basis arrival");
+                    candidate.frequency_hz = real(fields[3], "basis frequency");
+                    candidate.clock_ppm = real(fields[4], "basis clock");
+                    candidate.channel.taps = {{real(fields[5], "basis delay"), real(fields[6], "basis Doppler")}};
+                    if (candidate.clock_ppm <= -1e6 || candidate.channel.taps.front().delay_seconds < 0)
+                        throw std::invalid_argument("basis clock must be positive-rate and delay nonnegative");
+                    requests.push_back(candidate);
+                }
+                const auto output_bytes = columns * rows * sizeof(Complex);
+                // write_complex packs one further binary64 buffer. Include both.
+                if (fixed_bytes + template_bytes + 2 * output_bytes > stream_budget)
+                    throw std::runtime_error("basis batch exceeds64MiB workspace budget");
+                std::vector<Complex> output(columns * rows);
+                for (std::size_t c = 0; c < columns; ++c) {
+                    const auto& candidate = requests[c];
+                    const auto address = std::make_pair(static_cast<int>(candidate.epoch_offset_seconds), static_cast<unsigned>(candidate.source_bit));
+                    auto found = templates.find(address);
+                    if (found == templates.end()) {
+                        if (templates.size() >= 26 || fixed_bytes + template_bytes + 2 * output_bytes + g.source_workspace_bytes > stream_budget)
+                            throw std::runtime_error("template cache exceeds64MiB workspace budget");
+                        auto format = candidate_format;
+                        format.epoch = static_cast<std::uint64_t>(static_cast<std::int64_t>(format.epoch) + candidate.epoch_offset_seconds);
+                        auto source = std::make_unique<PatternSource>(format, key, candidate.source_bit);
+                        template_bytes += source->working_bytes();
+                        if (fixed_bytes + template_bytes + 2 * output_bytes > stream_budget)
+                            throw std::runtime_error("template cache actual workspace exceeds64MiB budget");
+                        found = templates.emplace(address, std::move(source)).first;
+                    }
+                    const auto destination = std::span(output).subspan(c * rows, rows);
+                    shaped_basis(*found->second, candidate, sample_rate, first, rows, destination);
+                    for (auto& value : destination) value *= data_gain;
+                }
+                std::cout << "{\"count\":" << rows << ",\"first_sample\":" << first
+                    << ",\"columns\":" << columns << ",\"workspace_bytes\":" << fixed_bytes + template_bytes + 2 * output_bytes << "}\n";
+                write_complex(std::cout, output);
+                std::cout.flush();
+            } else throw std::invalid_argument("unknown stream command");
+        }
+    }
     if (!std::filesystem::create_directory(o.output))
         throw std::runtime_error("output must be a fresh directory; existing outputs are never overwritten");
     auto observation = output_file(o.output / "observation.c128", true);
@@ -1160,13 +1456,13 @@ int run(const Options& o) {
     std::vector<Complex> buffer(config.maximum_chunk_samples);
     std::vector<std::uint8_t> validity(buffer.size());
     std::uint64_t written = 0;
-    while (const auto count = channel.read(buffer, validity)) {
+    while (const auto count = channel->read(buffer, validity)) {
         write_complex(observation, std::span(buffer).first(count));
         validity_file.write(reinterpret_cast<const char*>(validity.data()), static_cast<std::streamsize>(count));
         written += count;
     }
     observation.close(); validity_file.close();
-    if (written != channel.total_samples() || source_rows != composite_samples)
+    if (written != channel->total_samples() || source_rows != composite_samples)
         throw std::runtime_error("incomplete composite/capture export");
 
     if (o.templates) {
@@ -1192,7 +1488,7 @@ int run(const Options& o) {
         templates.close();
     }
 
-    const auto& report = channel.report();
+    const auto& report = channel->report();
     const auto elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - wall_start).count();
     const auto cpu = static_cast<double>(std::clock() - cpu_start) / CLOCKS_PER_SEC;
     auto truth = output_file(o.output / "evaluator-truth.json");
@@ -1268,6 +1564,8 @@ int run(const Options& o) {
         << ",\"public_epoch_seconds\":" << f.epoch << ",\"key_seed\":" << o.key_seed
         << ",\"encrypted_source\":true,\"encrypted_helper_metadata\":true,\"helper_callsign\":\"TRIAD\""
         << ",\"format\":{\"inner_rate_hz\":" << f.inner_rate_hz << ",\"added_symbols\":" << f.added_symbols
+        << ",\"pattern_revision\":\"" << pattern_revision_name(f.pattern_revision)
+        << "\",\"added_amplitude_depth\":" << f.added_amplitude_depth
         << ",\"added_interleave\":true,\"requested_bit_seconds\":" << f.bit_seconds
         << ",\"bit_seconds\":" << g.bit_seconds << ",\"fine_chip_rate_hz\":" << g.fine_chip_rate_hz
         << ",\"carrier_spacing_hz\":" << g.carrier_spacing_hz << ",\"occupied_bandwidth_hz\":" << g.occupied_bandwidth_hz

@@ -753,6 +753,8 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
   add_executable(triad_long EXCLUDE_FROM_ALL tools/triad-long.cpp)
   target_include_directories(triad_long PRIVATE src)
   target_link_libraries(triad_long PRIVATE triad_experiment)
+  add_executable(triad_pattern_probe EXCLUDE_FROM_ALL tools/triad-pattern-probe.cpp)
+  target_link_libraries(triad_pattern_probe PRIVATE triad_experiment)
   # Isolated composite-signal study. Reuse the production Helper transmitter
   # (whose object also contains Config adapters); no ordinary receiver is run.
   # Keep that linkage out of triad_experiment and the hardware-free triad group.
@@ -770,8 +772,13 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
       tools/triad_audio_capture.cpp src/audio.cpp src/audio_policy.cpp src/resampler.cpp)
     target_include_directories(triad_audio_capture PRIVATE include src)
     target_link_libraries(triad_audio_capture PRIVATE Threads::Threads ${CMAKE_DL_LIBS} datapump_background_noise)
+    add_executable(triad_audio_stream EXCLUDE_FROM_ALL
+      tools/triad-audio-stream.cpp src/audio.cpp src/audio_policy.cpp src/resampler.cpp)
+    target_include_directories(triad_audio_stream PRIVATE include src)
+    target_link_libraries(triad_audio_stream PRIVATE Threads::Threads ${CMAKE_DL_LIBS} datapump_background_noise)
     if(WIN32)
       target_link_libraries(triad_audio_capture PRIVATE winmm)
+      target_link_libraries(triad_audio_stream PRIVATE winmm)
     endif()
   endif()
   add_executable(triad_planner_perf EXCLUDE_FROM_ALL tools/triad-planner-perf.cpp)
@@ -1179,6 +1186,20 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
       ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_triad_helper_plan_long.py $<TARGET_FILE:triad_helper_export>)
     set_tests_properties(triad_helper_plan_long PROPERTIES LABELS "triad-helper" TIMEOUT 30)
     add_custom_target(test_triad_helper_plan_long DEPENDS triad_helper_export)
+    add_test(NAME triad_stream_source COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_triad_stream_source.py $<TARGET_FILE:triad_helper_export>)
+    set_tests_properties(triad_stream_source PROPERTIES LABELS "triad-helper" TIMEOUT 45)
+    add_custom_target(test_triad_stream_source DEPENDS triad_helper_export)
+    add_test(NAME triad_pattern_probe COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_triad_pattern_probe.py $<TARGET_FILE:triad_pattern_probe>)
+    set_tests_properties(triad_pattern_probe PROPERTIES LABELS "triad" TIMEOUT 60)
+    add_custom_target(test_triad_pattern_probe DEPENDS triad_pattern_probe)
+    if(TARGET triad_audio_stream)
+      add_test(NAME triad_audio_stream COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_triad_audio_stream.py $<TARGET_FILE:triad_audio_stream>)
+      set_tests_properties(triad_audio_stream PROPERTIES LABELS "triad-live" TIMEOUT 30)
+      add_custom_target(test_triad_audio_stream DEPENDS triad_audio_stream)
+    endif()
     if(TARGET triad_audio_capture)
       add_test(NAME triad_audio_capture_guards COMMAND ${CMAKE_COMMAND} -E env
         TRIAD_AUDIO_CAPTURE_BINARY=$<TARGET_FILE:triad_audio_capture> ${Python3_EXECUTABLE}
@@ -1289,7 +1310,7 @@ if(NOT DATAPUMP_BUILD_WASM)
           _target STREQUAL "test_triad_statistics" OR _target STREQUAL "test_triad_v3_source" OR _target STREQUAL "test_triad_shaping" OR
           _target STREQUAL "test_triad_v3_channel" OR _target STREQUAL "test_triad_v3_receiver" OR
           _target STREQUAL "triad_study" OR _target STREQUAL "triad_examples" OR
-          _target STREQUAL "triad_long" OR _target STREQUAL "triad_audio_capture" OR
+          _target STREQUAL "triad_long" OR _target STREQUAL "triad_pattern_probe" OR _target STREQUAL "triad_audio_capture" OR _target STREQUAL "triad_audio_stream" OR
           _target STREQUAL "triad_helper_export" OR _target STREQUAL "test_triad_helper_burst" OR
           _target STREQUAL "triad_planner_perf" OR
           _target STREQUAL "triad_oscillator_study")

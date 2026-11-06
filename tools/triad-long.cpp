@@ -43,6 +43,8 @@ namespace statistics = datapump::triad::statistics;
 using Clock = std::chrono::steady_clock;
 
 struct Options {
+    PatternRevision pattern_revision = PatternRevision::IndependentApskV2;
+    double added_amplitude_depth = .25;
     std::string mode = "plan";
     std::string channel = "none";
     std::string control = "signal";
@@ -113,6 +115,12 @@ struct Options {
 bool path_evolution_active(const Options& o) {
     const auto& p=o.path_evolution;
     return p.ray_coherence_seconds>0||p.gaussian_doppler_width_hz>0||p.diurnal_phase_amplitude_radians>0||p.outage_start_seconds>=0;
+}
+
+PatternRevision parse_pattern_revision(std::string_view text) {
+    if (text == "legacy-v1") return PatternRevision::LegacyV1;
+    if (text == "independent-apsk-v2") return PatternRevision::IndependentApskV2;
+    throw std::invalid_argument("pattern revision must be legacy-v1 or independent-apsk-v2");
 }
 
 bool configured_physics(const Options& o) {
@@ -268,6 +276,7 @@ Options parse(int argc, char** argv) {
             std::cout << R"HELP(triad_long --mode configure|plan|run|export|export-source-window|export-sampled|export-stats|export-group-stats [options]
   --seconds S                 Requested active one-bit span (8..315576000 s, ten Julian years); rounded to complete private tiles.
   --rate HZ --added N --sample-rate HZ --rf-hz HZ
+  --pattern-revision independent-apsk-v2|legacy-v1 --added-amplitude-depth D (0<D<1)
   --sample-rate-denominator N Reciprocal-integer sampling: N>1 requires --sample-rate 1; Fs=1/N Hz.
                               Rates below64 Hz require FHSS/dropout/frontend/FM/white-PM off.
                               Constant offsets, Wiener phase, two-ray spread and perturbation remain modeled.
@@ -385,6 +394,12 @@ Examples:
         else if (key == "--seconds") o.seconds = number(need(), "seconds");
         else if (key == "--cn0") o.cn0 = number(need(), "C/N0");
         else if (key == "--rate") o.rate = number(need(), "Rate");
+        else if (key == "--pattern-revision") o.pattern_revision = parse_pattern_revision(need());
+        else if (key == "--added-amplitude-depth") {
+            o.added_amplitude_depth = number(need(), "Added Symbols amplitude depth");
+            if (!(o.added_amplitude_depth > 0 && o.added_amplitude_depth < 1))
+                throw std::invalid_argument("Added Symbols amplitude depth must be in (0,1)");
+        }
         else if (key == "--rf-hz") o.rf_hz = number(need(), "RF frequency");
         else if (key == "--base-oscillator") o.base_oscillator=std::string(need());
         else if (key == "--shift-oscillator") o.shift_oscillator=std::string(need());
@@ -685,6 +700,7 @@ WholeBitCalendar whole_bit_calendar(const Options& o,const Format& f,const Geome
 
 Format format_for(const Options& o) {
     Format f;
+    f.pattern_revision=o.pattern_revision; f.added_amplitude_depth=o.added_amplitude_depth;
     f.inner_rate_hz=o.rate; f.added_symbols=o.added; f.added_interleave=true;
     const auto fs=o.sample_rate ? o.sample_rate : std::max(960.,std::ceil(4.2*(f.inner_rate_hz/6*o.added)));
     if(!std::isfinite(fs)||fs!=std::floor(fs)||fs>std::numeric_limits<std::uint32_t>::max())throw std::invalid_argument("sample rate must be an integer in uint32 range");
@@ -845,6 +861,8 @@ void json_configuration(std::ostream& out,const Options& o,const Format& f,const
     const auto supplied_frequency=std::floor((o.frequency_high-o.frequency_low)/o.frequency_step+1e-9)+1;
     const long double supplied_bank=2.L*supplied_timing*supplied_frequency*o.clocks_ppm.size()*o.epoch_offsets.size()*o.frequency_drifts.size()*(o.basis=="two-ray"?2:1);
     out<<"{\"new_controls_active\":"<<(r.active?"true":"false")<<",\"oscillator_presets_active\":"<<(r.oscillators?"true":"false")
+       <<",\"pattern_revision\":\""<<pattern_revision_name(f.pattern_revision)
+       <<"\",\"added_amplitude_depth\":"<<f.added_amplitude_depth
        <<",\"fhss_center_aligned\":"<<(f.fhss_center_aligned?"true":"false")
        <<",\"base_oscillator\":";json_string(out,r.base_id);out<<",\"shift_oscillator\":";json_string(out,r.shift_id);
     out<<",\"topology\":";
@@ -1004,6 +1022,8 @@ void json_provenance(std::ostream& out,const Options& o,const Format& f,const Ge
        <<",\"command_argv\":[";
     for(std::size_t i=0;i<o.command_argv.size();++i){if(i)out<<',';json_string(out,o.command_argv[i]);}
     out<<"],\"source_format\":{\"version\":3,\"inner_rate_hz\":"<<f.inner_rate_hz
+       <<",\"pattern_revision\":\""<<pattern_revision_name(f.pattern_revision)
+       <<"\",\"added_amplitude_depth\":"<<f.added_amplitude_depth
        <<",\"fhss_center_aligned\":"<<(f.fhss_center_aligned?"true":"false")
        <<",\"added_symbols\":"<<f.added_symbols<<",\"added_interleave\":"<<(f.added_interleave?"true":"false")
        <<",\"encrypted\":"<<(f.encrypt?"true":"false")<<",\"symbol_ordinal\":"<<f.symbol_ordinal
@@ -1236,6 +1256,8 @@ void print_plan(const Options& o) {
     const auto active_seconds=result.duration_found?
         std::round((result.duration_seconds-input.duration_offset_seconds)/input.duration_quantum_seconds)*shape.tile_seconds:0;
     std::cout<<std::setprecision(12)<<"{\"mode\":\"plan\",\"target_correct_probability\":"<<o.correct
+        <<",\"pattern_revision\":\""<<pattern_revision_name(format.pattern_revision)
+        <<"\",\"added_amplitude_depth\":"<<format.added_amplitude_depth
         <<",\"fhss_center_aligned\":"<<(format.fhss_center_aligned?"true":"false")
         <<",\"false_admission_probability_per_horizon\":"<<o.false_probability
         <<",\"monitoring_horizon_seconds\":"<<o.horizon<<",\"duration_alternatives\":"<<o.duration_alternatives<<",\"cn0_db_hz\":"<<o.cn0
@@ -1919,6 +1941,8 @@ void export_source_window(const Options& o) {
     std::ofstream manifest(directory/"manifest.json.partial");
     manifest<<std::setprecision(17)<<"{\"format\":\"triad-source-window-v1\",\"byte_order\":\"native\",\"complex_type\":\"complex64\",\"layout\":\"candidate,sample\",\"source_candidates_file\":\"source_candidates.c64\",\"source_candidates_shape\":[2,"<<rows
         <<"],\"signal_file\":\"signal.c64\",\"signal_shape\":["<<rows<<"],\"partial_source_window\":true,\"source_only\":true,\"channel_applied\":false,\"propagated_waveform\":false"
+        <<",\"pattern_revision\":\""<<pattern_revision_name(f.pattern_revision)
+        <<"\",\"added_amplitude_depth\":"<<f.added_amplitude_depth
         <<",\"candidate_model\":\"nominal-flat-keyed-source\",\"channel_model\":\"none-source-only\",\"source_origin_sample\":0"
         <<",\"sample_rate\":"<<fs<<",\"inner_rate_hz\":"<<f.inner_rate_hz<<",\"fine_rate_hz\":"<<g.fine_chip_rate_hz
         <<",\"carrier_spacing_hz\":"<<g.carrier_spacing_hz<<",\"occupied_bandwidth_hz\":"<<g.occupied_bandwidth_hz

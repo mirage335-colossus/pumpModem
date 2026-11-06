@@ -1,5 +1,10 @@
 # Developing the isolated three-carrier Robust modem
 
+**Current waveform:** read [independent patterns and APSK spreading](triad-patterns.md)
+before regenerating templates or transferring old sensitivity results. Use its
+small source/envelope probes first; constant coefficient power is not a guarantee
+of fast composite-envelope balance, especially at sub-Hz rates.
+
 **Random-channel work:** use the [stochastic guide](triad-stochastic.md) for
 physical-time random fields, moving delay, complete-waveform selective filtering
 and joint DATA/pilot inference. Run its cheap model and likelihood checks before
@@ -21,6 +26,9 @@ to make the next bounded development decision without replaying old campaigns
 by default.
 For its provisional weak-receiver duration model and automatic native-export
 wrapper, see the [duration-planning guide](triad-duration-planning.md).
+For bounded continuous source generation and incremental scheduled-bank
+reception, see the [continuous v3 execution guide](triad-continuous.md); its
+real-time and physical multi-day limits remain explicitly unqualified.
 
 For isolated performance regressions, first follow the
 [required efficient regression workflow](triad-performance.md#required-efficient-regression-workflow)

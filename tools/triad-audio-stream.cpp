@@ -1,0 +1,295 @@
+#include "datapump/audio.hpp"
+
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <bit>
+#include <cerrno>
+#include <chrono>
+#include <cmath>
+#include <condition_variable>
+#include <cstdint>
+#include <cstring>
+#include <deque>
+#include <iostream>
+#include <limits>
+#include <mutex>
+#include <optional>
+#include <string>
+#include <thread>
+#include <vector>
+
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#else
+#include <csignal>
+#endif
+
+namespace {
+using namespace std::chrono;
+using Clock = steady_clock;
+constexpr std::size_t block_frames = 4096;
+constexpr std::uint64_t maximum_queue_frames = 192000; // two seconds at 96 kHz
+
+struct Config {
+    std::string mode = "play", device = "default", channels = "left";
+    std::uint32_t rate = 48000;
+    std::uint64_t frames = 0;
+    bool frames_set = false, exclusive = false;
+    datapump::background_noise::Config noise;
+    double reference_watts = 0, reference_rms = 0;
+    bool watts_set = false, rms_set = false;
+};
+
+std::uint64_t parse_u64(const char* text, const char* what) {
+    if (!text || !*text || *text == '-' || *text == '+')
+        throw std::invalid_argument(std::string("invalid ") + what);
+    std::size_t used = 0;
+    auto value = std::stoull(text, &used);
+    if (used != std::strlen(text)) throw std::invalid_argument(std::string("invalid ") + what);
+    return value;
+}
+double parse_double(const char* text, const char* what) {
+    std::size_t used = 0;
+    const double value = std::stod(text, &used);
+    if (used != std::strlen(text) || !std::isfinite(value))
+        throw std::invalid_argument(std::string("invalid ") + what);
+    return value;
+}
+
+Config parse(int argc, char** argv) {
+    Config c;
+    std::optional<std::string> selected_noise;
+    for (int i = 1; i < argc; ++i) {
+        const std::string key = argv[i];
+        auto next = [&]() -> const char* {
+            if (++i >= argc) throw std::invalid_argument("missing value for " + key);
+            return argv[i];
+        };
+        if (key == "--mode") c.mode = next();
+        else if (key == "--device") c.device = next();
+        else if (key == "--sample-rate") {
+            const auto v = parse_u64(next(), "sample rate");
+            if (v == 0 || v > 192000) throw std::invalid_argument("sample rate must be 1..192000 Hz");
+            c.rate = static_cast<std::uint32_t>(v);
+        } else if (key == "--frames") { c.frames = parse_u64(next(), "frame count"); c.frames_set = true; }
+        else if (key == "--exclusive") c.exclusive = true;
+        else if (key == "--channels") c.channels = next();
+        else if (key == "--background-noise-bits") {
+            if (selected_noise) throw std::invalid_argument("select one background-noise level");
+            selected_noise = key; const auto v = parse_u64(next(), "effective bits");
+            if (v > 16) throw std::invalid_argument("effective bits must be 0..16");
+            c.noise.mode = datapump::background_noise::Mode::EffectiveBits; c.noise.value = static_cast<double>(v);
+        } else if (key == "--background-noise-obscured-bits") {
+            if (selected_noise) throw std::invalid_argument("select one background-noise level");
+            selected_noise = key; const auto v = parse_u64(next(), "obscured bits");
+            if (v > 16) throw std::invalid_argument("obscured bits must be 0..16");
+            c.noise.mode = datapump::background_noise::Mode::ObscuredBits; c.noise.value = static_cast<double>(v);
+        } else if (key == "--background-noise-db") {
+            if (selected_noise) throw std::invalid_argument("select one background-noise level");
+            selected_noise = key; c.noise.mode = datapump::background_noise::Mode::SuppressionDb;
+            c.noise.value = parse_double(next(), "noise suppression");
+            if (c.noise.value < 0) throw std::invalid_argument("noise suppression must be nonnegative");
+        } else if (key == "--background-noise-watts") {
+            if (selected_noise) throw std::invalid_argument("select one background-noise level");
+            selected_noise = key; c.watts_set = true; c.noise.mode = datapump::background_noise::Mode::RelativeWatts;
+            c.noise.value = parse_double(next(), "noise watts");
+            if (c.noise.value <= 0) throw std::invalid_argument("noise watts must be positive");
+        } else if (key == "--background-noise-reference-watts") {
+            c.reference_watts = parse_double(next(), "reference watts"); c.watts_set = true;
+        } else if (key == "--background-noise-reference-rms") {
+            c.reference_rms = parse_double(next(), "reference RMS"); c.rms_set = true;
+        } else if (key == "--help") {
+            std::cout << "triad-audio-stream --mode play|capture|copy --frames N [--sample-rate HZ] [--device NAME] [--exclusive] [--channels left|right|stereo]\n"
+                "  play: stdin mono float32le -> audio backend; capture: backend -> stdout mono float32le; copy: bounded device-free pipe check.\n"
+                "  optional TX noise: --background-noise-bits N | --background-noise-obscured-bits N | --background-noise-db D | --background-noise-watts W --background-noise-reference-watts W --background-noise-reference-rms R\n";
+            std::exit(0);
+        } else throw std::invalid_argument("unknown option: " + key);
+    }
+    if (!c.frames_set) throw std::invalid_argument("--frames is required");
+    if (c.mode != "play" && c.mode != "capture" && c.mode != "copy")
+        throw std::invalid_argument("--mode must be play, capture or copy");
+    if (c.channels != "left" && c.channels != "right" && c.channels != "stereo")
+        throw std::invalid_argument("--channels must be left, right or stereo");
+    if (c.mode == "capture" && c.channels != "left")
+        throw std::invalid_argument("capture supports the left logical mono input only");
+    if ((c.noise.mode == datapump::background_noise::Mode::RelativeWatts && (!c.watts_set || !c.rms_set)) ||
+        (c.noise.mode != datapump::background_noise::Mode::RelativeWatts && (c.watts_set || c.rms_set)))
+        throw std::invalid_argument("relative watts needs both fixed reference watts and RMS, and other noise modes reject references");
+    if (c.noise.mode == datapump::background_noise::Mode::RelativeWatts) {
+        if (c.reference_watts <= 0 || c.reference_rms <= 0)
+            throw std::invalid_argument("relative noise references must be positive");
+        c.noise.reference_watts = c.reference_watts;
+        c.noise.reference_mean_square = c.reference_rms * c.reference_rms;
+    }
+    if (c.mode == "capture" && c.noise.mode != datapump::background_noise::Mode::Off)
+        throw std::invalid_argument("transmit background noise is unavailable in capture mode");
+    if (c.mode == "copy" && c.noise.mode != datapump::background_noise::Mode::Off)
+        throw std::invalid_argument("copy mode does not model the final audio output stage; use play mode");
+    if (c.mode == "copy" && c.exclusive) throw std::invalid_argument("copy mode has no audio device");
+    return c;
+}
+
+void set_binary_stdio() {
+    if constexpr (std::endian::native != std::endian::little)
+        throw std::runtime_error("float32le pipe requires a little-endian host");
+#ifdef _WIN32
+    _setmode(_fileno(stdin), _O_BINARY);
+    _setmode(_fileno(stdout), _O_BINARY);
+#else
+    std::signal(SIGPIPE, SIG_IGN);
+#endif
+}
+
+bool read_floats(std::istream& in, float* out, std::size_t count, std::size_t& got) {
+    const auto bytes = count * sizeof(float);
+    in.read(reinterpret_cast<char*>(out), static_cast<std::streamsize>(bytes));
+    const auto read_bytes = static_cast<std::size_t>(in.gcount());
+    got = read_bytes / sizeof(float);
+    if (read_bytes % sizeof(float)) throw std::runtime_error("input ended inside a float32 frame");
+    if (!std::all_of(out, out + got, [](float value) { return std::isfinite(value); }))
+        throw std::runtime_error("nonfinite PCM input");
+    return got == count;
+}
+
+datapump::audio::ChannelMode channel_mode(const std::string& value) {
+    if (value == "right") return datapump::audio::ChannelMode::right_mono;
+    if (value == "stereo") return datapump::audio::ChannelMode::stereo;
+    return datapump::audio::ChannelMode::left_mono;
+}
+
+struct Queue {
+    std::mutex mutex;
+    std::condition_variable changed;
+    std::deque<std::vector<float>> blocks;
+    std::uint64_t frames = 0, cap = maximum_queue_frames;
+    bool done = false, failed = false;
+    std::string error;
+};
+
+int run(const Config& c) {
+    set_binary_stdio();
+    const auto wall_start = Clock::now();
+    const auto cpu_start = std::clock();
+    std::atomic<std::uint64_t> completed{0};
+    std::atomic<std::uint64_t> captured{0};
+    std::atomic<std::uint64_t> clipped{0};
+    std::optional<datapump::audio::BackgroundNoiseReport> noise_report;
+    datapump::audio::Options options;
+    options.exclusive = c.exclusive;
+    // A recovered underrun still loses physical samples. Never certify that
+    // stream as complete merely because the backend later resumes playback.
+    options.playback_discontinuity = [](const std::string& reason) {
+        throw std::runtime_error("playback discontinuity: " + reason);
+    };
+    options.background_noise = c.noise;
+    options.background_noise_report = [&](const auto& report) { noise_report = report; };
+
+    if (c.mode == "copy") {
+        std::array<float, block_frames> input{};
+        std::uint64_t left = c.frames;
+        while (left) {
+            const auto want = static_cast<std::size_t>(std::min<std::uint64_t>(left, input.size()));
+            std::size_t got = 0;
+            read_floats(std::cin, input.data(), want, got);
+            if (got != want) throw std::runtime_error("input ended before declared frame count");
+            std::cout.write(reinterpret_cast<const char*>(input.data()), static_cast<std::streamsize>(got * sizeof(float)));
+            if (!std::cout) throw std::runtime_error("output pipe failed");
+            completed += got; left -= got;
+        }
+        std::cout.flush();
+    } else if (c.mode == "play") {
+        std::uint64_t supplied = 0;
+        auto callback = [&](std::span<float> output) -> std::size_t {
+            if (supplied == c.frames) return 0;
+            const auto want = static_cast<std::size_t>(std::min<std::uint64_t>(
+                c.frames - supplied, output.size()));
+            std::size_t got = 0;
+            read_floats(std::cin, output.data(), want, got);
+            for (std::size_t i = 0; i < got; ++i)
+                if (std::abs(output[i]) >= .999f) clipped.fetch_add(1, std::memory_order_relaxed);
+            supplied += got;
+            completed.store(supplied, std::memory_order_relaxed);
+            return got;
+        };
+        datapump::audio::playback(c.rate, c.device, callback, {}, {}, channel_mode(c.channels), options);
+        if (completed != c.frames) throw std::runtime_error("audio backend completed before declared frame count");
+    } else {
+        Queue queue;
+        queue.cap = std::min<std::uint64_t>(maximum_queue_frames,
+            std::max<std::uint64_t>(block_frames, static_cast<std::uint64_t>(c.rate) * 2));
+        std::thread writer([&] {
+            try {
+                for (;;) {
+                    std::vector<float> block;
+                    {
+                        std::unique_lock lock(queue.mutex);
+                        queue.changed.wait(lock, [&] { return !queue.blocks.empty() || queue.done; });
+                        if (queue.blocks.empty() && queue.done) break;
+                        block = std::move(queue.blocks.front()); queue.blocks.pop_front();
+                        queue.frames -= block.size();
+                    }
+                    std::cout.write(reinterpret_cast<const char*>(block.data()), static_cast<std::streamsize>(block.size() * sizeof(float)));
+                    std::cout.flush();
+                    if (!std::cout) throw std::runtime_error("capture output pipe failed");
+                    completed.fetch_add(block.size(), std::memory_order_relaxed);
+                }
+            } catch (const std::exception& e) {
+                std::lock_guard lock(queue.mutex); queue.error = e.what(); queue.failed = true; queue.changed.notify_all();
+            }
+        });
+        auto callback = [&](std::span<const float> input) {
+            const auto done = captured.load(std::memory_order_relaxed);
+            const auto left = done >= c.frames ? 0 : c.frames - done;
+            const auto n = static_cast<std::size_t>(std::min<std::uint64_t>(left, input.size()));
+            if (!n) return false;
+            std::vector<float> block(input.begin(), input.begin() + static_cast<std::ptrdiff_t>(n));
+            for (float v : block) if (std::abs(v) >= .999f) clipped.fetch_add(1, std::memory_order_relaxed);
+            std::lock_guard lock(queue.mutex);
+            if (queue.failed || queue.frames + n > queue.cap) {
+                queue.failed = true; queue.error = "capture pipe queue exceeded its two-second bound";
+                queue.changed.notify_all(); return false;
+            }
+            queue.frames += n; queue.blocks.push_back(std::move(block));
+            captured.fetch_add(n, std::memory_order_relaxed);
+            queue.changed.notify_all();
+            return true;
+        };
+        try {
+            datapump::audio::capture(c.rate, c.device, callback, {}, {}, options);
+        } catch (...) {
+            { std::lock_guard lock(queue.mutex); queue.done = true; queue.changed.notify_all(); }
+            writer.join(); throw;
+        }
+        { std::lock_guard lock(queue.mutex); queue.done = true; queue.changed.notify_all(); }
+        writer.join();
+        std::lock_guard lock(queue.mutex);
+        if (!queue.error.empty()) throw std::runtime_error(queue.error);
+        if (captured != c.frames || completed != c.frames) throw std::runtime_error("capture ended before declared frame count");
+    }
+    const auto wall = duration<double>(Clock::now() - wall_start).count();
+    const auto cpu = static_cast<double>(std::clock() - cpu_start) / CLOCKS_PER_SEC;
+    std::cerr << "{\"schema\":\"triad-audio-stream-v1\",\"mode\":\"" << c.mode
+        << "\",\"sample_rate_hz\":" << c.rate << ",\"requested_frames\":" << c.frames
+        << ",\"completed_frames\":" << completed.load() << ",\"complete\":true,\"clipped_samples\":" << clipped.load()
+        << ",\"process_cpu_seconds\":" << cpu << ",\"wall_seconds\":" << wall
+        << ",\"queue_bound_frames\":" << (c.mode == "copy" ? 0 : std::min<std::uint64_t>(maximum_queue_frames, std::max<std::uint64_t>(block_frames, static_cast<std::uint64_t>(c.rate) * 2)))
+        << ",\"background_noise\":{";
+    if (!noise_report || !noise_report->enabled) std::cerr << "\"enabled\":false";
+    else std::cerr << "\"enabled\":true,\"sample_rate_hz\":" << noise_report->sample_rate_hz
+        << ",\"active_samples\":" << noise_report->active_samples << ",\"expected_variance\":" << noise_report->expected_variance
+        << ",\"measured_variance\":" << noise_report->measured_variance << ",\"peak\":" << noise_report->peak;
+    std::cerr << "}}\n";
+    return 0;
+}
+}
+
+int main(int argc, char** argv) {
+    try { return run(parse(argc, argv)); }
+    catch (const std::exception& e) {
+        std::cerr << "triad-audio-stream: " << e.what() << '\n';
+        std::cerr << "{\"schema\":\"triad-audio-stream-v1\",\"complete\":false}\n";
+        return 2;
+    }
+}

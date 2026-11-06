@@ -26,6 +26,130 @@ Crypto fixture_key() {
     return Crypto(bytes);
 }
 
+void legacy_pattern_goldens() {
+    // Captured from the pre-migration source/library, before adding the new
+    // revision. Include fractional coordinates, both alternatives and guards.
+    const Complex expected[3][2][3]={
+        {{{.47707298017000677,-.48840020184289495},{1.3587066107478152,-.19459343143392069},{-.33157290575745846,1.2104609669413073}},
+         {{.045662536859675001,1.1045737752950124},{1.2286429655848221,-.54157636434132828},{.27551831666536292,-.097841332829710526}}},
+        {{{-1.0462810550161215,.0039379055680827391},{0,0},{-.66499179403722886,-.76232705316848237}},
+         {{-.8266983951226341,.16524722487060584},{0,0},{-.66515706904988603,-.7555865042054638}}},
+        {{{.92083693362741337,-.40973791737129933},{-.056530910543517901,.61736394551964202},{-.56479148686767888,-.34058254135501675}},
+         {{-.061416002977603718,.0750100172430751},{-.60084949570568813,-.2107339651649458},{1.0867734238532554,.055204529796408719}}}
+    };
+    auto key=fixture_key();
+    for(unsigned mode=0;mode<3;++mode){
+        Format f;f.pattern_revision=PatternRevision::LegacyV1;
+        if(mode==1){f.inner_rate_hz=360;f.added_symbols=1;f.sample_rate=960;f.bit_seconds=8;
+            f.fhss=true;f.fhss_center_aligned=true;f.quiet_seconds=.055;f.ramp_seconds=.006;}
+        if(mode==2){f.bit_seconds=40;f.burst_wait_tiles=1;}
+        for(unsigned bit=0;bit<2;++bit){
+            PatternSource source(f,key,bit);unsigned i=0;
+            for(long double t:{.037L,.317L,.731L}){
+                const auto sample=source.geometry().calendar_origin_sample+t*source.geometry().tile_seconds*f.sample_rate;
+                check(std::abs(source.sample_at(sample)-expected[mode][bit][i++])<2e-12,
+                      "legacy revision no longer matches frozen pre-migration waveform");
+            }
+        }
+    }
+}
+
+void independent_patterns_and_apsk() {
+    auto key=fixture_key();Format f;f.encrypt=false;f.added_symbols=1;
+    f.inner_rate_hz=240;f.sample_rate=2048;f.bit_seconds=24;
+    check(f.pattern_revision==PatternRevision::IndependentApskV2,
+          "independent APSK pattern is not the default");
+    PatternSource zero(f,key,0),one(f,key,1);
+    constexpr unsigned permutations[6][3]={{0,1,2},{0,2,1},{1,0,2},{1,2,0},{2,0,1},{2,1,0}};
+    std::array<double,6> amplitude_error{};std::array<Complex,6> phase_relation{},conjugate_relation{};
+    Complex phase_mean{};double energy=0;unsigned count=0;
+    for(std::uint64_t k=0;k<zero.geometry().fine_cells;++k){
+        const auto a=zero.pattern_coefficient_at(k),b=one.pattern_coefficient_at(k);
+        double norm_a=0,norm_b=0;for(unsigned c=0;c<3;++c){norm_a+=std::norm(a[c]);norm_b+=std::norm(b[c]);}
+        if(norm_a==0&&norm_b==0){
+            check((static_cast<long double>(k)+.5L)/zero.geometry().fine_chip_rate_hz>=zero.geometry().bit_seconds,
+                  "zero coefficient inside the active continuous calendar");
+            continue; // The conservative ceil count can contain one end cell.
+        }
+        check(std::abs(norm_a-3)<3e-15&&std::abs(norm_b-3)<3e-15,
+              "active coefficient power is not constant");
+        if(a==b)continue; // Common non-payload cover is deliberately identical.
+        ++count;energy+=norm_a;
+        for(unsigned c=0;c<3;++c)phase_mean+=a[c]/std::abs(a[c]);
+        for(unsigned p=0;p<6;++p)for(unsigned c=0;c<3;++c){
+            amplitude_error[p]+=std::pow(std::abs(a[c])-std::abs(b[permutations[p][c]]),2);
+            phase_relation[p]+=std::conj(a[c])*b[permutations[p][c]];
+            conjugate_relation[p]+=a[c]*b[permutations[p][c]];
+        }
+    }
+    check(count>700,"too little payload sampled for independent-pattern regression");
+    check(std::abs(phase_mean)/(3*count)<.1,"new keyed phase distribution has a large mean");
+    for(unsigned p=0;p<6;++p){
+        check(amplitude_error[p]/count>.08,"bit alternatives retain a fixed amplitude permutation");
+        check(std::abs(phase_relation[p])/energy<.15&&std::abs(conjugate_relation[p])/energy<.15,
+              "bit alternatives retain a fixed phase/conjugation/permutation relation");
+    }
+    check(zero.pattern_coefficient_at(zero.geometry().fine_cells)==std::array<Complex,3>{},
+          "coefficient diagnostics escape the finite pattern calendar");
+
+    f=Format{};f.encrypt=false;f.added_interleave=false;f.bit_seconds=32;
+    PatternSource apsk(f,key,0),other(f,key,1);
+    auto changed=f;changed.added_amplitude_depth=.6;PatternSource deeper(changed,key,0);
+    std::uint64_t first=0;
+    while(first<apsk.geometry().fine_cells&&apsk.pattern_coefficient_at(first)==other.pattern_coefficient_at(first))++first;
+    check(first+400<apsk.geometry().fine_cells,"missing APSK test payload");
+    const auto radius_ratio=std::sqrt((1+f.added_amplitude_depth)/(1-f.added_amplitude_depth));
+    unsigned amplitude_changes=0,positive=0,negative=0;
+    for(std::uint64_t group=0;group<40;++group){
+        const auto reference=apsk.pattern_coefficient_at(first+group*f.added_symbols);
+        for(unsigned j=0;j<f.added_symbols;++j){
+            const auto k=first+group*f.added_symbols+j;
+            const auto a=apsk.pattern_coefficient_at(k),d=deeper.pattern_coefficient_at(k);
+            double power=0;
+            for(unsigned c=0;c<3;++c){
+                check(std::abs(a[c])>0,"APSK introduced a zero amplitude");power+=std::norm(a[c]);
+                const auto relative=a[c]/reference[c];
+                check(std::abs(relative.imag())<2e-14,"Added Symbols used a phase outside the two antipodal phases");
+                if(relative.real()>0)++positive;else ++negative;
+                check(std::abs(a[c]/std::abs(a[c])-d[c]/std::abs(d[c]))<2e-14,
+                      "changing radius depth changes the independently derived phase");
+            }
+            check(std::abs(power-3)<3e-15,"APSK coefficient balancing changed total power");
+            // The common gain cancels from carrier ratios. Two binary radii
+            // allow these five ratios relative to another fine symbol.
+            const auto r=std::abs((a[0]/a[1])/(reference[0]/reference[1]));
+            double distance=1e9;
+            for(int exponent=-2;exponent<=2;++exponent)distance=std::min(distance,std::abs(r-std::pow(radius_ratio,exponent)));
+            check(distance<2e-14,"Added Symbols have more than two radii");
+            if(std::abs(r-1)>1e-12)++amplitude_changes;
+        }
+    }
+    check(amplitude_changes>100&&positive>100&&negative>100,
+          "APSK did not exercise both radii and both phases");
+    for(double depth:{0.,1.,-1.,std::numeric_limits<double>::quiet_NaN()}){
+        f.added_amplitude_depth=depth;bool rejected=false;
+        try{(void)geometry(f);}catch(const std::exception&){rejected=true;}
+        check(rejected,"invalid independent APSK depth was accepted");
+    }
+}
+
+void revision_random_access_checks() {
+    auto key=fixture_key();
+    for(auto revision:{PatternRevision::LegacyV1,PatternRevision::IndependentApskV2}){
+        Format f;f.pattern_revision=revision;f.bit_seconds=38*86400.;
+        PatternSource sequential(f,key,1),random(f,key,1);
+        const auto first=sequential.geometry().source_samples/2;
+        std::array<Complex,59> a{},b{};sequential.render(first,a);
+        random.render(first+23,std::span(b).subspan(23));random.render(first,std::span(b).first(23));
+        check(a==b,"pattern revision loses long-coordinate chunk invariance");
+        check(sequential.sample_at(first+.375L)==random.sample_at(first+.375L),
+              "pattern revision loses fractional random-access invariance");
+        auto short_f=f;short_f.bit_seconds=16;PatternSource short_source(short_f,key,1);
+        check(short_source.working_bytes()==sequential.working_bytes(),
+              "pattern revision allocates in proportion to bit duration");
+    }
+}
+
 void geometry_checks() {
     Format f;
     const auto g = geometry(f);
@@ -370,6 +494,9 @@ void month_and_low_sample_rate_checks() {
 
 int main() {
     try {
+        legacy_pattern_goldens();
+        independent_patterns_and_apsk();
+        revision_random_access_checks();
         geometry_checks();
         random_access_and_chunk_checks();
         protected_waveform_checks();
