@@ -1,0 +1,262 @@
+{
+  "schema": "triad-gentle-streaming-summary-v1",
+  "hardware": "AMD Ryzen 5 PRO 5650U",
+  "threads": 1,
+  "scope": "Conditional complete sampled captures; parent+native CPU includes both receiver lanes and exact templates, excludes simulation generation and interpreter imports. Multi-trial CPU/input is a campaign average, not a per-trial latency interval.",
+  "rows": [
+    {
+      "name": "default-plus20",
+      "raw_result_sha256": "abe9212c4b47fe675bc3a4cd2d80399a10fd4279153e7c1839603879d21bc117",
+      "raw_source_guard": false,
+      "conditional_equivalence": true,
+      "command": [
+        "/tmp/triad-weak-env/bin/python",
+        "tools/triad_gentle_tracking_study.py",
+        "--input",
+        "native-profile-check/gps-plus20",
+        "--cn0",
+        "-45",
+        "--seed",
+        "614051",
+        "--receivers",
+        "tracking",
+        "--trials",
+        "1",
+        "--output",
+        "local-evidence/triad-gentle-clock/default-plus20.json"
+      ],
+      "path_resolution": "Input and frozen exporter paths above are relative to local-evidence/triad-gentle-clock; run tool from repository root with expanded paths; current equivalent legacy binary can regenerate old-pulse sources after checking manifests.",
+      "true_bit": "0",
+      "cn0_db_hz": -45.0,
+      "capture_seconds": 1250368.0,
+      "trials": 1,
+      "segment_seconds": 4096.0,
+      "receiver_policy": "PracticalTrackingReceiver",
+      "default_log_threshold": 21.493378688261398,
+      "outcomes": [
+        {
+          "log_e": 23.987184389454033,
+          "status": "correct_admission",
+          "selected_bit": 0
+        }
+      ],
+      "parent_cpu_seconds": 94.90799012199999,
+      "native_template_cpu_seconds": 6.6988840000000005,
+      "cpu_per_received_second": 8.126157588965808e-05,
+      "wall_seconds": 101.7033737229649,
+      "preparation_wall_seconds": [
+        0.002767711062915623
+      ],
+      "declared_receiver_workspace_bytes": 4509480,
+      "work_preflight_enforced": true,
+      "source_hashes": {
+        "tools/triad_gentle_tracking_study.py": "cff4ec1a4c7e5d5529b0706ff133a49ef8cbbffa0154cbc80d2a25bbb0a5b08e",
+        "tools/triad_continuous.py": "e62604e05a38ff8ed80111d1a6f8b040999466e6c1d76756ee1186165a542870",
+        "tools/triad_tracking_receiver.py": "b39d1e2a56421862b3c290c3684860566f89bd66f94986dd0b6d25dbc8ef0be6",
+        "tools/triad_incremental_receiver.py": "b1ee63d0996b779c3eb6b40b5514b55ab9d24eaec17be3d1cac3c536243d2c81",
+        "tools/triad_gaussian_state.py": "7d13799a4f7838bed4797fea13626c041f40cdf405c597fcf3ad4bae720c7a6c",
+        "tools/triad_timing_forward.py": "4ac00ca7be76695f0033fe54a17fdc0c1bd0427bf7925453323b1563e1d55556",
+        "tools/triad_dynamic_joint.py": "071a435406d43e5d322f4304ae821469f5b3a107134b5e50b5fb15eeab528832",
+        "tools/triad_multiday_tracker_check.py": "e82d310cba4b712233ed4b445c559ae07d6e8dfdd680a29faad5a70b6e4af1a7"
+      },
+      "actual_block_samples": 1
+    },
+    {
+      "name": "default-minus20",
+      "raw_result_sha256": "ab978ea3c7f0933b7bebc605cb21b03007f65844c554c683dbbf726f3076101d",
+      "raw_source_guard": true,
+      "conditional_equivalence": false,
+      "command": [
+        "/tmp/triad-weak-env/bin/python",
+        "tools/triad_gentle_tracking_study.py",
+        "--input",
+        "native-profile-check/gps-minus20",
+        "--exporter",
+        "frozen-tracking-export",
+        "--cn0",
+        "-45",
+        "--seed",
+        "631081",
+        "--bit",
+        "1",
+        "--receivers",
+        "tracking",
+        "--block-seconds",
+        "4096",
+        "--trials",
+        "2",
+        "--output",
+        "local-evidence/triad-gentle-clock/default-minus20.json"
+      ],
+      "path_resolution": "Input and frozen exporter paths above are relative to local-evidence/triad-gentle-clock; run tool from repository root with expanded paths; current equivalent legacy binary can regenerate old-pulse sources after checking manifests.",
+      "true_bit": "1",
+      "cn0_db_hz": -45.0,
+      "capture_seconds": 1250368.0,
+      "trials": 2,
+      "segment_seconds": 4096.0,
+      "receiver_policy": "PracticalTrackingReceiver",
+      "default_log_threshold": 21.493378688261398,
+      "outcomes": [
+        {
+          "log_e": 26.821528717587302,
+          "status": "correct_admission",
+          "selected_bit": 1
+        },
+        {
+          "log_e": 21.639077574263528,
+          "status": "correct_admission",
+          "selected_bit": 1
+        }
+      ],
+      "parent_cpu_seconds": 21.545749354,
+      "native_template_cpu_seconds": 9.358568,
+      "cpu_per_received_second": 1.235808872028075e-05,
+      "wall_seconds": 31.02258917002473,
+      "preparation_wall_seconds": [
+        0.003208500100299716,
+        0.0014563060831278563
+      ],
+      "declared_receiver_workspace_bytes": 6455424,
+      "work_preflight_enforced": true,
+      "source_hashes": {
+        "tools/triad_gentle_tracking_study.py": "cff4ec1a4c7e5d5529b0706ff133a49ef8cbbffa0154cbc80d2a25bbb0a5b08e",
+        "tools/triad_continuous.py": "e62604e05a38ff8ed80111d1a6f8b040999466e6c1d76756ee1186165a542870",
+        "tools/triad_tracking_receiver.py": "13ca5fcd9f5a558517e4dda4617768f8bdfb25ec6a810932d9fbbc0739e7b609",
+        "tools/triad_incremental_receiver.py": "b1ee63d0996b779c3eb6b40b5514b55ab9d24eaec17be3d1cac3c536243d2c81",
+        "tools/triad_gaussian_state.py": "7d13799a4f7838bed4797fea13626c041f40cdf405c597fcf3ad4bae720c7a6c",
+        "tools/triad_timing_forward.py": "4ac00ca7be76695f0033fe54a17fdc0c1bd0427bf7925453323b1563e1d55556",
+        "tools/triad_dynamic_joint.py": "071a435406d43e5d322f4304ae821469f5b3a107134b5e50b5fb15eeab528832",
+        "tools/triad_multiday_tracker_check.py": "7b949c1a360d89637a92e8689936b12024f3040e17d1be935e9d6167e18255a5"
+      },
+      "actual_block_samples": 64
+    },
+    {
+      "name": "default-long-plus20",
+      "raw_result_sha256": "612d3b8e39859dff939621fbada6cac3bd165951d23ed049d435c4791e107ee7",
+      "raw_source_guard": true,
+      "conditional_equivalence": false,
+      "command": [
+        "/tmp/triad-weak-env/bin/python",
+        "tools/triad_gentle_tracking_study.py",
+        "--input",
+        "long-source/gps-plus20-512d",
+        "--exporter",
+        "frozen-tracking-export",
+        "--cn0",
+        "-60",
+        "--seed",
+        "631005",
+        "--receivers",
+        "tracking",
+        "--block-seconds",
+        "4096",
+        "--trials",
+        "1",
+        "--output",
+        "local-evidence/triad-gentle-clock/default-long-plus20.json"
+      ],
+      "path_resolution": "Input and frozen exporter paths above are relative to local-evidence/triad-gentle-clock; run tool from repository root with expanded paths; current equivalent legacy binary can regenerate old-pulse sources after checking manifests.",
+      "true_bit": "0",
+      "cn0_db_hz": -60.0,
+      "capture_seconds": 44493632.0,
+      "trials": 1,
+      "segment_seconds": 4096.0,
+      "receiver_policy": "PracticalTrackingReceiver",
+      "default_log_threshold": 21.493378688261398,
+      "outcomes": [
+        {
+          "log_e": 37.65398001204712,
+          "status": "correct_admission",
+          "selected_bit": 0
+        }
+      ],
+      "parent_cpu_seconds": 334.13232497999996,
+      "native_template_cpu_seconds": 154.418689,
+      "cpu_per_received_second": 1.098024575696585e-05,
+      "wall_seconds": 488.84627599595115,
+      "preparation_wall_seconds": [
+        0.00274231203366071
+      ],
+      "declared_receiver_workspace_bytes": 6455424,
+      "work_preflight_enforced": true,
+      "source_hashes": {
+        "tools/triad_gentle_tracking_study.py": "cff4ec1a4c7e5d5529b0706ff133a49ef8cbbffa0154cbc80d2a25bbb0a5b08e",
+        "tools/triad_continuous.py": "e62604e05a38ff8ed80111d1a6f8b040999466e6c1d76756ee1186165a542870",
+        "tools/triad_tracking_receiver.py": "13ca5fcd9f5a558517e4dda4617768f8bdfb25ec6a810932d9fbbc0739e7b609",
+        "tools/triad_incremental_receiver.py": "b1ee63d0996b779c3eb6b40b5514b55ab9d24eaec17be3d1cac3c536243d2c81",
+        "tools/triad_gaussian_state.py": "7d13799a4f7838bed4797fea13626c041f40cdf405c597fcf3ad4bae720c7a6c",
+        "tools/triad_timing_forward.py": "4ac00ca7be76695f0033fe54a17fdc0c1bd0427bf7925453323b1563e1d55556",
+        "tools/triad_dynamic_joint.py": "071a435406d43e5d322f4304ae821469f5b3a107134b5e50b5fb15eeab528832",
+        "tools/triad_multiday_tracker_check.py": "7b949c1a360d89637a92e8689936b12024f3040e17d1be935e9d6167e18255a5"
+      },
+      "actual_block_samples": 64
+    },
+    {
+      "name": "default-c2-rate001",
+      "raw_result_sha256": "d8b44c61444ac425d767d5c8d32d3a06722cbbbe9fdd58871e8a9e97be240fba",
+      "raw_source_guard": true,
+      "conditional_equivalence": false,
+      "command": [
+        "/tmp/triad-weak-env/bin/python",
+        "tools/triad_gentle_tracking_study.py",
+        "--input",
+        "c2-source/rate001-added1-holdover",
+        "--cn0",
+        "-41",
+        "--seed",
+        "631211",
+        "--bit",
+        "0",
+        "--receivers",
+        "tracking",
+        "--block-seconds",
+        "4096",
+        "--trials",
+        "2",
+        "--output",
+        "local-evidence/triad-gentle-clock/default-c2-rate001.json"
+      ],
+      "path_resolution": "Input and frozen exporter paths above are relative to local-evidence/triad-gentle-clock; run tool from repository root with expanded paths; current equivalent legacy binary can regenerate old-pulse sources after checking manifests.",
+      "true_bit": "0",
+      "cn0_db_hz": -41.0,
+      "capture_seconds": 470932.0,
+      "trials": 2,
+      "segment_seconds": 1756.0,
+      "receiver_policy": "PracticalTrackingReceiver",
+      "default_log_threshold": 21.493378688261398,
+      "outcomes": [
+        {
+          "log_e": 20.203710694228924,
+          "status": "miss",
+          "selected_bit": 0
+        },
+        {
+          "log_e": 24.22432240105568,
+          "status": "correct_admission",
+          "selected_bit": 0
+        }
+      ],
+      "parent_cpu_seconds": 22.971336308,
+      "native_template_cpu_seconds": 157.70580700000002,
+      "cpu_per_received_second": 0.00019182933343667453,
+      "wall_seconds": 180.8484593409812,
+      "preparation_wall_seconds": [
+        0.0038332879776135087,
+        0.027979540987871587
+      ],
+      "declared_receiver_workspace_bytes": 18051174,
+      "work_preflight_enforced": true,
+      "source_hashes": {
+        "tools/triad_gentle_tracking_study.py": "cff4ec1a4c7e5d5529b0706ff133a49ef8cbbffa0154cbc80d2a25bbb0a5b08e",
+        "tools/triad_continuous.py": "e62604e05a38ff8ed80111d1a6f8b040999466e6c1d76756ee1186165a542870",
+        "tools/triad_tracking_receiver.py": "13ca5fcd9f5a558517e4dda4617768f8bdfb25ec6a810932d9fbbc0739e7b609",
+        "tools/triad_incremental_receiver.py": "b1ee63d0996b779c3eb6b40b5514b55ab9d24eaec17be3d1cac3c536243d2c81",
+        "tools/triad_gaussian_state.py": "7d13799a4f7838bed4797fea13626c041f40cdf405c597fcf3ad4bae720c7a6c",
+        "tools/triad_timing_forward.py": "4ac00ca7be76695f0033fe54a17fdc0c1bd0427bf7925453323b1563e1d55556",
+        "tools/triad_dynamic_joint.py": "071a435406d43e5d322f4304ae821469f5b3a107134b5e50b5fb15eeab528832",
+        "tools/triad_multiday_tracker_check.py": "7b949c1a360d89637a92e8689936b12024f3040e17d1be935e9d6167e18255a5"
+      },
+      "actual_block_samples": 439
+    }
+  ]
+}

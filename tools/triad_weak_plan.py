@@ -84,6 +84,11 @@ def _parser():
     p.add_argument('--output', type=Path, help='optional new capture directory; omit to write plan only')
     p.add_argument('--report', type=Path, help='plan JSON path (defaults beside output, or ./triad-weak-plan.json)')
     p.add_argument('--templates', action='store_true', help='include the native all-epoch template bank in the export')
+    p.add_argument('--tracking-bank', type=Path,
+        help='public continuous-receiver bank for bounded persistent tracking CPU/workspace preflight')
+    p.add_argument('--tracking-cost-calibration', type=Path)
+    p.add_argument('--tracking-memory-mib', type=int, default=512)
+    p.add_argument('--tracking-cpu-ceiling', type=float, default=1., help='CPU seconds per received second')
     return p
 
 
@@ -193,6 +198,34 @@ def execute(argv=None):
                 selected_run = dict(command=command, elapsed_seconds=time.perf_counter()-started,
                                     error=geometry_error)
     planned['native_geometry_verified'] = geometry_verified
+    tracking_plan = dict(available=False,
+        reason='Supply --tracking-bank to price the actual scheduled tracking bank; the broad acquisition grid is a separate workload.')
+    if args.tracking_bank is not None:
+        if geometry_verified:
+            from triad_continuous import load_bank, tracking_preflight, disciplined_capture_extent
+            bank, coordinates, taps = load_bank(args.tracking_bank)
+            fmt = selected_probe['format']; physical = selected_probe['physics']
+            fs = selected_probe['export_constraints']['sample_rate_hz']
+            # Padded source geometry plus explicit capture/Helper calendar;
+            # final device-discipline allowance includes both endpoints.
+            extra = (physical.get('capture_lead_seconds', 0.)+physical.get('capture_trail_seconds', 0.)+
+                (selected_probe['export_constraints']['fixed_helper_lead_seconds'] if helper_enabled else 0.))
+            rows = int(selected_probe['geometry']['padded_source_samples'])+math.ceil(extra*fs)
+            rows = disciplined_capture_extent(rows, fs, .001, coordinates, taps)
+            try:
+                tracking_plan = tracking_preflight(bank,
+                    dict(nominal_triplet_bandwidth_hz=fmt['occupied_bandwidth_hz'],
+                         data_if_hz=physical['data_if_hz'], fine_chip_rate_hz=fmt['fine_chip_rate_hz']),
+                    samples=rows, sample_rate=fs, memory_mib=args.tracking_memory_mib,
+                    projection_mode='dft', cpu_ceiling_per_second=args.tracking_cpu_ceiling,
+                    calibration=(json.loads(args.tracking_cost_calibration.read_text())
+                        if args.tracking_cost_calibration else None))
+                tracking_plan['available'] = True
+            except (MemoryError, ValueError) as exc:
+                tracking_plan = dict(available=False, reason=str(exc), status='configuration_rejected')
+        else:
+            tracking_plan['reason'] = 'Selected native geometry is unavailable.'
+    planned['continuous_tracking_resources'] = tracking_plan
     planned['export_supported'] = bool(planned.get('export_supported') and geometry_verified)
     if geometry_verified and 'padded_source_samples' in selected_probe.get('geometry', {}):
         limits = selected_probe.get('export_constraints', {})

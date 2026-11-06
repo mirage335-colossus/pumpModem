@@ -12,6 +12,7 @@ import json
 import math
 from fractions import Fraction
 import os
+import platform
 from pathlib import Path
 import resource
 import subprocess
@@ -305,7 +306,46 @@ def make_timing_forward(bank, descriptor, model_count):
     config = dict(raw)
     rates = config.pop('initial_rate_indices', [0])
     delays = config.pop('initial_delay_indices', [0])
-    segment_seconds = config.pop('segment_seconds', 4.)
+    segment_seconds = config.pop('segment_seconds', None)
+    bandwidth = float(descriptor.get('nominal_triplet_bandwidth_hz', 0))
+    center = abs(float(descriptor.get('data_if_hz', 0)))
+    if not math.isfinite(bandwidth) or bandwidth <= 0 or not math.isfinite(center):
+        raise ValueError('tracking requires finite resolved native waveform bandwidth and IF metadata')
+    if segment_seconds is None:
+        segment_seconds = 4.
+        # Slow complex-baseband patterns need not branch every four seconds.
+        # Bound within-segment envelope motion to a quarter delay cell and
+        # acceleration curvature to the same scale. These are geometric design
+        # budgets, not measured waveform-loss or arbitrary-trajectory promises.
+        # Keep the existing short cadence for audio IF and broad/spread chips.
+        if bandwidth < 1. and center < 1.:
+            delay_cell = float(config.get('delay_step_seconds', 1/(4*bandwidth)))
+            rate = float(config.get('maximum_rate_ppm', 2000.))*1e-6
+            acceleration = float(config.get('maximum_acceleration_ppm_per_second', 20.))*1e-6
+            rate_cell = float(config.get('rate_step_ppm', 50.))*1e-6
+            limits = [4096.]
+            if rate > 0: limits.append(.25*delay_cell/rate)
+            if acceleration > 0:
+                limits.append(math.sqrt(max(0., 2*delay_cell/acceleration)))
+                # Envelope slowness alone does not bound common IF phase.
+                # At most 1/16 cycle curvature for a local affine template.
+                limits.append(math.sqrt(.5/((center+bandwidth/2)*acceleration)))
+            if rate_cell > 0: limits.append(.25/((center+bandwidth/2)*rate_cell))
+            segment_seconds = max(4., min(limits))
+        # Oversampled low-rate input must not turn the slow update cadence into
+        # an unbounded segment allocation. Explicit user durations still fail
+        # preflight when they exceed the receiver's storage contract.
+        fs = float(descriptor.get('sample_rate_hz', 0.))
+        if fs:
+            if not math.isfinite(fs) or fs <= 0:
+                raise ValueError('finite positive tracking sample rate required')
+            segment_seconds = min(segment_seconds, 1_048_576/fs)
+        # Preserve explicit lattice indices and steps. For the automatic slow
+        # envelope grid, cap midpoint frequency mismatch at 1/8 cycle (the
+        # rectangular-integration design proxy is approximately 0.22 dB).
+        if (bandwidth < 1. and center < 1. and 'rate_step_ppm' not in config and
+            'initial_rate_indices' not in raw):
+            config['rate_step_ppm'] = min(200., .25e6/((center+bandwidth/2)*segment_seconds))
     if (isinstance(segment_seconds, bool) or not isinstance(segment_seconds, (int, float)) or
         not math.isfinite(segment_seconds) or segment_seconds <= 0):
         raise ValueError('positive finite tracking segment duration required')
@@ -316,9 +356,6 @@ def make_timing_forward(bank, descriptor, model_count):
     allowed = {'model_probabilities', 'delay_step_seconds', 'rate_step_ppm',
         'maximum_rate_ppm', 'maximum_acceleration_ppm_per_second', 'maximum_states', 'maximum_proposals'}
     if set(config)-allowed: raise ValueError('unknown public tracking configuration fields')
-    bandwidth = float(descriptor.get('nominal_triplet_bandwidth_hz', 0))
-    if not math.isfinite(bandwidth) or bandwidth <= 0:
-        raise ValueError('tracking requires resolved native waveform bandwidth metadata')
     config.setdefault('delay_step_seconds', 1/(4*bandwidth))
     proposal_cap = config.get('maximum_proposals', 256)
     if (isinstance(proposal_cap, bool) or not isinstance(proposal_cap, int) or
@@ -333,6 +370,129 @@ def make_timing_forward(bank, descriptor, model_count):
         tracker.rate_step_ppm > tracker.maximum_acceleration_ppm_per_second*segment_seconds):
         raise ValueError('tracking segment is too short for a rate-grid transition; reduce rate_step_ppm or increase segment_seconds')
     return tracker, segment_seconds
+
+
+def tracking_receiver_class(mode='tracking'):
+    """The practical tracker keeps channel evidence across timing updates.
+
+    The reset implementation remains an explicit numerical reference. Neither
+    choice qualifies physical ADC/ASRC noise or changes endpoint admission.
+    """
+    from triad_tracking_receiver import PracticalTrackingReceiver, PersistentTrackingReceiver, TrackingReceiver
+    if mode == 'tracking':
+        return PracticalTrackingReceiver
+    if mode == 'tracking-persistent':
+        return PersistentTrackingReceiver
+    if mode == 'tracking-reset':
+        return TrackingReceiver
+    raise ValueError('unknown timing receiver policy')
+
+
+def tracking_resource_report(receiver, descriptor, *, template_bytes=0,
+                             template_backend='auto', calibration=None,
+                             cpu_ceiling_per_second=1., memory_limit_bytes=None):
+    """Source/hardware-bound work accounting, without inventing CPU precision."""
+    import torch
+    from triad_tracking_budget import count_tracking_work, forecast_tracking_cost
+    forward = receiver.timing
+    if forward.observations:
+        raise ValueError('tracking work must be frozen before receiving samples')
+    args = receiver.receiver_arguments
+    work = count_tracking_work(samples=receiver.samples, sample_rate_hz=receiver.sample_rate,
+        block_samples=receiver.block_samples, segment_samples=receiver.segment_samples,
+        initial_states=len(forward.states), maximum_states=forward.maximum_states,
+        maximum_proposals=forward.maximum_proposals, rate_index_bound=forward.rate_index_bound,
+        models=forward.model_count, taps=len(args['stationary_power']),
+        precision=receiver.precision, projection_mode=args['projection_mode'],
+        workspace_bytes=receiver.owned_bytes_estimate+template_bytes,
+        fine_symbol_rate_hz=float(descriptor.get('fine_chip_rate_hz', 0.)),
+        data_if_hz=abs(float(descriptor.get('data_if_hz', 0.))),
+        maximum_relative_rate_ppm=forward.maximum_rate_ppm)
+    nominal_plan = getattr(receiver, 'nominal_work_plan', None)
+    if nominal_plan:
+        nominal = count_tracking_work(samples=receiver.samples, sample_rate_hz=receiver.sample_rate,
+            block_samples=receiver.block_samples, segment_samples=receiver.segment_samples,
+            initial_states=nominal_plan['initial_states'], maximum_states=nominal_plan['maximum_states'],
+            maximum_proposals=nominal_plan['maximum_proposals'], rate_index_bound=0,
+            models=nominal_plan['models'], taps=nominal_plan['taps'], precision=receiver.precision,
+            projection_mode=args['projection_mode'], workspace_bytes=nominal_plan['workspace_bytes'])
+        # Fixed affine states retain their original anchor and execute one
+        # identity transition each. Input/calendar counts remain shared; DSP
+        # basis/likelihood work is performed separately and must be added.
+        nominal['work']['transition_edges'] = nominal_plan['initial_states']*max(0, nominal['receiver']['segments']-1)
+        work['lanes'] = dict(adaptive=dict(work['work']), initial_affine=nominal['work'])
+        for key in ('basis_row_samples', 'gaussian_updates', 'transition_edges'):
+            work['work'][key] += nominal['work'][key]
+        work['work']['bound_scope'] += ' Includes both fixed-weight lanes; sample rows and segment calendar are shared counts.'
+    cpu_model = platform.processor() or platform.machine()
+    if Path('/proc/cpuinfo').exists():
+        for line in Path('/proc/cpuinfo').read_text().splitlines():
+            if line.startswith('model name'):
+                cpu_model = line.split(':', 1)[-1].strip(); break
+    identity = dict(source={name: file_identity(ROOT/'tools'/name)['sha256'] for name in
+        ('triad_continuous.py', 'triad_tracking_receiver.py', 'triad_incremental_receiver.py',
+         'triad_gaussian_state.py', 'triad_timing_forward.py', 'triad_tracking_basis.py',
+         'triad_tracking_budget.py')}, hardware=dict(cpu=cpu_model, architecture=platform.machine(),
+         torch_version=torch.__version__, threads=torch.get_num_threads()),
+        regime=dict(receiver=type(receiver).__name__, sample_rate_hz=receiver.sample_rate,
+            block_samples=receiver.block_samples,
+            segment_samples=receiver.segment_samples, models=forward.model_count,
+            taps=len(args['stationary_power']), precision=receiver.precision,
+            coherence_seconds=[str(value) for value in args['coherence_seconds']],
+            stationary_power=list(args['stationary_power']),
+            required_bands=[list(band) for band in args['required_bands']],
+            excluded_bands=[list(band) for band in args['excluded_bands']],
+            waveform_descriptor={key: descriptor.get(key) for key in
+                ('nominal_triplet_bandwidth_hz', 'fine_chip_rate_hz', 'data_if_hz')},
+            delay_step_seconds=forward.delay_step_seconds, rate_step_ppm=forward.rate_step_ppm,
+            maximum_rate_ppm=forward.maximum_rate_ppm,
+            maximum_acceleration_ppm_per_second=forward.maximum_acceleration_ppm_per_second,
+            projection=args['projection_mode'], template_backend=template_backend,
+            template_bytes=template_bytes, maximum_states=forward.maximum_states,
+            maximum_proposals=forward.maximum_proposals,
+            nominal_plan=({key: nominal_plan[key] for key in
+                ('initial_states', 'maximum_states', 'maximum_proposals', 'models', 'taps')}
+                if nominal_plan else None)))
+    # Only measured receiver timers excluding template generation are reusable
+    # here. Native synthesis has its own source/build and cache identity; a
+    # broad prose claim in an imported calibration is insufficient provenance.
+    if calibration is not None:
+        if not isinstance(calibration, dict):
+            raise ValueError('tracking CPU calibration must be an object')
+        if calibration.get('scope') != 'receiver-excluding-basis-v1':
+            calibration = dict(calibration, identity=None)
+    report = forecast_tracking_cost(work, calibration, identity,
+        cpu_ceiling_seconds=cpu_ceiling_per_second*receiver.samples/receiver.sample_rate,
+        memory_ceiling_bytes=memory_limit_bytes)
+    report['identity'] = identity
+    report['preparation_scope'] = 'Receiver construction and template-cache preparation are separate; CPU calibration scope must be receiver-excluding-basis-v1. Native synthesis, ingest, ASRC and finalization require separate measurements.'
+    return report
+
+
+def tracking_preflight(bank, descriptor, *, samples, sample_rate, block_seconds=.25,
+                       coherences=(.5, 2., math.inf), precision='fp32', memory_mib=512,
+                       chunk_samples=4096, projection_mode='valid-rows',
+                       template_backend='auto', calibration=None, cpu_ceiling_per_second=1.):
+    """Bounded no-waveform preflight for the isolated duration/link planner."""
+    descriptor = dict(descriptor, sample_rate_hz=sample_rate)
+    forward, segment_seconds = make_timing_forward(bank, descriptor, len(coherences))
+    memory = memory_mib*1024**2
+    template_bytes = min(32*1024**2, memory//8) if template_backend == 'auto' else 0
+    taps = bank.get('taps', [[0., 0.]])
+    projection = bank.get('projection', {})
+    receiver = tracking_receiver_class()(sample_rate=sample_rate, samples=samples,
+        block_samples=max(1, round(block_seconds*sample_rate)),
+        segment_samples=max(1, round(segment_seconds*sample_rate)),
+        basis_provider=lambda *args: None, timing_forward=forward,
+        required_bands=projection.get('required_bands_hz', [[-.49*sample_rate, .49*sample_rate]]),
+        excluded_bands=projection.get('excluded_bands_hz', []),
+        stationary_power=tuple(bank.get('stationary_power', [1/len(taps)]*len(taps))),
+        coherence_seconds=coherences, precision=precision, projection_mode=projection_mode,
+        memory_limit_bytes=memory-template_bytes, maximum_input_chunk_samples=chunk_samples,
+        audio_center_hz=float(descriptor.get('data_if_hz', 0.)))
+    return tracking_resource_report(receiver, descriptor, template_bytes=template_bytes,
+        template_backend=template_backend, calibration=calibration,
+        cpu_ceiling_per_second=cpu_ceiling_per_second, memory_limit_bytes=memory)
 
 
 class BoundedClockControl:
@@ -401,10 +561,14 @@ def parser():
     p.add_argument('--audio-arguments', default='[]', help='JSON array of extra native audio options (e.g. full-rate background noise)')
     p.add_argument('--follow-system-clock', choices=('auto', 'off', 'continuous', 'bounded-data'), default='auto',
         help='auto (default): follow UTC for live TX/RX, deterministic simulation stays off; explicit off preserves old clock policy')
-    p.add_argument('--receiver', choices=('auto', 'fixed', 'tracking'), default='auto',
-        help='auto: timing-state tracking for live capture, fixed bank for deterministic simulation; public tracking settings live in bank JSON')
+    p.add_argument('--receiver', choices=('auto', 'fixed', 'tracking', 'tracking-persistent', 'tracking-reset'), default='auto',
+        help='auto: persistent affine/adaptive mixture for live capture, fixed bank for deterministic simulation; persistent/reset alternatives are diagnostic references')
     p.add_argument('--tracking-templates', choices=('auto', 'direct'), default='auto',
         help='auto: bounded cached DATA with validated interpolation regimes and explicit native fallback; direct: exact native reference')
+    p.add_argument('--tracking-cost-calibration', type=Path,
+        help='optional exact source/hardware/regime-matched measured work record; no implicit cross-hardware extrapolation')
+    p.add_argument('--tracking-cpu-ceiling', type=float, default=1.,
+        help='reported receiver CPU seconds per received second ceiling; an unavailable calibration remains unknown')
     p.add_argument('--clock-max-ppm', type=float, default=1000)
     p.add_argument('--clock-phase-max-ppm', type=float, default=200,
         help='gentle UTC phase catch-up; separate from measured device-rate calibration')
@@ -426,6 +590,8 @@ def execute(argv=None):
         raise ValueError('chunk must be 1..8192 and threads 1..64')
     if not math.isfinite(a.block_seconds) or a.block_seconds <= 0:
         raise ValueError('positive finite block duration required')
+    if not math.isfinite(a.tracking_cpu_ceiling) or a.tracking_cpu_ceiling <= 0:
+        raise ValueError('positive finite tracking CPU ceiling required')
     if not math.isfinite(a.fixed_gain) or a.fixed_gain <= 0:
         raise ValueError('fixed audio gain must be finite and positive')
     if a.limit_seconds is not None and (not math.isfinite(a.limit_seconds) or a.limit_seconds <= 0):
@@ -457,13 +623,14 @@ def execute(argv=None):
         # The native tool itself defaults to continuous. An explicit adapter
         # override (including the legacy source-only mode) must not double steer.
         audio_arguments += ['--clock-discipline', 'off']
-    mapped_capture = a.mode == 'receive' and a.receiver == 'tracking'
+    tracking = a.receiver in ('tracking', 'tracking-persistent', 'tracking-reset')
+    mapped_capture = a.mode == 'receive' and tracking
     if mapped_capture:
         audio_arguments += ['--capture-format', 'mapped-v1']
     a.report.parent.mkdir(parents=True, exist_ok=True)
     result = dict(schema='triad-continuous-v1', mode=a.mode, complete=False,
         admitted=False, physical_null_qualified=False,
-        acquisition='public initial bank; evolving timing-state inference' if a.receiver == 'tracking' else 'fixed public bank',
+        acquisition='public initial bank; evolving timing-state inference' if tracking else 'fixed public bank',
         receiver_algorithm=a.receiver, system_clock_policy=a.follow_system_clock,
         multi_day_hardware_uptime_qualified=False,
         identities=[file_identity(p) for p in (a.native, Path(__file__),
@@ -543,8 +710,7 @@ def execute(argv=None):
                     stationary_power=tuple(bank.get('stationary_power', [1/len(taps)]*len(taps))),
                     coherence_seconds=tuple(float(x) for x in a.coherences.split(',')),
                     projection_mode=projection_mode, precision=a.precision, memory_limit_bytes=a.memory_mib*1024**2)
-                if a.receiver == 'tracking':
-                    from triad_tracking_receiver import TrackingReceiver
+                if tracking:
                     forward, segment_seconds = make_timing_forward(bank, d, len(common['coherence_seconds']))
                     # Narrow-complex simulations retain their original CFO
                     # convention. Actual audio includes the final DATA IF.
@@ -553,13 +719,24 @@ def execute(argv=None):
                     common['memory_limit_bytes'] -= template_cache_bytes
                     basis = tracking_source_basis(source, coordinates, taps, offset, forward, center,
                         template_backend=a.tracking_templates, cache_bytes=template_cache_bytes)
-                    receiver = TrackingReceiver(**common, timing_forward=forward,
+                    persistent_arguments = dict(audio_center_hz=center) if a.receiver != 'tracking-reset' else {}
+                    receiver = tracking_receiver_class(a.receiver)(**common, timing_forward=forward,
                         segment_samples=max(1, round(segment_seconds*fs)),
                         require_physical_map=mapped_capture,
                         maximum_input_chunk_samples=a.chunk_samples,
-                        basis_provider=basis)
+                        basis_provider=basis, **persistent_arguments)
+                    result['tracking_resource_plan'] = tracking_resource_report(receiver,
+                        dict(d, fine_chip_rate_hz=source.plan.get('format', {}).get('fine_chip_rate_hz', 0.)),
+                        template_bytes=template_cache_bytes, template_backend=a.tracking_templates,
+                        calibration=(json.loads(a.tracking_cost_calibration.read_text())
+                            if a.tracking_cost_calibration else None),
+                        cpu_ceiling_per_second=a.tracking_cpu_ceiling,
+                        memory_limit_bytes=a.memory_mib*1024**2)
                     result['tracking_scope'] = dict(initial_prior='Public bank and declared residual rate/offset indices; defaults assume calibrated residual zero at first segment center.',
-                        channel='Independent channel prior at each segment; coherence model fixed across the observation.',
+                        channel=('Fixed equal mixture of original affine and adaptive persistent channel evidence.'
+                            if a.receiver == 'tracking' else
+                            'Persistent channel posterior per timing state; conditional Gaussian moment matching at path merges.'
+                            if a.receiver == 'tracking-persistent' else 'Independent channel prior at each segment; legacy reset reference.'),
                         pruning='Discarded path likelihood is not renormalized; ambiguity can lose true paths.',
                         local_map_consumed=mapped_capture, segment_seconds=segment_seconds,
                         arbitrary_dynamics_qualified=False, low_cn0_coherent_sensitivity_qualified=False)
@@ -619,7 +796,7 @@ def execute(argv=None):
             if receiver is not None:
                 r = receiver.finish()
                 result['receiver'] = r
-                if a.receiver == 'tracking':
+                if tracking:
                     result['tracking_templates'] = basis.cache_report()
                 if result['complete'] and r['complete_observation']:
                     scores = np.asarray(r['bit_scores'], dtype=float).reshape(2)
@@ -628,9 +805,9 @@ def execute(argv=None):
                         helper_enabled=d['helper_enabled'],
                         log_threshold=result['admission_policy']['log_e_threshold']))
             result['status'] = 'complete' if result['complete'] else 'diagnostic_prefix_incomplete'
-            if a.mode == 'receive' and (a.follow_system_clock == 'continuous' or a.receiver == 'tracking'):
+            if a.mode == 'receive' and (a.follow_system_clock == 'continuous' or tracking):
                 result['admitted'] = False
-                result['status'] = ('completed_tracking_physical_null_unqualified' if a.receiver == 'tracking'
+                result['status'] = ('completed_tracking_physical_null_unqualified' if tracking
                     else 'completed_clock_tracking_unqualified') if result['complete'] else 'diagnostic_prefix_incomplete'
         except BaseException as error:
             result.update(status='failed', error=type(error).__name__+': '+str(error))

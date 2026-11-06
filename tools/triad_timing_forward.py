@@ -261,6 +261,15 @@ class SparseTimingForward:
         """Return each bit's retained normalized log-LR, without a bit prior."""
         return _logsumexp(self._log_weights, axis=(0, 2)).copy()
 
+    def component_log_weights(self):
+        """Owned [model,bit,state] weights for normalized posterior transport.
+
+        No prior is reapplied and no retained mass is renormalized.  A caller
+        carrying channel posteriors defines a different alternative from this
+        module's independent-emission reference and must report that scope.
+        """
+        return self._log_weights.copy()
+
     def report(self):
         scores = self.scores()
         state_weight = _logsumexp(self._log_weights, axis=0)  # [bit,state]

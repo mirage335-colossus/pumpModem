@@ -69,6 +69,18 @@ def main(binary):
             assert difference(samples(flat/f"source_unwarped_bit{bit}.c64"), samples(flat/f"signal_bit{bit}.c64")) < 1e-6
         assert (flat/"basis_bit0_ppm0.c64").read_bytes() != (flat/"basis_bit1_ppm0.c64").read_bytes()
         assert all(row["out_of_passband_samples"] == 0 for row in fm["channel_reports"])
+        assert fm["pulse_shape"] == "rrc-025-span8"
+        c2, c2m = run("c2", "--pulse-shape", "c2", "--raw-sources", "--chunk", "17")
+        c2_chunk, c2cm = run("c2-chunk", "--pulse-shape", "c2", "--raw-sources", "--chunk", "131")
+        assert c2m["pulse_shape"] == c2cm["pulse_shape"] == "rrc-025-span8-c2-tail2"
+        for field in ("samples", "bit_seconds", "source_samples", "calendar_origin_sample", "carrier_spacing_hz"):
+            assert c2m[field] == fm[field], f"pulse-only selection changed {field}"
+        for item in c2m["files"]:
+            assert (c2/item["path"]).read_bytes() == (c2_chunk/item["path"]).read_bytes()
+        for bit in (0, 1):
+            name=f"signal_bit{bit}.c64"
+            assert (c2/name).read_bytes() != (flat/name).read_bytes()
+            assert difference(samples(c2/name), samples(c2/f"basis_bit{bit}_ppm0.c64")) < 1e-6
 
         # Gaussian fields, moving RF phase and dispersive memory all run in
         # the shared full-waveform channel. Chunk boundaries cannot reset them.
@@ -134,6 +146,40 @@ def main(binary):
         affine, _ = run("window-affine", *common, "--sample-rate", "4", "--template-ppm", "0,100")
         assert (affine/"basis_bit0_ppm0.c64").read_bytes() != (affine/"basis_bit0_ppm1.c64").read_bytes()
 
+        # One natural system-oscillator drift affects monotonic and UTC alike;
+        # GPS steps UTC back toward physical time. A day of real holdover can
+        # need a 1--2s fix, but does not create unbounded accumulated UTC steps.
+        gps = ["--rate", ".01", "--days", "8", "--clock-profile", "gps-disciplined",
+               "--data-if", "1725", "--source-window", "350000", "16"]
+        gps_low, gm = run("gps-low", *gps, "--sample-rate", "4", "--chunk", "7")
+        gps_high, ghm = run("gps-high", *gps, "--sample-rate", "8", "--chunk", "37")
+        gps_map = [x[0] for x in struct.iter_unpack("<d", (gps_low/"oracle_source_time.f64").read_bytes())]
+        gps_high_map = [x[0] for x in struct.iter_unpack("<d", (gps_high/"oracle_source_time.f64").read_bytes())]
+        assert gps_map == gps_high_map[::2]
+        for bit in (0, 1):
+            assert difference(samples(gps_low/f"source_warped_bit{bit}.c64"),
+                              samples(gps_high/f"source_warped_bit{bit}.c64")[::2]) < 2e-6
+        assert "shared monotonic/UTC oscillator drift" in gm["clock_domain_model"]
+        assert gm["device_rate_error_ppm"] == 0 and gm["phase_catchup_cap_ppm"] == 200
+        assert gm["system_oscillator_drift_bound_ppm"] == 20
+        assert 0 < gm["gps_max_normal_step_seconds"] < .1
+        assert 1 < gm["gps_max_recovery_step_seconds"] < 2
+        assert gm["gps_fixes"] > 60 and gm["gps_skipped_fixes"] > 20
+        assert 86400 < gm["gps_max_fix_gap_seconds"] < 93600
+        assert gm["oracle_clock_max_displacement_seconds"] < 2
+        assert gm["oracle_system_utc_max_error_seconds"] < 2
+        assert gm["oracle_clock_min_applied_rate_ppm"] < 0 < gm["oracle_clock_max_positive_applied_rate_ppm"]
+
+        _, gps_negative = run("gps-negative", *gps, "--sample-rate", "4", "--clock-drift-ppm", "-20")
+        assert gps_negative["system_oscillator_drift_signed_ppm"] == -20
+        assert 1 < gps_negative["gps_max_recovery_step_seconds"] < 2
+        assert gps_negative["oracle_clock_min_applied_rate_ppm"] < 0 < gps_negative["oracle_clock_max_positive_applied_rate_ppm"]
+        _, gps_normal = run("gps-normal", *gps, "--sample-rate", "4", "--gps-holdover-seconds", "0")
+        assert gps_normal["gps_skipped_fixes"] == 0
+        assert gps_normal["gps_max_recovery_step_seconds"] == 0
+        assert gps_normal["oracle_system_utc_max_error_seconds"] < .1
+        assert gps_normal["oracle_clock_max_displacement_seconds"] < .1
+
         # Persistent exact-native basis service: same public affine files,
         # different request chunking, and an independently checked delay/IF.
         server_export, sm = run("server-affine", "--template-ppm", "-100,0,100")
@@ -153,6 +199,8 @@ def main(binary):
             assert metadata["schema"] == "triad-tracking-basis-server-v1"
             assert metadata["layout"] == "bit,state,sample"
             assert metadata["source_calendar"] == "canonical-8chips-v1"
+            assert metadata["maximum_rate_ppm"] == 4096
+            assert metadata["pulse_shape"] in ("rrc-025-span8", "rrc-025-span8-c2-tail2")
             outputs = []
             while remainder:
                 header, separator, body = remainder.partition(b"\n")
@@ -166,8 +214,10 @@ def main(binary):
         _, responses = server(f"basis 0 {sm['samples']} 3 0 -0 -100 0 0 0 100\n"
                               "basis 37 47 3 0 0 -100 0 0 0 100\n"
                               "basis 37 47 1 10 .001 100\n"
-                              "basis 37 47 1 0 .125 0\nquit\n")
-        assert len(responses) == 4
+                              "basis 37 47 1 0 .125 0\n"
+                              "basis 37 47 2 0 0 -2000 0 2000\n"
+                              "basis 37 1 2 2.3125 0 -4096 0 4096\nquit\n")
+        assert len(responses) == 6
         for bit in (0, 1):
             for state in range(3):
                 expected = samples(server_export/f"basis_bit{bit}_ppm{state}.c64")
@@ -182,16 +232,27 @@ def main(binary):
             rotation = complex(math.cos(2*math.pi*6*.125), math.sin(2*math.pi*6*.125))
             expected = [x*rotation for x in samples(server_export/f"basis_bit{bit}_ppm1.c64")[39:86]]
             assert difference(expected, delayed) < 2e-6
+            nominal = (server_export/f"basis_bit{bit}_ppm1.c64").read_bytes()
+            for state in range(2):
+                offset=(bit*2+state)*47*8
+                assert responses[4][offset:offset+47*8] != nominal[37*8:84*8]
+                assert responses[5][(bit*2+state)*8:(bit*2+state+1)*8] == nominal[37*8:38*8]
         for request in ("basis 0 0 1 0 0 0\n", "basis 0 16384 256 0 0 0\n",
-                        "basis 0 1 1 0 nan 0\n", "basis 0 1 1 0 0 1001\n",
+                        "basis 0 1 1 0 nan 0\n", "basis 0 1 1 0 0 4097\n",
                         "basis 9223372036854775808 1 1 0 0 0\n",
                         "basis 0 1 1 0 0 0 trailing\n", "basis 0 1 1 0 0\n",
                         "basis 0 1 1 0 1e20 0\n", "basis 0 1 1 0 0 0"):
             server(request, ok=False)
         server("quit\n", ok=False, extra=("--clock-profile", "periodic"))
         server("quit\n", ok=False, extra=("--spread", "sub9best"))
+        server("basis 0 1 1 0 0 2000\n", ok=False, extra=("--data-if", "10000"))
         _, empty = server("")
         assert not empty
+        c2_metadata, c2_response = server(f"basis 0 {c2m['samples']} 1 0 0 0\nquit\n", extra=("--pulse-shape", "c2"))
+        assert c2_metadata["pulse_shape"] == "rrc-025-span8-c2-tail2"
+        for bit in (0, 1):
+            begin=bit*c2m["samples"]*8
+            assert c2_response[0][begin:begin+c2m["samples"]*8] == (c2/f"basis_bit{bit}_ppm0.c64").read_bytes()
 
         rejected = run("cap", "--max-output-bytes", "1", ok=False)
         assert "max-output-bytes" in rejected.stderr and not (root/"cap").exists()
@@ -204,6 +265,11 @@ def main(binary):
         run("bad-depth", "--selective-each-depth", "1", ok=False)
         run("bad-ppm", "--template-ppm", "1001", ok=False)
         run("bad-bit", "--bit", "7", ok=False)
+        run("bad-clock-profile", "--clock-profile", "gps", ok=False)
+        run("clock-option-wrong-profile", "--clock-drift-ppm", "20", ok=False)
+        run("bad-clock-drift", "--clock-profile", "gps-disciplined", "--clock-drift-ppm", "201", ok=False)
+        run("bad-gps-holdover", "--clock-profile", "gps-disciplined", "--gps-holdover-seconds", "-1", ok=False)
+        run("bad-pulse-shape", "--pulse-shape", "unknown", ok=False)
     print(json.dumps({"native_export_checks": checks, "basis_server_protocol_checked": True, "status": "passed",
                       "scope": "small native source/channel/controller protocol; no reception claim"}))
 

@@ -126,6 +126,46 @@ class GaussianStateFilter:
         self._worst_relative_covariance_eigenvalue = torch.zeros((), dtype=torch.float64, device=self._device)
         self._largest_relative_gram_repair = torch.zeros((), dtype=torch.float64, device=self._device)
 
+    def initialize_posterior(self, mean, covariance):
+        """Start from a normalized posterior obtained from preceding data.
+
+        The caller owns the preceding likelihood ratio.  This filter starts a
+        fresh *incremental* likelihood at zero while retaining its channel
+        information.  This is useful when public timing states change between
+        blocks; it is not permission to fit an initial prior on the same data
+        that will subsequently be scored.  Inputs are copied and validated.
+        """
+        if self.mean is not None or self.blocks:
+            raise ValueError("Gaussian posterior can only initialize an unused filter")
+        if not isinstance(mean, torch.Tensor) or not isinstance(covariance, torch.Tensor):
+            raise TypeError("Gaussian posterior mean and covariance must be Torch tensors")
+        if mean.requires_grad or covariance.requires_grad:
+            raise ValueError("Gaussian posterior inputs must not require gradients")
+        if (mean.ndim < 1 or mean.shape[-1] != self.taps or
+                covariance.shape != mean.shape[:-1] + (self.taps, self.taps) or
+                mean.device != covariance.device):
+            raise ValueError("Gaussian posterior extents or device differ")
+        mean = mean.to(self.dtype)
+        covariance = covariance.to(self.dtype)
+        if not bool(torch.isfinite(mean).all()) or not bool(torch.isfinite(covariance).all()):
+            raise ValueError("Gaussian posterior contains nonfinite values")
+        scale = covariance.abs().amax(dim=(-2, -1)).clamp_min(1.)
+        if bool(((covariance-covariance.mH).abs().amax(dim=(-2, -1)) >
+                 self.relative_tolerance*scale).any()):
+            raise ValueError("Gaussian posterior covariance is not Hermitian")
+        covariance = (covariance+covariance.mH)*.5
+        eigenvalues = torch.linalg.eigvalsh(covariance)
+        if bool((eigenvalues[..., 0] < -self.relative_tolerance*scale).any()):
+            raise ValueError("Gaussian posterior covariance is not positive semidefinite")
+        self._initialize(mean, covariance)
+        self.mean = mean.clone()
+        self.covariance = covariance.clone()
+
+    def posterior(self):
+        """Return owned copies of the normalized current coefficient state."""
+        self.finish()
+        return self.mean.clone(), self.covariance.clone()
+
     def update(self, correlations, gram, dt_seconds: float):
         """Consume one complete block and return its FP64 log-LR increment."""
         dt = float(dt_seconds)

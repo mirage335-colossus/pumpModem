@@ -53,6 +53,12 @@ For complete sampled multi-day weak observations, use the
 source/channel and covariance checks precede the occasional historical campaign.
 Persistent evidence, renewed channel priors, low-IF timing tolerance, adaptive
 tracking and channel-oracle bounds are different claims; keep them separate.
+The [gentle GPS qualification](validation-data/triad-v3/2026-11-06-gentle-tracking/README.md)
+adds the default fixed nominal/adaptive persistent mixture, a full 515-day
+sampled observation and explicit work/workspace planning. Use its tiny posterior,
+timing and planner tests before reusing archived full-source statistics. A
+nominal-lane detection bound is not full-mixture correct-bit reliability; physical
+ASRC admission and high-IF phase tracking remain separate qualifications.
 
 For isolated performance regressions, first follow the
 [required efficient regression workflow](triad-performance.md#required-efficient-regression-workflow)

@@ -10,7 +10,8 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'tools'))
 from triad_continuous import (carrier_phase, endpoint_decision, read_exact,
                               receiver_noise_variance, validate_stream_identity, BoundedClockControl, execute, parser,
-                              disciplined_capture_extent, make_timing_forward, tracking_source_basis)
+                              disciplined_capture_extent, make_timing_forward, tracking_source_basis,
+                              tracking_receiver_class)
 from triad_timing_forward import TimingState
 from triad_control_clock import ControlClock, ClockReading
 
@@ -21,6 +22,10 @@ class ContinuousTests(unittest.TestCase):
         self.assertEqual(options.follow_system_clock, 'auto')
         self.assertEqual(options.receiver, 'auto')
         self.assertEqual(options.clock_phase_max_ppm, 200)
+        from triad_tracking_receiver import PracticalTrackingReceiver, PersistentTrackingReceiver, TrackingReceiver
+        self.assertIs(tracking_receiver_class(), PracticalTrackingReceiver)
+        self.assertIs(tracking_receiver_class('tracking-persistent'), PersistentTrackingReceiver)
+        self.assertIs(tracking_receiver_class('tracking-reset'), TrackingReceiver)
         bank = dict(coordinates=[[0, 0, 0, 0]])
         forward, seconds = make_timing_forward(bank, dict(nominal_triplet_bandwidth_hz=225), 3)
         self.assertEqual(forward.states, (TimingState(0, 0, 0),))
@@ -30,6 +35,29 @@ class ContinuousTests(unittest.TestCase):
                        dict(segment_seconds=.1), dict(secret_tx_trace=True)):
             with self.assertRaises(ValueError):
                 make_timing_forward(dict(bank, tracking=config), dict(nominal_triplet_bandwidth_hz=225), 3)
+
+    def test_slow_envelope_cadence_and_audio_phase_are_separate(self):
+        bank = dict(coordinates=[[0, 0, 0, 0]])
+        for width, center, expected in ((.000625, .0005, 4096.), (.0625, .05, 500.),
+                                        (.000625, 1725., 4.), (62.5, .05, 4.)):
+            _, seconds = make_timing_forward(bank, dict(nominal_triplet_bandwidth_hz=width,
+                data_if_hz=center), 1)
+            self.assertAlmostEqual(seconds, expected)
+        _, seconds = make_timing_forward(dict(bank, tracking=dict(segment_seconds=64)),
+            dict(nominal_triplet_bandwidth_hz=.000625, data_if_hz=.0005), 1)
+        self.assertEqual(seconds, 64)
+        _, seconds = make_timing_forward(bank,
+            dict(nominal_triplet_bandwidth_hz=.000625, data_if_hz=.5), 1)
+        self.assertLess(seconds, 224.)
+        self.assertLessEqual((.5+.000625/2)*20e-6*seconds**2/8, .0625+1e-12)
+        forward, seconds = make_timing_forward(bank, dict(nominal_triplet_bandwidth_hz=.000625,
+            data_if_hz=.0005, sample_rate_hz=6000), 1)
+        self.assertLessEqual(round(seconds*6000), 1_048_576)
+        self.assertEqual(forward.rate_step_ppm, 200.)
+        # Explicit lattice indices retain their previous physical meaning.
+        forward, _ = make_timing_forward(dict(bank, tracking=dict(initial_rate_indices=[1])),
+            dict(nominal_triplet_bandwidth_hz=.000625, data_if_hz=.0005), 1)
+        self.assertEqual(forward.rate_step_ppm, 50.)
 
     def test_mapped_basis_composes_local_coordinates_remote_rate_and_if_once(self):
         calls = []

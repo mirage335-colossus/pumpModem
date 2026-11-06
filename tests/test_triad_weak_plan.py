@@ -68,6 +68,23 @@ class WeakPlanCliTests(unittest.TestCase):
         with self.assertRaises(FileExistsError):
             wrapper.execute(self.args('--seconds', '4', '--report', str(report)))
 
+    def test_tracking_preflight_uses_full_endpoint_and_retains_rejection(self):
+        bank=self.root/'bank.json'
+        bank.write_text(json.dumps(dict(coordinates=[[0,0,0,0]],taps=[[0,0]])))
+        self.probe['geometry']={'padded_source_samples':1000, 'active_tiles':2,
+            'active_data_seconds':4., 'elapsed_seconds':4.}
+        self.probe['format'].update(occupied_bandwidth_hz=225.,fine_chip_rate_hz=60.)
+        self.probe['physics'].update(data_if_hz=1725.,capture_lead_seconds=1.,capture_trail_seconds=2.)
+        self.probe['export_constraints']['sample_rate_hz']=6000
+        with patch.object(wrapper,'run_json',side_effect=self.probe_for), \
+             patch.object(wrapper,'plan_from_native',return_value=self.plan), \
+             patch('triad_continuous.tracking_preflight',side_effect=MemoryError('declared workspace exceeded')) as check:
+            result=wrapper.execute(self.args('--seconds','4','--tracking-bank',str(bank),
+                '--report',str(self.root/'tracking-plan.json')))
+        self.assertGreater(check.call_args.kwargs['samples'],1000+41*6000)
+        self.assertEqual(check.call_args.kwargs['projection_mode'],'dft')
+        self.assertEqual(result['duration_plan']['continuous_tracking_resources']['status'],'configuration_rejected')
+
     def test_native_control_flags_are_rejected_but_cn0_is_preserved(self):
         with self.assertRaisesRegex(ValueError, 'reserved native options'):
             wrapper.execute(['--target-cn0', '8', '--exporter', str(self.exporter), '--',

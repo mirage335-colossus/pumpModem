@@ -1,5 +1,6 @@
 #include "datapump/continuous_clock.hpp"
 #include "datapump/triad_modem_v3.hpp"
+#include "datapump/triad_shaping.hpp"
 #include "datapump/tuning.hpp"
 #include <openssl/evp.h>
 #include <algorithm>
@@ -46,6 +47,7 @@ struct Options {
     double data_if = -1, rf = 0, seconds = 2*86400., phase = 0;
     double width = 0, excursion_ms = 0, knot = 3600, slow = 0, fast = 0;
     std::optional<double> selective_rate;
+    std::optional<double> clock_drift_ppm, gps_holdover_seconds;
     std::vector<double> ppm{-100,0,100};
     std::uint64_t seed = 1, key_seed = 1, cap = 2ULL*1024*1024*1024;
     std::size_t chunk = 4096;
@@ -87,6 +89,14 @@ Options parse(int argc,char** argv) {
         else if(a=="--max-output-bytes")o.cap=integer(next());
         else if(a=="--chunk")o.chunk=integer(next());
         else if(a=="--clock-profile")o.clock=next();
+        else if(a=="--pulse-shape") {
+            const auto shape=next();
+            if(shape=="legacy")o.format.pulse_shape=PulseShape::LegacyRrc;
+            else if(shape=="c2")o.format.pulse_shape=PulseShape::TaperedRrc;
+            else throw std::invalid_argument("pulse-shape must be legacy or c2");
+        }
+        else if(a=="--clock-drift-ppm")o.clock_drift_ppm=number(next());
+        else if(a=="--gps-holdover-seconds")o.gps_holdover_seconds=number(next());
         else if(a=="--spread")o.spread=next();
         else if(a=="--random-doppler-width-hz")o.width=number(next());
         else if(a=="--delay-excursion-ms")o.excursion_ms=number(next());
@@ -103,7 +113,9 @@ Options parse(int argc,char** argv) {
         else if(a=="--help") {
             std::cout<<"DATA-only triad tracking export: --output DIR --rate HZ --added N --seconds S|--days D\n"
                 "--sample-rate INTEGER [--sample-rate-denominator N] --data-if half-rate|HZ --shift HZ\n"
-                "--clock-profile off|periodic|wandering --template-ppm -100,0,100 --spread none|sub9best|sub9moderate|sub9worst\n"
+                "--clock-profile off|periodic|wandering|gps-disciplined --template-ppm -100,0,100 --spread none|sub9best|sub9moderate|sub9worst\n"
+                "--pulse-shape legacy|c2 (default legacy; shape only, no other planner geometry changes)\n"
+                "--clock-drift-ppm P (GPS profile: default20, signed system-oscillator bound) --gps-holdover-seconds S (default86400, weekly)\n"
                 "--random-doppler-width-hz B --delay-excursion-ms A --delay-knot-seconds T\n"
                 "--selective-each-depth 0..0.65 (or slow/fast-depth) --selective-modulation-rate-hz B\n"
                 "--phase-diffusion RAD/SQRT(S) --seed N --key-seed N --epoch N --bit both|0|1\n"
@@ -114,9 +126,14 @@ Options parse(int argc,char** argv) {
     }
     if((o.output.empty() && !o.basis_server) || o.seconds<=0 || o.seconds>10*366*86400. || !std::isfinite(o.seconds) ||
        o.chunk==0 || o.chunk>1048576 || o.cap==0 || o.ppm.empty() || o.ppm.size()>257 ||
-       (o.clock!="off" && o.clock!="periodic" && o.clock!="wandering") ||
+       (o.clock!="off" && o.clock!="periodic" && o.clock!="wandering" && o.clock!="gps-disciplined") ||
        (o.bit!="both" && o.bit!="0" && o.bit!="1"))throw std::invalid_argument("invalid export limits or clock/bit selection");
     if(o.data_if==-1)o.data_if=o.format.inner_rate_hz/2;
+    if((o.clock_drift_ppm || o.gps_holdover_seconds) && o.clock!="gps-disciplined")
+        throw std::invalid_argument("clock-drift-ppm and gps-holdover-seconds require gps-disciplined profile");
+    if((o.clock_drift_ppm && std::abs(*o.clock_drift_ppm)>200) ||
+       (o.gps_holdover_seconds && (*o.gps_holdover_seconds<0 || *o.gps_holdover_seconds>3*86400.)))
+        throw std::invalid_argument("GPS clock drift or holdover exceeds diagnostic bounds");
     if(o.data_if<0 || o.rf<0 || o.width<0 || o.excursion_ms<0 || o.knot<=0 || o.phase<0 ||
        o.slow<0 || o.slow>.65 || o.fast<0 || o.fast>.65 || (o.selective_rate && *o.selective_rate<0))
         throw std::invalid_argument("invalid physical channel setting");
@@ -147,16 +164,46 @@ std::string sha(const fs::path& path) {
     std::ostringstream out;out<<std::hex<<std::setfill('0');for(unsigned i=0;i<length;++i)out<<std::setw(2)<<unsigned(digest[i]);return out.str();
 }
 
-// Same 1-second controller clock at every export Fs. This explicitly models
-// pure UTC phase catch-up, not device calibration or remote clock knowledge.
+// Same 1-second controller clock at every export Fs. The historical profiles
+// deliberately apply independent UTC steps to ideal monotonic/device clocks.
+// gps-disciplined instead drifts monotonic and UTC together, then corrects UTC
+// toward physical time. ADC/DAC frame error stays explicitly zero: q therefore
+// measures that one system-oscillator drift rather than counting it twice.
 class ClockMap {
     audio::ContinuousClock clock_{1,false};
     const Options& o_; std::uint64_t tick_=0,hour_=1,quarter_=1;
     // Integrate only the small displacement, not a growing multi-day time.
     long double displacement_=0,utc_offset_=0,last_physical_=0,last_logical_=0; double c_=0,target_=0;
     std::uint64_t next_hour()const {return hour_*3600+static_cast<std::int64_t>(600*uniform(o_.seed^0x484f5552,hour_))-300;}
+    long double monotonic_offset(long double t) const {
+        if(o_.clock!="gps-disciplined")return 0;
+        const long double omega=2*pi/(7*86400.L),phase=2*pi*uniform(o_.seed^0x47505344,0);
+        const long double drift=o_.clock_drift_ppm.value_or(20)*1e-6L;
+        return drift*(.85L*t+.15L*(std::sin(omega*t+phase)-std::sin(phase))/omega);
+    }
+    bool gps_holdover() const {
+        const auto within=static_cast<long double>(tick_%(7*86400));
+        return within>=3*86400.L && within<3*86400.L+o_.gps_holdover_seconds.value_or(86400);
+    }
+    std::uint64_t last_gps_fix_=0;
     void observe() {
-        if(o_.clock!="off") {
+        const auto monotonic_error=monotonic_offset(tick_);
+        if(o_.clock=="gps-disciplined") {
+            while(tick_>=next_hour()) {
+                if(gps_holdover())++gps_skipped_fixes;
+                else {
+                    const auto next=-monotonic_error+.001L*(2*uniform(o_.seed^0x47505346,hour_)-1);
+                    const double step=static_cast<double>(next-utc_offset_);
+                    const auto gap=tick_-last_gps_fix_;
+                    gps_max_fix_gap_seconds=std::max(gps_max_fix_gap_seconds,gap);
+                    gps_max_step_seconds=std::max(gps_max_step_seconds,std::abs(step));
+                    if(gap>4200)gps_max_recovery_step_seconds=std::max(gps_max_recovery_step_seconds,std::abs(step));
+                    else gps_max_normal_step_seconds=std::max(gps_max_normal_step_seconds,std::abs(step));
+                    utc_offset_=next;last_gps_fix_=tick_;++gps_fixes;
+                }
+                ++hour_;
+            }
+        } else if(o_.clock!="off") {
             while(tick_>=next_hour()) {
                 const double sign=o_.clock=="periodic"?1:(uniform(o_.seed^0x5349474e,hour_)<.5?-1:1);
                 utc_offset_+=sign*(.05+.1*uniform(o_.seed^0x53544550,hour_));
@@ -168,20 +215,27 @@ class ClockMap {
                 ++quarter_;
             }
         }
-        audio::FrameTimestamp stamp;stamp.frame=tick_;stamp.steady_seconds=tick_;
-        stamp.utc_seconds=static_cast<long double>(o_.format.epoch)+tick_+utc_offset_;
+        const auto utc_error=monotonic_error+utc_offset_;
+        max_utc_error=std::max(max_utc_error,std::abs(static_cast<double>(utc_error)));
+        audio::FrameTimestamp stamp;stamp.frame=tick_;stamp.steady_seconds=tick_+monotonic_error;
+        stamp.utc_seconds=static_cast<long double>(o_.format.epoch)+tick_+utc_error;
         stamp.quality=audio::TimingQuality::bounded;clock_.observe(stamp);
         const auto r=clock_.update(tick_,static_cast<long double>(tick_)+displacement_,c_);
-        target_=o_.clock=="off"?0:std::clamp(r.target_correction,-200e-6,200e-6);
+        target_=o_.clock=="off"?0:o_.clock=="gps-disciplined"?r.target_correction:
+            std::clamp(r.target_correction,-200e-6,200e-6);
         max_error=std::max(max_error,std::abs(r.phase_error_seconds));
         max_rate=std::max(max_rate,std::abs(c_));
+        min_applied_rate=std::min(min_applied_rate,c_);max_applied_rate=std::max(max_applied_rate,c_);
+        max_displacement=std::max(max_displacement,std::abs(static_cast<double>(displacement_)));
     }
     std::pair<long double,double> advance(double dt)const {
         const double delta=target_-c_,slope=std::copysign(1e-5,delta),ramp=std::min(dt,std::abs(delta)/1e-5);
         return {dt+c_*ramp+.5*slope*ramp*ramp+target_*(dt-ramp),c_+slope*ramp};
     }
 public:
-    double max_error=0,max_rate=0;
+    double max_error=0,max_rate=0,max_utc_error=0,max_displacement=0,min_applied_rate=0,max_applied_rate=0;
+    double gps_max_step_seconds=0,gps_max_normal_step_seconds=0,gps_max_recovery_step_seconds=0;
+    std::uint64_t gps_fixes=0,gps_skipped_fixes=0,gps_max_fix_gap_seconds=0;
     explicit ClockMap(const Options& o):o_(o){observe();}
     long double at(long double t) {
         if(t<tick_)throw std::logic_error("clock source queried backward");
@@ -194,6 +248,7 @@ public:
     std::uint64_t ticks()const{return tick_;}
     long double displacement()const{return last_logical_-last_physical_;}
     long double final_physical_seconds()const{return last_physical_;}
+    long double final_utc_error_seconds()const{return monotonic_offset(last_physical_)+utc_offset_;}
 };
 Complex at(PatternSource& source,long double t,long double u,double fsample,double center,
            long double source_sample_shift) {
@@ -233,10 +288,11 @@ int serve_basis(const Options& o,const Geometry& g,const Crypto& crypto) {
         <<",\"sample_rate_hz\":"<<sample_rate<<",\"sample_rate_numerator\":"<<o.format.sample_rate<<",\"sample_rate_denominator\":"<<o.format.sample_rate_denominator
         <<",\"inner_rate_hz\":"<<o.format.inner_rate_hz<<",\"added_symbols\":"<<o.format.added_symbols<<",\"data_if_hz\":"<<o.data_if
         <<",\"pattern_revision\":\""<<pattern_revision_name(o.format.pattern_revision)<<"\",\"public_epoch_seconds\":"<<o.format.epoch<<",\"key_seed\":"<<o.key_seed<<",\"test_key_only\":true"
+        <<",\"pulse_shape\":\""<<pulse_shape_name(o.format.pulse_shape)<<"\""
         <<",\"source_calendar\":\"canonical-8chips-v1\",\"canonical_payload_origin_seconds\":"<<static_cast<double>(canonical_origin)
         <<",\"native_source_sample_shift\":"<<static_cast<double>(shift)<<",\"native_calendar_origin_sample\":"<<g.calendar_origin_sample
         <<",\"source_samples\":"<<g.source_samples<<",\"bit_seconds\":"<<g.bit_seconds<<",\"requested_bit_seconds\":"<<o.seconds
-        <<",\"maximum_count\":16384,\"maximum_states\":256,\"maximum_response_bytes\":8388608,\"compiled_driver_sha256\":\""<<compiled_driver_sha<<"\",\"source_sha256\":\""<<sha(__FILE__)<<"\",\"binary_sha256\":\""<<sha("/proc/self/exe")<<"\"}\n"<<std::flush;
+        <<",\"maximum_count\":16384,\"maximum_states\":256,\"maximum_response_bytes\":8388608,\"maximum_rate_ppm\":4096,\"compiled_driver_sha256\":\""<<compiled_driver_sha<<"\",\"source_sha256\":\""<<sha(__FILE__)<<"\",\"binary_sha256\":\""<<sha("/proc/self/exe")<<"\"}\n"<<std::flush;
     for(;;) {
         std::string line;char ch=0;
         while(std::cin.get(ch) && ch!='\n') {if(line.size()>=65536)throw std::invalid_argument("basis request line exceeds 65536 bytes");line+=ch;}
@@ -256,7 +312,13 @@ int serve_basis(const Options& o,const Geometry& g,const Crypto& crypto) {
         for(std::uint64_t k=0;k<states;++k) {
             std::string delay,ppm;if(!(input>>delay>>ppm))throw std::invalid_argument("missing basis delay/rate pair");
             const long double d=number(delay),r=number(ppm)*1e-6L;
-            if(std::abs(r)>.001L)throw std::invalid_argument("basis rate exceeds 1000 ppm");
+            // Independent local/remote software discipline can require the
+            // maintained public timing bank's +/-2000ppm extent. This query
+            // bound is separate from a transmitter's physical slew limits.
+            if(std::abs(r)>.004096L)throw std::invalid_argument("basis rate exceeds 4096 ppm");
+            const auto edge=g.occupied_bandwidth_hz*.5L*(1+r)+std::abs(o.data_if*r);
+            if(edge>=sample_rate*.5L)
+                throw std::invalid_argument("basis candidate exceeds sampled DATA passband");
             for(const auto t:{begin,end}) {
                 const auto displacement=d+r*(t-anchor),u=t+displacement,position=u*sample_rate+shift;
                 if(!std::isfinite(position) || std::abs(position)>=std::ldexp(1.L,63) ||
@@ -291,7 +353,9 @@ int run(const Options& o) {
     std::array<std::unique_ptr<PatternSource>,2> sources,templates;
     std::array<std::unique_ptr<ClockMap>,2> clocks;
     for(int bit=0;bit<2;++bit){sources[bit]=std::make_unique<PatternSource>(o.format,crypto,bit);templates[bit]=std::make_unique<PatternSource>(o.format,crypto,bit);clocks[bit]=std::make_unique<ClockMap>(o);}
-    const double warp=o.clock=="off"?0:200e-6;
+    // GPS profile keeps measured system-rate calibration separate from the
+    // 200-ppm phase cap. Retain the full controller domain in capture sizing.
+    const double warp=o.clock=="off"?0:o.clock=="gps-disciplined"?.001:200e-6;
     StreamChannelConfig cfg;auto& e=cfg.effects;e.sample_rate=fsample;e.occupied_bandwidth_hz=g.occupied_bandwidth_hz;
     e.rf_hz=o.rf;e.nominal_conversion_if_hz=o.data_if;e.seed=o.seed;e.noise_enabled=false;
     e.tx.phase_noise_rad_per_sqrt_second=e.rx.phase_noise_rad_per_sqrt_second=o.phase/std::sqrt(2.);
@@ -359,11 +423,18 @@ int run(const Options& o) {
         <<",\"extent_policy\":\"conservative native extent plus clock allowance and full channel tails; Fs-dependent extra silence retained\""
         <<",\"nominal_payload_energy_seconds\":"<<g.nominal_payload_energy_seconds
         <<",\"inner_rate_hz\":"<<o.format.inner_rate_hz<<",\"added_symbols\":"<<o.format.added_symbols<<",\"pattern_revision\":\""<<pattern_revision_name(o.format.pattern_revision)<<"\",\"encryption\":true,\"interleave\":true"
+        <<",\"pulse_shape\":\""<<pulse_shape_name(o.format.pulse_shape)<<"\""
         <<",\"carrier_spacing_hz\":"<<g.carrier_spacing_hz<<",\"occupied_bandwidth_hz\":"<<g.occupied_bandwidth_hz<<",\"data_if_hz\":"<<o.data_if<<",\"rf_hz\":"<<o.rf
         <<",\"public_epoch_seconds\":"<<o.format.epoch<<",\"key_seed\":"<<o.key_seed<<",\"test_key_only\":true,\"channel_seed\":"<<o.seed<<",\"transmit_gain\":1,\"channel_noise_enabled\":false"
         <<",\"noise_convention\":\"nominal unit-symbol reference power; external complex sample variance Fs / linear-CN0; shaping/guards reduce integrated energy; use emitted-source energy, no realized-energy normalization\""
-        <<",\"clock_profile\":\""<<o.clock<<"\",\"clock_controller_tick_seconds\":1,\"phase_catchup_cap_ppm\":"<<warp*1e6
-        <<",\"device_rate_error_ppm\":0,\"clock_slew_ppm_per_second\":10,\"clock_events\":\"seeded hourly 50..150ms with +/-300s jitter; independent +/-2s every24 events; wandering also 10ms quarter-hour steps\""
+        <<",\"clock_profile\":\""<<o.clock<<"\",\"clock_controller_tick_seconds\":1,\"phase_catchup_cap_ppm\":"<<(o.clock=="off"?0:200)
+        <<",\"device_rate_error_ppm\":0,\"clock_slew_ppm_per_second\":10,\"clock_events\":\""
+        <<(o.clock=="gps-disciplined"?"GPS corrects one drifting system UTC toward physical time; no independent phase steps added":"seeded hourly 50..150ms with +/-300s jitter; independent +/-2s every24 events; wandering also 10ms quarter-hour steps")<<"\""
+        <<",\"clock_domain_model\":\""<<(o.clock=="gps-disciplined"?"shared monotonic/UTC oscillator drift; GPS UTC steps toward physical time; ideal independent device frame clock":"ideal monotonic/device clocks; independent UTC phase-step stress")<<"\""
+        <<",\"system_oscillator_drift_bound_ppm\":"<<(o.clock=="gps-disciplined"?std::abs(o.clock_drift_ppm.value_or(20)):0)
+        <<",\"system_oscillator_drift_signed_ppm\":"<<(o.clock=="gps-disciplined"?o.clock_drift_ppm.value_or(20):0)
+        <<",\"gps_holdover_seconds\":"<<(o.clock=="gps-disciplined"?o.gps_holdover_seconds.value_or(86400):0)
+        <<",\"gps_model\":\""<<(o.clock=="gps-disciplined"?"hourly fixes +/-300s jitter; independent +/-1ms residual; weekly holdover begins physical day3; drift=P*(.85+.15*cos(2pi*t/7days+seedphase))":"inactive")<<"\""
         <<",\"capture_source_halfwidth_allowance_hz\":"<<edge<<",\"stochastic_spectral_tail_convention\":\"shared channel 6B random-ray total; GaussianErf 10B per edge; not compact support\""
         <<",\"spread\":\""<<spread<<"\",\"spread_doppler_hz\":"<<e.spread_doppler_hz<<",\"spread_delay_ms\":"<<e.spread_delay_ms
         <<",\"random_doppler_width_hz\":"<<o.width<<",\"delay_excursion_ms\":"<<o.excursion_ms<<",\"delay_knot_seconds\":"<<o.knot
@@ -382,7 +453,19 @@ int run(const Options& o) {
         <<",\"oracle_clock_max_applied_rate_ppm\":"<<1e6*(o.window?raw_clock.max_rate:clocks[0]->max_rate)
         <<",\"oracle_clock_final_displacement_seconds\":"<<static_cast<double>(o.window?raw_clock.displacement():clocks[0]->displacement())
         <<",\"oracle_clock_final_physical_seconds\":"<<static_cast<double>(o.window?raw_clock.final_physical_seconds():clocks[0]->final_physical_seconds())
-        <<",\"clock_controller_ticks\":"<<(o.window?raw_clock.ticks():clocks[0]->ticks())<<",\"wall_seconds\":"<<std::chrono::duration<double>(std::chrono::steady_clock::now()-started).count()<<"}\n";
+        <<",\"clock_controller_ticks\":"<<(o.window?raw_clock.ticks():clocks[0]->ticks());
+    const auto& final_clock=o.window?raw_clock:*clocks[0];
+    out<<",\"oracle_clock_max_displacement_seconds\":"<<final_clock.max_displacement
+        <<",\"oracle_clock_min_applied_rate_ppm\":"<<final_clock.min_applied_rate*1e6
+        <<",\"oracle_clock_max_positive_applied_rate_ppm\":"<<final_clock.max_applied_rate*1e6
+        <<",\"oracle_system_utc_max_error_seconds\":"<<final_clock.max_utc_error
+        <<",\"oracle_system_utc_final_error_seconds\":"<<static_cast<double>(final_clock.final_utc_error_seconds())
+        <<",\"gps_fixes\":"<<final_clock.gps_fixes<<",\"gps_skipped_fixes\":"<<final_clock.gps_skipped_fixes
+        <<",\"gps_max_fix_gap_seconds\":"<<final_clock.gps_max_fix_gap_seconds
+        <<",\"gps_max_step_seconds\":"<<final_clock.gps_max_step_seconds
+        <<",\"gps_max_normal_step_seconds\":"<<final_clock.gps_max_normal_step_seconds
+        <<",\"gps_max_recovery_step_seconds\":"<<final_clock.gps_max_recovery_step_seconds
+        <<",\"wall_seconds\":"<<std::chrono::duration<double>(std::chrono::steady_clock::now()-started).count()<<"}\n";
     if(!out)throw std::runtime_error("manifest write failed");
     out.close();std::cout<<"{\"samples\":"<<count<<",\"output_bytes\":"<<static_cast<std::uint64_t>(bytes)<<"}\n";return 0;
 }

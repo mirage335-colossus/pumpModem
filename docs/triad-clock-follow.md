@@ -18,10 +18,13 @@ or imply unchanged sensitivity.
 The [200-ppm tracking qualification](validation-data/triad-v3/2026-11-06-clock-tracking/README.md)
 retains direct/cache comparisons, independent sampled corrections, the default
 mapped cable check and failures encountered during implementation.
-The subsequent [multi-day weak-signal study](triad-multiday-tracking.md) tests
-complete sampled observations and exposes the sensitivity cost of repeatedly
-renewing the channel prior. Its low-IF persistent-bank successes do not qualify
-arbitrary multi-day audio-IF trajectories or physical noise admissions.
+The subsequent [multi-day weak-signal study](triad-multiday-tracking.md) exposed
+the sensitivity cost of renewing the channel prior at every timing update. The
+[current gentle-tracking study](validation-data/triad-v3/2026-11-06-gentle-tracking/README.md)
+addresses that defect with persistent channel state and a fixed equal mixture
+of nominal and adaptive timing branches. The 200-ppm phase catch-up controller
+is unchanged. Low-IF results do not qualify arbitrary multi-day audio-IF
+trajectories or physical noise admissions.
 
 The new policy uses the shared native audio resampler. On capture it adjusts
 PCM **before DATA mixing or projection**, so DATA, Helper pilots and auxiliary
@@ -154,46 +157,71 @@ The live adapter's default timing receiver handles two distinct effects:
   trace is supplied. State coordinates can move beyond the initial timing bank
   within checked counters; retained state count remains bounded.
 
-The initial acquisition bank is still public and required. Optional `tracking`
-settings in its JSON define `segment_seconds`, `delay_step_seconds`,
-`rate_step_ppm`, `maximum_rate_ppm`, `maximum_acceleration_ppm_per_second`,
-`maximum_states`, `maximum_proposals`, `initial_delay_indices`,
-`initial_rate_indices` and `model_probabilities`. Defaults are four-second
-segments, delay cells of `1/(4 * nominal_triplet_bandwidth_hz)`, 50-ppm rate
-cells, ±2000-ppm extent, 20-ppm/s acceleration, 64 retained states and 256
-proposals. Initial residual delay/rate indices default to zero **relative to
-an already appropriate acquisition bank**. This is a calibrated-start
-assumption, not automatic blind acquisition. Positive delay means the remote
-source is ahead; it is not a positive arrival delay.
-The adapter rejects a segment/rate-grid combination so coarse that its positive
-acceleration bound cannot reach an adjacent rate cell in one full segment.
-Higher audio IFs or longer coherent segments may require a finer rate grid.
-For an ideal rectangular coherent segment of length T, a residual frequency
-error df retains `sinc(df*T)^2` of matched-filter energy; the audio-center
-contribution at half a rate cell is `df = IF * rate_step_ppm * 1e-6 / 2`.
-Use the waveform's full span for a conservative design and measure actual shaped
-templates. The default 50-ppm grid is not a sensitivity qualification for every
-audio IF or coherence duration; finer grids must still fit the explicit state
-and workspace bounds.
+The initial acquisition bank is still public and required. This is a
+**scheduled post-acquisition** receiver: initial residual delay/rate indices
+default to zero relative to an already appropriate public acquisition bank.
+Positive delay means that the remote source is ahead; it is not a positive
+arrival delay. No branch receives the private transmitter clock history.
+
+The default `tracking` policy is a fixed **equal mixture** of two persistent
+receivers. A nominal branch retains the declared initial affine hypotheses and
+their channel evidence. An adaptive branch evolves sparse timing states while
+transporting their channel posteriors. Both score the same observation; their
+likelihoods are averaged with weights fixed before observing data, rather than
+selecting whichever result passes. This preserves a useful simple path when a
+slow waveform already tolerates the remaining clock motion. The mixture pays
+at most `log(2)` in log evidence relative to either branch considered alone;
+that is not a universal energy or sensitivity penalty.
+
+`--receiver tracking-persistent` exposes only the adaptive persistent branch.
+`--receiver tracking-reset` keeps the earlier independent-segment channel-prior
+reference, and `--receiver fixed` keeps the fixed-bank incremental reference.
+These choices make the coherence tradeoff measurable. None changes physical
+admission qualification or the source clock controller.
+
+Optional `tracking` settings in the public bank JSON include `segment_seconds`,
+`delay_step_seconds`, `rate_step_ppm`, `maximum_rate_ppm`,
+`maximum_acceleration_ppm_per_second`, `maximum_states`, `maximum_proposals`,
+`initial_delay_indices`, `initial_rate_indices` and `model_probabilities`.
+The delay-cell default is `1/(4 * nominal_triplet_bandwidth_hz)`; the default
+extent is ±2000 ppm with 20-ppm/s acceleration, 64 retained states and 256
+proposals. The audio/high-bandwidth cadence remains four seconds with 50-ppm
+rate cells. For both DATA IF and triplet bandwidth below 1 Hz, automatic cadence
+can increase up to 4096 seconds, constrained by envelope displacement, phase
+curvature, rate-cell phase mismatch and bounded segment storage. In that slow
+regime the automatic rate grid may coarsen up to 200 ppm. Explicit segment/grid
+choices remain explicit; they are not silently rewritten.
+
+These are cheap geometric design budgets, not measured sensitivity guarantees.
+For a rectangular coherent interval of duration T, a residual frequency error
+df retains `sinc(df*T)^2` of matched-filter energy. Half a rate cell contributes
+`df = (abs(IF) + bandwidth/2) * rate_step_ppm * 1e-6 / 2` at the outer nominal
+edge. The automatic low-IF grid limits this contribution to one eighth of a
+cycle per segment, approximately a 0.22-dB rectangular proxy. Actual pulse tails,
+channel evolution and state pruning still require waveform checks. The adapter
+rejects grids whose stated acceleration cannot reach an adjacent rate cell in
+one full segment, and rejects unsupported segment/workspace sizes.
 
 Transitions advance source delay using the trapezoidal old/new rate and split
-fractional delay cells. Bit and coherence-model priors remain fixed throughout
-the observation. Channel coefficients have independent priors at segment
-boundaries; within each segment the existing Gaussian channel filter continues.
-This avoids treating a moment-merged channel posterior as an exact switching
-likelihood, but sacrifices coherence longer than a segment. Very weak signals
-with long coherence can favor the explicit fixed receiver or a separately
-qualified longer segment.
+fractional delay cells. The persistent receiver carries proper complex Gaussian
+channel means and covariances across timing updates, including between-history
+uncertainty when histories merge. Its carrier phase follows the integrated
+public rate path; rounding an envelope delay cell must not introduce a carrier
+phase jump. Conditional moment matching at a history merge is an
+**interacting-model approximation**, not the exact unmerged switching-channel
+likelihood. Fixed bit/coherence priors are retained throughout the observation.
 
-Pruning only removes weighted paths and **never renormalizes likelihood**.
-Its evidence is therefore no greater than the complete declared HMM likelihood
-ratio under the conditional Gaussian null. This protects the model-based
-false-alarm argument, not sensitivity. Long fades, weak evidence, an unsuitable
-initial bank or overly fast corrections can discard the true path. Dropped
-probability/evidence diagnostics are not future miss-probability bounds. The
-recursion follows the standard
-[hidden Markov model likelihood construction](https://www.cs.cmu.edu/~durand/03-711/Readings/Rabiner89.pdf);
-physical audio still needs a qualified null for operational admission.
+Each predictive Gaussian density remains normalized conditional on the past;
+pruning only deletes weighted mass and never renormalizes likelihood. Under the
+declared Gaussian null this supports the model-conditional e-value argument,
+including the fixed nominal/adaptive mixture. Unlike the reset reference, the
+moment-matched score is not a pointwise lower bound on an exact unmerged path
+likelihood. These facts do not establish physical audio calibration. Long fades,
+a poor initial bank or an unsuitable grid can discard a useful adaptive path;
+dropped-mass diagnostics are not future miss-probability bounds. The nominal
+branch protects only the declared affine alternatives, not arbitrary remote
+motion. The recursion builds on the standard
+[hidden Markov model likelihood construction](https://www.cs.cmu.edu/~durand/03-711/Readings/Rabiner89.pdf).
 
 The default template path caches uniform keyed DATA by bit, epoch and bounded
 tile, then applies candidate time maps and the complete audio-center phase.
@@ -230,7 +258,9 @@ outages or −60-dB-Hz sensitivity.
 
 Live TX/RX uses this policy by default. `--follow-system-clock off` replays the
 old audio policy. `--receiver fixed` retains fixed-bank reception; `auto` selects
-timing tracking for physical capture and fixed reception for simulation. Existing
+the persistent nominal/adaptive mixture for physical capture and fixed reception
+for simulation. Select `--receiver tracking` explicitly for a paired simulation
+of the practical mixture. Existing
 key, epoch, power and public receiver-bank requirements remain. Simulation rejects
 explicit continuous hardware discipline; use injected timestamps in tests instead.
 
@@ -269,7 +299,8 @@ CCACHE_DISABLE=1 cmake --build build/dev-cli --parallel 2 --target \
 ctest --test-dir build/dev-cli --output-on-failure \
   -R '^(continuous_clock|alsa_continuous_clock|triad_audio_stream|triad_mapped_basis|triad_stream_source)$'
 # Use the study Python environment with NumPy/SciPy/Torch installed.
-OPENBLAS_NUM_THREADS=1 python -m unittest discover -s tests -p 'test_triad_*tracking*.py'
+OPENBLAS_NUM_THREADS=1 python tests/test_triad_persistent_tracking.py
+OPENBLAS_NUM_THREADS=1 python tests/test_triad_tracking_budget.py
 OPENBLAS_NUM_THREADS=1 python tests/test_triad_timing_forward.py
 OPENBLAS_NUM_THREADS=1 python tests/test_triad_audio_mapping.py
 OPENBLAS_NUM_THREADS=1 python tests/test_triad_continuous.py

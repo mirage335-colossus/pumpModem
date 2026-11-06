@@ -44,7 +44,8 @@ class IncrementalGaussianReceiver:
                  device="cpu", precision="fp32", memory_limit_bytes=512*1024**2,
                  maximum_candidates=4096, candidate_count=1,
                  projection_mode="dft", maximum_input_chunk_samples=1_048_576,
-                 block_center_seconds=None):
+                 block_center_seconds=None, initial_channel_state=None,
+                 first_block_elapsed_seconds=0.):
         started = time.perf_counter()
         self.sample_rate = float(sample_rate)
         if not math.isfinite(self.sample_rate) or self.sample_rate <= 0:
@@ -137,6 +138,19 @@ class IncrementalGaussianReceiver:
         self.excluded_bands = tuple(tuple(x) for x in excluded_bands)
         self.runtimes = [GaussianStateFilter(GaussianPrior(powers, coh),
             dtype=self.dtype, check_inputs=True) for coh in coherences]
+        self.first_block_elapsed_seconds = float(first_block_elapsed_seconds)
+        if not math.isfinite(self.first_block_elapsed_seconds) or self.first_block_elapsed_seconds < 0:
+            raise ValueError("initial channel elapsed time must be finite and nonnegative")
+        if initial_channel_state is not None:
+            if len(initial_channel_state) != len(self.runtimes):
+                raise ValueError("initial channel state must match the coherence alternatives")
+            shape = (3, self.candidates, self.taps)
+            for runtime, (mean, covariance) in zip(self.runtimes, initial_channel_state):
+                mean = torch.as_tensor(mean, dtype=self.dtype, device=self.device)
+                covariance = torch.as_tensor(covariance, dtype=self.dtype, device=self.device)
+                if tuple(mean.shape) != shape:
+                    raise ValueError("initial channel state must have [3,candidate,tap] shape")
+                runtime.initialize_posterior(mean, covariance)
         self.next_input_sample = 0
         self.current_block_index = 0
         self.pending = np.empty(0, dtype=np.complex64 if precision == "fp32" else np.complex128)
@@ -206,14 +220,14 @@ class IncrementalGaussianReceiver:
             gram = torch.as_tensor(gram_np, dtype=self.dtype, device=self.device)
         center_twice = start + stop - 1
         if self.block_center_seconds is None:
-            elapsed = 0. if self.previous_center_twice is None else (
+            elapsed = self.first_block_elapsed_seconds if self.previous_center_twice is None else (
                 (center_twice - self.previous_center_twice) / (2 * self.sample_rate))
         else:
             center = float(self.block_center_seconds(start, stop))
             if (not math.isfinite(center) or center < 0 or
                 (self.previous_physical_center is not None and center <= self.previous_physical_center)):
                 raise ValueError("physical block centers must be finite, nonnegative and strictly increasing")
-            elapsed = 0. if self.previous_physical_center is None else center-self.previous_physical_center
+            elapsed = self.first_block_elapsed_seconds if self.previous_physical_center is None else center-self.previous_physical_center
             self.previous_physical_center = center
         for runtime in self.runtimes:
             runtime.update(r, gram, elapsed)

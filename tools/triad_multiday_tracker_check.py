@@ -56,6 +56,11 @@ class NativePublicTimingBasis:
             '--seconds',str(manifest['requested_bit_seconds']),
             '--data-if',str(manifest['data_if_hz']),'--epoch',str(manifest['public_epoch_seconds']),
             '--key-seed',str(manifest['key_seed'])]
+        pulse=manifest.get('pulse_shape','rrc-025-span8')
+        if pulse=='rrc-025-span8-c2-tail2':
+            command.extend(('--pulse-shape','c2'))
+        elif pulse!='rrc-025-span8':
+            raise ValueError('unsupported public tracking pulse identity')
         self.command=command
         try:
             self.process=subprocess.Popen(command,stdin=subprocess.PIPE,stdout=subprocess.PIPE,
@@ -71,6 +76,8 @@ class NativePublicTimingBasis:
                          'source_samples','bit_seconds','requested_bit_seconds'):
                 if self.startup.get(name)!=manifest.get(name):
                     raise RuntimeError('native public basis format differs from capture: '+name)
+            if self.startup.get('pulse_shape','rrc-025-span8')!=pulse:
+                raise RuntimeError('native public basis pulse differs from capture')
         except BaseException:
             self.close()
             raise

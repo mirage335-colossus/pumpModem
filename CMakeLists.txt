@@ -1229,6 +1229,9 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
       ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_triad_tracking_export.py $<TARGET_FILE:triad_tracking_export>)
     set_tests_properties(triad_tracking_export PROPERTIES LABELS "triad" TIMEOUT 30)
     add_custom_target(test_triad_tracking_export DEPENDS triad_tracking_export)
+    add_test(NAME triad_tracking_budget COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_triad_tracking_budget.py)
+    set_tests_properties(triad_tracking_budget PROPERTIES LABELS "triad" TIMEOUT 30)
     add_test(NAME triad_control_clock COMMAND ${Python3_EXECUTABLE}
       ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_triad_control_clock.py)
     set_tests_properties(triad_control_clock PROPERTIES LABELS "triad" TIMEOUT 30)

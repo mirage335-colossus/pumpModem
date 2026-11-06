@@ -82,10 +82,15 @@ do not prune them using simulator truth.
 
 ## Receiver scope and admission
 
-The fixed incremental receiver is a scheduled-bank experiment. The timing
-receiver adds evolving delay/rate states with segment channel priors; see
-[its controls and limits](triad-clock-follow.md#receiver-timing-inference).
-Neither supplies general blind multi-day acquisition or multi-day Helper tracking.
+The fixed incremental receiver is a scheduled-bank experiment. Default physical
+timing reception uses a fixed equal mixture of nominal and adaptive timing
+branches, both with persistent channel evidence. The adaptive branch carries
+Gaussian channel posteriors through public delay/rate transitions and uses
+conditional moment matching at history merges. The explicit `tracking-reset`
+reference retains the older independent channel prior at each segment; see
+[controls, cadence and likelihood limits](triad-clock-follow.md#receiver-timing-inference).
+These remain scheduled post-acquisition methods. Neither supplies general blind
+multi-day acquisition or multi-day Helper tracking.
 A pilot estimate from the
 38-second lead alone is not a validated frequency bound for a bit lasting days.
 The caller must supply the public timing, frequency, clock, epoch, delay/Doppler
@@ -114,6 +119,32 @@ receiver conservatively expands partial erasures to its actual complete DFT
 blocks, reporting additional discarded rows separately; this does not implement
 a colored-noise covariance adapter. GPU execution of this incremental
 adapter has not been qualified.
+
+## Cheap resource preflight
+
+`triad_weak_plan.py --tracking-bank BANK.json` adds a bounded scheduled-tracking
+resource preflight to the isolated duration/link plan. It reports resolved
+cadence, sample/block/segment counts, configured candidate work bounds and
+estimated receiver/template workspace without generating a full observation.
+The work count includes both nominal and adaptive branches of the practical
+mixture. It does not price the separate blind-acquisition bank or turn a duration
+forecast into demonstrated reception.
+
+`--tracking-memory-mib`, `--tracking-cpu-ceiling` and
+`--tracking-cost-calibration FILE.json` set the memory budget, requested CPU
+seconds per received second and optional measured calibration. CPU seconds are
+reported only for source-, hardware- and computational-regime-matched evidence
+whose work counters scale consistently. Without that evidence, CPU cost remains
+**unknown** rather than being inferred from nominal rate alone. A provided
+work-scaled range is an engineering envelope, not a statistical confidence
+interval. Preparation, native synthesis, input transfer/ASRC and finalization
+need their own timings; the accepted calibration scope is
+`receiver-excluding-basis-v1`. Workspace estimates do not bound allocator RSS.
+
+Use this preflight and small [persistent-tracking checks](triad-multiday-tracking.md#cheap-checks-first)
+before a long experiment. Reuse a compatible native source/cache and the
+validated performance evidence; do not repeat historical multi-day sampled
+campaigns after an unrelated edit.
 
 ## Basic command shape
 
