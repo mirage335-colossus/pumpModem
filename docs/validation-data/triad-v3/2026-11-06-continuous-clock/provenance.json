@@ -1,0 +1,26 @@
+{
+  "base_commit": "c9ab215667ac679f7e5f4c28f1bf64dedb93f9d3",
+  "source_sha256": {
+    "include/datapump/continuous_clock.hpp": "7221b6283b212aa7729291da17b0db34c4bccd1658239f43c347ee84f5b16877",
+    "include/datapump/audio.hpp": "0b2e06f3851ed30a03bc4da14898665bb5a8b3b85b2e927fd571b1d920586b9e",
+    "src/audio.cpp": "45c72ba42ef6ffee2ae36163c6e6d1993bf7c6ba1381cd43467356fd9245a99a",
+    "src/resampler.cpp": "ce70f6da7ea4d361d47012d111f87176811c89ded069f12c05d2290212d389a3",
+    "tools/triad-audio-stream.cpp": "864bb47462c647e8cb803fc31a23dea7bb26d312b6fda82e1e23698da6f0d777",
+    "tools/triad_continuous.py": "3047cbd4d96840a32c957d2731ba629df2d7efc3f7b7240b5c76fd0612e74087",
+    "tests/test_continuous_clock.cpp": "da28977e5376075bfc8a84aef46bfcac21f41db959b2658277858484a7c0ae8a",
+    "tests/test_alsa_audio.cpp": "68e5d605c500a2da3bb3cad397d3c89c1f26e70ec5ccb8eb260bd05ae9d2de87",
+    "tests/test_triad_continuous.py": "44922fd7502aea49a763e3af378c9fb06d3f8ca397802fa97a7718a4c17ab89d",
+    "tests/test_triad_audio_stream.py": "78234486fc2c258f05b757d85cda0a20374c34c455576515268707670b9648f9",
+    "CMakeLists.txt": "0b4b1a43951b34f3f1c377f35179fcc157481cf0e4cdea00cb1469dbccb1e823",
+    "cmake/TestGroups.cmake": "71d5e0ea48750990713408e506fcd3929232f25a33696b3d477640ca582b6c90"
+  },
+  "final_binary_sha256": {
+    "build/dev-cli/test_continuous_clock": "bd687c9e9e7b2e09a4bc92f5db9813a42338fe809577ebd3bd9616cff1f101f3",
+    "build/dev-cli/test_alsa_audio": "6a79947d105eae8efd933e627ad421d004903b5eef31ca80348e94a3ed246f57",
+    "build/dev-cli/triad_audio_stream": "7fc34777a29a0e4dae3704b4338787cf150bed7eac420a9a5713c26657901be2",
+    "build/dev-cli/triad_helper_export": "fd933331fa739976a2bc2da6575579626f50e77764549afd2559ea6258ebbeb5"
+  },
+  "cable_note": "Cable receipts retain actual binary hashes. Final adapter differs only by decimal-ppm CLI conversion division instead of multiplication; final device-free boundary test passed; cable commands use unchanged defaults.",
+  "sanitizers": "ASan/UBSan standalone controller only; detect_leaks=0 (no leak qualification)",
+  "cpu": "AMD Ryzen 5 PRO 5650U with Radeon Graphics"
+}

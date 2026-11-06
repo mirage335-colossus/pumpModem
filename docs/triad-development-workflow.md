@@ -36,10 +36,13 @@ wrapper, see the [duration-planning guide](triad-duration-planning.md).
 For bounded continuous source generation and incremental scheduled-bank
 reception, see the [continuous v3 execution guide](triad-continuous.md); its
 real-time and physical multi-day limits remain explicitly unqualified.
-For GPS-driven clock steps, start with the [bounded timing map and evidence](triad-clock-follow.md).
-Use injected clocks and saved native source probes first. Never weaken the
-shared audio affine contract or hand a private TX correction trace to RX and
-call that practical synchronization. The cheap clock checks take seconds.
+For repeated GPS-driven clock corrections and device drift, start with the
+[continuous full-audio policy](triad-clock-follow.md). Use its injected-clock
+controller and actual native-resampler checks before a short cable experiment.
+Keep strict audio timing separate, and distinguish local clock discipline from
+remote waveform tracking and physical-noise qualification. Never hand a private
+TX correction trace to RX and call that practical synchronization. The older
+bounded-DATA map and its source evidence remain a separate diagnostic profile.
 
 For isolated performance regressions, first follow the
 [required efficient regression workflow](triad-performance.md#required-efficient-regression-workflow)

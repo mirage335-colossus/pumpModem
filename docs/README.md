@@ -38,7 +38,9 @@ cover a separate bounded fixed-bank incremental likelihood path: a 7,265-second
 64-second cable check. These results do not qualify blind multi-day acquisition,
 physical false admissions, or multi-day hardware uptime; they are not results
 for the finite-window weak receiver.
-For small GPS-driven wall-clock steps, see the [bounded clock-following guide](triad-clock-follow.md).
+For repeated GPS-driven clock corrections and continuing drift, see the
+[continuous full-audio clock-discipline guide](triad-clock-follow.md), including
+its receiver-tracking limits and inexpensive qualification checks.
 It provides opt-in slow-DATA source steering and sampled evidence, and explicitly
 separates this from general multi-day clock discipline and Helper timing tracking.
 The [cryptographic background-noise feature](triad-background-noise.md) adds an

@@ -159,18 +159,28 @@ class CaptureSink {
     bool timed_=false,strict_timing_=false,timing_reported_=false,timing_published_=false;
     bool capture_continuous_=true;
     const Options* options_=nullptr;
+    std::optional<ContinuousClock> continuous_clock_;
+    std::uint64_t produced_=0;
 public:
     CaptureSink(std::uint32_t logical,std::uint32_t hardware,const CaptureCallback& next,std::stop_token stop,const Options* options=nullptr)
         :next_(next),stop_(stop),logical_(logical),hardware_(hardware),
-         converter_(std::in_place,hardware,logical),
+         converter_(std::in_place,hardware,logical,options && options->continuous_clock.has_value()),
          output_(std::min<std::size_t>(4096,logical/20)),
          timed_(options && (options->follow_system_clock || options->request_capture_timing)),
-         strict_timing_(options && options->follow_system_clock),options_(options){}
+         strict_timing_(options && options->follow_system_clock),options_(options) {
+        if(options && options->continuous_clock)
+            continuous_clock_.emplace(hardware,true,*options->continuous_clock);
+    }
     std::size_t workspace_bytes() const {return sizeof(*this)+converter_->workspace_bytes()+output_.capacity()*sizeof(float);}
     CaptureTransportRecipe capture_transport()const noexcept {
         return capture_continuous_?converter_->capture_transport():CaptureTransportRecipe{};
     }
     bool timed() const {return timed_;}
+    void observe_continuous(const std::optional<FrameTimestamp>& timestamp) {
+        if(!continuous_clock_)return;
+        if(timestamp)continuous_clock_->observe(*timestamp);
+        else continuous_clock_->unavailable();
+    }
     bool strict_timing() const {return strict_timing_;}
     void disable_timing() {timed_=strict_timing_=false;}
     void disable_steering() {
@@ -195,7 +205,9 @@ public:
     void discontinuity() {
         // emplace destroys the old filter before allocating its replacement;
         // no doubled filter workspace and no fabricated EOF/absence samples.
-        capture_continuous_=false;converter_.emplace(hardware_,logical_);
+        capture_continuous_=false;converter_.emplace(hardware_,logical_,continuous_clock_.has_value());
+        produced_=0;
+        if(continuous_clock_)continuous_clock_.emplace(hardware_,true,*options_->continuous_clock);
         timing_published_=false;
     }
     bool write(std::span<const float> input,const UtcTimeline* timeline=nullptr) {
@@ -242,9 +254,20 @@ public:
                     }
                 }
             }
+            std::optional<ClockDisciplineReport> discipline;
+            if(continuous_clock_) {
+                discipline=continuous_clock_->update(converter_->source_seconds()*hardware_,
+                    static_cast<long double>(produced_)/logical_,converter_->rate_correction());
+                converter_->set_rate_correction(discipline->target_correction,
+                    options_->continuous_clock->maximum_slew_per_second);
+            }
             const auto progress=converter_->process(input.subspan(consumed),output_);
             consumed+=progress.consumed;
             if(progress.produced) {
+                if(discipline)options_->continuous_clock_report(*discipline);
+                if(progress.produced>std::numeric_limits<std::uint64_t>::max()-produced_)
+                    throw Error("capture corrected sample counter overflow");
+                produced_+=progress.produced;
                 if(timed_ && options_->capture_timing) {
                     options_->capture_timing(*predicted);
                     timing_published_=true;
@@ -644,6 +667,10 @@ class AlsaTimeline {
     long first_delay_=0;
     std::uint64_t first_accepted_=0;
     const std::uint64_t trace_id_=trace::identity();
+    std::optional<FrameTimestamp> raw_timestamp_;
+    bool continuous_seen_=false;
+    bool continuous_mode() const {return options_ && options_->continuous_clock.has_value();}
+    bool timestamp_ready() const {return continuous_mode()?continuous_seen_:timeline_.ready();}
     void trace_model() const {
         const bool custom=options_&&options_->frame_timestamp;
         trace::record("timeline",[&](auto& f){f.add("timeline",trace_id_);f.add("hardware_rate",stream_.hardware_rate);
@@ -655,7 +682,7 @@ class AlsaTimeline {
                 f.add("system_clock_slew_ppm",options_->clock_timing->system_clock_slew_fraction*1e6);
                 f.add("system_clock_phase_radius",options_->clock_timing->system_clock_phase_uncertainty_seconds);
             }
-            f.add("prediction",custom?"fitted":"timestamp_intersection");
+            f.add("prediction",continuous_mode()?"continuous_best_effort":custom?"fitted":"timestamp_intersection");
             f.add("has_shared_radius",!custom);
             f.add("persistent",(!custom&&(graph_||playback_)) || (options_&&options_->clock_timing.has_value()));
             f.add("observation_floor",allowance_);
@@ -663,6 +690,7 @@ class AlsaTimeline {
             if(options_&&options_->estimated_timing)f.add("variable_timestamp_error",options_->estimated_timing->variable_timestamp_error_seconds);});
     }
 public:
+    const std::optional<FrameTimestamp>& raw_timestamp() const noexcept {return raw_timestamp_;}
     AlsaTimeline(Alsa& api,Stream& stream,const Options* options,bool playback=false,detail::PipeWirePlayback* graph=nullptr):api_(api),stream_(stream),
         timeline_(stream.hardware_rate,.001,UtcTimeline::Prediction::fitted,std::nullopt,false,
             options?options->clock_timing:std::nullopt),playback_(playback),graph_(graph),options_(options) {
@@ -775,6 +803,12 @@ public:
             f.add("utc",value.utc_seconds);f.add("monotonic",value.steady_seconds);f.add("radius",value.uncertainty_seconds);
             f.add("read_radius",value.clock_read_uncertainty_seconds);f.add("continuity",value.continuity);
             f.add("quality",static_cast<int>(value.quality));});
+        if(continuous_mode()) {
+            // Collection and strict acceptance are different policies. The
+            // continuous controller checks sample-counter continuity while
+            // treating UTC corrections as phase-reference updates.
+            raw_timestamp_=value;continuous_seen_=true;return;
+        }
         try {timeline_.observe(value);}
         catch(const Error& error) {trace::record("timestamp_rejected",[&](auto& f){f.add("timeline",trace_id_);f.add("error",error.what());});throw;}
         latest_frame_=value.frame;
@@ -789,6 +823,7 @@ public:
     }
     void observe(std::uint64_t frames,bool capture,std::stop_token stop) {
         check_cancelled(stop);
+        if(continuous_mode())raw_timestamp_.reset();
         if(graph_) {
             const auto value=graph_->timestamp();variable_allowance_=graph_->period_seconds();
             observe_timestamp(value);return;
@@ -835,7 +870,7 @@ public:
                 throw DelayObservationFailure(result,capture,frames);
             }
             observed_delay_=true;
-            if(!capture && !timeline_.ready() && api_.state) {
+            if(!capture && !timestamp_ready() && api_.state) {
                 // A PREPARED plugin can report a tiny positive played position
                 // from latency rounding/interpolation before its clock starts.
                 // A successful query ends EIO grace but cannot anchor UTC yet.
@@ -849,11 +884,17 @@ public:
             const auto steady0=std::chrono::duration<long double>(before_steady.time_since_epoch()).count();
             const auto steady1=std::chrono::duration<long double>(after_steady.time_since_epoch()).count();
             const auto bracket=static_cast<double>(std::max(utc1-utc0,steady1-steady0));
-            if(delay<0 || utc1<utc0 || bracket<0 || bracket>.05)throw Error("audio UTC timestamp continuity unavailable");
+            if(delay<0 || utc1<utc0 || bracket<0 || bracket>.05) {
+                // A clock correction inside the paired read cannot date a
+                // frame reliably. Preserve PCM/filter history and hold rate;
+                // a real device failure still follows the I/O error path.
+                if(continuous_mode())return;
+                throw Error("audio UTC timestamp continuity unavailable");
+            }
             const auto frame=static_cast<long double>(frames)+(capture?delay:-static_cast<long double>(delay));
-            if(!capture && !timeline_.ready() && frame<=0)return; // DAC/codec preroll has not reached frame zero
+            if(!capture && !timestamp_ready() && frame<=0)return; // DAC/codec preroll has not reached frame zero
             if(frame<0)throw Error("audio UTC device position precedes stream origin");
-            if(diagnostic_ && playback_ && !timeline_.ready()) {
+            if(diagnostic_ && playback_ && !timestamp_ready()) {
                 first_delay_=delay;first_accepted_=frames;
             }
             trace::record("alsa_query",[&](auto& f){f.add("timeline",trace_id_);f.add("accepted_or_read",frames);
@@ -883,10 +924,11 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
     check_cancelled(stop);
     if(!next_samples)throw Error("playback callback is required");
     const bool timed=options && options->follow_system_clock;
-    Alsa api; Stream stream(api,device,0,rate,stop,timed,options);
+    const bool continuous=options && options->continuous_clock.has_value();
+    Alsa api; Stream stream(api,device,0,rate,stop,timed || continuous,options);
     std::unique_ptr<detail::PipeWirePlayback> graph;
 #ifndef DATAPUMP_ALSA_STUB
-    if(timed && !options->frame_timestamp && shared_server_endpoint(stream.endpoint)) {
+    if((timed || continuous) && !options->frame_timestamp && shared_server_endpoint(stream.endpoint)) {
         try {
             const auto target=detail::local_pipewire_sink(stop);
             const auto required_rate=std::max(rate,options->minimum_hardware_rate);
@@ -895,8 +937,11 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
             graph=std::make_unique<detail::PipeWirePlayback>(native_rate,target,stop,options->reported_xrun_budget_seconds,options->reported_xrun_window_seconds,rate);
             api.close(stream.pcm);stream.pcm=nullptr;
             stream.hardware_rate=native_rate;stream.channels=graph->channels();
-        }catch(const Error& e){throw TimingPreflightUnavailable(std::numeric_limits<double>::infinity(),
-            std::string("Native shared-server UTC unavailable: ")+e.what()+"; ordinary playback; peer arrival timing unqualified");}
+        }catch(const Error& e){
+            if(continuous)throw Error(std::string("continuous shared-server clock unavailable: ")+e.what());
+            throw TimingPreflightUnavailable(std::numeric_limits<double>::infinity(),
+                std::string("Native shared-server UTC unavailable: ")+e.what()+"; ordinary playback; peer arrival timing unqualified");
+        }
     }
 #endif
     const auto write=[&](const void* data,unsigned long count){return graph?graph->write(data,count):api.write(stream.pcm,data,count);};
@@ -929,7 +974,13 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
         if(options->estimated_timing && floor+options->estimated_timing->variable_timestamp_error_seconds>=limit)
             throw TimingPreflightUnavailable(floor,"estimated UTC model has no remaining error budget; ordinary playback; UTC presentation unqualified");
     }
-    PlaybackSource source(rate,stream.hardware_rate,next_samples,stop,timed,
+    std::optional<ContinuousClock> continuous_clock;
+    bool continuous_graph_started=false;
+    if(continuous) {
+        timing=std::make_unique<AlsaTimeline>(api,stream,options,true,graph.get());
+        continuous_clock.emplace(stream.hardware_rate,false,*options->continuous_clock);
+    }
+    PlaybackSource source(rate,stream.hardware_rate,next_samples,stop,timed || continuous,
         options?options->playback_output_gain:std::function<double(long double)>{},
         options?options->playback_output_transform:std::function<float(float,long double,std::uint32_t)>{});
     PlaybackOutput output(stream.hardware_rate,options?options->background_noise:background_noise::Config{},gain);
@@ -958,8 +1009,8 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
         }
         reported=true;
         report_format(rate,stream.hardware_rate,source.workspace_bytes()+block.capacity()*sizeof(std::int16_t)+samples.capacity()*sizeof(float)+
-            (timed?sizeof(AlsaTimeline):0)+(graph?graph->workspace_bytes():0),on_format,timed && (estimated || !options->frame_timestamp),
-            preflight?std::max(timing->allowance(),qualified_uncertainty-clock_phase):timed?timing->allowance():0,timed,
+            ((timed || continuous)?sizeof(AlsaTimeline):0)+(continuous?sizeof(ContinuousClock):0)+(graph?graph->workspace_bytes():0),on_format,continuous || (timed && (estimated || !options->frame_timestamp)),
+            preflight?std::max(timing->allowance(),qualified_uncertainty-clock_phase):(timed || continuous)?timing->allowance():0,timed || continuous,
             preflight?qualified_quality:TimingQuality::unavailable,{},stream.channels);
     };
     if(!estimated && !preflight)report();
@@ -1066,7 +1117,29 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
             throw Error("UTC audio preroll missed the scheduled epoch");
         std::size_t count=0;
         std::size_t active_begin=0;
-        if(!timed)count=source.read(samples);
+        if(!timed) {
+            if(continuous_clock) {
+                // A graph has no presentation date until its first actual
+                // submission. Start that block at the nominal rate; waiting
+                // for a dated frontier before write() would never activate it.
+                if(!graph || accepted) {
+                    timing->observe(accepted,false,stop);
+                    if(timing->raw_timestamp()) {
+                        continuous_clock->observe(*timing->raw_timestamp());
+                        if(graph && !continuous_graph_started) {
+                            graph->private_started();continuous_graph_started=true;
+                        }
+                    } else continuous_clock->unavailable();
+                } else continuous_clock->unavailable();
+                const auto control=continuous_clock->update(accepted,source.converter().source_seconds(),
+                    source.converter().rate_correction());
+                source.converter().set_rate_correction(control.target_correction,
+                    options->continuous_clock->maximum_slew_per_second);
+                options->continuous_clock_report(control);
+                check_cancelled(stop);
+            }
+            count=source.read(samples);
+        }
         else if(!timing->timeline().ready() || (estimated && !prepared_rate) || (preflight && !reported)) {
             std::fill(samples.begin(),samples.end(),0);count=samples.size();active_begin=count;
         } else {
@@ -1334,7 +1407,7 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
             catch(const Error& e){if(graph && !reported)throw TimingPreflightUnavailable(timing->allowance(),
                 std::string("native PipeWire silence preparation failed: ")+e.what());throw;}
             check_cancelled(stop);
-            if(timed && (n==-EAGAIN || n==-EINTR)) {
+            if((timed || continuous) && (n==-EAGAIN || n==-EINTR)) {
                 if(n==-EAGAIN) {
                     const auto ready=wait(20);
                     if(ready<0 && ready!=-EINTR)throw Error("UTC audio playback wait failed");
@@ -1342,7 +1415,7 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
                 continue;
             }
             if(n<0) {
-                if(timed || ++failures>8 || api.recover(stream.pcm,static_cast<int>(n),1)<0)
+                if(timed || continuous || ++failures>8 || api.recover(stream.pcm,static_cast<int>(n),1)<0)
                     throw Error("audio playback failed; UTC continuity lost");
                 if(options && options->playback_discontinuity && (n==-EPIPE || n==-ESTRPIPE))
                     options->playback_discontinuity(n==-EPIPE?
@@ -1378,15 +1451,48 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
     if(graph){graph->drain();check_cancelled(stop);if(options && options->background_noise_report)options->background_noise_report(output.report());return;}
     while(true) {
         check_cancelled(stop);
+        // The kernel drain initializer can turn a preexisting XRUN into
+        // SETUP. Reject observed loss before making that state-changing call.
+        const auto before=api.state?api.state(stream.pcm):-1;
+        const auto state_error=before==4?-EPIPE:before==7?-ESTRPIPE:before==8?-ENODEV:0;
+        if(state_error)throw Error("audio playback drain failed (ALSA "+std::to_string(state_error)+
+            ", state="+std::to_string(before)+")");
         const auto drained=api.drain(stream.pcm);
         if(drained==0)break;
-        if(!timed || (drained!=-EAGAIN && drained!=-EINTR))
-            throw Error("audio playback drain failed");
+        if(!(timed || continuous) || (drained!=-EAGAIN && drained!=-EINTR)) {
+            const auto state=api.state?api.state(stream.pcm):-1;
+            throw Error("audio playback drain failed (ALSA "+std::to_string(drained)+
+                ", state="+std::to_string(state)+")");
+        }
         // Nonblocking drain reports EAGAIN while already queued samples are
         // still playing. Closing here would truncate the finite pulse tail.
         // Keep cancellation responsive without recovering or replaying PCM.
         const auto ready=wait(20);
-        if(ready<0 && ready!=-EINTR)throw Error("audio playback drain wait failed");
+        if(ready<0 && ready!=-EINTR) {
+            check_cancelled(stop);
+            const auto state=api.state?api.state(stream.pcm):-1;
+            constexpr int setup_state=1; // SND_PCM_STATE_SETUP ABI
+            // Playback can finish between drain(EAGAIN) and poll. ALSA maps
+            // terminal SETUP/POLLERR to EIO (or a state check to EBADFD).
+            // Confirm completion without recovering, restarting or writing.
+            // Explicit XRUN/suspend/disconnect errors remain fatal even if a
+            // later state query differs from the one that produced the error.
+            if((ready==-EIO || ready==-EBADFD) && state==setup_state) {
+                const auto confirmed=api.drain(stream.pcm);
+                check_cancelled(stop);
+                const auto final_state=api.state?api.state(stream.pcm):-1;
+                // Raw ALSA hw bypasses the library's SETUP no-op. Linux's
+                // nonblocking DRAIN ioctl returns EAGAIN even in SETUP, so
+                // terminal state, rather than a required zero return, proves
+                // completion. A still-DRAINING or failed state never passes.
+                if((confirmed==0 || confirmed==-EAGAIN) && final_state==setup_state)break;
+                throw Error("audio playback drain wait failed (ALSA "+std::to_string(ready)+
+                    ", state="+std::to_string(state)+", confirmation="+std::to_string(confirmed)+
+                    ", final_state="+std::to_string(final_state)+")");
+            }
+            throw Error("audio playback drain wait failed (ALSA "+std::to_string(ready)+
+                ", state="+std::to_string(state)+")");
+        }
     }
     check_cancelled(stop);
     if(options && options->background_noise_report)options->background_noise_report(output.report());
@@ -1409,9 +1515,11 @@ static void capture_device(std::uint32_t rate,const std::string& device,const Ca
     if(!on_chunk) throw Error("capture callback is required");
     Alsa api; Stream stream(api,device,1,rate,stop,true,options);
     const bool observation_requested=options && options->request_capture_timing;
+    const bool continuous=options && options->continuous_clock.has_value();
     bool strict_timing=options && options->follow_system_clock;
     bool timed=strict_timing || observation_requested;
     std::unique_ptr<AlsaTimeline> timing;
+    if(continuous)timing=std::make_unique<AlsaTimeline>(api,stream,options);
     if(timed) {
         try {timing=std::make_unique<AlsaTimeline>(api,stream,options);}
         catch(const Error& e) {
@@ -1438,15 +1546,15 @@ static void capture_device(std::uint32_t rate,const std::string& device,const Ca
     }
     CaptureSink sink(rate,stream.hardware_rate,on_chunk,stop,options);
     if(!strict_timing)sink.disable_steering();
-    if(!timed){sink.disable_timing();timing.reset();}
+    if(!timed){sink.disable_timing();if(!continuous)timing.reset();}
     std::uint64_t received=0;
     constexpr std::size_t maximum_capture_frames=4096;
     const auto chunk_limit=std::min<std::size_t>(maximum_capture_frames,stream.hardware_rate/20);
     std::vector<std::int16_t> block(chunk_limit*stream.channels);
     std::vector<float> converted(chunk_limit);
     report_format(rate,stream.hardware_rate,sink.workspace_bytes()+block.capacity()*sizeof(std::int16_t)+converted.capacity()*sizeof(float)+
-        (timed?sizeof(AlsaTimeline):0),on_format,timed && !options->frame_timestamp,timed?timing->allowance():0,
-        false,TimingQuality::unavailable,sink.capture_transport(),stream.channels,0u);
+        ((timed || continuous)?sizeof(AlsaTimeline):0),on_format,continuous || (timed && !options->frame_timestamp),
+        (timed || continuous)?timing->allowance():0,continuous,TimingQuality::unavailable,sink.capture_transport(),stream.channels,0u);
     unsigned failures=0;
     const auto lose_observation=[&](const Error& error) {
         sink.lose_observation(error);timed=false;timing.reset();
@@ -1467,7 +1575,14 @@ static void capture_device(std::uint32_t rate,const std::string& device,const Ca
             // The old device/frame/resampler origin is no longer meaningful.
             // Only a fresh provider timeline may date the next continuous run.
             received=0;timing.reset();timed=false;
-            if(observation_requested && !options->frame_timestamp) {
+            if(continuous) {
+                // Only the known native delivered-frame origin can be rebound
+                // after the caller acknowledged a real device discontinuity.
+                // A custom counter needs a new explicitly associated stream.
+                if(options->frame_timestamp)
+                    throw Error("explicit continuous capture provider requires a fresh stream-coordinate binding after recovery");
+                timing=std::make_unique<AlsaTimeline>(api,stream,options);
+            } else if(observation_requested && !options->frame_timestamp) {
                 // Native capture dates use this run's delivered count plus its
                 // actual reported queue. A custom device counter has no such
                 // implicit rebasing contract after recovery.
@@ -1499,8 +1614,16 @@ static void capture_device(std::uint32_t rate,const std::string& device,const Ca
             check_cancelled(stop);
             if(monitor)monitor(std::span<const float>(converted.data(),static_cast<std::size_t>(n)),stream.hardware_rate);
             check_cancelled(stop);
+            if(static_cast<std::size_t>(n)>std::numeric_limits<std::uint64_t>::max()-received)
+                throw Error("audio capture sample counter overflow");
             received+=static_cast<std::size_t>(n);
-            if(timed) {
+            if(continuous) {
+                timing->observe(received,true,stop);
+                // Invalid query brackets provide no timestamp and freeze the
+                // applied rate. Counter-generation/reversal errors propagate:
+                // they are device continuity failures, not clock corrections.
+                sink.observe_continuous(timing->raw_timestamp());
+            } else if(timed) {
                 try {timing->observe(received,true,stop);}
                 catch(const Error& e) {
                     check_cancelled(stop);

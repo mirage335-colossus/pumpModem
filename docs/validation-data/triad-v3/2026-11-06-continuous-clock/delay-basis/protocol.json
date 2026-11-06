@@ -1,0 +1,123 @@
+{
+  "seeds": [
+    94002,
+    94003
+  ],
+  "configurations": [
+    "helper-on"
+  ],
+  "cn0_db_hz": 8,
+  "coherences": [
+    0.1,
+    0.5,
+    1.0
+  ],
+  "clock_events": {
+    "tx": [
+      [
+        45,
+        0.1
+      ],
+      [
+        55,
+        2
+      ],
+      [
+        75,
+        -2
+      ],
+      [
+        85,
+        -0.1
+      ]
+    ],
+    "rx": [
+      [
+        48,
+        -0.1
+      ],
+      [
+        60,
+        -2
+      ],
+      [
+        80,
+        2
+      ],
+      [
+        95,
+        0.1
+      ]
+    ]
+  },
+  "coordinates": [
+    [
+      0,
+      -0.03,
+      0,
+      0
+    ]
+  ],
+  "taps": [
+    [
+      0.0,
+      0
+    ],
+    [
+      0.005,
+      0
+    ],
+    [
+      0.01,
+      0
+    ],
+    [
+      0.015,
+      0
+    ],
+    [
+      0.02,
+      0
+    ],
+    [
+      0.025,
+      0
+    ],
+    [
+      0.03,
+      0
+    ],
+    [
+      0.035,
+      0
+    ],
+    [
+      0.04,
+      0
+    ],
+    [
+      0.045,
+      0
+    ],
+    [
+      0.05,
+      0
+    ],
+    [
+      0.055,
+      0
+    ],
+    [
+      0.06,
+      0
+    ]
+  ],
+  "delay_scope": "Fixed +/-30ms delay envelope; neither private map nor a full +/-1000ppm arbitrary-duration guarantee",
+  "channel": "None/Off explicit flat control; no oscillator error",
+  "receiver": "fixed nominal native basis, no private clock trajectory",
+  "null_scope": "Unqualified ASRC colored noise and Helper/real-PCM; model scores diagnostics only",
+  "noise_order": "white real PCM noise between TX and RX ASRC; paired pre-RX noise samples identical",
+  "controller": "defaults; ideal exactly dated device frontier, no timestamp jitter",
+  "source_padding_seconds": 2,
+  "receiver_trailing_seconds": 1
+}

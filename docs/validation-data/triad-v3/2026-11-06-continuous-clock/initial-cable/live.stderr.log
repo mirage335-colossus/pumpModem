@@ -1,0 +1,28 @@
+ALSA lib pcm.c:8854:(snd_pcm_set_params) Channels count (1) not available for CAPTURE: Invalid argument
+ALSA lib pcm.c:8868:(snd_pcm_set_params) Rate doesn't match (requested 8000Hz, get 44100Hz)
+ALSA lib pcm.c:8854:(snd_pcm_set_params) Channels count (1) not available for CAPTURE: Invalid argument
+ALSA lib pcm.c:8868:(snd_pcm_set_params) Rate doesn't match (requested 11025Hz, get 44100Hz)
+ALSA lib pcm.c:8854:(snd_pcm_set_params) Channels count (1) not available for CAPTURE: Invalid argument
+ALSA lib pcm.c:8868:(snd_pcm_set_params) Rate doesn't match (requested 16000Hz, get 44100Hz)
+ALSA lib pcm.c:8854:(snd_pcm_set_params) Channels count (1) not available for CAPTURE: Invalid argument
+ALSA lib pcm.c:8868:(snd_pcm_set_params) Rate doesn't match (requested 22050Hz, get 44100Hz)
+ALSA lib pcm.c:8854:(snd_pcm_set_params) Channels count (1) not available for CAPTURE: Invalid argument
+ALSA lib pcm.c:8868:(snd_pcm_set_params) Rate doesn't match (requested 24000Hz, get 44100Hz)
+ALSA lib pcm.c:8854:(snd_pcm_set_params) Channels count (1) not available for CAPTURE: Invalid argument
+ALSA lib pcm.c:8868:(snd_pcm_set_params) Rate doesn't match (requested 32000Hz, get 44100Hz)
+ALSA lib pcm.c:8854:(snd_pcm_set_params) Channels count (1) not available for CAPTURE: Invalid argument
+ALSA lib pcm.c:8868:(snd_pcm_set_params) Rate doesn't match (requested 8000Hz, get 44100Hz)
+ALSA lib pcm.c:8854:(snd_pcm_set_params) Channels count (1) not available for PLAYBACK: Invalid argument
+ALSA lib pcm.c:8868:(snd_pcm_set_params) Rate doesn't match (requested 11025Hz, get 44100Hz)
+ALSA lib pcm.c:8854:(snd_pcm_set_params) Channels count (1) not available for PLAYBACK: Invalid argument
+ALSA lib pcm.c:8868:(snd_pcm_set_params) Rate doesn't match (requested 16000Hz, get 44100Hz)
+ALSA lib pcm.c:8854:(snd_pcm_set_params) Channels count (1) not available for PLAYBACK: Invalid argument
+ALSA lib pcm.c:8868:(snd_pcm_set_params) Rate doesn't match (requested 22050Hz, get 44100Hz)
+ALSA lib pcm.c:8854:(snd_pcm_set_params) Channels count (1) not available for PLAYBACK: Invalid argument
+ALSA lib pcm.c:8868:(snd_pcm_set_params) Rate doesn't match (requested 24000Hz, get 44100Hz)
+ALSA lib pcm.c:8854:(snd_pcm_set_params) Channels count (1) not available for PLAYBACK: Invalid argument
+ALSA lib pcm.c:8868:(snd_pcm_set_params) Rate doesn't match (requested 32000Hz, get 44100Hz)
+ALSA lib pcm.c:8854:(snd_pcm_set_params) Channels count (1) not available for PLAYBACK: Invalid argument
+triad-audio-stream: audio playback drain wait failed
+{"schema":"triad-audio-stream-v1","complete":false}
+{"schema":"triad-audio-stream-v1","mode":"capture","sample_rate_hz":6000,"requested_frames":451200,"completed_frames":451200,"complete":true,"clipped_samples":0,"process_cpu_seconds":1.99601,"wall_seconds":75.4825,"queue_bound_frames":12000,"background_noise":{"enabled":false},"clock_discipline":{"enabled":true,"reports":7847,"saturated_reports":0,"holdover_reports":0,"peak_absolute_error_seconds":0.000761395,"peak_applied_ppm":0,"ready":true,"observations":10931,"rejected":1,"clock_steps":0,"rate_updates":0,"cumulative_clock_step_seconds":0,"q_estimate":1,"target_correction":0,"applied_correction":0,"native_frame":3.31699e+06,"logical_seconds":75.2152,"origin_utc_seconds":1.79396e+09,"estimated_utc_seconds":1.79396e+09,"phase_error_seconds":0.0007576,"uncertainty_seconds":0.036422,"scope":"estimated full retained audio passband; adjusted capture covariance unqualified; no RF-clock certificate"}}

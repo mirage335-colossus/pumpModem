@@ -1,0 +1,1418 @@
+{
+  "protocol": {
+    "seeds": [
+      94001,
+      94002,
+      94003
+    ],
+    "configurations": [
+      "helper-off",
+      "helper-on"
+    ],
+    "cn0_db_hz": 8,
+    "coherences": [
+      0.1,
+      0.5,
+      "inf"
+    ],
+    "clock_events": {
+      "tx": [
+        [
+          45,
+          0.1
+        ],
+        [
+          55,
+          2
+        ],
+        [
+          75,
+          -2
+        ],
+        [
+          85,
+          -0.1
+        ]
+      ],
+      "rx": [
+        [
+          48,
+          -0.1
+        ],
+        [
+          60,
+          -2
+        ],
+        [
+          80,
+          2
+        ],
+        [
+          95,
+          0.1
+        ]
+      ]
+    },
+    "coordinates": [
+      [
+        0,
+        0,
+        0,
+        0
+      ]
+    ],
+    "channel": "None/Off explicit flat control; no oscillator error",
+    "receiver": "fixed nominal native basis, no private clock trajectory",
+    "null_scope": "Unqualified ASRC colored noise and Helper/real-PCM; model scores diagnostics only",
+    "noise_order": "white real PCM noise between TX and RX ASRC; paired pre-RX noise samples identical",
+    "controller": "new gentle defaults: phase-only cap50ppm, total cap1000ppm, slew10ppm/s; ideal exactly dated device frontier, no timestamp jitter",
+    "source_padding_seconds": 2,
+    "receiver_trailing_seconds": 1
+  },
+  "identities": {
+    "build/dev-cli/triad_helper_export": "fd933331fa739976a2bc2da6575579626f50e77764549afd2559ea6258ebbeb5",
+    "include/datapump/continuous_clock.hpp": "7221b6283b212aa7729291da17b0db34c4bccd1658239f43c347ee84f5b16877",
+    "src/resampler.cpp": "ce70f6da7ea4d361d47012d111f87176811c89ded069f12c05d2290212d389a3",
+    "tools/triad_incremental_receiver.py": "9c4ea5cf318ba8cb1fa3ff469b1f7a9f762961acb51964d4a762b64160ee1d15",
+    "tools/triad_continuous.py": "5fee994d31cdfbc7cd6382b577617d9f8487717ff05058982edc2e229c289929"
+  },
+  "results": [
+    {
+      "seed": 94001,
+      "helper": "off",
+      "events": false,
+      "source_descriptor": {
+        "schema": "triad-stream-source-v1",
+        "sample_rate_hz": 6000,
+        "emitted_samples": 648000,
+        "capture_samples": 786296,
+        "simulation_channel_constructed": false,
+        "total_samples": 648000,
+        "data_offset_samples": 227198,
+        "source_samples": 419205,
+        "capture_lead_seconds": 0,
+        "noise_variance": 0,
+        "template_data_gain": 1.0027602298004303,
+        "data_if_hz": 1725,
+        "epoch": 1793850000,
+        "pattern_revision": "independent-apsk-v2",
+        "added_amplitude_depth": 0.25,
+        "helper_enabled": false,
+        "clock_follow_bounded": false,
+        "clock_follow_limit_seconds": 0,
+        "clock_follow_endpoint_padding_seconds": 0,
+        "clock_follow_basis": "nominal affine; remote corrections are not supplied to receiver",
+        "conditional_gaussian_null_supported": false,
+        "helper_high_hz": 2400,
+        "helper_low_hz": 550,
+        "maximum_rows": 16384,
+        "maximum_columns": 128,
+        "workspace_budget_bytes": 67108864,
+        "fixed_workspace_bytes": 1049688,
+        "stream_kind": "emitted",
+        "key_source": "explicit-test-fixture-seed",
+        "power": {
+          "data_power_reference_policy": "bounded-tiles",
+          "pattern_revision": "independent-apsk-v2",
+          "added_amplitude_depth": 0.25,
+          "data_power_reference_version": 2,
+          "data_reference_bit": 0,
+          "data_reference_integration_method": "bounded-keyed-tile-quadrature-v1",
+          "data_reference_complete_sampled_source": false,
+          "data_reference_active_seconds": 69.60000000000001,
+          "data_reference_mean_norm": 0.9945023131747577,
+          "data_reference_nodes": 12288,
+          "data_reference_refinement_relative_difference": 0,
+          "data_reference_refinement_tolerance": 0.001,
+          "data_reference_sampled_tiles": 6,
+          "data_reference_tile_relative_standard_error": 0.0038810307806955127,
+          "data_reference_statistical_error_is_bound": false,
+          "post_plan_data_calibration_gain": 1.003065619467987,
+          "template_data_gain": 1.0027602298004303,
+          "data_reference_scope": "fixed public bit0; at most16 stratified keyed tiles with2048 fractional nodes each; active-time mean omits finite outer halo; between-tile standard error is diagnostic, not a confidence bound or integration guarantee; one unchanged gain for the entire stream"
+        },
+        "basis_scope": "Public DATA pattern only; arrival is absolute seconds in the requested observation coordinate. Fixed key/epoch per session; all three carriers retained.",
+        "scope": "Bounded pull source, not a receiver or real-time guarantee. Emitted kind has no channel or thermal noise. Physical null and full-duration power accuracy require qualification."
+      },
+      "source_args": [
+        "--case",
+        "hf",
+        "--sample-rate",
+        "6000",
+        "--rate",
+        "36",
+        "--added-symbols",
+        "10",
+        "--seconds",
+        "60",
+        "--key-seed",
+        "94001",
+        "--epoch",
+        "1793850000",
+        "--spread-preset",
+        "none",
+        "--selective-perturbation",
+        "off",
+        "--base-oscillator",
+        "gpsdo-ocxo",
+        "--shift-oscillator",
+        "gpsdo-ocxo",
+        "--oscillator-effects",
+        "off",
+        "--arrival-seconds",
+        "0",
+        "--helper",
+        "off"
+      ],
+      "tx": {
+        "capture": false,
+        "events": false,
+        "input_samples": 660000,
+        "output_samples": 660000,
+        "peak_applied_ppm": 0,
+        "peak_error_seconds": 4.6566129424663316e-11,
+        "steps": 0
+      },
+      "rx": {
+        "capture": true,
+        "events": false,
+        "input_samples": 660000,
+        "output_samples": 660000,
+        "peak_applied_ppm": 0,
+        "peak_error_seconds": 4.6566129424663316e-11,
+        "steps": 0
+      },
+      "receiver": {
+        "status": "scored",
+        "complete_observation": true,
+        "admission": null,
+        "bit_scores": [
+          436.27449511615106,
+          -5.742642963472636
+        ],
+        "model_bit_scores": [
+          [
+            240.99410753873417,
+            -98.3350917654434
+          ],
+          [
+            293.3334812950343,
+            -92.19165646498004
+          ],
+          [
+            437.37310740481917,
+            -4.644030674804526
+          ]
+        ],
+        "hypothesis_log_evidence": [
+          [
+            0.0,
+            240.99410753873417,
+            -98.3350917654434
+          ],
+          [
+            0.0,
+            293.3334812950343,
+            -92.19165646498004
+          ],
+          [
+            0.0,
+            437.37310740481917,
+            -4.644030674804526
+          ]
+        ],
+        "consumed_samples": 654000,
+        "processed_rows": 654000,
+        "scored_rows": 654000,
+        "observed_rows": 654000,
+        "erased_rows": 0,
+        "blocks": 218,
+        "pending_rows": 0,
+        "working_bytes_estimate": 433728,
+        "push_process_cpu_seconds": 2.057071537000001
+      },
+      "decision": {
+        "candidate_bit": 0,
+        "log_e": 435.5813479355911,
+        "conditional_model_pass": true,
+        "admitted": false,
+        "admission_scope": "Conditional Gaussian model, fixed bank and endpoint only; neither correctness nor Helper/physical null qualified."
+      },
+      "receiver_wall_seconds": 1.5507372750435024,
+      "receiver_cpu_seconds": 2.0623259590000003,
+      "receiver_expected_bit": 0,
+      "pcm_peak": 3.3149666786193848,
+      "noisy_output_samples": 660000
+    },
+    {
+      "seed": 94001,
+      "helper": "off",
+      "events": true,
+      "source_descriptor": {
+        "schema": "triad-stream-source-v1",
+        "sample_rate_hz": 6000,
+        "emitted_samples": 648000,
+        "capture_samples": 786296,
+        "simulation_channel_constructed": false,
+        "total_samples": 648000,
+        "data_offset_samples": 227198,
+        "source_samples": 419205,
+        "capture_lead_seconds": 0,
+        "noise_variance": 0,
+        "template_data_gain": 1.0027602298004303,
+        "data_if_hz": 1725,
+        "epoch": 1793850000,
+        "pattern_revision": "independent-apsk-v2",
+        "added_amplitude_depth": 0.25,
+        "helper_enabled": false,
+        "clock_follow_bounded": false,
+        "clock_follow_limit_seconds": 0,
+        "clock_follow_endpoint_padding_seconds": 0,
+        "clock_follow_basis": "nominal affine; remote corrections are not supplied to receiver",
+        "conditional_gaussian_null_supported": false,
+        "helper_high_hz": 2400,
+        "helper_low_hz": 550,
+        "maximum_rows": 16384,
+        "maximum_columns": 128,
+        "workspace_budget_bytes": 67108864,
+        "fixed_workspace_bytes": 1049688,
+        "stream_kind": "emitted",
+        "key_source": "explicit-test-fixture-seed",
+        "power": {
+          "data_power_reference_policy": "bounded-tiles",
+          "pattern_revision": "independent-apsk-v2",
+          "added_amplitude_depth": 0.25,
+          "data_power_reference_version": 2,
+          "data_reference_bit": 0,
+          "data_reference_integration_method": "bounded-keyed-tile-quadrature-v1",
+          "data_reference_complete_sampled_source": false,
+          "data_reference_active_seconds": 69.60000000000001,
+          "data_reference_mean_norm": 0.9945023131747577,
+          "data_reference_nodes": 12288,
+          "data_reference_refinement_relative_difference": 0,
+          "data_reference_refinement_tolerance": 0.001,
+          "data_reference_sampled_tiles": 6,
+          "data_reference_tile_relative_standard_error": 0.0038810307806955127,
+          "data_reference_statistical_error_is_bound": false,
+          "post_plan_data_calibration_gain": 1.003065619467987,
+          "template_data_gain": 1.0027602298004303,
+          "data_reference_scope": "fixed public bit0; at most16 stratified keyed tiles with2048 fractional nodes each; active-time mean omits finite outer halo; between-tile standard error is diagnostic, not a confidence bound or integration guarantee; one unchanged gain for the entire stream"
+        },
+        "basis_scope": "Public DATA pattern only; arrival is absolute seconds in the requested observation coordinate. Fixed key/epoch per session; all three carriers retained.",
+        "scope": "Bounded pull source, not a receiver or real-time guarantee. Emitted kind has no channel or thermal noise. Physical null and full-duration power accuracy require qualification."
+      },
+      "source_args": [
+        "--case",
+        "hf",
+        "--sample-rate",
+        "6000",
+        "--rate",
+        "36",
+        "--added-symbols",
+        "10",
+        "--seconds",
+        "60",
+        "--key-seed",
+        "94001",
+        "--epoch",
+        "1793850000",
+        "--spread-preset",
+        "none",
+        "--selective-perturbation",
+        "off",
+        "--base-oscillator",
+        "gpsdo-ocxo",
+        "--shift-oscillator",
+        "gpsdo-ocxo",
+        "--oscillator-effects",
+        "off",
+        "--arrival-seconds",
+        "0",
+        "--helper",
+        "off"
+      ],
+      "tx": {
+        "capture": false,
+        "events": true,
+        "input_samples": 660000,
+        "output_samples": 659989,
+        "peak_applied_ppm": 50.00000000000002,
+        "peak_error_seconds": 2.0996249999767165,
+        "steps": 4
+      },
+      "rx": {
+        "capture": true,
+        "events": true,
+        "input_samples": 659989,
+        "output_samples": 659976,
+        "peak_applied_ppm": 50.00250012500624,
+        "peak_error_seconds": 2.0995249825064093,
+        "steps": 4
+      },
+      "receiver": {
+        "status": "scored",
+        "complete_observation": true,
+        "admission": null,
+        "bit_scores": [
+          63.4076947497518,
+          -6.253337865251697
+        ],
+        "model_bit_scores": [
+          [
+            43.107478255678416,
+            -87.12500990554955
+          ],
+          [
+            64.50630703791103,
+            -81.18374140095693
+          ],
+          [
+            4.720757670875173,
+            -5.154725576583587
+          ]
+        ],
+        "hypothesis_log_evidence": [
+          [
+            0.0,
+            43.107478255678416,
+            -87.12500990554955
+          ],
+          [
+            0.0,
+            64.50630703791103,
+            -81.18374140095693
+          ],
+          [
+            0.0,
+            4.720757670875173,
+            -5.154725576583587
+          ]
+        ],
+        "consumed_samples": 654000,
+        "processed_rows": 654000,
+        "scored_rows": 654000,
+        "observed_rows": 654000,
+        "erased_rows": 0,
+        "blocks": 218,
+        "pending_rows": 0,
+        "working_bytes_estimate": 433728,
+        "push_process_cpu_seconds": 1.7471525129999979
+      },
+      "decision": {
+        "candidate_bit": 0,
+        "log_e": 62.71454756919185,
+        "conditional_model_pass": true,
+        "admitted": false,
+        "admission_scope": "Conditional Gaussian model, fixed bank and endpoint only; neither correctness nor Helper/physical null qualified."
+      },
+      "receiver_wall_seconds": 1.217875228030607,
+      "receiver_cpu_seconds": 1.7501557559999998,
+      "receiver_expected_bit": 0,
+      "pcm_peak": 3.3149666786193848,
+      "noisy_output_samples": 659976
+    },
+    {
+      "seed": 94001,
+      "helper": "on",
+      "events": false,
+      "source_descriptor": {
+        "schema": "triad-stream-source-v1",
+        "sample_rate_hz": 6000,
+        "emitted_samples": 648000,
+        "capture_samples": 786296,
+        "simulation_channel_constructed": false,
+        "total_samples": 648000,
+        "data_offset_samples": 227198,
+        "source_samples": 419205,
+        "capture_lead_seconds": 0,
+        "noise_variance": 0,
+        "template_data_gain": 1.0027602298004303,
+        "data_if_hz": 1725,
+        "epoch": 1793850000,
+        "pattern_revision": "independent-apsk-v2",
+        "added_amplitude_depth": 0.25,
+        "helper_enabled": true,
+        "clock_follow_bounded": false,
+        "clock_follow_limit_seconds": 0,
+        "clock_follow_endpoint_padding_seconds": 0,
+        "clock_follow_basis": "nominal affine; remote corrections are not supplied to receiver",
+        "conditional_gaussian_null_supported": false,
+        "helper_high_hz": 2400,
+        "helper_low_hz": 550,
+        "maximum_rows": 16384,
+        "maximum_columns": 128,
+        "workspace_budget_bytes": 67108864,
+        "fixed_workspace_bytes": 1049688,
+        "stream_kind": "emitted",
+        "key_source": "explicit-test-fixture-seed",
+        "power": {
+          "data_power_reference_policy": "bounded-tiles",
+          "pattern_revision": "independent-apsk-v2",
+          "added_amplitude_depth": 0.25,
+          "data_power_reference_version": 2,
+          "data_reference_bit": 0,
+          "data_reference_integration_method": "bounded-keyed-tile-quadrature-v1",
+          "data_reference_complete_sampled_source": false,
+          "data_reference_active_seconds": 69.60000000000001,
+          "data_reference_mean_norm": 0.9945023131747577,
+          "data_reference_nodes": 12288,
+          "data_reference_refinement_relative_difference": 0,
+          "data_reference_refinement_tolerance": 0.001,
+          "data_reference_sampled_tiles": 6,
+          "data_reference_tile_relative_standard_error": 0.0038810307806955127,
+          "data_reference_statistical_error_is_bound": false,
+          "post_plan_data_calibration_gain": 1.003065619467987,
+          "template_data_gain": 1.0027602298004303,
+          "data_reference_scope": "fixed public bit0; at most16 stratified keyed tiles with2048 fractional nodes each; active-time mean omits finite outer halo; between-tile standard error is diagnostic, not a confidence bound or integration guarantee; one unchanged gain for the entire stream"
+        },
+        "basis_scope": "Public DATA pattern only; arrival is absolute seconds in the requested observation coordinate. Fixed key/epoch per session; all three carriers retained.",
+        "scope": "Bounded pull source, not a receiver or real-time guarantee. Emitted kind has no channel or thermal noise. Physical null and full-duration power accuracy require qualification."
+      },
+      "source_args": [
+        "--case",
+        "hf",
+        "--sample-rate",
+        "6000",
+        "--rate",
+        "36",
+        "--added-symbols",
+        "10",
+        "--seconds",
+        "60",
+        "--key-seed",
+        "94001",
+        "--epoch",
+        "1793850000",
+        "--spread-preset",
+        "none",
+        "--selective-perturbation",
+        "off",
+        "--base-oscillator",
+        "gpsdo-ocxo",
+        "--shift-oscillator",
+        "gpsdo-ocxo",
+        "--oscillator-effects",
+        "off",
+        "--arrival-seconds",
+        "0",
+        "--helper",
+        "on"
+      ],
+      "tx": {
+        "capture": false,
+        "events": false,
+        "input_samples": 660000,
+        "output_samples": 660000,
+        "peak_applied_ppm": 0,
+        "peak_error_seconds": 4.6566129424663316e-11,
+        "steps": 0
+      },
+      "rx": {
+        "capture": true,
+        "events": false,
+        "input_samples": 660000,
+        "output_samples": 660000,
+        "peak_applied_ppm": 0,
+        "peak_error_seconds": 4.6566129424663316e-11,
+        "steps": 0
+      },
+      "receiver": {
+        "status": "scored",
+        "complete_observation": true,
+        "admission": null,
+        "bit_scores": [
+          436.2971202462721,
+          -5.744421019772008
+        ],
+        "model_bit_scores": [
+          [
+            241.03319720630543,
+            -98.42558564275527
+          ],
+          [
+            293.3644213192165,
+            -92.27445800224814
+          ],
+          [
+            437.3957325349402,
+            -4.645808731103898
+          ]
+        ],
+        "hypothesis_log_evidence": [
+          [
+            0.0,
+            241.03319720630543,
+            -98.42558564275527
+          ],
+          [
+            0.0,
+            293.3644213192165,
+            -92.27445800224814
+          ],
+          [
+            0.0,
+            437.3957325349402,
+            -4.645808731103898
+          ]
+        ],
+        "consumed_samples": 654000,
+        "processed_rows": 654000,
+        "scored_rows": 654000,
+        "observed_rows": 654000,
+        "erased_rows": 0,
+        "blocks": 218,
+        "pending_rows": 0,
+        "working_bytes_estimate": 433728,
+        "push_process_cpu_seconds": 1.7395748390000074
+      },
+      "decision": {
+        "candidate_bit": 0,
+        "log_e": 435.6039730657121,
+        "conditional_model_pass": true,
+        "admitted": false,
+        "admission_scope": "Conditional Gaussian model, fixed bank and endpoint only; neither correctness nor Helper/physical null qualified."
+      },
+      "receiver_wall_seconds": 1.2193204809445888,
+      "receiver_cpu_seconds": 1.7425543330000002,
+      "receiver_expected_bit": 0,
+      "pcm_peak": 10.152454376220703,
+      "noisy_output_samples": 660000
+    },
+    {
+      "seed": 94001,
+      "helper": "on",
+      "events": true,
+      "source_descriptor": {
+        "schema": "triad-stream-source-v1",
+        "sample_rate_hz": 6000,
+        "emitted_samples": 648000,
+        "capture_samples": 786296,
+        "simulation_channel_constructed": false,
+        "total_samples": 648000,
+        "data_offset_samples": 227198,
+        "source_samples": 419205,
+        "capture_lead_seconds": 0,
+        "noise_variance": 0,
+        "template_data_gain": 1.0027602298004303,
+        "data_if_hz": 1725,
+        "epoch": 1793850000,
+        "pattern_revision": "independent-apsk-v2",
+        "added_amplitude_depth": 0.25,
+        "helper_enabled": true,
+        "clock_follow_bounded": false,
+        "clock_follow_limit_seconds": 0,
+        "clock_follow_endpoint_padding_seconds": 0,
+        "clock_follow_basis": "nominal affine; remote corrections are not supplied to receiver",
+        "conditional_gaussian_null_supported": false,
+        "helper_high_hz": 2400,
+        "helper_low_hz": 550,
+        "maximum_rows": 16384,
+        "maximum_columns": 128,
+        "workspace_budget_bytes": 67108864,
+        "fixed_workspace_bytes": 1049688,
+        "stream_kind": "emitted",
+        "key_source": "explicit-test-fixture-seed",
+        "power": {
+          "data_power_reference_policy": "bounded-tiles",
+          "pattern_revision": "independent-apsk-v2",
+          "added_amplitude_depth": 0.25,
+          "data_power_reference_version": 2,
+          "data_reference_bit": 0,
+          "data_reference_integration_method": "bounded-keyed-tile-quadrature-v1",
+          "data_reference_complete_sampled_source": false,
+          "data_reference_active_seconds": 69.60000000000001,
+          "data_reference_mean_norm": 0.9945023131747577,
+          "data_reference_nodes": 12288,
+          "data_reference_refinement_relative_difference": 0,
+          "data_reference_refinement_tolerance": 0.001,
+          "data_reference_sampled_tiles": 6,
+          "data_reference_tile_relative_standard_error": 0.0038810307806955127,
+          "data_reference_statistical_error_is_bound": false,
+          "post_plan_data_calibration_gain": 1.003065619467987,
+          "template_data_gain": 1.0027602298004303,
+          "data_reference_scope": "fixed public bit0; at most16 stratified keyed tiles with2048 fractional nodes each; active-time mean omits finite outer halo; between-tile standard error is diagnostic, not a confidence bound or integration guarantee; one unchanged gain for the entire stream"
+        },
+        "basis_scope": "Public DATA pattern only; arrival is absolute seconds in the requested observation coordinate. Fixed key/epoch per session; all three carriers retained.",
+        "scope": "Bounded pull source, not a receiver or real-time guarantee. Emitted kind has no channel or thermal noise. Physical null and full-duration power accuracy require qualification."
+      },
+      "source_args": [
+        "--case",
+        "hf",
+        "--sample-rate",
+        "6000",
+        "--rate",
+        "36",
+        "--added-symbols",
+        "10",
+        "--seconds",
+        "60",
+        "--key-seed",
+        "94001",
+        "--epoch",
+        "1793850000",
+        "--spread-preset",
+        "none",
+        "--selective-perturbation",
+        "off",
+        "--base-oscillator",
+        "gpsdo-ocxo",
+        "--shift-oscillator",
+        "gpsdo-ocxo",
+        "--oscillator-effects",
+        "off",
+        "--arrival-seconds",
+        "0",
+        "--helper",
+        "on"
+      ],
+      "tx": {
+        "capture": false,
+        "events": true,
+        "input_samples": 660000,
+        "output_samples": 659989,
+        "peak_applied_ppm": 50.00000000000002,
+        "peak_error_seconds": 2.0996249999767165,
+        "steps": 4
+      },
+      "rx": {
+        "capture": true,
+        "events": true,
+        "input_samples": 659989,
+        "output_samples": 659976,
+        "peak_applied_ppm": 50.00250012500624,
+        "peak_error_seconds": 2.0995249825064093,
+        "steps": 4
+      },
+      "receiver": {
+        "status": "scored",
+        "complete_observation": true,
+        "admission": null,
+        "bit_scores": [
+          63.351095437349485,
+          -6.254301767781899
+        ],
+        "model_bit_scores": [
+          [
+            43.05363156994367,
+            -87.09058073983539
+          ],
+          [
+            64.44970772550732,
+            -81.15963869906409
+          ],
+          [
+            4.7049096824848675,
+            -5.155689479113789
+          ]
+        ],
+        "hypothesis_log_evidence": [
+          [
+            0.0,
+            43.05363156994367,
+            -87.09058073983539
+          ],
+          [
+            0.0,
+            64.44970772550732,
+            -81.15963869906409
+          ],
+          [
+            0.0,
+            4.7049096824848675,
+            -5.155689479113789
+          ]
+        ],
+        "consumed_samples": 654000,
+        "processed_rows": 654000,
+        "scored_rows": 654000,
+        "observed_rows": 654000,
+        "erased_rows": 0,
+        "blocks": 218,
+        "pending_rows": 0,
+        "working_bytes_estimate": 433728,
+        "push_process_cpu_seconds": 1.5128872610000066
+      },
+      "decision": {
+        "candidate_bit": 0,
+        "log_e": 62.65794825678954,
+        "conditional_model_pass": true,
+        "admitted": false,
+        "admission_scope": "Conditional Gaussian model, fixed bank and endpoint only; neither correctness nor Helper/physical null qualified."
+      },
+      "receiver_wall_seconds": 1.0516151040210389,
+      "receiver_cpu_seconds": 1.515040041999999,
+      "receiver_expected_bit": 0,
+      "pcm_peak": 10.152454376220703,
+      "noisy_output_samples": 659976
+    },
+    {
+      "seed": 94002,
+      "helper": "on",
+      "events": false,
+      "source_descriptor": {
+        "schema": "triad-stream-source-v1",
+        "sample_rate_hz": 6000,
+        "emitted_samples": 648000,
+        "capture_samples": 786296,
+        "simulation_channel_constructed": false,
+        "total_samples": 648000,
+        "data_offset_samples": 227198,
+        "source_samples": 419205,
+        "capture_lead_seconds": 0,
+        "noise_variance": 0,
+        "template_data_gain": 0.998169802096824,
+        "data_if_hz": 1725,
+        "epoch": 1793850000,
+        "pattern_revision": "independent-apsk-v2",
+        "added_amplitude_depth": 0.25,
+        "helper_enabled": true,
+        "clock_follow_bounded": false,
+        "clock_follow_limit_seconds": 0,
+        "clock_follow_endpoint_padding_seconds": 0,
+        "clock_follow_basis": "nominal affine; remote corrections are not supplied to receiver",
+        "conditional_gaussian_null_supported": false,
+        "helper_high_hz": 2400,
+        "helper_low_hz": 550,
+        "maximum_rows": 16384,
+        "maximum_columns": 128,
+        "workspace_budget_bytes": 67108864,
+        "fixed_workspace_bytes": 1049688,
+        "stream_kind": "emitted",
+        "key_source": "explicit-test-fixture-seed",
+        "power": {
+          "data_power_reference_policy": "bounded-tiles",
+          "pattern_revision": "independent-apsk-v2",
+          "added_amplitude_depth": 0.25,
+          "data_power_reference_version": 2,
+          "data_reference_bit": 0,
+          "data_reference_integration_method": "bounded-keyed-tile-quadrature-v1",
+          "data_reference_complete_sampled_source": false,
+          "data_reference_active_seconds": 69.60000000000001,
+          "data_reference_mean_norm": 1.0036704692575715,
+          "data_reference_nodes": 12288,
+          "data_reference_refinement_relative_difference": 0,
+          "data_reference_refinement_tolerance": 0.001,
+          "data_reference_sampled_tiles": 6,
+          "data_reference_tile_relative_standard_error": 0.005531309385490295,
+          "data_reference_statistical_error_is_bound": false,
+          "post_plan_data_calibration_gain": 0.9983509755832927,
+          "template_data_gain": 0.998169802096824,
+          "data_reference_scope": "fixed public bit0; at most16 stratified keyed tiles with2048 fractional nodes each; active-time mean omits finite outer halo; between-tile standard error is diagnostic, not a confidence bound or integration guarantee; one unchanged gain for the entire stream"
+        },
+        "basis_scope": "Public DATA pattern only; arrival is absolute seconds in the requested observation coordinate. Fixed key/epoch per session; all three carriers retained.",
+        "scope": "Bounded pull source, not a receiver or real-time guarantee. Emitted kind has no channel or thermal noise. Physical null and full-duration power accuracy require qualification."
+      },
+      "source_args": [
+        "--case",
+        "hf",
+        "--sample-rate",
+        "6000",
+        "--rate",
+        "36",
+        "--added-symbols",
+        "10",
+        "--seconds",
+        "60",
+        "--key-seed",
+        "94002",
+        "--epoch",
+        "1793850000",
+        "--spread-preset",
+        "none",
+        "--selective-perturbation",
+        "off",
+        "--base-oscillator",
+        "gpsdo-ocxo",
+        "--shift-oscillator",
+        "gpsdo-ocxo",
+        "--oscillator-effects",
+        "off",
+        "--arrival-seconds",
+        "0",
+        "--helper",
+        "on"
+      ],
+      "tx": {
+        "capture": false,
+        "events": false,
+        "input_samples": 660000,
+        "output_samples": 660000,
+        "peak_applied_ppm": 0,
+        "peak_error_seconds": 4.6566129424663316e-11,
+        "steps": 0
+      },
+      "rx": {
+        "capture": true,
+        "events": false,
+        "input_samples": 660000,
+        "output_samples": 660000,
+        "peak_applied_ppm": 0,
+        "peak_error_seconds": 4.6566129424663316e-11,
+        "steps": 0
+      },
+      "receiver": {
+        "status": "scored",
+        "complete_observation": true,
+        "admission": null,
+        "bit_scores": [
+          445.14607781993965,
+          -5.67455217935657
+        ],
+        "model_bit_scores": [
+          [
+            240.69126520194777,
+            -83.75788810762506
+          ],
+          [
+            296.3721732455306,
+            -78.71983908698894
+          ],
+          [
+            446.24469010860776,
+            -4.57593989068846
+          ]
+        ],
+        "hypothesis_log_evidence": [
+          [
+            0.0,
+            240.69126520194777,
+            -83.75788810762506
+          ],
+          [
+            0.0,
+            296.3721732455306,
+            -78.71983908698894
+          ],
+          [
+            0.0,
+            446.24469010860776,
+            -4.57593989068846
+          ]
+        ],
+        "consumed_samples": 654000,
+        "processed_rows": 654000,
+        "scored_rows": 654000,
+        "observed_rows": 654000,
+        "erased_rows": 0,
+        "blocks": 218,
+        "pending_rows": 0,
+        "working_bytes_estimate": 433728,
+        "push_process_cpu_seconds": 1.8080754369999923
+      },
+      "decision": {
+        "candidate_bit": 0,
+        "log_e": 444.4529306393797,
+        "conditional_model_pass": true,
+        "admitted": false,
+        "admission_scope": "Conditional Gaussian model, fixed bank and endpoint only; neither correctness nor Helper/physical null qualified."
+      },
+      "receiver_wall_seconds": 1.2800989539828151,
+      "receiver_cpu_seconds": 1.8134999710000006,
+      "receiver_expected_bit": 0,
+      "pcm_peak": 10.011312484741211,
+      "noisy_output_samples": 660000
+    },
+    {
+      "seed": 94002,
+      "helper": "on",
+      "events": true,
+      "source_descriptor": {
+        "schema": "triad-stream-source-v1",
+        "sample_rate_hz": 6000,
+        "emitted_samples": 648000,
+        "capture_samples": 786296,
+        "simulation_channel_constructed": false,
+        "total_samples": 648000,
+        "data_offset_samples": 227198,
+        "source_samples": 419205,
+        "capture_lead_seconds": 0,
+        "noise_variance": 0,
+        "template_data_gain": 0.998169802096824,
+        "data_if_hz": 1725,
+        "epoch": 1793850000,
+        "pattern_revision": "independent-apsk-v2",
+        "added_amplitude_depth": 0.25,
+        "helper_enabled": true,
+        "clock_follow_bounded": false,
+        "clock_follow_limit_seconds": 0,
+        "clock_follow_endpoint_padding_seconds": 0,
+        "clock_follow_basis": "nominal affine; remote corrections are not supplied to receiver",
+        "conditional_gaussian_null_supported": false,
+        "helper_high_hz": 2400,
+        "helper_low_hz": 550,
+        "maximum_rows": 16384,
+        "maximum_columns": 128,
+        "workspace_budget_bytes": 67108864,
+        "fixed_workspace_bytes": 1049688,
+        "stream_kind": "emitted",
+        "key_source": "explicit-test-fixture-seed",
+        "power": {
+          "data_power_reference_policy": "bounded-tiles",
+          "pattern_revision": "independent-apsk-v2",
+          "added_amplitude_depth": 0.25,
+          "data_power_reference_version": 2,
+          "data_reference_bit": 0,
+          "data_reference_integration_method": "bounded-keyed-tile-quadrature-v1",
+          "data_reference_complete_sampled_source": false,
+          "data_reference_active_seconds": 69.60000000000001,
+          "data_reference_mean_norm": 1.0036704692575715,
+          "data_reference_nodes": 12288,
+          "data_reference_refinement_relative_difference": 0,
+          "data_reference_refinement_tolerance": 0.001,
+          "data_reference_sampled_tiles": 6,
+          "data_reference_tile_relative_standard_error": 0.005531309385490295,
+          "data_reference_statistical_error_is_bound": false,
+          "post_plan_data_calibration_gain": 0.9983509755832927,
+          "template_data_gain": 0.998169802096824,
+          "data_reference_scope": "fixed public bit0; at most16 stratified keyed tiles with2048 fractional nodes each; active-time mean omits finite outer halo; between-tile standard error is diagnostic, not a confidence bound or integration guarantee; one unchanged gain for the entire stream"
+        },
+        "basis_scope": "Public DATA pattern only; arrival is absolute seconds in the requested observation coordinate. Fixed key/epoch per session; all three carriers retained.",
+        "scope": "Bounded pull source, not a receiver or real-time guarantee. Emitted kind has no channel or thermal noise. Physical null and full-duration power accuracy require qualification."
+      },
+      "source_args": [
+        "--case",
+        "hf",
+        "--sample-rate",
+        "6000",
+        "--rate",
+        "36",
+        "--added-symbols",
+        "10",
+        "--seconds",
+        "60",
+        "--key-seed",
+        "94002",
+        "--epoch",
+        "1793850000",
+        "--spread-preset",
+        "none",
+        "--selective-perturbation",
+        "off",
+        "--base-oscillator",
+        "gpsdo-ocxo",
+        "--shift-oscillator",
+        "gpsdo-ocxo",
+        "--oscillator-effects",
+        "off",
+        "--arrival-seconds",
+        "0",
+        "--helper",
+        "on"
+      ],
+      "tx": {
+        "capture": false,
+        "events": true,
+        "input_samples": 660000,
+        "output_samples": 659989,
+        "peak_applied_ppm": 50.00000000000002,
+        "peak_error_seconds": 2.0996249999767165,
+        "steps": 4
+      },
+      "rx": {
+        "capture": true,
+        "events": true,
+        "input_samples": 659989,
+        "output_samples": 659976,
+        "peak_applied_ppm": 50.00250012500624,
+        "peak_error_seconds": 2.0995249825064093,
+        "steps": 4
+      },
+      "receiver": {
+        "status": "scored",
+        "complete_observation": true,
+        "admission": null,
+        "bit_scores": [
+          37.73056129961559,
+          -6.894413165275355
+        ],
+        "model_bit_scores": [
+          [
+            17.858175764054316,
+            -91.53506952322707
+          ],
+          [
+            38.82917358750274,
+            -86.05611886203405
+          ],
+          [
+            10.251005970741971,
+            -5.795800876607245
+          ]
+        ],
+        "hypothesis_log_evidence": [
+          [
+            0.0,
+            17.858175764054316,
+            -91.53506952322707
+          ],
+          [
+            0.0,
+            38.82917358750274,
+            -86.05611886203405
+          ],
+          [
+            0.0,
+            10.251005970741971,
+            -5.795800876607245
+          ]
+        ],
+        "consumed_samples": 654000,
+        "processed_rows": 654000,
+        "scored_rows": 654000,
+        "observed_rows": 654000,
+        "erased_rows": 0,
+        "blocks": 218,
+        "pending_rows": 0,
+        "working_bytes_estimate": 433728,
+        "push_process_cpu_seconds": 1.7094288809999831
+      },
+      "decision": {
+        "candidate_bit": 0,
+        "log_e": 37.03741411905564,
+        "conditional_model_pass": true,
+        "admitted": false,
+        "admission_scope": "Conditional Gaussian model, fixed bank and endpoint only; neither correctness nor Helper/physical null qualified."
+      },
+      "receiver_wall_seconds": 1.1915920110186562,
+      "receiver_cpu_seconds": 1.7164014049999992,
+      "receiver_expected_bit": 0,
+      "pcm_peak": 10.011312484741211,
+      "noisy_output_samples": 659976
+    },
+    {
+      "seed": 94003,
+      "helper": "on",
+      "events": false,
+      "source_descriptor": {
+        "schema": "triad-stream-source-v1",
+        "sample_rate_hz": 6000,
+        "emitted_samples": 648000,
+        "capture_samples": 786296,
+        "simulation_channel_constructed": false,
+        "total_samples": 648000,
+        "data_offset_samples": 227198,
+        "source_samples": 419205,
+        "capture_lead_seconds": 0,
+        "noise_variance": 0,
+        "template_data_gain": 0.9978934279658127,
+        "data_if_hz": 1725,
+        "epoch": 1793850000,
+        "pattern_revision": "independent-apsk-v2",
+        "added_amplitude_depth": 0.25,
+        "helper_enabled": true,
+        "clock_follow_bounded": false,
+        "clock_follow_limit_seconds": 0,
+        "clock_follow_endpoint_padding_seconds": 0,
+        "clock_follow_basis": "nominal affine; remote corrections are not supplied to receiver",
+        "conditional_gaussian_null_supported": false,
+        "helper_high_hz": 2400,
+        "helper_low_hz": 550,
+        "maximum_rows": 16384,
+        "maximum_columns": 128,
+        "workspace_budget_bytes": 67108864,
+        "fixed_workspace_bytes": 1049688,
+        "stream_kind": "emitted",
+        "key_source": "explicit-test-fixture-seed",
+        "power": {
+          "data_power_reference_policy": "bounded-tiles",
+          "pattern_revision": "independent-apsk-v2",
+          "added_amplitude_depth": 0.25,
+          "data_power_reference_version": 2,
+          "data_reference_bit": 0,
+          "data_reference_integration_method": "bounded-keyed-tile-quadrature-v1",
+          "data_reference_complete_sampled_source": false,
+          "data_reference_active_seconds": 69.60000000000001,
+          "data_reference_mean_norm": 1.0042264944971748,
+          "data_reference_nodes": 12288,
+          "data_reference_refinement_relative_difference": 0,
+          "data_reference_refinement_tolerance": 0.001,
+          "data_reference_sampled_tiles": 6,
+          "data_reference_tile_relative_standard_error": 0.007724203510620913,
+          "data_reference_statistical_error_is_bound": false,
+          "post_plan_data_calibration_gain": 0.9977973762253182,
+          "template_data_gain": 0.9978934279658127,
+          "data_reference_scope": "fixed public bit0; at most16 stratified keyed tiles with2048 fractional nodes each; active-time mean omits finite outer halo; between-tile standard error is diagnostic, not a confidence bound or integration guarantee; one unchanged gain for the entire stream"
+        },
+        "basis_scope": "Public DATA pattern only; arrival is absolute seconds in the requested observation coordinate. Fixed key/epoch per session; all three carriers retained.",
+        "scope": "Bounded pull source, not a receiver or real-time guarantee. Emitted kind has no channel or thermal noise. Physical null and full-duration power accuracy require qualification."
+      },
+      "source_args": [
+        "--case",
+        "hf",
+        "--sample-rate",
+        "6000",
+        "--rate",
+        "36",
+        "--added-symbols",
+        "10",
+        "--seconds",
+        "60",
+        "--key-seed",
+        "94003",
+        "--epoch",
+        "1793850000",
+        "--spread-preset",
+        "none",
+        "--selective-perturbation",
+        "off",
+        "--base-oscillator",
+        "gpsdo-ocxo",
+        "--shift-oscillator",
+        "gpsdo-ocxo",
+        "--oscillator-effects",
+        "off",
+        "--arrival-seconds",
+        "0",
+        "--helper",
+        "on"
+      ],
+      "tx": {
+        "capture": false,
+        "events": false,
+        "input_samples": 660000,
+        "output_samples": 660000,
+        "peak_applied_ppm": 0,
+        "peak_error_seconds": 4.6566129424663316e-11,
+        "steps": 0
+      },
+      "rx": {
+        "capture": true,
+        "events": false,
+        "input_samples": 660000,
+        "output_samples": 660000,
+        "peak_applied_ppm": 0,
+        "peak_error_seconds": 4.6566129424663316e-11,
+        "steps": 0
+      },
+      "receiver": {
+        "status": "scored",
+        "complete_observation": true,
+        "admission": null,
+        "bit_scores": [
+          410.65812694546895,
+          -5.915248324582708
+        ],
+        "model_bit_scores": [
+          [
+            223.23575213966586,
+            -87.98065360085326
+          ],
+          [
+            275.67593579599634,
+            -81.0419400165556
+          ],
+          [
+            411.75673923413706,
+            -4.816636035914598
+          ]
+        ],
+        "hypothesis_log_evidence": [
+          [
+            0.0,
+            223.23575213966586,
+            -87.98065360085326
+          ],
+          [
+            0.0,
+            275.67593579599634,
+            -81.0419400165556
+          ],
+          [
+            0.0,
+            411.75673923413706,
+            -4.816636035914598
+          ]
+        ],
+        "consumed_samples": 654000,
+        "processed_rows": 654000,
+        "scored_rows": 654000,
+        "observed_rows": 654000,
+        "erased_rows": 0,
+        "blocks": 218,
+        "pending_rows": 0,
+        "working_bytes_estimate": 433728,
+        "push_process_cpu_seconds": 2.2877202169999844
+      },
+      "decision": {
+        "candidate_bit": 0,
+        "log_e": 409.964979764909,
+        "conditional_model_pass": true,
+        "admitted": false,
+        "admission_scope": "Conditional Gaussian model, fixed bank and endpoint only; neither correctness nor Helper/physical null qualified."
+      },
+      "receiver_wall_seconds": 1.634482011955697,
+      "receiver_cpu_seconds": 2.2935038940000005,
+      "receiver_expected_bit": 0,
+      "pcm_peak": 10.007651329040527,
+      "noisy_output_samples": 660000
+    },
+    {
+      "seed": 94003,
+      "helper": "on",
+      "events": true,
+      "source_descriptor": {
+        "schema": "triad-stream-source-v1",
+        "sample_rate_hz": 6000,
+        "emitted_samples": 648000,
+        "capture_samples": 786296,
+        "simulation_channel_constructed": false,
+        "total_samples": 648000,
+        "data_offset_samples": 227198,
+        "source_samples": 419205,
+        "capture_lead_seconds": 0,
+        "noise_variance": 0,
+        "template_data_gain": 0.9978934279658127,
+        "data_if_hz": 1725,
+        "epoch": 1793850000,
+        "pattern_revision": "independent-apsk-v2",
+        "added_amplitude_depth": 0.25,
+        "helper_enabled": true,
+        "clock_follow_bounded": false,
+        "clock_follow_limit_seconds": 0,
+        "clock_follow_endpoint_padding_seconds": 0,
+        "clock_follow_basis": "nominal affine; remote corrections are not supplied to receiver",
+        "conditional_gaussian_null_supported": false,
+        "helper_high_hz": 2400,
+        "helper_low_hz": 550,
+        "maximum_rows": 16384,
+        "maximum_columns": 128,
+        "workspace_budget_bytes": 67108864,
+        "fixed_workspace_bytes": 1049688,
+        "stream_kind": "emitted",
+        "key_source": "explicit-test-fixture-seed",
+        "power": {
+          "data_power_reference_policy": "bounded-tiles",
+          "pattern_revision": "independent-apsk-v2",
+          "added_amplitude_depth": 0.25,
+          "data_power_reference_version": 2,
+          "data_reference_bit": 0,
+          "data_reference_integration_method": "bounded-keyed-tile-quadrature-v1",
+          "data_reference_complete_sampled_source": false,
+          "data_reference_active_seconds": 69.60000000000001,
+          "data_reference_mean_norm": 1.0042264944971748,
+          "data_reference_nodes": 12288,
+          "data_reference_refinement_relative_difference": 0,
+          "data_reference_refinement_tolerance": 0.001,
+          "data_reference_sampled_tiles": 6,
+          "data_reference_tile_relative_standard_error": 0.007724203510620913,
+          "data_reference_statistical_error_is_bound": false,
+          "post_plan_data_calibration_gain": 0.9977973762253182,
+          "template_data_gain": 0.9978934279658127,
+          "data_reference_scope": "fixed public bit0; at most16 stratified keyed tiles with2048 fractional nodes each; active-time mean omits finite outer halo; between-tile standard error is diagnostic, not a confidence bound or integration guarantee; one unchanged gain for the entire stream"
+        },
+        "basis_scope": "Public DATA pattern only; arrival is absolute seconds in the requested observation coordinate. Fixed key/epoch per session; all three carriers retained.",
+        "scope": "Bounded pull source, not a receiver or real-time guarantee. Emitted kind has no channel or thermal noise. Physical null and full-duration power accuracy require qualification."
+      },
+      "source_args": [
+        "--case",
+        "hf",
+        "--sample-rate",
+        "6000",
+        "--rate",
+        "36",
+        "--added-symbols",
+        "10",
+        "--seconds",
+        "60",
+        "--key-seed",
+        "94003",
+        "--epoch",
+        "1793850000",
+        "--spread-preset",
+        "none",
+        "--selective-perturbation",
+        "off",
+        "--base-oscillator",
+        "gpsdo-ocxo",
+        "--shift-oscillator",
+        "gpsdo-ocxo",
+        "--oscillator-effects",
+        "off",
+        "--arrival-seconds",
+        "0",
+        "--helper",
+        "on"
+      ],
+      "tx": {
+        "capture": false,
+        "events": true,
+        "input_samples": 660000,
+        "output_samples": 659989,
+        "peak_applied_ppm": 50.00000000000002,
+        "peak_error_seconds": 2.0996249999767165,
+        "steps": 4
+      },
+      "rx": {
+        "capture": true,
+        "events": true,
+        "input_samples": 659989,
+        "output_samples": 659976,
+        "peak_applied_ppm": 50.00250012500624,
+        "peak_error_seconds": 2.0995249825064093,
+        "steps": 4
+      },
+      "receiver": {
+        "status": "scored",
+        "complete_observation": true,
+        "admission": null,
+        "bit_scores": [
+          80.29528487880239,
+          -5.734844753307871
+        ],
+        "model_bit_scores": [
+          [
+            56.75179956563473,
+            -94.71294476363346
+          ],
+          [
+            81.39389716745063,
+            -87.11569357902044
+          ],
+          [
+            3.792561962003674,
+            -4.636232464639761
+          ]
+        ],
+        "hypothesis_log_evidence": [
+          [
+            0.0,
+            56.75179956563473,
+            -94.71294476363346
+          ],
+          [
+            0.0,
+            81.39389716745063,
+            -87.11569357902044
+          ],
+          [
+            0.0,
+            3.792561962003674,
+            -4.636232464639761
+          ]
+        ],
+        "consumed_samples": 654000,
+        "processed_rows": 654000,
+        "scored_rows": 654000,
+        "observed_rows": 654000,
+        "erased_rows": 0,
+        "blocks": 218,
+        "pending_rows": 0,
+        "working_bytes_estimate": 433728,
+        "push_process_cpu_seconds": 1.8028368340000114
+      },
+      "decision": {
+        "candidate_bit": 0,
+        "log_e": 79.60213769824244,
+        "conditional_model_pass": true,
+        "admitted": false,
+        "admission_scope": "Conditional Gaussian model, fixed bank and endpoint only; neither correctness nor Helper/physical null qualified."
+      },
+      "receiver_wall_seconds": 1.2613665570388548,
+      "receiver_cpu_seconds": 1.805816930999999,
+      "receiver_expected_bit": 0,
+      "pcm_peak": 10.007651329040527,
+      "noisy_output_samples": 659976
+    }
+  ],
+  "wall_seconds": 16.748383280995768
+}

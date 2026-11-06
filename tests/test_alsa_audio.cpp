@@ -8,6 +8,7 @@
 #include "../src/alsa_plugin_path.hpp"
 #include "../src/pulse_playback.hpp"
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <iomanip>
 #include <openssl/evp.h>
@@ -1539,6 +1540,253 @@ void passive_capture_discontinuity_and_cancel() {
     rejects([&]{a::capture(logical,"default",[&](auto){++pcm;return false;},stop.get_token(),{},cancelled);});
     check(clock_queries==1 && !dates && !pcm,"passive dating published after cancellation");
 }
+// These short native-adapter checks complement the multi-day controller tests:
+// they exercise real PCM through the adjustable converter, not only callbacks
+// or the controller's arithmetic. Mock device time advances with actual frames;
+// the eight-second signal does not require eight seconds of wall time.
+void continuous_clock_runtime() {
+    constexpr unsigned rate=8000;
+    constexpr std::size_t total=8*rate;
+    constexpr long double epoch=1800000000.L;
+    const auto waveform=[](std::size_t n) {
+        const double t=static_cast<double>(n)/rate;
+        return static_cast<float>(.12*std::sin(2*std::numbers::pi*175*t)+
+            .10*std::sin(2*std::numbers::pi*1300*t)+.08*std::sin(2*std::numbers::pi*2400*t));
+    };
+    const auto phase=[](long double t) {
+        if(t<1)return 0.L;
+        if(t<2)return .01L;
+        if(t<3)return .11L;
+        if(t<4)return -.10L;
+        if(t<5)return 1.90L;
+        if(t<6)return 1.85L;
+        if(t<7)return -.15L;
+        return -.04L;
+    };
+    struct Result {std::vector<float> pcm;std::vector<a::ClockDisciplineReport> reports;};
+    const auto run=[&](bool capture,bool corrections) {
+        f::reset();f::state.available={"default"};f::state.supported_rates={rate};
+        f::state.write_limit=137;f::state.read_limit=199;
+        f::state.sample=[&](std::size_t n,unsigned){return static_cast<std::int16_t>(waveform(n)*32767);};
+        Result result;a::Options options;options.continuous_clock.emplace();
+        // Strict UTC policy intentionally remains off. Its small hard-error
+        // budget must not accidentally reject best-effort clock following.
+        options.maximum_utc_error_seconds=0;
+        unsigned queries=0,formats=0,source_calls=0;std::size_t generated=0;
+        options.frame_timestamp=[&](std::uint64_t frames,bool input) {
+            check(input==capture,"continuous clock queried the wrong native direction");++queries;
+            const auto elapsed=static_cast<long double>(frames)/rate;
+            return a::FrameTimestamp{static_cast<long double>(frames),
+                epoch+elapsed+(corrections?phase(elapsed):0),elapsed,1e-6,1e-9,
+                a::TimingQuality::bounded,601};
+        };
+        options.continuous_clock_report=[&](const auto& report){result.reports.push_back(report);};
+        const auto format=[&](const a::StreamFormat& value) {
+            ++formats;check(value.hardware_rate==rate && value.logical_rate==rate &&
+                value.usable_passband_hz<=.43*rate,"continuous equal-rate stream bypassed its adjustable filter");
+            if(capture)check(value.capture_transport.kind==a::CaptureTransportKind::unknown,
+                "adjustable capture incorrectly published a fixed transport recipe");
+        };
+        if(capture) {
+            a::capture(rate,"default",[&](auto samples) {
+                check(!result.reports.empty(),"continuous capture delivered PCM before discipline telemetry");
+                for(const auto sample:samples)check(std::isfinite(sample),"continuous capture produced nonfinite PCM");
+                result.pcm.insert(result.pcm.end(),samples.begin(),samples.end());
+                return result.pcm.size()<total;
+            },{},format,options);
+        } else {
+            a::playback(rate,"default",[&](std::span<float> output) {
+                ++source_calls;
+                const auto n=std::min(output.size(),total-generated);
+                for(std::size_t i=0;i<n;++i)output[i]=waveform(generated+i);
+                generated+=n;return n;
+            },{},format,a::ChannelMode::left_mono,options);
+            check(generated==total && source_calls>100,"continuous playback reset or truncated the finite source");
+            check(std::abs(static_cast<double>(f::state.played.size())-total)<total*.001+3,
+                "continuous playback inserted a clock step, duplicated PCM, or lost the finite tail");
+            for(const auto sample:f::state.played)result.pcm.push_back(static_cast<float>(sample)/32768);
+        }
+        check(formats==1 && queries>50 && result.reports.size()>50 && !f::state.live &&
+            f::state.configured_streams==1 && f::state.recovered_errors.empty(),
+            "continuous clock reopened, recovered, leaked, or failed to observe the native stream");
+        bool positive=false,negative=false,applied=false,saturated=false,phase_limited=false;
+        const auto phase_cap=options.continuous_clock->maximum_phase_correction;
+        for(std::size_t i=0;i<result.reports.size();++i) {
+            const auto& r=result.reports[i];
+            check(r.capture==capture && r.ready && !r.holdover && r.origin_utc_seconds==epoch &&
+                std::abs(r.q_estimate-1)<1e-9 && std::abs(r.target_correction)<=phase_cap/(1-phase_cap)+1e-12 &&
+                std::abs(r.applied_correction)<=.001+1e-12,
+                "continuous telemetry reset its UTC origin, treated a step as rate, or exceeded its domain");
+            if(i) {
+                const auto& before=result.reports[i-1];
+                check(r.native_frame>=before.native_frame && r.logical_seconds>=before.logical_seconds,
+                    "continuous converter frontier moved backwards");
+                const auto elapsed=capture?r.logical_seconds-before.logical_seconds:
+                    (r.native_frame-before.native_frame)/rate;
+                check(std::abs(r.applied_correction-before.applied_correction)<=1e-5*elapsed+2e-10,
+                    "continuous native resampling exceeded the selected slew bound");
+            }
+            if(std::abs(r.phase_error_seconds)>.005) {
+                check((capture?-1:1)*r.target_correction*r.phase_error_seconds>0,
+                    "continuous capture/playback used the wrong reciprocal phase correction");
+                positive|=r.phase_error_seconds>0;negative|=r.phase_error_seconds<0;
+            }
+            applied|=std::abs(r.applied_correction)>1e-7;saturated|=r.saturated;
+            phase_limited|=r.phase_correction_limited;
+        }
+        if(corrections)check(positive && negative && applied && phase_limited && !saturated && result.reports.back().clock_steps>=7,
+            "repeated small and two-second UTC corrections did not reach the actual PCM converter");
+        else check(!applied && !saturated && !phase_limited && result.reports.back().clock_steps==0,
+            "stable native timing introduced an unnecessary correction");
+        return result;
+    };
+    const auto measure=[&](const Result& result,bool capture,bool corrections) {
+        // Integrate the documented continuous rate law from actual converter
+        // frontiers. This analytic reference does not resample PCM or copy the
+        // native filter. A rate ramp that reaches its target within a block is
+        // integrated in two pieces; samplewise trapezoid rounding is negligible.
+        const auto output_frame=[&](const auto& r) {
+            return static_cast<std::size_t>(std::llround(capture?r.logical_seconds*rate:r.native_frame));
+        };
+        const auto source_time=[&](const auto& r,long double elapsed) {
+            const long double delta=r.target_correction-r.applied_correction;
+            const auto ramp=std::min(elapsed,std::abs(delta)/1e-5L);
+            return (capture?r.native_frame/rate:r.logical_seconds)+elapsed*(1+r.applied_correction)+
+                std::copysign(1e-5L,delta)*ramp*ramp/2+delta*(elapsed-ramp);
+        };
+        constexpr std::array<double,3> frequencies{175,1300,2400},amplitudes{.12,.10,.08};
+        std::array<std::array<double,7>,6> fit{};
+        double error_energy=0,expected_energy=0,received_energy=0,peak_error=0,map_error=0;
+        std::size_t measured=0,mapped=0;long double last_source=0;
+        for(std::size_t block=0;block<result.reports.size();++block) {
+            const auto& r=result.reports[block];const auto first=output_frame(r);
+            const auto last=block+1<result.reports.size()?output_frame(result.reports[block+1]):result.pcm.size();
+            check(first==mapped && last>=first && last<=result.pcm.size(),
+                "continuous PCM reports skipped or duplicated an output interval");
+            if(block+1<result.reports.size()) {
+                const auto& next=result.reports[block+1];
+                const auto actual=capture?next.native_frame/rate:next.logical_seconds;
+                map_error=std::max(map_error,static_cast<double>(rate*std::abs(actual-
+                    source_time(r,static_cast<long double>(last-first)/rate))));
+            }
+            for(std::size_t i=first;i<last;++i) {
+                const auto t=source_time(r,static_cast<long double>(i-first)/rate);last_source=t;++mapped;
+                // Finite FIR zero extension is intentional at the source ends.
+                // Keep every interior sample, including either side of all UTC
+                // updates; do not discard the difficult clock-step boundaries.
+                if(i<100 || i+100>=result.pcm.size())continue;
+                std::array<double,6> basis{};double expected=0;
+                for(unsigned tone=0;tone<3;++tone) {
+                    const auto angle=2*std::numbers::pi*frequencies[tone]*static_cast<double>(t);
+                    basis[2*tone]=std::sin(angle);basis[2*tone+1]=std::cos(angle);
+                    expected+=amplitudes[tone]*basis[2*tone];
+                }
+                const double actual=result.pcm[i],error=actual-expected;
+                expected_energy+=expected*expected;received_energy+=actual*actual;
+                error_energy+=error*error;peak_error=std::max(peak_error,std::abs(error));++measured;
+                for(unsigned row=0;row<6;++row) {
+                    for(unsigned col=0;col<6;++col)fit[row][col]+=basis[row]*basis[col];
+                    fit[row][6]+=basis[row]*actual;
+                }
+            }
+        }
+        check(mapped==result.pcm.size() && measured>total-rate && map_error<1e-6,
+            "native converter source coordinates departed from continuous bounded-rate integration");
+        if(!capture) {
+            const auto end=result.reports.back().logical_seconds;
+            check(last_source<8 && end>=8 && end<8+(1.001L/rate)+1e-10L,
+                "continuous finite playback omitted source samples or emitted an extra endpoint sample");
+        }
+        // Six-variable joint tone fit removes finite-window cross terms; plain
+        // independent DFT peaks would conflate them with phase/filter error.
+        for(unsigned col=0;col<6;++col) {
+            unsigned pivot=col;
+            for(unsigned row=col+1;row<6;++row)if(std::abs(fit[row][col])>std::abs(fit[pivot][col]))pivot=row;
+            check(std::abs(fit[pivot][col])>1,"continuous tone measurement lost independent basis vectors");
+            std::swap(fit[col],fit[pivot]);const auto scale=fit[col][col];
+            for(unsigned j=col;j<=6;++j)fit[col][j]/=scale;
+            for(unsigned row=0;row<6;++row)if(row!=col) {
+                const auto factor=fit[row][col];
+                for(unsigned j=col;j<=6;++j)fit[row][j]-=factor*fit[col][j];
+            }
+        }
+        const auto rms=std::sqrt(error_energy/measured),energy_db=10*std::log10(received_energy/expected_energy);
+        check(rms<1e-4 && peak_error<5e-4 && std::abs(energy_db)<.01,
+            "continuous native resampling introduced a full-band waveform disturbance or energy loss");
+        const auto precision=std::cout.precision();std::cout<<std::setprecision(8)
+            <<"Continuous "<<(capture?"RX":"TX")<<(corrections?" repeated-steps":" stable")
+            <<" map_error_samples="<<map_error<<" rms="<<rms<<" peak="<<peak_error<<" energy_db="<<energy_db;
+        for(unsigned tone=0;tone<3;++tone) {
+            const auto sine=fit[2*tone][6],cosine=fit[2*tone+1][6];
+            const auto gain_db=20*std::log10(std::hypot(sine,cosine)/amplitudes[tone]);
+            const auto phase_rad=std::atan2(cosine,sine);
+            check(std::abs(gain_db)<.01 && std::abs(phase_rad)<.001,
+                "continuous native resampling degraded a retained baseband tone");
+            std::cout<<" tone"<<frequencies[tone]<<"_gain_db="<<gain_db<<"_phase_rad="<<phase_rad;
+        }
+        std::cout<<'\n';std::cout.precision(precision);
+    };
+    for(const bool capture:{false,true}) {
+        const auto ordinary=run(capture,false),corrected=run(capture,true);
+        measure(ordinary,capture,false);measure(corrected,capture,true);
+        check(ordinary.pcm.size()>total-rate/2 && corrected.pcm.size()>total-rate/2,
+            "continuous clock ended the stream before repeated corrections were exercised");
+        check(std::equal(ordinary.pcm.begin(),ordinary.pcm.begin()+rate/2,corrected.pcm.begin()),
+            "future clock corrections changed earlier PCM or its filter initialization");
+        double changed=0;
+        for(std::size_t i=2*rate;i<std::min(ordinary.pcm.size(),corrected.pcm.size());++i)
+            changed+=std::abs(ordinary.pcm[i]-corrected.pcm[i]);
+        check(changed>1,"clock reports changed but the full-band native PCM was not resampled");
+    }
+}
+void continuous_clock_invalid_and_discontinuous() {
+    constexpr unsigned rate=8000;
+    const auto setup=[] {
+        f::reset();f::state.available={"default"};f::state.supported_rates={rate};
+        f::state.read_limit=199;f::state.sample=[](std::size_t n,unsigned){return static_cast<std::int16_t>(n%101);};
+    };
+    // Reject incompatible policy choices before requesting any private PCM.
+    for(unsigned invalid=0;invalid<3;++invalid) {
+        setup();a::Options options;options.continuous_clock.emplace();unsigned sources=0;
+        if(invalid)options.continuous_clock_report=[](const auto&){};
+        if(invalid==1)options.follow_system_clock=true;
+        if(invalid==2)options.request_capture_timing=true;
+        rejects([&]{a::playback(rate,"default",[&](auto){++sources;return std::size_t{0};},
+            {},{},a::ChannelMode::left_mono,options);});
+        check(!sources && !f::state.opens,"invalid continuous clock policy opened a private stream");
+    }
+    // A real counter gap is not a system-clock step. Explicit provider counters
+    // must fail without resetting the converter, restarting the source, or
+    // silently constructing a new epoch. Hardware-gap recovery has its own tests.
+    for(const bool capture:{false,true})for(const bool generation:{false,true}) {
+        setup();a::Options options;options.continuous_clock.emplace();
+        options.continuous_clock_report=[](const auto&){};
+        unsigned queries=0;std::size_t source=0,received=0;bool injected=false;
+        long double previous_frame=0;
+        options.frame_timestamp=[&](std::uint64_t frames,bool input) {
+            check(input==capture,"counter-failure fixture queried the wrong direction");++queries;
+            const auto elapsed=static_cast<long double>(frames)/rate;
+            long double frame=frames;std::uint64_t continuity=607;
+            if(frames>=rate/4) {
+                injected=true;
+                if(generation)++continuity;else frame=previous_frame-1;
+            }
+            previous_frame=frame;
+            return a::FrameTimestamp{frame,1800000000.L+elapsed,elapsed,1e-6,1e-9,
+                a::TimingQuality::bounded,continuity};
+        };
+        rejects([&] {
+            if(capture)a::capture(rate,"default",[&](auto samples){received+=samples.size();return received<2*rate;},
+                {},{},options);
+            else a::playback(rate,"default",[&](auto samples) {
+                const auto n=std::min(samples.size(),2*rate-source);std::fill_n(samples.begin(),n,.1f);source+=n;return n;
+            },{},{},a::ChannelMode::left_mono,options);
+        });
+        check(injected && queries>2 && (capture?received>0 && received<2*rate:source>0 && source<2*rate) &&
+            f::state.configured_streams==1 && f::state.recovered_errors.empty(),
+            "counter discontinuity was not distinguished from a correctable wall-clock step");
+    }
+}
 void capture_timing_fallback_preserves_pcm() {
     constexpr unsigned rate=48000;
     const auto run=[&](bool timed) {
@@ -1647,6 +1895,64 @@ void timed_drain() {
         if(scenario==1)check(error=="audio operation cancelled" && f::state.drain_calls==1,"drain ignored cancellation or retried after it");
         if(scenario>=2)check(!error.empty() && f::state.drain_calls==1,"drain ignored a fatal device error");
         check(!f::state.live && f::state.recovered_errors.empty(),"drain leaked or recovered/replayed a stream");
+    }
+}
+void terminal_nonblocking_drain() {
+    constexpr unsigned rate=8000;
+    struct Case {int wait_error,state,confirmation,final_state;bool pass;int initial_state=3;};
+    // SETUP is the sole successful terminal state. Explicit loss remains
+    // fatal, including an XRUN code followed by an apparently benign state.
+    const std::array cases{
+        Case{-EIO,1,0,1,true},Case{-EBADFD,1,0,1,true},
+        Case{-EPIPE,4,0,4,false},Case{-EIO,3,0,3,false},
+        Case{-EIO,1,-EAGAIN,1,true},Case{-EBADFD,1,-EAGAIN,1,true},
+        Case{-EIO,1,-EAGAIN,5,false},Case{-EIO,1,-EIO,1,false},Case{-EIO,1,0,4,false},
+        Case{-ESTRPIPE,7,0,7,false},Case{-ENODEV,8,0,8,false},
+        Case{-EPIPE,1,0,1,false},Case{-ENODEV,1,0,1,false},
+        Case{-EPIPE,4,0,1,false,4},Case{-ESTRPIPE,7,0,1,false,7},Case{-ENODEV,8,0,1,false,8}};
+    std::vector<std::int16_t> reference;
+    for(const auto& scenario:cases) {
+        f::reset();auto& state=f::state;
+        state.available={"default"};state.supported_rates={rate};state.write_limit=29;
+        state.drain_results={-EAGAIN,scenario.confirmation};state.wait_results={scenario.wait_error};
+        state.before_wait=[&](int timeout) {
+            check(timeout==20,"terminal drain changed its bounded wait");state.pcm_state=scenario.state;
+        };
+        state.after_drain=[&] {if(state.drain_calls==2)state.pcm_state=scenario.final_state;};
+        state.after_write=[&](std::size_t) {if(state.played.size()==1103)state.pcm_state=scenario.initial_state;};
+        a::Options options;options.continuous_clock.emplace();
+        options.continuous_clock_report=[](const auto&){};
+        options.frame_timestamp=[&](std::uint64_t frames,bool capture) {
+            check(!capture,"terminal drain used capture dates");
+            const auto elapsed=static_cast<long double>(frames)/rate;
+            return a::FrameTimestamp{static_cast<long double>(frames),1800000000.L+elapsed,
+                elapsed,1e-6,1e-6,a::TimingQuality::estimated,81};
+        };
+        std::vector<float> input(1103);
+        for(std::size_t i=0;i<input.size();++i)input[i]=static_cast<float>(.2*std::cos(.037*i));
+        std::size_t cursor=0,source_calls=0;std::string failure;
+        try {a::playback(rate,"default",[&](std::span<float> output) {
+            ++source_calls;const auto n=std::min(output.size(),input.size()-cursor);
+            std::copy_n(input.begin()+static_cast<std::ptrdiff_t>(cursor),n,output.begin());cursor+=n;return n;
+        },{},{},a::ChannelMode::left_mono,options);}
+        catch(const datapump::Error& error){failure=error.what();}
+        const bool confirm=(scenario.wait_error==-EIO || scenario.wait_error==-EBADFD) && scenario.state==1;
+        check(failure.empty()==scenario.pass,"terminal drain misclassified completion or real device loss");
+        check(state.drain_calls==(scenario.initial_state!=3?0u:confirm?2u:1u),
+              "terminal drain skipped confirmation, cleared prior loss or retried a real failure");
+        if(!scenario.pass) {
+            check(failure.find("ALSA "+std::to_string(scenario.wait_error))!=std::string::npos &&
+                  failure.find("state="+std::to_string(scenario.state))!=std::string::npos,
+                  "terminal drain omitted native error/state evidence");
+            if(confirm)check(failure.find("confirmation="+std::to_string(scenario.confirmation))!=std::string::npos,
+                "terminal drain hid failed completion confirmation");
+        }
+        check(cursor==input.size() && source_calls==4 && state.played.size()==input.size(),
+              "terminal drain truncated or regenerated finite source PCM");
+        if(reference.empty())reference=state.played;
+        else check(state.played==reference,"terminal drain changed or replayed the resampled tail");
+        check(!state.live && state.recovered_errors.empty() && !state.drops && !state.prepares,
+              "terminal drain recovered, restarted or leaked the stream");
     }
 }
 
@@ -3067,6 +3373,14 @@ void full_rate_background_noise_output() {
     check(first!=second,"separate native transmissions reused one background-noise stream");
 }
 int main(int argc,char** argv){try{
+    if(argc==2 && std::string(argv[1])=="--drain") {
+        timed_drain();terminal_nonblocking_drain();
+        std::cout<<"Nonblocking drain completion and failure checks passed\n";return 0;
+    }
+    if(argc==2 && std::string(argv[1])=="--continuous-clock") {
+        continuous_clock_runtime();continuous_clock_invalid_and_discontinuous();
+        std::cout<<"Continuous full-baseband clock discipline passed\n";return 0;
+    }
     full_rate_background_noise_output();
     if(argc==2&&std::string(argv[1])=="--minimum-rate") {minimum_hardware_rate();return 0;}
     minimum_hardware_rate();
@@ -3212,9 +3526,10 @@ int main(int argc,char** argv){try{
     native_prepared_delay_readiness();
     bounded_timing_preflight_and_post_start_failure();
     passive_capture_timing_preserves_pcm();passive_capture_timing_loss();passive_capture_discontinuity_and_cancel();
+    continuous_clock_runtime();continuous_clock_invalid_and_discontinuous();
     capture_timing_fallback_preserves_pcm();
     capture_uncertainty_downgrade_preserves_filter();
-    timed_drain();
+    timed_drain();terminal_nonblocking_drain();
     bounded_clock_provider();
     zero_audio_error_requests();
     playback_discontinuity_observer();

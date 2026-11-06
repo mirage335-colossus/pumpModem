@@ -1,0 +1,5 @@
+Continuous TX stable map_error_samples=3.469447e-15 rms=2.0092412e-05 peak=3.4973827e-05 energy_db=-0.0011013334 tone175_gain_db=-0.0010574728_phase_rad=7.0535492e-10 tone1300_gain_db=-0.0011421764_phase_rad=2.9281749e-12 tone2400_gain_db=-0.00113642_phase_rad=2.7657319e-09
+Continuous TX repeated-steps map_error_samples=1.5128003e-10 rms=2.063961e-05 peak=4.0218975e-05 energy_db=-0.0011523177 tone175_gain_db=-0.001128234_phase_rad=1.2544124e-07 tone1300_gain_db=-0.0011599062_phase_rad=-3.7826466e-07 tone2400_gain_db=-0.0011948625_phase_rad=-1.9154842e-06
+Continuous RX stable map_error_samples=3.469447e-15 rms=1.9647146e-05 peak=3.5484412e-05 energy_db=-0.0011042739 tone175_gain_db=-0.0010569108_phase_rad=-1.7109309e-08 tone1300_gain_db=-0.0011461488_phase_rad=7.4690292e-09 tone2400_gain_db=-0.001145603_phase_rad=1.4625628e-08
+Continuous RX repeated-steps map_error_samples=2.4286129e-14 rms=1.9804466e-05 peak=4.7177657e-05 energy_db=-0.0011173015 tone175_gain_db=-0.001057591_phase_rad=-1.5343947e-08 tone1300_gain_db=-0.0011560399_phase_rad=-2.6196712e-08 tone2400_gain_db=-0.0011913145_phase_rad=1.7195645e-07
+Continuous full-baseband clock discipline passed

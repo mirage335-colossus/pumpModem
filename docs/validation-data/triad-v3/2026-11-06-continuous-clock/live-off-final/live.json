@@ -1,0 +1,233 @@
+{
+  "identities": {
+    "build/dev-cli/triad_audio_stream": "c05527fe0cf13e34bef16a738d8384ca283f70b461bd9c2155db6f55282d0df7",
+    "build/dev-cli/triad_helper_export": "fd933331fa739976a2bc2da6575579626f50e77764549afd2559ea6258ebbeb5",
+    "tools/triad_incremental_receiver.py": "9c4ea5cf318ba8cb1fa3ff469b1f7a9f762961acb51964d4a762b64160ee1d15",
+    "tools/triad_continuous.py": "3047cbd4d96840a32c957d2731ba629df2d7efc3f7b7240b5c76fd0612e74087"
+  },
+  "schema": "triad-live-stream-check-v1",
+  "configuration": [
+    "--case",
+    "hf",
+    "--sample-rate",
+    "6000",
+    "--rate",
+    "36",
+    "--added-symbols",
+    "10",
+    "--seconds",
+    "32",
+    "--key-seed",
+    "73005",
+    "--epoch",
+    "1793850000",
+    "--spread-preset",
+    "none",
+    "--selective-perturbation",
+    "off",
+    "--base-oscillator",
+    "gpsdo-ocxo",
+    "--shift-oscillator",
+    "gpsdo-ocxo",
+    "--oscillator-effects",
+    "off",
+    "--arrival-seconds",
+    "0",
+    "--helper",
+    "on"
+  ],
+  "clock_mode": "off",
+  "source": {
+    "schema": "triad-stream-source-v1",
+    "sample_rate_hz": 6000,
+    "emitted_samples": 439200,
+    "capture_samples": 577496,
+    "simulation_channel_constructed": false,
+    "total_samples": 439200,
+    "data_offset_samples": 227198,
+    "source_samples": 210405,
+    "capture_lead_seconds": 0,
+    "noise_variance": 0,
+    "template_data_gain": 1.0003906369365028,
+    "data_if_hz": 1725,
+    "epoch": 1793850000,
+    "pattern_revision": "independent-apsk-v2",
+    "added_amplitude_depth": 0.25,
+    "helper_enabled": true,
+    "clock_follow_bounded": false,
+    "clock_follow_limit_seconds": 0,
+    "clock_follow_endpoint_padding_seconds": 0,
+    "clock_follow_basis": "nominal affine; remote corrections are not supplied to receiver",
+    "conditional_gaussian_null_supported": false,
+    "helper_high_hz": 2400,
+    "helper_low_hz": 550,
+    "maximum_rows": 16384,
+    "maximum_columns": 128,
+    "workspace_budget_bytes": 67108864,
+    "fixed_workspace_bytes": 1049688,
+    "stream_kind": "emitted",
+    "key_source": "explicit-test-fixture-seed",
+    "power": {
+      "data_power_reference_policy": "bounded-tiles",
+      "pattern_revision": "independent-apsk-v2",
+      "added_amplitude_depth": 0.25,
+      "data_power_reference_version": 2,
+      "data_reference_bit": 0,
+      "data_reference_integration_method": "bounded-keyed-tile-quadrature-v1",
+      "data_reference_complete_sampled_source": false,
+      "data_reference_active_seconds": 34.800000000000004,
+      "data_reference_mean_norm": 0.9992191836803185,
+      "data_reference_nodes": 6144,
+      "data_reference_refinement_relative_difference": 0,
+      "data_reference_refinement_tolerance": 0.001,
+      "data_reference_sampled_tiles": 3,
+      "data_reference_tile_relative_standard_error": 0.012144916195582394,
+      "data_reference_statistical_error_is_bound": false,
+      "post_plan_data_calibration_gain": 1.0007564772846822,
+      "template_data_gain": 1.0003906369365028,
+      "data_reference_scope": "fixed public bit0; at most16 stratified keyed tiles with2048 fractional nodes each; active-time mean omits finite outer halo; between-tile standard error is diagnostic, not a confidence bound or integration guarantee; one unchanged gain for the entire stream"
+    },
+    "basis_scope": "Public DATA pattern only; arrival is absolute seconds in the requested observation coordinate. Fixed key/epoch per session; all three carriers retained.",
+    "scope": "Bounded pull source, not a receiver or real-time guarantee. Emitted kind has no channel or thermal noise. Physical null and full-duration power accuracy require qualification."
+  },
+  "coordinates": [
+    [
+      0,
+      0.95,
+      0,
+      0
+    ],
+    [
+      0,
+      0.975,
+      0,
+      0
+    ],
+    [
+      0,
+      1.0,
+      0,
+      0
+    ],
+    [
+      0,
+      1.025,
+      0,
+      0
+    ],
+    [
+      0,
+      1.05,
+      0,
+      0
+    ],
+    [
+      0,
+      1.075,
+      0,
+      0
+    ],
+    [
+      0,
+      1.1,
+      0,
+      0
+    ],
+    [
+      0,
+      1.125,
+      0,
+      0
+    ],
+    [
+      0,
+      1.15,
+      0,
+      0
+    ],
+    [
+      0,
+      1.175,
+      0,
+      0
+    ],
+    [
+      0,
+      1.2,
+      0,
+      0
+    ],
+    [
+      0,
+      1.225,
+      0,
+      0
+    ],
+    [
+      0,
+      1.25,
+      0,
+      0
+    ]
+  ],
+  "receiver": {
+    "status": "scored",
+    "complete_observation": true,
+    "admission": null,
+    "bit_scores": [
+      58330.01358861115,
+      1348.4392270599462
+    ],
+    "model_bit_scores": [
+      [
+        58208.680802977135,
+        1349.1323742405061
+      ],
+      [
+        58330.70673579171,
+        39.264031136496925
+      ]
+    ],
+    "hypothesis_log_evidence": [
+      [
+        0.0,
+        58208.680802977135,
+        1349.1323742405061
+      ],
+      [
+        0.0,
+        58330.70673579171,
+        39.264031136496925
+      ]
+    ],
+    "consumed_samples": 451200,
+    "processed_rows": 451200,
+    "scored_rows": 451200,
+    "observed_rows": 451200,
+    "erased_rows": 0,
+    "blocks": 150,
+    "pending_rows": 0,
+    "working_bytes_estimate": 6669024,
+    "push_process_cpu_seconds": 1.2278880349999974
+  },
+  "frames_sent": 439200,
+  "frames_received": 451200,
+  "peak_capture": 0.02424616925418377,
+  "errors": [],
+  "wall_seconds": 75.56903155898908,
+  "python_cpu_seconds": 2.335217785,
+  "child_cpu_seconds": 8.599819,
+  "source_completion": {
+    "stopped": true,
+    "complete": true,
+    "consumed_samples": 439200,
+    "total_samples": 439200,
+    "source_generated_samples": 439200,
+    "source_data_energy": 208003.39423707456,
+    "source_helper_energy": 4394789.456788676,
+    "workspace_bytes": 1049688
+  },
+  "physical_null_qualified": false,
+  "expected_bit_evaluation_only": 0,
+  "scope": "Paired full-audio clock mode cable check with unchanged predeclared timing bank and Helper; no injected OS clock changes, not marginal sensitivity or multi-day uptime; operational admission withheld."
+}

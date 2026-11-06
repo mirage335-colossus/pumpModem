@@ -1,0 +1,7 @@
+triad_continuous: bounded clock-step following: correction outside original +/-2-second envelope; the established source trajectory and epoch are retained
+triad_continuous: bounded clock-step following: following; the established source trajectory and epoch are retained
+........
+----------------------------------------------------------------------
+Ran 8 tests in 0.005s
+
+OK

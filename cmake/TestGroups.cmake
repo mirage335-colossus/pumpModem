@@ -142,6 +142,7 @@ set(_aliases
   "gui_native_policy=test_gui_native"
   "alsa_audio_contract=test_alsa_audio"
   "alsa_interleave_playback=test_alsa_audio"
+  "alsa_continuous_clock=test_alsa_audio"
   "windows_audio_contract=test_windows_audio"
   "fast_acoustic_short_convolutional=test_fast_acoustic_short_weak"
   "gui_self_check=datapump-gui" "gui_trace=test_gui_application"

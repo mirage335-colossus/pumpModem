@@ -10,6 +10,7 @@ import argparse
 import hashlib
 import json
 import math
+from fractions import Fraction
 import os
 from pathlib import Path
 import resource
@@ -191,6 +192,30 @@ def load_bank(path):
     return bank, coordinates, taps
 
 
+def disciplined_capture_extent(samples, sample_rate, maximum_correction, coordinates, taps):
+    """Public endpoint envelope, not an inferred physical end or tracking proof.
+
+    Each endpoint's logical/native rate is in [1/(1+c),1+c].
+    Include both software maps, declared affine-clock candidates and positive
+    arrival/echo extent. Rational arithmetic keeps large integer endpoints.
+    """
+    c = Fraction(str(maximum_correction))
+    clock = Fraction(str(max(abs(row[3]) for row in coordinates))) / 1_000_000
+    if not 0 < c <= Fraction(1, 1000) or not 0 <= clock < 1:
+        raise ValueError('invalid public continuous-clock capture envelope')
+    arrival = max(Fraction(0), Fraction(str(max(row[1] for row in coordinates))) +
+                  Fraction(str(max(row[0] for row in taps))))
+    extent = (samples + arrival*sample_rate) * (1+c)**2 / (1-clock)
+    # Outward guard for decimal CLI/binary-rate conversions and the small
+    # number of floating point operations defining the native rate bounds.
+    # Keep the final ceil/integer arithmetic exact even at large coordinates.
+    extent = extent * (1 + Fraction(64, 1 << 52)) + 2
+    frames = (extent.numerator + extent.denominator - 1)//extent.denominator
+    if not samples <= frames < (1 << 64):
+        raise ValueError('continuous-clock capture endpoint exceeds sample counter')
+    return int(frames)
+
+
 def source_basis(source, coordinates, taps, offset):
     rows = [(bit, epoch, arrival+offset, frequency, clock, delay, doppler)
         for bit in (0, 1) for epoch, arrival, frequency, clock in coordinates
@@ -268,8 +293,13 @@ def parser():
     p.add_argument('--device', default='default')
     p.add_argument('--fixed-gain', type=float, default=.002)
     p.add_argument('--audio-arguments', default='[]', help='JSON array of extra native audio options (e.g. full-rate background noise)')
-    p.add_argument('--follow-system-clock', choices=('off', 'bounded-data'), default='off',
-        help='bounded slow DATA calendar; TX follows +/-2s corrections, RX keeps nominal physical-time templates; no Helper/FHSS/burst')
+    p.add_argument('--follow-system-clock', choices=('off', 'continuous', 'bounded-data'), default='off',
+        help='continuous: native full-audio UTC discipline with repeated corrections; bounded-data: older slow source-only experiment')
+    p.add_argument('--clock-max-ppm', type=float, default=1000)
+    p.add_argument('--clock-phase-max-ppm', type=float, default=50,
+        help='gentle UTC phase catch-up; separate from measured device-rate calibration')
+    p.add_argument('--clock-slew-ppm-per-second', type=float, default=10)
+    p.add_argument('--clock-phase-seconds', type=float, default=1000)
     return p
 
 
@@ -288,7 +318,12 @@ def execute(argv=None):
         raise ValueError('positive finite prefix duration required')
     if a.mode != 'transmit' and a.bank is None: raise ValueError('reception requires --bank')
     if a.follow_system_clock != 'off' and a.mode == 'simulate':
-        raise ValueError('bounded clock profile currently supports emitted TX/RX; use the injected native probe for simulated correction traces')
+        raise ValueError('audio clock discipline requires dated TX/RX hardware; use the injected controller/audio tests for simulated device clocks')
+    if a.follow_system_clock == 'continuous' and '--clock-follow-bounded' in native_args:
+        raise ValueError('full-audio discipline cannot be combined with source-only clock steering')
+    if (not 0 < a.clock_max_ppm <= 1000 or not 0 < a.clock_phase_max_ppm <= a.clock_max_ppm or
+        not 0 < a.clock_slew_ppm_per_second <= 1000 or not math.isfinite(a.clock_phase_seconds) or a.clock_phase_seconds < 1):
+        raise ValueError('invalid continuous audio clock limits')
     if a.mode == 'receive' and (a.noise_variance is None or a.noise_variance <= 0):
         raise ValueError('physical reception requires a declared conservative --noise-variance')
     audio_arguments = json.loads(a.audio_arguments)
@@ -299,6 +334,11 @@ def execute(argv=None):
     for i, item in enumerate(audio_arguments):
         if item.startswith('--') and not item.startswith(allowed_audio):
             raise ValueError('audio extra flags restricted to background noise and exclusive access')
+    if a.follow_system_clock == 'continuous':
+        audio_arguments += ['--clock-discipline', 'continuous', '--clock-max-ppm', str(a.clock_max_ppm),
+            '--clock-phase-max-ppm', str(a.clock_phase_max_ppm),
+            '--clock-slew-ppm-per-second', str(a.clock_slew_ppm_per_second),
+            '--clock-phase-seconds', str(a.clock_phase_seconds)]
     a.report.parent.mkdir(parents=True, exist_ok=True)
     result = dict(schema='triad-continuous-v1', mode=a.mode, complete=False,
         admitted=False, physical_null_qualified=False, acquisition='fixed public bank; no blind tracking',
@@ -306,6 +346,16 @@ def execute(argv=None):
         identities=[file_identity(p) for p in (a.native, Path(__file__),
             ROOT/'tools/triad_incremental_receiver.py', ROOT/'tools/triad_gaussian_state.py')])
     if a.mode != 'simulate': result['identities'].append(file_identity(a.audio_native))
+    if a.follow_system_clock == 'continuous':
+        result['clock_profile'] = dict(name='continuous-full-audio',
+            source_epoch_unchanged=True, receiver_uses_private_transmitter_trace=False,
+            receiver_clock_tracking_qualified=False,
+            capture_transport='adjustable ASRC; white-noise covariance and physical null unqualified',
+            maximum_local_software_rate_ppm=a.clock_max_ppm,
+            maximum_phase_catchup_ppm=a.clock_phase_max_ppm,
+            maximum_two_endpoint_relative_rate_ppm=((1+a.clock_max_ppm*1e-6)**2-1)*1e6,
+            frequency_scope='software rate multiplies baseband/audio frequencies, never RF shift',
+            receiver_time='disciplined output sample coordinate; full retained PCM before DATA mixing')
     child_before = resource.getrusage(resource.RUSAGE_CHILDREN)
     started, cpu = time.perf_counter(), time.process_time()
     source = audio = None
@@ -323,6 +373,11 @@ def execute(argv=None):
                 kind='channel' if a.mode == 'simulate' else 'emitted', log=log)
             d = source.descriptor; fs = int(d['sample_rate_hz']); total = int(d['total_samples'])
             result.update(source=d, plan=source.plan, command=source.command)
+            if a.follow_system_clock == 'continuous':
+                result['clock_profile'].update(
+                    maximum_local_data_center_shift_hz=abs(float(d['data_if_hz']))*a.clock_max_ppm*1e-6,
+                    maximum_two_endpoint_data_center_shift_hz=abs(float(d['data_if_hz']))*((1+a.clock_max_ppm*1e-6)**2-1),
+                    scope='Elapsed audio discipline from first dated frame; independent remote nonlinear timing remains outside fixed-bank qualification.')
             if a.follow_system_clock == 'bounded-data':
                 result['clock_profile'] = dict(name='bounded-data',
                     local_corrections_steer_source=a.mode == 'transmit',
@@ -330,7 +385,6 @@ def execute(argv=None):
                     receiver_time='physical sample index; nominal affine bank unchanged')
             block_samples = max(1, round(a.block_seconds*fs))
             if 2*block_samples > 16384: raise ValueError('merged final block exceeds native bounded basis request')
-            requested = total if a.limit_seconds is None else min(total, math.ceil(a.limit_seconds*fs))
             receiver = None; first = 0
             if a.mode != 'transmit':
                 import torch
@@ -338,6 +392,12 @@ def execute(argv=None):
                 from triad_operational_admission import operational_threshold
                 torch.set_num_threads(a.threads)
                 bank, coordinates, taps = load_bank(a.bank)
+                if a.mode == 'receive' and a.follow_system_clock == 'continuous':
+                    total = disciplined_capture_extent(total, fs, a.clock_max_ppm*1e-6, coordinates, taps)
+                    result['clock_profile'].update(nominal_source_samples=int(d['total_samples']),
+                        capture_endpoint_samples=total,
+                        capture_allowance_seconds=(total-int(d['total_samples']))/fs,
+                        endpoint_scope='Public software plus declared affine-rate/arrival/echo envelope; unmodeled hardware or path timing remains unqualified.')
                 variance = receiver_noise_variance(a.noise_variance, float(d['noise_variance']),
                     simulated=a.mode == 'simulate')
                 result['receiver_noise_variance'] = variance
@@ -365,6 +425,7 @@ def execute(argv=None):
                 result.update(bank=bank, bank_sha256=hashlib.sha256(a.bank.read_bytes()).hexdigest(),
                     admission_policy=operational_threshold(alpha_per_day=a.alpha_per_day),
                     helper_null_scope='Fixed DATA projection retains finite-window Helper leakage; physical/Helper null unqualified.')
+            requested = total if a.limit_seconds is None else min(total, math.ceil(a.limit_seconds*fs))
             if a.mode in ('transmit', 'receive'):
                 args = [str(a.audio_native), '--mode', 'play' if a.mode == 'transmit' else 'capture',
                     '--sample-rate', str(fs), '--frames', str(requested), '--device', a.device, *audio_arguments]
@@ -407,6 +468,10 @@ def execute(argv=None):
                         helper_enabled=d['helper_enabled'],
                         log_threshold=result['admission_policy']['log_e_threshold']))
             result['status'] = 'complete' if result['complete'] else 'diagnostic_prefix_incomplete'
+            if a.follow_system_clock == 'continuous' and a.mode == 'receive':
+                result['admitted'] = False
+                result['status'] = ('completed_clock_tracking_unqualified' if result['complete']
+                    else 'diagnostic_prefix_clock_tracking_unqualified')
         except BaseException as error:
             result.update(status='failed', error=type(error).__name__+': '+str(error))
             raise

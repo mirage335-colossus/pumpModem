@@ -1,0 +1,6 @@
+{"seed": 94001, "helper": "off", "events": false, "decision": {"candidate_bit": 0, "log_e": 435.5813479355911, "conditional_model_pass": true, "admitted": false, "admission_scope": "Conditional Gaussian model, fixed bank and endpoint only; neither correctness nor Helper/physical null qualified."}, "receiver_cpu_seconds": 2.158745}
+Traceback (most recent call last):
+  File "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/continuous-audio-clock/receiver-pair/run.py", line 26, in <module>
+    if len(rx)<N: raise RuntimeError('padding/window shortened; must not silently fabricate observed noise')
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: padding/window shortened; must not silently fabricate observed noise

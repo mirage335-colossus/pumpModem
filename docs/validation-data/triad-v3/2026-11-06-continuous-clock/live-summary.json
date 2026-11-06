@@ -1,0 +1,176 @@
+[
+  {
+    "mode": "off",
+    "frames_sent": 439200,
+    "frames_received": 451200,
+    "seconds": 75.2,
+    "errors": [],
+    "peak_capture": 0.02424616925418377,
+    "bit_scores": [
+      58330.01358861115,
+      1348.4392270599462
+    ],
+    "wall_seconds": 75.56903155898908,
+    "all_cpu_seconds": 10.935036785000001,
+    "cpu_seconds_per_input_second": 0.14541272320478724,
+    "receipts": [
+      {
+        "schema": "triad-audio-stream-v1",
+        "mode": "play",
+        "sample_rate_hz": 6000,
+        "requested_frames": 439200,
+        "completed_frames": 439200,
+        "complete": true,
+        "clipped_samples": 0,
+        "process_cpu_seconds": 1.443752,
+        "wall_seconds": 73.261797095,
+        "queue_bound_frames": 12000,
+        "background_noise": {
+          "enabled": true,
+          "sample_rate_hz": 44100,
+          "active_samples": 3228120,
+          "expected_variance": 1.241763432820638e-09,
+          "measured_variance": 1.2418153326156663e-09,
+          "peak": 6.103701895199438e-05
+        },
+        "clock_discipline": {
+          "enabled": false,
+          "reports": 0,
+          "saturated_reports": 0,
+          "holdover_reports": 0,
+          "peak_absolute_error_seconds": 0,
+          "phase_limited_reports": 0,
+          "peak_applied_ppm": 0,
+          "scope": "estimated full retained audio passband; adjusted capture covariance unqualified; no RF-clock certificate"
+        }
+      },
+      {
+        "schema": "triad-audio-stream-v1",
+        "mode": "capture",
+        "sample_rate_hz": 6000,
+        "requested_frames": 451200,
+        "completed_frames": 451200,
+        "complete": true,
+        "clipped_samples": 0,
+        "process_cpu_seconds": 2.257225,
+        "wall_seconds": 75.485431981,
+        "queue_bound_frames": 12000,
+        "background_noise": {
+          "enabled": false
+        },
+        "clock_discipline": {
+          "enabled": false,
+          "reports": 0,
+          "saturated_reports": 0,
+          "holdover_reports": 0,
+          "peak_absolute_error_seconds": 0,
+          "phase_limited_reports": 0,
+          "peak_applied_ppm": 0,
+          "scope": "estimated full retained audio passband; adjusted capture covariance unqualified; no RF-clock certificate"
+        }
+      }
+    ]
+  },
+  {
+    "mode": "continuous",
+    "frames_sent": 439200,
+    "frames_received": 451200,
+    "seconds": 75.2,
+    "errors": [],
+    "peak_capture": 0.024318328127264977,
+    "bit_scores": [
+      44805.360790376784,
+      1349.967773190231
+    ],
+    "wall_seconds": 75.5222515980131,
+    "all_cpu_seconds": 10.530146343999998,
+    "cpu_seconds_per_input_second": 0.14002854180851063,
+    "receipts": [
+      {
+        "schema": "triad-audio-stream-v1",
+        "mode": "play",
+        "sample_rate_hz": 6000,
+        "requested_frames": 439200,
+        "completed_frames": 439200,
+        "complete": true,
+        "clipped_samples": 0,
+        "process_cpu_seconds": 1.516275,
+        "wall_seconds": 73.285514918,
+        "queue_bound_frames": 12000,
+        "background_noise": {
+          "enabled": true,
+          "sample_rate_hz": 44100,
+          "active_samples": 3228120,
+          "expected_variance": 1.241763432820638e-09,
+          "measured_variance": 1.2419864927985032e-09,
+          "peak": 6.103701895199438e-05
+        },
+        "clock_discipline": {
+          "enabled": true,
+          "reports": 1465,
+          "saturated_reports": 0,
+          "holdover_reports": 3,
+          "peak_absolute_error_seconds": 0.0001454169028006977,
+          "phase_limited_reports": 0,
+          "peak_applied_ppm": 0.8742228325693373,
+          "ready": true,
+          "observations": 1462,
+          "rejected": 0,
+          "clock_steps": 0,
+          "rate_updates": 1,
+          "cumulative_clock_step_seconds": 0,
+          "q_estimate": 1.0000008742228326,
+          "target_correction": 8.742228325693373e-07,
+          "applied_correction": 8.742228325693373e-07,
+          "native_frame": 3228120,
+          "logical_seconds": 73.2000001366313,
+          "origin_utc_seconds": 1793961657.347589,
+          "estimated_utc_seconds": 1793961730.5477211,
+          "phase_error_seconds": 0.00013191214880173968,
+          "uncertainty_seconds": 0.03649688748635987,
+          "scope": "estimated full retained audio passband; adjusted capture covariance unqualified; no RF-clock certificate"
+        }
+      },
+      {
+        "schema": "triad-audio-stream-v1",
+        "mode": "capture",
+        "sample_rate_hz": 6000,
+        "requested_frames": 451200,
+        "completed_frames": 451200,
+        "complete": true,
+        "clipped_samples": 0,
+        "process_cpu_seconds": 2.154466,
+        "wall_seconds": 75.460676545,
+        "queue_bound_frames": 12000,
+        "background_noise": {
+          "enabled": false
+        },
+        "clock_discipline": {
+          "enabled": true,
+          "reports": 7888,
+          "saturated_reports": 0,
+          "holdover_reports": 0,
+          "peak_absolute_error_seconds": 0.00014966930138834988,
+          "phase_limited_reports": 0,
+          "peak_applied_ppm": 0.7785667762442083,
+          "ready": true,
+          "observations": 11134,
+          "rejected": 0,
+          "clock_steps": 0,
+          "rate_updates": 1,
+          "cumulative_clock_step_seconds": 0,
+          "q_estimate": 1.0000007785673823,
+          "target_correction": -7.785667762442083e-07,
+          "applied_correction": -7.785667762442083e-07,
+          "native_frame": 3316768.2693851646,
+          "logical_seconds": 75.21016666666667,
+          "origin_utc_seconds": 1793961656.225289,
+          "estimated_utc_seconds": 1793961731.435584,
+          "phase_error_seconds": 0.00012824525786589436,
+          "uncertainty_seconds": 0.03641736370277957,
+          "scope": "estimated full retained audio passband; adjusted capture covariance unqualified; no RF-clock certificate"
+        }
+      }
+    ]
+  }
+]

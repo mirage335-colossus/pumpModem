@@ -3,16 +3,41 @@ import io
 import math
 from pathlib import Path
 import sys
+import tempfile
 import unittest
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'tools'))
 from triad_continuous import (carrier_phase, endpoint_decision, read_exact,
-                              receiver_noise_variance, validate_stream_identity, BoundedClockControl)
+                              receiver_noise_variance, validate_stream_identity, BoundedClockControl, execute, parser,
+                              disciplined_capture_extent)
 from triad_control_clock import ControlClock, ClockReading
 
 
 class ContinuousTests(unittest.TestCase):
+    def test_full_audio_capture_endpoint_covers_both_clocks_and_public_delays(self):
+        frames = 1_000_000*6000
+        result = disciplined_capture_extent(frames, 6000, .001, [[0, 0, 0, 0]], [[0, 0]])
+        self.assertEqual(result, 6_012_006_003)
+        self.assertEqual(disciplined_capture_extent(6000, 6000, .001,
+            [[0, .1, 0, 100]], [[.01, 0]]), 6676)
+        self.assertGreater(disciplined_capture_extent(2**54+1, 6000, .001,
+            [[0, 0, 0, 0]], [[0, 0]]), 2**54+1)
+        with self.assertRaisesRegex(ValueError, 'sample counter'):
+            disciplined_capture_extent(2**64-1, 6000, .001, [[0, 0, 0, 0]], [[0, 0]])
+
+    def test_full_audio_policy_is_explicit_and_rejects_double_steering(self):
+        with tempfile.TemporaryDirectory() as directory:
+            report = str(Path(directory)/'result.json')
+            flags = ['--mode', 'transmit', '--report', report, '--follow-system-clock', 'continuous']
+            self.assertEqual(parser().parse_args(flags).follow_system_clock, 'continuous')
+            with self.assertRaisesRegex(ValueError, 'source-only clock steering'):
+                execute(flags+['--', '--clock-follow-bounded'])
+            with self.assertRaisesRegex(ValueError, 'dated TX/RX hardware'):
+                execute(['--mode', 'simulate', '--bank', 'not-opened.json', '--report', report,
+                    '--follow-system-clock', 'continuous'])
+            self.assertFalse(Path(report).exists())
+
     def test_clock_follow_uses_original_envelope_without_changing_receiver_bank(self):
         now = [10000000000]
         offset = [1700000000000000000]

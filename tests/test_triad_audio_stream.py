@@ -32,6 +32,18 @@ class AudioStreamTests(unittest.TestCase):
         self.assertTrue(receipt["complete"])
         self.assertEqual(receipt["requested_frames"], len(values))
         self.assertEqual(receipt["completed_frames"], len(values))
+        self.assertFalse(receipt['clock_discipline']['enabled'])
+
+    def test_clock_discipline_requires_a_dated_device_and_valid_limits(self):
+        for flags in (('--clock-discipline','continuous'), ('--clock-max-ppm','2000'),
+                      ('--clock-phase-seconds','nan'), ('--clock-discipline','unknown')):
+            result = self.run_copy(b'', 0, *flags)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(result.stdout, b'')
+        # A total bound equal to the default phase cap is valid; decimal ppm
+        # conversion must not put it one floating-point ULP below that cap.
+        result = self.run_copy(b'', 0, '--clock-max-ppm', '50')
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
 
     def test_short_stream_does_not_claim_completion(self):
         payload = struct.pack("<2f", .25, -.5)

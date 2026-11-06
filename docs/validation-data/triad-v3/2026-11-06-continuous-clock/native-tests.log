@@ -1,0 +1,25 @@
+Internal ctest changing into directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli
+Test project /home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli
+    Start 238: resampler
+1/4 Test #238: resampler ........................   Passed    1.66 sec
+    Start 371: capture_transport
+2/4 Test #371: capture_transport ................***Failed    0.06 sec
+Helper Carrier fixed 550/950 Hz tones overlap the data separation guard; raise the Robust carrier
+
+    Start 425: continuous_clock
+3/4 Test #425: continuous_clock .................   Passed    1.82 sec
+    Start 533: alsa_continuous_clock
+4/4 Test #533: alsa_continuous_clock ............   Passed    0.09 sec
+
+75% tests passed, 1 tests failed out of 4
+
+Label Time Summary:
+audio      =   1.92 sec*proc (2 tests)
+regular    =   3.64 sec*proc (4 tests)
+triad      =   1.92 sec*proc (2 tests)
+
+Total Test time (real) =   3.65 sec
+
+The following tests FAILED:
+	371 - capture_transport (Failed)                        regular
+Errors while running CTest

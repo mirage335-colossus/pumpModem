@@ -743,6 +743,14 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
   endif()
   add_test(NAME triad_clock_follow COMMAND test_triad_clock_follow)
   set_tests_properties(triad_clock_follow PROPERTIES LABELS "triad" TIMEOUT 30)
+  add_executable(test_continuous_clock EXCLUDE_FROM_ALL tests/test_continuous_clock.cpp)
+  target_include_directories(test_continuous_clock PRIVATE include)
+  if(DATAPUMP_SANITIZERS AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(test_continuous_clock PRIVATE -O1 -fsanitize=address,undefined -fno-omit-frame-pointer)
+    target_link_options(test_continuous_clock PRIVATE -fsanitize=address,undefined)
+  endif()
+  add_test(NAME continuous_clock COMMAND test_continuous_clock)
+  set_tests_properties(continuous_clock PROPERTIES LABELS "triad;audio" TIMEOUT 30)
   add_executable(test_triad_shaping EXCLUDE_FROM_ALL tests/test_triad_shaping.cpp)
   target_include_directories(test_triad_shaping PRIVATE src)
   target_link_libraries(test_triad_shaping PRIVATE triad_experiment)
@@ -1156,6 +1164,8 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
     target_link_libraries(test_alsa_audio PRIVATE alsa_stub datapump Threads::Threads ${CMAKE_DL_LIBS})
     add_test(NAME alsa_audio_contract COMMAND test_alsa_audio)
     add_test(NAME alsa_interleave_playback COMMAND test_alsa_audio --interleave)
+    add_test(NAME alsa_continuous_clock COMMAND test_alsa_audio --continuous-clock)
+    set_tests_properties(alsa_continuous_clock PROPERTIES LABELS "triad;audio" TIMEOUT 30)
     add_executable(test_windows_audio tests/test_windows_audio.cpp src/audio.cpp src/resampler.cpp)
     target_link_libraries(test_windows_audio PRIVATE datapump_background_noise)
     target_include_directories(test_windows_audio PRIVATE tests/winmm_stub include)
@@ -1319,7 +1329,7 @@ if(NOT DATAPUMP_BUILD_WASM)
       if(_target STREQUAL "background_noise" OR _target STREQUAL "test_background_noise" OR _target STREQUAL "test_audio_output" OR
           _target STREQUAL "test_triad_modem" OR _target STREQUAL "test_triad_v2" OR
           _target STREQUAL "test_triad_statistics" OR _target STREQUAL "test_triad_v3_source" OR _target STREQUAL "test_triad_shaping" OR
-          _target STREQUAL "test_triad_clock_follow" OR
+          _target STREQUAL "test_triad_clock_follow" OR _target STREQUAL "test_continuous_clock" OR
           _target STREQUAL "test_triad_v3_channel" OR _target STREQUAL "test_triad_v3_receiver" OR
           _target STREQUAL "triad_study" OR _target STREQUAL "triad_examples" OR
           _target STREQUAL "triad_long" OR _target STREQUAL "triad_pattern_probe" OR _target STREQUAL "triad_audio_capture" OR _target STREQUAL "triad_audio_stream" OR

@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <cstring>
 #include <deque>
+#include <iomanip>
 #include <iostream>
 #include <limits>
 #include <mutex>
@@ -37,6 +38,8 @@ struct Config {
     std::uint32_t rate = 48000;
     std::uint64_t frames = 0;
     bool frames_set = false, exclusive = false;
+    bool continuous_clock = false;
+    datapump::audio::ContinuousClockOptions clock_options;
     datapump::background_noise::Config noise;
     double reference_watts = 0, reference_rms = 0;
     bool watts_set = false, rms_set = false;
@@ -75,6 +78,15 @@ Config parse(int argc, char** argv) {
             c.rate = static_cast<std::uint32_t>(v);
         } else if (key == "--frames") { c.frames = parse_u64(next(), "frame count"); c.frames_set = true; }
         else if (key == "--exclusive") c.exclusive = true;
+        else if (key == "--clock-discipline") {
+            const std::string mode = next();
+            if (mode != "off" && mode != "continuous") throw std::invalid_argument("clock discipline must be off or continuous");
+            c.continuous_clock = mode == "continuous";
+        }
+        else if (key == "--clock-max-ppm") c.clock_options.maximum_rate_correction = parse_double(next(), "clock rate") / 1e6;
+        else if (key == "--clock-phase-max-ppm") c.clock_options.maximum_phase_correction = parse_double(next(), "clock phase rate") / 1e6;
+        else if (key == "--clock-slew-ppm-per-second") c.clock_options.maximum_slew_per_second = parse_double(next(), "clock slew") / 1e6;
+        else if (key == "--clock-phase-seconds") c.clock_options.phase_time_constant_seconds = parse_double(next(), "clock phase time constant");
         else if (key == "--channels") c.channels = next();
         else if (key == "--background-noise-bits") {
             if (selected_noise) throw std::invalid_argument("select one background-noise level");
@@ -103,6 +115,8 @@ Config parse(int argc, char** argv) {
         } else if (key == "--help") {
             std::cout << "triad-audio-stream --mode play|capture|copy --frames N [--sample-rate HZ] [--device NAME] [--exclusive] [--channels left|right|stereo]\n"
                 "  play: stdin mono float32le -> audio backend; capture: backend -> stdout mono float32le; copy: bounded device-free pipe check.\n"
+                "  --clock-discipline continuous: best-effort whole-audio UTC discipline, repeated corrections; dated native provider required.\n"
+                "  [--clock-max-ppm 1000 --clock-phase-max-ppm 50 --clock-slew-ppm-per-second 10 --clock-phase-seconds 1000]\n"
                 "  optional TX noise: --background-noise-bits N | --background-noise-obscured-bits N | --background-noise-db D | --background-noise-watts W --background-noise-reference-watts W --background-noise-reference-rms R\n";
             std::exit(0);
         } else throw std::invalid_argument("unknown option: " + key);
@@ -128,6 +142,8 @@ Config parse(int argc, char** argv) {
     if (c.mode == "copy" && c.noise.mode != datapump::background_noise::Mode::Off)
         throw std::invalid_argument("copy mode does not model the final audio output stage; use play mode");
     if (c.mode == "copy" && c.exclusive) throw std::invalid_argument("copy mode has no audio device");
+    c.clock_options.validate();
+    if (c.mode == "copy" && c.continuous_clock) throw std::invalid_argument("copy mode has no dated audio device for continuous clock discipline");
     return c;
 }
 
@@ -185,6 +201,19 @@ int run(const Config& c) {
     };
     options.background_noise = c.noise;
     options.background_noise_report = [&](const auto& report) { noise_report = report; };
+    std::optional<datapump::audio::ClockDisciplineReport> clock_report;
+    std::uint64_t clock_reports = 0, clock_saturated = 0, clock_holdover = 0, clock_phase_limited = 0;
+    double peak_clock_error = 0, peak_clock_rate = 0;
+    if (c.continuous_clock) {
+        options.continuous_clock = c.clock_options;
+        options.continuous_clock_report = [&](const auto& report) {
+            clock_report = report; ++clock_reports;
+            clock_saturated += report.saturated; clock_holdover += report.holdover;
+            clock_phase_limited += report.phase_correction_limited;
+            if (std::isfinite(report.phase_error_seconds)) peak_clock_error = std::max(peak_clock_error, std::abs(report.phase_error_seconds));
+            peak_clock_rate = std::max(peak_clock_rate, std::abs(report.applied_correction));
+        };
+    }
 
     if (c.mode == "copy") {
         std::array<float, block_frames> input{};
@@ -270,7 +299,8 @@ int run(const Config& c) {
     }
     const auto wall = duration<double>(Clock::now() - wall_start).count();
     const auto cpu = static_cast<double>(std::clock() - cpu_start) / CLOCKS_PER_SEC;
-    std::cerr << "{\"schema\":\"triad-audio-stream-v1\",\"mode\":\"" << c.mode
+    std::cerr << std::setprecision(std::numeric_limits<long double>::max_digits10)
+        << "{\"schema\":\"triad-audio-stream-v1\",\"mode\":\"" << c.mode
         << "\",\"sample_rate_hz\":" << c.rate << ",\"requested_frames\":" << c.frames
         << ",\"completed_frames\":" << completed.load() << ",\"complete\":true,\"clipped_samples\":" << clipped.load()
         << ",\"process_cpu_seconds\":" << cpu << ",\"wall_seconds\":" << wall
@@ -280,7 +310,26 @@ int run(const Config& c) {
     else std::cerr << "\"enabled\":true,\"sample_rate_hz\":" << noise_report->sample_rate_hz
         << ",\"active_samples\":" << noise_report->active_samples << ",\"expected_variance\":" << noise_report->expected_variance
         << ",\"measured_variance\":" << noise_report->measured_variance << ",\"peak\":" << noise_report->peak;
-    std::cerr << "}}\n";
+    std::cerr << "},\"clock_discipline\":{\"enabled\":" << (c.continuous_clock ? "true" : "false")
+        << ",\"reports\":" << clock_reports << ",\"saturated_reports\":" << clock_saturated
+        << ",\"holdover_reports\":" << clock_holdover << ",\"peak_absolute_error_seconds\":" << peak_clock_error
+        << ",\"phase_limited_reports\":" << clock_phase_limited
+        << ",\"peak_applied_ppm\":" << peak_clock_rate * 1e6;
+    if (clock_report) {
+        const auto& r = *clock_report;
+        std::cerr << ",\"ready\":" << (r.ready ? "true" : "false")
+            << ",\"observations\":" << r.observations << ",\"rejected\":" << r.rejected
+            << ",\"clock_steps\":" << r.clock_steps << ",\"rate_updates\":" << r.rate_updates
+            << ",\"cumulative_clock_step_seconds\":" << r.cumulative_clock_step_seconds
+            << ",\"q_estimate\":" << r.q_estimate << ",\"target_correction\":" << r.target_correction
+            << ",\"applied_correction\":" << r.applied_correction << ",\"native_frame\":" << r.native_frame
+            << ",\"logical_seconds\":" << r.logical_seconds
+            << ",\"origin_utc_seconds\":" << r.origin_utc_seconds
+            << ",\"estimated_utc_seconds\":" << r.estimated_utc_seconds
+            << ",\"phase_error_seconds\":" << r.phase_error_seconds << ",\"uncertainty_seconds\":";
+        if (std::isfinite(r.uncertainty_seconds)) std::cerr << r.uncertainty_seconds; else std::cerr << "null";
+    }
+    std::cerr << ",\"scope\":\"estimated full retained audio passband; adjusted capture covariance unqualified; no RF-clock certificate\"}}\n";
     return 0;
 }
 }

@@ -4,6 +4,7 @@
 #include "datapump/utc_timing.hpp"
 #include "datapump/audio_provider_timing.hpp"
 #include "datapump/background_noise.hpp"
+#include "datapump/continuous_clock.hpp"
 #include <span>
 #include <stop_token>
 #include <functional>
@@ -82,6 +83,13 @@ struct Options {
     // timestamps never authorize a GPS-only narrow acquisition window; an
     // explicitly assumed backend/propagation allowance remains necessary.
     bool follow_system_clock=false;
+    // Explicit best-effort full-PCM discipline, separate from the strict
+    // affine/scheduled policy above. Repeated UTC steps and continuous device
+    // drift steer one stateful resampler; historical phase correction has no
+    // lifetime budget. Timing remains estimated, and adjustable capture has
+    // no fixed/white-noise transport witness. The observer is mandatory.
+    std::optional<ContinuousClockOptions> continuous_clock;
+    std::function<void(const ClockDisciplineReport&)> continuous_clock_report={};
     // Residual UTC presentation-error radius, after compensating known queued
     // audio (half the GUI/CLI total Audio error lag interval). It cannot reduce a provider's reported uncertainty.
     // Zero is a valid requested hard bound, but native audio cannot establish
@@ -224,6 +232,17 @@ inline void validate_options_impl(const Options& options) {
        (options.minimum_hardware_rate<64 || options.minimum_hardware_rate>120000000))
         throw Error("minimum hardware audio rate must be zero or 64..120000000 Hz");
     if(options.clock_timing)options.clock_timing->validate();
+    if(options.continuous_clock) {
+        options.continuous_clock->validate();
+        if(options.follow_system_clock || options.request_capture_timing || options.estimated_timing)
+            throw Error("continuous clock discipline cannot use strict or fixed-PCM timing policy");
+        if(!options.continuous_clock_report)
+            throw Error("continuous clock discipline requires a visible mapping observer");
+        if constexpr(CheckProvider) {
+            if(!utc_follow_supported())
+                throw Error("continuous clock discipline is unavailable with the selected audio provider");
+        }
+    }
     if(options.allow_timing_fallback && !options.timing_status)
         throw Error("audio timing fallback requires a visible status observer");
     if(!std::isfinite(options.presentation_lag_seconds)||options.presentation_lag_seconds<0||
