@@ -5,7 +5,7 @@
 #include "datapump/triad_shaping.hpp"
 #include "datapump/triad_helper_burst.hpp"
 #include "datapump/tuning.hpp"
-#include "background_noise_options.hpp"
+#include "diagnostic_iq_noise_options.hpp"
 
 #include <algorithm>
 #include <array>
@@ -67,7 +67,7 @@ struct Options {
     bool plan_only = false, power_plan_only = false;
     bool data = true, helper = true, templates = false, explicit_data_if = false;
     bool oscillator_effects = true;
-    datapump::triad::cli::BackgroundNoiseOptions background_noise;
+    datapump::triad::cli::DiagnosticIqNoiseOptions diagnostic_iq_noise;
 };
 
 double real(std::string_view text, const char* name) {
@@ -104,8 +104,10 @@ Options parse(int argc, char** argv) {
         if (arg == "--help") {
             std::cout << "triad_helper_export --case hf|eme --output NEW_DIRECTORY\n"
                 "  [--seed N] [--key-seed N] [--epoch UTC_SECONDS] [--bit 0|1]\n"
-                "  [--background-noise-bits N | --background-noise-obscured-bits N | --background-noise-db D]\n"
-                "  [--background-noise-watts W] (relative to strongest active DATA or Helper watts)\n"
+                "  [--diagnostic-iq-noise-bits N | --diagnostic-iq-noise-obscured-bits N | --diagnostic-iq-noise-db D]\n"
+                "  [--diagnostic-iq-noise-watts W] (relative to strongest active DATA or Helper watts)\n"
+                "  [--diagnostic-iq-noise-reference-watts W --diagnostic-iq-noise-reference-rms RMS]\n"
+                "  Diagnostic noise is confined to sampled complex-IQ Nyquist; it is not full-rate DAC/audio noise.\n"
                 "  [--seconds 16] [--rate HZ] [--added-symbols N] [--burst-wait-tiles N]\n"
                 "  [--whole-bit-count 1..16] [--whole-bit-wait-count 0..1000]\n"
                 "  [--fhss on|off] [--shaping auto|legacy (default: auto)] [--shaping-tail-fraction F]\n"
@@ -132,10 +134,12 @@ Options parse(int argc, char** argv) {
         else if (arg == "--output") o.output = std::string(next());
         else if (arg == "--seed") o.seed = integer(next(), "seed");
         else if (arg == "--key-seed") o.key_seed = integer(next(), "key seed");
-        else if (arg == "--background-noise-bits" || arg == "--background-noise-obscured-bits" ||
-                 arg == "--background-noise-db" || arg == "--background-noise-watts" ||
-                 arg == "--background-noise-reference-watts" || arg == "--background-noise-reference-rms")
-            o.background_noise.consume(arg, next());
+        else if (arg == "--diagnostic-iq-noise-bits" || arg == "--diagnostic-iq-noise-obscured-bits" ||
+                 arg == "--diagnostic-iq-noise-db" || arg == "--diagnostic-iq-noise-watts" ||
+                 arg == "--diagnostic-iq-noise-reference-watts" || arg == "--diagnostic-iq-noise-reference-rms")
+            o.diagnostic_iq_noise.consume(arg, next());
+        else if (arg.starts_with("--background-noise-"))
+            throw std::invalid_argument("--background-noise-* denotes shared full-rate audio noise and is not a triad complex-I/Q option; use --diagnostic-iq-noise-* only for the narrower diagnostic (not a full-rate DAC/audio floor)");
         else if (arg == "--epoch") o.epoch = integer(next(), "epoch");
         else if (arg == "--bit") {
             const auto bit = integer(next(), "source bit");
@@ -210,8 +214,8 @@ Options parse(int argc, char** argv) {
         throw std::invalid_argument("power reference must be whole-active or legacy-window");
     if (o.plan_only && o.power_plan_only)
         throw std::invalid_argument("--plan-only and --power-plan-only are mutually exclusive");
-    if (o.background_noise.enabled() && (o.plan_only || o.power_plan_only))
-        throw std::invalid_argument("background-noise settings apply to sampled exports, not plan-only modes");
+    if (o.diagnostic_iq_noise.enabled() && (o.plan_only || o.power_plan_only))
+        throw std::invalid_argument("diagnostic-IQ noise settings apply to sampled exports, not plan-only modes");
     const bool fhss_enabled = o.fhss.value_or(o.scenario == "eme");
     if (o.ramp_seconds && !fhss_enabled)
         throw std::invalid_argument("--ramp-seconds requires FHSS on");
@@ -964,13 +968,13 @@ int run(const Options& o) {
     const double strongest_reference_watts = std::max(active_helper_watts, active_data_watts);
     const double strongest_reference_mean_square = active_helper_watts >= active_data_watts
         ? reference_helper_ratio : reference_data_mean_square;
-    if (o.background_noise.enabled() && o.background_noise.mode_name() == "watts-relative-to-strongest-signal" &&
+    if (o.diagnostic_iq_noise.enabled() && o.diagnostic_iq_noise.mode_name() == "watts-relative-to-strongest-signal" &&
         (strongest_reference_watts <= 0 || strongest_reference_mean_square <= 0))
-        throw std::invalid_argument("relative background-noise watts requires at least one active, power-referenced DATA or Helper signal");
-    if (o.background_noise.mode_name() == "watts-relative-to-strongest-signal" &&
+        throw std::invalid_argument("relative diagnostic-IQ noise watts requires at least one active, power-referenced DATA or Helper signal");
+    if (o.diagnostic_iq_noise.mode_name() == "watts-relative-to-strongest-signal" &&
         o.helper && o.helper_components != "full")
-        throw std::invalid_argument("relative background-noise watts requires the complete production Helper waveform reference");
-    config.background_noise = o.background_noise.resolved(1., strongest_reference_mean_square,
+        throw std::invalid_argument("relative diagnostic-IQ noise watts requires the complete production Helper waveform reference");
+    config.diagnostic_iq_noise = o.diagnostic_iq_noise.resolved(1., strongest_reference_mean_square,
                                                           strongest_reference_watts);
     auto& effects = config.effects;
     effects.sample_rate = sample_rate;
@@ -1199,14 +1203,14 @@ int run(const Options& o) {
         << ",\"observation_padding_samples\":" << report.observation_padding_samples
         << ",\"erased_samples\":" << report.erased_samples << ",\"out_of_passband_samples\":" << report.out_of_passband_samples
         << ",\"signal_energy_samples\":" << report.signal_energy << ",\"observed_energy_samples\":" << report.observed_energy
-        << ",\"background_noise\":{\"enabled\":" << boolean(report.background_noise_enabled)
-        << ",\"sample_rate_hz\":" << report.background_noise_sample_rate_hz
-        << ",\"represented_complex_nyquist_hz\":[" << -report.background_noise_sample_rate_hz/2 << ',' << report.background_noise_sample_rate_hz/2 << ']'
-        << ",\"expected_variance_per_complex_sample\":" << report.background_noise_expected_variance
-        << ",\"measured_variance_per_complex_sample\":" << (report.background_noise_source_samples ?
-            report.background_noise_source_energy / static_cast<double>(report.background_noise_source_samples) : 0)
-        << ",\"samples\":" << report.background_noise_source_samples
-        << ",\"stage\":\"post simulated DAC quantization and signal gain, before TX oscillator and propagation; source calendar only\",\"spectrum_scope\":\"sampled complex Nyquist; propagation/front-end filters may color it; no reconstruction-image model\"}"
+        << ",\"diagnostic_iq_noise\":{\"enabled\":" << boolean(report.diagnostic_iq_noise_enabled)
+        << ",\"sample_rate_hz\":" << report.diagnostic_iq_noise_sample_rate_hz
+        << ",\"diagnostic_iq_nyquist_hz\":[" << -report.diagnostic_iq_noise_sample_rate_hz/2 << ',' << report.diagnostic_iq_noise_sample_rate_hz/2 << ']'
+        << ",\"expected_variance_per_complex_sample\":" << report.diagnostic_iq_noise_expected_variance
+        << ",\"measured_variance_per_complex_sample\":" << (report.diagnostic_iq_noise_source_samples ?
+            report.diagnostic_iq_noise_source_energy / static_cast<double>(report.diagnostic_iq_noise_source_samples) : 0)
+        << ",\"samples\":" << report.diagnostic_iq_noise_source_samples
+        << ",\"stage\":\"narrow simulated complex-IQ source, before TX oscillator and propagation; source calendar only\",\"spectrum_scope\":\"sampled complex Nyquist only; propagation/front-end filters may color it; this is not full-rate DAC/audio noise and does not establish its floor; reconstruction images are not modeled\"}"
         << ",\"working_bytes\":" << report.working_bytes << ",\"selective_perturbation\":";
     selective_json(truth, report.selective_perturbation);
     truth << "}}\n";
@@ -1217,14 +1221,14 @@ int run(const Options& o) {
     json_string(manifest, o.whole_bit_calendar ? "triad-helper-whole-bit-public-v1" : "triad-helper-public-v1");
     manifest << ",\"case\":"; json_string(manifest, o.scenario);
     manifest << ",\"control\":"; json_string(manifest, o.control);
-    manifest << ",\"background_noise_request\":{\"mode\":";
-    json_string(manifest, o.background_noise.mode_name());
-    manifest << ",\"value\":" << o.background_noise.value()
+    manifest << ",\"diagnostic_iq_noise_request\":{\"mode\":";
+    json_string(manifest, o.diagnostic_iq_noise.mode_name());
+    manifest << ",\"value\":" << o.diagnostic_iq_noise.value()
         << ",\"full_scale\":1"
-        << ",\"resolved_variance_per_real_dac_sample\":"
-        << background_noise::resolve(config.background_noise).variance
-        << ",\"reference_mean_square\":" << config.background_noise.reference_mean_square
-        << ",\"reference_watts\":" << config.background_noise.reference_watts
+        << ",\"resolved_variance_per_complex_iq_sample\":"
+        << background_noise::resolve(config.diagnostic_iq_noise).variance
+        << ",\"reference_mean_square\":" << config.diagnostic_iq_noise.reference_mean_square
+        << ",\"reference_watts\":" << config.diagnostic_iq_noise.reference_watts
         << ",\"reference_policy\":\"strongest of effective Helper and total DATA transmit watts; fixed whole-transmission RMS reference\"}";
     manifest << ",\"sample_rate_hz\":" << sample_rate
         << ",\"observation\":{\"file\":\"observation.c128\",\"dtype\":\"<c16\",\"shape\":[" << written

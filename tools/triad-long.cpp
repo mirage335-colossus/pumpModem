@@ -1,5 +1,5 @@
 #include "datapump/triad_modem_v3.hpp"
-#include "background_noise_options.hpp"
+#include "diagnostic_iq_noise_options.hpp"
 #include "datapump/triad_statistics.hpp"
 #include "datapump/tuning.hpp"
 #include "datapump/clock_sync.hpp"
@@ -88,7 +88,7 @@ struct Options {
     bool performance_trace = false;
     bool assume_model_bounds = false;
     bool stats_noisy = false;
-    datapump::triad::cli::BackgroundNoiseOptions background_noise;
+    datapump::triad::cli::DiagnosticIqNoiseOptions diagnostic_iq_noise;
     std::string basis = "flat";
     double tap_delay_ms = 1.5, tap_doppler_hz = .3;
     // Common lower bound on total model-tail support for paired channel runs.
@@ -352,11 +352,11 @@ Options parse(int argc, char** argv) {
   --dac-enob B --adc-enob B    Synthetic Gaussian converter-error effective resolution (0=nominal).
   --dac-full-scale V --adc-full-scale V --dac-gain G --adc-gain G
   --dac-dither-lsb RMS --adc-dither-lsb RMS   Added TPDF dither before quantization.
-  --background-noise-bits N | --background-noise-obscured-bits N
-  --background-noise-db D | --background-noise-watts W
-  --background-noise-reference-watts W --background-noise-reference-rms RMS
-                              Optional cryptographic TX baseband floor. Noise spans configured sample Nyquist;
-                              watt mode needs fixed source RMS and watt reference. It is separate from --noise-seed.
+  --diagnostic-iq-noise-bits N | --diagnostic-iq-noise-obscured-bits N
+  --diagnostic-iq-noise-db D | --diagnostic-iq-noise-watts W
+  --diagnostic-iq-noise-reference-watts W --diagnostic-iq-noise-reference-rms RMS
+                              Cryptographic narrow complex-I/Q diagnostic only; it spans configured complex sample Nyquist,
+                              not a full-rate DAC/audio floor. Watt mode needs a fixed source RMS and watt reference.
   --rx-lowpass-hz HZ          Continuous one-pole analog approximation after noise/interference.
   --interference-tone AMP HZ  Receiver-coordinate tone; no fixed-RF retuning claim.
   --tone-every-dwells N --interference-impulse AMP RATE-HZ
@@ -460,10 +460,12 @@ Examples:
         else if (key == "--channel-seed") o.channel_seed = integer(need(), "channel seed");
         else if (key == "--oscillator-seed") o.oscillator_seed = integer(need(), "oscillator seed");
         else if (key == "--noise-seed") o.noise_seed = integer(need(), "noise seed");
-        else if (key == "--background-noise-bits" || key == "--background-noise-obscured-bits" ||
-                 key == "--background-noise-db" || key == "--background-noise-watts" ||
-                 key == "--background-noise-reference-watts" || key == "--background-noise-reference-rms")
-            o.background_noise.consume(key, need());
+        else if (key == "--diagnostic-iq-noise-bits" || key == "--diagnostic-iq-noise-obscured-bits" ||
+                 key == "--diagnostic-iq-noise-db" || key == "--diagnostic-iq-noise-watts" ||
+                 key == "--diagnostic-iq-noise-reference-watts" || key == "--diagnostic-iq-noise-reference-rms")
+            o.diagnostic_iq_noise.consume(key, need());
+        else if (key.starts_with("--background-noise-"))
+            throw std::invalid_argument("--background-noise-* denotes shared full-rate audio noise and is not a triad complex-I/Q option; use --diagnostic-iq-noise-* only for the narrower diagnostic (not a full-rate DAC/audio floor)");
         else if (key == "--frontend-seed") o.frontend_seed = integer(need(), "frontend seed");
         else if (key == "--path-seed") o.path_seed = integer(need(), "path seed");
         else if (key == "--trials") o.trials = bounded_integer<unsigned>(need(),"trials");
@@ -592,10 +594,10 @@ Examples:
         throw std::invalid_argument("invalid sampled frontend configuration");
     if(o.mode=="plan" && o.frontend.active())
         throw std::invalid_argument("planner cannot represent the sampled frontend; use run or actual-sample export-stats");
-    if(o.background_noise.enabled() &&
+    if(o.diagnostic_iq_noise.enabled() &&
        (o.mode=="plan" || o.mode=="configure" || o.mode=="export-source-window" ||
         o.mode=="export-stats" || o.mode=="export-group-stats"))
-        throw std::invalid_argument("transmitter background noise requires an actual sampled channel run/export mode");
+        throw std::invalid_argument("diagnostic-IQ noise requires an actual sampled channel run/export mode");
     if(o.mode=="export-stats" && o.frontend.active() && !o.stats_noisy)
         throw std::invalid_argument("sampled frontend export-stats requires --stats-noisy; Gaussian projection simulation is unsupported");
     if(o.mode=="export" && o.frontend.active())
@@ -1053,7 +1055,7 @@ void json_provenance(std::ostream& out,const Options& o,const Format& f,const Ge
            <<",\"quantization_step\":"<<(c.nominal_bits?std::ldexp(c.full_scale,1-static_cast<int>(c.nominal_bits)):0)
            <<",\"added_tpdf_dither_rms_lsb_per_component\":"<<c.dither_rms_lsb<<'}';
     };
-    out<<",\"gaussian_projection_supported\":"<<(!front.active()&&!o.background_noise.enabled()?"true":"false")
+    out<<",\"gaussian_projection_supported\":"<<(!front.active()&&!o.diagnostic_iq_noise.enabled()?"true":"false")
        <<",\"sampled_frontend\":{\"active\":"<<(front.active()?"true":"false")<<",\"dac\":";
     converter(front.dac);out<<",\"adc\":";converter(front.adc);
     out<<",\"tone_amplitude\":"<<front.tone_amplitude<<",\"tone_frequency_hz\":"<<front.tone_frequency_hz
@@ -1068,10 +1070,10 @@ void json_provenance(std::ostream& out,const Options& o,const Format& f,const Ge
        <<",\"dac_dither_guards\":\"converter noise can occupy shaped guards while finite transmitter source exists; absent transmitter disables DAC\""
        <<",\"noise_normalization\":\"reported variance is pre-frontend thermal input variance; transformed samples may be colored and non-Gaussian\""
        <<",\"signal_energy_report_stage\":\"after shared propagation and RX oscillator; before thermal noise and sampled frontend\""
-       <<",\"analytic_admission_supported\":"<<(!front.active()&&!o.background_noise.enabled()?"true":"false")<<'}';
+       <<",\"analytic_admission_supported\":"<<(!front.active()&&!o.diagnostic_iq_noise.enabled()?"true":"false")<<'}';
 }
 
-const char* background_noise_mode_name(background_noise::Mode mode) {
+const char* diagnostic_iq_noise_mode_name(background_noise::Mode mode) {
     switch (mode) {
     case background_noise::Mode::Off: return "off";
     case background_noise::Mode::EffectiveBits: return "effective-bits";
@@ -1144,23 +1146,23 @@ void json_frontend_report(std::ostream& out,const StreamChannelReport& r) {
        <<",\"frontend_report\":{\"dac_clipped_components\":"<<r.dac_clipped_components
        <<",\"adc_clipped_components\":"<<r.adc_clipped_components<<",\"impulse_events\":"<<r.impulse_events
        <<",\"overload_samples\":"<<r.overload_samples<<",\"maximum_adc_input_component\":"<<r.maximum_adc_input_component
-       << ",\"background_noise\":{\"enabled\":" << (r.background_noise_enabled ? "true" : "false")
-       << ",\"request_mode\":\"" << background_noise_mode_name(r.background_noise_config.mode) << '\"'
-       << ",\"request_value\":" << r.background_noise_config.value
-       << ",\"full_scale\":" << r.background_noise_config.full_scale
-       << ",\"fixed_reference_mean_square\":" << r.background_noise_config.reference_mean_square
-       << ",\"fixed_reference_watts\":" << r.background_noise_config.reference_watts
-       << ",\"sample_rate_hz\":" << r.background_noise_sample_rate_hz
-       << ",\"represented_complex_nyquist_hz\":[" << -r.background_noise_sample_rate_hz/2
-       << ',' << r.background_noise_sample_rate_hz/2 << ']'
+       << ",\"diagnostic_iq_noise\":{\"enabled\":" << (r.diagnostic_iq_noise_enabled ? "true" : "false")
+       << ",\"request_mode\":\"" << diagnostic_iq_noise_mode_name(r.diagnostic_iq_noise_config.mode) << '\"'
+       << ",\"request_value\":" << r.diagnostic_iq_noise_config.value
+       << ",\"full_scale\":" << r.diagnostic_iq_noise_config.full_scale
+       << ",\"fixed_reference_mean_square\":" << r.diagnostic_iq_noise_config.reference_mean_square
+       << ",\"fixed_reference_watts\":" << r.diagnostic_iq_noise_config.reference_watts
+       << ",\"sample_rate_hz\":" << r.diagnostic_iq_noise_sample_rate_hz
+       << ",\"diagnostic_iq_nyquist_hz\":[" << -r.diagnostic_iq_noise_sample_rate_hz/2
+       << ',' << r.diagnostic_iq_noise_sample_rate_hz/2 << ']'
        << ",\"expected_variance_per_complex_sample_after_signal_gain\":"
-       << r.background_noise_expected_variance
+       << r.diagnostic_iq_noise_expected_variance
        << ",\"measured_variance_per_complex_sample_after_signal_gain\":"
-       << (r.background_noise_source_samples ?
-           r.background_noise_source_energy / static_cast<double>(r.background_noise_source_samples) : 0)
-       << ",\"sample_count\":" << r.background_noise_source_samples
-       << ",\"stage\":\"mixed with simulated DAC output, then fixed TX signal gain and oscillator, before sampled propagation\""
-       << ",\"spectrum_scope\":\"sampled complex Nyquist; propagation/front-end filters may color it; out-of-band reconstruction images are not modeled\"}"
+       << (r.diagnostic_iq_noise_source_samples ?
+           r.diagnostic_iq_noise_source_energy / static_cast<double>(r.diagnostic_iq_noise_source_samples) : 0)
+       << ",\"sample_count\":" << r.diagnostic_iq_noise_source_samples
+       << ",\"stage\":\"mixed into the narrow simulated complex-IQ source, then fixed TX signal gain and oscillator, before sampled propagation\""
+       << ",\"spectrum_scope\":\"sampled complex Nyquist only; propagation/front-end filters may color it; not a full-rate DAC/audio floor, and out-of-band reconstruction images are not modeled\"}"
        <<",\"gaussian_projection_supported\":"<<(r.gaussian_projection_supported?"true":"false")<<'}';
 }
 void json_endpoint_truth(std::ostream& out,const StreamChannelConfig& c) {
@@ -1319,7 +1321,7 @@ StreamChannelConfig channel_config(const Options& o,const Format& base,const Geo
                                    std::uint64_t seed,double noise,double pad,double trail,
                                    std::uint64_t observation_samples) {
     StreamChannelConfig channel_cfg; channel_cfg.frontend=o.frontend; channel_cfg.path_evolution=o.path_evolution;
-    channel_cfg.background_noise=o.background_noise.resolved(o.frontend.dac.full_scale, 1., 0.);
+    channel_cfg.diagnostic_iq_noise=o.diagnostic_iq_noise.resolved(o.frontend.dac.full_scale, 1., 0.);
     channel_cfg.selective_model.model=o.selective_model=="legacy-allpass"
         ?SelectiveModel::LegacyAllpass:SelectiveModel::DispersiveDft;
     channel_cfg.selective_model.correlation_spacing_hz=o.selective_scale_hz>0
@@ -1859,7 +1861,7 @@ void export_source_window(const Options& o) {
         (o.margin_explicit&&o.margin!=1)||o.phase_diffusion_explicit&&o.phase_diffusion!=0||
         o.white_fm!=0||o.random_walk_fm!=0||o.flicker_fm!=0||o.white_pm!=0||path_evolution_active(o)||
         o.dropout_ms!=0||!o.missed_dwells.empty()||o.frontend.active()||o.truth_epoch_offset!=0||
-        o.truth_frequency_hz!=0||o.truth_frequency_drift!=0||o.background_noise.enabled();
+        o.truth_frequency_hz!=0||o.truth_frequency_drift!=0||o.diagnostic_iq_noise.enabled();
     if(channel_effect)
         throw std::invalid_argument("export-source-window is source-only; remove propagation/oscillator/frontend/erasure selections or use a propagated export mode");
     const auto f=format_for(o);const auto g=geometry(f);const double fs=effective_sample_rate(f);

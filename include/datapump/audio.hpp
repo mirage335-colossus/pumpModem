@@ -3,6 +3,7 @@
 #include "datapump/capture_transport.hpp"
 #include "datapump/utc_timing.hpp"
 #include "datapump/audio_provider_timing.hpp"
+#include "datapump/background_noise.hpp"
 #include <span>
 #include <stop_token>
 #include <functional>
@@ -35,6 +36,17 @@ struct StreamFormat {
 };
 using StreamFormatCallback = std::function<void(const StreamFormat&)>;
 enum class ChannelMode { left_mono, right_mono, stereo };
+enum class AudioOutputSampleFormat { S16, Float32 };
+struct BackgroundNoiseReport {
+    bool enabled = false;
+    std::uint32_t sample_rate_hz = 0;
+    AudioOutputSampleFormat sample_format = AudioOutputSampleFormat::S16;
+    std::uint64_t active_samples = 0;
+    double expected_variance = 0;
+    double measured_mean = 0;
+    double measured_variance = 0;
+    double peak = 0;
+};
 // Applied only at the final hardware PCM boundary, after rate conversion.
 // Unity gain preserves the original conversion exactly; capture is not scaled.
 // Optional read-only capture observation before resampling. The borrowed PCM
@@ -180,6 +192,12 @@ struct Options {
     // formats without changing logical PCM, symbol timing, or callback rates.
     // Providers with an already configured clock reject an insufficient rate.
     std::uint32_t minimum_hardware_rate=0;
+    // A fresh cryptographic source is created per playback/transmission, after
+    // final-rate composition and before provider-specific sample delivery.
+    // Relative-watt reference_mean_square is already expressed at final DAC
+    // gain/headroom; the output stage does not infer or rescale it.
+    background_noise::Config background_noise{};
+    std::function<void(const BackgroundNoiseReport&)> background_noise_report={};
 };
 // Capabilities belong to the selected audio provider, not the UI or target OS.
 bool exclusive_supported();
@@ -193,6 +211,15 @@ void schedule_output(double epoch_seconds,std::stop_token stop={});
 namespace detail {
 template<bool CheckProvider>
 inline void validate_options_impl(const Options& options) {
+    try {
+        const auto level=background_noise::resolve(options.background_noise);
+        if(options.background_noise.full_scale!=1.)
+            throw Error("full-rate audio background noise requires normalized DAC full scale 1");
+        if(level.enabled && options.background_noise.mode==background_noise::Mode::RelativeWatts &&
+           options.background_noise.reference_mean_square>1.)
+            throw Error("background-noise reference mean-square power exceeds normalized full scale");
+    } catch(const Error&) { throw; }
+      catch(const std::exception& error) { throw Error(std::string("invalid audio background-noise settings: ")+error.what()); }
     if(options.minimum_hardware_rate!=0 &&
        (options.minimum_hardware_rate<64 || options.minimum_hardware_rate>120000000))
         throw Error("minimum hardware audio rate must be zero or 64..120000000 Hz");

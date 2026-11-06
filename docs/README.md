@@ -25,9 +25,11 @@ pilot-aware weak onset, segmented complex acquisition, fixed-prior operational
 admission accounting and a bounded streaming audio experiment. It explicitly
 separates Gaussian-null theory from physical Helper/audio qualification.
 The [cryptographic background-noise feature](triad-background-noise.md) adds an
-optional fresh AES-256 noise floor across the represented DAC spectrum, with
-explicit effective-bit, dB and relative-power units and inexpensive digital/cable
-checks. It remains separate from receiver thermal noise and message encryption.
+optional fresh AES-256 noise floor at the shared final-rate audio output layer
+for native and host/browser backends, with explicit effective-bit, dB and
+relative-power units and inexpensive digital/cable checks. It distinguishes
+full-DAC audio from the separate narrow-I/Q diagnostic, receiver thermal noise
+and message encryption.
 The [Helper-assisted triad integration](triad-helper.md) documents production
 Helper composition, the requested HF/EME configurations, acquisition reuse and
 scoped admission controls, separately from ordinary Robust integration.

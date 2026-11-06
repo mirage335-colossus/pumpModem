@@ -1,4 +1,5 @@
 #include "datapump/audio.hpp"
+#include "datapump/audio_output.hpp"
 #include "audio_trace.hpp"
 #include <iostream>
 #include <syncstream>
@@ -81,17 +82,6 @@ void report_format(std::uint32_t logical,std::uint32_t hardware,std::size_t work
         format.hardware_channels=hardware_channels;
         format.selected_capture_channel=selected_capture_channel;
         callback(format);
-    }
-}
-void playback_pcm(std::span<const float> samples,std::span<std::int16_t> output,unsigned channels,ChannelMode mode,double gain) {
-    for(std::size_t i=0;i<samples.size();++i) {
-        if(!std::isfinite(samples[i]))throw Error("nonfinite transmit sample");
-        // Preserve the original float arithmetic exactly at the default 100%.
-        const auto sample=gain==1.0
-            ? static_cast<std::int16_t>(std::clamp(samples[i],-1.0f,1.0f)*32767)
-            : static_cast<std::int16_t>(std::clamp(static_cast<double>(samples[i])*gain,-1.0,1.0)*32767);
-        output[i*channels]=channels==2 && mode==ChannelMode::right_mono?0:sample;
-        if(channels==2)output[i*channels+1]=mode==ChannelMode::left_mono?0:sample;
     }
 }
 class PlaybackSource {
@@ -942,6 +932,7 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
     PlaybackSource source(rate,stream.hardware_rate,next_samples,stop,timed,
         options?options->playback_output_gain:std::function<double(long double)>{},
         options?options->playback_output_transform:std::function<float(float,long double,std::uint32_t)>{});
+    PlaybackOutput output(stream.hardware_rate,options?options->background_noise:background_noise::Config{},gain);
     const auto chunk_limit=std::min<std::size_t>(4096,stream.hardware_rate/20);
     std::vector<std::int16_t> block(chunk_limit*stream.channels);
     std::vector<float> samples(chunk_limit);
@@ -1074,9 +1065,10 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
                 std::chrono::system_clock::now().time_since_epoch()).count()>*detail::utc_playback_epoch+options->presentation_lag_seconds+timing->allowance())
             throw Error("UTC audio preroll missed the scheduled epoch");
         std::size_t count=0;
+        std::size_t active_begin=0;
         if(!timed)count=source.read(samples);
         else if(!timing->timeline().ready() || (estimated && !prepared_rate) || (preflight && !reported)) {
-            std::fill(samples.begin(),samples.end(),0);count=samples.size();
+            std::fill(samples.begin(),samples.end(),0);count=samples.size();active_begin=count;
         } else {
             const auto predicted=timing->timeline().predict(accepted);
             const auto epoch=*detail::utc_playback_epoch+options->presentation_lag_seconds;
@@ -1135,6 +1127,7 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
                 }
             }
             count=leading;
+            active_begin=leading;
             if(source_started) {
                 auto at_source=timing->timeline().predict(accepted+leading);
                 if(estimated) {
@@ -1326,11 +1319,12 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
                     epoch+source.converter().source_seconds(),timing_error,
                     graph?.001:options->maximum_timing_rate_correction,source.converter().rate_correction(),"generated block end");
             }
+            if(!source_started)active_begin=count;
         }
         if(count>samples.size())throw Error("playback callback returned invalid sample count");
         if(!count){if(graph)graph->end_input();break;}
         if(graph && source.converter().finished())graph->end_input(count);
-        playback_pcm(std::span<const float>(samples.data(),count),block,stream.channels,channels,gain);
+        output.pack_s16(std::span<const float>(samples.data(),count),block,stream.channels,channels,active_begin);
         std::size_t offset=0;
         while(offset<count) {
             check_cancelled(stop);
@@ -1381,7 +1375,7 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
         }
     }
     check_cancelled(stop);
-    if(graph){graph->drain();check_cancelled(stop);return;}
+    if(graph){graph->drain();check_cancelled(stop);if(options && options->background_noise_report)options->background_noise_report(output.report());return;}
     while(true) {
         check_cancelled(stop);
         const auto drained=api.drain(stream.pcm);
@@ -1395,6 +1389,7 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
         if(ready<0 && ready!=-EINTR)throw Error("audio playback drain wait failed");
     }
     check_cancelled(stop);
+    if(options && options->background_noise_report)options->background_noise_report(output.report());
 }
 std::vector<float> record(double seconds,std::uint32_t rate,const std::string& device,std::size_t memory_limit,std::stop_token stop,StreamFormatCallback on_format) {
     check_cancelled(stop);
@@ -1641,6 +1636,7 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
     PlaybackSource source(rate,session.hardware_rate,next_samples,stop,false,
         options?options->playback_output_gain:std::function<double(long double)>{},
         options?options->playback_output_transform:std::function<float(float,long double,std::uint32_t)>{});
+    PlaybackOutput output(session.hardware_rate,options?options->background_noise:background_noise::Config{},gain);
     session.prepare();
     mm_check(waveOutPause(session.output),"waveOut pause failed");
     std::vector<float> samples(std::min<std::size_t>(WaveSession::block_frames,session.hardware_rate/20));
@@ -1655,7 +1651,7 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
         check_cancelled(stop);
         if(count>samples.size())throw Error("playback callback returned invalid sample count");
         if(!count){finished=true;return;}
-        playback_pcm(std::span<const float>(samples.data(),count),session.pcm[slot],session.channels,channels,gain);
+        output.pack_s16(std::span<const float>(samples.data(),count),session.pcm[slot],session.channels,channels);
         auto& header=session.headers[slot];
         header.dwBufferLength=static_cast<DWORD>(count*session.channels*sizeof(std::int16_t));
         // The other buffer may finish while the producer computes this block.
@@ -1679,6 +1675,7 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
         slot=1-slot;
     }
     session.finish();
+    if(options && options->background_noise_report)options->background_noise_report(output.report());
 }
 std::vector<float> record(double seconds,std::uint32_t rate,const std::string& device,std::size_t memory_limit,std::stop_token stop,StreamFormatCallback on_format) {
     check_cancelled(stop);

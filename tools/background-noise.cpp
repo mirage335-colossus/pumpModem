@@ -1,6 +1,9 @@
 #include "datapump/background_noise.hpp"
+#include "datapump/audio_output.hpp"
+#include "datapump/resampler.hpp"
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <charconv>
 #include <chrono>
@@ -38,7 +41,7 @@ struct Options {
     fs::path input, output, metadata;
     std::string format, output_format;
     unsigned channels = 1;
-    double signal_gain = 1, sample_rate = 48000;
+    double signal_gain = 1, sample_rate = 48000, input_rate = 0;
     Config noise{};
     bool level_set = false;
 };
@@ -79,6 +82,7 @@ Options parse(int argc, char** argv) {
         else if (arg == "--channels") o.channels = integer(next(), "channel count");
         else if (arg == "--signal-gain") o.signal_gain = number(next(), "signal gain");
         else if (arg == "--sample-rate") o.sample_rate = number(next(), "sample rate");
+        else if (arg == "--input-rate") o.input_rate = number(next(), "input rate");
         else if (arg == "--bits" || arg == "--obscured-bits" || arg == "--db" || arg == "--noise-watts") {
             if (o.level_set) throw std::runtime_error("choose only one background-noise level option");
             o.level_set = true;
@@ -96,7 +100,8 @@ Options parse(int argc, char** argv) {
             std::cout << "background-noise --input FILE --output FILE --metadata FILE --format f32|s16 "
                          "[--output-format f32|s16] [--channels 1|2] [--signal-gain G] "
                          "[--bits 0..16 | --obscured-bits 0..16 | --db D | --noise-watts W "
-                         "--reference-watts W --reference-rms R] [--sample-rate HZ]\n";
+                         "--reference-watts W --reference-rms R] [--input-rate HZ] [--sample-rate HZ]\n"
+                         "Noise is added after full-rate audio resampling; references are final DAC units.\n";
             std::exit(0);
         } else throw std::runtime_error("unknown option: " + std::string(arg));
     }
@@ -106,9 +111,12 @@ Options parse(int argc, char** argv) {
     if (o.output_format.empty()) o.output_format = o.format;
     if (o.output_format != "f32" && o.output_format != "s16") throw std::runtime_error("--output-format must be f32 or s16");
     if (o.channels < 1 || o.channels > 2) throw std::runtime_error("--channels must be one or two");
-    if (!std::isfinite(o.signal_gain) || o.signal_gain < 0 || o.signal_gain > 1 ||
-        !std::isfinite(o.sample_rate) || o.sample_rate <= 0)
-        throw std::runtime_error("signal gain must be within 0..1 and sample rate must be positive");
+    if (o.input_rate == 0) o.input_rate = o.sample_rate;
+    if (!std::isfinite(o.signal_gain) || o.signal_gain < .0001 || o.signal_gain > 1.75)
+        throw std::runtime_error("signal gain must be within .0001..1.75");
+    for (const auto rate : {o.input_rate, o.sample_rate})
+        if (!std::isfinite(rate) || rate < 64 || rate > 120000000 || std::floor(rate) != rate)
+            throw std::runtime_error("audio input/output rates must be integers in 64..120000000 Hz");
     if (o.noise.mode == Mode::RelativeWatts && (!o.noise.reference_watts || !o.noise.reference_mean_square))
         throw std::runtime_error("--noise-watts requires --reference-watts and --reference-rms");
     o.noise.full_scale = 1;
@@ -191,8 +199,10 @@ int run(const Options& o) {
     const auto level = resolve(o.noise);
     require(level.peak <= 1., "selected noise level cannot fit within normalized DAC full scale");
 
-    // First pass proves format, identical stereo input, and strict worst-case
-    // headroom before either output artifact is created.
+    // Validate format, identical stereo input, and source headroom before
+    // creating artifacts. A resampling filter may overshoot that source peak;
+    // the final-rate mixer also enforces headroom sample by sample. A failure
+    // can leave partial PCM, but never a complete receipt or clipped output.
     double input_peak = 0, input_sumsq = 0;
     std::int64_t minimum_output_code = 0, maximum_output_code = 0;
     {
@@ -225,48 +235,73 @@ int run(const Options& o) {
                 "noise plus source peak exceeds S16 range; apply fixed source headroom");
     }
 
-    Generator noise(o.noise);
+    datapump::audio::PlaybackOutput mixer(static_cast<std::uint32_t>(o.sample_rate), o.noise, o.signal_gain);
     std::ifstream in(in_abs, std::ios::binary);
     require(static_cast<bool>(in), "cannot open PCM input");
     ExclusiveOutput out(out_abs);
-    double sum_noise = 0, sum_noise2 = 0;
-    std::uint64_t clips = 0;
-    for (std::uint64_t i = 0; i < count; ++i) {
-        const double raw = o.format == "f32" ? sample_f32(in) : static_cast<double>(sample_s16(in)) / 32768.;
-        if (o.channels == 2) {
-            const double right = o.format == "f32" ? sample_f32(in) : static_cast<double>(sample_s16(in)) / 32768.;
-            require(raw == right, "stereo fixture changed after validation");
-        }
-        const double clean = raw * o.signal_gain;
+    std::uint64_t output_count = 0;
+    std::array<std::int16_t, 8192> packed{};
+    auto emit = [&](std::span<float> mono) {
         if (o.output_format == "s16") {
-            const auto code = o.format == "s16"
-                ? static_cast<std::int32_t>(std::llround(clean * 32768.))
-                : static_cast<std::int32_t>(std::clamp(static_cast<float>(clean), -1.f, 1.f) * 32767.f);
-            const auto n = noise.s16_noise();
-            sum_noise += static_cast<double>(n) / 32767.;
-            sum_noise2 += static_cast<double>(n) * n / (32767. * 32767.);
-            const auto mixed = code + n;
-            if (mixed < -32768 || mixed > 32767) ++clips;
-            require(mixed >= -32768 && mixed <= 32767, "unanticipated S16 clipping; output was not completed");
-            write_s16(out, static_cast<std::int16_t>(mixed));
-            if (o.channels == 2) write_s16(out, static_cast<std::int16_t>(mixed));
+            auto codes = std::span(packed).first(mono.size()*o.channels);
+            mixer.pack_s16(mono, codes, o.channels, datapump::audio::ChannelMode::stereo);
+            out.write(codes.data(), codes.size_bytes());
         } else {
-            const double n = noise.real();
-            const double mixed = clean + n;
-            if (std::abs(mixed) > 1) ++clips;
-            require(std::abs(mixed) <= 1, "unanticipated f32 clipping; output was not completed");
-            const float emitted = static_cast<float>(mixed);
-            const double realized = static_cast<double>(emitted) - static_cast<float>(clean);
-            sum_noise += realized; sum_noise2 += realized * realized;
-            write_float(out, emitted);
-            if (o.channels == 2) write_float(out, emitted);
+            mixer.mix_float(mono);
+            for (const float x : mono) {
+                const float value = static_cast<float>(x*mixer.provider_gain());
+                write_float(out, value);
+                if (o.channels == 2) write_float(out, value);
+            }
+        }
+        output_count += mono.size();
+    };
+    // Preserve exact cached S16 codes when no rate conversion is necessary.
+    // Every other path goes through the same full-rate float finalizer used by
+    // providers; the noise is never passed through the source resampler.
+    if (o.format == "s16" && o.output_format == "s16" && o.input_rate == o.sample_rate) {
+        std::array<std::int16_t,4096> mono{};
+        for (std::uint64_t first=0; first<count;) {
+            const auto n=static_cast<std::size_t>(std::min<std::uint64_t>(mono.size(),count-first));
+            for (std::size_t i=0;i<n;++i) {
+                mono[i]=sample_s16(in);
+                if(o.channels==2)require(sample_s16(in)==mono[i],"stereo input changed after validation");
+            }
+            mixer.mix_s16(std::span(mono).first(n));
+            for(std::size_t i=0;i<n;++i) {
+                write_s16(out,mono[i]);if(o.channels==2)write_s16(out,mono[i]);
+            }
+            first+=n;output_count+=n;
+        }
+    } else {
+        datapump::audio::Resampler converter(static_cast<std::uint32_t>(o.input_rate),
+                                             static_cast<std::uint32_t>(o.sample_rate));
+        std::array<float,4096> input{}, output{};
+        std::size_t offset=0, loaded=0;std::uint64_t read=0;
+        while (!converter.finished()) {
+            if(offset==loaded && read<count) {
+                loaded=static_cast<std::size_t>(std::min<std::uint64_t>(input.size(),count-read));offset=0;
+                for(std::size_t i=0;i<loaded;++i) {
+                    const double value=o.format=="f32"?sample_f32(in):static_cast<double>(sample_s16(in))/32768.;
+                    if(o.channels==2) {
+                        const double right=o.format=="f32"?sample_f32(in):static_cast<double>(sample_s16(in))/32768.;
+                        require(value==right,"stereo input changed after validation");
+                    }
+                    input[i]=static_cast<float>(value);
+                }
+                read+=loaded;
+            }
+            const auto progress=converter.process(std::span(input).first(loaded).subspan(offset),output,read==count);
+            offset+=progress.consumed;
+            emit(std::span(output).first(progress.produced));
+            require(progress.consumed || progress.produced || converter.finished(),"audio renderer made no progress");
         }
     }
     out.flush();
     const double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
     const double cpu = static_cast<double>(std::clock() - cpu_started) / CLOCKS_PER_SEC;
-    const double actual_mean = sum_noise / static_cast<double>(count);
-    const double actual_var = std::max(0., sum_noise2 / static_cast<double>(count) - actual_mean * actual_mean);
+    const auto report=mixer.report();
+    const double actual_mean=report.measured_mean, actual_var=report.measured_variance;
     const char* mode_name = "off";
     switch (o.noise.mode) {
     case Mode::Off: mode_name = "off"; break;
@@ -277,11 +312,13 @@ int run(const Options& o) {
     }
     std::ostringstream metadata;
     metadata << std::setprecision(17)
-         << "{\n  \"schema\":\"background-noise-v1\",\n  \"status\":\"complete\",\n"
+         << "{\n  \"schema\":\"background-noise-audio-v2\",\n  \"status\":\"complete\",\n"
          << "  \"input\":" << quote(in_abs) << ",\n  \"output\":" << quote(out_abs) << ",\n"
          << "  \"format\":\"" << o.format << "\",\n  \"output_format\":\"" << o.output_format << "\",\n"
          << "  \"channels\":" << o.channels << ",\n  \"sample_rate_hz\":" << o.sample_rate << ",\n"
-         << "  \"samples\":" << count << ",\n  \"source_peak\":" << input_peak << ",\n"
+         << "  \"samples\":" << output_count << ",\n  \"input_samples\":" << count << ",\n"
+         << "  \"input_rate_hz\":" << o.input_rate << ",\n  \"stage\":\"shared full-rate audio finalizer after resampling\",\n"
+         << "  \"source_peak\":" << input_peak << ",\n"
          << "  \"source_mean_square\":" << input_sumsq / static_cast<double>(count) << ",\n"
          << "  \"mode\":\"" << mode_name << "\",\n  \"level_value\":" << o.noise.value << ",\n"
          << "  \"reference_mean_square\":" << o.noise.reference_mean_square << ",\n"
@@ -289,7 +326,7 @@ int run(const Options& o) {
          << "  \"expected_noise_variance\":" << level.variance << ",\n"
          << "  \"measured_noise_mean\":" << actual_mean << ",\n  \"measured_noise_variance\":" << actual_var << ",\n"
          << "  \"noise_peak_bound\":" << (o.output_format == "s16" ? std::ceil(level.peak*32767.)/32767. : level.peak)
-         << ",\n  \"clipped_samples\":" << clips << ",\n"
+         << ",\n  \"clipped_samples\":0,\n"
          << "  \"key_policy\":\"fresh OS-seeded AES-256-CTR key per invocation; key is ephemeral and never stored\",\n"
          << "  \"iv_policy\":\"system-clock nanoseconds in high 64 bits; counter starts at zero under the fresh key\",\n"
          << "  \"noise_scope\":\"additive independent sample noise across the represented PCM Nyquist band before DAC; downstream shaping is not compensated\",\n"

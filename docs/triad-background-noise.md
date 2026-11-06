@@ -1,13 +1,17 @@
 # Cryptographic transmit background noise
 
-The isolated three-carrier tools provide an optional, default-off, full-baseband
-transmit noise floor. This is additional transmitted energy, separate from
-receiver thermal noise and from message encryption. The ordinary receiver and
-GUI are not integrated by this change.
+The optional, default-off transmit noise floor is added at the **shared final-rate
+audio output stage**, after resampling and Helper composition and before delivery
+to any supported audio backend. It spans the represented DAC Nyquist band; it is
+not limited to the modem's narrow complex I/Q bandwidth. This is additional
+transmitted energy, separate from receiver thermal noise and message encryption.
 
-Use the shared implementation in `include/datapump/background_noise.hpp` and
-`src/background_noise.cpp`; do not substitute a seeded simulation PRNG. Each
-enabled generator/transmission obtains a new private 256-bit key from OpenSSL's
+Use `audio::PlaybackOutput` in `include/datapump/audio_output.hpp` and
+`src/audio_output.cpp` for playback and offline PCM rendering. Its cryptographic
+source is shared with `include/datapump/background_noise.hpp` and
+`src/background_noise.cpp`; do not duplicate it in a backend or substitute a
+seeded simulation PRNG. Each enabled generator/transmission obtains a new private
+256-bit key from OpenSSL's
 OS-seeded private RNG. AES-256-CTR encrypts zeros in buffered blocks. Its initial
 counter contains system-clock time and starts its block counter at zero, with
 an exhaustion guard. Key material and buffered stream state are temporary,
@@ -25,22 +29,25 @@ transmitter noise to those ADC samples.
 ## Units and reference power
 
 One level control may be selected. The canonical quantity is added real-DAC
-mean square (v), for samples normalized to full-scale peak 1:
+mean square \(v\), for samples normalized to full-scale peak 1:
 
 | Control | Definition |
 | --- | --- |
-| Effective bits (B), 0–16 | (v=2^{-2B}/3), the ideal quantization variance \(\Delta^2/12\), with \(\Delta=2/2^B\). |
-| Obscured bits (K), 0–16 | Effective bits (16-K). |
-| Suppression (D) dB | Positive dB **below a full-scale sine**, (v=0.5\,10^{-D/10}). |
-| Noise watts (P_n) | (v=P_{\rm reference,samples} P_n/P_{\rm reference,watts}\). Both reference quantities are fixed for the transmission. |
+| Effective bits (B), 0–16 | \(v=2^{-2B}/3\), the ideal quantization variance \(\Delta^2/12\), with \(\Delta=2/2^B\). |
+| Obscured bits (K), 0–16 | Effective bits \(16-K\). |
+| Suppression (D) dB | Positive dB **below a full-scale sine**, \(v=0.5\,10^{-D/10}\). |
+| Noise watts \(P_n\) | \(v=P_{\rm reference,samples} P_n/P_{\rm reference,watts}\). Both reference quantities are fixed for the transmission. |
 
 The power reference is the strongest complete active signal: total DATA across
 all three carriers or the complete effective Helper signal, whichever is larger.
 It is not the instantaneous composite peak, a single pilot, or the sum of
-Helper and DATA powers. Generic PCM tools require an explicit reference RMS
-and watts; the Helper exporter derives the reference from its existing active
-source power calibration. Do not estimate this reference from a faded, noisy
-received capture. Supplied PCM reference RMS is after any explicit signal gain.
+Helper and DATA powers. Full-rate PCM tools and the production CLI require an
+explicit reference RMS and watts for relative-power mode. The reference RMS is
+in **final normalized DAC units, including the selected transmit gain**. The
+output stage does not silently rescale that reference when applying gain. Do not
+estimate it from a faded, noisy received capture. The isolated narrow-I/Q
+diagnostic exporter can derive its separate source reference from its active
+DATA/Helper power calibration; that is not a full-DAC reference.
 
 For 1 mW added to a 40 W reference, added power is −46.0206 dB and RMS amplitude
 is 0.005 of reference RMS. With a 4 W reference these are −36.0206 dB and
@@ -55,33 +62,65 @@ do not claim measured hardware ENOB.
 
 ## Placement, bandwidth and headroom
 
-In native `StreamingChannel`, noise is generated once per chronological source
-sample after DATA/Helper composition and before transmitter oscillators and
-propagation. It continues through source guards and burst gaps, ends at the
-source endpoint, and its echoes/filter tails drain normally. It is not gated
-again at reception. Disabling the transmitted source disables this transmitter
-noise as well. Receiver-only noise controls remain independent.
+One `audio::PlaybackOutput` belongs to one playback/transmission, not one buffer
+or one open device. It adds noise after the final rate conversion, Helper/output
+transform and signal gain. Native S16 packing and host/browser Float32 delivery
+use the same stage. Enabled Float32 output passes unity gain to the provider so
+that the existing provider gain cannot scale the signal and noise a second time.
+Stereo routing duplicates the same mono noise on the selected output channels;
+this does not introduce an independent stereo/I/Q transmitter.
 
-The complex simulation uses the analytic-equivalent convention
-\(E|n|^2=v\), half in each independent component. Full baseband means that
-simulation's configured sample bandwidth, **not** an implicit 48 kHz DAC.
-Subsequent interpolation, oscillator shifting and channel filtering can alter
-the spectrum. Existing sampled interpolation and Nyquist-edge wrapping are
-not a newly validated analog reconstruction filter. Keep DATA/Helper signal
-capture bounds separate from the noise bandwidth.
+The generator starts lazily on the first active source sample, even when that
+sample is zero. Device calibration and scheduled preroll silence remain quiet
+and consume no stream samples. Source-internal FHSS guards, Symbol Burst gaps
+and drained resampler output remain part of the active transmission and receive
+noise. Noise is not inferred from nonzero signal amplitude or restarted at
+buffer boundaries. A successful completion report records the actual final
+sample rate, PCM format, active sample count and measured noise moments, but no
+key or random stream material.
 
-For raw ALSA live tests, add noise at the final hardware-rate S16 boundary,
-after audio conversion and all prepared waveform processing. Stereo playback
-duplicates the same mono samples/noise, preserving the existing radio route.
-No independent stereo or I/Q hardware claim is made. A cable waveform which
-already contains a simulated HF channel receives this physical-DAC noise
-**after** that simulated channel; this differs from transmitter noise propagated
-through native HF simulation. Receipts must preserve that ordering distinction.
-The duplex suite currently supports this feature with `--backend alsa-tools`;
-its native audio-capture backend rejects the option because final hardware-rate
-injection through that backend's possible resampler has not been implemented.
-The earlier receiver false-admission bounds do not automatically cover this
-additional, potentially colored transmitted-noise source.
+The shared integration covers native ALSA/PulseAudio/PipeWire and Windows output,
+and the host/browser audio provider. `audio::Options::background_noise` and
+`live::Settings::background_noise` expose the setting programmatically. The
+production CLI accepts it for `tx`/`status-tx --device` and transmitting `listen`
+commands. There is no new GUI control. Provider contract tests and physical
+hardware measurements are distinct evidence: native ALSA cable measurements do
+not establish physical Windows or browser behavior, and mocked host-provider
+checks do not constitute a newly built/tested WebAssembly binary. The local
+WebAssembly SDK was unavailable during this integration.
+
+For an offline full-audio simulation, use the `background_noise` PCM renderer:
+resample from `--input-rate` to `--sample-rate`, then add noise at that output
+rate. Apply subsequent transmitter reconstruction/filter and propagation models
+to this complete noisy waveform, retaining their state and tails. For a cable
+fixture that already contains a simulated HF channel, final hardware-DAC noise
+is added **after** that simulated channel. Receipts must preserve this ordering;
+it is not equivalent to transmitter noise propagated through the HF model. Both
+`triad_live_duplex` capture backends (`native` and `alsa-tools`) support final-rate
+noise; the native backend adds it during playback rather than pre-noising a file.
+
+### Narrow-I/Q diagnostics are not the DAC feature
+
+The earlier `StreamingChannel` noise injection remains only as the explicitly
+named `diagnostic_iq_noise` / `--diagnostic-iq-noise-*` experiment. It injects
+complex noise with \(E|n|^2=v\) over that simulation's sampled I/Q Nyquist band,
+after DATA/Helper composition and before transmitter oscillators and propagation.
+Its channel state and tails remain continuous. `triad_long` and
+`triad_helper_export` reject the old `--background-noise-*` spelling to prevent
+accidentally presenting this restricted-bandwidth diagnostic as full-DAC noise.
+The production narrowband `live::Settings::simulation` path also rejects the
+full-rate setting; use the offline full-audio renderer for that layer instead.
+
+Equal total noise variance in these two representations does **not** imply
+equal receiver noise density. For example, with an energy-preserving analytic
+conversion, real white DAC noise of variance \(v\) at 48 kHz has complex PSD
+\(2v/48000\). An ideal 6 kHz complex passband retains variance \(v/4\), whereas
+directly injecting complex variance \(v\) at 6 kHz is 6.02 dB stronger in-band.
+That comparison assumes ideal flat filtering; time-varying channels and actual
+filter responses need their own propagation/energy calculation. Neither path
+compensates analog filtering to make radiated noise spectrally flat. Earlier
+receiver false-admission bounds do not automatically cover this added,
+potentially colored transmitted-noise source.
 
 Float noise is independent bounded uniform noise. Quantized output uses a
 symmetric integer distribution calibrated to the requested variance, including
@@ -108,36 +147,41 @@ checks (the stream adapter tests also use Torch). Core CTest checks use C++ and
 Python's standard library only.
 
 ```sh
-./build.sh test triad --cli --jobs 2
+./build.sh configure --cli --web-worker --build-dir build/dev-cli
+./build.sh test triad --cli --web-worker --build-dir build/dev-cli --jobs 2
+# --web-worker also makes the host-provider contract target available.
 # Optional tools in the same configured profile:
 cmake --build build/dev-cli --target background_noise triad_long triad_helper_export --parallel 2
 
-# Input is clean mono float32le at the actual DAC rate.
-build/dev-cli/background_noise --input clean.f32 --output noisy.s16 \
-  --format f32 --output-format s16 --sample-rate 48000 \
+# Clean mono float32le at 6 kHz; noise spans the final 48 kHz audio output.
+build/dev-cli/background_noise --input clean-6k.f32 --output noisy-48k.s16 \
+  --format f32 --output-format s16 --input-rate 6000 --sample-rate 48000 \
   --bits 10 --metadata noise.json
+# Omit --input-rate when the source already has the output sample rate.
 
 # Fixed strongest-signal reference: 40W corresponds to RMS0.1 in these samples.
 build/dev-cli/background_noise --input clean.f32 --output noisy-mw.s16 \
   --format f32 --output-format s16 --noise-watts .001 \
   --reference-watts 40 --reference-rms .1 --metadata noise-mw.json
 
-# Digital qualification only; fresh output directory, no audio device access.
-python3 tools/triad_noise_qualification.py \
-  --output local-evidence/noise-digital
+# Shared full-rate digital qualification; fresh directory, no audio device access.
+python3 tools/triad_fullrate_noise_qualification.py \
+  --tool build/dev-cli/background_noise --output local-evidence/noise-fullrate-digital
 
 # In the existing research Python environment (NumPy/SciPy; stream tests use Torch):
 python3 -m unittest tests/test_triad_background_noise.py \
   tests/test_triad_live_alsa.py tests/test_triad_stream_run.py tests/test_triad_live_duplex.py
 ```
 
-Native exporters and supported live adapters use the prefixed selectors
+Production live transmission and live adapters use the prefixed selectors
 `--background-noise-bits`, `--background-noise-obscured-bits`,
 `--background-noise-db`, and `--background-noise-watts`. The raw-ALSA and
 continuous-stream adapters accept `--background-noise-tool` to select the built
 native executable. Generic PCM watt settings also require
 `--background-noise-reference-watts` and `--background-noise-reference-rms`.
-Unsupported backends must reject a selected setting rather than ignore it.
+The native duplex backend uses its built-in shared stage, so it does not use
+`--background-noise-tool`. Unsupported operations (such as receive-only playback
+options or a narrow-I/Q simulation) reject the setting rather than ignore it.
 
 The focused core and adapter checks, plus the short digital qualification, are
 the routine tests for this feature. Do not repeat the historical weak-signal,
@@ -145,8 +189,16 @@ multi-day or GPU receiver campaigns merely to test noise generation. Physical
 qualification is opt-in with `triad_noise_qualification.py --live --live-only`
 and an explicit `--device hw:C,D`; it briefly owns that capture/playback route.
 
-The [measured digital and cable qualification](validation-data/triad-v3/2026-11-06-background-noise/README.md)
-records the source identities, power/PSD errors, CPU cost, test results and limits.
+The [shared full-rate qualification](validation-data/triad-v3/2026-11-06-background-noise-fullrate/README.md)
+records the lower-rate-source to full-audio bandwidth checks, DDC variance
+prediction and backend evidence limits.
+
+The [earlier digital and cable qualification](validation-data/triad-v3/2026-11-06-background-noise/README.md)
+records its source identities, power/PSD errors, CPU cost and limits. Its 48 kHz
+raw-ALSA DAC measurements remain evidence for that route. Its old complex
+simulation results describe the narrow-I/Q diagnostic above, not a 48 kHz DAC
+noise floor; its former native-backend exclusion is historical. Do not rewrite
+those measurements as evidence for the new shared-backend integration.
 
 ## Basis
 

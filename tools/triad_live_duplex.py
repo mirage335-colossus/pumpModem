@@ -464,13 +464,45 @@ def discover_route(deadline, *, capture_source=None, playback_sink=None,
                 route_scope="active physical ALSA route discovered from desktop metadata; actual native stream formats follow in each capture")
 
 
-def validate_capture(metadata):
+def validate_capture(metadata, *, require_background_noise=False):
     if metadata.get("schema") != "triad-audio-capture-v1" or metadata.get("status") != "complete":
         raise ValueError("native audio capture is incomplete or unrecognized")
     if metadata.get("discontinuity", {}).get("capture", True) or metadata.get("discontinuity", {}).get("playback", True):
         raise ValueError("native capture/playback discontinuity invalidates continuous evidence")
     if not metadata.get("audio_format", {}).get("capture") or not metadata.get("audio_format", {}).get("playback"):
         raise ValueError("actual stream-format metadata is missing")
+    if require_background_noise:
+        report = metadata.get("background_noise")
+        playback = metadata.get("audio_format", {}).get("playback") or {}
+        if not isinstance(report, dict) or report.get("enabled") is not True:
+            raise ValueError("requested background-noise report is missing or disabled")
+        if (report.get("sample_rate_hz", 0) <= 0 or report.get("active_samples", 0) <= 0 or
+                report.get("expected_variance", 0) <= 0 or report.get("measured_variance", -1) < 0 or
+                report.get("format") not in ("s16", "float32")):
+            raise ValueError("background-noise report has invalid rate, samples, variance, or format")
+        if playback.get("hardware_rate") != report["sample_rate_hz"]:
+            raise ValueError("background-noise report rate does not match actual playback hardware rate")
+
+
+def capture_background_noise_arguments(args, backend):
+    """Return shared noise settings for a capture backend, without Python-only tool paths."""
+    if args is None or not background_noise_enabled(args):
+        return []
+    values = background_noise_arguments(args)
+    if backend != "native":
+        return values
+    result = []
+    skip_value = False
+    for item in values:
+        if skip_value:
+            skip_value = False
+        elif item == "--background-noise-tool":
+            skip_value = True
+        else:
+            result.append(item)
+    if skip_value:
+        raise ValueError("background-noise tool option is missing its value")
+    return result
 
 
 def capture_one(case, prepared, output, audio_binary, route, deadline, *, backend="native",
@@ -490,11 +522,12 @@ def capture_one(case, prepared, output, audio_binary, route, deadline, *, backen
              "--playback-device", route["playback"]["device"],
              "--preroll-seconds", .75, "--postroll-seconds", 1.,
              "--max-seconds", cap]
-    if backend == "alsa-tools" and background_noise_args is not None:
-        argv.extend(background_noise_arguments(background_noise_args))
+    argv.extend(capture_background_noise_arguments(background_noise_args, backend))
     execute(argv, deadline, timeout=cap + 2., log=dest / "command.json")
     metadata = json_read(dest / "capture.json")
-    validate_capture(metadata)
+    validate_capture(metadata, require_background_noise=(backend == "native" and
+                                                         background_noise_args is not None and
+                                                         background_noise_enabled(background_noise_args)))
     json_write(dest / "capture-identity.json", dict(stimulus_sha256=stimulus["stimulus_sha256"],
                 capture_sha256=digest(dest / "capture.f32"),
                 provider_sha256=digest(dest / "provider.f32"),
@@ -1170,8 +1203,6 @@ def main(argv=None):
     validate_background_noise(args)
     if args.command != "run" and background_noise_enabled(args):
         raise ValueError("background noise is a transmit-time option for run, not plan/prepare/analyze")
-    if args.command == "run" and args.capture_backend == "native" and background_noise_enabled(args):
-        raise ValueError("background noise is currently supported by the ALSA-tools backend; native audio capture has no TX PCM mixer hook")
     deadline = Deadline(args.budget_seconds)
     deadline.start = start
     if not 1 <= args.trials <= 1000000:

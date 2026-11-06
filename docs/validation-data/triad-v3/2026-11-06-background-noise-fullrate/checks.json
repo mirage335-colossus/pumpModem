@@ -1,0 +1,45 @@
+{
+  "source_revision": "b4e960de1ceeb485ff66d5713694bde5a4de8d6c",
+  "worktree_changes": true,
+  "triad": {
+    "passed": 20,
+    "seconds": 34.45
+  },
+  "provider_final": {
+    "passed": 5,
+    "seconds": 23.6
+  },
+  "sanitizer_untraced": {
+    "passed": 4,
+    "seconds": 5.04,
+    "instrumentation": [
+      "ASan",
+      "UBSan",
+      "LSan"
+    ],
+    "sandbox_attempt": "blocked by LSan ptrace limitation"
+  },
+  "python": {
+    "background_noise_adapters": 7,
+    "alsa_adapter": 10,
+    "duplex_adapter": 28,
+    "native_capture_guards": 7
+  },
+  "production_cli_noise": {
+    "passed": 1
+  },
+  "broader_cli": {
+    "total": 49,
+    "failures": 5,
+    "errors": 1,
+    "all_passed": false,
+    "baseline_experiment_performed": false,
+    "details": "providers-tests.log"
+  },
+  "physical_cable_reuse": "Recorded binary predates reference_mean_square>1 constructor guard; measured settings unchanged. Final digital qualification uses rebuilt binary.",
+  "hardware_limits": [
+    "Physical ALSA loopback tested",
+    "Windows/host provider contract tests only",
+    "No new WebAssembly build: local SDK unavailable"
+  ]
+}

@@ -205,11 +205,12 @@ struct SelectiveModelConfig {
 };
 struct StreamChannelConfig {
     SimulationConfig effects{};
-    // Optional cryptographic transmitter noise, injected once per emitted
-    // baseband sample at the simulated DAC output before TX oscillator/path.
-    // It spans the source's complete finite calendar, including shaped quiet
-    // intervals, and is distinct from effects.noise_enabled (receiver noise).
-    background_noise::Config background_noise{};
+    // Optional cryptographic narrow complex-I/Q diagnostic noise injected
+    // once per emitted source sample before TX oscillator/path. It spans the
+    // source calendar, including shaped quiet intervals. This does not model
+    // full-rate audio/DAC noise or reconstruction bandwidth, and is distinct
+    // from effects.noise_enabled (receiver noise).
+    background_noise::Config diagnostic_iq_noise{};
     // Additional deterministic TX frequency slope in physical Hz/second,
     // applied at emission before propagation. Allows zero-RF direct conversion
     // to retain explicit frequency drift without an RF-ppm division by zero.
@@ -274,12 +275,14 @@ struct StreamChannelReport {
     std::uint64_t natural_complete_samples = 0, observation_padding_samples = 0;
     std::uint64_t erased_samples = 0, out_of_passband_samples = 0;
     double signal_energy = 0, observed_energy = 0;
-    bool background_noise_enabled = false;
-    double background_noise_sample_rate_hz = 0;
-    background_noise::Config background_noise_config{};
-    double background_noise_expected_variance = 0;
-    double background_noise_source_energy = 0;
-    std::uint64_t background_noise_source_samples = 0;
+    // Narrow complex-I/Q diagnostic accounting only; not a full-rate audio/DAC
+    // noise-floor measurement or prediction.
+    bool diagnostic_iq_noise_enabled = false;
+    double diagnostic_iq_noise_sample_rate_hz = 0;
+    background_noise::Config diagnostic_iq_noise_config{};
+    double diagnostic_iq_noise_expected_variance = 0;
+    double diagnostic_iq_noise_source_energy = 0;
+    std::uint64_t diagnostic_iq_noise_source_samples = 0;
     double complex_noise_variance = 0;
     std::uint64_t dac_clipped_components = 0, adc_clipped_components = 0;
     std::uint64_t impulse_events = 0, overload_samples = 0;

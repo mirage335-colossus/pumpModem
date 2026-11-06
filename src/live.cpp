@@ -101,6 +101,13 @@
 
 namespace datapump::live {
 namespace detail {
+audio::Options playback_output_options(const Settings& settings,double gain) {
+    audio::Options output;
+    output.transmit_gain=gain;
+    output.exclusive=settings.exclusive;
+    output.background_noise=settings.background_noise;
+    return output;
+}
 // Shared by enqueue-time publication and the joined per-row refresh. This is
 // only a source-clock interval; it supplies no RF/NCO, phase or epoch authority.
 std::optional<HelperViewBlock::ClockMeasurement> realtime_helper_clock_measurement(
@@ -241,7 +248,13 @@ Settings normalized(Settings value) {
         throw Error("Diagnostic capture requires hardware 48000 Hz");
     // Capability remains provider-selected and is checked before any mutation,
     // exactly as before. The pure layout routine shares all remaining checks.
-    audio::validate_options({value.transmit_gain,value.exclusive});
+    audio::Options audio_validation;
+    audio_validation.transmit_gain=value.transmit_gain;
+    audio_validation.exclusive=value.exclusive;
+    audio_validation.background_noise=value.background_noise;
+    audio::validate_options(audio_validation);
+    if(value.simulation && background_noise::resolve(value.background_noise).enabled)
+        throw Error("full-rate background noise is available on audio playback; the narrowband live simulator does not model the full DAC spectrum");
     return detail::normalized_layout(std::move(value));
 }
 
@@ -14241,7 +14254,7 @@ struct Session::Impl {
                         return std::max(*helper_end,data_end);
                     };
                     channels=wave->output_channels;
-                    output_options={wave->output_gain,value.exclusive};
+                    output_options=detail::playback_output_options(value,wave->output_gain);
                     if(helper::effective_helper_power(value.helper)>0) {
                         // Preserve the data amplitude even if optional helper
                         // output later becomes unavailable. Returning full-scale

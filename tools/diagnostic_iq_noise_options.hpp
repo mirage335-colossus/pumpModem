@@ -10,31 +10,32 @@
 
 namespace datapump::triad::cli {
 
-// Shared, default-off command-line controls for isolated sampled transmitters.
+// Default-off narrow complex-I/Q diagnostic controls for isolated sampled
+// transmitters. This does not model the full-rate DAC/audio noise floor.
 // The caller supplies its fixed signal reference after resolving DATA/Helper
 // power; this parser never infers signal power from a particular waveform row.
-class BackgroundNoiseOptions {
+class DiagnosticIqNoiseOptions {
 public:
     bool consume(std::string_view option, std::string_view value) {
         using Mode = background_noise::Mode;
         Mode mode{};
-        if (option == "--background-noise-bits") mode = Mode::EffectiveBits;
-        else if (option == "--background-noise-obscured-bits") mode = Mode::ObscuredBits;
-        else if (option == "--background-noise-db") mode = Mode::SuppressionDb;
-        else if (option == "--background-noise-watts") mode = Mode::RelativeWatts;
-        else if (option == "--background-noise-reference-watts") {
-            reference_watts = parse(value, "background noise reference watts");
+        if (option == "--diagnostic-iq-noise-bits") mode = Mode::EffectiveBits;
+        else if (option == "--diagnostic-iq-noise-obscured-bits") mode = Mode::ObscuredBits;
+        else if (option == "--diagnostic-iq-noise-db") mode = Mode::SuppressionDb;
+        else if (option == "--diagnostic-iq-noise-watts") mode = Mode::RelativeWatts;
+        else if (option == "--diagnostic-iq-noise-reference-watts") {
+            reference_watts = parse(value, "diagnostic-IQ noise reference watts");
             return true;
-        } else if (option == "--background-noise-reference-rms") {
-            reference_rms = parse(value, "background noise reference RMS");
+        } else if (option == "--diagnostic-iq-noise-reference-rms") {
+            reference_rms = parse(value, "diagnostic-IQ noise reference RMS");
             if (*reference_rms <= 0)
-                throw std::invalid_argument("background noise reference RMS must be positive");
+                throw std::invalid_argument("diagnostic-IQ noise reference RMS must be positive");
             return true;
         } else return false;
         if (config.mode != Mode::Off)
-            throw std::invalid_argument("select only one background-noise level option");
+            throw std::invalid_argument("select only one diagnostic-IQ noise level option");
         config.mode = mode;
-        config.value = parse(value, "background-noise level");
+        config.value = parse(value, "diagnostic-IQ noise level");
         return true;
     }
 

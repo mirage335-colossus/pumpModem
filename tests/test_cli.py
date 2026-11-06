@@ -51,6 +51,15 @@ class StreamCLI(unittest.TestCase):
         self.assertNotIn(b'pack/unpack',helptext)
         for command in ('pack','unpack'):
             self.run_pump(command,'--text','x',ok=False)
+    def test_background_noise_output_scope(self):
+        self.assertIn(b'--background-noise-bits',self.run_pump('--help').stdout)
+        for args in (('simulate','--text','e'),('estimate','--text','e'),
+                     ('status-tx','--bits','0','--output','unused.wav'),('listen',)):
+            result=self.run_pump(*args,'--background-noise-bits','10',ok=False)
+            self.assertIn(b'background noise',result.stderr)
+        result=self.run_pump('tx','--text','e','--device','nonexistent',
+            '--background-noise-bits','10','--background-noise-reference-rms','.1',*AUDIO,ok=False)
+        self.assertIn(b'reference values require --background-noise-watts',result.stderr)
     def test_helper_options_and_disabled_preservation(self):
         helptext=self.run_pump('--help').stdout
         for flag in (b'--helper-power',b'--helper-data-power',b'--helper-ratio-limit',

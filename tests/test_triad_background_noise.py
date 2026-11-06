@@ -109,14 +109,15 @@ class BackgroundNoiseAdapterTests(unittest.TestCase):
             self.assertEqual(error.exception.code, 2)
             self.assertFalse(out.exists())
 
-    def test_duplex_noise_requires_live_alsa_transmit_backend(self):
+    def test_duplex_noise_options_reach_live_preflight_for_both_backends(self):
         spec = importlib.util.spec_from_file_location('triad_live_duplex_noise_test', TOOLS / 'triad_live_duplex.py')
         duplex = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(duplex)
         with tempfile.TemporaryDirectory() as d:
-            with self.assertRaisesRegex(ValueError, 'ALSA-tools backend'):
-                duplex.main(['run', '--output', str(Path(d) / 'out'), '--capture-backend', 'native',
-                             '--background-noise-bits', '10'])
+            for backend in ('native', 'alsa-tools'):
+                with self.subTest(backend=backend), self.assertRaisesRegex(ValueError, 'run/analyze requires --prepared'):
+                    duplex.main(['run', '--output', str(Path(d) / f'out-{backend}'),
+                                 '--capture-backend', backend, '--background-noise-bits', '10'])
             with self.assertRaisesRegex(ValueError, 'transmit-time option'):
                 duplex.main(['prepare', '--output', str(Path(d) / 'out2'), '--background-noise-bits', '10'])
 

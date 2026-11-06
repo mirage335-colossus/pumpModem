@@ -5,12 +5,16 @@ For the new isolated random-channel implementation, see the
 ray width, ray-center separation, bounded delay motion and random dispersive
 coefficients, and preserves the earlier deterministic laws for replay.
 
-The isolated [cryptographic transmit background noise](triad-background-noise.md)
-is a separate default-off source contribution, not a replacement for receiver
-thermal noise. It uses a fresh temporary AES key for each transmission, so a
-channel seed alone does not reproduce that added source. Preserve its complete
-propagation and filter tails and distinguish source-DAC from final live-DAC
-injection when replaying an already simulated channel through audio hardware.
+The [cryptographic transmit background noise](triad-background-noise.md) is a
+separate default-off source contribution, not a replacement for receiver thermal
+noise. The standard feature belongs to shared **full-rate audio output after
+resampling**, before backend delivery, using a fresh temporary AES key per
+transmission. A channel seed alone cannot reproduce it. To model propagation of
+that noise, feed the complete noisy audio waveform through the channel and retain
+its state and tails. A final live-DAC addition to an already channel-simulated
+fixture has a different ordering. The isolated `diagnostic_iq_noise` option spans
+only its complex sample bandwidth and must not be called equivalent full-DAC
+noise; equal variance at different sample rates has different in-band density.
 
 Use these models when building simulations that need Doppler/delay spread or
 frequency-selective amplitude changes. They are explicit channel impairments;

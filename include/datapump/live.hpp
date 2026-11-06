@@ -58,12 +58,21 @@ struct Settings {
     double simulation_spread_doppler_hz = 0;
     double simulation_perturbation_slow_depth = 0;
     double simulation_perturbation_fast_depth = 0;
+    // Optional cryptographically random full-rate audio noise. Applied by the
+    // selected audio backend after resampling and all fixed output gains.
+    ::datapump::background_noise::Config background_noise{};
     // Selecting a transmit key restricts reception to matching keyed streams.
     // Pattern-only raw results carry no separate authentication tag.
     bool permits_plaintext() const noexcept {
         return !transfer.key && !transfer.modem.scramble && !transfer.modem.dsss;
     }
 };
+namespace detail {
+// Build the common per-playback controls after wave-specific gain is known.
+// Keep this small adapter shared with focused tests so live routing cannot
+// silently drop configured full-rate audio noise when creating Options.
+audio::Options playback_output_options(const Settings& settings,double gain);
+}
 // Check exactly the settings accepted by Session without changing a live
 // receiver, opening audio hardware, or starting a transmission.
 void validate_settings(const Settings& settings);

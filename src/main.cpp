@@ -146,6 +146,14 @@ Modem:
 
 Audio/simulation:
   --device ID           OS audio endpoint; listen automatically uses default
+  --background-noise-bits N       Full-rate DAC noise at N effective bits (0..16)
+  --background-noise-obscured-bits N  Equivalent obscured bits (0..16)
+  --background-noise-db N         Full-scale-sine suppression in dB (0..300)
+  --background-noise-watts W       Noise power relative to a fixed output reference
+  --background-noise-reference-rms N  Fixed final normalized DAC reference RMS
+  --background-noise-reference-watts W  Watts represented by that reference RMS
+                        Choose exactly one noise level; watts mode requires both reference values,
+                        including all fixed output gains/headroom.
   --right-mono          TX on right channel; default left (mono devices use their sole channel)
   --no-mono             TX on both stereo channels
   --device-type audio   Analog audio input only; no network/raw serial input
@@ -213,7 +221,9 @@ public:
             "recovery-seconds","recovery-threads","recovery-bits","recovery-errors",
             "helper-power","helper-data-power","helper-ratio-limit","helper-frequency","helper-callsign",
             "tx-dbm","attenuation-db","noise-figure-db","symbol-seconds","coherent-seconds",
-            "trials","hypotheses","false-alarm","residual-frequency-hz","template-correlation"};
+            "trials","hypotheses","false-alarm","residual-frequency-hz","template-correlation",
+            "background-noise-bits","background-noise-obscured-bits","background-noise-db","background-noise-watts",
+            "background-noise-reference-rms","background-noise-reference-watts"};
         for(int i=1;i<argc;++i) {
             std::string arg=argv[i];
             if(arg=="--tx" || arg=="--rx") {if(!command.empty()) throw Error("choose one command");command=arg.substr(2);continue;}
@@ -263,6 +273,17 @@ public:
         const auto reject=[this](std::initializer_list<const char*> names,const std::string& reason) {
             for(const auto name:names) if(has(name)) throw Error("--"+std::string(name)+" "+reason);
         };
+        const bool noise_requested=has("background-noise-bits")||has("background-noise-obscured-bits")||
+            has("background-noise-db")||has("background-noise-watts")||has("background-noise-reference-rms")||
+            has("background-noise-reference-watts");
+        if(noise_requested) {
+            if(command!="listen"&&command!="tx"&&command!="status-tx")
+                throw Error("full-rate background noise is only available for live transmission commands");
+            if((command=="tx"||command=="status-tx")&&(!has("device")||has("output")))
+                throw Error("full-rate background noise requires live audio output via --device");
+            if(command=="listen"&&!has("text")&&!has("input")&&!has("helper-only"))
+                throw Error("background noise requires a transmission; use --text, --input, or --helper-only");
+        }
         if(command=="qr") reject({"keyfile","key-name","pad","scramble","dsss","dsss-factor","dsss-version","dsss-mode","repeatable","device"},"cannot be used with QR; QR contains plaintext input");
         if(command=="rx" || command=="status-rx") {
             reject({"output"},"is not a receive output; use --save PATH for decoded source bytes");
@@ -310,6 +331,40 @@ double helper_power(const Args& a,const std::string& name,double fallback) {
     if(end!=value.size()||!std::isfinite(watts)||watts<0)
         throw Error("--"+name+" requires finite nonnegative watts");
     return watts;
+}
+background_noise::Config background_noise_options(const Args& a) {
+    using background_noise::Config;
+    using background_noise::Mode;
+    const bool bits=a.has("background-noise-bits");
+    const bool obscured=a.has("background-noise-obscured-bits");
+    const bool db=a.has("background-noise-db");
+    const bool watts=a.has("background-noise-watts");
+    const auto count=static_cast<unsigned>(bits)+static_cast<unsigned>(obscured)+
+        static_cast<unsigned>(db)+static_cast<unsigned>(watts);
+    if(count==0) {
+        if(a.has("background-noise-reference-rms")||a.has("background-noise-reference-watts"))
+            throw Error("background-noise reference values require --background-noise-watts");
+        return {};
+    }
+    if(count!=1)throw Error("choose exactly one background-noise level option");
+    if(!watts && (a.has("background-noise-reference-rms")||a.has("background-noise-reference-watts")))
+        throw Error("background-noise reference values require --background-noise-watts");
+    Config result;
+    if(bits) {result.mode=Mode::EffectiveBits;result.value=a.number("background-noise-bits",0);}
+    else if(obscured) {result.mode=Mode::ObscuredBits;result.value=a.number("background-noise-obscured-bits",0);}
+    else if(db) {result.mode=Mode::SuppressionDb;result.value=a.number("background-noise-db",0);}
+    else {
+        if(!a.has("background-noise-reference-rms")||!a.has("background-noise-reference-watts"))
+            throw Error("--background-noise-watts requires --background-noise-reference-rms and --background-noise-reference-watts");
+        result.mode=Mode::RelativeWatts;
+        result.value=helper_power(a,"background-noise-watts",0);
+        const auto rms=a.number("background-noise-reference-rms",0);
+        if(rms<=0||rms>1)throw Error("--background-noise-reference-rms must be greater than zero and at most 1");
+        result.reference_mean_square=rms*rms;
+        result.reference_watts=helper_power(a,"background-noise-reference-watts",0);
+    }
+    (void)background_noise::resolve(result);
+    return result;
 }
 helper::Options helper_options(const Args& a,bool) {
     helper::Options result;
@@ -576,6 +631,7 @@ void play_transmission(const Args& a, transfer::Options& options,const helper::O
             helper_sample_count(helper_end()-origin+helper_lead(),options.modem.sample_rate));
     };
     audio::Options output;
+    output.background_noise=background_noise_options(a);
     if(helper::effective_helper_power(helper_settings)>0)output.minimum_hardware_rate=helper::minimum_output_rate(
         helper_settings,helper::placement_band(options.modem),options.modem.sample_rate);
     std::optional<helper::Generator> helper_generator;
@@ -1459,6 +1515,7 @@ volatile std::sig_atomic_t interrupted=0;
 void interrupt_handler(int) {interrupted=1;}
 void listen(const Args& a,const transfer::Options& options,const helper::Options& helper_settings) {
     live::Settings settings;
+    settings.background_noise=background_noise_options(a);
     settings.helper=helper_settings;
     settings.transfer=options;
     settings.content_limit=content_budget(a);

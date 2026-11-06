@@ -1,0 +1,3878 @@
+{
+  "digital": {
+    "schema": "triad-fullrate-noise-qualification-v1",
+    "tool_sha256": "25648ae9a007fb53ef4c676a90529b2c2a78a2a43da07328df10ed8e61c4235f",
+    "qualification_source_sha256": "22094a874440bed88c2e5148bd13ad28fff70da87cf8b4d85b39cbd0ad27d527",
+    "ddc_source_sha256": "2ce6a976f147a7f12848a74ad7b6dae08bcbb146b9cd4ddd50e51782b1f88a0e",
+    "observation_seconds_per_case": 4,
+    "rows": [
+      {
+        "name": "6k-to-48k-bits10-float",
+        "input_rate_hz": 6000,
+        "output_rate_hz": 48000,
+        "output_format": "f32",
+        "output_samples": 192000,
+        "source_sha256": "d7f613fb151cf6e5af5550148f06f0c4c7d0a034dcabb2258531e3e89aba9cd1",
+        "off": {
+          "command": [
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/background_noise",
+            "--input",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital/6k-to-48k-bits10-float-source.f32",
+            "--output",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital/6k-to-48k-bits10-float-off.f32",
+            "--metadata",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital/6k-to-48k-bits10-float-off.json",
+            "--format",
+            "f32",
+            "--output-format",
+            "f32",
+            "--input-rate",
+            "6000",
+            "--sample-rate",
+            "48000",
+            "--signal-gain",
+            "1.0"
+          ],
+          "wall_seconds": 0.05268949700985104,
+          "receipt": {
+            "schema": "background-noise-audio-v2",
+            "status": "complete",
+            "input": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital/6k-to-48k-bits10-float-source.f32",
+            "output": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital/6k-to-48k-bits10-float-off.f32",
+            "format": "f32",
+            "output_format": "f32",
+            "channels": 1,
+            "sample_rate_hz": 48000,
+            "samples": 192000,
+            "input_samples": 24000,
+            "input_rate_hz": 6000,
+            "stage": "shared full-rate audio finalizer after resampling",
+            "source_peak": 0.15000000596046448,
+            "source_mean_square": 0.011249999962543226,
+            "mode": "off",
+            "level_value": 0,
+            "reference_mean_square": 0,
+            "reference_watts": 0,
+            "signal_gain": 1,
+            "expected_noise_variance": 0,
+            "measured_noise_mean": 0,
+            "measured_noise_variance": 0,
+            "noise_peak_bound": 0,
+            "clipped_samples": 0,
+            "key_policy": "fresh OS-seeded AES-256-CTR key per invocation; key is ephemeral and never stored",
+            "iv_policy": "system-clock nanoseconds in high 64 bits; counter starts at zero under the fresh key",
+            "noise_scope": "additive independent sample noise across the represented PCM Nyquist band before DAC; downstream shaping is not compensated",
+            "cpu_seconds": 0.048743,
+            "wall_seconds": 0.048839706
+          },
+          "output_sha256": "a62bd857d484a2fa46e7c41436a3672135c5af1672248262db16f9ab80ecd49f"
+        },
+        "on": {
+          "command": [
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/background_noise",
+            "--input",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital/6k-to-48k-bits10-float-source.f32",
+            "--output",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital/6k-to-48k-bits10-float-on.f32",
+            "--metadata",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital/6k-to-48k-bits10-float-on.json",
+            "--format",
+            "f32",
+            "--output-format",
+            "f32",
+            "--input-rate",
+            "6000",
+            "--sample-rate",
+            "48000",
+            "--signal-gain",
+            "1.0",
+            "--bits",
+            "10"
+          ],
+          "wall_seconds": 0.0604810569784604,
+          "receipt": {
+            "schema": "background-noise-audio-v2",
+            "status": "complete",
+            "input": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital/6k-to-48k-bits10-float-source.f32",
+            "output": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital/6k-to-48k-bits10-float-on.f32",
+            "format": "f32",
+            "output_format": "f32",
+            "channels": 1,
+            "sample_rate_hz": 48000,
+            "samples": 192000,
+            "input_samples": 24000,
+            "input_rate_hz": 6000,
+            "stage": "shared full-rate audio finalizer after resampling",
+            "source_peak": 0.15000000596046448,
+            "source_mean_square": 0.011249999962543226,
+            "mode": "effective-bits",
+            "level_value": 10,
+            "reference_mean_square": 0,
+            "reference_watts": 0,
+            "signal_gain": 1,
+            "expected_noise_variance": 3.178914388020833e-07,
+            "measured_noise_mean": -4.4484423371161965e-07,
+            "measured_noise_variance": 3.178754550119941e-07,
+            "noise_peak_bound": 0.0009765625,
+            "clipped_samples": 0,
+            "key_policy": "fresh OS-seeded AES-256-CTR key per invocation; key is ephemeral and never stored",
+            "iv_policy": "system-clock nanoseconds in high 64 bits; counter starts at zero under the fresh key",
+            "noise_scope": "additive independent sample noise across the represented PCM Nyquist band before DAC; downstream shaping is not compensated",
+            "cpu_seconds": 0.055434,
+            "wall_seconds": 0.055503421
+          },
+          "output_sha256": "0d984aedd78362d9bd9371ad67457c7a0055b2dc711dc2c1c21268d8f0e57ede"
+        },
+        "noise": {
+          "expected_variance": 3.178914388020833e-07,
+          "measured_mean_square": 3.178756528983864e-07,
+          "variance_error_db": -0.00021566800038320272,
+          "bands": [
+            {
+              "range_hz": [
+                100,
+                2000
+              ],
+              "measured_psd": 1.3323706534979527e-11,
+              "expected_one_sided_psd": 1.3245476616753471e-11,
+              "error_db": 0.02557468160937625
+            },
+            {
+              "range_hz": [
+                4000,
+                8000
+              ],
+              "measured_psd": 1.3312124954145612e-11,
+              "expected_one_sided_psd": 1.3245476616753471e-11,
+              "error_db": 0.02179795178067115
+            },
+            {
+              "range_hz": [
+                8000,
+                14000
+              ],
+              "measured_psd": 1.3263828739771058e-11,
+              "expected_one_sided_psd": 1.3245476616753471e-11,
+              "error_db": 0.006013154191586643
+            },
+            {
+              "range_hz": [
+                14000,
+                20000
+              ],
+              "measured_psd": 1.3114290008549781e-11,
+              "expected_one_sided_psd": 1.3245476616753471e-11,
+              "error_db": -0.043228068927082836
+            },
+            {
+              "range_hz": [
+                20000,
+                23500
+              ],
+              "measured_psd": 1.3381944931917465e-11,
+              "expected_one_sided_psd": 1.3245476616753471e-11,
+              "error_db": 0.044516480914303484
+            }
+          ],
+          "descriptive_mean_power_interval_95": [
+            3.166498650782901e-07,
+            3.1914638882748435e-07
+          ],
+          "interval_method": "Student-t of disjoint 4096-sample mean-square blocks; approximate, per case, assuming independent AES sample draws",
+          "lag_one_correlation": 0.0009645997908174893,
+          "acceptance": {
+            "total_power_error_db": 0.15,
+            "per_band_error_db": 0.5,
+            "absolute_lag_one": 0.015
+          },
+          "passed": true
+        },
+        "ddc": {
+          "expected_complex_variance": 4.427348748962564e-08,
+          "measured_complex_variance": 4.42661236796101e-08,
+          "error_db": -0.0007224025542178519,
+          "valid_output_samples": 23945,
+          "metadata": {
+            "schema": "triad-continuous-audio-ddc-v1",
+            "input_sample_rate": 48000,
+            "output_sample_rate": 6000,
+            "carrier_hz": 1725.0,
+            "pass_edge_hz": 1450.0,
+            "stop_edge_hz": 2000.0,
+            "declared_conjugate_image_edge_hz": 2000.0,
+            "attenuation_design_db": 80.0,
+            "fir_taps": 439,
+            "taps_sha256": "d3c69061ae5e72d198adf639b508b7a481c303570322e287aa30938cd83712f8",
+            "causal_history_samples": 438,
+            "group_delay_input_samples": 219,
+            "group_delay_seconds": 0.0045625,
+            "start_input_sample": 0,
+            "decimation": 8,
+            "output_lattice": "absolute input sample index modulo decimation equals zero",
+            "content_time": "(output_input_sample_index - group_delay_input_samples) / input_sample_rate; retain integer index plus separate epoch origin",
+            "arithmetic": "fp64",
+            "tap_arithmetic": "fp32",
+            "phase_arithmetic": "exact integer global reduction; FP64 bounded local phase",
+            "continuous_cross_window_filter_state": true,
+            "declared_transmit_gain_undone": 1.0,
+            "mixing_scale": 1.4142135623730951,
+            "fir_energy": 0.06963617462688253,
+            "white_real_pcm_variance_to_complex_output_variance": 0.13927234925376508,
+            "noise_scope": "Variance factor for independent zero-mean real white PCM; output is generally colored/improper and is not an automatically whitened receiver null.",
+            "memory_scope": "FIR/validity history plus bounded internal chunk workspace; returned output storage scales with requested input chunk",
+            "maximum_internal_chunk_samples": 65536,
+            "projection_scope": "Fixed receiver low-pass. Preserves declared passband, not all noncompact stochastic sidebands. Apply matching operator to model/templates; new admission calibration required.",
+            "source_effects": "No propagation, gain fitting, AGC, channel reset, carrier-label filtering or post-channel hop gate."
+          },
+          "assumptions": "Independent real sample noise; linear fixed DDC with its actual FIR energy, complete startup history excluded; no channel or whitening claim.",
+          "acceptance_error_db": 0.25,
+          "passed": true
+        },
+        "metadata_correct": true,
+        "passed": true
+      },
+      {
+        "name": "8k-to-48k-db40-s16",
+        "input_rate_hz": 8000,
+        "output_rate_hz": 48000,
+        "output_format": "s16",
+        "output_samples": 192000,
+        "source_sha256": "cdb4f572121aeed5e9a4fccaddba0c38b8dba4286d3ca7afb234c96c9d3ee8c9",
+        "off": {
+          "command": [
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/background_noise",
+            "--input",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital/8k-to-48k-db40-s16-source.f32",
+            "--output",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital/8k-to-48k-db40-s16-off.s16",
+            "--metadata",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital/8k-to-48k-db40-s16-off.json",
+            "--format",
+            "f32",
+            "--output-format",
+            "s16",
+            "--input-rate",
+            "8000",
+            "--sample-rate",
+            "48000",
+            "--signal-gain",
+            "1.0"
+          ],
+          "wall_seconds": 0.06587226403644308,
+          "receipt": {
+            "schema": "background-noise-audio-v2",
+            "status": "complete",
+            "input": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital/8k-to-48k-db40-s16-source.f32",
+            "output": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital/8k-to-48k-db40-s16-off.s16",
+            "format": "f32",
+            "output_format": "s16",
+            "channels": 1,
+            "sample_rate_hz": 48000,
+            "samples": 192000,
+            "input_samples": 32000,
+            "input_rate_hz": 8000,
+            "stage": "shared full-rate audio finalizer after resampling",
+            "source_peak": 0.15000000596046448,
+            "source_mean_square": 0.011249999979671282,
+            "mode": "off",
+            "level_value": 0,
+            "reference_mean_square": 0,
+            "reference_watts": 0,
+            "signal_gain": 1,
+            "expected_noise_variance": 0,
+            "measured_noise_mean": 0,
+            "measured_noise_variance": 0,
+            "noise_peak_bound": 0,
+            "clipped_samples": 0,
+            "key_policy": "fresh OS-seeded AES-256-CTR key per invocation; key is ephemeral and never stored",
+            "iv_policy": "system-clock nanoseconds in high 64 bits; counter starts at zero under the fresh key",
+            "noise_scope": "additive independent sample noise across the represented PCM Nyquist band before DAC; downstream shaping is not compensated",
+            "cpu_seconds": 0.055755,
+            "wall_seconds": 0.055944915
+          },
+          "output_sha256": "02b4dcb15bd1120f3252faebf873e46b8ad0f44b227cc93647445ec8cf5f9031"
+        },
+        "on": {
+          "command": [
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/background_noise",
+            "--input",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital/8k-to-48k-db40-s16-source.f32",
+            "--output",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital/8k-to-48k-db40-s16-on.s16",
+            "--metadata",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital/8k-to-48k-db40-s16-on.json",
+            "--format",
+            "f32",
+            "--output-format",
+            "s16",
+            "--input-rate",
+            "8000",
+            "--sample-rate",
+            "48000",
+            "--signal-gain",
+            "1.0",
+            "--db",
+            "40"
+          ],
+          "wall_seconds": 0.060739295033272356,
+          "receipt": {
+            "schema": "background-noise-audio-v2",
+            "status": "complete",
+            "input": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital/8k-to-48k-db40-s16-source.f32",
+            "output": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital/8k-to-48k-db40-s16-on.s16",
+            "format": "f32",
+            "output_format": "s16",
+            "channels": 1,
+            "sample_rate_hz": 48000,
+            "samples": 192000,
+            "input_samples": 32000,
+            "input_rate_hz": 8000,
+            "stage": "shared full-rate audio finalizer after resampling",
+            "source_peak": 0.15000000596046448,
+            "source_mean_square": 0.011249999979671282,
+            "mode": "dB-below-full-scale-sine",
+            "level_value": 40,
+            "reference_mean_square": 0,
+            "reference_watts": 0,
+            "signal_gain": 1,
+            "expected_noise_variance": 5e-05,
+            "measured_noise_mean": 2.1570387127292705e-05,
+            "measured_noise_variance": 5.001151003893113e-05,
+            "noise_peak_bound": 0.012268440809350871,
+            "clipped_samples": 0,
+            "key_policy": "fresh OS-seeded AES-256-CTR key per invocation; key is ephemeral and never stored",
+            "iv_policy": "system-clock nanoseconds in high 64 bits; counter starts at zero under the fresh key",
+            "noise_scope": "additive independent sample noise across the represented PCM Nyquist band before DAC; downstream shaping is not compensated",
+            "cpu_seconds": 0.056108,
+            "wall_seconds": 0.056196221
+          },
+          "output_sha256": "9d4b8523db42b4abb365854b388463300c142cd2547cd98d2373089d870dfdf8"
+        },
+        "noise": {
+          "expected_variance": 5e-05,
+          "measured_mean_square": 5.001197532053196e-05,
+          "variance_error_db": 0.001040038582227261,
+          "bands": [
+            {
+              "range_hz": [
+                100,
+                2000
+              ],
+              "measured_psd": 2.1021332747660413e-09,
+              "expected_one_sided_psd": 2.0833333333333334e-09,
+              "error_db": 0.0390148411092429
+            },
+            {
+              "range_hz": [
+                4000,
+                8000
+              ],
+              "measured_psd": 2.0805870430381812e-09,
+              "expected_one_sided_psd": 2.0833333333333334e-09,
+              "error_db": -0.005728730552091835
+            },
+            {
+              "range_hz": [
+                8000,
+                14000
+              ],
+              "measured_psd": 2.0986973353737095e-09,
+              "expected_one_sided_psd": 2.0833333333333334e-09,
+              "error_db": 0.0319104849021607
+            },
+            {
+              "range_hz": [
+                14000,
+                20000
+              ],
+              "measured_psd": 2.064445976925578e-09,
+              "expected_one_sided_psd": 2.0833333333333334e-09,
+              "error_db": -0.03955240020179521
+            },
+            {
+              "range_hz": [
+                20000,
+                23500
+              ],
+              "measured_psd": 2.0761123161222035e-09,
+              "expected_one_sided_psd": 2.0833333333333334e-09,
+              "error_db": -0.015079178060638505
+            }
+          ],
+          "descriptive_mean_power_interval_95": [
+            4.983077960338508e-05,
+            5.0250856221907e-05
+          ],
+          "interval_method": "Student-t of disjoint 4096-sample mean-square blocks; approximate, per case, assuming independent AES sample draws",
+          "lag_one_correlation": 0.004528475086129194,
+          "acceptance": {
+            "total_power_error_db": 0.15,
+            "per_band_error_db": 0.5,
+            "absolute_lag_one": 0.015
+          },
+          "passed": true
+        },
+        "ddc": {
+          "expected_complex_variance": 6.963617462688255e-06,
+          "measured_complex_variance": 6.986198110133439e-06,
+          "error_db": 0.014059912257940302,
+          "valid_output_samples": 23945,
+          "metadata": {
+            "schema": "triad-continuous-audio-ddc-v1",
+            "input_sample_rate": 48000,
+            "output_sample_rate": 6000,
+            "carrier_hz": 1725.0,
+            "pass_edge_hz": 1450.0,
+            "stop_edge_hz": 2000.0,
+            "declared_conjugate_image_edge_hz": 2000.0,
+            "attenuation_design_db": 80.0,
+            "fir_taps": 439,
+            "taps_sha256": "d3c69061ae5e72d198adf639b508b7a481c303570322e287aa30938cd83712f8",
+            "causal_history_samples": 438,
+            "group_delay_input_samples": 219,
+            "group_delay_seconds": 0.0045625,
+            "start_input_sample": 0,
+            "decimation": 8,
+            "output_lattice": "absolute input sample index modulo decimation equals zero",
+            "content_time": "(output_input_sample_index - group_delay_input_samples) / input_sample_rate; retain integer index plus separate epoch origin",
+            "arithmetic": "fp64",
+            "tap_arithmetic": "fp32",
+            "phase_arithmetic": "exact integer global reduction; FP64 bounded local phase",
+            "continuous_cross_window_filter_state": true,
+            "declared_transmit_gain_undone": 1.0,
+            "mixing_scale": 1.4142135623730951,
+            "fir_energy": 0.06963617462688253,
+            "white_real_pcm_variance_to_complex_output_variance": 0.13927234925376508,
+            "noise_scope": "Variance factor for independent zero-mean real white PCM; output is generally colored/improper and is not an automatically whitened receiver null.",
+            "memory_scope": "FIR/validity history plus bounded internal chunk workspace; returned output storage scales with requested input chunk",
+            "maximum_internal_chunk_samples": 65536,
+            "projection_scope": "Fixed receiver low-pass. Preserves declared passband, not all noncompact stochastic sidebands. Apply matching operator to model/templates; new admission calibration required.",
+            "source_effects": "No propagation, gain fitting, AGC, channel reset, carrier-label filtering or post-channel hop gate."
+          },
+          "assumptions": "Independent real sample noise; linear fixed DDC with its actual FIR energy, complete startup history excluded; no channel or whitening claim.",
+          "acceptance_error_db": 0.25,
+          "passed": true
+        },
+        "metadata_correct": true,
+        "passed": true
+      },
+      {
+        "name": "8k-to-48k-fixed-reference-gain",
+        "input_rate_hz": 8000,
+        "output_rate_hz": 48000,
+        "output_format": "f32",
+        "output_samples": 192000,
+        "source_sha256": "cdb4f572121aeed5e9a4fccaddba0c38b8dba4286d3ca7afb234c96c9d3ee8c9",
+        "off": {
+          "command": [
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/background_noise",
+            "--input",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital/8k-to-48k-fixed-reference-gain-source.f32",
+            "--output",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital/8k-to-48k-fixed-reference-gain-off.f32",
+            "--metadata",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital/8k-to-48k-fixed-reference-gain-off.json",
+            "--format",
+            "f32",
+            "--output-format",
+            "f32",
+            "--input-rate",
+            "8000",
+            "--sample-rate",
+            "48000",
+            "--signal-gain",
+            "0.25"
+          ],
+          "wall_seconds": 0.07004200096707791,
+          "receipt": {
+            "schema": "background-noise-audio-v2",
+            "status": "complete",
+            "input": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital/8k-to-48k-fixed-reference-gain-source.f32",
+            "output": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital/8k-to-48k-fixed-reference-gain-off.f32",
+            "format": "f32",
+            "output_format": "f32",
+            "channels": 1,
+            "sample_rate_hz": 48000,
+            "samples": 192000,
+            "input_samples": 32000,
+            "input_rate_hz": 8000,
+            "stage": "shared full-rate audio finalizer after resampling",
+            "source_peak": 0.03750000149011612,
+            "source_mean_square": 0.0007031249987294551,
+            "mode": "off",
+            "level_value": 0,
+            "reference_mean_square": 0,
+            "reference_watts": 0,
+            "signal_gain": 0.25,
+            "expected_noise_variance": 0,
+            "measured_noise_mean": 0,
+            "measured_noise_variance": 0,
+            "noise_peak_bound": 0,
+            "clipped_samples": 0,
+            "key_policy": "fresh OS-seeded AES-256-CTR key per invocation; key is ephemeral and never stored",
+            "iv_policy": "system-clock nanoseconds in high 64 bits; counter starts at zero under the fresh key",
+            "noise_scope": "additive independent sample noise across the represented PCM Nyquist band before DAC; downstream shaping is not compensated",
+            "cpu_seconds": 0.055175,
+            "wall_seconds": 0.057901576
+          },
+          "output_sha256": "690b579dc5e0f69c361bb5a9387abf8ebdb84f6b1efa48d6a675f103f4a52aca"
+        },
+        "on": {
+          "command": [
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/background_noise",
+            "--input",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital/8k-to-48k-fixed-reference-gain-source.f32",
+            "--output",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital/8k-to-48k-fixed-reference-gain-on.f32",
+            "--metadata",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital/8k-to-48k-fixed-reference-gain-on.json",
+            "--format",
+            "f32",
+            "--output-format",
+            "f32",
+            "--input-rate",
+            "8000",
+            "--sample-rate",
+            "48000",
+            "--signal-gain",
+            "0.25",
+            "--noise-watts",
+            ".001",
+            "--reference-watts",
+            "40",
+            "--reference-rms",
+            ".1"
+          ],
+          "wall_seconds": 0.06695736601250246,
+          "receipt": {
+            "schema": "background-noise-audio-v2",
+            "status": "complete",
+            "input": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital/8k-to-48k-fixed-reference-gain-source.f32",
+            "output": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital/8k-to-48k-fixed-reference-gain-on.f32",
+            "format": "f32",
+            "output_format": "f32",
+            "channels": 1,
+            "sample_rate_hz": 48000,
+            "samples": 192000,
+            "input_samples": 32000,
+            "input_rate_hz": 8000,
+            "stage": "shared full-rate audio finalizer after resampling",
+            "source_peak": 0.03750000149011612,
+            "source_mean_square": 0.0007031249987294551,
+            "mode": "relative-watts",
+            "level_value": 0.001,
+            "reference_mean_square": 0.010000000000000002,
+            "reference_watts": 40,
+            "signal_gain": 0.25,
+            "expected_noise_variance": 2.5000000000000004e-07,
+            "measured_noise_mean": -8.182288785564707e-07,
+            "measured_noise_variance": 2.512071531572337e-07,
+            "noise_peak_bound": 0.0008660254037844387,
+            "clipped_samples": 0,
+            "key_policy": "fresh OS-seeded AES-256-CTR key per invocation; key is ephemeral and never stored",
+            "iv_policy": "system-clock nanoseconds in high 64 bits; counter starts at zero under the fresh key",
+            "noise_scope": "additive independent sample noise across the represented PCM Nyquist band before DAC; downstream shaping is not compensated",
+            "cpu_seconds": 0.060096,
+            "wall_seconds": 0.060100516
+          },
+          "output_sha256": "31ad2a38f1c8b81f463dae57ed455a54e277dc587eec622ab73c4cbb432428c6"
+        },
+        "noise": {
+          "expected_variance": 2.5e-07,
+          "measured_mean_square": 2.5120782265573143e-07,
+          "variance_error_db": 0.020931506101615933,
+          "bands": [
+            {
+              "range_hz": [
+                100,
+                2000
+              ],
+              "measured_psd": 1.0555997539241537e-11,
+              "expected_one_sided_psd": 1.0416666666666666e-11,
+              "error_db": 0.05770513347153626
+            },
+            {
+              "range_hz": [
+                4000,
+                8000
+              ],
+              "measured_psd": 1.0337273296439089e-11,
+              "expected_one_sided_psd": 1.0416666666666666e-11,
+              "error_db": -0.033227686740852
+            },
+            {
+              "range_hz": [
+                8000,
+                14000
+              ],
+              "measured_psd": 1.044906084089408e-11,
+              "expected_one_sided_psd": 1.0416666666666666e-11,
+              "error_db": 0.013484909558772688
+            },
+            {
+              "range_hz": [
+                14000,
+                20000
+              ],
+              "measured_psd": 1.0563447343055416e-11,
+              "expected_one_sided_psd": 1.0416666666666666e-11,
+              "error_db": 0.06076904811498897
+            },
+            {
+              "range_hz": [
+                20000,
+                23500
+              ],
+              "measured_psd": 1.0534223086434877e-11,
+              "expected_one_sided_psd": 1.0416666666666666e-11,
+              "error_db": 0.04873744344281282
+            }
+          ],
+          "descriptive_mean_power_interval_95": [
+            2.503394092539315e-07,
+            2.5234695456581655e-07
+          ],
+          "interval_method": "Student-t of disjoint 4096-sample mean-square blocks; approximate, per case, assuming independent AES sample draws",
+          "lag_one_correlation": -0.003448880130878473,
+          "acceptance": {
+            "total_power_error_db": 0.15,
+            "per_band_error_db": 0.5,
+            "absolute_lag_one": 0.015
+          },
+          "passed": true
+        },
+        "ddc": {
+          "expected_complex_variance": 3.481808731344127e-08,
+          "measured_complex_variance": 3.517186380121708e-08,
+          "error_db": 0.043904727051776005,
+          "valid_output_samples": 23945,
+          "metadata": {
+            "schema": "triad-continuous-audio-ddc-v1",
+            "input_sample_rate": 48000,
+            "output_sample_rate": 6000,
+            "carrier_hz": 1725.0,
+            "pass_edge_hz": 1450.0,
+            "stop_edge_hz": 2000.0,
+            "declared_conjugate_image_edge_hz": 2000.0,
+            "attenuation_design_db": 80.0,
+            "fir_taps": 439,
+            "taps_sha256": "d3c69061ae5e72d198adf639b508b7a481c303570322e287aa30938cd83712f8",
+            "causal_history_samples": 438,
+            "group_delay_input_samples": 219,
+            "group_delay_seconds": 0.0045625,
+            "start_input_sample": 0,
+            "decimation": 8,
+            "output_lattice": "absolute input sample index modulo decimation equals zero",
+            "content_time": "(output_input_sample_index - group_delay_input_samples) / input_sample_rate; retain integer index plus separate epoch origin",
+            "arithmetic": "fp64",
+            "tap_arithmetic": "fp32",
+            "phase_arithmetic": "exact integer global reduction; FP64 bounded local phase",
+            "continuous_cross_window_filter_state": true,
+            "declared_transmit_gain_undone": 1.0,
+            "mixing_scale": 1.4142135623730951,
+            "fir_energy": 0.06963617462688253,
+            "white_real_pcm_variance_to_complex_output_variance": 0.13927234925376508,
+            "noise_scope": "Variance factor for independent zero-mean real white PCM; output is generally colored/improper and is not an automatically whitened receiver null.",
+            "memory_scope": "FIR/validity history plus bounded internal chunk workspace; returned output storage scales with requested input chunk",
+            "maximum_internal_chunk_samples": 65536,
+            "projection_scope": "Fixed receiver low-pass. Preserves declared passband, not all noncompact stochastic sidebands. Apply matching operator to model/templates; new admission calibration required.",
+            "source_effects": "No propagation, gain fitting, AGC, channel reset, carrier-label filtering or post-channel hop gate."
+          },
+          "assumptions": "Independent real sample noise; linear fixed DDC with its actual FIR energy, complete startup history excluded; no channel or whitening claim.",
+          "acceptance_error_db": 0.25,
+          "passed": true
+        },
+        "metadata_correct": true,
+        "passed": true
+      },
+      {
+        "name": "48k-db60-s16",
+        "input_rate_hz": 48000,
+        "output_rate_hz": 48000,
+        "output_format": "s16",
+        "output_samples": 192000,
+        "source_sha256": "b0b77d9506935669f81150593ef66aec6d96a842962297ff2dbad4444f922c20",
+        "off": {
+          "command": [
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/background_noise",
+            "--input",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital/48k-db60-s16-source.f32",
+            "--output",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital/48k-db60-s16-off.s16",
+            "--metadata",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital/48k-db60-s16-off.json",
+            "--format",
+            "f32",
+            "--output-format",
+            "s16",
+            "--input-rate",
+            "48000",
+            "--sample-rate",
+            "48000",
+            "--signal-gain",
+            "1.0"
+          ],
+          "wall_seconds": 0.019336336001288146,
+          "receipt": {
+            "schema": "background-noise-audio-v2",
+            "status": "complete",
+            "input": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital/48k-db60-s16-source.f32",
+            "output": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital/48k-db60-s16-off.s16",
+            "format": "f32",
+            "output_format": "s16",
+            "channels": 1,
+            "sample_rate_hz": 48000,
+            "samples": 192000,
+            "input_samples": 192000,
+            "input_rate_hz": 48000,
+            "stage": "shared full-rate audio finalizer after resampling",
+            "source_peak": 0.15000000596046448,
+            "source_mean_square": 0.011249999978821689,
+            "mode": "off",
+            "level_value": 0,
+            "reference_mean_square": 0,
+            "reference_watts": 0,
+            "signal_gain": 1,
+            "expected_noise_variance": 0,
+            "measured_noise_mean": 0,
+            "measured_noise_variance": 0,
+            "noise_peak_bound": 0,
+            "clipped_samples": 0,
+            "key_policy": "fresh OS-seeded AES-256-CTR key per invocation; key is ephemeral and never stored",
+            "iv_policy": "system-clock nanoseconds in high 64 bits; counter starts at zero under the fresh key",
+            "noise_scope": "additive independent sample noise across the represented PCM Nyquist band before DAC; downstream shaping is not compensated",
+            "cpu_seconds": 0.013556,
+            "wall_seconds": 0.013557435
+          },
+          "output_sha256": "2614b5b3fd8945532dd2ff061ec7089b8759985ec75267cf7e4a896dca13a905"
+        },
+        "on": {
+          "command": [
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/background_noise",
+            "--input",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital/48k-db60-s16-source.f32",
+            "--output",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital/48k-db60-s16-on.s16",
+            "--metadata",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital/48k-db60-s16-on.json",
+            "--format",
+            "f32",
+            "--output-format",
+            "s16",
+            "--input-rate",
+            "48000",
+            "--sample-rate",
+            "48000",
+            "--signal-gain",
+            "1.0",
+            "--db",
+            "60"
+          ],
+          "wall_seconds": 0.02589080500183627,
+          "receipt": {
+            "schema": "background-noise-audio-v2",
+            "status": "complete",
+            "input": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital/48k-db60-s16-source.f32",
+            "output": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital/48k-db60-s16-on.s16",
+            "format": "f32",
+            "output_format": "s16",
+            "channels": 1,
+            "sample_rate_hz": 48000,
+            "samples": 192000,
+            "input_samples": 192000,
+            "input_rate_hz": 48000,
+            "stage": "shared full-rate audio finalizer after resampling",
+            "source_peak": 0.15000000596046448,
+            "source_mean_square": 0.011249999978821689,
+            "mode": "dB-below-full-scale-sine",
+            "level_value": 60,
+            "reference_mean_square": 0,
+            "reference_watts": 0,
+            "signal_gain": 1,
+            "expected_noise_variance": 5e-07,
+            "measured_noise_mean": -8.058793908505509e-07,
+            "measured_noise_variance": 4.994902268225724e-07,
+            "noise_peak_bound": 0.0012512588885158849,
+            "clipped_samples": 0,
+            "key_policy": "fresh OS-seeded AES-256-CTR key per invocation; key is ephemeral and never stored",
+            "iv_policy": "system-clock nanoseconds in high 64 bits; counter starts at zero under the fresh key",
+            "noise_scope": "additive independent sample noise across the represented PCM Nyquist band before DAC; downstream shaping is not compensated",
+            "cpu_seconds": 0.020703,
+            "wall_seconds": 0.021001065
+          },
+          "output_sha256": "5a5300f101561b19d8e3febc22955faea895f0e464c3ae0cbc386dc8578d3dd4"
+        },
+        "noise": {
+          "expected_variance": 5e-07,
+          "measured_mean_square": 4.994908762641648e-07,
+          "variance_error_db": -0.004424445554310423,
+          "bands": [
+            {
+              "range_hz": [
+                100,
+                2000
+              ],
+              "measured_psd": 2.0597991430757056e-11,
+              "expected_one_sided_psd": 2.0833333333333332e-11,
+              "error_db": -0.04933889491574947
+            },
+            {
+              "range_hz": [
+                4000,
+                8000
+              ],
+              "measured_psd": 2.081319948641942e-11,
+              "expected_one_sided_psd": 2.0833333333333332e-11,
+              "error_db": -0.0041991583468706664
+            },
+            {
+              "range_hz": [
+                8000,
+                14000
+              ],
+              "measured_psd": 2.081181560929393e-11,
+              "expected_one_sided_psd": 2.0833333333333332e-11,
+              "error_db": -0.004487931911551088
+            },
+            {
+              "range_hz": [
+                14000,
+                20000
+              ],
+              "measured_psd": 2.076857425691572e-11,
+              "expected_one_sided_psd": 2.0833333333333332e-11,
+              "error_db": -0.013520789736234558
+            },
+            {
+              "range_hz": [
+                20000,
+                23500
+              ],
+              "measured_psd": 2.1069195322546063e-11,
+              "expected_one_sided_psd": 2.0833333333333332e-11,
+              "error_db": 0.048891866689595415
+            }
+          ],
+          "descriptive_mean_power_interval_95": [
+            4.973783888558476e-07,
+            5.012793341673017e-07
+          ],
+          "interval_method": "Student-t of disjoint 4096-sample mean-square blocks; approximate, per case, assuming independent AES sample draws",
+          "lag_one_correlation": -0.0016157451681333343,
+          "acceptance": {
+            "total_power_error_db": 0.15,
+            "per_band_error_db": 0.5,
+            "absolute_lag_one": 0.015
+          },
+          "passed": true
+        },
+        "ddc": {
+          "expected_complex_variance": 6.963617462688254e-08,
+          "measured_complex_variance": 6.930510361455421e-08,
+          "error_db": -0.02069688543466255,
+          "valid_output_samples": 23945,
+          "metadata": {
+            "schema": "triad-continuous-audio-ddc-v1",
+            "input_sample_rate": 48000,
+            "output_sample_rate": 6000,
+            "carrier_hz": 1725.0,
+            "pass_edge_hz": 1450.0,
+            "stop_edge_hz": 2000.0,
+            "declared_conjugate_image_edge_hz": 2000.0,
+            "attenuation_design_db": 80.0,
+            "fir_taps": 439,
+            "taps_sha256": "d3c69061ae5e72d198adf639b508b7a481c303570322e287aa30938cd83712f8",
+            "causal_history_samples": 438,
+            "group_delay_input_samples": 219,
+            "group_delay_seconds": 0.0045625,
+            "start_input_sample": 0,
+            "decimation": 8,
+            "output_lattice": "absolute input sample index modulo decimation equals zero",
+            "content_time": "(output_input_sample_index - group_delay_input_samples) / input_sample_rate; retain integer index plus separate epoch origin",
+            "arithmetic": "fp64",
+            "tap_arithmetic": "fp32",
+            "phase_arithmetic": "exact integer global reduction; FP64 bounded local phase",
+            "continuous_cross_window_filter_state": true,
+            "declared_transmit_gain_undone": 1.0,
+            "mixing_scale": 1.4142135623730951,
+            "fir_energy": 0.06963617462688253,
+            "white_real_pcm_variance_to_complex_output_variance": 0.13927234925376508,
+            "noise_scope": "Variance factor for independent zero-mean real white PCM; output is generally colored/improper and is not an automatically whitened receiver null.",
+            "memory_scope": "FIR/validity history plus bounded internal chunk workspace; returned output storage scales with requested input chunk",
+            "maximum_internal_chunk_samples": 65536,
+            "projection_scope": "Fixed receiver low-pass. Preserves declared passband, not all noncompact stochastic sidebands. Apply matching operator to model/templates; new admission calibration required.",
+            "source_effects": "No propagation, gain fitting, AGC, channel reset, carrier-label filtering or post-channel hop gate."
+          },
+          "assumptions": "Independent real sample noise; linear fixed DDC with its actual FIR energy, complete startup history excluded; no channel or whitening claim.",
+          "acceptance_error_db": 0.25,
+          "passed": true
+        },
+        "metadata_correct": true,
+        "passed": true
+      }
+    ],
+    "exact_s16": {
+      "name": "off-preserves-all-s16-codes",
+      "samples": 65536,
+      "command": [
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/background_noise",
+        "--input",
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital/all-s16-codes.input",
+        "--output",
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital/all-s16-codes.output",
+        "--metadata",
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital/all-s16-codes.json",
+        "--format",
+        "s16",
+        "--sample-rate",
+        "48000"
+      ],
+      "output_sha256": "697df5e3231fd569f25e5826e4aab08fe4526bb6730a7489aabeb4708e6efe5d",
+      "passed": true
+    },
+    "scope": "Digital full-rate PCM renderer using the production shared output stage. Not a physical device, browser runtime, RF model, or receiver admission test.",
+    "passed": true,
+    "wall_seconds": 0.9097403609775938
+  },
+  "digital-independent": {
+    "schema": "triad-fullrate-noise-qualification-v1",
+    "tool_sha256": "25648ae9a007fb53ef4c676a90529b2c2a78a2a43da07328df10ed8e61c4235f",
+    "qualification_source_sha256": "d4b31cacee892490dd9cbdddf7ed7ba91ccda4b1dd38c1ad5027747906183fa0",
+    "ddc_source_sha256": "2ce6a976f147a7f12848a74ad7b6dae08bcbb146b9cd4ddd50e51782b1f88a0e",
+    "observation_seconds_per_case": 4,
+    "rows": [
+      {
+        "name": "6k-to-48k-bits10-float",
+        "input_rate_hz": 6000,
+        "output_rate_hz": 48000,
+        "output_format": "f32",
+        "output_samples": 192000,
+        "source_sha256": "d7f613fb151cf6e5af5550148f06f0c4c7d0a034dcabb2258531e3e89aba9cd1",
+        "off": {
+          "command": [
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/background_noise",
+            "--input",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-independent/6k-to-48k-bits10-float-source.f32",
+            "--output",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-independent/6k-to-48k-bits10-float-off.f32",
+            "--metadata",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-independent/6k-to-48k-bits10-float-off.json",
+            "--format",
+            "f32",
+            "--output-format",
+            "f32",
+            "--input-rate",
+            "6000",
+            "--sample-rate",
+            "48000",
+            "--signal-gain",
+            "1.0"
+          ],
+          "wall_seconds": 0.04616141697624698,
+          "receipt": {
+            "schema": "background-noise-audio-v2",
+            "status": "complete",
+            "input": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-independent/6k-to-48k-bits10-float-source.f32",
+            "output": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-independent/6k-to-48k-bits10-float-off.f32",
+            "format": "f32",
+            "output_format": "f32",
+            "channels": 1,
+            "sample_rate_hz": 48000,
+            "samples": 192000,
+            "input_samples": 24000,
+            "input_rate_hz": 6000,
+            "stage": "shared full-rate audio finalizer after resampling",
+            "source_peak": 0.15000000596046448,
+            "source_mean_square": 0.011249999962543226,
+            "mode": "off",
+            "level_value": 0,
+            "reference_mean_square": 0,
+            "reference_watts": 0,
+            "signal_gain": 1,
+            "expected_noise_variance": 0,
+            "measured_noise_mean": 0,
+            "measured_noise_variance": 0,
+            "noise_peak_bound": 0,
+            "clipped_samples": 0,
+            "key_policy": "fresh OS-seeded AES-256-CTR key per invocation; key is ephemeral and never stored",
+            "iv_policy": "system-clock nanoseconds in high 64 bits; counter starts at zero under the fresh key",
+            "noise_scope": "additive independent sample noise across the represented PCM Nyquist band before DAC; downstream shaping is not compensated",
+            "cpu_seconds": 0.042417,
+            "wall_seconds": 0.042417176
+          },
+          "output_sha256": "a62bd857d484a2fa46e7c41436a3672135c5af1672248262db16f9ab80ecd49f"
+        },
+        "on": {
+          "command": [
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/background_noise",
+            "--input",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-independent/6k-to-48k-bits10-float-source.f32",
+            "--output",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-independent/6k-to-48k-bits10-float-on.f32",
+            "--metadata",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-independent/6k-to-48k-bits10-float-on.json",
+            "--format",
+            "f32",
+            "--output-format",
+            "f32",
+            "--input-rate",
+            "6000",
+            "--sample-rate",
+            "48000",
+            "--signal-gain",
+            "1.0",
+            "--bits",
+            "10"
+          ],
+          "wall_seconds": 0.04877553996630013,
+          "receipt": {
+            "schema": "background-noise-audio-v2",
+            "status": "complete",
+            "input": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-independent/6k-to-48k-bits10-float-source.f32",
+            "output": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-independent/6k-to-48k-bits10-float-on.f32",
+            "format": "f32",
+            "output_format": "f32",
+            "channels": 1,
+            "sample_rate_hz": 48000,
+            "samples": 192000,
+            "input_samples": 24000,
+            "input_rate_hz": 6000,
+            "stage": "shared full-rate audio finalizer after resampling",
+            "source_peak": 0.15000000596046448,
+            "source_mean_square": 0.011249999962543226,
+            "mode": "effective-bits",
+            "level_value": 10,
+            "reference_mean_square": 0,
+            "reference_watts": 0,
+            "signal_gain": 1,
+            "expected_noise_variance": 3.178914388020833e-07,
+            "measured_noise_mean": -8.18011124562123e-07,
+            "measured_noise_variance": 3.185823531468127e-07,
+            "noise_peak_bound": 0.0009765625,
+            "clipped_samples": 0,
+            "key_policy": "fresh OS-seeded AES-256-CTR key per invocation; key is ephemeral and never stored",
+            "iv_policy": "system-clock nanoseconds in high 64 bits; counter starts at zero under the fresh key",
+            "noise_scope": "additive independent sample noise across the represented PCM Nyquist band before DAC; downstream shaping is not compensated",
+            "cpu_seconds": 0.044732,
+            "wall_seconds": 0.044734128
+          },
+          "output_sha256": "9655ec9014a434e5d9c4dd0ff8750bc29cfa2b3a185e09e54b946870b0fea962"
+        },
+        "noise": {
+          "expected_variance": 3.178914388020833e-07,
+          "measured_mean_square": 3.185830222890126e-07,
+          "variance_error_db": 0.009437959532225402,
+          "bands": [
+            {
+              "range_hz": [
+                100,
+                2000
+              ],
+              "measured_psd": 1.3319602382646971e-11,
+              "expected_one_sided_psd": 1.3245476616753471e-11,
+              "error_db": 0.02423670160807176
+            },
+            {
+              "range_hz": [
+                4000,
+                8000
+              ],
+              "measured_psd": 1.3249368827470853e-11,
+              "expected_one_sided_psd": 1.3245476616753471e-11,
+              "error_db": 0.0012759958556329617
+            },
+            {
+              "range_hz": [
+                8000,
+                14000
+              ],
+              "measured_psd": 1.3273116799902589e-11,
+              "expected_one_sided_psd": 1.3245476616753471e-11,
+              "error_db": 0.009053257975494871
+            },
+            {
+              "range_hz": [
+                14000,
+                20000
+              ],
+              "measured_psd": 1.313494739583748e-11,
+              "expected_one_sided_psd": 1.3245476616753471e-11,
+              "error_db": -0.03639252469892864
+            },
+            {
+              "range_hz": [
+                20000,
+                23500
+              ],
+              "measured_psd": 1.330337828257365e-11,
+              "expected_one_sided_psd": 1.3245476616753471e-11,
+              "error_db": 0.018943501649342883
+            }
+          ],
+          "descriptive_mean_power_interval_95": [
+            3.172900515227653e-07,
+            3.196020561684405e-07
+          ],
+          "interval_method": "Student-t of disjoint 4096-sample mean-square blocks; approximate, per case, assuming independent AES sample draws",
+          "lag_one_correlation": 0.001723979200010991,
+          "acceptance": {
+            "total_power_error_db": 0.15,
+            "per_band_error_db": 0.5,
+            "absolute_lag_one": 0.015
+          },
+          "passed": true
+        },
+        "ddc": {
+          "expected_complex_variance": 4.427348748962564e-08,
+          "measured_complex_variance": 4.467042494389387e-08,
+          "error_db": 0.03876350517906138,
+          "valid_output_samples": 23945,
+          "metadata": {
+            "schema": "triad-continuous-audio-ddc-v1",
+            "input_sample_rate": 48000,
+            "output_sample_rate": 6000,
+            "carrier_hz": 1725.0,
+            "pass_edge_hz": 1450.0,
+            "stop_edge_hz": 2000.0,
+            "declared_conjugate_image_edge_hz": 2000.0,
+            "attenuation_design_db": 80.0,
+            "fir_taps": 439,
+            "taps_sha256": "d3c69061ae5e72d198adf639b508b7a481c303570322e287aa30938cd83712f8",
+            "causal_history_samples": 438,
+            "group_delay_input_samples": 219,
+            "group_delay_seconds": 0.0045625,
+            "start_input_sample": 0,
+            "decimation": 8,
+            "output_lattice": "absolute input sample index modulo decimation equals zero",
+            "content_time": "(output_input_sample_index - group_delay_input_samples) / input_sample_rate; retain integer index plus separate epoch origin",
+            "arithmetic": "fp64",
+            "tap_arithmetic": "fp32",
+            "phase_arithmetic": "exact integer global reduction; FP64 bounded local phase",
+            "continuous_cross_window_filter_state": true,
+            "declared_transmit_gain_undone": 1.0,
+            "mixing_scale": 1.4142135623730951,
+            "fir_energy": 0.06963617462688253,
+            "white_real_pcm_variance_to_complex_output_variance": 0.13927234925376508,
+            "noise_scope": "Variance factor for independent zero-mean real white PCM; output is generally colored/improper and is not an automatically whitened receiver null.",
+            "memory_scope": "FIR/validity history plus bounded internal chunk workspace; returned output storage scales with requested input chunk",
+            "maximum_internal_chunk_samples": 65536,
+            "projection_scope": "Fixed receiver low-pass. Preserves declared passband, not all noncompact stochastic sidebands. Apply matching operator to model/templates; new admission calibration required.",
+            "source_effects": "No propagation, gain fitting, AGC, channel reset, carrier-label filtering or post-channel hop gate."
+          },
+          "assumptions": "Independent real sample noise; linear fixed DDC with its actual FIR energy, complete startup history excluded; no channel or whitening claim.",
+          "acceptance_error_db": 0.25,
+          "passed": true
+        },
+        "metadata_correct": true,
+        "passed": true
+      },
+      {
+        "name": "8k-to-48k-db40-s16",
+        "input_rate_hz": 8000,
+        "output_rate_hz": 48000,
+        "output_format": "s16",
+        "output_samples": 192000,
+        "source_sha256": "cdb4f572121aeed5e9a4fccaddba0c38b8dba4286d3ca7afb234c96c9d3ee8c9",
+        "off": {
+          "command": [
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/background_noise",
+            "--input",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-independent/8k-to-48k-db40-s16-source.f32",
+            "--output",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-independent/8k-to-48k-db40-s16-off.s16",
+            "--metadata",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-independent/8k-to-48k-db40-s16-off.json",
+            "--format",
+            "f32",
+            "--output-format",
+            "s16",
+            "--input-rate",
+            "8000",
+            "--sample-rate",
+            "48000",
+            "--signal-gain",
+            "1.0"
+          ],
+          "wall_seconds": 0.11101145599968731,
+          "receipt": {
+            "schema": "background-noise-audio-v2",
+            "status": "complete",
+            "input": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-independent/8k-to-48k-db40-s16-source.f32",
+            "output": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-independent/8k-to-48k-db40-s16-off.s16",
+            "format": "f32",
+            "output_format": "s16",
+            "channels": 1,
+            "sample_rate_hz": 48000,
+            "samples": 192000,
+            "input_samples": 32000,
+            "input_rate_hz": 8000,
+            "stage": "shared full-rate audio finalizer after resampling",
+            "source_peak": 0.15000000596046448,
+            "source_mean_square": 0.011249999979671282,
+            "mode": "off",
+            "level_value": 0,
+            "reference_mean_square": 0,
+            "reference_watts": 0,
+            "signal_gain": 1,
+            "expected_noise_variance": 0,
+            "measured_noise_mean": 0,
+            "measured_noise_variance": 0,
+            "noise_peak_bound": 0,
+            "clipped_samples": 0,
+            "key_policy": "fresh OS-seeded AES-256-CTR key per invocation; key is ephemeral and never stored",
+            "iv_policy": "system-clock nanoseconds in high 64 bits; counter starts at zero under the fresh key",
+            "noise_scope": "additive independent sample noise across the represented PCM Nyquist band before DAC; downstream shaping is not compensated",
+            "cpu_seconds": 0.103181,
+            "wall_seconds": 0.104106458
+          },
+          "output_sha256": "02b4dcb15bd1120f3252faebf873e46b8ad0f44b227cc93647445ec8cf5f9031"
+        },
+        "on": {
+          "command": [
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/background_noise",
+            "--input",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-independent/8k-to-48k-db40-s16-source.f32",
+            "--output",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-independent/8k-to-48k-db40-s16-on.s16",
+            "--metadata",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-independent/8k-to-48k-db40-s16-on.json",
+            "--format",
+            "f32",
+            "--output-format",
+            "s16",
+            "--input-rate",
+            "8000",
+            "--sample-rate",
+            "48000",
+            "--signal-gain",
+            "1.0",
+            "--db",
+            "40"
+          ],
+          "wall_seconds": 0.06603590096347034,
+          "receipt": {
+            "schema": "background-noise-audio-v2",
+            "status": "complete",
+            "input": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-independent/8k-to-48k-db40-s16-source.f32",
+            "output": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-independent/8k-to-48k-db40-s16-on.s16",
+            "format": "f32",
+            "output_format": "s16",
+            "channels": 1,
+            "sample_rate_hz": 48000,
+            "samples": 192000,
+            "input_samples": 32000,
+            "input_rate_hz": 8000,
+            "stage": "shared full-rate audio finalizer after resampling",
+            "source_peak": 0.15000000596046448,
+            "source_mean_square": 0.011249999979671282,
+            "mode": "dB-below-full-scale-sine",
+            "level_value": 40,
+            "reference_mean_square": 0,
+            "reference_watts": 0,
+            "signal_gain": 1,
+            "expected_noise_variance": 5e-05,
+            "measured_noise_mean": -1.0489466027812536e-05,
+            "measured_noise_variance": 4.9818967256167966e-05,
+            "noise_peak_bound": 0.012268440809350871,
+            "clipped_samples": 0,
+            "key_policy": "fresh OS-seeded AES-256-CTR key per invocation; key is ephemeral and never stored",
+            "iv_policy": "system-clock nanoseconds in high 64 bits; counter starts at zero under the fresh key",
+            "noise_scope": "additive independent sample noise across the represented PCM Nyquist band before DAC; downstream shaping is not compensated",
+            "cpu_seconds": 0.059438,
+            "wall_seconds": 0.059711752
+          },
+          "output_sha256": "558ae69c4e9c46e89f333859d66fc0b99dae46fe29d16e287e8ece0d63479bec"
+        },
+        "noise": {
+          "expected_variance": 5e-05,
+          "measured_mean_square": 4.981907728506552e-05,
+          "variance_error_db": -0.015743247669124105,
+          "bands": [
+            {
+              "range_hz": [
+                100,
+                2000
+              ],
+              "measured_psd": 2.0908556255553527e-09,
+              "expected_one_sided_psd": 2.0833333333333334e-09,
+              "error_db": 0.015652830151843884
+            },
+            {
+              "range_hz": [
+                4000,
+                8000
+              ],
+              "measured_psd": 2.0833207126785397e-09,
+              "expected_one_sided_psd": 2.0833333333333334e-09,
+              "error_db": -2.630926721727297e-05
+            },
+            {
+              "range_hz": [
+                8000,
+                14000
+              ],
+              "measured_psd": 2.0836394100288145e-09,
+              "expected_one_sided_psd": 2.0833333333333334e-09,
+              "error_db": 0.000638004749791324
+            },
+            {
+              "range_hz": [
+                14000,
+                20000
+              ],
+              "measured_psd": 2.0481452360700166e-09,
+              "expected_one_sided_psd": 2.0833333333333334e-09,
+              "error_db": -0.0739801296350811
+            },
+            {
+              "range_hz": [
+                20000,
+                23500
+              ],
+              "measured_psd": 2.105078267009653e-09,
+              "expected_one_sided_psd": 2.0833333333333334e-09,
+              "error_db": 0.04509484957491178
+            }
+          ],
+          "descriptive_mean_power_interval_95": [
+            4.964314853093139e-05,
+            4.999258495773043e-05
+          ],
+          "interval_method": "Student-t of disjoint 4096-sample mean-square blocks; approximate, per case, assuming independent AES sample draws",
+          "lag_one_correlation": 0.0023013349967928687,
+          "acceptance": {
+            "total_power_error_db": 0.15,
+            "per_band_error_db": 0.5,
+            "absolute_lag_one": 0.015
+          },
+          "passed": true
+        },
+        "ddc": {
+          "expected_complex_variance": 6.963617462688255e-06,
+          "measured_complex_variance": 7.004452711805948e-06,
+          "error_db": 0.025393019452873627,
+          "valid_output_samples": 23945,
+          "metadata": {
+            "schema": "triad-continuous-audio-ddc-v1",
+            "input_sample_rate": 48000,
+            "output_sample_rate": 6000,
+            "carrier_hz": 1725.0,
+            "pass_edge_hz": 1450.0,
+            "stop_edge_hz": 2000.0,
+            "declared_conjugate_image_edge_hz": 2000.0,
+            "attenuation_design_db": 80.0,
+            "fir_taps": 439,
+            "taps_sha256": "d3c69061ae5e72d198adf639b508b7a481c303570322e287aa30938cd83712f8",
+            "causal_history_samples": 438,
+            "group_delay_input_samples": 219,
+            "group_delay_seconds": 0.0045625,
+            "start_input_sample": 0,
+            "decimation": 8,
+            "output_lattice": "absolute input sample index modulo decimation equals zero",
+            "content_time": "(output_input_sample_index - group_delay_input_samples) / input_sample_rate; retain integer index plus separate epoch origin",
+            "arithmetic": "fp64",
+            "tap_arithmetic": "fp32",
+            "phase_arithmetic": "exact integer global reduction; FP64 bounded local phase",
+            "continuous_cross_window_filter_state": true,
+            "declared_transmit_gain_undone": 1.0,
+            "mixing_scale": 1.4142135623730951,
+            "fir_energy": 0.06963617462688253,
+            "white_real_pcm_variance_to_complex_output_variance": 0.13927234925376508,
+            "noise_scope": "Variance factor for independent zero-mean real white PCM; output is generally colored/improper and is not an automatically whitened receiver null.",
+            "memory_scope": "FIR/validity history plus bounded internal chunk workspace; returned output storage scales with requested input chunk",
+            "maximum_internal_chunk_samples": 65536,
+            "projection_scope": "Fixed receiver low-pass. Preserves declared passband, not all noncompact stochastic sidebands. Apply matching operator to model/templates; new admission calibration required.",
+            "source_effects": "No propagation, gain fitting, AGC, channel reset, carrier-label filtering or post-channel hop gate."
+          },
+          "assumptions": "Independent real sample noise; linear fixed DDC with its actual FIR energy, complete startup history excluded; no channel or whitening claim.",
+          "acceptance_error_db": 0.25,
+          "passed": true
+        },
+        "metadata_correct": true,
+        "passed": true
+      },
+      {
+        "name": "8k-to-48k-fixed-reference-gain",
+        "input_rate_hz": 8000,
+        "output_rate_hz": 48000,
+        "output_format": "f32",
+        "output_samples": 192000,
+        "source_sha256": "cdb4f572121aeed5e9a4fccaddba0c38b8dba4286d3ca7afb234c96c9d3ee8c9",
+        "off": {
+          "command": [
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/background_noise",
+            "--input",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-independent/8k-to-48k-fixed-reference-gain-source.f32",
+            "--output",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-independent/8k-to-48k-fixed-reference-gain-off.f32",
+            "--metadata",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-independent/8k-to-48k-fixed-reference-gain-off.json",
+            "--format",
+            "f32",
+            "--output-format",
+            "f32",
+            "--input-rate",
+            "8000",
+            "--sample-rate",
+            "48000",
+            "--signal-gain",
+            "0.25"
+          ],
+          "wall_seconds": 0.06713344599120319,
+          "receipt": {
+            "schema": "background-noise-audio-v2",
+            "status": "complete",
+            "input": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-independent/8k-to-48k-fixed-reference-gain-source.f32",
+            "output": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-independent/8k-to-48k-fixed-reference-gain-off.f32",
+            "format": "f32",
+            "output_format": "f32",
+            "channels": 1,
+            "sample_rate_hz": 48000,
+            "samples": 192000,
+            "input_samples": 32000,
+            "input_rate_hz": 8000,
+            "stage": "shared full-rate audio finalizer after resampling",
+            "source_peak": 0.03750000149011612,
+            "source_mean_square": 0.0007031249987294551,
+            "mode": "off",
+            "level_value": 0,
+            "reference_mean_square": 0,
+            "reference_watts": 0,
+            "signal_gain": 0.25,
+            "expected_noise_variance": 0,
+            "measured_noise_mean": 0,
+            "measured_noise_variance": 0,
+            "noise_peak_bound": 0,
+            "clipped_samples": 0,
+            "key_policy": "fresh OS-seeded AES-256-CTR key per invocation; key is ephemeral and never stored",
+            "iv_policy": "system-clock nanoseconds in high 64 bits; counter starts at zero under the fresh key",
+            "noise_scope": "additive independent sample noise across the represented PCM Nyquist band before DAC; downstream shaping is not compensated",
+            "cpu_seconds": 0.058594,
+            "wall_seconds": 0.058839812
+          },
+          "output_sha256": "690b579dc5e0f69c361bb5a9387abf8ebdb84f6b1efa48d6a675f103f4a52aca"
+        },
+        "on": {
+          "command": [
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/background_noise",
+            "--input",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-independent/8k-to-48k-fixed-reference-gain-source.f32",
+            "--output",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-independent/8k-to-48k-fixed-reference-gain-on.f32",
+            "--metadata",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-independent/8k-to-48k-fixed-reference-gain-on.json",
+            "--format",
+            "f32",
+            "--output-format",
+            "f32",
+            "--input-rate",
+            "8000",
+            "--sample-rate",
+            "48000",
+            "--signal-gain",
+            "0.25",
+            "--noise-watts",
+            ".001",
+            "--reference-watts",
+            "40",
+            "--reference-rms",
+            ".1"
+          ],
+          "wall_seconds": 0.04816800099797547,
+          "receipt": {
+            "schema": "background-noise-audio-v2",
+            "status": "complete",
+            "input": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-independent/8k-to-48k-fixed-reference-gain-source.f32",
+            "output": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-independent/8k-to-48k-fixed-reference-gain-on.f32",
+            "format": "f32",
+            "output_format": "f32",
+            "channels": 1,
+            "sample_rate_hz": 48000,
+            "samples": 192000,
+            "input_samples": 32000,
+            "input_rate_hz": 8000,
+            "stage": "shared full-rate audio finalizer after resampling",
+            "source_peak": 0.03750000149011612,
+            "source_mean_square": 0.0007031249987294551,
+            "mode": "relative-watts",
+            "level_value": 0.001,
+            "reference_mean_square": 0.010000000000000002,
+            "reference_watts": 40,
+            "signal_gain": 0.25,
+            "expected_noise_variance": 2.5000000000000004e-07,
+            "measured_noise_mean": -5.465812078437217e-07,
+            "measured_noise_variance": 2.504761679774253e-07,
+            "noise_peak_bound": 0.0008660254037844387,
+            "clipped_samples": 0,
+            "key_policy": "fresh OS-seeded AES-256-CTR key per invocation; key is ephemeral and never stored",
+            "iv_policy": "system-clock nanoseconds in high 64 bits; counter starts at zero under the fresh key",
+            "noise_scope": "additive independent sample noise across the represented PCM Nyquist band before DAC; downstream shaping is not compensated",
+            "cpu_seconds": 0.044377,
+            "wall_seconds": 0.044424381
+          },
+          "output_sha256": "eec5350fb58ba04e1b149909b1cfa1ea82bb4f5a22f9fdcce0a968f90c4c3df9"
+        },
+        "noise": {
+          "expected_variance": 2.5e-07,
+          "measured_mean_square": 2.5047646672844203e-07,
+          "variance_error_db": 0.008269197344758034,
+          "bands": [
+            {
+              "range_hz": [
+                100,
+                2000
+              ],
+              "measured_psd": 1.0493423920769524e-11,
+              "expected_one_sided_psd": 1.0416666666666666e-11,
+              "error_db": 0.03188451192497102
+            },
+            {
+              "range_hz": [
+                4000,
+                8000
+              ],
+              "measured_psd": 1.0360029182217367e-11,
+              "expected_one_sided_psd": 1.0416666666666666e-11,
+              "error_db": -0.023677882251437136
+            },
+            {
+              "range_hz": [
+                8000,
+                14000
+              ],
+              "measured_psd": 1.0480945051469118e-11,
+              "expected_one_sided_psd": 1.0416666666666666e-11,
+              "error_db": 0.026716771504090797
+            },
+            {
+              "range_hz": [
+                14000,
+                20000
+              ],
+              "measured_psd": 1.0475776039763777e-11,
+              "expected_one_sided_psd": 1.0416666666666666e-11,
+              "error_db": 0.02457438167480941
+            },
+            {
+              "range_hz": [
+                20000,
+                23500
+              ],
+              "measured_psd": 1.0332374301021509e-11,
+              "expected_one_sided_psd": 1.0416666666666666e-11,
+              "error_db": -0.03528636404198382
+            }
+          ],
+          "descriptive_mean_power_interval_95": [
+            2.4948973427049413e-07,
+            2.514767051353799e-07
+          ],
+          "interval_method": "Student-t of disjoint 4096-sample mean-square blocks; approximate, per case, assuming independent AES sample draws",
+          "lag_one_correlation": -0.0016597675917078391,
+          "acceptance": {
+            "total_power_error_db": 0.15,
+            "per_band_error_db": 0.5,
+            "absolute_lag_one": 0.015
+          },
+          "passed": true
+        },
+        "ddc": {
+          "expected_complex_variance": 3.481808731344127e-08,
+          "measured_complex_variance": 3.483384874065632e-08,
+          "error_db": 0.0019655163577753506,
+          "valid_output_samples": 23945,
+          "metadata": {
+            "schema": "triad-continuous-audio-ddc-v1",
+            "input_sample_rate": 48000,
+            "output_sample_rate": 6000,
+            "carrier_hz": 1725.0,
+            "pass_edge_hz": 1450.0,
+            "stop_edge_hz": 2000.0,
+            "declared_conjugate_image_edge_hz": 2000.0,
+            "attenuation_design_db": 80.0,
+            "fir_taps": 439,
+            "taps_sha256": "d3c69061ae5e72d198adf639b508b7a481c303570322e287aa30938cd83712f8",
+            "causal_history_samples": 438,
+            "group_delay_input_samples": 219,
+            "group_delay_seconds": 0.0045625,
+            "start_input_sample": 0,
+            "decimation": 8,
+            "output_lattice": "absolute input sample index modulo decimation equals zero",
+            "content_time": "(output_input_sample_index - group_delay_input_samples) / input_sample_rate; retain integer index plus separate epoch origin",
+            "arithmetic": "fp64",
+            "tap_arithmetic": "fp32",
+            "phase_arithmetic": "exact integer global reduction; FP64 bounded local phase",
+            "continuous_cross_window_filter_state": true,
+            "declared_transmit_gain_undone": 1.0,
+            "mixing_scale": 1.4142135623730951,
+            "fir_energy": 0.06963617462688253,
+            "white_real_pcm_variance_to_complex_output_variance": 0.13927234925376508,
+            "noise_scope": "Variance factor for independent zero-mean real white PCM; output is generally colored/improper and is not an automatically whitened receiver null.",
+            "memory_scope": "FIR/validity history plus bounded internal chunk workspace; returned output storage scales with requested input chunk",
+            "maximum_internal_chunk_samples": 65536,
+            "projection_scope": "Fixed receiver low-pass. Preserves declared passband, not all noncompact stochastic sidebands. Apply matching operator to model/templates; new admission calibration required.",
+            "source_effects": "No propagation, gain fitting, AGC, channel reset, carrier-label filtering or post-channel hop gate."
+          },
+          "assumptions": "Independent real sample noise; linear fixed DDC with its actual FIR energy, complete startup history excluded; no channel or whitening claim.",
+          "acceptance_error_db": 0.25,
+          "passed": true
+        },
+        "metadata_correct": true,
+        "passed": true
+      },
+      {
+        "name": "48k-db60-s16",
+        "input_rate_hz": 48000,
+        "output_rate_hz": 48000,
+        "output_format": "s16",
+        "output_samples": 192000,
+        "source_sha256": "b0b77d9506935669f81150593ef66aec6d96a842962297ff2dbad4444f922c20",
+        "off": {
+          "command": [
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/background_noise",
+            "--input",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-independent/48k-db60-s16-source.f32",
+            "--output",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-independent/48k-db60-s16-off.s16",
+            "--metadata",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-independent/48k-db60-s16-off.json",
+            "--format",
+            "f32",
+            "--output-format",
+            "s16",
+            "--input-rate",
+            "48000",
+            "--sample-rate",
+            "48000",
+            "--signal-gain",
+            "1.0"
+          ],
+          "wall_seconds": 0.02230719500221312,
+          "receipt": {
+            "schema": "background-noise-audio-v2",
+            "status": "complete",
+            "input": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-independent/48k-db60-s16-source.f32",
+            "output": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-independent/48k-db60-s16-off.s16",
+            "format": "f32",
+            "output_format": "s16",
+            "channels": 1,
+            "sample_rate_hz": 48000,
+            "samples": 192000,
+            "input_samples": 192000,
+            "input_rate_hz": 48000,
+            "stage": "shared full-rate audio finalizer after resampling",
+            "source_peak": 0.15000000596046448,
+            "source_mean_square": 0.011249999978821689,
+            "mode": "off",
+            "level_value": 0,
+            "reference_mean_square": 0,
+            "reference_watts": 0,
+            "signal_gain": 1,
+            "expected_noise_variance": 0,
+            "measured_noise_mean": 0,
+            "measured_noise_variance": 0,
+            "noise_peak_bound": 0,
+            "clipped_samples": 0,
+            "key_policy": "fresh OS-seeded AES-256-CTR key per invocation; key is ephemeral and never stored",
+            "iv_policy": "system-clock nanoseconds in high 64 bits; counter starts at zero under the fresh key",
+            "noise_scope": "additive independent sample noise across the represented PCM Nyquist band before DAC; downstream shaping is not compensated",
+            "cpu_seconds": 0.015441,
+            "wall_seconds": 0.015659233
+          },
+          "output_sha256": "2614b5b3fd8945532dd2ff061ec7089b8759985ec75267cf7e4a896dca13a905"
+        },
+        "on": {
+          "command": [
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/background_noise",
+            "--input",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-independent/48k-db60-s16-source.f32",
+            "--output",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-independent/48k-db60-s16-on.s16",
+            "--metadata",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-independent/48k-db60-s16-on.json",
+            "--format",
+            "f32",
+            "--output-format",
+            "s16",
+            "--input-rate",
+            "48000",
+            "--sample-rate",
+            "48000",
+            "--signal-gain",
+            "1.0",
+            "--db",
+            "60"
+          ],
+          "wall_seconds": 0.026454979029949754,
+          "receipt": {
+            "schema": "background-noise-audio-v2",
+            "status": "complete",
+            "input": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-independent/48k-db60-s16-source.f32",
+            "output": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-independent/48k-db60-s16-on.s16",
+            "format": "f32",
+            "output_format": "s16",
+            "channels": 1,
+            "sample_rate_hz": 48000,
+            "samples": 192000,
+            "input_samples": 192000,
+            "input_rate_hz": 48000,
+            "stage": "shared full-rate audio finalizer after resampling",
+            "source_peak": 0.15000000596046448,
+            "source_mean_square": 0.011249999978821689,
+            "mode": "dB-below-full-scale-sine",
+            "level_value": 60,
+            "reference_mean_square": 0,
+            "reference_watts": 0,
+            "signal_gain": 1,
+            "expected_noise_variance": 5e-07,
+            "measured_noise_mean": 2.001187678660441e-07,
+            "measured_noise_variance": 4.990960914231317e-07,
+            "noise_peak_bound": 0.0012512588885158849,
+            "clipped_samples": 0,
+            "key_policy": "fresh OS-seeded AES-256-CTR key per invocation; key is ephemeral and never stored",
+            "iv_policy": "system-clock nanoseconds in high 64 bits; counter starts at zero under the fresh key",
+            "noise_scope": "additive independent sample noise across the represented PCM Nyquist band before DAC; downstream shaping is not compensated",
+            "cpu_seconds": 0.020812,
+            "wall_seconds": 0.020838528
+          },
+          "output_sha256": "5a566312286b1d6af6c593d2aa9f6f894307b006c99597c8c11494377a8a0009"
+        },
+        "noise": {
+          "expected_variance": 5e-07,
+          "measured_mean_square": 4.990961314706529e-07,
+          "variance_error_db": -0.007858007040373106,
+          "bands": [
+            {
+              "range_hz": [
+                100,
+                2000
+              ],
+              "measured_psd": 2.0244928140772454e-11,
+              "expected_one_sided_psd": 2.0833333333333332e-11,
+              "error_db": -0.12442523042400108
+            },
+            {
+              "range_hz": [
+                4000,
+                8000
+              ],
+              "measured_psd": 2.116799002452938e-11,
+              "expected_one_sided_psd": 2.0833333333333332e-11,
+              "error_db": 0.0692085955665162
+            },
+            {
+              "range_hz": [
+                8000,
+                14000
+              ],
+              "measured_psd": 2.086155758441511e-11,
+              "expected_one_sided_psd": 2.0833333333333332e-11,
+              "error_db": 0.005879683626995408
+            },
+            {
+              "range_hz": [
+                14000,
+                20000
+              ],
+              "measured_psd": 2.0785816640849567e-11,
+              "expected_one_sided_psd": 2.0833333333333332e-11,
+              "error_db": -0.009916707248053717
+            },
+            {
+              "range_hz": [
+                20000,
+                23500
+              ],
+              "measured_psd": 2.068133347577112e-11,
+              "expected_one_sided_psd": 2.0833333333333332e-11,
+              "error_db": -0.031802251803282444
+            }
+          ],
+          "descriptive_mean_power_interval_95": [
+            4.967511506946185e-07,
+            5.012552552829345e-07
+          ],
+          "interval_method": "Student-t of disjoint 4096-sample mean-square blocks; approximate, per case, assuming independent AES sample draws",
+          "lag_one_correlation": -0.00010540731763936003,
+          "acceptance": {
+            "total_power_error_db": 0.15,
+            "per_band_error_db": 0.5,
+            "absolute_lag_one": 0.015
+          },
+          "passed": true
+        },
+        "ddc": {
+          "expected_complex_variance": 6.963617462688254e-08,
+          "measured_complex_variance": 6.844605885949889e-08,
+          "error_db": -0.07486459285936731,
+          "valid_output_samples": 23945,
+          "metadata": {
+            "schema": "triad-continuous-audio-ddc-v1",
+            "input_sample_rate": 48000,
+            "output_sample_rate": 6000,
+            "carrier_hz": 1725.0,
+            "pass_edge_hz": 1450.0,
+            "stop_edge_hz": 2000.0,
+            "declared_conjugate_image_edge_hz": 2000.0,
+            "attenuation_design_db": 80.0,
+            "fir_taps": 439,
+            "taps_sha256": "d3c69061ae5e72d198adf639b508b7a481c303570322e287aa30938cd83712f8",
+            "causal_history_samples": 438,
+            "group_delay_input_samples": 219,
+            "group_delay_seconds": 0.0045625,
+            "start_input_sample": 0,
+            "decimation": 8,
+            "output_lattice": "absolute input sample index modulo decimation equals zero",
+            "content_time": "(output_input_sample_index - group_delay_input_samples) / input_sample_rate; retain integer index plus separate epoch origin",
+            "arithmetic": "fp64",
+            "tap_arithmetic": "fp32",
+            "phase_arithmetic": "exact integer global reduction; FP64 bounded local phase",
+            "continuous_cross_window_filter_state": true,
+            "declared_transmit_gain_undone": 1.0,
+            "mixing_scale": 1.4142135623730951,
+            "fir_energy": 0.06963617462688253,
+            "white_real_pcm_variance_to_complex_output_variance": 0.13927234925376508,
+            "noise_scope": "Variance factor for independent zero-mean real white PCM; output is generally colored/improper and is not an automatically whitened receiver null.",
+            "memory_scope": "FIR/validity history plus bounded internal chunk workspace; returned output storage scales with requested input chunk",
+            "maximum_internal_chunk_samples": 65536,
+            "projection_scope": "Fixed receiver low-pass. Preserves declared passband, not all noncompact stochastic sidebands. Apply matching operator to model/templates; new admission calibration required.",
+            "source_effects": "No propagation, gain fitting, AGC, channel reset, carrier-label filtering or post-channel hop gate."
+          },
+          "assumptions": "Independent real sample noise; linear fixed DDC with its actual FIR energy, complete startup history excluded; no channel or whitening claim.",
+          "acceptance_error_db": 0.25,
+          "passed": true
+        },
+        "metadata_correct": true,
+        "passed": true
+      }
+    ],
+    "exact_s16": {
+      "name": "off-preserves-all-s16-codes",
+      "samples": 65536,
+      "command": [
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/background_noise",
+        "--input",
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-independent/all-s16-codes.input",
+        "--output",
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-independent/all-s16-codes.output",
+        "--metadata",
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-independent/all-s16-codes.json",
+        "--format",
+        "s16",
+        "--sample-rate",
+        "48000"
+      ],
+      "output_sha256": "697df5e3231fd569f25e5826e4aab08fe4526bb6730a7489aabeb4708e6efe5d",
+      "passed": true
+    },
+    "negative_control": {
+      "name": "correct-power-but-source-band-limited",
+      "intentional_lowpass_hz": 3000.0,
+      "measurement": {
+        "expected_variance": 3.178914388020833e-07,
+        "measured_mean_square": 3.1789143880208326e-07,
+        "variance_error_db": -9.643274665532873e-16,
+        "bands": [
+          {
+            "range_hz": [
+              100,
+              2000
+            ],
+            "measured_psd": 1.0507719554302659e-10,
+            "expected_one_sided_psd": 1.3245476616753471e-11,
+            "error_db": 8.994408828804874
+          },
+          {
+            "range_hz": [
+              4000,
+              8000
+            ],
+            "measured_psd": 5.4567127437362946e-14,
+            "expected_one_sided_psd": 1.3245476616753471e-11,
+            "error_db": -23.85136498352004
+          },
+          {
+            "range_hz": [
+              8000,
+              14000
+            ],
+            "measured_psd": 2.985109524747913e-19,
+            "expected_one_sided_psd": 1.3245476616753471e-11,
+            "error_db": -76.47107320109805
+          },
+          {
+            "range_hz": [
+              14000,
+              20000
+            ],
+            "measured_psd": 6.830724143868959e-25,
+            "expected_one_sided_psd": 1.3245476616753471e-11,
+            "error_db": -132.8760084341347
+          },
+          {
+            "range_hz": [
+              20000,
+              23500
+            ],
+            "measured_psd": 2.013719871267577e-29,
+            "expected_one_sided_psd": 1.3245476616753471e-11,
+            "error_db": -178.18068534609878
+          }
+        ],
+        "descriptive_mean_power_interval_95": [
+          3.117042079308277e-07,
+          3.2301767493173716e-07
+        ],
+        "interval_method": "Student-t of disjoint 4096-sample mean-square blocks; approximate, per case, assuming independent AES sample draws",
+        "lag_one_correlation": 0.9730919565136468,
+        "acceptance": {
+          "total_power_error_db": 0.15,
+          "per_band_error_db": 0.5,
+          "absolute_lag_one": 0.015
+        },
+        "passed": false
+      },
+      "detected": true
+    },
+    "scope": "Digital full-rate PCM renderer using the production shared output stage. Not a physical device, browser runtime, RF model, or receiver admission test.",
+    "passed": true,
+    "wall_seconds": 0.9102394410292618
+  },
+  "digital-final": {
+    "schema": "triad-fullrate-noise-qualification-v1",
+    "tool_sha256": "b49dbc808c94aa547d314c10f21600e4d5dc30b26a6b01217d66e33a9cce8165",
+    "qualification_source_sha256": "d4b31cacee892490dd9cbdddf7ed7ba91ccda4b1dd38c1ad5027747906183fa0",
+    "ddc_source_sha256": "2ce6a976f147a7f12848a74ad7b6dae08bcbb146b9cd4ddd50e51782b1f88a0e",
+    "observation_seconds_per_case": 4,
+    "rows": [
+      {
+        "name": "6k-to-48k-bits10-float",
+        "input_rate_hz": 6000,
+        "output_rate_hz": 48000,
+        "output_format": "f32",
+        "output_samples": 192000,
+        "source_sha256": "d7f613fb151cf6e5af5550148f06f0c4c7d0a034dcabb2258531e3e89aba9cd1",
+        "off": {
+          "command": [
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/background_noise",
+            "--input",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-final/6k-to-48k-bits10-float-source.f32",
+            "--output",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-final/6k-to-48k-bits10-float-off.f32",
+            "--metadata",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-final/6k-to-48k-bits10-float-off.json",
+            "--format",
+            "f32",
+            "--output-format",
+            "f32",
+            "--input-rate",
+            "6000",
+            "--sample-rate",
+            "48000",
+            "--signal-gain",
+            "1.0"
+          ],
+          "wall_seconds": 0.05818950099637732,
+          "receipt": {
+            "schema": "background-noise-audio-v2",
+            "status": "complete",
+            "input": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-final/6k-to-48k-bits10-float-source.f32",
+            "output": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-final/6k-to-48k-bits10-float-off.f32",
+            "format": "f32",
+            "output_format": "f32",
+            "channels": 1,
+            "sample_rate_hz": 48000,
+            "samples": 192000,
+            "input_samples": 24000,
+            "input_rate_hz": 6000,
+            "stage": "shared full-rate audio finalizer after resampling",
+            "source_peak": 0.15000000596046448,
+            "source_mean_square": 0.011249999962543226,
+            "mode": "off",
+            "level_value": 0,
+            "reference_mean_square": 0,
+            "reference_watts": 0,
+            "signal_gain": 1,
+            "expected_noise_variance": 0,
+            "measured_noise_mean": 0,
+            "measured_noise_variance": 0,
+            "noise_peak_bound": 0,
+            "clipped_samples": 0,
+            "key_policy": "fresh OS-seeded AES-256-CTR key per invocation; key is ephemeral and never stored",
+            "iv_policy": "system-clock nanoseconds in high 64 bits; counter starts at zero under the fresh key",
+            "noise_scope": "additive independent sample noise across the represented PCM Nyquist band before DAC; downstream shaping is not compensated",
+            "cpu_seconds": 0.053821,
+            "wall_seconds": 0.053832536
+          },
+          "output_sha256": "a62bd857d484a2fa46e7c41436a3672135c5af1672248262db16f9ab80ecd49f"
+        },
+        "on": {
+          "command": [
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/background_noise",
+            "--input",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-final/6k-to-48k-bits10-float-source.f32",
+            "--output",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-final/6k-to-48k-bits10-float-on.f32",
+            "--metadata",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-final/6k-to-48k-bits10-float-on.json",
+            "--format",
+            "f32",
+            "--output-format",
+            "f32",
+            "--input-rate",
+            "6000",
+            "--sample-rate",
+            "48000",
+            "--signal-gain",
+            "1.0",
+            "--bits",
+            "10"
+          ],
+          "wall_seconds": 0.06542728201020509,
+          "receipt": {
+            "schema": "background-noise-audio-v2",
+            "status": "complete",
+            "input": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-final/6k-to-48k-bits10-float-source.f32",
+            "output": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-final/6k-to-48k-bits10-float-on.f32",
+            "format": "f32",
+            "output_format": "f32",
+            "channels": 1,
+            "sample_rate_hz": 48000,
+            "samples": 192000,
+            "input_samples": 24000,
+            "input_rate_hz": 6000,
+            "stage": "shared full-rate audio finalizer after resampling",
+            "source_peak": 0.15000000596046448,
+            "source_mean_square": 0.011249999962543226,
+            "mode": "effective-bits",
+            "level_value": 10,
+            "reference_mean_square": 0,
+            "reference_watts": 0,
+            "signal_gain": 1,
+            "expected_noise_variance": 3.178914388020833e-07,
+            "measured_noise_mean": 9.105332303480138e-07,
+            "measured_noise_variance": 3.183965603883925e-07,
+            "noise_peak_bound": 0.0009765625,
+            "clipped_samples": 0,
+            "key_policy": "fresh OS-seeded AES-256-CTR key per invocation; key is ephemeral and never stored",
+            "iv_policy": "system-clock nanoseconds in high 64 bits; counter starts at zero under the fresh key",
+            "noise_scope": "additive independent sample noise across the represented PCM Nyquist band before DAC; downstream shaping is not compensated",
+            "cpu_seconds": 0.060668,
+            "wall_seconds": 0.060773207
+          },
+          "output_sha256": "1f36c0ae275ef619c404142f301416dd2c34a509f14d3e294f81f5f54e1a272c"
+        },
+        "noise": {
+          "expected_variance": 3.178914388020833e-07,
+          "measured_mean_square": 3.18397389459156e-07,
+          "variance_error_db": 0.006906662981744091,
+          "bands": [
+            {
+              "range_hz": [
+                100,
+                2000
+              ],
+              "measured_psd": 1.3440477191579035e-11,
+              "expected_one_sided_psd": 1.3245476616753471e-11,
+              "error_db": 0.06347097922045643
+            },
+            {
+              "range_hz": [
+                4000,
+                8000
+              ],
+              "measured_psd": 1.3290638545747707e-11,
+              "expected_one_sided_psd": 1.3245476616753471e-11,
+              "error_db": 0.014782567358480141
+            },
+            {
+              "range_hz": [
+                8000,
+                14000
+              ],
+              "measured_psd": 1.3307994685620566e-11,
+              "expected_one_sided_psd": 1.3245476616753471e-11,
+              "error_db": 0.020450284777010778
+            },
+            {
+              "range_hz": [
+                14000,
+                20000
+              ],
+              "measured_psd": 1.3189842265734744e-11,
+              "expected_one_sided_psd": 1.3245476616753471e-11,
+              "error_db": -0.01827988338694735
+            },
+            {
+              "range_hz": [
+                20000,
+                23500
+              ],
+              "measured_psd": 1.3357138366039123e-11,
+              "expected_one_sided_psd": 1.3245476616753471e-11,
+              "error_db": 0.036458345452679626
+            }
+          ],
+          "descriptive_mean_power_interval_95": [
+            3.170658415396982e-07,
+            3.1961360180328086e-07
+          ],
+          "interval_method": "Student-t of disjoint 4096-sample mean-square blocks; approximate, per case, assuming independent AES sample draws",
+          "lag_one_correlation": 0.0011151442314728068,
+          "acceptance": {
+            "total_power_error_db": 0.15,
+            "per_band_error_db": 0.5,
+            "absolute_lag_one": 0.015
+          },
+          "passed": true
+        },
+        "ddc": {
+          "expected_complex_variance": 4.427348748962564e-08,
+          "measured_complex_variance": 4.439575601514686e-08,
+          "error_db": 0.011977226262764457,
+          "valid_output_samples": 23945,
+          "metadata": {
+            "schema": "triad-continuous-audio-ddc-v1",
+            "input_sample_rate": 48000,
+            "output_sample_rate": 6000,
+            "carrier_hz": 1725.0,
+            "pass_edge_hz": 1450.0,
+            "stop_edge_hz": 2000.0,
+            "declared_conjugate_image_edge_hz": 2000.0,
+            "attenuation_design_db": 80.0,
+            "fir_taps": 439,
+            "taps_sha256": "d3c69061ae5e72d198adf639b508b7a481c303570322e287aa30938cd83712f8",
+            "causal_history_samples": 438,
+            "group_delay_input_samples": 219,
+            "group_delay_seconds": 0.0045625,
+            "start_input_sample": 0,
+            "decimation": 8,
+            "output_lattice": "absolute input sample index modulo decimation equals zero",
+            "content_time": "(output_input_sample_index - group_delay_input_samples) / input_sample_rate; retain integer index plus separate epoch origin",
+            "arithmetic": "fp64",
+            "tap_arithmetic": "fp32",
+            "phase_arithmetic": "exact integer global reduction; FP64 bounded local phase",
+            "continuous_cross_window_filter_state": true,
+            "declared_transmit_gain_undone": 1.0,
+            "mixing_scale": 1.4142135623730951,
+            "fir_energy": 0.06963617462688253,
+            "white_real_pcm_variance_to_complex_output_variance": 0.13927234925376508,
+            "noise_scope": "Variance factor for independent zero-mean real white PCM; output is generally colored/improper and is not an automatically whitened receiver null.",
+            "memory_scope": "FIR/validity history plus bounded internal chunk workspace; returned output storage scales with requested input chunk",
+            "maximum_internal_chunk_samples": 65536,
+            "projection_scope": "Fixed receiver low-pass. Preserves declared passband, not all noncompact stochastic sidebands. Apply matching operator to model/templates; new admission calibration required.",
+            "source_effects": "No propagation, gain fitting, AGC, channel reset, carrier-label filtering or post-channel hop gate."
+          },
+          "assumptions": "Independent real sample noise; linear fixed DDC with its actual FIR energy, complete startup history excluded; no channel or whitening claim.",
+          "acceptance_error_db": 0.25,
+          "passed": true
+        },
+        "metadata_correct": true,
+        "passed": true
+      },
+      {
+        "name": "8k-to-48k-db40-s16",
+        "input_rate_hz": 8000,
+        "output_rate_hz": 48000,
+        "output_format": "s16",
+        "output_samples": 192000,
+        "source_sha256": "cdb4f572121aeed5e9a4fccaddba0c38b8dba4286d3ca7afb234c96c9d3ee8c9",
+        "off": {
+          "command": [
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/background_noise",
+            "--input",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-final/8k-to-48k-db40-s16-source.f32",
+            "--output",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-final/8k-to-48k-db40-s16-off.s16",
+            "--metadata",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-final/8k-to-48k-db40-s16-off.json",
+            "--format",
+            "f32",
+            "--output-format",
+            "s16",
+            "--input-rate",
+            "8000",
+            "--sample-rate",
+            "48000",
+            "--signal-gain",
+            "1.0"
+          ],
+          "wall_seconds": 0.12484396900981665,
+          "receipt": {
+            "schema": "background-noise-audio-v2",
+            "status": "complete",
+            "input": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-final/8k-to-48k-db40-s16-source.f32",
+            "output": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-final/8k-to-48k-db40-s16-off.s16",
+            "format": "f32",
+            "output_format": "s16",
+            "channels": 1,
+            "sample_rate_hz": 48000,
+            "samples": 192000,
+            "input_samples": 32000,
+            "input_rate_hz": 8000,
+            "stage": "shared full-rate audio finalizer after resampling",
+            "source_peak": 0.15000000596046448,
+            "source_mean_square": 0.011249999979671282,
+            "mode": "off",
+            "level_value": 0,
+            "reference_mean_square": 0,
+            "reference_watts": 0,
+            "signal_gain": 1,
+            "expected_noise_variance": 0,
+            "measured_noise_mean": 0,
+            "measured_noise_variance": 0,
+            "noise_peak_bound": 0,
+            "clipped_samples": 0,
+            "key_policy": "fresh OS-seeded AES-256-CTR key per invocation; key is ephemeral and never stored",
+            "iv_policy": "system-clock nanoseconds in high 64 bits; counter starts at zero under the fresh key",
+            "noise_scope": "additive independent sample noise across the represented PCM Nyquist band before DAC; downstream shaping is not compensated",
+            "cpu_seconds": 0.099027,
+            "wall_seconds": 0.11233609
+          },
+          "output_sha256": "02b4dcb15bd1120f3252faebf873e46b8ad0f44b227cc93647445ec8cf5f9031"
+        },
+        "on": {
+          "command": [
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/background_noise",
+            "--input",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-final/8k-to-48k-db40-s16-source.f32",
+            "--output",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-final/8k-to-48k-db40-s16-on.s16",
+            "--metadata",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-final/8k-to-48k-db40-s16-on.json",
+            "--format",
+            "f32",
+            "--output-format",
+            "s16",
+            "--input-rate",
+            "8000",
+            "--sample-rate",
+            "48000",
+            "--signal-gain",
+            "1.0",
+            "--db",
+            "40"
+          ],
+          "wall_seconds": 0.07463414198718965,
+          "receipt": {
+            "schema": "background-noise-audio-v2",
+            "status": "complete",
+            "input": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-final/8k-to-48k-db40-s16-source.f32",
+            "output": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-final/8k-to-48k-db40-s16-on.s16",
+            "format": "f32",
+            "output_format": "s16",
+            "channels": 1,
+            "sample_rate_hz": 48000,
+            "samples": 192000,
+            "input_samples": 32000,
+            "input_rate_hz": 8000,
+            "stage": "shared full-rate audio finalizer after resampling",
+            "source_peak": 0.15000000596046448,
+            "source_mean_square": 0.011249999979671282,
+            "mode": "dB-below-full-scale-sine",
+            "level_value": 40,
+            "reference_mean_square": 0,
+            "reference_watts": 0,
+            "signal_gain": 1,
+            "expected_noise_variance": 5e-05,
+            "measured_noise_mean": -2.028749707530951e-05,
+            "measured_noise_variance": 4.988379496010748e-05,
+            "noise_peak_bound": 0.012268440809350871,
+            "clipped_samples": 0,
+            "key_policy": "fresh OS-seeded AES-256-CTR key per invocation; key is ephemeral and never stored",
+            "iv_policy": "system-clock nanoseconds in high 64 bits; counter starts at zero under the fresh key",
+            "noise_scope": "additive independent sample noise across the represented PCM Nyquist band before DAC; downstream shaping is not compensated",
+            "cpu_seconds": 0.068932,
+            "wall_seconds": 0.06910776
+          },
+          "output_sha256": "cf7e9c1aab6f56b24fdd3b0f80750ba2556bc6b1f797d76947a7cd4abc34a464"
+        },
+        "noise": {
+          "expected_variance": 5e-05,
+          "measured_mean_square": 4.988420654264507e-05,
+          "variance_error_db": -0.010069356075073775,
+          "bands": [
+            {
+              "range_hz": [
+                100,
+                2000
+              ],
+              "measured_psd": 2.081696964836487e-09,
+              "expected_one_sided_psd": 2.0833333333333334e-09,
+              "error_db": -0.003412536256546775
+            },
+            {
+              "range_hz": [
+                4000,
+                8000
+              ],
+              "measured_psd": 2.0944516555724602e-09,
+              "expected_one_sided_psd": 2.0833333333333334e-09,
+              "error_db": 0.02311577742234657
+            },
+            {
+              "range_hz": [
+                8000,
+                14000
+              ],
+              "measured_psd": 2.062552631476406e-09,
+              "expected_one_sided_psd": 2.0833333333333334e-09,
+              "error_db": -0.043537230906248336
+            },
+            {
+              "range_hz": [
+                14000,
+                20000
+              ],
+              "measured_psd": 2.0962376894821196e-09,
+              "expected_one_sided_psd": 2.0833333333333334e-09,
+              "error_db": 0.026817625278647603
+            },
+            {
+              "range_hz": [
+                20000,
+                23500
+              ],
+              "measured_psd": 2.056762891660703e-09,
+              "expected_one_sided_psd": 2.0833333333333334e-09,
+              "error_db": -0.05574534507097558
+            }
+          ],
+          "descriptive_mean_power_interval_95": [
+            4.967505924184002e-05,
+            5.009062505737298e-05
+          ],
+          "interval_method": "Student-t of disjoint 4096-sample mean-square blocks; approximate, per case, assuming independent AES sample draws",
+          "lag_one_correlation": 0.0010766805022095593,
+          "acceptance": {
+            "total_power_error_db": 0.15,
+            "per_band_error_db": 0.5,
+            "absolute_lag_one": 0.015
+          },
+          "passed": true
+        },
+        "ddc": {
+          "expected_complex_variance": 6.963617462688255e-06,
+          "measured_complex_variance": 6.9738840368113334e-06,
+          "error_db": 0.006398158660359931,
+          "valid_output_samples": 23945,
+          "metadata": {
+            "schema": "triad-continuous-audio-ddc-v1",
+            "input_sample_rate": 48000,
+            "output_sample_rate": 6000,
+            "carrier_hz": 1725.0,
+            "pass_edge_hz": 1450.0,
+            "stop_edge_hz": 2000.0,
+            "declared_conjugate_image_edge_hz": 2000.0,
+            "attenuation_design_db": 80.0,
+            "fir_taps": 439,
+            "taps_sha256": "d3c69061ae5e72d198adf639b508b7a481c303570322e287aa30938cd83712f8",
+            "causal_history_samples": 438,
+            "group_delay_input_samples": 219,
+            "group_delay_seconds": 0.0045625,
+            "start_input_sample": 0,
+            "decimation": 8,
+            "output_lattice": "absolute input sample index modulo decimation equals zero",
+            "content_time": "(output_input_sample_index - group_delay_input_samples) / input_sample_rate; retain integer index plus separate epoch origin",
+            "arithmetic": "fp64",
+            "tap_arithmetic": "fp32",
+            "phase_arithmetic": "exact integer global reduction; FP64 bounded local phase",
+            "continuous_cross_window_filter_state": true,
+            "declared_transmit_gain_undone": 1.0,
+            "mixing_scale": 1.4142135623730951,
+            "fir_energy": 0.06963617462688253,
+            "white_real_pcm_variance_to_complex_output_variance": 0.13927234925376508,
+            "noise_scope": "Variance factor for independent zero-mean real white PCM; output is generally colored/improper and is not an automatically whitened receiver null.",
+            "memory_scope": "FIR/validity history plus bounded internal chunk workspace; returned output storage scales with requested input chunk",
+            "maximum_internal_chunk_samples": 65536,
+            "projection_scope": "Fixed receiver low-pass. Preserves declared passband, not all noncompact stochastic sidebands. Apply matching operator to model/templates; new admission calibration required.",
+            "source_effects": "No propagation, gain fitting, AGC, channel reset, carrier-label filtering or post-channel hop gate."
+          },
+          "assumptions": "Independent real sample noise; linear fixed DDC with its actual FIR energy, complete startup history excluded; no channel or whitening claim.",
+          "acceptance_error_db": 0.25,
+          "passed": true
+        },
+        "metadata_correct": true,
+        "passed": true
+      },
+      {
+        "name": "8k-to-48k-fixed-reference-gain",
+        "input_rate_hz": 8000,
+        "output_rate_hz": 48000,
+        "output_format": "f32",
+        "output_samples": 192000,
+        "source_sha256": "cdb4f572121aeed5e9a4fccaddba0c38b8dba4286d3ca7afb234c96c9d3ee8c9",
+        "off": {
+          "command": [
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/background_noise",
+            "--input",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-final/8k-to-48k-fixed-reference-gain-source.f32",
+            "--output",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-final/8k-to-48k-fixed-reference-gain-off.f32",
+            "--metadata",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-final/8k-to-48k-fixed-reference-gain-off.json",
+            "--format",
+            "f32",
+            "--output-format",
+            "f32",
+            "--input-rate",
+            "8000",
+            "--sample-rate",
+            "48000",
+            "--signal-gain",
+            "0.25"
+          ],
+          "wall_seconds": 0.06328344601206481,
+          "receipt": {
+            "schema": "background-noise-audio-v2",
+            "status": "complete",
+            "input": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-final/8k-to-48k-fixed-reference-gain-source.f32",
+            "output": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-final/8k-to-48k-fixed-reference-gain-off.f32",
+            "format": "f32",
+            "output_format": "f32",
+            "channels": 1,
+            "sample_rate_hz": 48000,
+            "samples": 192000,
+            "input_samples": 32000,
+            "input_rate_hz": 8000,
+            "stage": "shared full-rate audio finalizer after resampling",
+            "source_peak": 0.03750000149011612,
+            "source_mean_square": 0.0007031249987294551,
+            "mode": "off",
+            "level_value": 0,
+            "reference_mean_square": 0,
+            "reference_watts": 0,
+            "signal_gain": 0.25,
+            "expected_noise_variance": 0,
+            "measured_noise_mean": 0,
+            "measured_noise_variance": 0,
+            "noise_peak_bound": 0,
+            "clipped_samples": 0,
+            "key_policy": "fresh OS-seeded AES-256-CTR key per invocation; key is ephemeral and never stored",
+            "iv_policy": "system-clock nanoseconds in high 64 bits; counter starts at zero under the fresh key",
+            "noise_scope": "additive independent sample noise across the represented PCM Nyquist band before DAC; downstream shaping is not compensated",
+            "cpu_seconds": 0.056482,
+            "wall_seconds": 0.056485103
+          },
+          "output_sha256": "690b579dc5e0f69c361bb5a9387abf8ebdb84f6b1efa48d6a675f103f4a52aca"
+        },
+        "on": {
+          "command": [
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/background_noise",
+            "--input",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-final/8k-to-48k-fixed-reference-gain-source.f32",
+            "--output",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-final/8k-to-48k-fixed-reference-gain-on.f32",
+            "--metadata",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-final/8k-to-48k-fixed-reference-gain-on.json",
+            "--format",
+            "f32",
+            "--output-format",
+            "f32",
+            "--input-rate",
+            "8000",
+            "--sample-rate",
+            "48000",
+            "--signal-gain",
+            "0.25",
+            "--noise-watts",
+            ".001",
+            "--reference-watts",
+            "40",
+            "--reference-rms",
+            ".1"
+          ],
+          "wall_seconds": 0.06806052202591673,
+          "receipt": {
+            "schema": "background-noise-audio-v2",
+            "status": "complete",
+            "input": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-final/8k-to-48k-fixed-reference-gain-source.f32",
+            "output": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-final/8k-to-48k-fixed-reference-gain-on.f32",
+            "format": "f32",
+            "output_format": "f32",
+            "channels": 1,
+            "sample_rate_hz": 48000,
+            "samples": 192000,
+            "input_samples": 32000,
+            "input_rate_hz": 8000,
+            "stage": "shared full-rate audio finalizer after resampling",
+            "source_peak": 0.03750000149011612,
+            "source_mean_square": 0.0007031249987294551,
+            "mode": "relative-watts",
+            "level_value": 0.001,
+            "reference_mean_square": 0.010000000000000002,
+            "reference_watts": 40,
+            "signal_gain": 0.25,
+            "expected_noise_variance": 2.5000000000000004e-07,
+            "measured_noise_mean": -2.2280723697967566e-07,
+            "measured_noise_variance": 2.4969063693820936e-07,
+            "noise_peak_bound": 0.0008660254037844387,
+            "clipped_samples": 0,
+            "key_policy": "fresh OS-seeded AES-256-CTR key per invocation; key is ephemeral and never stored",
+            "iv_policy": "system-clock nanoseconds in high 64 bits; counter starts at zero under the fresh key",
+            "noise_scope": "additive independent sample noise across the represented PCM Nyquist band before DAC; downstream shaping is not compensated",
+            "cpu_seconds": 0.063005,
+            "wall_seconds": 0.063076184
+          },
+          "output_sha256": "b9cdacdfb2736d04a4e9137c535f904ed14bca66402e9d03fa5c2322d337c93a"
+        },
+        "noise": {
+          "expected_variance": 2.5e-07,
+          "measured_mean_square": 2.496906865812742e-07,
+          "variance_error_db": -0.0053766512643218245,
+          "bands": [
+            {
+              "range_hz": [
+                100,
+                2000
+              ],
+              "measured_psd": 1.0256497720538248e-11,
+              "expected_one_sided_psd": 1.0416666666666666e-11,
+              "error_db": -0.06729679118915066
+            },
+            {
+              "range_hz": [
+                4000,
+                8000
+              ],
+              "measured_psd": 1.048348320431215e-11,
+              "expected_one_sided_psd": 1.0416666666666666e-11,
+              "error_db": 0.02776836782323887
+            },
+            {
+              "range_hz": [
+                8000,
+                14000
+              ],
+              "measured_psd": 1.0326621858596589e-11,
+              "expected_one_sided_psd": 1.0416666666666666e-11,
+              "error_db": -0.037704926926522934
+            },
+            {
+              "range_hz": [
+                14000,
+                20000
+              ],
+              "measured_psd": 1.043734639822114e-11,
+              "expected_one_sided_psd": 1.0416666666666666e-11,
+              "error_db": 0.00861330259770494
+            },
+            {
+              "range_hz": [
+                20000,
+                23500
+              ],
+              "measured_psd": 1.0260419394269294e-11,
+              "expected_one_sided_psd": 1.0416666666666666e-11,
+              "error_db": -0.06563654050681826
+            }
+          ],
+          "descriptive_mean_power_interval_95": [
+            2.4858618183119406e-07,
+            2.5075338247434637e-07
+          ],
+          "interval_method": "Student-t of disjoint 4096-sample mean-square blocks; approximate, per case, assuming independent AES sample draws",
+          "lag_one_correlation": 0.003934988990573499,
+          "acceptance": {
+            "total_power_error_db": 0.15,
+            "per_band_error_db": 0.5,
+            "absolute_lag_one": 0.015
+          },
+          "passed": true
+        },
+        "ddc": {
+          "expected_complex_variance": 3.481808731344127e-08,
+          "measured_complex_variance": 3.510288556770197e-08,
+          "error_db": 0.03537908275517188,
+          "valid_output_samples": 23945,
+          "metadata": {
+            "schema": "triad-continuous-audio-ddc-v1",
+            "input_sample_rate": 48000,
+            "output_sample_rate": 6000,
+            "carrier_hz": 1725.0,
+            "pass_edge_hz": 1450.0,
+            "stop_edge_hz": 2000.0,
+            "declared_conjugate_image_edge_hz": 2000.0,
+            "attenuation_design_db": 80.0,
+            "fir_taps": 439,
+            "taps_sha256": "d3c69061ae5e72d198adf639b508b7a481c303570322e287aa30938cd83712f8",
+            "causal_history_samples": 438,
+            "group_delay_input_samples": 219,
+            "group_delay_seconds": 0.0045625,
+            "start_input_sample": 0,
+            "decimation": 8,
+            "output_lattice": "absolute input sample index modulo decimation equals zero",
+            "content_time": "(output_input_sample_index - group_delay_input_samples) / input_sample_rate; retain integer index plus separate epoch origin",
+            "arithmetic": "fp64",
+            "tap_arithmetic": "fp32",
+            "phase_arithmetic": "exact integer global reduction; FP64 bounded local phase",
+            "continuous_cross_window_filter_state": true,
+            "declared_transmit_gain_undone": 1.0,
+            "mixing_scale": 1.4142135623730951,
+            "fir_energy": 0.06963617462688253,
+            "white_real_pcm_variance_to_complex_output_variance": 0.13927234925376508,
+            "noise_scope": "Variance factor for independent zero-mean real white PCM; output is generally colored/improper and is not an automatically whitened receiver null.",
+            "memory_scope": "FIR/validity history plus bounded internal chunk workspace; returned output storage scales with requested input chunk",
+            "maximum_internal_chunk_samples": 65536,
+            "projection_scope": "Fixed receiver low-pass. Preserves declared passband, not all noncompact stochastic sidebands. Apply matching operator to model/templates; new admission calibration required.",
+            "source_effects": "No propagation, gain fitting, AGC, channel reset, carrier-label filtering or post-channel hop gate."
+          },
+          "assumptions": "Independent real sample noise; linear fixed DDC with its actual FIR energy, complete startup history excluded; no channel or whitening claim.",
+          "acceptance_error_db": 0.25,
+          "passed": true
+        },
+        "metadata_correct": true,
+        "passed": true
+      },
+      {
+        "name": "48k-db60-s16",
+        "input_rate_hz": 48000,
+        "output_rate_hz": 48000,
+        "output_format": "s16",
+        "output_samples": 192000,
+        "source_sha256": "b0b77d9506935669f81150593ef66aec6d96a842962297ff2dbad4444f922c20",
+        "off": {
+          "command": [
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/background_noise",
+            "--input",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-final/48k-db60-s16-source.f32",
+            "--output",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-final/48k-db60-s16-off.s16",
+            "--metadata",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-final/48k-db60-s16-off.json",
+            "--format",
+            "f32",
+            "--output-format",
+            "s16",
+            "--input-rate",
+            "48000",
+            "--sample-rate",
+            "48000",
+            "--signal-gain",
+            "1.0"
+          ],
+          "wall_seconds": 0.012513631023466587,
+          "receipt": {
+            "schema": "background-noise-audio-v2",
+            "status": "complete",
+            "input": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-final/48k-db60-s16-source.f32",
+            "output": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-final/48k-db60-s16-off.s16",
+            "format": "f32",
+            "output_format": "s16",
+            "channels": 1,
+            "sample_rate_hz": 48000,
+            "samples": 192000,
+            "input_samples": 192000,
+            "input_rate_hz": 48000,
+            "stage": "shared full-rate audio finalizer after resampling",
+            "source_peak": 0.15000000596046448,
+            "source_mean_square": 0.011249999978821689,
+            "mode": "off",
+            "level_value": 0,
+            "reference_mean_square": 0,
+            "reference_watts": 0,
+            "signal_gain": 1,
+            "expected_noise_variance": 0,
+            "measured_noise_mean": 0,
+            "measured_noise_variance": 0,
+            "noise_peak_bound": 0,
+            "clipped_samples": 0,
+            "key_policy": "fresh OS-seeded AES-256-CTR key per invocation; key is ephemeral and never stored",
+            "iv_policy": "system-clock nanoseconds in high 64 bits; counter starts at zero under the fresh key",
+            "noise_scope": "additive independent sample noise across the represented PCM Nyquist band before DAC; downstream shaping is not compensated",
+            "cpu_seconds": 0.00816,
+            "wall_seconds": 0.008266374
+          },
+          "output_sha256": "2614b5b3fd8945532dd2ff061ec7089b8759985ec75267cf7e4a896dca13a905"
+        },
+        "on": {
+          "command": [
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/background_noise",
+            "--input",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-final/48k-db60-s16-source.f32",
+            "--output",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-final/48k-db60-s16-on.s16",
+            "--metadata",
+            "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-final/48k-db60-s16-on.json",
+            "--format",
+            "f32",
+            "--output-format",
+            "s16",
+            "--input-rate",
+            "48000",
+            "--sample-rate",
+            "48000",
+            "--signal-gain",
+            "1.0",
+            "--db",
+            "60"
+          ],
+          "wall_seconds": 0.025990901980549097,
+          "receipt": {
+            "schema": "background-noise-audio-v2",
+            "status": "complete",
+            "input": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-final/48k-db60-s16-source.f32",
+            "output": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-final/48k-db60-s16-on.s16",
+            "format": "f32",
+            "output_format": "s16",
+            "channels": 1,
+            "sample_rate_hz": 48000,
+            "samples": 192000,
+            "input_samples": 192000,
+            "input_rate_hz": 48000,
+            "stage": "shared full-rate audio finalizer after resampling",
+            "source_peak": 0.15000000596046448,
+            "source_mean_square": 0.011249999978821689,
+            "mode": "dB-below-full-scale-sine",
+            "level_value": 60,
+            "reference_mean_square": 0,
+            "reference_watts": 0,
+            "signal_gain": 1,
+            "expected_noise_variance": 5e-07,
+            "measured_noise_mean": -7.496108890041811e-07,
+            "measured_noise_variance": 5.00009830027016e-07,
+            "noise_peak_bound": 0.0012512588885158849,
+            "clipped_samples": 0,
+            "key_policy": "fresh OS-seeded AES-256-CTR key per invocation; key is ephemeral and never stored",
+            "iv_policy": "system-clock nanoseconds in high 64 bits; counter starts at zero under the fresh key",
+            "noise_scope": "additive independent sample noise across the represented PCM Nyquist band before DAC; downstream shaping is not compensated",
+            "cpu_seconds": 0.021216,
+            "wall_seconds": 0.02122759
+          },
+          "output_sha256": "532541b186e5cded7fd1435d041956ccf1a91f3f704724456854265a916b30f8"
+        },
+        "noise": {
+          "expected_variance": 5e-07,
+          "measured_mean_square": 5.000103919435008e-07,
+          "variance_error_db": 9.026233637537895e-05,
+          "bands": [
+            {
+              "range_hz": [
+                100,
+                2000
+              ],
+              "measured_psd": 2.0712379435109664e-11,
+              "expected_one_sided_psd": 2.0833333333333332e-11,
+              "error_db": -0.02528769178623833
+            },
+            {
+              "range_hz": [
+                4000,
+                8000
+              ],
+              "measured_psd": 2.105606699953128e-11,
+              "expected_one_sided_psd": 2.0833333333333332e-11,
+              "error_db": 0.046184912186637034
+            },
+            {
+              "range_hz": [
+                8000,
+                14000
+              ],
+              "measured_psd": 2.0869512041931928e-11,
+              "expected_one_sided_psd": 2.0833333333333332e-11,
+              "error_db": 0.007535321538439886
+            },
+            {
+              "range_hz": [
+                14000,
+                20000
+              ],
+              "measured_psd": 2.084081327324698e-11,
+              "expected_one_sided_psd": 2.0833333333333332e-11,
+              "error_db": 0.0015589985297194504
+            },
+            {
+              "range_hz": [
+                20000,
+                23500
+              ],
+              "measured_psd": 2.0679554555189434e-11,
+              "expected_one_sided_psd": 2.0833333333333332e-11,
+              "error_db": -0.032175829562188084
+            }
+          ],
+          "descriptive_mean_power_interval_95": [
+            4.981653518394067e-07,
+            5.022515105053604e-07
+          ],
+          "interval_method": "Student-t of disjoint 4096-sample mean-square blocks; approximate, per case, assuming independent AES sample draws",
+          "lag_one_correlation": -0.0002804460974102262,
+          "acceptance": {
+            "total_power_error_db": 0.15,
+            "per_band_error_db": 0.5,
+            "absolute_lag_one": 0.015
+          },
+          "passed": true
+        },
+        "ddc": {
+          "expected_complex_variance": 6.963617462688254e-08,
+          "measured_complex_variance": 6.882807048945669e-08,
+          "error_db": -0.050693108841197494,
+          "valid_output_samples": 23945,
+          "metadata": {
+            "schema": "triad-continuous-audio-ddc-v1",
+            "input_sample_rate": 48000,
+            "output_sample_rate": 6000,
+            "carrier_hz": 1725.0,
+            "pass_edge_hz": 1450.0,
+            "stop_edge_hz": 2000.0,
+            "declared_conjugate_image_edge_hz": 2000.0,
+            "attenuation_design_db": 80.0,
+            "fir_taps": 439,
+            "taps_sha256": "d3c69061ae5e72d198adf639b508b7a481c303570322e287aa30938cd83712f8",
+            "causal_history_samples": 438,
+            "group_delay_input_samples": 219,
+            "group_delay_seconds": 0.0045625,
+            "start_input_sample": 0,
+            "decimation": 8,
+            "output_lattice": "absolute input sample index modulo decimation equals zero",
+            "content_time": "(output_input_sample_index - group_delay_input_samples) / input_sample_rate; retain integer index plus separate epoch origin",
+            "arithmetic": "fp64",
+            "tap_arithmetic": "fp32",
+            "phase_arithmetic": "exact integer global reduction; FP64 bounded local phase",
+            "continuous_cross_window_filter_state": true,
+            "declared_transmit_gain_undone": 1.0,
+            "mixing_scale": 1.4142135623730951,
+            "fir_energy": 0.06963617462688253,
+            "white_real_pcm_variance_to_complex_output_variance": 0.13927234925376508,
+            "noise_scope": "Variance factor for independent zero-mean real white PCM; output is generally colored/improper and is not an automatically whitened receiver null.",
+            "memory_scope": "FIR/validity history plus bounded internal chunk workspace; returned output storage scales with requested input chunk",
+            "maximum_internal_chunk_samples": 65536,
+            "projection_scope": "Fixed receiver low-pass. Preserves declared passband, not all noncompact stochastic sidebands. Apply matching operator to model/templates; new admission calibration required.",
+            "source_effects": "No propagation, gain fitting, AGC, channel reset, carrier-label filtering or post-channel hop gate."
+          },
+          "assumptions": "Independent real sample noise; linear fixed DDC with its actual FIR energy, complete startup history excluded; no channel or whitening claim.",
+          "acceptance_error_db": 0.25,
+          "passed": true
+        },
+        "metadata_correct": true,
+        "passed": true
+      }
+    ],
+    "exact_s16": {
+      "name": "off-preserves-all-s16-codes",
+      "samples": 65536,
+      "command": [
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/background_noise",
+        "--input",
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-final/all-s16-codes.input",
+        "--output",
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-final/all-s16-codes.output",
+        "--metadata",
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/digital-final/all-s16-codes.json",
+        "--format",
+        "s16",
+        "--sample-rate",
+        "48000"
+      ],
+      "output_sha256": "697df5e3231fd569f25e5826e4aab08fe4526bb6730a7489aabeb4708e6efe5d",
+      "passed": true
+    },
+    "negative_control": {
+      "name": "correct-power-but-source-band-limited",
+      "intentional_lowpass_hz": 3000.0,
+      "measurement": {
+        "expected_variance": 3.178914388020833e-07,
+        "measured_mean_square": 3.178914388020833e-07,
+        "variance_error_db": 0.0,
+        "bands": [
+          {
+            "range_hz": [
+              100,
+              2000
+            ],
+            "measured_psd": 1.0652464745633241e-10,
+            "expected_one_sided_psd": 1.3245476616753471e-11,
+            "error_db": 9.053825152867597
+          },
+          {
+            "range_hz": [
+              4000,
+              8000
+            ],
+            "measured_psd": 5.643283681823895e-14,
+            "expected_one_sided_psd": 1.3245476616753471e-11,
+            "error_db": -23.705357079520667
+          },
+          {
+            "range_hz": [
+              8000,
+              14000
+            ],
+            "measured_psd": 2.9661746125832546e-19,
+            "expected_one_sided_psd": 1.3245476616753471e-11,
+            "error_db": -76.49870876823562
+          },
+          {
+            "range_hz": [
+              14000,
+              20000
+            ],
+            "measured_psd": 6.731409463676484e-25,
+            "expected_one_sided_psd": 1.3245476616753471e-11,
+            "error_db": -132.93961581309156
+          },
+          {
+            "range_hz": [
+              20000,
+              23500
+            ],
+            "measured_psd": 1.75315489112264e-29,
+            "expected_one_sided_psd": 1.3245476616753471e-11,
+            "error_db": -178.7824730261049
+          }
+        ],
+        "descriptive_mean_power_interval_95": [
+          3.1173541229110764e-07,
+          3.235803947264858e-07
+        ],
+        "interval_method": "Student-t of disjoint 4096-sample mean-square blocks; approximate, per case, assuming independent AES sample draws",
+        "lag_one_correlation": 0.9734136729263322,
+        "acceptance": {
+          "total_power_error_db": 0.15,
+          "per_band_error_db": 0.5,
+          "absolute_lag_one": 0.015
+        },
+        "passed": false
+      },
+      "detected": true
+    },
+    "scope": "Digital full-rate PCM renderer using the production shared output stage. Not a physical device, browser runtime, RF model, or receiver admission test.",
+    "passed": true,
+    "wall_seconds": 1.1653339939657599
+  },
+  "native-cable": {
+    "schema": "triad-native-fullrate-noise-cable-v1",
+    "binary": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/triad_audio_capture",
+    "binary_sha256": "e94054895565fecde71b8b3017e52cdb0f4cd76058ff3bbe3dc751bfe33d464f",
+    "device": "hw:1,0",
+    "unchanged_mixer_settings": true,
+    "source": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/native-cable/source-tone-1737hz-0p05rms.f32",
+    "source_sha256": "2d254cb48b1d93988a40dcce6d006f220056e3aded7f1c019a4017ce82f704a3",
+    "sample_rate_hz": 48000,
+    "source_seconds": 6,
+    "captures": {
+      "off": {
+        "name": "off",
+        "expected_dac_variance": 0.0,
+        "command": [
+          "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/triad_audio_capture",
+          "--live",
+          "--exclusive",
+          "--input",
+          "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/native-cable/source-tone-1737hz-0p05rms.f32",
+          "--output",
+          "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/native-cable/off-capture.f32",
+          "--raw-output",
+          "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/native-cable/off-provider.f32",
+          "--metadata",
+          "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/native-cable/off-capture.json",
+          "--rate",
+          "48000",
+          "--capture-device",
+          "hw:1,0",
+          "--playback-device",
+          "hw:1,0",
+          "--preroll-seconds",
+          ".75",
+          "--postroll-seconds",
+          "1",
+          "--max-seconds",
+          "30"
+        ],
+        "return_code": 0,
+        "wall_seconds": 8.045323427009862,
+        "output_sha256": "5800fec8099423c80d5f7986c3f85d94145c9ac0d62ce1fcb56ec23af9e9a5c4",
+        "provider_sha256": "74792b1fb02a34773246b859cae095608c3fed0a20578d04a806267e6905204f",
+        "capture_sha256": "5800fec8099423c80d5f7986c3f85d94145c9ac0d62ce1fcb56ec23af9e9a5c4",
+        "capture_metadata_sha256": "3b00fc8686b0dc9cd0737fb3006451e9ea81feccb08bc7545116bd296ff28bae",
+        "metadata": {
+          "schema": "triad-audio-capture-v1",
+          "status": "complete",
+          "failure": "",
+          "capture_error": "",
+          "requested": {
+            "rate": 48000,
+            "capture_device": "hw:1,0",
+            "playback_device": "hw:1,0",
+            "exclusive": true,
+            "preroll_seconds": 0.75,
+            "postroll_seconds": 1,
+            "max_seconds": 30,
+            "input_peak": 0.0500000007451
+          },
+          "playback": {
+            "call_start_capture_sample": 36689,
+            "call_return_capture_sample": 325768,
+            "call_start_seconds": 1.010467718,
+            "call_return_seconds": 7.029339615,
+            "marker_note": "call boundary and API drain marker; not calibrated analog latency"
+          },
+          "capture": {
+            "logical_samples": 373768,
+            "logical_rate": 48000,
+            "logical_seconds": 7.78683333333,
+            "required_postroll_samples": 373768,
+            "maximum_logical_samples": 1440000,
+            "logical_peak": 0.0425720214844,
+            "raw_samples": 374107,
+            "raw_rate": 48000,
+            "raw_seconds": 7.79389583333,
+            "raw_semantics": "optional selected-channel mono provider capture float samples before modem-rate resampling; hardware channel zero for native ALSA; S16 converted to float, not interleaved ADC codes",
+            "capture_timing_count": 954,
+            "first_capture_prediction": {
+              "logical_sample_index": 0,
+              "utc_seconds": 1793935067.05,
+              "uncertainty_seconds": 0.0230657619422,
+              "seconds_per_frame": 2.08333333333e-05,
+              "rate_uncertainty_fraction": 0.00200400801603,
+              "clock_extrapolation_seconds": 4.02471609886e-05,
+              "quality": "estimated"
+            },
+            "last_capture_prediction": {
+              "logical_sample_index": 373142,
+              "utc_seconds": 1793935074.83,
+              "uncertainty_seconds": 0.023062506224,
+              "seconds_per_frame": 2.083360801e-05,
+              "rate_uncertainty_fraction": 0.00200919246517,
+              "clock_extrapolation_seconds": 4.16666666667e-05,
+              "quality": "estimated"
+            }
+          },
+          "audio_format": {
+            "capture": {
+              "logical_rate": 48000,
+              "hardware_rate": 48000,
+              "logical_channels": 1,
+              "hardware_channels": 2,
+              "selected_capture_channel": 0,
+              "usable_passband_hz": 24000,
+              "workspace_bytes": 35392,
+              "timing_quality": "estimated",
+              "timing_uncertainty_seconds": 0.023,
+              "capture_transport": {
+                "kind": "fixed_nominal_audio",
+                "raw_rate": 48000,
+                "logical_rate": 48000,
+                "raw_zero": 0,
+                "logical_zero": 0
+              }
+            },
+            "playback": {
+              "logical_rate": 48000,
+              "hardware_rate": 48000,
+              "logical_channels": 1,
+              "hardware_channels": 2,
+              "selected_capture_channel": null,
+              "usable_passband_hz": 24000,
+              "workspace_bytes": 29664,
+              "timing_quality": "unavailable",
+              "timing_uncertainty_seconds": 0,
+              "capture_transport": {
+                "kind": "unknown",
+                "raw_rate": 0,
+                "logical_rate": 0,
+                "raw_zero": 0,
+                "logical_zero": 0
+              }
+            }
+          },
+          "background_noise": {
+            "enabled": false,
+            "sample_rate_hz": 48000,
+            "format": "s16",
+            "active_samples": 0,
+            "expected_variance": 0,
+            "measured_mean": 0,
+            "measured_variance": 0,
+            "peak": 0
+          },
+          "discontinuity": {
+            "capture": false,
+            "playback": false,
+            "reason": ""
+          },
+          "timing_status": "",
+          "elapsed_seconds": 8.038655667,
+          "capture_timing_note": "native device timestamps are observational estimates, not calibrated DAC-to-ADC or radio latency"
+        },
+        "selected_capture_samples": [
+          132689,
+          276689
+        ],
+        "selected_capture_seconds": [
+          2.7643541666666667,
+          5.764354166666666
+        ],
+        "selected_sample_count": 144000,
+        "tone_gain": 0.8414098216522404,
+        "capture_peak": 0.042572021484375,
+        "clipping_sample_fraction": 0.0,
+        "raw_provider_samples": 374107,
+        "raw_provider_rate": 48000,
+        "background_noise": {
+          "enabled": false,
+          "sample_rate_hz": 48000,
+          "format": "s16",
+          "active_samples": 0,
+          "expected_variance": 0,
+          "measured_mean": 0,
+          "measured_variance": 0,
+          "peak": 0
+        }
+      },
+      "db40": {
+        "name": "db40",
+        "expected_dac_variance": 5e-05,
+        "command": [
+          "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/triad_audio_capture",
+          "--live",
+          "--exclusive",
+          "--input",
+          "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/native-cable/source-tone-1737hz-0p05rms.f32",
+          "--output",
+          "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/native-cable/db40-capture.f32",
+          "--raw-output",
+          "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/native-cable/db40-provider.f32",
+          "--metadata",
+          "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/native-cable/db40-capture.json",
+          "--rate",
+          "48000",
+          "--capture-device",
+          "hw:1,0",
+          "--playback-device",
+          "hw:1,0",
+          "--preroll-seconds",
+          ".75",
+          "--postroll-seconds",
+          "1",
+          "--max-seconds",
+          "30",
+          "--background-noise-db",
+          "40"
+        ],
+        "return_code": 0,
+        "wall_seconds": 7.786131428030785,
+        "output_sha256": "581fbd485a7018ada11440fe26d45d93f8612fd7941c08699bc3800f7cbccf0b",
+        "provider_sha256": "f723c5afb8bc92ceb3cc5ec38b83a11c0bef5d5387261867016ca3a4b95ab342",
+        "capture_sha256": "581fbd485a7018ada11440fe26d45d93f8612fd7941c08699bc3800f7cbccf0b",
+        "capture_metadata_sha256": "50b64f91451e3df36e5fb0dcf1cec8d8f355655d75f005fd263c142dae99ba45",
+        "metadata": {
+          "schema": "triad-audio-capture-v1",
+          "status": "complete",
+          "failure": "",
+          "capture_error": "",
+          "requested": {
+            "rate": 48000,
+            "capture_device": "hw:1,0",
+            "playback_device": "hw:1,0",
+            "exclusive": true,
+            "preroll_seconds": 0.75,
+            "postroll_seconds": 1,
+            "max_seconds": 30,
+            "input_peak": 0.0500000007451
+          },
+          "playback": {
+            "call_start_capture_sample": 36703,
+            "call_return_capture_sample": 324791,
+            "call_start_seconds": 0.772614118,
+            "call_return_seconds": 6.775705604,
+            "marker_note": "call boundary and API drain marker; not calibrated analog latency"
+          },
+          "capture": {
+            "logical_samples": 372791,
+            "logical_rate": 48000,
+            "logical_seconds": 7.76647916667,
+            "required_postroll_samples": 372791,
+            "maximum_logical_samples": 1440000,
+            "logical_peak": 0.0556335449219,
+            "raw_samples": 373146,
+            "raw_rate": 48000,
+            "raw_seconds": 7.773875,
+            "raw_semantics": "optional selected-channel mono provider capture float samples before modem-rate resampling; hardware channel zero for native ALSA; S16 converted to float, not interleaved ADC codes",
+            "capture_timing_count": 971,
+            "first_capture_prediction": {
+              "logical_sample_index": 0,
+              "utc_seconds": 1793935074.88,
+              "uncertainty_seconds": 0.0230661124423,
+              "seconds_per_frame": 2.08333333333e-05,
+              "rate_uncertainty_fraction": 0.00200400801603,
+              "clock_extrapolation_seconds": 4.02471609886e-05,
+              "quality": "estimated"
+            },
+            "last_capture_prediction": {
+              "logical_sample_index": 372182,
+              "utc_seconds": 1793935082.63,
+              "uncertainty_seconds": 0.0230624227236,
+              "seconds_per_frame": 2.08337326267e-05,
+              "rate_uncertainty_fraction": 0.00201517406339,
+              "clock_extrapolation_seconds": 4.15831663327e-05,
+              "quality": "estimated"
+            }
+          },
+          "audio_format": {
+            "capture": {
+              "logical_rate": 48000,
+              "hardware_rate": 48000,
+              "logical_channels": 1,
+              "hardware_channels": 2,
+              "selected_capture_channel": 0,
+              "usable_passband_hz": 24000,
+              "workspace_bytes": 35392,
+              "timing_quality": "estimated",
+              "timing_uncertainty_seconds": 0.023,
+              "capture_transport": {
+                "kind": "fixed_nominal_audio",
+                "raw_rate": 48000,
+                "logical_rate": 48000,
+                "raw_zero": 0,
+                "logical_zero": 0
+              }
+            },
+            "playback": {
+              "logical_rate": 48000,
+              "hardware_rate": 48000,
+              "logical_channels": 1,
+              "hardware_channels": 2,
+              "selected_capture_channel": null,
+              "usable_passband_hz": 24000,
+              "workspace_bytes": 29664,
+              "timing_quality": "unavailable",
+              "timing_uncertainty_seconds": 0,
+              "capture_transport": {
+                "kind": "unknown",
+                "raw_rate": 0,
+                "logical_rate": 0,
+                "raw_zero": 0,
+                "logical_zero": 0
+              }
+            }
+          },
+          "background_noise": {
+            "enabled": true,
+            "sample_rate_hz": 48000,
+            "format": "s16",
+            "active_samples": 288000,
+            "expected_variance": 5e-05,
+            "measured_mean": 2.41959856292e-05,
+            "measured_variance": 4.9963912154e-05,
+            "peak": 0.0122379222999
+          },
+          "discontinuity": {
+            "capture": false,
+            "playback": false,
+            "reason": ""
+          },
+          "timing_status": "",
+          "elapsed_seconds": 7.778728529,
+          "capture_timing_note": "native device timestamps are observational estimates, not calibrated DAC-to-ADC or radio latency"
+        },
+        "selected_capture_samples": [
+          132703,
+          276703
+        ],
+        "selected_capture_seconds": [
+          2.7646458333333332,
+          5.764645833333334
+        ],
+        "selected_sample_count": 144000,
+        "tone_gain": 0.8413156664721619,
+        "capture_peak": 0.055633544921875,
+        "clipping_sample_fraction": 0.0,
+        "raw_provider_samples": 373146,
+        "raw_provider_rate": 48000,
+        "background_noise": {
+          "enabled": true,
+          "sample_rate_hz": 48000,
+          "format": "s16",
+          "active_samples": 288000,
+          "expected_variance": 5e-05,
+          "measured_mean": 2.41959856292e-05,
+          "measured_variance": 4.9963912154e-05,
+          "peak": 0.0122379222999
+        }
+      },
+      "db60": {
+        "name": "db60",
+        "expected_dac_variance": 5e-07,
+        "command": [
+          "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/triad_audio_capture",
+          "--live",
+          "--exclusive",
+          "--input",
+          "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/native-cable/source-tone-1737hz-0p05rms.f32",
+          "--output",
+          "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/native-cable/db60-capture.f32",
+          "--raw-output",
+          "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/native-cable/db60-provider.f32",
+          "--metadata",
+          "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/native-cable/db60-capture.json",
+          "--rate",
+          "48000",
+          "--capture-device",
+          "hw:1,0",
+          "--playback-device",
+          "hw:1,0",
+          "--preroll-seconds",
+          ".75",
+          "--postroll-seconds",
+          "1",
+          "--max-seconds",
+          "30",
+          "--background-noise-db",
+          "60"
+        ],
+        "return_code": 0,
+        "wall_seconds": 7.792238733032718,
+        "output_sha256": "f47c0501ae53ddd4204fc6ad3e2c157772c4bcece6c65db1ced83756ce71a303",
+        "provider_sha256": "c30ae07ca860271cc5f6156c222c899eb916eab657eefc902e064cf07c0c8f57",
+        "capture_sha256": "f47c0501ae53ddd4204fc6ad3e2c157772c4bcece6c65db1ced83756ce71a303",
+        "capture_metadata_sha256": "6204caffc7842bfa2599fcd432b77f7c6422758eb89ab8eb1a2be18348ccd2c7",
+        "metadata": {
+          "schema": "triad-audio-capture-v1",
+          "status": "complete",
+          "failure": "",
+          "capture_error": "",
+          "requested": {
+            "rate": 48000,
+            "capture_device": "hw:1,0",
+            "playback_device": "hw:1,0",
+            "exclusive": true,
+            "preroll_seconds": 0.75,
+            "postroll_seconds": 1,
+            "max_seconds": 30,
+            "input_peak": 0.0500000007451
+          },
+          "playback": {
+            "call_start_capture_sample": 36740,
+            "call_return_capture_sample": 325043,
+            "call_start_seconds": 0.77378264,
+            "call_return_seconds": 6.777392704,
+            "marker_note": "call boundary and API drain marker; not calibrated analog latency"
+          },
+          "capture": {
+            "logical_samples": 373043,
+            "logical_rate": 48000,
+            "logical_seconds": 7.77172916667,
+            "required_postroll_samples": 373043,
+            "maximum_logical_samples": 1440000,
+            "logical_peak": 0.0436096191406,
+            "raw_samples": 373368,
+            "raw_rate": 48000,
+            "raw_seconds": 7.7785,
+            "raw_semantics": "optional selected-channel mono provider capture float samples before modem-rate resampling; hardware channel zero for native ALSA; S16 converted to float, not interleaved ADC codes",
+            "capture_timing_count": 1011,
+            "first_capture_prediction": {
+              "logical_sample_index": 0,
+              "utc_seconds": 1793935082.68,
+              "uncertainty_seconds": 0.0230663096924,
+              "seconds_per_frame": 2.08333333333e-05,
+              "rate_uncertainty_fraction": 0.00200400801603,
+              "clock_extrapolation_seconds": 4.02889111556e-05,
+              "quality": "estimated"
+            },
+            "last_capture_prediction": {
+              "logical_sample_index": 372403,
+              "utc_seconds": 1793935090.44,
+              "uncertainty_seconds": 0.0230624644738,
+              "seconds_per_frame": 2.08337056176e-05,
+              "rate_uncertainty_fraction": 0.00201387763014,
+              "clock_extrapolation_seconds": 4.16249164997e-05,
+              "quality": "estimated"
+            }
+          },
+          "audio_format": {
+            "capture": {
+              "logical_rate": 48000,
+              "hardware_rate": 48000,
+              "logical_channels": 1,
+              "hardware_channels": 2,
+              "selected_capture_channel": 0,
+              "usable_passband_hz": 24000,
+              "workspace_bytes": 35392,
+              "timing_quality": "estimated",
+              "timing_uncertainty_seconds": 0.023,
+              "capture_transport": {
+                "kind": "fixed_nominal_audio",
+                "raw_rate": 48000,
+                "logical_rate": 48000,
+                "raw_zero": 0,
+                "logical_zero": 0
+              }
+            },
+            "playback": {
+              "logical_rate": 48000,
+              "hardware_rate": 48000,
+              "logical_channels": 1,
+              "hardware_channels": 2,
+              "selected_capture_channel": null,
+              "usable_passband_hz": 24000,
+              "workspace_bytes": 29664,
+              "timing_quality": "unavailable",
+              "timing_uncertainty_seconds": 0,
+              "capture_transport": {
+                "kind": "unknown",
+                "raw_rate": 0,
+                "logical_rate": 0,
+                "raw_zero": 0,
+                "logical_zero": 0
+              }
+            }
+          },
+          "background_noise": {
+            "enabled": true,
+            "sample_rate_hz": 48000,
+            "format": "s16",
+            "active_samples": 288000,
+            "expected_variance": 5e-07,
+            "measured_mean": -1.40777221663e-06,
+            "measured_variance": 5.00328455374e-07,
+            "peak": 0.00122074037904
+          },
+          "discontinuity": {
+            "capture": false,
+            "playback": false,
+            "reason": ""
+          },
+          "timing_status": "",
+          "elapsed_seconds": 7.78498167,
+          "capture_timing_note": "native device timestamps are observational estimates, not calibrated DAC-to-ADC or radio latency"
+        },
+        "selected_capture_samples": [
+          132740,
+          276740
+        ],
+        "selected_capture_seconds": [
+          2.765416666666667,
+          5.765416666666667
+        ],
+        "selected_sample_count": 144000,
+        "tone_gain": 0.8413131775408161,
+        "capture_peak": 0.043609619140625,
+        "clipping_sample_fraction": 0.0,
+        "raw_provider_samples": 373368,
+        "raw_provider_rate": 48000,
+        "background_noise": {
+          "enabled": true,
+          "sample_rate_hz": 48000,
+          "format": "s16",
+          "active_samples": 288000,
+          "expected_variance": 5e-07,
+          "measured_mean": -1.40777221663e-06,
+          "measured_variance": 5.00328455374e-07,
+          "peak": 0.00122074037904
+        }
+      },
+      "bits10": {
+        "name": "bits10",
+        "expected_dac_variance": 3.178914388020833e-07,
+        "command": [
+          "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/triad_audio_capture",
+          "--live",
+          "--exclusive",
+          "--input",
+          "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/native-cable/source-tone-1737hz-0p05rms.f32",
+          "--output",
+          "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/native-cable/bits10-capture.f32",
+          "--raw-output",
+          "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/native-cable/bits10-provider.f32",
+          "--metadata",
+          "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-background-noise-fullrate/native-cable/bits10-capture.json",
+          "--rate",
+          "48000",
+          "--capture-device",
+          "hw:1,0",
+          "--playback-device",
+          "hw:1,0",
+          "--preroll-seconds",
+          ".75",
+          "--postroll-seconds",
+          "1",
+          "--max-seconds",
+          "30",
+          "--background-noise-bits",
+          "10"
+        ],
+        "return_code": 0,
+        "wall_seconds": 7.777351761993486,
+        "output_sha256": "93b5a1311ea79a2e304038155d14c73f3a40b203f4b3d2622b90e3486f5cc271",
+        "provider_sha256": "2e3c7a347c4b9a794a4d0c1c8172541a6565a6fe8bc7b7634650eae78a7cc5a3",
+        "capture_sha256": "93b5a1311ea79a2e304038155d14c73f3a40b203f4b3d2622b90e3486f5cc271",
+        "capture_metadata_sha256": "e433cbc2393d8c56c16ba6b77c8f4b46305f6be8e1c5d8d3eca633b193df705e",
+        "metadata": {
+          "schema": "triad-audio-capture-v1",
+          "status": "complete",
+          "failure": "",
+          "capture_error": "",
+          "requested": {
+            "rate": 48000,
+            "capture_device": "hw:1,0",
+            "playback_device": "hw:1,0",
+            "exclusive": true,
+            "preroll_seconds": 0.75,
+            "postroll_seconds": 1,
+            "max_seconds": 30,
+            "input_peak": 0.0500000007451
+          },
+          "playback": {
+            "call_start_capture_sample": 36675,
+            "call_return_capture_sample": 324292,
+            "call_start_seconds": 0.771389794,
+            "call_return_seconds": 6.774415559,
+            "marker_note": "call boundary and API drain marker; not calibrated analog latency"
+          },
+          "capture": {
+            "logical_samples": 372292,
+            "logical_rate": 48000,
+            "logical_seconds": 7.75608333333,
+            "required_postroll_samples": 372292,
+            "maximum_logical_samples": 1440000,
+            "logical_peak": 0.0432739257812,
+            "raw_samples": 372688,
+            "raw_rate": 48000,
+            "raw_seconds": 7.76433333333,
+            "raw_semantics": "optional selected-channel mono provider capture float samples before modem-rate resampling; hardware channel zero for native ALSA; S16 converted to float, not interleaved ADC codes",
+            "capture_timing_count": 997,
+            "first_capture_prediction": {
+              "logical_sample_index": 0,
+              "utc_seconds": 1793935090.48,
+              "uncertainty_seconds": 0.0230653776924,
+              "seconds_per_frame": 2.08333333333e-05,
+              "rate_uncertainty_fraction": 0.00200400801603,
+              "clock_extrapolation_seconds": 4.02889111556e-05,
+              "quality": "estimated"
+            },
+            "last_capture_prediction": {
+              "logical_sample_index": 371712,
+              "utc_seconds": 1793935098.23,
+              "uncertainty_seconds": 0.0230629654758,
+              "seconds_per_frame": 2.08335370466e-05,
+              "rate_uncertainty_fraction": 0.00200578622294,
+              "clock_extrapolation_seconds": 4.21259185037e-05,
+              "quality": "estimated"
+            }
+          },
+          "audio_format": {
+            "capture": {
+              "logical_rate": 48000,
+              "hardware_rate": 48000,
+              "logical_channels": 1,
+              "hardware_channels": 2,
+              "selected_capture_channel": 0,
+              "usable_passband_hz": 24000,
+              "workspace_bytes": 35392,
+              "timing_quality": "estimated",
+              "timing_uncertainty_seconds": 0.023,
+              "capture_transport": {
+                "kind": "fixed_nominal_audio",
+                "raw_rate": 48000,
+                "logical_rate": 48000,
+                "raw_zero": 0,
+                "logical_zero": 0
+              }
+            },
+            "playback": {
+              "logical_rate": 48000,
+              "hardware_rate": 48000,
+              "logical_channels": 1,
+              "hardware_channels": 2,
+              "selected_capture_channel": null,
+              "usable_passband_hz": 24000,
+              "workspace_bytes": 29664,
+              "timing_quality": "unavailable",
+              "timing_uncertainty_seconds": 0,
+              "capture_transport": {
+                "kind": "unknown",
+                "raw_rate": 0,
+                "logical_rate": 0,
+                "raw_zero": 0,
+                "logical_zero": 0
+              }
+            }
+          },
+          "background_noise": {
+            "enabled": true,
+            "sample_rate_hz": 48000,
+            "format": "s16",
+            "active_samples": 288000,
+            "expected_variance": 3.17891438802e-07,
+            "measured_mean": -5.42021444339e-07,
+            "measured_variance": 3.17902997169e-07,
+            "peak": 0.000976592303232
+          },
+          "discontinuity": {
+            "capture": false,
+            "playback": false,
+            "reason": ""
+          },
+          "timing_status": "",
+          "elapsed_seconds": 7.770223513,
+          "capture_timing_note": "native device timestamps are observational estimates, not calibrated DAC-to-ADC or radio latency"
+        },
+        "selected_capture_samples": [
+          132675,
+          276292
+        ],
+        "selected_capture_seconds": [
+          2.7640625,
+          5.756083333333334
+        ],
+        "selected_sample_count": 143617,
+        "tone_gain": 0.841318165437435,
+        "capture_peak": 0.04327392578125,
+        "clipping_sample_fraction": 0.0,
+        "raw_provider_samples": 372688,
+        "raw_provider_rate": 48000,
+        "background_noise": {
+          "enabled": true,
+          "sample_rate_hz": 48000,
+          "format": "s16",
+          "active_samples": 288000,
+          "expected_variance": 3.17891438802e-07,
+          "measured_mean": -5.42021444339e-07,
+          "measured_variance": 3.17902997169e-07,
+          "peak": 0.000976592303232
+        }
+      }
+    },
+    "passband_frequency_hz": [
+      1400,
+      2100
+    ],
+    "excluded_tone_frequency_hz": [
+      1650,
+      1820
+    ],
+    "baseline_tone_gain": 0.8414098216522404,
+    "frequency_resolution_hz": 11.71875,
+    "rows": [
+      {
+        "name": "db40",
+        "expected_dac_variance": 5e-05,
+        "measured_added_passband_psd": 1.4608538703051375e-09,
+        "predicted_added_passband_psd": 1.4749385166101147e-09,
+        "passband_error_db": -0.041671414693251724,
+        "baseline_passband_psd": 1.0762475299554754e-12,
+        "total_passband_psd": 1.461930117835093e-09,
+        "added_passband_floor_rise_db": 31.330144455415233,
+        "added_passband_power": 7.703721581687248e-07,
+        "other_band_psd": [
+          {
+            "band_hz": [
+              100,
+              500
+            ],
+            "added_mean_psd": 1.428916611883229e-09
+          },
+          {
+            "band_hz": [
+              500,
+              1400
+            ],
+            "added_mean_psd": 1.4663109697057459e-09
+          },
+          {
+            "band_hz": [
+              2100,
+              6000
+            ],
+            "added_mean_psd": 1.5042571583169764e-09
+          },
+          {
+            "band_hz": [
+              6000,
+              12000
+            ],
+            "added_mean_psd": 1.467672024898766e-09
+          },
+          {
+            "band_hz": [
+              12000,
+              20000
+            ],
+            "added_mean_psd": 1.463082626628043e-09
+          },
+          {
+            "band_hz": [
+              20000,
+              23500
+            ],
+            "added_mean_psd": 9.7689002852844e-10
+          }
+        ],
+        "capture_noise_report": {
+          "enabled": true,
+          "sample_rate_hz": 48000,
+          "format": "s16",
+          "active_samples": 288000,
+          "expected_variance": 5e-05,
+          "measured_mean": 2.41959856292e-05,
+          "measured_variance": 4.9963912154e-05,
+          "peak": 0.0122379222999
+        },
+        "tone_gain": 0.8413156664721619,
+        "capture_peak": 0.055633544921875,
+        "clipping_sample_fraction": 0.0,
+        "discontinuity": {
+          "capture": false,
+          "playback": false,
+          "reason": ""
+        },
+        "capture_sha256": "581fbd485a7018ada11440fe26d45d93f8612fd7941c08699bc3800f7cbccf0b",
+        "capture_metadata_sha256": "50b64f91451e3df36e5fb0dcf1cec8d8f355655d75f005fd263c142dae99ba45"
+      },
+      {
+        "name": "db60",
+        "expected_dac_variance": 5e-07,
+        "measured_added_passband_psd": 1.531900620673207e-11,
+        "predicted_added_passband_psd": 1.4749385166101145e-11,
+        "passband_error_db": 0.16456675172833393,
+        "baseline_passband_psd": 1.0762475299554754e-12,
+        "total_passband_psd": 1.6395253736687547e-11,
+        "added_passband_floor_rise_db": 11.828059745636416,
+        "added_passband_power": 8.078382179331364e-09,
+        "other_band_psd": [
+          {
+            "band_hz": [
+              100,
+              500
+            ],
+            "added_mean_psd": 1.5018016642195445e-11
+          },
+          {
+            "band_hz": [
+              500,
+              1400
+            ],
+            "added_mean_psd": 1.4586581125602793e-11
+          },
+          {
+            "band_hz": [
+              2100,
+              6000
+            ],
+            "added_mean_psd": 1.4725887126420292e-11
+          },
+          {
+            "band_hz": [
+              6000,
+              12000
+            ],
+            "added_mean_psd": 1.4505837350301168e-11
+          },
+          {
+            "band_hz": [
+              12000,
+              20000
+            ],
+            "added_mean_psd": 1.4822480583660082e-11
+          },
+          {
+            "band_hz": [
+              20000,
+              23500
+            ],
+            "added_mean_psd": 9.751592578954902e-12
+          }
+        ],
+        "capture_noise_report": {
+          "enabled": true,
+          "sample_rate_hz": 48000,
+          "format": "s16",
+          "active_samples": 288000,
+          "expected_variance": 5e-07,
+          "measured_mean": -1.40777221663e-06,
+          "measured_variance": 5.00328455374e-07,
+          "peak": 0.00122074037904
+        },
+        "tone_gain": 0.8413131775408161,
+        "capture_peak": 0.043609619140625,
+        "clipping_sample_fraction": 0.0,
+        "discontinuity": {
+          "capture": false,
+          "playback": false,
+          "reason": ""
+        },
+        "capture_sha256": "f47c0501ae53ddd4204fc6ad3e2c157772c4bcece6c65db1ced83756ce71a303",
+        "capture_metadata_sha256": "6204caffc7842bfa2599fcd432b77f7c6422758eb89ab8eb1a2be18348ccd2c7"
+      },
+      {
+        "name": "bits10",
+        "expected_dac_variance": 3.178914388020833e-07,
+        "measured_added_passband_psd": 9.486481914030936e-12,
+        "predicted_added_passband_psd": 9.377406543795995e-12,
+        "passband_error_db": 0.0502243844967478,
+        "baseline_passband_psd": 1.0762475299554754e-12,
+        "total_passband_psd": 1.056272944398641e-11,
+        "added_passband_floor_rise_db": 9.91863988086222,
+        "added_passband_power": 5.0026369468522505e-09,
+        "other_band_psd": [
+          {
+            "band_hz": [
+              100,
+              500
+            ],
+            "added_mean_psd": 9.551735843090789e-12
+          },
+          {
+            "band_hz": [
+              500,
+              1400
+            ],
+            "added_mean_psd": 9.753058449985402e-12
+          },
+          {
+            "band_hz": [
+              2100,
+              6000
+            ],
+            "added_mean_psd": 9.574792564920034e-12
+          },
+          {
+            "band_hz": [
+              6000,
+              12000
+            ],
+            "added_mean_psd": 9.432192802748294e-12
+          },
+          {
+            "band_hz": [
+              12000,
+              20000
+            ],
+            "added_mean_psd": 9.322549663719393e-12
+          },
+          {
+            "band_hz": [
+              20000,
+              23500
+            ],
+            "added_mean_psd": 6.140728747680982e-12
+          }
+        ],
+        "capture_noise_report": {
+          "enabled": true,
+          "sample_rate_hz": 48000,
+          "format": "s16",
+          "active_samples": 288000,
+          "expected_variance": 3.17891438802e-07,
+          "measured_mean": -5.42021444339e-07,
+          "measured_variance": 3.17902997169e-07,
+          "peak": 0.000976592303232
+        },
+        "tone_gain": 0.841318165437435,
+        "capture_peak": 0.04327392578125,
+        "clipping_sample_fraction": 0.0,
+        "discontinuity": {
+          "capture": false,
+          "playback": false,
+          "reason": ""
+        },
+        "capture_sha256": "93b5a1311ea79a2e304038155d14c73f3a40b203f4b3d2622b90e3486f5cc271",
+        "capture_metadata_sha256": "e433cbc2393d8c56c16ba6b77c8f4b46305f6be8e1c5d8d3eca633b193df705e"
+      }
+    ],
+    "limitation": "Four short physical cable observations. The result measures the analog headphone/microphone loopback and does not establish radiated RF noise, an independently calibrated ADC/DAC noise figure, or behavior outside the negotiated capture band."
+  }
+}

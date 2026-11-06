@@ -1,4 +1,5 @@
 #include "datapump/host/audio.hpp"
+#include "datapump/audio_output.hpp"
 #include "datapump/resampler.hpp"
 #include "datapump/execution.hpp"
 #include <algorithm>
@@ -7,6 +8,7 @@
 #include <condition_variable>
 #include <deque>
 #include <limits>
+#include <memory>
 #include <mutex>
 
 namespace datapump::host {
@@ -191,6 +193,7 @@ void AudioEndpoint::capture(std::uint32_t logical,const audio::CaptureCallback& 
 }
 void AudioEndpoint::playback(std::uint32_t logical,const audio::PlaybackCallback& callback,std::stop_token stop,audio::StreamFormatCallback format,audio::ChannelMode channels,audio::Options options) {
     audio::validate_options(options);auto& p=*impl_;std::uint64_t generation,stream;std::uint32_t rate;
+    std::unique_ptr<audio::PlaybackOutput> playback_output;
     {
         std::unique_lock lock(p.mutex);p.changed.wait(lock,stop,[&]{return p.closed || p.rate!=0;});
         generation=p.generation;p.valid(generation,stop);rate=p.rate;
@@ -199,7 +202,8 @@ void AudioEndpoint::playback(std::uint32_t logical,const audio::PlaybackCallback
         if(p.playback_stream || p.cancelling_stream)throw Error("host playback is in use or awaits a flush acknowledgment");
         stream=++p.next_stream;p.playback_stream=stream;p.sent=p.played=0;p.ready=p.ending=p.drained=false;
         p.scheduled_epoch=0;p.playback_failure.clear();
-        p.event({Kind::playback_start,generation,stream,0,rate,channels,options.transmit_gain,{}});
+        playback_output=std::make_unique<audio::PlaybackOutput>(rate,options.background_noise,options.transmit_gain);
+        p.event({Kind::playback_start,generation,stream,0,rate,channels,playback_output->provider_gain(),{}});
     }
     try {
         {
@@ -217,12 +221,13 @@ void AudioEndpoint::playback(std::uint32_t logical,const audio::PlaybackCallback
             if(offset==count && !ending){count=callback(input);offset=0;if(count>input.size())throw Error("invalid playback callback count");ending=count==0;}
             auto progress=converter.process(std::span<const float>(input.data()+offset,count-offset),output,ending);offset+=progress.consumed;
             if(!progress.produced)continue;
-            auto samples=std::span<const float>(output.data(),progress.produced);check_pcm(samples);
+            auto samples=std::span<float>(output.data(),progress.produced);check_pcm(samples);
+            playback_output->mix_float(samples);
             std::unique_lock lock(p.mutex);p.valid_playback(generation,stop);
             const auto limit=std::min<std::uint64_t>(max_queue_frames,rate/4);
             auto writable=p.changed.wait_for(lock,stop,std::chrono::seconds(3),[&]{return p.closed || !p.failure.empty() || !p.playback_failure.empty() || p.sent-p.played+samples.size()<=limit;});
             p.valid_playback(generation,stop);if(!writable)throw Error("host playback stopped consuming samples");
-            Event event{Kind::playback_pcm,generation,stream,p.sent,rate,channels,options.transmit_gain,{samples.begin(),samples.end()}};
+            Event event{Kind::playback_pcm,generation,stream,p.sent,rate,channels,playback_output->provider_gain(),{samples.begin(),samples.end()}};
             if(!p.sent) {
                 if(!p.scheduled_epoch)p.scheduled_epoch=epoch_now()+.5;
                 if(p.scheduled_epoch-epoch_now()<.15)throw Error("first host output samples missed their delivery deadline");
@@ -230,22 +235,23 @@ void AudioEndpoint::playback(std::uint32_t logical,const audio::PlaybackCallback
             }
             p.event(std::move(event));p.sent+=samples.size();
         }
-        std::unique_lock lock(p.mutex);p.valid_playback(generation,stop);p.ending=true;p.event({Kind::playback_end,generation,stream,p.sent,rate,channels,options.transmit_gain,{}});
+        std::unique_lock lock(p.mutex);p.valid_playback(generation,stop);p.ending=true;p.event({Kind::playback_end,generation,stream,p.sent,rate,channels,playback_output->provider_gain(),{}});
         auto drained=p.changed.wait_for(lock,stop,std::chrono::seconds(3),[&]{return p.closed || !p.failure.empty() || !p.playback_failure.empty() || p.drained;});
         p.valid_playback(generation,stop);if(!drained)throw Error("host playback drain timed out");
-        p.playback_stream=0;
+        p.playback_stream=0;lock.unlock();
     } catch(...) {
         std::unique_lock lock(p.mutex);
         // Any already exposed samples remain reserved by the shared session.
         p.cancelling_stream=stream;p.playback_stream=0;p.events.erase(std::remove_if(p.events.begin(),p.events.end(),[&](const Event& e){return e.stream==stream;}),p.events.end());
         p.event_frames=0;for(const auto& e:p.events)p.event_frames+=e.samples.size();
-        if(!p.closed && p.events.size()<128)p.event({Kind::playback_cancel,generation,stream,p.sent,rate,channels,options.transmit_gain,{}});
+        if(!p.closed && p.events.size()<128)p.event({Kind::playback_cancel,generation,stream,p.sent,rate,channels,playback_output->provider_gain(),{}});
         // A cancelled callback cannot authorize another stream until the device
         // confirms that old scheduled samples have actually been removed.
         if(!p.closed && !p.changed.wait_for(lock,std::chrono::seconds(3),[&]{return p.closed || !p.cancelling_stream;}))
             p.fail("host playback flush acknowledgment timed out");
         throw;
     }
+    if(options.background_noise_report)options.background_noise_report(playback_output->report());
 }
 }
 

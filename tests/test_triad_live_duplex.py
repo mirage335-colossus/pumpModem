@@ -97,6 +97,30 @@ class CampaignTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 d.validate_capture({**metadata(), **change})
 
+    def test_native_background_noise_report_is_required_only_when_requested(self):
+        d.validate_capture(metadata())
+        report = dict(enabled=True, sample_rate_hz=96000, format="s16", active_samples=48000,
+                      expected_variance=1e-5, measured_mean=0., measured_variance=1.01e-5, peak=.01)
+        noisy = {**metadata(), "background_noise": report,
+                 "audio_format": {"capture": {"format": "S16_LE"},
+                                  "playback": {"format": "S16_LE", "hardware_rate": 96000}}}
+        d.validate_capture(noisy, require_background_noise=True)
+        for bad in [None, {**report, "enabled": False}, {**report, "active_samples": 0},
+                    {**report, "sample_rate_hz": 48000}]:
+            with self.subTest(report=bad), self.assertRaises(ValueError):
+                d.validate_capture({**noisy, "background_noise": bad}, require_background_noise=True)
+
+    def test_native_background_noise_forwarding_drops_only_python_mixer_path(self):
+        parser = d.parser()
+        args = parser.parse_args(["run", "--prepared", "/tmp/prep", "--output", "/tmp/out",
+                                  "--background-noise-bits", "10",
+                                  "--background-noise-tool", "/tmp/noise-tool"])
+        native = d.capture_background_noise_arguments(args, "native")
+        alsa = d.capture_background_noise_arguments(args, "alsa-tools")
+        self.assertEqual(native, ["--background-noise-bits", "10"])
+        self.assertEqual(alsa, native + ["--background-noise-tool", "/tmp/noise-tool"])
+        self.assertEqual(d.capture_background_noise_arguments(None, "native"), [])
+
     def test_exclusive_outputs_and_failed_stage_remain_visible(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp)

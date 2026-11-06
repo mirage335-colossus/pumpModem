@@ -379,7 +379,7 @@ struct StreamingChannel::Impl {
     std::uint64_t total = 0, cursor = 0, tx_next = 0, history_first = 0;
     std::uint64_t delay_samples = 0, tx_interpolation_tail = 0, tail_samples = 0;
     std::vector<Complex> tx_history;
-    std::unique_ptr<background_noise::Generator> transmit_noise;
+    std::unique_ptr<background_noise::Generator> transmit_diagnostic_iq_noise;
     OscillatorState tx_osc, rx_osc;
     Rng tx_rng, rx_rng, thermal_rng;
     Rng tx_spectrum_rng, rx_spectrum_rng;
@@ -429,15 +429,15 @@ struct StreamingChannel::Impl {
                     "emitted source needs finite ordered signed frequency bounds");
         }
         validate_effects(effects, format);
-        if (cfg.background_noise.mode != background_noise::Mode::Off) {
-            auto noise_config = cfg.background_noise;
+        if (cfg.diagnostic_iq_noise.mode != background_noise::Mode::Off) {
+            auto noise_config = cfg.diagnostic_iq_noise;
             noise_config.full_scale = config.frontend.dac.full_scale;
             const auto level = background_noise::resolve(noise_config);
-            transmit_noise = std::make_unique<background_noise::Generator>(noise_config);
-            stats.background_noise_enabled = true;
-            stats.background_noise_sample_rate_hz = effects.sample_rate;
-            stats.background_noise_config = noise_config;
-            stats.background_noise_expected_variance = level.variance * config.signal_gain * config.signal_gain;
+            transmit_diagnostic_iq_noise = std::make_unique<background_noise::Generator>(noise_config);
+            stats.diagnostic_iq_noise_enabled = true;
+            stats.diagnostic_iq_noise_sample_rate_hz = effects.sample_rate;
+            stats.diagnostic_iq_noise_config = noise_config;
+            stats.diagnostic_iq_noise_expected_variance = level.variance * config.signal_gain * config.signal_gain;
             stats.gaussian_projection_supported = false;
         }
         validate_spectrum(config.tx_spectrum);
@@ -713,7 +713,7 @@ struct StreamingChannel::Impl {
             recovery_alpha = std::exp(-dt_rx/config.frontend.overload_recovery_seconds);
         tone_initial_phase = keyed_phase(root_seed(config.frontend_seed,effects.seed), 0, 0x544f4e4546524f4eULL);
         stats.complex_noise_variance = effects.noise_enabled ? config.complex_noise_variance : 0;
-        stats.gaussian_projection_supported = !transmit_noise && !config.frontend.active() && !effects.slow_agc;
+        stats.gaussian_projection_supported = !transmit_diagnostic_iq_noise && !config.frontend.active() && !effects.slow_agc;
         stats.source_samples = geometry.source_samples;
         stats.tail_samples = tail_samples;
     }
@@ -743,9 +743,9 @@ struct StreamingChannel::Impl {
             tx_osc.phase = std::remainder(tx_osc.phase, tau);
             auto value = effects.signal_enabled ? source_sample(tx_next) : Complex{};
             const double white_pm = config.tx_spectrum.white_pm_rms_radians * tx_spectrum_rng.gaussian();
-            if (effects.signal_enabled && transmit_noise) {
-                // Sample once in emitted-calendar order around the simulated
-                // DAC output. Quantized noise is added in code space so
+            if (effects.signal_enabled && transmit_diagnostic_iq_noise) {
+                // Sample once in emitted-calendar order at the narrow
+                // complex-I/Q diagnostic source. Quantized noise is added in code space so
                 // sub-LSB requests remain visible; fixed TX gain then scales
                 // the signal and noise together.
                 if (config.frontend.dac.nominal_bits || config.frontend.dac.gain != 1)
@@ -754,23 +754,23 @@ struct StreamingChannel::Impl {
                 const auto& dac = config.frontend.dac;
                 if (dac.nominal_bits) {
                     const double step = std::ldexp(dac.full_scale, 1-static_cast<int>(dac.nominal_bits));
-                    const double component_variance = transmit_noise->variance() * .5;
+                    const double component_variance = transmit_diagnostic_iq_noise->variance() * .5;
                     const auto max_codes = static_cast<std::int64_t>(std::ceil(
                         (std::sqrt(1 + 12*component_variance/(step*step)) - 1) * .5));
                     const double support = step * static_cast<double>(max_codes);
                     const double positive_limit = dac.full_scale-step;
                     require(value.real()+support <= positive_limit && value.real()-support >= -dac.full_scale &&
                             value.imag()+support <= positive_limit && value.imag()-support >= -dac.full_scale,
-                            "cryptographic background noise exceeds DAC headroom; reduce its level or reserve fixed TX gain");
-                    noise = {step*static_cast<double>(transmit_noise->quantized_noise(step, component_variance)),
-                             step*static_cast<double>(transmit_noise->quantized_noise(step, component_variance))};
+                            "cryptographic diagnostic-IQ noise exceeds DAC headroom; reduce its level or reserve fixed TX gain");
+                    noise = {step*static_cast<double>(transmit_diagnostic_iq_noise->quantized_noise(step, component_variance)),
+                             step*static_cast<double>(transmit_diagnostic_iq_noise->quantized_noise(step, component_variance))};
                 } else {
-                    noise = transmit_noise->complex();
+                    noise = transmit_diagnostic_iq_noise->complex();
                 }
                 value += noise;
-                stats.background_noise_source_energy += std::norm(noise) *
+                stats.diagnostic_iq_noise_source_energy += std::norm(noise) *
                     config.signal_gain * config.signal_gain;
-                ++stats.background_noise_source_samples;
+                ++stats.diagnostic_iq_noise_source_samples;
                 value *= config.signal_gain * std::polar(1.0, tx_osc.phase + white_pm);
             } else {
                 if (effects.signal_enabled && (config.frontend.dac.nominal_bits || config.frontend.dac.gain != 1))

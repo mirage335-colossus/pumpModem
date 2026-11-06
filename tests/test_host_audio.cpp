@@ -2,9 +2,11 @@
 #include <atomic>
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <future>
 #include <iostream>
 #include <limits>
+#include <numbers>
 #include <thread>
 
 namespace {
@@ -18,6 +20,26 @@ template<class Predicate>void until(AudioEndpoint& endpoint,Predicate consume) {
         std::this_thread::sleep_for(1ms);
     }
     throw std::runtime_error("audio event deadline expired");
+}
+double upper_band_periodogram(std::span<const float> samples,std::uint32_t rate) {
+    const auto count=samples.size();
+    long double power=0;std::size_t bins=0;
+    // Use separated exact DFT bins well beyond the 8-kHz logical source
+    // passband. Noise added before rate conversion is removed by its filter.
+    const auto first=static_cast<std::size_t>(std::ceil(14000.0*count/rate));
+    const auto last=static_cast<std::size_t>(std::floor(22000.0*count/rate));
+    for(std::size_t bin=first;bin<=last;bin+=512) {
+        const double step=2*std::numbers::pi*static_cast<double>(bin)/count;
+        const double cs=std::cos(step),ss=std::sin(step);
+        double phase_c=1,phase_s=0;long double real=0,imag=0;
+        for(float sample:samples) {
+            real+=sample*phase_c;imag-=sample*phase_s;
+            const auto next_c=phase_c*cs-phase_s*ss;
+            phase_s=phase_s*cs+phase_c*ss;phase_c=next_c;
+        }
+        power+=(real*real+imag*imag)/count;++bins;
+    }
+    return bins?static_cast<double>(power/bins):0;
 }
 void playback(std::uint32_t output_rate,bool composed=false) {
     AudioEndpoint endpoint;endpoint.configure(1,output_rate);std::atomic<unsigned> calls=0;std::size_t source=0;
@@ -46,6 +68,52 @@ void playback(std::uint32_t output_rate,bool composed=false) {
     fails([&]{endpoint.playback_progress(1,stream,frames+1,true);});
     endpoint.playback_progress(1,stream,frames,true);require(task.wait_for(2s)==std::future_status::ready,"playback did not finish after drain");task.get();
     require(!composed || transformed==frames,"host composition did not run once per hardware frame");
+}
+void full_rate_background_noise() {
+    const auto run=[] {
+        constexpr std::size_t frames=8192;
+        constexpr std::size_t output_frames=(frames*48000+8000-1)/8000;
+        AudioEndpoint endpoint;endpoint.configure(1,48000);std::size_t source=0;
+        audio::Options options;options.transmit_gain=.25;
+        options.background_noise.mode=background_noise::Mode::EffectiveBits;
+        options.background_noise.value=5;
+        audio::BackgroundNoiseReport report;bool reported=false;
+        options.background_noise_report=[&](const auto& value){report=value;reported=true;};
+        auto task=std::async(std::launch::async,[&]{endpoint.playback(8000,[&](std::span<float> out) {
+            const auto n=std::min(out.size(),frames-source);std::fill_n(out.begin(),n,0.f);source+=n;return n;
+        },{},{},audio::ChannelMode::left_mono,options);});
+        std::vector<float> received;std::uint64_t stream=0;bool started=false;
+        until(endpoint,[&](const AudioEndpoint::Event& e) {
+            if(e.kind==AudioEndpoint::Kind::playback_start) {
+                stream=e.stream;require(e.gain==1,"noise-enabled float output left a second gain for the provider");
+                endpoint.playback_ready(1,stream);
+            }
+            if(e.kind==AudioEndpoint::Kind::playback_pcm) {
+                require(e.gain==1,"noise-enabled float PCM gain metadata is not unity");
+                started=true;received.insert(received.end(),e.samples.begin(),e.samples.end());
+                endpoint.playback_progress(1,stream,received.size(),false);
+            }
+            if(e.kind==AudioEndpoint::Kind::playback_end) {
+                require(e.gain==1 && e.position==received.size(),"float output end metadata mismatch");return true;
+            }
+            return false;
+        });
+        require(started && received.size()==output_frames,"full-rate host output lost or miscounted resampled samples");
+        require(std::any_of(received.begin(),received.end(),[](float x){return x!=0;}),
+            "full-rate audio stage did not add noise to silence");
+        require(task.wait_for(10ms)==std::future_status::timeout,"noise report preceded host drain");
+        endpoint.playback_progress(1,stream,received.size(),true);
+        require(task.wait_for(2s)==std::future_status::ready,"noise-enabled host playback did not drain");task.get();
+        require(reported && report.enabled && report.sample_rate_hz==48000 && report.active_samples==output_frames,
+            "host noise report omitted final-rate output accounting");
+        require(report.measured_variance>0 && report.measured_mean<.02 && report.measured_mean>-.02,
+            "host noise report did not measure its generated stream");
+        require(upper_band_periodogram(received,48000)>report.expected_variance*.2,
+            "host output lacks broadband noise above the upsampled logical passband");
+        return received;
+    };
+    const auto first=run(),second=run();
+    require(first!=second,"separate host transmissions reused the same background-noise stream");
 }
 void gap_and_close() {
     AudioEndpoint endpoint;endpoint.configure(1,48000);std::atomic<std::size_t> frames=0;
@@ -200,4 +268,4 @@ void paced_capture_stops() {
     }
 }
 }
-int main(){try{playback(8000);playback(44100);playback(48000);playback(8000,true);playback(44100,true);playback(48000,true);minimum_hardware_rate();gap_and_close();capture_monitor_pair();capture_restart();stopped_capture();cancellation();failed_output_keeps_capture();paced_capture_stops();std::cout<<"Host audio bounds, continuity, resampling, readiness, drain, cancellation and output recovery passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+int main(){try{playback(8000);playback(44100);playback(48000);playback(8000,true);playback(44100,true);playback(48000,true);full_rate_background_noise();minimum_hardware_rate();gap_and_close();capture_monitor_pair();capture_restart();stopped_capture();cancellation();failed_output_keeps_capture();paced_capture_stops();std::cout<<"Host audio bounds, continuity, resampling, readiness, drain, cancellation and output recovery passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

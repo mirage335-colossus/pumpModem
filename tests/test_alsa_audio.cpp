@@ -1970,6 +1970,66 @@ void protected_timing_playback() {
     std::cout<<"protected UTC stop after "<<double(stopped_at)/48000<<" s, tail "
         <<double(source.total_samples()-stopped_at)/48000<<" s, original "<<double(original)/48000<<" s\n";
 }
+void timed_background_noise_preroll() {
+    constexpr unsigned rate=48000;
+    f::reset();f::state.available={"default"};f::state.supported_rates={rate};f::state.write_limit=137;
+    const auto epoch=std::ceil(std::chrono::duration<long double>(
+        std::chrono::system_clock::now().time_since_epoch()).count())+6;
+    QueuedPlayback driver(epoch-.125L-.375L/rate,0);
+    constexpr std::size_t source_frames=12000;
+    std::size_t generated=0,frames_before_first_source=0;
+    std::uint64_t accepted_at_first_source=0;
+    long double scheduled_epoch=0;
+    bool source_started=false,reported=false;
+    a::BackgroundNoiseReport noise_report;
+    a::Options options;options.follow_system_clock=true;options.maximum_utc_error_seconds=.03;
+    options.maximum_timing_rate_correction=.0002;options.maximum_timing_slew_per_second=1e-14;
+    options.timing_stop_duration_seconds=static_cast<double>(source_frames)/rate;
+    options.estimated_timing=a::EstimatedDeviceTiming{.001,.03,120};options.allow_timing_fallback=true;
+    options.background_noise.mode=datapump::background_noise::Mode::EffectiveBits;
+    options.background_noise.value=5;
+    options.background_noise_report=[&](const auto& value){noise_report=value;reported=true;};
+    options.frame_timestamp=[&](auto frames,bool capture){return driver.stamp(frames,capture);};
+    options.timing_status=[](const auto& status) {
+        check(status.following_system_clock,"noise preroll fixture lost UTC scheduling");
+    };
+    a::playback(rate,"default",[&](std::span<float> output) {
+        if(!source_started) {
+            source_started=true;
+            frames_before_first_source=f::state.played.size();
+            accepted_at_first_source=driver.accepted;
+        }
+        const auto count=std::min(output.size(),source_frames-generated);
+        std::fill_n(output.begin(),count,0.f);generated+=count;return count;
+    },{},[&](const auto&) {
+        scheduled_epoch=std::ceil(driver.origin+.125L);
+        a::schedule_output(static_cast<double>(scheduled_epoch));
+    },
+        a::ChannelMode::left_mono,options);
+    check(source_started && generated==source_frames && reported && noise_report.enabled,
+        "scheduled noise transmission did not complete or report");
+    const auto predicted_prefix=static_cast<std::int64_t>(std::ceil(
+        (scheduled_epoch-driver.origin)*rate-static_cast<long double>(accepted_at_first_source)-1e-6L));
+    check(predicted_prefix>0 && predicted_prefix<2400,
+        "timed fixture did not exercise an in-block scheduled prefix");
+    const auto predicted_active=frames_before_first_source+static_cast<std::size_t>(predicted_prefix);
+    check(predicted_active<=f::state.played.size(),"predicted scheduled start exceeds emitted provider PCM");
+    check(std::all_of(f::state.played.begin(),
+                      f::state.played.begin()+static_cast<std::ptrdiff_t>(predicted_active-4),
+                      [](auto sample){return sample==0;}),
+        "cryptographic noise leaked into UTC calibration or scheduled lead-in silence");
+    const auto active_begin=static_cast<std::size_t>(std::max<std::int64_t>(0,predicted_active-4));
+    const auto active_end=std::min(f::state.played.size(),predicted_active+32);
+    check(std::any_of(f::state.played.begin()+static_cast<std::ptrdiff_t>(active_begin),
+                      f::state.played.begin()+static_cast<std::ptrdiff_t>(active_end),
+                      [](auto sample){return sample!=0;}),
+        "scheduled source-zero samples did not receive background noise");
+    check(std::any_of(f::state.played.end()-256,f::state.played.end(),[](auto sample){return sample!=0;}),
+        "background noise stopped before the end of the scheduled source");
+    check(noise_report.active_samples+4>=f::state.played.size()-predicted_active &&
+          noise_report.active_samples<=f::state.played.size()-predicted_active+4,
+        "noise accounting included preparation or omitted scheduled source frames");
+}
 long double outside_energy(std::span<const float> pcm,double low,double high) {
     std::size_t size=1;while(size<pcm.size())size*=2;
     std::vector<std::complex<double>> bins(size);
@@ -2983,7 +3043,31 @@ void minimum_hardware_rate() {
         check(!f::state.opens,"invalid minimum rate opened hardware");
     }
 }
+void full_rate_background_noise_output() {
+    const auto run=[] {
+        f::reset();f::state.available={"default"};f::state.supported_rates={48000};
+        a::Options options;options.background_noise.mode=datapump::background_noise::Mode::EffectiveBits;
+        options.background_noise.value=5;
+        datapump::audio::BackgroundNoiseReport report;bool reported=false;
+        options.background_noise_report=[&](const auto& value){report=value;reported=true;};
+        std::size_t generated=0;
+        a::playback(8000,"default",[&](std::span<float> out) {
+            const auto count=std::min<std::size_t>(out.size(),1001-generated);
+            std::fill_n(out.begin(),count,0.f);generated+=count;return count;
+        },{},{},a::ChannelMode::left_mono,options);
+        check(generated==1001 && f::state.played.size()==6006,"full-rate native noise changed resampled duration");
+        check(std::any_of(f::state.played.begin(),f::state.played.end(),[](auto value){return value!=0;}),
+            "final S16 provider stage did not add background noise to silence");
+        check(reported && report.enabled && report.sample_rate_hz==48000 && report.active_samples==f::state.played.size(),
+            "native noise report omitted final DAC-rate frame accounting");
+        check(report.measured_variance>0 && report.peak>0,"native noise output report did not record emitted noise");
+        return f::state.played;
+    };
+    const auto first=run(),second=run();
+    check(first!=second,"separate native transmissions reused one background-noise stream");
+}
 int main(int argc,char** argv){try{
+    full_rate_background_noise_output();
     if(argc==2&&std::string(argv[1])=="--minimum-rate") {minimum_hardware_rate();return 0;}
     minimum_hardware_rate();
     if(argc==2&&std::string(argv[1])=="--dsss-clipping-diagnostic") {native_queued_dsss_playback(false,true);return 0;}
@@ -3004,9 +3088,10 @@ int main(int argc,char** argv){try{
     if(argc==2 && std::string(argv[1])=="--native-frontier") {native_playback_frontiers();return 0;}
     if(argc==2 && std::string(argv[1])=="--utc-runtime") {
         native_pipewire_dated_observations();native_source_endpoint_contract();shared_server_timing_fallback();native_prepared_positive_pointer();native_absolute_clock_not_steering_limit();native_running_pointer_intervals();native_slow_query_recovers();native_playback_frontiers();native_audio_error_model();native_period_refinement();native_protected_period_reserve();
-        independent_cover_runtime();scheduled_payload_runtime();bounded_clock_provider();protected_timing_playback();native_queued_dsss_playback(true);
+        independent_cover_runtime();scheduled_payload_runtime();bounded_clock_provider();protected_timing_playback();timed_background_noise_preroll();native_queued_dsss_playback(true);
         std::cout<<"Native runtime UTC timing passed\n";return 0;
     }
+    if(argc==2 && std::string(argv[1])=="--background-noise-preroll") {timed_background_noise_preroll();return 0;}
     if(argc==2 && std::string(argv[1])=="--period") {native_period_refinement();native_protected_period_reserve();std::cout<<"Native period refinement passed\n";return 0;}
     if(argc==2 && std::string(argv[1])=="--lag") {bounded_clock_provider();std::cout<<"One-sided audio lag scheduling passed\n";return 0;}
     if(argc==2 && std::string(argv[1])=="--interleave") {
@@ -3133,7 +3218,7 @@ int main(int argc,char** argv){try{
     bounded_clock_provider();
     zero_audio_error_requests();
     playback_discontinuity_observer();
-    independent_cover_runtime();scheduled_payload_runtime();protected_timing_playback();
+    independent_cover_runtime();scheduled_payload_runtime();protected_timing_playback();timed_background_noise_preroll();
     native_queued_dsss_playback();
     std::cout<<"ALSA default resolution and streaming tests passed\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

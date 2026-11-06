@@ -64,6 +64,23 @@ class TriadAudioCaptureCliTests(unittest.TestCase):
         self.assertNotEqual(bad_deadline.returncode, 0)
         self.assertIn("max-seconds", bad_deadline.stderr)
 
+    def test_background_noise_levels_are_validated_before_opening_devices(self):
+        with tempfile.TemporaryDirectory() as directory:
+            args, _ = self.valid_args(Path(directory))
+            bad_bits = self.invoke(*args, "--background-noise-bits", "17")
+            missing_refs = self.invoke(*args, "--background-noise-watts", "0.001")
+            valid_watts = self.invoke(*args, "--background-noise-watts", "0.001",
+                                      "--background-noise-reference-watts", "40W",
+                                      "--background-noise-reference-rms", "0.2",
+                                      "--preroll-seconds", "0")
+        self.assertNotEqual(bad_bits.returncode, 0)
+        self.assertIn("effective DAC bits", bad_bits.stderr)
+        self.assertNotEqual(missing_refs.returncode, 0)
+        self.assertIn("reference watts and reference RMS", missing_refs.stderr)
+        # The watt settings passed their checks and the later timing guard ran;
+        # this test never reaches any device operation.
+        self.assertIn("pre/post roll", valid_watts.stderr)
+
     def test_nonfinite_and_overrange_pcm_are_rejected_before_device_open(self):
         for sample, message in ((float("nan"), "nonfinite"), (0.981, "0.98")):
             with self.subTest(sample=sample), tempfile.TemporaryDirectory() as directory:

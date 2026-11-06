@@ -2153,7 +2153,7 @@ void random_selective_response_checks() {
     }
 }
 
-void cryptographic_background_noise_checks() {
+void diagnostic_iq_noise_checks() {
     constexpr double tau = 6.2831853071795864769;
     const auto f = fixture_format();
     StreamChannelReport baseline_report{}, noise_report{};
@@ -2164,23 +2164,23 @@ void cryptographic_background_noise_checks() {
     const auto clean = capture(257, baseline, f, &baseline_report);
 
     auto noisy = baseline;
-    noisy.background_noise.mode = background_noise::Mode::EffectiveBits;
-    noisy.background_noise.value = 8;
+    noisy.diagnostic_iq_noise.mode = background_noise::Mode::EffectiveBits;
+    noisy.diagnostic_iq_noise.value = 8;
     const auto received = capture(257, noisy, f, &noise_report);
-    check(noise_report.background_noise_enabled && noise_report.background_noise_source_samples ==
-          geometry(f).source_samples, "cryptographic background-noise stream did not span the whole finite transmitter calendar");
-    check(noise_report.background_noise_sample_rate_hz == effective_sample_rate(f),
-          "background-noise Nyquist metadata lost the configured simulation sample rate");
-    const double measured = noise_report.background_noise_source_energy /
-        static_cast<double>(noise_report.background_noise_source_samples);
-    check(measured > noise_report.background_noise_expected_variance*.85 &&
-          measured < noise_report.background_noise_expected_variance*1.15,
-          "simulated-DAC noise floor differs from the requested effective-bit variance");
+    check(noise_report.diagnostic_iq_noise_enabled && noise_report.diagnostic_iq_noise_source_samples ==
+          geometry(f).source_samples, "cryptographic diagnostic-IQ noise stream did not span the whole finite transmitter calendar");
+    check(noise_report.diagnostic_iq_noise_sample_rate_hz == effective_sample_rate(f),
+          "diagnostic-IQ Nyquist metadata lost the configured simulation sample rate");
+    const double measured = noise_report.diagnostic_iq_noise_source_energy /
+        static_cast<double>(noise_report.diagnostic_iq_noise_source_samples);
+    check(measured > noise_report.diagnostic_iq_noise_expected_variance*.85 &&
+          measured < noise_report.diagnostic_iq_noise_expected_variance*1.15,
+          "simulated complex-IQ diagnostic noise level differs from the requested effective-bit variance");
 
     // The default remains bit-for-bit identical, and two new transmissions do
-    // not inherit a deterministic channel seed as their background-noise key.
+    // not inherit a deterministic channel seed as their diagnostic-IQ noise key.
     const auto clean_again = capture(257, baseline, f);
-    check(clean == clean_again, "off background-noise mode changed the exact seeded simulation path");
+    check(clean == clean_again, "off diagnostic-IQ noise mode changed the exact seeded simulation path");
     const auto independent = capture(257, noisy, f);
     check(received != independent, "new simulated transmissions reused the cryptographic noise stream");
 
@@ -2206,8 +2206,8 @@ void cryptographic_background_noise_checks() {
         cfg.effects.rf_hz = 30e6;
         cfg.effects.noise_enabled = false;
         if (with_noise) {
-            cfg.background_noise.mode = background_noise::Mode::SuppressionDb;
-            cfg.background_noise.value = 20;
+            cfg.diagnostic_iq_noise.mode = background_noise::Mode::SuppressionDb;
+            cfg.diagnostic_iq_noise.value = 20;
         }
         StreamingChannel channel(emitted, cfg);
         std::vector<Complex> output(static_cast<std::size_t>(channel.total_samples()));
@@ -2216,7 +2216,7 @@ void cryptographic_background_noise_checks() {
             const auto wanted = std::min<std::uint64_t>(257, channel.total_samples() - cursor);
             const auto got = channel.read(std::span(output).subspan(static_cast<std::size_t>(cursor),
                                                                      static_cast<std::size_t>(wanted)));
-            check(got == wanted, "background-noise silent-source stream ended early");
+            check(got == wanted, "diagnostic-IQ noise silent-source stream ended early");
             cursor += got;
         }
         if (report) *report = channel.report();
@@ -2225,8 +2225,8 @@ void cryptographic_background_noise_checks() {
     StreamChannelReport silent_report{};
     const auto silent_noise = run_silent_source(true, &silent_report);
     const auto silent_clean = run_silent_source(false, nullptr);
-    check(silent_report.background_noise_source_samples == 8192,
-          "background noise did not continue throughout a source-silent calendar region");
+    check(silent_report.diagnostic_iq_noise_source_samples == 8192,
+          "diagnostic-IQ noise did not continue throughout a source-silent calendar region");
     long double quiet_noise_energy = 0;
     std::size_t quiet_count = 0;
     for (std::size_t n = 0; n < 3000; ++n) {
@@ -2235,9 +2235,9 @@ void cryptographic_background_noise_checks() {
         ++quiet_count;
     }
     const double quiet_variance = static_cast<double>(quiet_noise_energy / quiet_count);
-    check(quiet_variance > .8 * silent_report.background_noise_expected_variance &&
-          quiet_variance < 1.2 * silent_report.background_noise_expected_variance,
-          "transmitter background floor disappeared during the silent source interval");
+    check(quiet_variance > .8 * silent_report.diagnostic_iq_noise_expected_variance &&
+          quiet_variance < 1.2 * silent_report.diagnostic_iq_noise_expected_variance,
+          "transmitter diagnostic-IQ noise disappeared during the silent source interval");
 }
 } // namespace
 
@@ -2269,7 +2269,7 @@ int main() {
         fixed_time_random_process_checks();
         random_channel_waveform_checks();
         random_selective_response_checks();
-        cryptographic_background_noise_checks();
+        diagnostic_iq_noise_checks();
         std::cout << "triad v3 streaming channel checks passed\n";
         return 0;
     } catch (const std::exception& e) {

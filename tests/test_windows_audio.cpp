@@ -74,6 +74,30 @@ void channel_routing() {
         require(error<.00015,"resampling changed active-channel phase/amplitude");clean();
     }
 }
+void full_rate_background_noise() {
+    audio::Options options;options.background_noise.mode=datapump::background_noise::Mode::EffectiveBits;
+    options.background_noise.value=5;
+    audio::BackgroundNoiseReport report;bool reported=false;
+    options.background_noise_report=[&](const auto& value){report=value;reported=true;};
+    fake::reset();fake::state.supported_rates={48000};std::size_t generated=0;
+    audio::playback(8000,"7",[&](std::span<float> out) {
+        const auto count=std::min<std::size_t>(out.size(),1001-generated);
+        std::fill_n(out.begin(),count,0.f);generated+=count;return count;
+    },{},{},audio::ChannelMode::left_mono,options);
+    require(generated==1001 && fake::state.played.size()==6006,"full-rate WinMM noise changed resampled duration");
+    require(std::any_of(fake::state.played.begin(),fake::state.played.end(),[](auto value){return value!=0;}),
+        "final S16 WinMM provider stage did not add noise to silence");
+    require(reported && report.enabled && report.sample_rate_hz==48000 && report.active_samples==6006,
+        "WinMM noise report omitted final DAC-rate frame accounting");
+    require(report.measured_variance>0 && report.peak>0,"WinMM noise report omitted emitted noise measurements");
+    const auto first=fake::state.played;
+    fake::reset();fake::state.supported_rates={48000};generated=0;
+    audio::playback(8000,"7",[&](std::span<float> out) {
+        const auto count=std::min<std::size_t>(out.size(),1001-generated);
+        std::fill_n(out.begin(),count,0.f);generated+=count;return count;
+    },{},{},audio::ChannelMode::left_mono,options);
+    require(first!=fake::state.played,"separate WinMM transmissions reused one noise stream");clean();
+}
 void audio_options() {
     require(!audio::exclusive_supported(),"WinMM incorrectly advertises exclusive hardware support");
     const std::vector<float> samples{0,.25f,-.5f,1,-1,2,-2,.00004f,-.00004f};
@@ -183,7 +207,7 @@ int main() {
     try {
         minimum_hardware_rate();
         passive_capture_is_explicitly_unavailable();
-        channel_routing();audio_options();
+        channel_routing();audio_options();full_rate_background_noise();
         std::vector<float> samples(30000);
         for(std::size_t i=0;i<samples.size();++i)samples[i]=static_cast<float>(i%1000)/1000;
         fake::reset();audio::play(samples,48000,"default");direct_format();

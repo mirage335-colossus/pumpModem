@@ -9,6 +9,7 @@
 #include <bit>
 #include <charconv>
 #include <chrono>
+#include <cctype>
 #include <cmath>
 #include <condition_variable>
 #include <cstdlib>
@@ -52,6 +53,9 @@ struct Config {
     std::uint32_t rate = 48000;
     double pre = .75, post = 1.0, max_seconds = 30.0;
     bool live = false, exclusive = false, rate_set = false;
+    datapump::background_noise::Config background_noise{};
+    unsigned background_noise_levels = 0;
+    std::optional<double> background_noise_reference_watts, background_noise_reference_rms;
 };
 
 struct FormatRecord {
@@ -72,6 +76,7 @@ struct RunState {
     std::uint64_t first_timing_sample = 0, last_timing_sample = 0;
     std::uint64_t timing_count = 0;
     std::string timing_status, capture_error, gap_reason;
+    std::optional<BackgroundNoiseReport> background_noise;
     std::vector<float> logical_capture, raw_capture;
     std::vector<float> input;
     std::uint64_t playback_start_capture_sample = 0;
@@ -120,12 +125,59 @@ double parse_number(std::string_view s, std::string_view name) {
     return value;
 }
 
+double parse_power_watts(std::string_view s, std::string_view name) {
+    std::string value(s);
+    std::erase_if(value, [](unsigned char ch) { return std::isspace(ch) != 0; });
+    double multiplier = 1;
+    if (value.ends_with("kW")) { value.resize(value.size() - 2); multiplier = 1000; }
+    else if (value.ends_with("mW")) { value.resize(value.size() - 2); multiplier = .001; }
+    else if (value.ends_with("uW")) { value.resize(value.size() - 2); multiplier = .000001; }
+    else if (value.ends_with("W")) value.pop_back();
+    const double watts = parse_number(value, name) * multiplier;
+    if (!std::isfinite(watts) || watts <= 0)
+        throw std::runtime_error("background-noise watts must be finite and positive");
+    return watts;
+}
+
+void set_background_noise_level(Config& c, datapump::background_noise::Mode mode,
+                                std::string_view value, std::string_view name) {
+    if (++c.background_noise_levels != 1)
+        throw std::runtime_error("choose exactly one background-noise level option");
+    c.background_noise.mode = mode;
+    c.background_noise.value = parse_number(value, name);
+}
+
+void finish_background_noise_config(Config& c) {
+    using datapump::background_noise::Mode;
+    if (!c.background_noise_levels) {
+        if (c.background_noise_reference_watts || c.background_noise_reference_rms)
+            throw std::runtime_error("background-noise references require --background-noise-watts");
+        return;
+    }
+    if (c.background_noise.mode == Mode::RelativeWatts) {
+        if (!c.background_noise_reference_watts || !c.background_noise_reference_rms)
+            throw std::runtime_error("--background-noise-watts requires both reference watts and reference RMS");
+        if (c.background_noise.value <= 0)
+            throw std::runtime_error("background-noise watts must be finite and positive");
+        if (*c.background_noise_reference_rms <= 0 || *c.background_noise_reference_rms > 1)
+            throw std::runtime_error("background-noise reference RMS must be greater than zero and at most 1");
+        c.background_noise.reference_watts = *c.background_noise_reference_watts;
+        c.background_noise.reference_mean_square = *c.background_noise_reference_rms * *c.background_noise_reference_rms;
+    } else if (c.background_noise_reference_watts || c.background_noise_reference_rms) {
+        throw std::runtime_error("background-noise references are only valid with --background-noise-watts");
+    }
+    (void)datapump::background_noise::resolve(c.background_noise);
+}
+
 void usage(std::ostream& out) {
     out << "Usage: triad_audio_capture --live --input mono-f32le --output new-mono-f32le "
            "--metadata new-json --rate 48000 --capture-device hw:1,0 "
            "--playback-device hw:1,0 --exclusive [options]\n"
            "Options: --raw-output new-provider-rate-f32le --preroll-seconds .75 "
-           "--postroll-seconds 1 --max-seconds 30 --list-devices\n"
+           "--postroll-seconds 1 --max-seconds 30 --list-devices "
+           "[--background-noise-bits BITS | --background-noise-obscured-bits BITS | "
+           "--background-noise-db DB | --background-noise-watts WATTS "
+           "--background-noise-reference-watts WATTS --background-noise-reference-rms RMS]\n"
            "The named audio devices must be explicit ALSA hw endpoints.\n";
 }
 
@@ -155,6 +207,12 @@ Config parse_args(int argc, char **argv, bool& help, bool& list) {
         } else if (key == "--preroll-seconds") c.pre = parse_number(value, key);
         else if (key == "--postroll-seconds") c.post = parse_number(value, key);
         else if (key == "--max-seconds") c.max_seconds = parse_number(value, key);
+        else if (key == "--background-noise-bits") set_background_noise_level(c, datapump::background_noise::Mode::EffectiveBits, value, key);
+        else if (key == "--background-noise-obscured-bits") set_background_noise_level(c, datapump::background_noise::Mode::ObscuredBits, value, key);
+        else if (key == "--background-noise-db") set_background_noise_level(c, datapump::background_noise::Mode::SuppressionDb, value, key);
+        else if (key == "--background-noise-watts") set_background_noise_level(c, datapump::background_noise::Mode::RelativeWatts, value, key);
+        else if (key == "--background-noise-reference-watts") c.background_noise_reference_watts = parse_power_watts(value, key);
+        else if (key == "--background-noise-reference-rms") c.background_noise_reference_rms = parse_number(value, key);
         else throw std::runtime_error("unknown option: " + std::string(key));
     }
     if (help || list) {
@@ -170,6 +228,7 @@ Config parse_args(int argc, char **argv, bool& help, bool& list) {
     if (!c.capture_device.starts_with("hw:") || !c.playback_device.starts_with("hw:"))
         throw std::runtime_error("capture and playback must name explicit hw:C,D endpoints; monitor/default aliases are rejected");
     if (c.rate < kMinRate || c.rate > kMaxRate) throw std::runtime_error("logical rate must be 44100..192000 Hz");
+    finish_background_noise_config(c);
     if (!std::isfinite(c.pre) || c.pre < .1 || c.pre > 10 || !std::isfinite(c.post) || c.post < .1 || c.post > 10)
         throw std::runtime_error("pre/post roll must be finite and 0.1..10 seconds");
     if (!std::isfinite(c.max_seconds) || c.max_seconds < 2 || c.max_seconds > kHardMaxSeconds)
@@ -320,7 +379,20 @@ std::string make_metadata(const Config& c, const RunState& s, bool success, std:
     add_prediction("last_capture_prediction", s.last_timing, s.last_timing_sample);
     o << "},\"audio_format\":{\"capture\":"; append_format_json(o, s.capture_format);
     o << ",\"playback\":"; append_format_json(o, s.playback_format);
-    o << "},\"discontinuity\":{\"capture\":" << (s.capture_gap.load() ? "true" : "false")
+    o << "},\"background_noise\":";
+    if (!s.background_noise) o << "null";
+    else {
+        const auto& r = *s.background_noise;
+        o << "{\"enabled\":" << (r.enabled ? "true" : "false")
+          << ",\"sample_rate_hz\":" << r.sample_rate_hz
+          << ",\"format\":" << json_string(r.sample_format == AudioOutputSampleFormat::S16 ? "s16" : "float32")
+          << ",\"active_samples\":" << r.active_samples
+          << ",\"expected_variance\":" << r.expected_variance
+          << ",\"measured_mean\":" << r.measured_mean
+          << ",\"measured_variance\":" << r.measured_variance
+          << ",\"peak\":" << r.peak << "}";
+    }
+    o << ",\"discontinuity\":{\"capture\":" << (s.capture_gap.load() ? "true" : "false")
       << ",\"playback\":" << (s.playback_gap.load() ? "true" : "false")
       << ",\"reason\":" << json_string(s.gap_reason) << "},\"timing_status\":" << json_string(s.timing_status)
       << ",\"elapsed_seconds\":" << elapsed << ",\"capture_timing_note\":\"native device timestamps are observational estimates, not calibrated DAC-to-ADC or radio latency\"}\n";
@@ -445,6 +517,10 @@ int run(const Config& c) {
         s.playback_call_start_seconds = std::chrono::duration<double>(Clock::now() - started).count();
         Options playback_options;
         playback_options.exclusive = c.exclusive;
+        playback_options.background_noise = c.background_noise;
+        playback_options.background_noise_report = [&](const BackgroundNoiseReport& report) {
+            s.background_noise = report;
+        };
         playback_options.playback_discontinuity = [&](const std::string& reason) {
             s.playback_gap.store(true);
             std::lock_guard lock(s.timing_mutex);
