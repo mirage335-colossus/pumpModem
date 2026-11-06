@@ -18,7 +18,9 @@ from triad_realtime_fft import FFTScreen
 from triad_realtime_receiver import refinement_coordinates
 from triad_segmented_fft import SegmentedFFTScreen
 from triad_weak_helper import estimate_weak_helper
-from triad_operational_admission import PublicGrid, operational_decision
+from triad_operational_admission import (DEFAULT_COHERENCES, DEFAULT_ALPHA_PER_DAY,
+    DEFAULT_MINIMUM_ATTEMPT_SPACING_SECONDS, public_grid, operational_threshold,
+    operational_decision)
 
 
 def _timed(f):
@@ -29,13 +31,27 @@ def _timed(f):
 class WeakReceiver:
     def __init__(self, manifest, templates, epochs, *, precision='fp32',
                  block_seconds=.5, screen_mode='auto', noise_inflation=1.,
-                 top_per_bit=2, coherences=(.5,2.,math.inf),
-                 memory_limit_bytes=2*1024**3):
+                 top_per_bit=2, coherences=DEFAULT_COHERENCES,
+                 memory_limit_bytes=2*1024**3, admission_policy=None):
         c,w=time.process_time(),time.perf_counter()
         if not math.isfinite(noise_inflation) or noise_inflation<1:
             raise ValueError('noise inflation must be finite and at least one')
         if screen_mode not in ('auto','whole','segmented'):
             raise ValueError('unsupported acquisition screen')
+        allowed_admission = {'alpha_per_day', 'minimum_attempt_spacing_seconds',
+                             'duration_alternatives', 'log_null_expectation_penalty'}
+        supplied_admission = dict(manifest.get('weak_admission_policy', {})
+                                  if admission_policy is None else admission_policy)
+        unknown_admission = set(supplied_admission) - allowed_admission
+        if unknown_admission:
+            raise ValueError('unsupported operational admission policy argument')
+        admission = dict(alpha_per_day=DEFAULT_ALPHA_PER_DAY,
+                         minimum_attempt_spacing_seconds=DEFAULT_MINIMUM_ATTEMPT_SPACING_SECONDS,
+                         duration_alternatives=1, log_null_expectation_penalty=0.)
+        admission.update(supplied_admission)
+        # Validate at construction so malformed policies cannot fail after scoring.
+        operational_threshold(**admission)
+        self.admission_policy = admission
         self.manifest=copy.deepcopy(manifest)
         self.manifest['power']['complex_noise_variance']*=noise_inflation
         self.templates,self.epochs=templates,tuple(epochs)
@@ -55,8 +71,7 @@ class WeakReceiver:
                      if self.screen_mode=='segmented' else FFTScreen(self.manifest,templates,epochs,**common))
         self.required,self.excluded=core_projection_bands(self.manifest,pilot_use='none',
             frequencies_hz=(-self.cfo_bound,self.cfo_bound),clock_ppm=(-self.clock_bound,self.clock_bound))
-        lo,hi=manifest['calendar']['arrival_prior_seconds']
-        self.grid=PublicGrid(self.epochs,lo,hi,.001,self.cfo_bound,.01,self.clock_bound)
+        self.grid=public_grid(ch,manifest['calendar']['arrival_prior_seconds'],self.epochs)
         names=('triad_weak_receiver.py','triad_weak_helper.py','triad_segmented_fft.py',
             'triad_operational_admission.py','triad_realtime_receiver.py','triad_realtime_fft.py',
             'triad_dynamic_joint.py','triad_dynamic_frequency.py','triad_dynamic_variants.py',
@@ -67,6 +82,7 @@ class WeakReceiver:
             coherences=[str(x)for x in self.coherences],noise_inflation=noise_inflation,
             fixed_projection='original-prior DATA core; lossy receiver projection',
             final_grid=self.grid.__dict__,memory_limit_bytes=memory_limit_bytes,
+            admission_policy=self.admission_policy,
             sources={n:hashlib.sha256((Path(__file__).parent/n).read_bytes()).hexdigest()for n in names})
         self.procedure_id=hashlib.sha256(json.dumps(dict(policy=self.policy,
             geometry=public_geometry(self.manifest),screen=self.screen.procedure_id,
@@ -85,10 +101,20 @@ class WeakReceiver:
         helper,t=_timed(lambda:estimate_weak_helper(raw,self.manifest,self.frequencies,valid=valid))
         r['helper'],r['timing']['helper']=helper,t
         frequency=helper.get('frequency') or {}
-        if frequency.get('status')!='narrowed':return finish('helper_acquisition_unresolved')
+        if frequency.get('status')=='narrowed':
+            intervals=frequency['expanded_intervals_hz']
+            r['frequency_search_source']='helper_narrowed'
+        elif frequency.get('status')=='fallback':
+            # An already precise oscillator prior can be narrower than the
+            # pilot's measurable profile. Non-narrowing is not a DATA failure.
+            # Let the existing interval-grid, work and memory guards decide
+            # whether searching the complete ORIGINAL prior is affordable.
+            intervals=[[-self.cfo_bound,self.cfo_bound]]
+            r['frequency_search_source']='original_prior_after_helper_fallback'
+        else:return finish('helper_acquisition_unresolved')
         try:
             coarse,t=_timed(lambda:self.screen.score(raw,
-                frequency_intervals=frequency['expanded_intervals_hz'],valid=valid,top_per_bit=self.top_per_bit))
+                frequency_intervals=intervals,valid=valid,top_per_bit=self.top_per_bit))
         except MemoryError:return finish('coarse_memory_limit')
         r['coarse'],r['timing']['coarse']=coarse,t
         if not coarse.get('candidates'):return finish('coarse_acquisition_unresolved')
@@ -117,7 +143,8 @@ class WeakReceiver:
         h0=np.asarray(refined['hypothesis_log_evidence'])[...,0]
         zero_h0=bool(np.max(np.abs(h0))<1e-7)
         if not zero_h0:raise RuntimeError('working null is not the required zero-signal hypothesis')
-        decision=operational_decision(evidence[0],coordinates,self.grid,zero_h0_verified=zero_h0)
+        decision=operational_decision(evidence[0],coordinates,self.grid,
+            zero_h0_verified=zero_h0,**self.admission_policy)
         bit=int(np.argmax(evidence[0]))
         r.update(status='scored',bit=bit,score=float(evidence[0,bit]),
             margin=float(evidence[0,bit]-evidence[0,1-bit]),bit_scores=evidence[0].tolist(),

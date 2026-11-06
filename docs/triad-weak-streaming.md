@@ -20,6 +20,8 @@ audio image effects and the remaining physical-null qualification gap.
 The separate [HF background-noise target study](validation-data/triad-v3/2026-11-06-hf-background-target/README.md)
 measures a single scheduled bit after added full-audio noise; it does not
 qualify unrestricted packet streaming or a physical null.
+For automatic weak-receiver DATA duration planning and native fixture export,
+see the [provisional duration-planning guide](triad-duration-planning.md).
 
 ## Acquisition without discarding complex evidence
 
@@ -52,6 +54,12 @@ qualify unrestricted packet streaming or a physical null.
   projection, not removal of effects from the simulated channel. Coherence
   alternatives 0.5, 2 and infinite seconds are a fixed mixture. Clock/CFO
   refinement is approximate; this is not exhaustive continuous acquisition.
+  If Helper returns an explicit frequency fallback, acquisition can use the
+  original oscillator interval under the screen's existing frequency/product/
+  memory limits. This matters when a disciplined oscillator already has a
+  narrower prior than the pilot measurement can resolve. Helper remains marked
+  as fallback; no original prior mass or admission penalty is removed. Early
+  Helper failures without a frequency result still return unresolved.
 
 ## What the false-admission calculation does and does not establish
 
@@ -118,9 +126,10 @@ cable gain probe may set a fixed gain; fitting gain/alignment from the payload
 must not be passed off as blind reception.
 
 Current sampled qualification covers this Rate 36/Added×10, 6-kHz analytic
-geometry and 48-kHz audio bridge. Helper failure returns an explicit unresolved
-result; a practical Helper-free broad-frequency acquisition fallback is not
-qualified here. Higher rates, larger ray renewal, unscheduled overlapping
+geometry and 48-kHz audio bridge. The [duration study](validation-data/triad-v3/2026-11-06-duration-planner/README.md)
+adds a bounded Rate100/Added×1 stable-oscillator example and an original-prior
+fallback check. A practical Helper-free broad-frequency acquisition fallback
+is not qualified here. Higher rates, larger ray renewal, unscheduled overlapping
 messages, multi-day frontends and different audio hardware do not inherit this
 study's sensitivity or timing evidence. The full public scheduled window is
 currently collected before scoring; templates are reusable inputs, but this

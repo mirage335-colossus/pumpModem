@@ -5,7 +5,8 @@ import unittest
 import numpy as np
 from scipy.special import logsumexp
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tools'))
-from triad_operational_admission import PublicGrid,operational_decision
+from triad_operational_admission import (PublicGrid,operational_decision,
+    operational_threshold,public_grid)
 
 
 class AdmissionTests(unittest.TestCase):
@@ -31,6 +32,21 @@ class AdmissionTests(unittest.TestCase):
         self.assertAlmostEqual(b['log_e_threshold']-a['log_e_threshold'],np.log(4))
         self.assertEqual(a['attempts_per_24h_bound'],216001)
         self.assertFalse(a['physical_null_qualified'])
+
+    def test_shared_threshold_matches_existing_formula_and_validates_budget(self):
+        p=operational_threshold()
+        self.assertEqual(p['attempts_per_24h_bound'],216001)
+        self.assertAlmostEqual(p['log_e_threshold'],np.log(216001/1e-4))
+        for args in (dict(alpha_per_day=0),dict(minimum_attempt_spacing_seconds=0),
+                     dict(duration_alternatives=0),dict(duration_alternatives=True),
+                     dict(log_null_expectation_penalty=-1)):
+            with self.assertRaises(ValueError):operational_threshold(**args)
+
+    def test_shared_grid_constructor_matches_receiver_geometry_without_arrays(self):
+        physics=dict(spread_margin=1.,deterministic_cfo_bound_hz=5.,sample_clock_pair_ppm=10.)
+        g=public_grid(physics,(-.002, .003),(0,1))
+        self.assertEqual(g.__dict__,PublicGrid((0,1),-.002,.003,.001,5.,.01,10.).__dict__)
+        self.assertEqual(g.counts,(2,6,1001,9))
 
     def test_selected_atoms_must_be_finite_unique_and_fixed(self):
         grid=self.grid()

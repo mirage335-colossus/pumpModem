@@ -24,6 +24,8 @@ The [weak-signal and continuous-audio path](triad-weak-streaming.md) adds
 pilot-aware weak onset, segmented complex acquisition, fixed-prior operational
 admission accounting and a bounded streaming audio experiment. It explicitly
 separates Gaussian-null theory from physical Helper/audio qualification.
+For planning weak-receiver DATA observation time and exporting a matching native
+fixture, use the [provisional duration-planning guide](triad-duration-planning.md).
 The [cryptographic background-noise feature](triad-background-noise.md) adds an
 optional fresh AES-256 noise floor at the shared final-rate audio output layer
 for native and host/browser backends, with explicit effective-bit, dB and

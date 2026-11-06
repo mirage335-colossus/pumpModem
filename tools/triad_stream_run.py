@@ -90,7 +90,8 @@ class StreamSession:
         c,w=time.process_time(),time.perf_counter()
         if self.receiver_factory is None:
             from triad_weak_receiver import WeakReceiver
-            receiver=WeakReceiver(*self.slots[index],noise_inflation=self.noise_inflation)
+            receiver=WeakReceiver(*self.slots[index],noise_inflation=self.noise_inflation,
+                admission_policy=self.slots[index][0].get('weak_admission_policy'))
         else:receiver=self.receiver_factory(*self.slots[index])
         preparation=dict(cpu_seconds=time.process_time()-c,wall_seconds=time.perf_counter()-w)
         result=receiver.score(raw,valid)

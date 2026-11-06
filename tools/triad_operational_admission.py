@@ -22,6 +22,44 @@ import numpy as np
 from scipy.special import logsumexp
 
 
+DEFAULT_COHERENCES = (.5, 2., math.inf)
+DEFAULT_ALPHA_PER_DAY = 1e-4
+DEFAULT_MINIMUM_ATTEMPT_SPACING_SECONDS = .4
+
+
+def public_grid(physics, arrival_prior, epochs):
+    """Build the receiver's public final grid from public channel bounds.
+
+    ``physics`` is the channel-physics mapping (or a manifest containing one);
+    this intentionally allocates only the compact grid descriptor.
+    """
+    channel = physics.get('channel', physics)
+    margin = float(channel['spread_margin'])
+    cfo_bound = float(channel['deterministic_cfo_bound_hz']) * margin
+    clock_bound = float(channel['sample_clock_pair_ppm']) * margin
+    lo, hi = map(float, arrival_prior)
+    return PublicGrid(tuple(epochs), lo, hi, .001, cfo_bound, .01, clock_bound)
+
+
+def operational_threshold(alpha_per_day=DEFAULT_ALPHA_PER_DAY,
+                           minimum_attempt_spacing_seconds=DEFAULT_MINIMUM_ATTEMPT_SPACING_SECONDS,
+                           duration_alternatives=1, log_null_expectation_penalty=0.):
+    """Validate an operational search budget and return its fixed threshold."""
+    if (not math.isfinite(alpha_per_day) or not 0 < alpha_per_day < 1 or
+            not math.isfinite(minimum_attempt_spacing_seconds) or minimum_attempt_spacing_seconds <= 0 or
+            isinstance(duration_alternatives, bool) or not isinstance(duration_alternatives, int) or
+            duration_alternatives < 1 or not math.isfinite(log_null_expectation_penalty) or
+            log_null_expectation_penalty < 0):
+        raise ValueError('invalid operational error budget')
+    attempts = math.ceil(86400 / minimum_attempt_spacing_seconds) + 1
+    return dict(alpha_per_24h=alpha_per_day,
+                minimum_attempt_spacing_seconds=minimum_attempt_spacing_seconds,
+                duration_alternatives=duration_alternatives,
+                log_null_expectation_penalty=log_null_expectation_penalty,
+                attempts_per_24h_bound=attempts,
+                log_e_threshold=math.log(attempts * duration_alternatives / alpha_per_day))
+
+
 @dataclass(frozen=True)
 class PublicGrid:
     epochs: tuple
@@ -98,7 +136,8 @@ class PublicGrid:
 
 
 def operational_decision(bit_log_evidence, coordinates, grid, *,
-                         alpha_per_day=1e-4, minimum_attempt_spacing_seconds=.4,
+                         alpha_per_day=DEFAULT_ALPHA_PER_DAY,
+                         minimum_attempt_spacing_seconds=DEFAULT_MINIMUM_ATTEMPT_SPACING_SECONDS,
                          duration_alternatives=1, log_null_expectation_penalty=0.,
                          zero_h0_verified=False):
     """Correct selected-candidate averages, then apply an operational budget.
@@ -114,16 +153,13 @@ def operational_decision(bit_log_evidence, coordinates, grid, *,
         raise ValueError('two finite DATA-versus-H0 log evidences required')
     if not zero_h0_verified:
         raise ValueError('fixed zero-signal H0 likelihood must be verified')
-    if (not math.isfinite(alpha_per_day) or not 0<alpha_per_day<1 or
-            not math.isfinite(minimum_attempt_spacing_seconds) or minimum_attempt_spacing_seconds<=0 or
-            not isinstance(duration_alternatives,int) or duration_alternatives<1 or
-            not math.isfinite(log_null_expectation_penalty) or log_null_expectation_penalty<0):
-        raise ValueError('invalid operational error budget')
+    threshold_policy = operational_threshold(alpha_per_day, minimum_attempt_spacing_seconds,
+                                             duration_alternatives, log_null_expectation_penalty)
     selected = grid.validate_selected(coordinates)
-    attempts = math.ceil(86400/minimum_attempt_spacing_seconds)+1
+    attempts = threshold_policy['attempts_per_24h_bound']
     log_mass = math.log(selected)-math.log(grid.candidate_count)
     log_e = float(logsumexp(evidence)-math.log(2)+log_mass-log_null_expectation_penalty)
-    threshold = math.log(attempts*duration_alternatives/alpha_per_day)
+    threshold = threshold_policy['log_e_threshold']
     return dict(schema='triad-operational-grid-budget-v1',
         candidate_bit=int(np.argmax(evidence)), passes_conditional_bound=log_e>=threshold,
         log_e_lower_bound=log_e, log_e_threshold=threshold,

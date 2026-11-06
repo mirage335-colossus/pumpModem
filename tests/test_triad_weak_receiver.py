@@ -44,6 +44,35 @@ class WeakContracts(unittest.TestCase):
         self.assertFalse(r['operational']['physical_null_qualified'])
         self.assertLess(r['operational']['selected_prior_mass'],1.)
 
+    def test_admission_policy_is_validated_fingerprinted_and_applied(self):
+        m,t,screen,dynamic,helper=self.pipeline()
+        policy=dict(alpha_per_day=1e-3,duration_alternatives=3)
+        with mock.patch('triad_weak_receiver.FFTScreen',return_value=screen),mock.patch('triad_weak_receiver.ScanJointReceiver',return_value=dynamic),mock.patch('triad_weak_receiver.estimate_weak_helper',return_value=helper):
+            rx=WeakReceiver(m,t,[0],admission_policy=policy)
+            r=rx.score(np.zeros(m['calendar']['capture_samples'],complex))
+            default=WeakReceiver(m,t,[0])
+            default_result=default.score(np.zeros(m['calendar']['capture_samples'],complex))
+        self.assertEqual(rx.policy['admission_policy']['alpha_per_day'],1e-3)
+        self.assertEqual(r['operational']['duration_alternatives'],3)
+        self.assertAlmostEqual(r['operational']['log_e_threshold']-default_result['operational']['log_e_threshold'],
+            np.log(3*1e-4/1e-3))
+        self.assertNotEqual(rx.procedure_id,default.procedure_id)
+
+    def test_invalid_or_unrecognized_admission_policy_fails_at_construction(self):
+        m,t=self.inputs()
+        for policy in ({'alpha_per_day':0},{'unknown':1},{'zero_h0_verified':True}):
+            with self.assertRaises(ValueError):WeakReceiver(m,t,[0],admission_policy=policy)
+
+    def test_manifest_policy_is_default_and_explicit_policy_can_override(self):
+        m,t,screen,dynamic,helper=self.pipeline()
+        m['weak_admission_policy']=dict(duration_alternatives=2)
+        with mock.patch('triad_weak_receiver.FFTScreen',return_value=screen):
+            rx=WeakReceiver(m,t,[0])
+            override=WeakReceiver(m,t,[0],admission_policy={})
+        self.assertEqual(rx.admission_policy['duration_alternatives'],2)
+        self.assertEqual(override.admission_policy['duration_alternatives'],1)
+        self.assertNotEqual(rx.procedure_id,override.procedure_id)
+
     def test_nonzero_helper_null_cannot_borrow_noise_evalue(self):
         m,t,screen,dynamic,helper=self.pipeline(h0=1.)
         with mock.patch('triad_weak_receiver.FFTScreen',return_value=screen),mock.patch('triad_weak_receiver.ScanJointReceiver',return_value=dynamic),mock.patch('triad_weak_receiver.estimate_weak_helper',return_value=helper):
@@ -54,6 +83,26 @@ class WeakContracts(unittest.TestCase):
         with mock.patch('triad_weak_receiver.FFTScreen',return_value=screen),mock.patch('triad_weak_receiver.estimate_weak_helper',return_value=dict(frequency=None)):
             r=WeakReceiver(m,t,[0]).score(np.zeros(m['calendar']['capture_samples'],complex))
         self.assertEqual(r['reason'],'helper_acquisition_unresolved');screen.score.assert_not_called()
+
+    def test_non_narrowing_helper_uses_original_interval_without_prior_discount(self):
+        m,t,screen,dynamic,helper=self.pipeline()
+        helper['frequency']=dict(status='fallback',expanded_intervals_hz=[])
+        with mock.patch('triad_weak_receiver.FFTScreen',return_value=screen),mock.patch('triad_weak_receiver.ScanJointReceiver',return_value=dynamic),mock.patch('triad_weak_receiver.estimate_weak_helper',return_value=helper):
+            rx=WeakReceiver(m,t,[0]);r=rx.score(np.zeros(m['calendar']['capture_samples'],complex))
+        self.assertEqual(screen.score.call_args.kwargs['frequency_intervals'],[[-5.,5.]])
+        self.assertEqual(r['frequency_search_source'],'original_prior_after_helper_fallback')
+        self.assertEqual(r['helper']['frequency']['status'],'fallback')
+        self.assertEqual(r['operational']['full_grid_candidates'],rx.grid.candidate_count)
+
+    def test_original_prior_fallback_preserves_screen_work_limit(self):
+        m,t,screen,dynamic,helper=self.pipeline()
+        helper['frequency']=dict(status='fallback')
+        screen.score.return_value=dict(candidates=[],reason='frequency_work_limit')
+        with mock.patch('triad_weak_receiver.FFTScreen',return_value=screen),mock.patch('triad_weak_receiver.ScanJointReceiver',return_value=dynamic)as refined,mock.patch('triad_weak_receiver.estimate_weak_helper',return_value=helper):
+            r=WeakReceiver(m,t,[0]).score(np.zeros(m['calendar']['capture_samples'],complex))
+        self.assertEqual(r['reason'],'coarse_acquisition_unresolved')
+        self.assertEqual(r['coarse']['reason'],'frequency_work_limit')
+        refined.assert_not_called()
 
     def test_refinement_work_limit_is_explicit(self):
         m,t,screen,dynamic,helper=self.pipeline()

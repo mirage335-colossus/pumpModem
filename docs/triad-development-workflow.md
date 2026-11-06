@@ -19,6 +19,8 @@ a separate streaming study. Its waveform, key addressing, channel state, and
 reception contracts are in the [v3 study](triad-v3.md); this page describes how
 to make the next bounded development decision without replaying old campaigns
 by default.
+For its provisional weak-receiver duration model and automatic native-export
+wrapper, see the [duration-planning guide](triad-duration-planning.md).
 
 For isolated performance regressions, first follow the
 [required efficient regression workflow](triad-performance.md#required-efficient-regression-workflow)
