@@ -399,7 +399,12 @@ class DynamicJointReceiver(ProjectedJointReceiver):
 
     A singleton timing/CFO/epoch bank is a *conditioned* diagnostic, not blind
     acquisition.  Dynamic gains approximate unmodeled channel evolution but do
-    not make omitted timing/clock hypotheses exhaustive.
+    not make omitted timing/clock hypotheses exhaustive. ``candidate_coordinates``
+    optionally supplies correlated (epoch, arrival, CFO, clock ppm) hypotheses
+    without expanding their Cartesian product. It overrides the three numeric
+    banks; ``selected_epochs`` still restricts allowed epochs. Caller order is
+    retained and bound in the procedure identity. Adaptive selection and its
+    admission calibration belong to the outer procedure, not this scorer.
     """
 
     def __init__(self, manifest, raw_templates, epoch_offsets, *,
@@ -408,7 +413,8 @@ class DynamicJointReceiver(ProjectedJointReceiver):
                  coherence_seconds=(.5, math.inf), pilot_use="both",
                  required_bands_hz=None, auxiliary_exclusion_hz=None,
                  auxiliary_half_width_hz=200., valid=None, device="cpu",
-                 precision="fp32", memory_limit_bytes=512*1024**2):
+                 precision="fp32", memory_limit_bytes=512*1024**2,
+                 candidate_coordinates=None):
         m = manifest
         if m.get("schema") == "triad-helper-whole-bit-public-v1" or m.get("whole_bit_calendar"):
             raise ValueError("whole-bit train needs an explicit calendar/template adapter")
@@ -419,9 +425,51 @@ class DynamicJointReceiver(ProjectedJointReceiver):
         chosen = epochs if selected_epochs is None else tuple(int(x) for x in selected_epochs)
         if not chosen or any(x not in epochs for x in chosen) or len(set(chosen)) != len(chosen):
             raise ValueError("selected epochs must be a unique nonempty public subset")
-        arrivals = tuple(_finite(x, "arrival") for x in arrival_seconds)
-        cfo = tuple(_finite(x, "CFO") for x in frequencies_hz)
-        clocks = tuple(_finite(x, "clock ppm") for x in clock_ppm)
+        if candidate_coordinates is None:
+            arrivals = tuple(_finite(x, "arrival") for x in arrival_seconds)
+            cfo = tuple(_finite(x, "CFO") for x in frequencies_hz)
+            clocks = tuple(_finite(x, "clock ppm") for x in clock_ppm)
+            candidates = tuple(itertools.product(chosen, arrivals, cfo, clocks))
+        else:
+            # Bound iteration before allocating templates or numerical designs.
+            # In particular, do not first materialize an unbounded generator.
+            candidates_list, seen = [], set()
+            try:
+                coordinate_iterator = iter(candidate_coordinates)
+            except TypeError as error:
+                raise ValueError("candidate coordinates must be an iterable") from error
+            for coordinate in coordinate_iterator:
+                if len(candidates_list) == 4096:
+                    raise ValueError("direct dynamic adapter limited to4096 public hypotheses")
+                try:
+                    coordinate = tuple(coordinate)
+                except TypeError as error:
+                    raise ValueError("each candidate needs epoch, arrival, CFO and clock ppm") from error
+                if len(coordinate) != 4:
+                    raise ValueError("each candidate needs epoch, arrival, CFO and clock ppm")
+                epoch = coordinate[0]
+                if (isinstance(epoch, (bool, np.bool_)) or
+                        not isinstance(epoch, (int, np.integer)) or int(epoch) not in chosen):
+                    raise ValueError("candidate epoch must be an integer in selected epochs")
+                if any(isinstance(value, (bool, np.bool_)) for value in coordinate[1:]):
+                    raise ValueError("candidate arrival, CFO and clock ppm must be finite numbers")
+                try:
+                    candidate = (int(epoch), *(_finite(value, name) for value, name in
+                        zip(coordinate[1:], ("arrival", "CFO", "clock ppm"))))
+                except (TypeError, ValueError, OverflowError) as error:
+                    raise ValueError("candidate arrival, CFO and clock ppm must be finite numbers") from error
+                if candidate in seen:
+                    raise ValueError("candidate coordinates must be unique")
+                seen.add(candidate)
+                candidates_list.append(candidate)
+            if not candidates_list:
+                raise ValueError("candidate coordinates must be nonempty")
+            candidates = tuple(candidates_list)
+            # Plan the projection from the actual sparse bank, not unused
+            # defaults or the superset from which a coarse screen selected it.
+            chosen, arrivals, cfo, clocks = tuple(
+                tuple(dict.fromkeys(candidate[axis] for candidate in candidates))
+                for axis in range(4))
         if any(not values or len(set(values)) != len(values) for values in (arrivals, cfo, clocks)):
             raise ValueError("acquisition banks must be nonempty and unique")
         if any(1+q*1e-6 <= 0 for q in clocks):
@@ -430,7 +478,6 @@ class DynamicJointReceiver(ProjectedJointReceiver):
         bounds = tuple(calendar["arrival_prior_seconds"])
         if min(arrivals) < bounds[0] or max(arrivals) > bounds[1]:
             raise ValueError("arrival bank leaves public prior")
-        candidates = tuple(itertools.product(chosen, arrivals, cfo, clocks))
         if len(candidates) > 4096:
             raise ValueError("direct dynamic adapter limited to4096 public hypotheses")
         fs = int(m["sample_rate_hz"])

@@ -166,6 +166,12 @@ random selective-modulation estimator optimal. The separate
 [frequency-assistance qualification](validation-data/triad-v3/2026-11-05-helper-frequency/README.md)
 records the implemented model, measured narrowing, reception and remaining limits.
 
+The newer [hierarchical CPU acquisition path](triad-realtime.md) first acquires
+Helper onset over the broad prior, then uses an onset-relative 36-second
+frequency aperture, shared FFT timing/epoch proposals and sparse dynamic
+refinement. It has a separate specular-core policy and complete-procedure
+calibration; the older exhaustive small-bank timing and gates do not qualify it.
+
 ## Whole-bit Symbol Burst
 
 The new opt-in calendar is distinct from v3's within-bit `burst_wait_tiles`.

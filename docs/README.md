@@ -14,6 +14,12 @@ Fixed-ray campaign successes do not establish random-channel sensitivity.
 Its [frequency-assistance path](triad-stochastic.md#frequency-assistance-survives-the-phase-fallback)
 retains useful Helper frequency narrowing when coherent pilot-to-DATA phase
 transfer is unresolved, with separate coverage and admission calibration.
+The [local HF CPU cost study](validation-data/triad-v3/2026-11-05-local-cpu/README.md)
+separates measured tile preparation/scoring from the currently impractical broad
+joint-acquisition bank; its projections are not a live receiver CPU ceiling.
+The [hierarchical CPU receiver](triad-realtime.md) acquires Helper onset, shares
+FFT timing/epoch searches and refines sparse dynamic hypotheses. Its cheap tests
+and sampled qualification remain separate; it is an isolated experimental path.
 The [Helper-assisted triad integration](triad-helper.md) documents production
 Helper composition, the requested HF/EME configurations, acquisition reuse and
 scoped admission controls, separately from ordinary Robust integration.
