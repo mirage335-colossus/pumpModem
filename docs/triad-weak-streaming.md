@@ -17,6 +17,9 @@ validation report; successful small tests do not qualify an operational modem.
 The [sampled and live evidence](validation-data/triad-v3/2026-11-06-weak-stream/README.md)
 records independent trials, preserved misses, actual streaming CPU/backlog,
 audio image effects and the remaining physical-null qualification gap.
+The separate [HF background-noise target study](validation-data/triad-v3/2026-11-06-hf-background-target/README.md)
+measures a single scheduled bit after added full-audio noise; it does not
+qualify unrestricted packet streaming or a physical null.
 
 ## Acquisition without discarding complex evidence
 

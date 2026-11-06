@@ -1,0 +1,497 @@
+{
+  "schema": "triad-hf-background-target-summary-v1",
+  "cpu_model": "AMD Ryzen 5 PRO 5650U",
+  "numerical_threads": 2,
+  "source_revision": "74711490dace5fb8db964e50ed882d3d2ece5671",
+  "rows": [
+    {
+      "name": "replay-0",
+      "expected_bit": 0,
+      "selected_bit": 0,
+      "conditional_admission": true,
+      "outcome": "correct_admission",
+      "log_e_lower_bound": 46.11825001708477,
+      "log_e_threshold": 21.493378688261398,
+      "physical_null_qualified": false,
+      "nominal_data_cn0_db_hz": 7.960889988747595,
+      "received_data_cn0_estimate_db_hz": 9.385365676200557,
+      "cn0_scope": "Software source component energy plus actual quiet PSD; live assumes independently calibrated scalar cable gain and excludes unknown gain-response/drift bias.",
+      "received_cpu_seconds_parent": 42.874391974000005,
+      "audio_child_cpu_seconds": 0.0,
+      "receiver_preparation": {
+        "cpu_seconds": 2.8231412239999996,
+        "wall_seconds": 2.791836140968371
+      },
+      "imports": {
+        "cpu_seconds": 1.817816634,
+        "wall_seconds": 1.6034944950370118
+      },
+      "reception_wall_seconds": 31.50802518398268,
+      "duration_denominators_seconds": {
+        "observed_audio": 109.54733333333333,
+        "analysis_window": 85.54733333333333,
+        "transmitted_helper_and_data": 61.4675,
+        "active_data": 23.2
+      },
+      "ratios_including_audio_children": {
+        "observed_audio": {
+          "prepared": 0.39137777862233075,
+          "including_workspace": 0.41714875029363263,
+          "including_workspace_imports": 0.4337475417445123
+        },
+        "analysis_window": {
+          "prepared": 0.501177421941849,
+          "including_workspace": 0.5341783480256544,
+          "including_workspace_imports": 0.5554338713616634
+        },
+        "transmitted_helper_and_data": {
+          "prepared": 0.6975131894741124,
+          "including_workspace": 0.7434421962500508,
+          "including_workspace_imports": 0.7730245501769228
+        },
+        "active_data": {
+          "prepared": 1.848034136810345,
+          "including_workspace": 1.969721258534483,
+          "including_workspace_imports": 2.048098557672414
+        }
+      },
+      "helper_frequency_counts": [
+        365,
+        15
+      ],
+      "near_fullscale_samples": [
+        0,
+        0
+      ],
+      "gap_samples": 0,
+      "scored_records": [
+        "scored"
+      ],
+      "completion_backlog_seconds": 28.89222985797096,
+      "noise_variance_ratio": 0.9997416633322599,
+      "report_sha256": "cbe62ed52fd5415aa4791cc556f58b9687f25b1d0839fc1b6bc30ecd238e2d9d"
+    },
+    {
+      "name": "replay-1",
+      "expected_bit": 1,
+      "selected_bit": 1,
+      "conditional_admission": true,
+      "outcome": "correct_admission",
+      "log_e_lower_bound": 28.967957586751357,
+      "log_e_threshold": 21.493378688261398,
+      "physical_null_qualified": false,
+      "nominal_data_cn0_db_hz": 7.910716760729002,
+      "received_data_cn0_estimate_db_hz": 8.189374230246935,
+      "cn0_scope": "Software source component energy plus actual quiet PSD; live assumes independently calibrated scalar cable gain and excludes unknown gain-response/drift bias.",
+      "received_cpu_seconds_parent": 43.564801677999995,
+      "audio_child_cpu_seconds": 0.0,
+      "receiver_preparation": {
+        "cpu_seconds": 2.6907192710000007,
+        "wall_seconds": 2.6741572100436315
+      },
+      "imports": {
+        "cpu_seconds": 1.99122083,
+        "wall_seconds": 2.367591490969062
+      },
+      "reception_wall_seconds": 32.119762512040325,
+      "duration_denominators_seconds": {
+        "observed_audio": 109.54733333333333,
+        "analysis_window": 85.54733333333333,
+        "transmitted_helper_and_data": 61.4675,
+        "active_data": 23.2
+      },
+      "ratios_including_audio_children": {
+        "observed_audio": {
+          "prepared": 0.3976801657548335,
+          "including_workspace": 0.4222423270519288,
+          "including_workspace_imports": 0.44042408160855884
+        },
+        "analysis_window": {
+          "prepared": 0.5092479213612736,
+          "including_workspace": 0.5407009096211843,
+          "including_workspace_imports": 0.563983490730278
+        },
+        "transmitted_helper_and_data": {
+          "prepared": 0.7087452991906291,
+          "including_workspace": 0.7525199650058974,
+          "including_workspace_imports": 0.7849234746166672
+        },
+        "active_data": {
+          "prepared": 1.877793175775862,
+          "including_workspace": 1.9937724546982756,
+          "including_workspace_imports": 2.0796242963793103
+        }
+      },
+      "helper_frequency_counts": [
+        365,
+        15
+      ],
+      "near_fullscale_samples": [
+        0,
+        0
+      ],
+      "gap_samples": 0,
+      "scored_records": [
+        "scored"
+      ],
+      "completion_backlog_seconds": 29.92568237701198,
+      "noise_variance_ratio": 0.9996779822320847,
+      "report_sha256": "64ed063785f959c8131d15d30713840b4d1af06a863377cd0d3e2ec99f82d09b"
+    },
+    {
+      "name": "replay-null",
+      "expected_bit": null,
+      "selected_bit": 0,
+      "conditional_admission": false,
+      "outcome": "correct_null_rejection",
+      "log_e_lower_bound": -19.97835796056836,
+      "log_e_threshold": 21.493378688261398,
+      "physical_null_qualified": false,
+      "nominal_data_cn0_db_hz": 7.998509449847563,
+      "received_data_cn0_estimate_db_hz": null,
+      "cn0_scope": "Software source component energy plus actual quiet PSD; live assumes independently calibrated scalar cable gain and excludes unknown gain-response/drift bias.",
+      "received_cpu_seconds_parent": 42.9737432,
+      "audio_child_cpu_seconds": 0.0,
+      "receiver_preparation": {
+        "cpu_seconds": 2.660234838,
+        "wall_seconds": 2.6258009119774215
+      },
+      "imports": {
+        "cpu_seconds": 1.971254184,
+        "wall_seconds": 1.7379141050041653
+      },
+      "reception_wall_seconds": 32.03320130700013,
+      "duration_denominators_seconds": {
+        "observed_audio": 109.54733333333333,
+        "analysis_window": 85.54733333333333,
+        "transmitted_helper_and_data": 61.4675,
+        "active_data": 23.200000000000003
+      },
+      "ratios_including_audio_children": {
+        "observed_audio": {
+          "prepared": 0.39228470372015756,
+          "including_workspace": 0.41656858865878377,
+          "including_workspace_imports": 0.4345707990275133
+        },
+        "analysis_window": {
+          "prepared": 0.5023387816491456,
+          "including_workspace": 0.533435424108291,
+          "including_workspace_imports": 0.5564880905463643
+        },
+        "transmitted_helper_and_data": {
+          "prepared": 0.6991295107170457,
+          "including_workspace": 0.7424082326107293,
+          "including_workspace_imports": 0.774491758701753
+        },
+        "active_data": {
+          "prepared": 1.8523165172413791,
+          "including_workspace": 1.9669818119827585,
+          "including_workspace_imports": 2.051985869741379
+        }
+      },
+      "helper_frequency_counts": [
+        365,
+        14
+      ],
+      "near_fullscale_samples": [
+        0,
+        0
+      ],
+      "gap_samples": 0,
+      "scored_records": [
+        "scored"
+      ],
+      "completion_backlog_seconds": 29.814155959000345,
+      "noise_variance_ratio": 1.0002720781720347,
+      "report_sha256": "e9418ea304a5b33a93f98652f198ad91c80b45c336f8b50d1b19505d7e2d082a"
+    },
+    {
+      "name": "live-0",
+      "expected_bit": 0,
+      "selected_bit": 0,
+      "conditional_admission": true,
+      "outcome": "correct_admission",
+      "log_e_lower_bound": 50.52106337149086,
+      "log_e_threshold": 21.493378688261398,
+      "physical_null_qualified": false,
+      "nominal_data_cn0_db_hz": 7.919340680545703,
+      "received_data_cn0_estimate_db_hz": 9.343816367998667,
+      "cn0_scope": "Software source component energy plus actual quiet PSD; live assumes independently calibrated scalar cable gain and excludes unknown gain-response/drift bias.",
+      "received_cpu_seconds_parent": 45.953330906000005,
+      "audio_child_cpu_seconds": 0.11248299999999989,
+      "receiver_preparation": {
+        "cpu_seconds": 2.8510830470000004,
+        "wall_seconds": 2.818013227020856
+      },
+      "imports": {
+        "cpu_seconds": 1.787764196,
+        "wall_seconds": 1.5576992469723336
+      },
+      "reception_wall_seconds": 139.17317186202854,
+      "duration_denominators_seconds": {
+        "observed_audio": 109.54733333333333,
+        "analysis_window": 85.54733333333333,
+        "transmitted_helper_and_data": 61.4675,
+        "active_data": 23.200000000000003
+      },
+      "ratios_including_audio_children": {
+        "observed_audio": {
+          "prepared": 0.42051059121475654,
+          "including_workspace": 0.44653662909488145,
+          "including_workspace_imports": 0.4628602999373179
+        },
+        "analysis_window": {
+          "prepared": 0.5384833414561919,
+          "including_workspace": 0.5718108916662121,
+          "including_workspace_imports": 0.5927141102859237
+        },
+        "transmitted_helper_and_data": {
+          "prepared": 0.7494336666693782,
+          "including_workspace": 0.7958172522552569,
+          "including_workspace_imports": 0.8249092864359215
+        },
+        "active_data": {
+          "prepared": 1.9855954269827585,
+          "including_workspace": 2.1084869376293103,
+          "including_workspace_imports": 2.1855651536206895
+        }
+      },
+      "helper_frequency_counts": [
+        365,
+        16
+      ],
+      "near_fullscale_samples": [
+        0,
+        0
+      ],
+      "gap_samples": 0,
+      "scored_records": [
+        "scored"
+      ],
+      "completion_backlog_seconds": 31.261966812016908,
+      "noise_variance_ratio": 1.000606480446415,
+      "report_sha256": "edd4e198532f9945fee9cb4b3fbd94f48b04fe287142e0c8705f465743ddaffc"
+    },
+    {
+      "name": "live-1",
+      "expected_bit": 1,
+      "selected_bit": 1,
+      "conditional_admission": false,
+      "outcome": "miss",
+      "log_e_lower_bound": 8.425451220511043,
+      "log_e_threshold": 21.493378688261398,
+      "physical_null_qualified": false,
+      "nominal_data_cn0_db_hz": 7.896527825805716,
+      "received_data_cn0_estimate_db_hz": 8.175185295323649,
+      "cn0_scope": "Software source component energy plus actual quiet PSD; live assumes independently calibrated scalar cable gain and excludes unknown gain-response/drift bias.",
+      "received_cpu_seconds_parent": 42.900032108000005,
+      "audio_child_cpu_seconds": 0.117726,
+      "receiver_preparation": {
+        "cpu_seconds": 2.7891728440000003,
+        "wall_seconds": 2.7614926639944315
+      },
+      "imports": {
+        "cpu_seconds": 1.742708051,
+        "wall_seconds": 1.5171665360103361
+      },
+      "reception_wall_seconds": 136.89202880399534,
+      "duration_denominators_seconds": {
+        "observed_audio": 109.54733333333333,
+        "analysis_window": 85.54733333333333,
+        "transmitted_helper_and_data": 61.4675,
+        "active_data": 23.200000000000003
+      },
+      "ratios_including_audio_children": {
+        "observed_audio": {
+          "prepared": 0.3926864926698353,
+          "including_workspace": 0.41814738486255565,
+          "including_workspace_imports": 0.4340597398963006
+        },
+        "analysis_window": {
+          "prepared": 0.5028532910591408,
+          "including_workspace": 0.5354571459698725,
+          "including_workspace_imports": 0.5558336555941741
+        },
+        "transmitted_helper_and_data": {
+          "prepared": 0.6998455786879245,
+          "including_workspace": 0.7452219620449831,
+          "including_workspace_imports": 0.7735809494936349
+        },
+        "active_data": {
+          "prepared": 1.854213711551724,
+          "including_workspace": 1.974436678965517,
+          "including_workspace_imports": 2.049572716077586
+        }
+      },
+      "helper_frequency_counts": [
+        365,
+        15
+      ],
+      "near_fullscale_samples": [
+        0,
+        0
+      ],
+      "gap_samples": 0,
+      "scored_records": [
+        "scored"
+      ],
+      "completion_backlog_seconds": 28.98169530701125,
+      "noise_variance_ratio": 1.0007300473297598,
+      "report_sha256": "e62159d0f83fedab08089cac36669d73ccdb4e42192d5685ccea7e6d59fa6a85"
+    },
+    {
+      "name": "replay-long",
+      "expected_bit": 1,
+      "selected_bit": 1,
+      "conditional_admission": true,
+      "outcome": "correct_admission",
+      "log_e_lower_bound": 30.74308057624166,
+      "log_e_threshold": 21.493378688261398,
+      "physical_null_qualified": false,
+      "nominal_data_cn0_db_hz": 7.68243116756961,
+      "received_data_cn0_estimate_db_hz": 7.9915429194882766,
+      "cn0_scope": "Software source component energy plus actual quiet PSD; live assumes independently calibrated scalar cable gain and excludes unknown gain-response/drift bias.",
+      "received_cpu_seconds_parent": 65.605057495,
+      "audio_child_cpu_seconds": 0.0,
+      "receiver_preparation": {
+        "cpu_seconds": 5.428376655,
+        "wall_seconds": 5.405977672955487
+      },
+      "imports": {
+        "cpu_seconds": 1.717874318,
+        "wall_seconds": 1.490466455987189
+      },
+      "reception_wall_seconds": 48.5127325070207,
+      "duration_denominators_seconds": {
+        "observed_audio": 121.1485,
+        "analysis_window": 97.1485,
+        "transmitted_helper_and_data": 73.0675,
+        "active_data": 34.800000000000004
+      },
+      "ratios_including_audio_children": {
+        "observed_audio": {
+          "prepared": 0.5415259577708349,
+          "including_workspace": 0.58633358357718,
+          "including_workspace_imports": 0.6005213670660388
+        },
+        "analysis_window": {
+          "prepared": 0.6753069527064236,
+          "including_workspace": 0.731184054823286,
+          "including_workspace_imports": 0.7488768518093434
+        },
+        "transmitted_helper_and_data": {
+          "prepared": 0.8978691962226708,
+          "including_workspace": 0.9721618250248057,
+          "including_workspace_imports": 0.99568567198823
+        },
+        "active_data": {
+          "prepared": 1.8852028015804594,
+          "including_workspace": 2.0411906364942523,
+          "including_workspace_imports": 2.0905822654597697
+        }
+      },
+      "helper_frequency_counts": [
+        365,
+        15
+      ],
+      "near_fullscale_samples": [
+        0,
+        0
+      ],
+      "gap_samples": 0,
+      "scored_records": [
+        "scored"
+      ],
+      "completion_backlog_seconds": 45.36395223002182,
+      "noise_variance_ratio": 1.0000732139122834,
+      "report_sha256": "52aa44bf67f36026c2ec6d62abee84f33eeae1cfa7dbe1e5c52731f2bb28ebfd"
+    },
+    {
+      "name": "live-long",
+      "expected_bit": 1,
+      "selected_bit": 1,
+      "conditional_admission": true,
+      "outcome": "correct_admission",
+      "log_e_lower_bound": 33.028772094041095,
+      "log_e_threshold": 21.493378688261398,
+      "physical_null_qualified": false,
+      "nominal_data_cn0_db_hz": 7.6498493128245295,
+      "received_data_cn0_estimate_db_hz": 7.958961064743196,
+      "cn0_scope": "Software source component energy plus actual quiet PSD; live assumes independently calibrated scalar cable gain and excludes unknown gain-response/drift bias.",
+      "received_cpu_seconds_parent": 61.756008366,
+      "audio_child_cpu_seconds": 0.12271699999999996,
+      "receiver_preparation": {
+        "cpu_seconds": 5.030617949999999,
+        "wall_seconds": 5.009845225024037
+      },
+      "imports": {
+        "cpu_seconds": 1.755467607,
+        "wall_seconds": 1.5267524890368804
+      },
+      "reception_wall_seconds": 162.3124557210249,
+      "duration_denominators_seconds": {
+        "observed_audio": 121.1485,
+        "analysis_window": 97.1485,
+        "transmitted_helper_and_data": 73.0675,
+        "active_data": 34.800000000000004
+      },
+      "ratios_including_audio_children": {
+        "observed_audio": {
+          "prepared": 0.5107675733995881,
+          "including_workspace": 0.5522919666029708,
+          "including_workspace_imports": 0.5667902911385614
+        },
+        "analysis_window": {
+          "prepared": 0.6369498794731777,
+          "including_workspace": 0.6887326445184435,
+          "including_workspace_imports": 0.7068127000005148
+        },
+        "transmitted_helper_and_data": {
+          "prepared": 0.8468707067574505,
+          "including_workspace": 0.9157196197488625,
+          "including_workspace_imports": 0.9397583547541658
+        },
+        "active_data": {
+          "prepared": 1.7781242921264366,
+          "including_workspace": 1.9226822791954021,
+          "including_workspace_imports": 1.9731549881034482
+        }
+      },
+      "helper_frequency_counts": [
+        365,
+        15
+      ],
+      "near_fullscale_samples": [
+        0,
+        0
+      ],
+      "gap_samples": 0,
+      "scored_records": [
+        "scored"
+      ],
+      "completion_backlog_seconds": 42.86618486896623,
+      "noise_variance_ratio": 1.0005997243036253,
+      "report_sha256": "cd8bd29d1cff84390df461b92055f16c907a6a7c250087673cabb06ca6a4d5cd"
+    }
+  ],
+  "limitations": [
+    "Scheduled one-bit observations; no completed fox message or indefinite consecutive-bit stream qualification.",
+    "Measured timings and ranges are observations, not confidence bounds.",
+    "Each receipt budgets one duration; this adaptive exploratory campaign is not itself covered by one operational daily false-admission bound.",
+    "Short replay wrapper metadata evolved during measurement; DSP/noise/receiver pipeline unchanged. Long runs record invocation-time hashes and verify unchanged source."
+  ],
+  "transmit_calendar_estimates": {
+    "source_text": "fox",
+    "source_bits": 22,
+    "short": {
+      "active_bit_seconds": 23.2,
+      "single_bit_seconds": 61.6,
+      "fox_seconds": 548.8
+    },
+    "long": {
+      "active_bit_seconds": 34.8,
+      "single_bit_seconds": 73.2,
+      "fox_seconds": 804.0
+    }
+  }
+}

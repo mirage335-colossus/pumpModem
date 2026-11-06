@@ -1,0 +1,54 @@
+{
+  "schema": "triad-hf-long-predecode-noise-calibration-v1",
+  "actual_data_seconds": 34.800000000000004,
+  "realized_data_target_db_hz": 8,
+  "postchannel_mean_data_power": 1.07376284353783,
+  "audio_mean_data_power": 9.663927977834422e-06,
+  "audio_channel_gain_db": 0.30911175191866613,
+  "target_nominal_data_cn0_db_hz": 7.690888248081334,
+  "scope": "Signal-minus-matched-Helper-control energy including tails sets impairment before any receiver score. Only fixed noise variance and public configuration enter receiver; no arrival/channel/bit truth.",
+  "bridge": {
+    "schema": "triad-real-audio-bridge-v1",
+    "native_sample_rate": 6000.0,
+    "audio_sample_rate": 48000.0,
+    "carrier_hz": 1725.0,
+    "fixed_gain": 0.003,
+    "source_start_seconds": 0.0,
+    "native_samples": 708891,
+    "audio_samples": 5671128,
+    "resample_ratio": [
+      8,
+      1
+    ],
+    "resample_half_support_seconds": 0.010666666666666666,
+    "nominal_audio_geometry": {
+      "carrier_hz": 1725.0,
+      "occupied_bandwidth_hz": 2900.0,
+      "nominal_audio_band_hz": [
+        275.0,
+        3175.0
+      ],
+      "transition_hz": 145.0,
+      "real_image_separated": true,
+      "below_audio_nyquist": true,
+      "measured_audio_band_supported": null,
+      "supported": true,
+      "reasons": [],
+      "scope": "nominal support calculation; finite shaped spectra have nonzero tails"
+    },
+    "measured_peak": 0.023199964314699173,
+    "source_energy_sample_seconds": 37.366946955116546,
+    "audio_energy_sample_seconds": 0.00033630469362863814,
+    "scaling": "sqrt(2) * fixed_gain * real(composite_IQ * exp(+j*2*pi*fc*t))",
+    "arithmetic": "FP32 polyphase bulk and PCM; FP64 phase coordinates and diagnostic reductions",
+    "alignment": "resample_poly zero-phase alignment; constant zero extension; edge support is not hidden",
+    "window_boundary": "returns the input time extent, not extra resampling-filter tails; exclude TX plus RX support at finite-window boundaries",
+    "continuous_cross_window_filter_state": false
+  },
+  "source_hashes": {
+    "local-evidence/triad-hf-background-target/fixtures-long/signal/manifest.json": "c95029e5f1f7d792678a6668e1e47346950eb1f6a610b72a050db3d6d236df5a",
+    "local-evidence/triad-hf-background-target/fixtures-long/signal/observation.c128": "c901f8631f75e4b4f000e98e80221c955f2ea3517759bb66c432f14bf1b103ee",
+    "local-evidence/triad-hf-background-target/fixtures-long/signal-helper/observation.c128": "a19a58d76d336343eba7459a3cf9ed9568faf661c2fdbfc2d5c74286bd908c09",
+    "tools/triad_hf_noise_measure.py": "e35c7103b73e09f5e41a69b7c056f31a56473dd54e1e40afc449acaf7bc7ff09"
+  }
+}

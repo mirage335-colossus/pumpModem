@@ -193,6 +193,11 @@ The [shared full-rate qualification](validation-data/triad-v3/2026-11-06-backgro
 records the lower-rate-source to full-audio bandwidth checks, DDC variance
 prediction and backend evidence limits.
 
+The [HF background-noise target study](validation-data/triad-v3/2026-11-06-hf-background-target/README.md)
+records software and cable reception near 8 dB-Hz DATA using full-audio AES
+noise, with measured CPU/preparation costs, preserved misses and explicit
+physical-null and continuous-streaming limits.
+
 The [earlier digital and cable qualification](validation-data/triad-v3/2026-11-06-background-noise/README.md)
 records its source identities, power/PSD errors, CPU cost and limits. Its 48 kHz
 raw-ALSA DAC measurements remain evidence for that route. Its old complex

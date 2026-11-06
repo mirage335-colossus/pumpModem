@@ -1,0 +1,12 @@
+{
+  "checked_utc": "2026-11-06T04:10:20.037628+00:00",
+  "syntax": "python3 -m py_compile tools/triad_hf_noise_measure.py passed",
+  "whitespace": "git diff --check passed",
+  "archive_json": "all JSON parse; seven report hashes match summary",
+  "documentation_links": "all local report links resolve",
+  "long_run_source_matches_current": true,
+  "source_sha256": "e35c7103b73e09f5e41a69b7c056f31a56473dd54e1e40afc449acaf7bc7ff09",
+  "archive_sha256": "ac1728f07b8048cc9b7b6b5c455b6ac12ea85ab1c8b1f74f8d700cf2f179f54c",
+  "summary_sha256": "2b2b0861140ef9cd06692783470ec4e743d59d8ecf1ff00b2141bb8d31df485c",
+  "runtime_scope": "Experimental measurement tool only; native receiver algorithms unchanged; no ordinary receiver campaign run"
+}

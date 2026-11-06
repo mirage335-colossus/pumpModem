@@ -1,0 +1,9 @@
+{
+  "schema": "triad-pre-noise-payload-quantization-diagnostic-v1",
+  "scope": "Paired full-composite versus matched Helper-only S16 packing; difference isolates DATA including quantizer interaction with shared components. No receiver use.",
+  "data_energy_pcm_sample_sum": 16.142625223275445,
+  "quantization_error_energy_pcm_sample_sum": 0.0003138540980113883,
+  "error_to_data_energy_db": -47.11246360413614,
+  "nominal_data_rms_codes": 98.304,
+  "clean_composite_peak": 0.1460818350315094
+}
