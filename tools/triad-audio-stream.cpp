@@ -119,7 +119,8 @@ Config parse(int argc, char** argv) {
                 "  play: stdin mono float32le -> audio backend; capture: backend -> stdout mono float32le; copy: bounded device-free pipe check.\n"
                 "  --clock-discipline auto|off|continuous: auto (default) follows UTC for play/capture; copy remains off. Dated native provider required.\n"
                 "  [--clock-max-ppm 1000 --clock-phase-max-ppm 200 --clock-slew-ppm-per-second 10 --clock-phase-seconds 1000]\n"
-                "  --capture-format raw|mapped-v1: mapped capture emits bounded TRIADMAP frames with exact local sample coordinates.\n"
+                "  --capture-format raw|mapped-v1|adc-v1: mapped capture emits bounded TRIADMAP frames with exact local sample coordinates.\n"
+                "  adc-v1: selected native mono ADC samples before ASRC, identity coordinates; frames count native ADC samples. Requires matching hardware/sample rate and active clock discipline.\n"
                 "  optional TX noise: --background-noise-bits N | --background-noise-obscured-bits N | --background-noise-db D | --background-noise-watts W --background-noise-reference-watts W --background-noise-reference-rms R\n";
             std::exit(0);
         } else throw std::invalid_argument("unknown option: " + key);
@@ -128,10 +129,12 @@ Config parse(int argc, char** argv) {
     if (c.mode != "play" && c.mode != "capture" && c.mode != "copy")
         throw std::invalid_argument("--mode must be play, capture or copy");
     c.continuous_clock = c.clock_mode == "continuous" || (c.clock_mode == "auto" && c.mode != "copy");
-    if (c.capture_format != "raw" && c.capture_format != "mapped-v1")
-        throw std::invalid_argument("capture format must be raw or mapped-v1");
+    if (c.capture_format != "raw" && c.capture_format != "mapped-v1" && c.capture_format != "adc-v1")
+        throw std::invalid_argument("capture format must be raw, mapped-v1 or adc-v1");
     if (c.capture_format != "raw" && c.mode != "capture")
-        throw std::invalid_argument("mapped-v1 output requires capture mode");
+        throw std::invalid_argument("mapped-v1/adc-v1 output requires capture mode");
+    if (c.capture_format == "adc-v1" && !c.continuous_clock)
+        throw std::invalid_argument("adc-v1 requires active continuous clock discipline (auto or continuous)");
     if (c.channels != "left" && c.channels != "right" && c.channels != "stereo")
         throw std::invalid_argument("--channels must be left, right or stereo");
     if (c.mode == "capture" && c.channels != "left")
@@ -228,6 +231,17 @@ struct Queue {
     std::string error;
 };
 
+bool enqueue_capture_block(Queue& queue, CaptureBlock block) {
+    std::lock_guard lock(queue.mutex);
+    if (queue.failed) return false; // Preserve the original writer failure.
+    if (block.pcm.size() > queue.cap - queue.frames) {
+        queue.failed = true; queue.error = "capture pipe queue exceeded its two-second bound";
+        queue.changed.notify_all(); return false;
+    }
+    queue.frames += block.pcm.size(); queue.blocks.push_back(std::move(block));
+    queue.changed.notify_all(); return true;
+}
+
 int run(const Config& c) {
     set_binary_stdio();
     const auto wall_start = Clock::now();
@@ -235,6 +249,9 @@ int run(const Config& c) {
     std::atomic<std::uint64_t> completed{0};
     std::atomic<std::uint64_t> captured{0};
     std::atomic<std::uint64_t> clipped{0};
+    std::uint64_t observed_native_frames = 0;
+    std::uint64_t discarded_post_asrc_frames = 0;
+    std::optional<datapump::audio::StreamFormat> capture_format;
     std::optional<datapump::audio::BackgroundNoiseReport> noise_report;
     datapump::audio::Options options;
     options.exclusive = c.exclusive;
@@ -293,6 +310,7 @@ int run(const Config& c) {
         queue.cap = std::min<std::uint64_t>(maximum_queue_frames,
             std::max<std::uint64_t>(block_frames, static_cast<std::uint64_t>(c.rate) * 2));
         std::optional<CaptureBlock> pending_map;
+        const bool native_adc = c.capture_format == "adc-v1";
         if(c.capture_format == "mapped-v1") {
             options.capture_sample_map = [&](const datapump::audio::CaptureSampleMap& map) {
                 if(pending_map || map.source_frame_offsets.empty() || map.source_frame_offsets.size()>block_frames ||
@@ -303,6 +321,38 @@ int run(const Config& c) {
                 pending_map->source_frame_origin=map.source_frame_origin;
                 pending_map->native_rate=map.native_rate;
                 pending_map->offsets.assign(map.source_frame_offsets.begin(),map.source_frame_offsets.end());
+            };
+        }
+        if (native_adc) {
+            options.capture_discontinuity = [] {
+                throw std::runtime_error("ADC capture discontinuity invalidates native sample coordinates");
+            };
+            options.capture_monitor = [&](std::span<const float> input, std::uint32_t native_rate) {
+                if (!capture_format || native_rate != c.rate || native_rate != capture_format->hardware_rate)
+                    throw std::runtime_error("adc-v1 requires reported, matching native hardware/sample rate");
+                if (input.size() > std::numeric_limits<std::uint64_t>::max() - observed_native_frames)
+                    throw std::runtime_error("ADC capture sample counter overflow");
+                observed_native_frames += input.size();
+                std::size_t position = 0;
+                while (position < input.size()) {
+                    const auto done = captured.load(std::memory_order_relaxed);
+                    if (done >= c.frames) break;
+                    const auto n = static_cast<std::size_t>(std::min<std::uint64_t>(
+                        c.frames - done, std::min(block_frames, input.size() - position)));
+                    CaptureBlock block;
+                    block.first_output_frame = block.source_frame_origin = done;
+                    block.native_rate = native_rate;
+                    block.pcm.assign(input.begin() + static_cast<std::ptrdiff_t>(position),
+                        input.begin() + static_cast<std::ptrdiff_t>(position + n));
+                    block.offsets.resize(n);
+                    for (std::size_t i = 0; i < n; ++i) {
+                        if (!std::isfinite(block.pcm[i])) throw std::runtime_error("nonfinite ADC capture PCM");
+                        block.offsets[i] = static_cast<double>(i);
+                        if (std::abs(block.pcm[i]) >= .999f) clipped.fetch_add(1, std::memory_order_relaxed);
+                    }
+                    if (!enqueue_capture_block(queue, std::move(block))) break;
+                    captured.fetch_add(n, std::memory_order_relaxed); position += n;
+                }
             };
         }
         std::thread writer([&] {
@@ -316,7 +366,7 @@ int run(const Config& c) {
                         block = std::move(queue.blocks.front()); queue.blocks.pop_front();
                         queue.frames -= block.pcm.size();
                     }
-                    write_capture_block(std::cout,block,c.capture_format == "mapped-v1");
+                    write_capture_block(std::cout,block,c.capture_format != "raw");
                     std::cout.flush();
                     if (!std::cout) throw std::runtime_error("capture output pipe failed");
                     completed.fetch_add(block.pcm.size(), std::memory_order_relaxed);
@@ -326,6 +376,14 @@ int run(const Config& c) {
             }
         });
         auto callback = [&](std::span<const float> input) {
+            if (native_adc) {
+                // CaptureMonitor observes the raw samples, but the normal
+                // controller and stateful ASRC still process the same stream.
+                // Do not pass their correlated output off as native ADC PCM.
+                discarded_post_asrc_frames += input.size();
+                std::lock_guard lock(queue.mutex);
+                return !queue.failed && captured.load(std::memory_order_relaxed) < c.frames;
+            }
             const auto done = captured.load(std::memory_order_relaxed);
             const auto left = done >= c.frames ? 0 : c.frames - done;
             const auto n = static_cast<std::size_t>(std::min<std::uint64_t>(left, input.size()));
@@ -338,18 +396,16 @@ int run(const Config& c) {
             }
             block.pcm.assign(input.begin(), input.begin() + static_cast<std::ptrdiff_t>(n));
             for (float v : block.pcm) if (std::abs(v) >= .999f) clipped.fetch_add(1, std::memory_order_relaxed);
-            std::lock_guard lock(queue.mutex);
-            if (queue.failed || queue.frames + n > queue.cap) {
-                queue.failed = true; queue.error = "capture pipe queue exceeded its two-second bound";
-                queue.changed.notify_all(); return false;
-            }
-            queue.frames += n; queue.blocks.push_back(std::move(block));
+            if (!enqueue_capture_block(queue, std::move(block))) return false;
             captured.fetch_add(n, std::memory_order_relaxed);
-            queue.changed.notify_all();
             return done+n<c.frames;
         };
         try {
-            datapump::audio::capture(c.rate, c.device, callback, {}, {}, options);
+            datapump::audio::capture(c.rate, c.device, callback, {}, [&](const auto& format) {
+                if (native_adc && (format.hardware_rate != c.rate || format.logical_rate != c.rate))
+                    throw std::runtime_error("adc-v1 requires --sample-rate to equal negotiated native hardware rate");
+                capture_format = format;
+            }, options);
         } catch (...) {
             { std::lock_guard lock(queue.mutex); queue.done = true; queue.changed.notify_all(); }
             writer.join(); throw;
@@ -359,6 +415,8 @@ int run(const Config& c) {
         std::lock_guard lock(queue.mutex);
         if (!queue.error.empty()) throw std::runtime_error(queue.error);
         if (captured != c.frames || completed != c.frames) throw std::runtime_error("capture ended before declared frame count");
+        if (native_adc && (!capture_format || !discarded_post_asrc_frames || !clock_reports))
+            throw std::runtime_error("adc-v1 capture lacks an active clock-discipline/ASRC pipeline witness");
     }
     const auto wall = duration<double>(Clock::now() - wall_start).count();
     const auto cpu = static_cast<double>(std::clock() - cpu_start) / CLOCKS_PER_SEC;
@@ -369,6 +427,21 @@ int run(const Config& c) {
         << ",\"process_cpu_seconds\":" << cpu << ",\"wall_seconds\":" << wall
         << ",\"queue_bound_frames\":" << (c.mode == "copy" ? 0 : std::min<std::uint64_t>(maximum_queue_frames, std::max<std::uint64_t>(block_frames, static_cast<std::uint64_t>(c.rate) * 2)))
         << ",\"capture_format\":\"" << c.capture_format << "\""
+        << ",\"capture_observation\":\"" << (c.mode != "capture" ? "none" : c.capture_format == "adc-v1" ? "pre-asrc-native-mono" : "post-asrc-logical-mono") << "\""
+        << ",\"observed_native_frames\":" << observed_native_frames
+        << ",\"unretained_native_tail_frames\":" << (c.capture_format == "adc-v1" ? observed_native_frames - captured.load() : 0)
+        << ",\"discarded_post_asrc_frames\":" << discarded_post_asrc_frames
+        << ",\"capture_stream_format\":";
+    if (!capture_format) std::cerr << "null";
+    else {
+        const auto& f = *capture_format;
+        std::cerr << "{\"logical_rate\":" << f.logical_rate << ",\"hardware_rate\":" << f.hardware_rate
+            << ",\"logical_channels\":" << f.logical_channels << ",\"hardware_channels\":" << f.hardware_channels
+            << ",\"selected_capture_channel\":";
+        if (f.selected_capture_channel) std::cerr << *f.selected_capture_channel; else std::cerr << "null";
+        std::cerr << "}";
+    }
+    std::cerr
         << ",\"background_noise\":{";
     if (!noise_report || !noise_report->enabled) std::cerr << "\"enabled\":false";
     else std::cerr << "\"enabled\":true,\"sample_rate_hz\":" << noise_report->sample_rate_hz

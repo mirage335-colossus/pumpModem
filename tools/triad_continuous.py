@@ -555,6 +555,10 @@ def parser():
     p.add_argument('--memory-mib', type=int, default=256)
     p.add_argument('--alpha-per-day', type=float, default=1e-4)
     p.add_argument('--noise-variance', type=float, help='fixed receiver variance; required for physical capture')
+    p.add_argument('--physical-noise-profile', type=Path,
+        help='explicit matched ADC noise profile enables conditional fixed-bank physical admission; Helper off')
+    p.add_argument('--physical-save-pcm', type=Path,
+        help='retain raw ADC float32 samples for a profile-qualified receive run')
     p.add_argument('--limit-seconds', type=float, help='diagnostic prefix only; cannot admit an incomplete bit')
     p.add_argument('--device', default='default')
     p.add_argument('--fixed-gain', type=float, default=.002)
@@ -604,6 +608,11 @@ def execute(argv=None):
     if (not 0 < a.clock_max_ppm <= 1000 or not 0 < a.clock_phase_max_ppm <= a.clock_max_ppm or
         not 0 < a.clock_slew_ppm_per_second <= 1000 or not math.isfinite(a.clock_phase_seconds) or a.clock_phase_seconds < 1):
         raise ValueError('invalid continuous audio clock limits')
+    if a.physical_noise_profile is not None:
+        from triad_physical_run import execute as execute_physical
+        return execute_physical(a, native_args)
+    if a.physical_save_pcm is not None:
+        raise ValueError('physical-save-pcm requires a physical-noise-profile')
     if a.mode == 'receive' and (a.noise_variance is None or a.noise_variance <= 0):
         raise ValueError('physical reception requires a declared conservative --noise-variance')
     audio_arguments = json.loads(a.audio_arguments)

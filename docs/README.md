@@ -122,6 +122,10 @@ limits of their model-conditional reception and false-admission claims.
 The [multi-day tracking guide](triad-multiday-tracking.md) provides cheap entry
 checks, complete sampled-observation qualification, persistent-versus-reset
 receiver evidence and explicit low-IF, channel and physical-noise limits.
+The [native-ADC admission guide](triad-physical-admission.md) describes short,
+independently validated physical noise profiles, active clock following and
+their conditional admission limits. It is the starting point for live admission
+work; default adaptive tracking scores remain separate.
 The maintained [v3 guide](triad-v3.md) also covers reciprocal-integer sample
 clocks, a ten-Julian-year representation/planner ceiling, and the deterministic
 CFO batch receiver. The subsequent [−60 dB-Hz study](validation-data/triad-v3/2026-11-02-minus60/README.md)

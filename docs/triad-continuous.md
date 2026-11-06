@@ -1,5 +1,12 @@
 # Continuous three-carrier transmission and reception
 
+**Physical admission:** the optional [native-ADC noise-profile path](triad-physical-admission.md)
+adds a conditional admission gate for a matching, independently checked cable
+profile. It scores a fixed public real-waveform bank before capture ASRC while
+leaving full-audio clock discipline running. The default adaptive timing score,
+Helper leakage, other hardware and arbitrary multi-day physical trajectories
+do not inherit this qualification.
+
 The isolated v3 study now has a bounded pull interface for long transmissions
 and an incremental likelihood receiver. The implementation removes the
 3,600-second duration check from native source generation. It does not make
@@ -52,7 +59,8 @@ without a lifetime ±2-second displacement cap. It preserves the source epoch
 and logical sequence; strict audio following remains separate. Live capture now
 uses exact local ADC coordinates and bounded remote delay/rate inference. Its
 initial bank and dynamics remain explicit assumptions; it does not supply a
-qualified physical noise covariance, so admission remains withheld.
+qualified physical noise covariance, so that adaptive path withholds admission.
+The separate native-ADC profile path above has its own conditional gate.
 The older `bounded-data` profile remains
 available with its original slow-DATA-only limits.
 
@@ -106,10 +114,12 @@ zero-signal null does not automatically cover a strong residual Helper tone,
 non-Gaussian audio, clipping, or unmodeled noise covariance. Reports therefore
 do not qualify the physical false-admission rate. A missing or invalid block
 must be represented as unobserved rows; it must not be filled with observed
-zeros to preserve a white-noise assumption. The adapter only enables conditional
+zeros to preserve a white-noise assumption. The default adapter only enables conditional
 Gaussian admissions when the native descriptor explicitly supports that null;
 Helper, physical capture and the additional diagnostic I/Q noise path remain
 unqualified. Missing capability metadata fails closed.
+The optional native-ADC profile path has a separate conditional physical gate;
+it does not change these default score semantics.
 Simulation also rejects a receiver noise-variance override smaller than the
 known native thermal variance; a smaller assumed noise floor would invalidate
 the conditional false-admission argument.

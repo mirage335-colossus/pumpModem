@@ -133,9 +133,14 @@ to RX or silently treat it as observed synchronization evidence.
 Adjustable capture reports an **unknown capture transport recipe**: the
 interpolation colors noise and its covariance changes with the rate history.
 The fixed nominal white-noise transport witness is deliberately unavailable.
-The current continuous physical receiver already withholds operational admission;
-this mode does not relax that rule or certify its false-admission rate. Receiver
-scores and conditional model passes remain diagnostics. General blind multi-day
+The adaptive continuous physical receiver withholds operational admission;
+this mode alone does not relax that rule or certify its false-admission rate.
+The optional [physical noise-profile receiver](triad-physical-admission.md)
+instead scores original real ADC samples before ASRC, using a fixed public
+likelihood bank and a declared global noise bound. Clock discipline and the
+post-ASRC stream continue running; their colored output is not substituted for
+the original ADC observations. Its admission is conditional on its matching
+profile and is not a qualification of the adaptive timing score. General blind multi-day
 acquisition, trajectories outside the declared dynamics and physical noise covariance need
 separate qualification. No claim of unchanged sensitivity follows from controller
 stability alone.

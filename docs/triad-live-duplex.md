@@ -34,6 +34,12 @@ cable reception; transmitted-noise-dominated agreement alone does not qualify
 hardware-floor behavior. Its narrow mean-loss proxy intervals are conditional
 engineering estimates, not future-pass or full-receiver BER guarantees.
 
+For short live **admission** checks with clock following enabled, use the
+[native-ADC profile path](triad-physical-admission.md). It separates the actual
+ADC noise envelope from covariance introduced by ASRC, keeps the clock pipeline
+active, and requires independent noise validation. Its conditional admission
+claim is narrower than physical certification of a daily false-admission rate.
+
 ## What each result establishes
 
 | Evidence class | What was exercised | What it does not establish |
