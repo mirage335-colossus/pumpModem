@@ -1,0 +1,55 @@
+{
+  "schema": "triad-cpu-audio-conversion-diagnostic-v1",
+  "scope": "Synthetic real PCM computational diagnostic, not live hardware or whole-sideband channel validation",
+  "audio_seconds": 84.67766666666667,
+  "measurements": [
+    {
+      "cpu_seconds": 2.342016324,
+      "wall_seconds": 2.341885233996436,
+      "finite": true
+    },
+    {
+      "cpu_seconds": 2.3389954509999997,
+      "wall_seconds": 2.339723267010413,
+      "finite": true
+    },
+    {
+      "cpu_seconds": 2.251953781,
+      "wall_seconds": 2.250659859040752,
+      "finite": true
+    }
+  ],
+  "receipt": {
+    "schema": "triad-real-audio-ddc-v1",
+    "audio_sample_rate": 48000.0,
+    "native_sample_rate": 6000.0,
+    "carrier_hz": 1725.0,
+    "source_start_seconds": 0.0,
+    "declared_transmit_gain_undone": 1.0,
+    "audio_samples": 4064528,
+    "converted_samples": 508066,
+    "retained_samples": 508066,
+    "resample_ratio": [
+      1,
+      8
+    ],
+    "edge_samples_each_side": 88,
+    "image_rejection_taps": 373,
+    "image_rejection_half_support_seconds": 0.003875,
+    "resample_half_support_seconds": 0.014541666666666666,
+    "valid_samples": 507890,
+    "scaling": "sqrt(2) * real_audio * exp(-j*2*pi*fc*t), then fixed low-pass/resampling",
+    "scope": "known-alignment baseband conversion; no payload-fitted gain, delay or phase",
+    "valid_mask_scope": "excludes RX support only; caller must also exclude finite TX-window support",
+    "continuous_cross_window_filter_state": false
+  },
+  "source_sha256": "6b1502306135af9f2ff6273d70ea2f919ed0f2a29db27b2fbffb20618bec0814",
+  "excluded": [
+    "device and driver servicing",
+    "unknown alignment",
+    "continuous cross-window filtering",
+    "whole stochastic sideband and real-audio image compatibility",
+    "Python/library import",
+    "synthetic input generation"
+  ]
+}

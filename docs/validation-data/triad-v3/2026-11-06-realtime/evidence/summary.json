@@ -1,0 +1,117 @@
+{
+  "groups": {
+    "calibration": {
+      "total": 19,
+      "scored": 19,
+      "unresolved": 0,
+      "raw_correct": 0,
+      "raw_wrong": 0,
+      "correct_admissions": 0,
+      "wrong_admissions": 0,
+      "misses": 0,
+      "false_admissions": 0
+    },
+    "signal": {
+      "total": 16,
+      "scored": 16,
+      "unresolved": 0,
+      "raw_correct": 16,
+      "raw_wrong": 0,
+      "correct_admissions": 16,
+      "wrong_admissions": 0,
+      "misses": 0,
+      "false_admissions": 0,
+      "binomial_reference_95pct_CP_not_boundary_population_guarantee": [
+        0.7940927857921772,
+        1.0
+      ]
+    },
+    "null": {
+      "total": 16,
+      "scored": 15,
+      "unresolved": 1,
+      "raw_correct": 0,
+      "raw_wrong": 0,
+      "correct_admissions": 0,
+      "wrong_admissions": 0,
+      "misses": 0,
+      "false_admissions": 0,
+      "false_probability_one_sided95pct_upper": 0.1707497229824809
+    },
+    "noise": {
+      "total": 4,
+      "scored": 0,
+      "unresolved": 4,
+      "raw_correct": 0,
+      "raw_wrong": 0,
+      "correct_admissions": 0,
+      "wrong_admissions": 0,
+      "misses": 0,
+      "false_admissions": 0,
+      "false_probability_one_sided95pct_upper": 0.527129195498412
+    },
+    "stress8": {
+      "total": 4,
+      "scored": 0,
+      "unresolved": 4,
+      "raw_correct": 0,
+      "raw_wrong": 0,
+      "correct_admissions": 0,
+      "wrong_admissions": 0,
+      "misses": 0,
+      "false_admissions": 0
+    },
+    "ray05": {
+      "total": 2,
+      "scored": 0,
+      "unresolved": 2,
+      "raw_correct": 0,
+      "raw_wrong": 0,
+      "correct_admissions": 0,
+      "wrong_admissions": 0,
+      "misses": 0,
+      "false_admissions": 0
+    }
+  },
+  "gate": {
+    "schema": "triad-realtime-rank-gate-v1",
+    "procedure_id": "689786cef37a09ec71d135609e18bcb19a71d4af7dbe0041193826007f555172",
+    "alpha": 0.05,
+    "null_scores": [
+      5.901006630313303,
+      4.38765238058887,
+      3.5677612221902564,
+      4.2669214928506385,
+      4.20407959113388,
+      3.308999393139173,
+      4.181225518614026,
+      4.403303316512522,
+      3.6279336281674066,
+      2.7484893255707448,
+      3.60397084441974,
+      5.038142713377965,
+      2.4517633257702065,
+      4.298059629425277,
+      4.487167702899683,
+      3.7516356074400585,
+      4.766567611022765,
+      7.922021464011076,
+      3.5566717517363458
+    ],
+    "scope": "per-capture exchangeable null rank; no daily/continuous or conditional guarantee"
+  },
+  "scope": "Per-capture matched Helper-present null rank gate; stress/noise laws reported separately; no daily false-admission guarantee",
+  "source_sha256": {
+    "triad_realtime_receiver.py": "413958f2fe71739b6c6b60656079f69fa5370b75b3ff96109d1109f4507a464e",
+    "triad_realtime_helper.py": "bb6bc2b7920cc2bea27d647ba092e056cfb1e138e5535f9b3148ef9ee2e331cf",
+    "triad_realtime_fft.py": "0580ba4e357c3535fc70fb02ef53cd7778b71b4590955149e0c23d3b82d8e1c2",
+    "triad_dynamic_joint.py": "071a435406d43e5d322f4304ae821469f5b3a107134b5e50b5fb15eeab528832",
+    "triad_dynamic_frequency.py": "4d6b48b3b39a558769e1d035b46fdf619252245a20be7a4702d12cf524fa9cec",
+    "triad_dynamic_scan.py": "50ed9f86c28a6090123e7efe38c319b851ba00b0562e9a722346ad2a70e510ac",
+    "triad_dynamic_variants.py": "c20d1a7e0dc70629971ca04558a378c1c2222d9d457ebdb3bcc8343aa6eb8e76",
+    "triad_helper_receiver.py": "7956b27568b325ddb94437702c04d25650ed5cdac745f6e711a16f5c3c0af6e9",
+    "triad_gaussian_prepared.py": "c88afdf459521393958c49d801517d79cd158cbe2291e4a48c3eff6931e42875",
+    "triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba"
+  },
+  "campaign_wall_seconds": 417.1720794910216
+}

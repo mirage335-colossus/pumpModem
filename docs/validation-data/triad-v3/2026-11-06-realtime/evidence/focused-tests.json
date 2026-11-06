@@ -1,0 +1,27 @@
+{
+  "patterns": [
+    "test_triad_realtime*.py",
+    "test_triad_dynamic_sparse.py",
+    "test_triad_dynamic_joint.py",
+    "test_triad_dynamic_acquire.py",
+    "test_triad_dynamic_scan.py",
+    "test_triad_dynamic_variants.py",
+    "test_triad_dynamic_frequency.py",
+    "test_triad_dynamic_campaign.py"
+  ],
+  "run": 84,
+  "failures": 0,
+  "errors": 0,
+  "skipped": [
+    [
+      "test_cuda_scan_matches_frozen_mixture_and_near_gate_decisions (test_triad_dynamic_variants.VariantTests.test_cuda_scan_matches_frozen_mixture_and_near_gate_decisions)",
+      "CUDA hardware unavailable; no GPU pass claimed"
+    ],
+    [
+      "test_native_capture_four_coherences_serial_scan (test_triad_dynamic_variants.VariantTests.test_native_capture_four_coherences_serial_scan)",
+      "optional native replay not requested"
+    ]
+  ],
+  "wall_seconds": 8.334528776002117,
+  "successful": true
+}

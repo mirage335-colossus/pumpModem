@@ -1,0 +1,44 @@
+{
+  "platform": "Linux-7.2.6+deb13-amd64-x86_64-with-glibc2.41",
+  "python": "3.13.5 (main, Aug 10 2026, 12:06:59) [GCC 14.2.0]",
+  "numpy": "2.5.4",
+  "scipy": "1.18.1",
+  "torch": "2.8.0+cpu",
+  "threadpools": [
+    {
+      "library": "/tmp/triad-weak-env/lib/python3.13/site-packages/numpy.libs/libscipy_openblas64_-f48b354e.so",
+      "threads": 2
+    },
+    {
+      "library": "/tmp/triad-weak-env/lib/python3.13/site-packages/scipy.libs/libscipy_openblas-5f890258.so",
+      "threads": 2
+    },
+    {
+      "library": "torch",
+      "threads": 6
+    }
+  ],
+  "cpu": "Architecture:                            x86_64\nCPU op-mode(s):                          32-bit, 64-bit\nAddress sizes:                           48 bits physical, 48 bits virtual\nByte Order:                              Little Endian\nCPU(s):                                  12\nOn-line CPU(s) list:                     0-11\nVendor ID:                               AuthenticAMD\nModel name:                              AMD Ryzen 5 PRO 5650U with Radeon Graphics\nCPU family:                              25\nModel:                                   80\nThread(s) per core:                      2\nCore(s) per socket:                      6\nSocket(s):                               1\nStepping:                                0\nFrequency boost:                         enabled\nCPU(s) scaling MHz:                      66%\nCPU max MHz:                             4291.7529\nCPU min MHz:                             413.6630\nBogoMIPS:                                4591.55\nFlags:                                   fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm constant_tsc rep_good nopl xtopology nonstop_tsc cpuid extd_apicid aperfmperf rapl pni pclmulqdq monitor ssse3 fma cx16 sse4_1 sse4_2 movbe popcnt aes xsave avx f16c rdrand lahf_lm cmp_legacy svm extapic cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw ibs skinit wdt tce topoext perfctr_core perfctr_nb bpext perfctr_llc mwaitx cpb cat_l3 cdp_l3 hw_pstate ssbd mba ibrs ibpb stibp vmmcall fsgsbase bmi1 avx2 smep bmi2 erms invpcid cqm rdt_a rdseed adx smap clflushopt clwb sha_ni xsaveopt xsavec xgetbv1 xsaves cqm_llc cqm_occup_llc cqm_mbm_total cqm_mbm_local user_shstk clzero irperf xsaveerptr rdpru wbnoinvd cppc arat npt lbrv svm_lock nrip_save tsc_scale vmcb_clean flushbyasid decodeassists pausefilter pfthreshold avic v_vmsave_vmload vgif v_spec_ctrl umip pku ospke vaes vpclmulqdq rdpid overflow_recov succor smca fsrm debug_swap\nVirtualization:                          AMD-V\nL1d cache:                               192 KiB (6 instances)\nL1i cache:                               192 KiB (6 instances)\nL2 cache:                                3 MiB (6 instances)\nL3 cache:                                16 MiB (1 instance)\nNUMA node(s):                            1\nNUMA node0 CPU(s):                       0-11\nVulnerability Gather data sampling:      Not affected\nVulnerability Ghostwrite:                Not affected\nVulnerability Indirect target selection: Not affected\nVulnerability Itlb multihit:             Not affected\nVulnerability L1tf:                      Not affected\nVulnerability Mds:                       Not affected\nVulnerability Meltdown:                  Not affected\nVulnerability Mmio stale data:           Not affected\nVulnerability Old microcode:             Not affected\nVulnerability Reg file data sampling:    Not affected\nVulnerability Retbleed:                  Not affected\nVulnerability Spec rstack overflow:      Mitigation; Safe RET\nVulnerability Spec store bypass:         Mitigation; Speculative Store Bypass disabled via prctl\nVulnerability Spectre v1:                Mitigation; usercopy/swapgs barriers and __user pointer sanitization\nVulnerability Spectre v2:                Mitigation; Retpolines; IBPB conditional; IBRS_FW; STIBP always-on; RSB filling; PBRSB-eIBRS Not affected; BHI Not affected\nVulnerability Srbds:                     Not affected\nVulnerability Tsa:                       Mitigation; Clear CPU buffers\nVulnerability Tsx async abort:           Not affected\nVulnerability Vmscape:                   Mitigation; IBPB before exit to userspace\n",
+  "git_head": "879fb8a2cea2a70a8947cadb09cd2dd864ba4b24",
+  "source_sha256": {
+    "triad_realtime_receiver.py": "413958f2fe71739b6c6b60656079f69fa5370b75b3ff96109d1109f4507a464e",
+    "triad_realtime_helper.py": "bb6bc2b7920cc2bea27d647ba092e056cfb1e138e5535f9b3148ef9ee2e331cf",
+    "triad_realtime_fft.py": "0580ba4e357c3535fc70fb02ef53cd7778b71b4590955149e0c23d3b82d8e1c2",
+    "triad_dynamic_joint.py": "071a435406d43e5d322f4304ae821469f5b3a107134b5e50b5fb15eeab528832",
+    "triad_dynamic_frequency.py": "4d6b48b3b39a558769e1d035b46fdf619252245a20be7a4702d12cf524fa9cec",
+    "triad_dynamic_scan.py": "50ed9f86c28a6090123e7efe38c319b851ba00b0562e9a722346ad2a70e510ac",
+    "triad_dynamic_variants.py": "c20d1a7e0dc70629971ca04558a378c1c2222d9d457ebdb3bcc8343aa6eb8e76",
+    "triad_helper_receiver.py": "7956b27568b325ddb94437702c04d25650ed5cdac745f6e711a16f5c3c0af6e9",
+    "triad_gaussian_prepared.py": "c88afdf459521393958c49d801517d79cd158cbe2291e4a48c3eff6931e42875",
+    "triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba"
+  },
+  "input_sha256": {
+    "capture/observation.c128": "44418feb315db0fdbd438bf3c0bd950525235954107b153592d3a5a174e46f3c",
+    "capture/validity.u8": "094aceda373345e9423b36bd5248eca2c23a94a7dbb1006e87ffc5b1822e580f",
+    "capture/templates.c128": "cf315c6797565a754750908a288d7dc7c576b1d198ab356ce2a26faaaa087c8a",
+    "capture/evaluator-truth.json": "6239ebaf7c3c0a5905535835a24990856753463c27ff7b65ccd421dff48e6078",
+    "capture/manifest.json": "4284c80ee77d811e7b70a5004b10bd3d9c37afa84086bbf55b1a3f4529cfa837"
+  },
+  "current_git_status": " M docs/README.md\n M docs/triad-performance-matrix.md\n M docs/triad-stochastic.md\n M tools/triad_dynamic_joint.py\n?? docs/triad-realtime.md\n?? docs/validation-data/triad-v3/2026-11-05-local-cpu/\n?? docs/validation-data/triad-v3/2026-11-06-realtime/\n?? tests/test_triad_dynamic_sparse.py\n?? tests/test_triad_realtime_fft.py\n?? tests/test_triad_realtime_helper.py\n?? tests/test_triad_realtime_receiver.py\n?? tools/triad_realtime_fft.py\n?? tools/triad_realtime_helper.py\n?? tools/triad_realtime_receiver.py\n",
+  "evidence_scope": "Hardware/library environment reused from preceding same-host study; current source identities bound separately; numerical versions also in every receiver policy."
+}

@@ -1,0 +1,85 @@
+{
+  "schema": "triad-keyed-template-preparation-cost-v1",
+  "rows": [
+    {
+      "templates": false,
+      "command": [
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/triad_helper_export",
+        "--case",
+        "hf",
+        "--base-oscillator",
+        "crystal",
+        "--shift-oscillator",
+        "ic-7100",
+        "--channel-evolution",
+        "stochastic",
+        "--random-doppler-width-hz",
+        "0",
+        "--sample-rate",
+        "6000",
+        "--seed",
+        "20261105",
+        "--key-seed",
+        "2417",
+        "--output",
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-realtime/template-cost-0"
+      ],
+      "wall_seconds": 2.4200029359781183,
+      "cpu_seconds": 2.416748,
+      "native_cost": {
+        "wall_seconds": 2.415638174,
+        "process_cpu_seconds": 2.412899,
+        "binary_export_bytes": 8637122,
+        "channel_working_bytes": 297928,
+        "source_reference_working_bytes": 254272,
+        "maximum_export_bytes": 2147483648
+      },
+      "observation_sha256": "44418feb315db0fdbd438bf3c0bd950525235954107b153592d3a5a174e46f3c",
+      "template_sha256": null
+    },
+    {
+      "templates": true,
+      "command": [
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/triad_helper_export",
+        "--case",
+        "hf",
+        "--base-oscillator",
+        "crystal",
+        "--shift-oscillator",
+        "ic-7100",
+        "--channel-evolution",
+        "stochastic",
+        "--random-doppler-width-hz",
+        "0",
+        "--sample-rate",
+        "6000",
+        "--seed",
+        "20261105",
+        "--key-seed",
+        "2417",
+        "--output",
+        "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-realtime/template-cost-1",
+        "--templates"
+      ],
+      "wall_seconds": 10.867072001041379,
+      "cpu_seconds": 10.862124,
+      "native_cost": {
+        "wall_seconds": 10.862524363,
+        "process_cpu_seconds": 10.85814,
+        "binary_export_bytes": 67300194,
+        "channel_working_bytes": 297928,
+        "source_reference_working_bytes": 254272,
+        "maximum_export_bytes": 2147483648
+      },
+      "observation_sha256": "44418feb315db0fdbd438bf3c0bd950525235954107b153592d3a5a174e46f3c",
+      "template_sha256": "cf315c6797565a754750908a288d7dc7c576b1d198ab356ce2a26faaaa087c8a"
+    }
+  ],
+  "identical_observation": true,
+  "incremental_template_seconds": {
+    "cpu_seconds": 8.445376,
+    "wall_seconds": 8.44706906506326
+  },
+  "scope": "One paired run: incremental raw keyed template construction and export I/O; not pure in-memory synthesis, simulation excluded by subtraction; not a confidence interval",
+  "binary_sha256": "c497ba10d1255f1e56a2976eb4c1be4854ba5f88b2891f0be15110a06ac22242"
+}

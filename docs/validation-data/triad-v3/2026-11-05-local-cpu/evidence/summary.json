@@ -1,0 +1,94 @@
+{
+  "capture": {
+    "denominator_seconds": 84.67766666666667,
+    "single_tile_score_cpu_per_second_range": [
+      0.000412130238984691,
+      0.0005241575700794775
+    ],
+    "single_tile_prep_and_score_cpu_per_second_range": [
+      0.02300517989788728,
+      0.024787708608724066
+    ],
+    "conditional_fullbank_score_cpu_per_second_range": [
+      10753.613353918992,
+      13676.715057479138
+    ],
+    "conditional_fullbank_prep_and_score_cpu_per_second_range": [
+      600268.5228064979,
+      646779.6077388278
+    ]
+  },
+  "onair": {
+    "denominator_seconds": 61.6,
+    "single_tile_score_cpu_per_second_range": [
+      0.0005665296590908984,
+      0.0007205266233766229
+    ],
+    "single_tile_prep_and_score_cpu_per_second_range": [
+      0.03162378173701298,
+      0.0340741124512987
+    ],
+    "conditional_fullbank_score_cpu_per_second_range": [
+      14782.319594892333,
+      18800.524654743494
+    ],
+    "conditional_fullbank_prep_and_score_cpu_per_second_range": [
+      825151.5890373542,
+      889087.4680341865
+    ]
+  },
+  "DATA": {
+    "denominator_seconds": 23.200000000000003,
+    "single_tile_score_cpu_per_second_range": [
+      0.0015042339224137643,
+      0.001913122413793102
+    ],
+    "single_tile_prep_and_score_cpu_per_second_range": [
+      0.08396659288793101,
+      0.09047264340517241
+    ],
+    "conditional_fullbank_score_cpu_per_second_range": [
+      39249.60720023137,
+      49918.63442811203
+    ],
+    "conditional_fullbank_prep_and_score_cpu_per_second_range": [
+      2190919.7364095263,
+      2360680.5185735296
+    ]
+  },
+  "threads": {
+    "1": {
+      "preparation": {
+        "cpu_seconds": 1.6970277979999997,
+        "wall_seconds": 1.6970813780208118
+      },
+      "score": {
+        "cpu_seconds": 0.033477898500001047,
+        "wall_seconds": 0.03353530299500562
+      }
+    },
+    "2": {
+      "preparation": {
+        "cpu_seconds": 2.097642338,
+        "wall_seconds": 1.877730961481575
+      },
+      "score": {
+        "cpu_seconds": 0.040088512499998785,
+        "wall_seconds": 0.03343909652903676
+      }
+    },
+    "6": {
+      "preparation": {
+        "cpu_seconds": 3.3578676109999996,
+        "wall_seconds": 1.7485314474906772
+      },
+      "score": {
+        "cpu_seconds": 0.07607684299999917,
+        "wall_seconds": 0.03343307552859187
+      }
+    }
+  },
+  "conditional_fullbank_size8_stored_workspace_TB": 750.65229242055,
+  "processor": "AMD Ryzen 5 PRO 5650U with Radeon Graphics",
+  "engineering_ranges_not_confidence_intervals": true
+}

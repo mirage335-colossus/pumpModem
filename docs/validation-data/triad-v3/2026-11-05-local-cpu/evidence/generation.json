@@ -1,0 +1,30 @@
+{
+  "command": [
+    "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/triad_helper_export",
+    "--case",
+    "hf",
+    "--base-oscillator",
+    "crystal",
+    "--shift-oscillator",
+    "ic-7100",
+    "--channel-evolution",
+    "stochastic",
+    "--random-doppler-width-hz",
+    "0",
+    "--sample-rate",
+    "6000",
+    "--templates",
+    "--seed",
+    "20261105",
+    "--key-seed",
+    "2417",
+    "--output",
+    "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-cpu-ceiling/capture"
+  ],
+  "returncode": 0,
+  "wall_seconds": 9.798255639965646,
+  "user_seconds": 9.753627,
+  "system_seconds": 0.043989,
+  "stdout": "Exported 508066 samples to /home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-cpu-ceiling/capture; C/N0=20.02059991 dB-Hz; high pilot=2400 Hz\n",
+  "stderr": ""
+}

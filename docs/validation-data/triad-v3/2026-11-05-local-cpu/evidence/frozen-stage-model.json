@@ -1,0 +1,31 @@
+{
+  "preparation": {
+    "cpu_seconds": {
+      "slope_per_candidate": 0.16932575756756746,
+      "intercept_per_tile": 0.5289522415405411,
+      "size8_frozen": 1.907418382,
+      "predicted_heldout_four_size8": 7.629673528
+    },
+    "wall_seconds": {
+      "slope_per_candidate": 0.1812816734395833,
+      "intercept_per_tile": 0.26365429341613694,
+      "size8_frozen": 1.7174132890067995,
+      "predicted_heldout_four_size8": 6.869653156027198
+    }
+  },
+  "score": {
+    "cpu_seconds": {
+      "slope_per_candidate": 0.0022020006621621085,
+      "intercept_per_tile": 0.022350983797297472,
+      "size8_frozen": 0.04060657299999981,
+      "predicted_heldout_four_size8": 0.16242629199999925
+    },
+    "wall_seconds": {
+      "slope_per_candidate": 0.0012019280017026355,
+      "intercept_per_tile": 0.022782040975446734,
+      "size8_frozen": 0.03292040998348966,
+      "predicted_heldout_four_size8": 0.13168163993395865
+    }
+  },
+  "frozen_utc": "2026-11-05T23:01:58Z"
+}

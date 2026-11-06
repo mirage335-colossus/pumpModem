@@ -1,0 +1,41 @@
+{
+  "rows": [
+    {
+      "cpu": 24.560883,
+      "wall": 21.362099001999013,
+      "cpu_per_capture": 0.29005148543693143,
+      "cpu_per_onair": 0.39871563311688313,
+      "inclusive_cpu": 35.348275324,
+      "inclusive_wall": 32.15105330105871,
+      "inclusive_cpu_per_capture": 0.41744507985970325,
+      "inclusive_cpu_per_onair": 0.5738356383766233,
+      "capture_headroom": 2.6337447135481034,
+      "onair_headroom": 1.9159558918081094
+    },
+    {
+      "cpu": 21.741625000000003,
+      "wall": 18.5061496560229,
+      "cpu_per_capture": 0.25675748820035194,
+      "cpu_per_onair": 0.35294845779220785,
+      "inclusive_cpu": 32.529017324,
+      "inclusive_wall": 29.295103955082595,
+      "inclusive_cpu_per_capture": 0.3841510826231238,
+      "inclusive_cpu_per_onair": 0.5280684630519481,
+      "capture_headroom": 2.8905057581123685,
+      "onair_headroom": 2.1027404474976312
+    },
+    {
+      "cpu": 22.005821999999995,
+      "wall": 18.853555495967157,
+      "cpu_per_capture": 0.25987751984978325,
+      "cpu_per_onair": 0.35723737012987006,
+      "inclusive_cpu": 32.793214324,
+      "inclusive_wall": 29.642509795026854,
+      "inclusive_cpu_per_capture": 0.3872711142725551,
+      "inclusive_cpu_per_onair": 0.5323573753896104,
+      "capture_headroom": 2.8566294572287907,
+      "onair_headroom": 2.078096639790423
+    }
+  ],
+  "scope": "Additive engineering estimate combines uncontended cold process, one paired template export delta, and maximum previous real-audio DDC synthetic cost; not a live measurement or confidence interval"
+}

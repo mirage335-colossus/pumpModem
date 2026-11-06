@@ -1,0 +1,14 @@
+{
+  "same_bit": true,
+  "fp32_score": 2212.574392373798,
+  "fp64_score": 2212.5741802706425,
+  "score_abs_difference": 0.0002121031557180686,
+  "score_relative_difference": 9.586261902962462e-08,
+  "fp32_margin": 2198.7299282457325,
+  "fp64_margin": 2198.729712589214,
+  "same_coarse_candidates": false,
+  "same_refinement_coordinates": true,
+  "scope": "Paired full acquisition on original native capture; no admission gate transfer across precision",
+  "same_ordered_coarse_coordinates": true,
+  "coarse_comparison_note": "Full candidate dictionaries differ numerically in score; coordinate equality reported separately."
+}

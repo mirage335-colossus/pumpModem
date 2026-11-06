@@ -1,0 +1,579 @@
+{
+  "schema": "triad-realtime-qualification-v1",
+  "rows": [
+    {
+      "name": "calibration-00",
+      "kind": "calibration",
+      "seed": 2026110700,
+      "bit": 0,
+      "epoch_offset": 1,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "calibration-01",
+      "kind": "calibration",
+      "seed": 2026110701,
+      "bit": 1,
+      "epoch_offset": -4,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "calibration-02",
+      "kind": "calibration",
+      "seed": 2026110702,
+      "bit": 0,
+      "epoch_offset": 5,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "calibration-03",
+      "kind": "calibration",
+      "seed": 2026110703,
+      "bit": 1,
+      "epoch_offset": -2,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "calibration-04",
+      "kind": "calibration",
+      "seed": 2026110704,
+      "bit": 0,
+      "epoch_offset": 1,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "calibration-05",
+      "kind": "calibration",
+      "seed": 2026110705,
+      "bit": 1,
+      "epoch_offset": -4,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "calibration-06",
+      "kind": "calibration",
+      "seed": 2026110706,
+      "bit": 0,
+      "epoch_offset": -3,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "calibration-07",
+      "kind": "calibration",
+      "seed": 2026110707,
+      "bit": 1,
+      "epoch_offset": 3,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "calibration-08",
+      "kind": "calibration",
+      "seed": 2026110708,
+      "bit": 0,
+      "epoch_offset": -6,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "calibration-09",
+      "kind": "calibration",
+      "seed": 2026110709,
+      "bit": 1,
+      "epoch_offset": -2,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "calibration-10",
+      "kind": "calibration",
+      "seed": 2026110710,
+      "bit": 0,
+      "epoch_offset": 3,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "calibration-11",
+      "kind": "calibration",
+      "seed": 2026110711,
+      "bit": 1,
+      "epoch_offset": -2,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "calibration-12",
+      "kind": "calibration",
+      "seed": 2026110712,
+      "bit": 0,
+      "epoch_offset": -1,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "calibration-13",
+      "kind": "calibration",
+      "seed": 2026110713,
+      "bit": 1,
+      "epoch_offset": 3,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "calibration-14",
+      "kind": "calibration",
+      "seed": 2026110714,
+      "bit": 0,
+      "epoch_offset": -2,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "calibration-15",
+      "kind": "calibration",
+      "seed": 2026110715,
+      "bit": 1,
+      "epoch_offset": 3,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "calibration-16",
+      "kind": "calibration",
+      "seed": 2026110716,
+      "bit": 0,
+      "epoch_offset": 2,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "calibration-17",
+      "kind": "calibration",
+      "seed": 2026110717,
+      "bit": 1,
+      "epoch_offset": -2,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "calibration-18",
+      "kind": "calibration",
+      "seed": 2026110718,
+      "bit": 0,
+      "epoch_offset": 0,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "signal-00",
+      "kind": "signal",
+      "seed": 2026110800,
+      "bit": 0,
+      "epoch_offset": 4,
+      "ray_width": 0.0,
+      "cn0": null,
+      "arrival": -7.035
+    },
+    {
+      "name": "signal-01",
+      "kind": "signal",
+      "seed": 2026110801,
+      "bit": 1,
+      "epoch_offset": 0,
+      "ray_width": 0.0,
+      "cn0": null,
+      "arrival": 7.035
+    },
+    {
+      "name": "signal-02",
+      "kind": "signal",
+      "seed": 2026110802,
+      "bit": 0,
+      "epoch_offset": -5,
+      "ray_width": 0.0,
+      "cn0": null,
+      "arrival": -7.034
+    },
+    {
+      "name": "signal-03",
+      "kind": "signal",
+      "seed": 2026110803,
+      "bit": 1,
+      "epoch_offset": 4,
+      "ray_width": 0.0,
+      "cn0": null,
+      "arrival": 7.034
+    },
+    {
+      "name": "signal-04",
+      "kind": "signal",
+      "seed": 2026110804,
+      "bit": 0,
+      "epoch_offset": 4,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "signal-05",
+      "kind": "signal",
+      "seed": 2026110805,
+      "bit": 1,
+      "epoch_offset": 2,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "signal-06",
+      "kind": "signal",
+      "seed": 2026110806,
+      "bit": 0,
+      "epoch_offset": -1,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "signal-07",
+      "kind": "signal",
+      "seed": 2026110807,
+      "bit": 1,
+      "epoch_offset": -6,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "signal-08",
+      "kind": "signal",
+      "seed": 2026110808,
+      "bit": 0,
+      "epoch_offset": -2,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "signal-09",
+      "kind": "signal",
+      "seed": 2026110809,
+      "bit": 1,
+      "epoch_offset": -6,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "signal-10",
+      "kind": "signal",
+      "seed": 2026110810,
+      "bit": 0,
+      "epoch_offset": -6,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "signal-11",
+      "kind": "signal",
+      "seed": 2026110811,
+      "bit": 1,
+      "epoch_offset": 1,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "signal-12",
+      "kind": "signal",
+      "seed": 2026110812,
+      "bit": 0,
+      "epoch_offset": -5,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "signal-13",
+      "kind": "signal",
+      "seed": 2026110813,
+      "bit": 1,
+      "epoch_offset": 3,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "signal-14",
+      "kind": "signal",
+      "seed": 2026110814,
+      "bit": 0,
+      "epoch_offset": 0,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "signal-15",
+      "kind": "signal",
+      "seed": 2026110815,
+      "bit": 1,
+      "epoch_offset": 6,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "null-00",
+      "kind": "null",
+      "seed": 2026110900,
+      "bit": 0,
+      "epoch_offset": 1,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "null-01",
+      "kind": "null",
+      "seed": 2026110901,
+      "bit": 1,
+      "epoch_offset": -5,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "null-02",
+      "kind": "null",
+      "seed": 2026110902,
+      "bit": 0,
+      "epoch_offset": -5,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "null-03",
+      "kind": "null",
+      "seed": 2026110903,
+      "bit": 1,
+      "epoch_offset": 6,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "null-04",
+      "kind": "null",
+      "seed": 2026110904,
+      "bit": 0,
+      "epoch_offset": -2,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "null-05",
+      "kind": "null",
+      "seed": 2026110905,
+      "bit": 1,
+      "epoch_offset": -3,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "null-06",
+      "kind": "null",
+      "seed": 2026110906,
+      "bit": 0,
+      "epoch_offset": -6,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "null-07",
+      "kind": "null",
+      "seed": 2026110907,
+      "bit": 1,
+      "epoch_offset": -1,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "null-08",
+      "kind": "null",
+      "seed": 2026110908,
+      "bit": 0,
+      "epoch_offset": 2,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "null-09",
+      "kind": "null",
+      "seed": 2026110909,
+      "bit": 1,
+      "epoch_offset": 6,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "null-10",
+      "kind": "null",
+      "seed": 2026110910,
+      "bit": 0,
+      "epoch_offset": 5,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "null-11",
+      "kind": "null",
+      "seed": 2026110911,
+      "bit": 1,
+      "epoch_offset": -6,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "null-12",
+      "kind": "null",
+      "seed": 2026110912,
+      "bit": 0,
+      "epoch_offset": 3,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "null-13",
+      "kind": "null",
+      "seed": 2026110913,
+      "bit": 1,
+      "epoch_offset": -4,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "null-14",
+      "kind": "null",
+      "seed": 2026110914,
+      "bit": 0,
+      "epoch_offset": 6,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "null-15",
+      "kind": "null",
+      "seed": 2026110915,
+      "bit": 1,
+      "epoch_offset": 4,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "noise-00",
+      "kind": "noise",
+      "seed": 2026111000,
+      "bit": 0,
+      "epoch_offset": -1,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "noise-01",
+      "kind": "noise",
+      "seed": 2026111001,
+      "bit": 1,
+      "epoch_offset": 2,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "noise-02",
+      "kind": "noise",
+      "seed": 2026111002,
+      "bit": 0,
+      "epoch_offset": -6,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "noise-03",
+      "kind": "noise",
+      "seed": 2026111003,
+      "bit": 1,
+      "epoch_offset": 3,
+      "ray_width": 0.0,
+      "cn0": null
+    },
+    {
+      "name": "stress8-00",
+      "kind": "stress8",
+      "seed": 2026111100,
+      "bit": 0,
+      "epoch_offset": -1,
+      "ray_width": 0.0,
+      "cn0": 8.0
+    },
+    {
+      "name": "stress8-01",
+      "kind": "stress8",
+      "seed": 2026111101,
+      "bit": 1,
+      "epoch_offset": 1,
+      "ray_width": 0.0,
+      "cn0": 8.0
+    },
+    {
+      "name": "stress8-02",
+      "kind": "stress8",
+      "seed": 2026111102,
+      "bit": 0,
+      "epoch_offset": -6,
+      "ray_width": 0.0,
+      "cn0": 8.0
+    },
+    {
+      "name": "stress8-03",
+      "kind": "stress8",
+      "seed": 2026111103,
+      "bit": 1,
+      "epoch_offset": -1,
+      "ray_width": 0.0,
+      "cn0": 8.0
+    },
+    {
+      "name": "ray05-00",
+      "kind": "ray05",
+      "seed": 2026111200,
+      "bit": 0,
+      "epoch_offset": -4,
+      "ray_width": 0.5,
+      "cn0": null
+    },
+    {
+      "name": "ray05-01",
+      "kind": "ray05",
+      "seed": 2026111201,
+      "bit": 1,
+      "epoch_offset": 3,
+      "ray_width": 0.5,
+      "cn0": null
+    }
+  ],
+  "sources": {
+    "triad_realtime_receiver.py": "413958f2fe71739b6c6b60656079f69fa5370b75b3ff96109d1109f4507a464e",
+    "triad_realtime_helper.py": "bb6bc2b7920cc2bea27d647ba092e056cfb1e138e5535f9b3148ef9ee2e331cf",
+    "triad_realtime_fft.py": "0580ba4e357c3535fc70fb02ef53cd7778b71b4590955149e0c23d3b82d8e1c2",
+    "triad_dynamic_joint.py": "071a435406d43e5d322f4304ae821469f5b3a107134b5e50b5fb15eeab528832",
+    "triad_dynamic_frequency.py": "4d6b48b3b39a558769e1d035b46fdf619252245a20be7a4702d12cf524fa9cec",
+    "triad_dynamic_scan.py": "50ed9f86c28a6090123e7efe38c319b851ba00b0562e9a722346ad2a70e510ac",
+    "triad_dynamic_variants.py": "c20d1a7e0dc70629971ca04558a378c1c2222d9d457ebdb3bcc8343aa6eb8e76",
+    "triad_helper_receiver.py": "7956b27568b325ddb94437702c04d25650ed5cdac745f6e711a16f5c3c0af6e9",
+    "triad_gaussian_prepared.py": "c88afdf459521393958c49d801517d79cd158cbe2291e4a48c3eff6931e42875",
+    "triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba"
+  },
+  "native_binary_sha256": "c497ba10d1255f1e56a2976eb4c1be4854ba5f88b2891f0be15110a06ac22242",
+  "template_sha256": "cf315c6797565a754750908a288d7dc7c576b1d198ab356ce2a26faaaa087c8a",
+  "reference_manifest_sha256": "4284c80ee77d811e7b70a5004b10bd3d9c37afa84086bbf55b1a3f4529cfa837",
+  "alpha": 0.05,
+  "scope": "Per-capture matched Helper-present null rank gate; stress/noise laws reported separately; no daily false-admission guarantee",
+  "workers": 4,
+  "score_threads": 1,
+  "fft_workers": 2,
+  "generated_at": 1793923512.7518718
+}
