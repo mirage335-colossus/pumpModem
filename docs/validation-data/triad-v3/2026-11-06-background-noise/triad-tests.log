@@ -1,0 +1,93 @@
+Configuring dev in /home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli
+Preset CMake variables:
+
+  BUILD_TESTING="ON"
+  CMAKE_BUILD_TYPE="Release"
+  CMAKE_EXPORT_COMPILE_COMMANDS="ON"
+  DATAPUMP_COMPILER_CACHE="ON"
+  DATAPUMP_SANITIZERS="OFF"
+
+-- DataPump native dependency prefix: /home/user/___quick/p/_cur/dataPump/pumpModem/third_party/build-support/cache/sysroot/usr
+-- DataPump compiler cache: /usr/bin/ccache
+-- Could NOT find Gettext (missing: GETTEXT_MSGMERGE_EXECUTABLE GETTEXT_MSGFMT_EXECUTABLE) 
+-- DataPump build: /home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli (Release, fltk, portable=OFF)
+-- DataPump targeted receive mitigation: index=compiler target supported; barrier=compiler target supported
+-- Configuring done (0.4s)
+-- Generating done (0.5s)
+-- Build files have been written to: /home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli
+Building datapump-tests-triad with 2 compile jobs
+[1/29] Building CXX object CMakeFiles/datapump_background_noise.dir/src/background_noise.cpp.o
+[2/29] Linking CXX static library libdatapump_background_noise.a
+[3/29] Building CXX object CMakeFiles/background_noise.dir/tools/background-noise.cpp.o
+[4/29] Linking CXX executable background_noise
+[5/29] Building CXX object CMakeFiles/triad_experiment.dir/src/triad_modem_v3.cpp.o
+[6/29] Building CXX object CMakeFiles/triad_experiment.dir/src/triad_shaping.cpp.o
+[7/29] Building CXX object CMakeFiles/triad_experiment.dir/src/triad_simulation_stream.cpp.o
+[8/29] Building CXX object CMakeFiles/test_background_noise.dir/tests/test_background_noise.cpp.o
+[9/29] Building CXX object CMakeFiles/triad_experiment.dir/src/triad_receiver_v3.cpp.o
+[10/29] Linking CXX static library libtriad_experiment.a
+[11/29] Building CXX object CMakeFiles/test_background_noise.dir/src/background_noise.cpp.o
+[12/29] Building CXX object CMakeFiles/test_triad_v3_source.dir/tests/test_triad_v3_source.cpp.o
+[13/29] Building CXX object CMakeFiles/test_triad_shaping.dir/tests/test_triad_shaping.cpp.o
+[14/29] Building CXX object CMakeFiles/test_triad_v3_receiver.dir/tests/test_triad_v3_receiver.cpp.o
+[15/29] Building CXX object CMakeFiles/test_triad_v3_channel.dir/tests/test_triad_v3_channel.cpp.o
+[16/29] Building CXX object CMakeFiles/triad_oscillator_study.dir/tools/triad-oscillator-study.cpp.o
+[17/29] Linking CXX executable test_background_noise
+[18/29] Linking CXX executable test_triad_modem
+[19/29] Linking CXX executable test_triad_v2
+[20/29] Linking CXX executable test_triad_statistics
+[21/29] Linking CXX executable test_triad_v3_source
+[22/29] Linking CXX executable test_triad_shaping
+[23/29] Linking CXX executable test_triad_v3_channel
+[24/29] Linking CXX executable test_triad_v3_receiver
+[25/29] Linking CXX executable triad_study
+[26/29] Linking CXX executable triad_examples
+[27/29] Linking CXX executable triad_oscillator_study
+[28/29] Building CXX object CMakeFiles/triad_long.dir/tools/triad-long.cpp.o
+[29/29] Linking CXX executable triad_long
+Internal ctest changing into directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli
+Test project /home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli
+      Start 537: triad_diversity_export
+      Start 429: triad_shaping
+ 1/18 Test #429: triad_shaping ....................   Passed    9.16 sec
+      Start 430: triad_v3_channel
+ 2/18 Test #430: triad_v3_channel .................   Passed    9.76 sec
+      Start 531: triad_long_smoke
+ 3/18 Test #531: triad_long_smoke .................   Passed    9.33 sec
+      Start 432: triad_oscillator_study
+ 4/18 Test #537: triad_diversity_export ...........   Passed   29.44 sec
+      Start 532: triad_configuration
+ 5/18 Test #432: triad_oscillator_study ...........   Passed    3.21 sec
+      Start 536: triad_bounded_run
+ 6/18 Test #532: triad_configuration ..............   Passed    3.11 sec
+      Start 538: triad_lowrate_campaign
+ 7/18 Test #536: triad_bounded_run ................   Passed    1.83 sec
+      Start 424: triad_smoke
+ 8/18 Test #538: triad_lowrate_campaign ...........   Passed    1.43 sec
+      Start 533: triad_live_source
+ 9/18 Test #424: triad_smoke ......................   Passed    0.77 sec
+      Start 425: triad_v2
+10/18 Test #533: triad_live_source ................   Passed    0.47 sec
+      Start 423: triad_modem
+11/18 Test #425: triad_v2 .........................   Passed    0.67 sec
+      Start 431: triad_v3_receiver
+12/18 Test #423: triad_modem ......................   Passed    0.58 sec
+      Start 427: triad_statistics
+13/18 Test #427: triad_statistics .................   Passed    0.21 sec
+      Start 428: triad_v3_source
+14/18 Test #431: triad_v3_receiver ................   Passed    0.55 sec
+      Start 426: triad_examples_smoke
+15/18 Test #426: triad_examples_smoke .............   Passed    0.05 sec
+      Start 421: background_noise
+16/18 Test #421: background_noise .................   Passed    0.09 sec
+      Start 530: background_noise_cli
+17/18 Test #428: triad_v3_source ..................   Passed    0.22 sec
+18/18 Test #530: background_noise_cli .............   Passed    0.09 sec
+
+100% tests passed, 0 tests failed out of 18
+
+Label Time Summary:
+regular    =   0.18 sec*proc (2 tests)
+triad      =  70.99 sec*proc (18 tests)
+
+Total Test time (real) =  35.54 sec

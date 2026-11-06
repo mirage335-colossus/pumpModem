@@ -1,0 +1,21 @@
+{
+  "CMakeLists.txt": "3c54372ba42f8e1bbf163468b9f886f4ac474fc214d35900603dfaeaafb5531e",
+  "include/datapump/background_noise.hpp": "15dc030413ff4da61461ab28cf62b4932dc78d69198a988ec25bbd5a744cb7b5",
+  "src/background_noise.cpp": "c7230b566e333082848a20134f0d7f3398ec5ecc6a75649663b7492c72ee256c",
+  "tools/background-noise.cpp": "da0e9d542c23d1627b7b8c5413414d4f804adc39076d976ca613f3b72ff67428",
+  "tests/test_background_noise.cpp": "baf75ed0f0b40f3c3785815915469ab89e67228a867b1bc1bf9b09ed309121cc",
+  "tests/test_background_noise_cli.py": "70e49fde30180974e8148ecbc4c57b58e41a43c97453d972e7baa545fcc0ed16",
+  "include/datapump/triad_modem_v3.hpp": "5601419ed2ddd5968760c9294dedc1b1baf2aa9997433352cfd588995497410d",
+  "src/triad_simulation_stream.cpp": "2debfc7a0ab16391827f0e2127d8c77cbdfc4daef3c8fe97c198ecb77c312ea2",
+  "tests/test_triad_v3_channel.cpp": "20507464613dbd36cca829bfa35f08619759c13f7803cb199bca9d35c7a6fc1a",
+  "tools/background_noise_options.hpp": "7602fd4452904079f7170d383657e0089751779c602d10343364af7339d17841",
+  "tools/triad-long.cpp": "7762dd75b963a0666bac1a29b86815ec0d19bdb417c221f8d6b0f5b0005ffeee",
+  "tools/triad-helper-export.cpp": "2dd7d789d4424ff3b7f4c784554717ca44f43a340145d6e27a40c384d42285a2",
+  "tools/triad_background_noise.py": "58b3a284be81cbe61cfde97e6a9c98ca1aa825efb4e78de9967dffcbc9e339d7",
+  "tools/triad_live_alsa.py": "396ddfba97373a798fb62f20a01e66865dad77fc8a3f33b45ff4057fd5b144c6",
+  "tools/triad_live_duplex.py": "4ea2f4b7f539c8841ff6d53c269f00d2d7884f9aca3bb82a068b052217cb3864",
+  "tools/triad_stream_run.py": "be1998453ba1b02d104bfe1403dd9b41a0038ac03ac9225f4307f593237923b9",
+  "tools/triad_noise_qualification.py": "a45305ec8ab1a9aeb46137325932dcad3190217e78d1c26a83db3bd756d5dfee",
+  "tests/test_triad_background_noise.py": "61105920c8476c382bc463e7269e020747bb02174366f9c1c96b78389d95d2db",
+  "tests/test_triad_live_alsa.py": "3ad3bf497a6e654b035045fee433aa7dbcb4e75b223bed0870521aa51deca68a"
+}

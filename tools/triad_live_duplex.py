@@ -42,6 +42,10 @@ from scipy import signal as scipy_signal
 
 import triad_live_model as model
 import triad_live_waveforms as wave
+from triad_background_noise import add_arguments as add_background_noise_arguments
+from triad_background_noise import enabled as background_noise_enabled
+from triad_background_noise import forwarded_arguments as background_noise_arguments
+from triad_background_noise import validate as validate_background_noise
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -172,7 +176,7 @@ def execute(argv, deadline, *, timeout=60., log=None):
 def provenance(binary, deadline):
     files = ["tools/triad_live_duplex.py", "tools/triad_live_model.py",
              "tools/triad_live_waveforms.py", "tools/triad_audio_capture.cpp",
-             "tools/triad_live_alsa.py",
+             "tools/triad_live_alsa.py", "tools/triad_background_noise.py",
              "tools/triad-long.cpp", "src/triad_modem_v3.cpp",
              "src/triad_simulation.cpp", "src/channel_perturbation.hpp",
              "src/channel_spread.hpp", "src/audio.cpp"]
@@ -469,7 +473,8 @@ def validate_capture(metadata):
         raise ValueError("actual stream-format metadata is missing")
 
 
-def capture_one(case, prepared, output, audio_binary, route, deadline, *, backend="native"):
+def capture_one(case, prepared, output, audio_binary, route, deadline, *, backend="native",
+                background_noise_args=None):
     src, dest = prepared / case["id"], output / case["id"]
     dest.mkdir()
     stimulus = json_read(src / "stimulus.json")
@@ -478,13 +483,16 @@ def capture_one(case, prepared, output, audio_binary, route, deadline, *, backen
     if cap > deadline.remaining():
         raise BudgetExceeded("remaining whole-command budget cannot fit the next complete capture")
     command = ([sys.executable, str(ROOT / "tools/triad_live_alsa.py")] if backend == "alsa-tools" else [audio_binary])
-    execute([*command, "--live", "--exclusive", "--input", src / "stimulus.f32",
+    argv = [*command, "--live", "--exclusive", "--input", src / "stimulus.f32",
              "--output", dest / "capture.f32", "--raw-output", dest / "provider.f32",
              "--metadata", dest / "capture.json", "--rate", FS,
              "--capture-device", route["capture"]["device"],
              "--playback-device", route["playback"]["device"],
              "--preroll-seconds", .75, "--postroll-seconds", 1.,
-             "--max-seconds", cap], deadline, timeout=cap + 2., log=dest / "command.json")
+             "--max-seconds", cap]
+    if backend == "alsa-tools" and background_noise_args is not None:
+        argv.extend(background_noise_arguments(background_noise_args))
+    execute(argv, deadline, timeout=cap + 2., log=dest / "command.json")
     metadata = json_read(dest / "capture.json")
     validate_capture(metadata)
     json_write(dest / "capture-identity.json", dict(stimulus_sha256=stimulus["stimulus_sha256"],
@@ -1015,7 +1023,9 @@ def run_campaign(args, output, deadline, stages):
                     plan_sha256=digest(prepared / "plan.json"), provenance=provenance(args.binary, deadline),
                     capture_backend=args.capture_backend,
                     audio_binary_sha256=digest(args.audio_binary) if args.capture_backend == "native" else None,
-                    alsa_adapter_sha256=digest(ROOT / "tools/triad_live_alsa.py") if args.capture_backend == "alsa-tools" else None))
+                    alsa_adapter_sha256=digest(ROOT / "tools/triad_live_alsa.py") if args.capture_backend == "alsa-tools" else None,
+                    background_noise_tool_sha256=(digest(args.background_noise_tool)
+                        if args.capture_backend == "alsa-tools" and background_noise_enabled(args) else None)))
     with stages.stage("route-discovery"):
         route = discover_route(deadline, capture_source=args.capture_source, playback_sink=args.playback_sink,
                                capture_device=args.capture_device, playback_device=args.playback_device)
@@ -1039,7 +1049,8 @@ def run_campaign(args, output, deadline, stages):
             if case["kind"] not in ("training", "training_low") and profile is None:
                 raise ValueError("combined declared training profile must freeze before any holdout capture")
             with stages.stage("capture-" + case["id"]):
-                capture_one(case, prepared, output, args.audio_binary, route, deadline, backend=args.capture_backend)
+                capture_one(case, prepared, output, args.audio_binary, route, deadline,
+                            backend=args.capture_backend, background_noise_args=args)
             if case["kind"] == "training" and has_low_training:
                 continue
             if case["kind"] in ("training", "training_low"):
@@ -1149,12 +1160,18 @@ def parser():
     p.add_argument("--playback-sink")
     p.add_argument("--capture-device")
     p.add_argument("--playback-device")
+    add_background_noise_arguments(p)
     return p
 
 
 def main(argv=None):
     start = PROCESS_START if argv is None else time.monotonic()
     args = parser().parse_args(argv)
+    validate_background_noise(args)
+    if args.command != "run" and background_noise_enabled(args):
+        raise ValueError("background noise is a transmit-time option for run, not plan/prepare/analyze")
+    if args.command == "run" and args.capture_backend == "native" and background_noise_enabled(args):
+        raise ValueError("background noise is currently supported by the ALSA-tools backend; native audio capture has no TX PCM mixer hook")
     deadline = Deadline(args.budget_seconds)
     deadline.start = start
     if not 1 <= args.trials <= 1000000:

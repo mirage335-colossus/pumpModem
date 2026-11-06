@@ -5,6 +5,13 @@ For the new isolated random-channel implementation, see the
 ray width, ray-center separation, bounded delay motion and random dispersive
 coefficients, and preserves the earlier deterministic laws for replay.
 
+The isolated [cryptographic transmit background noise](triad-background-noise.md)
+is a separate default-off source contribution, not a replacement for receiver
+thermal noise. It uses a fresh temporary AES key for each transmission, so a
+channel seed alone does not reproduce that added source. Preserve its complete
+propagation and filter tails and distinguish source-DAC from final live-DAC
+injection when replaying an already simulated channel through audio hardware.
+
 Use these models when building simulations that need Doppler/delay spread or
 frequency-selective amplitude changes. They are explicit channel impairments;
 the presets do not claim calibrated field measurements. Apply them on the

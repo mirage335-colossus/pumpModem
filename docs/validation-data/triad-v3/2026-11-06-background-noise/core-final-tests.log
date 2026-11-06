@@ -1,0 +1,14 @@
+Internal ctest changing into directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli
+Test project /home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli
+    Start 421: background_noise
+1/2 Test #421: background_noise .................   Passed    0.10 sec
+    Start 530: background_noise_cli
+2/2 Test #530: background_noise_cli .............   Passed    0.11 sec
+
+100% tests passed, 0 tests failed out of 2
+
+Label Time Summary:
+regular    =   0.21 sec*proc (2 tests)
+triad      =   0.21 sec*proc (2 tests)
+
+Total Test time (real) =   0.22 sec

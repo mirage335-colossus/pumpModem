@@ -29,6 +29,10 @@ from triad_live_waveforms import to_audio
 from triad_stream_frontend import StreamingAudioDDC
 from triad_stream_scheduler import StreamingWindowScheduler, WindowRequest
 from triad_stream_slots import load_slots
+from triad_background_noise import add_arguments as add_background_noise_arguments
+from triad_background_noise import apply as apply_background_noise
+from triad_background_noise import enabled as background_noise_enabled
+from triad_background_noise import validate as validate_background_noise
 
 
 def digest(path):
@@ -259,6 +263,7 @@ def main():
     p.add_argument('--record-pcm',action='store_true');p.add_argument('--chunk-frames',type=int,default=2400)
     p.add_argument('--max-seconds',type=float,default=600.);p.add_argument('--drain-timeout',type=float,default=180.)
     p.add_argument('--threads',type=int,default=2);p.add_argument('--noise-inflation',type=float,default=1.)
+    add_background_noise_arguments(p)
     a=p.parse_args()
     if (a.train is None)==(a.source_dir is None):p.error('supply a public train directory, positional or --source-dir')
     a.train=a.train or a.source_dir
@@ -266,6 +271,9 @@ def main():
     if a.mode=='live'and not a.exclusive:p.error('live raw hardware requires --exclusive')
     if a.mode=='live'and a.replay_pcm:p.error('--replay-pcm is for replay mode')
     if a.replay_pcm and a.playback_offset_frames is None:p.error('recorded PCM requires its public --playback-offset-frames')
+    try: validate_background_noise(a)
+    except ValueError as exc: p.error(str(exc))
+    if a.replay_pcm and background_noise_enabled(a):p.error('--replay-pcm is recorded receiver input; background noise applies to transmissions only')
     if a.chunk_frames<1 or a.chunk_frames>65536:p.error('chunk frames must be1..65536')
     for value in (a.fixed_gain,a.analog_gain,a.max_seconds,a.drain_timeout,a.noise_inflation):
         if not math.isfinite(value)or value<=0:p.error('gains, limits and noise inflation must be positive/finite')
@@ -284,6 +292,17 @@ def main():
     if a.replay_pcm:bridge=dict(mode='retained-capture-replay',file=str(a.replay_pcm),sha256=digest(a.replay_pcm))
     elif a.tx_pcm:bridge=dict(mode='retained-transmit-PCM',file=str(tx),sha256=digest(tx))
     else:bridge=prepare_pcm(a.train,original,tx,fixed_gain=a.fixed_gain,observation_file=a.observation_file)
+    if background_noise_enabled(a) and not a.replay_pcm:
+        clean_tx=tx
+        tx=a.output/'tx.background-noise.stereo.s16le'
+        noise_meta=a.output/'tx.background-noise.json'
+        noise_receipt=apply_background_noise(a,input_path=clean_tx,output_path=tx,
+            metadata_path=noise_meta,sample_rate=48000,input_format='s16',
+            output_format='s16',channels=2,timeout=a.max_seconds)
+        bridge=dict(mode='fresh-transmit-background-noise',clean_file=str(clean_tx),
+            clean_sha256=digest(clean_tx),file=str(tx),sha256=digest(tx),
+            background_noise=noise_receipt,
+            stage='digital post-simulation audio baseband before DAC codes; the propagation model is already in the clean fixture')
     preparation=dict(cpu_seconds=time.process_time()-c,wall_seconds=time.perf_counter()-w)
     session=StreamSession(original,slots,a.output,fixed_gain=a.fixed_gain,analog_gain=a.analog_gain,
         playback_offset_frames=offset,noise_inflation=a.noise_inflation)
@@ -299,7 +318,7 @@ def main():
     report=dict(schema='triad-continuous-run-v1',mode=a.mode,train_manifest_sha256=digest(a.train/'manifest.json'),
         bridge=bridge,preparation=preparation,transport=transport,stream=stream,
         fixed_gain=a.fixed_gain,analog_gain=a.analog_gain,public_playback_offset_frames=offset,
-        source_sha256={name:digest(Path(__file__).parent/name)for name in ('triad_stream_run.py','triad_stream_frontend.py','triad_stream_scheduler.py','triad_stream_slots.py')},
+        source_sha256={name:digest(Path(__file__).parent/name)for name in ('triad_stream_run.py','triad_stream_frontend.py','triad_stream_scheduler.py','triad_stream_slots.py','triad_background_noise.py')},
         total_cpu_seconds=time.process_time()-c,total_wall_seconds=time.perf_counter()-w,
         failure=failure or transport.get('failure'),message_completed=False,physical_null_qualified=False,
         scope='Continuous PCM/DDC/ring/worker test with fixed public source windows; no evaluator truth input; conditional bit candidates only, no source text decode or completed-message claim.')

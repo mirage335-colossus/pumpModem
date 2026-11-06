@@ -20,6 +20,10 @@ import sys
 import time
 
 import numpy as np
+from triad_background_noise import add_arguments as add_background_noise_arguments
+from triad_background_noise import apply as apply_background_noise
+from triad_background_noise import enabled as background_noise_enabled
+from triad_background_noise import validate as validate_background_noise
 
 
 def parse_hw_format(log, rate, direction):
@@ -65,10 +69,12 @@ def parser():
     p.add_argument("--preroll-seconds", type=float, default=.75)
     p.add_argument("--postroll-seconds", type=float, default=1.)
     p.add_argument("--max-seconds", type=float, default=30.)
+    add_background_noise_arguments(p)
     return p
 
 
 def validate(c):
+    validate_background_noise(c)
     if not c.live:
         raise ValueError("opening audio requires explicit --live")
     if not c.exclusive:
@@ -137,10 +143,17 @@ def run(c):
         raise ValueError("arecord and aplay are required")
     paths = {"output": Path(c.output), "metadata": Path(c.metadata),
              "stereo": Path(str(c.output) + ".stereo.s16le"),
-             "tx": Path(str(c.output) + ".tx.stereo.s16le"),
              "capture_log": Path(str(c.output) + ".arecord.stderr.log"),
              "playback_log": Path(str(c.output) + ".aplay.stderr.log"),
              "playback_stdout": Path(str(c.output) + ".aplay.stdout.log")}
+    tx_path = Path(str(c.output) + ".tx.stereo.s16le")
+    if background_noise_enabled(c):
+        paths["clean_tx"] = Path(str(c.output) + ".tx.clean.stereo.s16le")
+        paths["tx"] = tx_path
+        noise_metadata = Path(str(c.output) + ".tx.noise.json")
+    else:
+        paths["tx"] = tx_path
+        noise_metadata = None
     if c.raw_output:
         paths["raw"] = Path(c.raw_output)
     resolved = [p.resolve() for p in paths.values()]
@@ -151,7 +164,7 @@ def run(c):
               "--disable-format", "--disable-softvol"]
     capture_argv = [executables["arecord"], "-D", c.capture_device, *common,
                     "--samples", str(capture_frames)]
-    playback_argv = [executables["aplay"], "-D", c.playback_device, *common, str(paths["tx"])]
+    playback_argv = [executables["aplay"], "-D", c.playback_device, *common, str(tx_path)]
     report = {"schema": "triad-audio-capture-v1", "backend": "alsa-utils-raw-stereo-v1",
               "status": "incomplete", "failure": None,
               "requested": {"rate": c.rate, "capture_device": c.capture_device,
@@ -165,15 +178,28 @@ def run(c):
               "audio_format": {}, "discontinuity": {"capture": False, "playback": False},
               "timing_note": "No provider timestamps. Public probe markers measure relative latency/rate; subprocess/file boundaries are not calibrated analog times.",
               "pcm_contract": "TX float32 clamp*32767 truncate to S16_LE, identical stereo; RX selected fixed channel S16/32768, both channels retained; no effective ADC resolution claim"}
+    if background_noise_enabled(c):
+        report["requested"]["background_noise_stage"] = "digital post-simulation baseband, immediately before S16 DAC codes"
+        report["requested"]["background_noise_reference"] = (
+            "fixed explicit full-scale or supplied transmitter reference; no per-capture RMS normalization")
     capture = playback = None
     with ExitStack() as stack:
         # Exclusive creation claims every artifact before starting any device.
-        files = {key: stack.enter_context(path.open("x+b")) for key, path in paths.items()}
+        opened_paths = {key: path for key, path in paths.items()
+                        if key != "tx" or not background_noise_enabled(c)}
+        files = {key: stack.enter_context(path.open("x+b")) for key, path in opened_paths.items()}
         try:
+            tx_baseline = files["clean_tx"] if background_noise_enabled(c) else files["tx"]
             for first in range(0, len(pcm), 65536):
                 stereo = np.repeat(pcm[first:first + 65536, None], 2, axis=1)
-                files["tx"].write(stereo.tobytes())
-            files["tx"].flush()
+                tx_baseline.write(stereo.tobytes())
+            tx_baseline.flush()
+            if background_noise_enabled(c):
+                noise_report = apply_background_noise(c, input_path=paths["clean_tx"],
+                    output_path=tx_path, metadata_path=noise_metadata, sample_rate=c.rate,
+                    input_format="s16", output_format="s16", channels=2,
+                    timeout=min(60., remaining()))
+                report["background_noise"] = noise_report
             del pcm
             versions = {}
             for name, exe in executables.items():

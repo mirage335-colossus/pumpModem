@@ -158,6 +158,36 @@ class AlsaToolsTests(unittest.TestCase):
             tx = np.fromfile(str(c.output) + ".tx.stereo.s16le", "<i2").reshape(-1, 2)
             np.testing.assert_array_equal(tx[:, 0], tx[:, 1])
 
+    def test_background_noise_creates_separate_fresh_tx_artifact_before_playback(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            c = self.config(root)
+            c.background_noise_bits = 16
+
+            def mix(args, **kwargs):
+                clean = Path(kwargs['input_path'])
+                noisy = Path(kwargs['output_path'])
+                self.assertNotEqual(clean, noisy)
+                self.assertTrue(clean.is_file())
+                noisy.write_bytes(clean.read_bytes())
+                Path(kwargs['metadata_path']).write_text('{"noise_variance":1e-8}\n')
+                return {'file': str(noisy), 'sha256': 'synthetic-test-hash',
+                        'metadata': str(kwargs['metadata_path'])}
+
+            with mock.patch.object(m.subprocess, "Popen", self.fake_processes(c)), \
+                 mock.patch.object(m.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "version", "")), \
+                 mock.patch.object(m, "apply_background_noise", side_effect=mix) as mixer:
+                result = m.run(c)
+            self.assertEqual(result["status"], "complete", result["failure"])
+            mixer.assert_called_once()
+            clean = Path(str(c.output) + ".tx.clean.stereo.s16le")
+            noisy = Path(str(c.output) + ".tx.stereo.s16le")
+            self.assertTrue(clean.exists())
+            self.assertTrue(noisy.exists())
+            self.assertNotEqual(clean, noisy)
+            self.assertEqual(result['background_noise']['file'], str(noisy))
+            self.assertIn(str(noisy), result['argv']['playback'])
+
     def test_failed_negotiation_and_process_preserve_incomplete(self):
         for bad_format, playback_failure in ((True, False), (False, True)):
             with self.subTest(bad_format=bad_format), tempfile.TemporaryDirectory() as d:

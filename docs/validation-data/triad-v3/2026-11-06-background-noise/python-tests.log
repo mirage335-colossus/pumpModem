@@ -1,0 +1,29 @@
+usage: triad_stream_run.py [-h] [--source-dir SOURCE_DIR]
+                           [--observation-file OBSERVATION_FILE]
+                           --output OUTPUT [--mode {replay,live}]
+                           [--exclusive] [--device DEVICE]
+                           [--replay-pcm REPLAY_PCM] [--tx-pcm TX_PCM]
+                           [--fixed-gain FIXED_GAIN]
+                           [--analog-gain ANALOG_GAIN]
+                           [--preroll-seconds PREROLL_SECONDS]
+                           [--postroll-seconds POSTROLL_SECONDS]
+                           [--playback-offset-frames PLAYBACK_OFFSET_FRAMES]
+                           [--realtime] [--record-pcm]
+                           [--chunk-frames CHUNK_FRAMES]
+                           [--max-seconds MAX_SECONDS]
+                           [--drain-timeout DRAIN_TIMEOUT] [--threads THREADS]
+                           [--noise-inflation NOISE_INFLATION]
+                           [--background-noise-bits BITS |
+                           --background-noise-obscured-bits BITS |
+                           --background-noise-db DB |
+                           --background-noise-watts WATTS]
+                           [--background-noise-reference-watts BACKGROUND_NOISE_REFERENCE_WATTS]
+                           [--background-noise-reference-rms BACKGROUND_NOISE_REFERENCE_RMS]
+                           [--background-noise-tool BACKGROUND_NOISE_TOOL]
+                           [train]
+triad_stream_run.py: error: --replay-pcm is recorded receiver input; background noise applies to transmissions only
+...............................................
+----------------------------------------------------------------------
+Ran 47 tests in 0.314s
+
+OK

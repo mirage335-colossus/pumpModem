@@ -674,12 +674,32 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
 
   # Isolated 3-carrier Robust waveform/receiver research. This target owns its
   # complex-baseband channel path and does not link the ordinary modem receiver.
+  add_library(datapump_background_noise STATIC EXCLUDE_FROM_ALL src/background_noise.cpp)
+  target_include_directories(datapump_background_noise PUBLIC include)
+  target_link_libraries(datapump_background_noise PUBLIC OpenSSL::Crypto)
+  add_executable(background_noise EXCLUDE_FROM_ALL tools/background-noise.cpp)
+  target_link_libraries(background_noise PRIVATE datapump_background_noise)
+  # Compile deterministic known-answer seams only into this test executable.
+  # Production library/CLI cannot accept a caller-provided key or IV.
+  add_executable(test_background_noise EXCLUDE_FROM_ALL tests/test_background_noise.cpp src/background_noise.cpp)
+  target_include_directories(test_background_noise PRIVATE include)
+  target_compile_definitions(test_background_noise PRIVATE DATAPUMP_BACKGROUND_NOISE_TESTING=1)
+  target_link_libraries(test_background_noise PRIVATE OpenSSL::Crypto)
+  add_dependencies(test_background_noise background_noise)
+  add_test(NAME background_noise COMMAND test_background_noise)
+  set_tests_properties(background_noise PROPERTIES LABELS "triad" TIMEOUT 30)
+  if(DATAPUMP_SANITIZERS AND NOT MSVC)
+    target_compile_options(datapump_background_noise PUBLIC -O1 -fsanitize=address,undefined -fno-omit-frame-pointer)
+    target_link_options(datapump_background_noise PUBLIC -fsanitize=address,undefined)
+    target_compile_options(test_background_noise PRIVATE -O1 -fsanitize=address,undefined -fno-omit-frame-pointer)
+    target_link_options(test_background_noise PRIVATE -fsanitize=address,undefined)
+  endif()
   add_library(triad_experiment STATIC EXCLUDE_FROM_ALL
     src/crypto.cpp src/triad_modem.cpp src/triad_simulation.cpp src/triad_modem_v2.cpp
     src/triad_statistics.cpp src/triad_modem_v3.cpp src/triad_shaping.cpp src/triad_simulation_stream.cpp
     src/triad_receiver_v3.cpp src/search_fft.cpp src/tuning_presets.cpp)
   target_include_directories(triad_experiment PUBLIC include PRIVATE src)
-  target_link_libraries(triad_experiment PUBLIC OpenSSL::Crypto Threads::Threads)
+  target_link_libraries(triad_experiment PUBLIC OpenSSL::Crypto Threads::Threads datapump_background_noise)
   if(MSVC)
     target_compile_options(triad_experiment PRIVATE /W4 /permissive-)
   else()
@@ -1122,6 +1142,10 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
   endif()
   find_package(Python3 QUIET COMPONENTS Interpreter)
   if(Python3_FOUND)
+    add_test(NAME background_noise_cli COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_background_noise_cli.py $<TARGET_FILE:background_noise>)
+    set_tests_properties(background_noise_cli PROPERTIES LABELS "triad" TIMEOUT 30)
+    add_custom_target(test_background_noise_cli DEPENDS background_noise)
     add_test(NAME triad_long_smoke COMMAND ${Python3_EXECUTABLE}
       ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_triad_long.py $<TARGET_FILE:triad_long>)
     set_tests_properties(triad_long_smoke PROPERTIES LABELS "triad" TIMEOUT 300)
@@ -1243,7 +1267,8 @@ if(NOT DATAPUMP_BUILD_WASM)
   foreach(_target IN LISTS _datapump_native_targets)
     get_target_property(_type ${_target} TYPE)
     if(_type STREQUAL "EXECUTABLE")
-      if(_target STREQUAL "test_triad_modem" OR _target STREQUAL "test_triad_v2" OR
+      if(_target STREQUAL "background_noise" OR _target STREQUAL "test_background_noise" OR
+          _target STREQUAL "test_triad_modem" OR _target STREQUAL "test_triad_v2" OR
           _target STREQUAL "test_triad_statistics" OR _target STREQUAL "test_triad_v3_source" OR _target STREQUAL "test_triad_shaping" OR
           _target STREQUAL "test_triad_v3_channel" OR _target STREQUAL "test_triad_v3_receiver" OR
           _target STREQUAL "triad_study" OR _target STREQUAL "triad_examples" OR
