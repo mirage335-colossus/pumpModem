@@ -7,6 +7,11 @@ the encrypted transmitted waveform, the automatic shaping plan and the 38-second
 Helper lead. It does not integrate the ordinary Robust receiver or implement
 the missing multi-bit message adapter.
 
+For the subsequent 8-dB-Hz and renewing-ray work, start with the
+[weak-signal streaming guide](triad-weak-streaming.md). This page retains the
+earlier frozen receiver and its limitations rather than retroactively assigning
+new evidence to it.
+
 Start with `tools/triad_realtime_receiver.py`, rather than multiplying the
 small-bank dynamic reference receiver across the full timing/epoch/CFO/clock
 product. The earlier [CPU diagnosis](validation-data/triad-v3/2026-11-05-local-cpu/README.md)

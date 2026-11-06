@@ -20,6 +20,10 @@ joint-acquisition bank; its projections are not a live receiver CPU ceiling.
 The [hierarchical CPU receiver](triad-realtime.md) acquires Helper onset, shares
 FFT timing/epoch searches and refines sparse dynamic hypotheses. Its cheap tests
 and sampled qualification remain separate; it is an isolated experimental path.
+The [weak-signal and continuous-audio path](triad-weak-streaming.md) adds
+pilot-aware weak onset, segmented complex acquisition, fixed-prior operational
+admission accounting and a bounded streaming audio experiment. It explicitly
+separates Gaussian-null theory from physical Helper/audio qualification.
 The [Helper-assisted triad integration](triad-helper.md) documents production
 Helper composition, the requested HF/EME configurations, acquisition reuse and
 scoped admission controls, separately from ordinary Robust integration.

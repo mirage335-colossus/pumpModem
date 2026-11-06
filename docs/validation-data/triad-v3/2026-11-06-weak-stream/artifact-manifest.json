@@ -1,0 +1,2808 @@
+{
+  "archive": "compact-evidence.tar.gz",
+  "archive_members": [
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/alignment/README-invalid-interpretation.md",
+      "sha256": "60c7309fbc0ddd298a593b60e23703a43b0ef4608ae2b1cf2ec39f6235291a0a",
+      "size_bytes": 3129
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/alignment/README.md",
+      "sha256": "6dbb972d8626cb96a4e44592c1c39b0e7c923d037272df01da52367559532444",
+      "size_bytes": 3645
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/alignment/oracle-results-corrected.json",
+      "sha256": "1f5ede137102adc36f3e406e6f6a036a74a4b4d98e2c57af72add87d93e9c22f",
+      "size_bytes": 29972
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/alignment/oracle-results-invalid-interpretation.json",
+      "sha256": "3c18d41b388656c94cfcc8a59368aa06052108c22de3674c3eaf5d6608a3ee5a",
+      "size_bytes": 28860
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/alignment/oracle-results.json",
+      "sha256": "3c18d41b388656c94cfcc8a59368aa06052108c22de3674c3eaf5d6608a3ee5a",
+      "size_bytes": 28860
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/alignment/run-invalid-interpretation.py",
+      "sha256": "a4afc3e6adc33b4499a7a3c6ea79a8c29175fa04a47cd0d81c21a5d5a945ed1b",
+      "size_bytes": 4803
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/alignment/run.log",
+      "sha256": "5266f02cf2d2842e9c699b5363107778ad618757859d7373af89f948a69cc6e5",
+      "size_bytes": 716
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/alignment/run.py",
+      "sha256": "4b710780b84268979df699ffb18ae84be2ad19c689a05080b1af30c5d368abe4",
+      "size_bytes": 5274
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/audio-replay/report.json",
+      "sha256": "c26a3d5ca91d3c9bb841173ddad2e0ec598cf90e9dd0419f4fd725faef637388",
+      "size_bytes": 723653
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/audio-replay/slot-0-receiver.json",
+      "sha256": "a9062993d0b6e870255130e191fb04a34ef04b1c964b5ccf74b9c86d1a40acc8",
+      "size_bytes": 2099983
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/audio-replay/slot-1-receiver.json",
+      "sha256": "d747f3871acd32f7f83f28e50b583bb24a401fc0b87338f5f4183161e47953b3",
+      "size_bytes": 2102395
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/audio-replay/slot-2-receiver.json",
+      "sha256": "c98214cfb00e58208d312f8338e2047174bae8d06bbddcb57db03d79304f38cf",
+      "size_bytes": 2605769
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/bridge-noise.json",
+      "sha256": "68f8cf1891277e5a1254555be269d562d7e7af95b32d23420c8c1eb53c244a8f",
+      "size_bytes": 2716
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/cable-calibration/analysis.json",
+      "sha256": "30d9479e5d2b558ffc61dd9d07b2f443eeb6499940af9a1ebb539783d6184935",
+      "size_bytes": 2372
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/cable-calibration/captured.f32.aplay.stderr.log",
+      "sha256": "cd1f5f1555206ce85cd4741df322c0c731b5635443fd9bdaf8cc57367a2d075c",
+      "size_bytes": 775
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/cable-calibration/captured.f32.aplay.stdout.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size_bytes": 0
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/cable-calibration/captured.f32.arecord.stderr.log",
+      "sha256": "9727b3e55c0dc09aa0da2433c61efc7b45f507d478e2dff92be0a80e94c74aab",
+      "size_bytes": 698
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/cable-calibration/protocol.json",
+      "sha256": "d061c2c0ca54026f052ee5fa2c9d90d13405acbc42a0ff0606b8adc0aca60018",
+      "size_bytes": 1321
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/cable-calibration/receipt.json",
+      "sha256": "b051a2655d6b66f334d6bf5c0c52db0467e009894450cbd767e0add08343c780",
+      "size_bytes": 4147
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/cable-helper-only/capture.stderr.log",
+      "sha256": "9727b3e55c0dc09aa0da2433c61efc7b45f507d478e2dff92be0a80e94c74aab",
+      "size_bytes": 698
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/cable-helper-only/playback.stderr.log",
+      "sha256": "a86d099b3a4210fd4be953293eb52b265a0a0a6c7cd786544d0981354c18a08a",
+      "size_bytes": 762
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/cable-helper-only/report.json",
+      "sha256": "eba7ba6a53057d0d1c1686f6b0725a31d19193e2c6627c1865d6f529c3529185",
+      "size_bytes": 866581
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/cable-helper-only/slot-0-receiver.json",
+      "sha256": "19177dd39c06d4f9a977bb112a9b719ef199e8daea69a0a94d69045f362ad5c6",
+      "size_bytes": 2099666
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/cable-helper-only/slot-1-receiver.json",
+      "sha256": "cd8548a45603b3442bb31785cfa3a256d86561c2ca453389097418c5e26437b8",
+      "size_bytes": 2101456
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/cable-helper-only/slot-2-receiver.json",
+      "sha256": "48297bd4cd85ac46bf233f74bb06878f02540cb794ba6f36f2f8af18b6c64ffd",
+      "size_bytes": 2099297
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/cable-signal/capture.stderr.log",
+      "sha256": "9727b3e55c0dc09aa0da2433c61efc7b45f507d478e2dff92be0a80e94c74aab",
+      "size_bytes": 698
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/cable-signal/noise-metrology.json",
+      "sha256": "1fc4591be816e8e94a83ad94a1ead31013fe926ee9e46de13ddd52129abb4d4c",
+      "size_bytes": 1219
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/cable-signal/playback.stderr.log",
+      "sha256": "671db20067f42545050a0fe706564c27006dd263b73a005ae83c5166b68923e1",
+      "size_bytes": 757
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/cable-signal/report.json",
+      "sha256": "24c48624878a76eaacf0c4b32caa27123b4c68c3c34962bc811955e931d23a01",
+      "size_bytes": 864617
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/cable-signal/slot-0-receiver.json",
+      "sha256": "7acfd41c58e19422b5a7c782589a045089abd09976710e67b5e61297db70e915",
+      "size_bytes": 2100012
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/cable-signal/slot-1-receiver.json",
+      "sha256": "142c22bd3f1bea6f5228dbffcc3b29ab503b487203f52d546af12b4ef0bb646b",
+      "size_bytes": 2101996
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/cable-signal/slot-2-receiver.json",
+      "sha256": "9c50208aaf304897715d512b3f8ddf90a367ce3f347d2a03ea85e71460d28a66",
+      "size_bytes": 2099421
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/focused-initial.log",
+      "sha256": "5e5b53defa44c5394088e1a289224d0e6cc3df1f41806d270815a9b76a212ccf",
+      "size_bytes": 3820
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/focused-tests.log",
+      "sha256": "40c76e505ab3c95015cce6f82b1bab8ea7d2bcbaf89dab979d73469f6d3a03c2",
+      "size_bytes": 164
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/helper/diagnose.log",
+      "sha256": "570c6f1a59c16bf4da5c0b7644db67cba075142923e74cd9963d0410f044de89",
+      "size_bytes": 1063
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/helper/diagnose.py",
+      "sha256": "d5bf4715b25d8bac0ca96d48a1e5687834e745311bba177592db1d33f4461a9a",
+      "size_bytes": 2073
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/helper/failed-complex/diagnose.log",
+      "sha256": "5c8b0cf4a2f40c98ab9edeee0f4ad8ddeceda5e2c858ad45a367e5f6cf2f193c",
+      "size_bytes": 1021
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/helper/failed-complex/ray05-00.json",
+      "sha256": "2d2c9d4ebdce44081a66cd49439ccc1043066d87025eac63d4e4438df5675bc9",
+      "size_bytes": 463884
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/helper/failed-complex/ray05-01.json",
+      "sha256": "ec6cf5997e34b69c74b79a2a8429a589f1fd75ba18f9d4428cf0c4c532d335f1",
+      "size_bytes": 462296
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/helper/failed-complex/stress8-00.json",
+      "sha256": "0f3ce19b05856e16c008e50d3ac3bf90b36f7b1babb96276eca0b9e68ad1d81a",
+      "size_bytes": 899047
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/helper/failed-complex/stress8-01.json",
+      "sha256": "85f78c908e65acd94bc2252de5e21c2fce28c2303714fc3d3f1db46de3d6d5a0",
+      "size_bytes": 894342
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/helper/failed-complex/stress8-02.json",
+      "sha256": "c1d363f84b2f47ee3a5db56ec2174c9a407879058d01e17d8bdfa6c7934e29b6",
+      "size_bytes": 894848
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/helper/failed-complex/stress8-03.json",
+      "sha256": "efc6acffb6367d79f9bb125e4148bad4e2fbcdd6e39c75faac2890d8b4fab04c",
+      "size_bytes": 59603
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/helper/failed-complex/summary.json",
+      "sha256": "21b21c63f4d978125e2589792450d9139566bc25f352a7fbdc0072b8752e98cd",
+      "size_bytes": 3417
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/helper/failed-complex/triad_weak_helper.py",
+      "sha256": "912074f0719de54ca59f5f460795d61060b8a3932fe161e2dcd47733d673c58f",
+      "size_bytes": 15635
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/helper/initial/diagnose.log",
+      "sha256": "ac79f80c610edc0138d3a2158ee6ef5d9bb3739e8b2169e5554fd5f466eb0b03",
+      "size_bytes": 1024
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/helper/initial/diagnose.py",
+      "sha256": "1605f31693bbaf76816c2bba195f14518b87a4c998e94e022fce4dc2e14dacc1",
+      "size_bytes": 1974
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/helper/initial/ray05-00.json",
+      "sha256": "2602a3f4deaeb5f942775f14ff002ec94d70664f9e55814d94d93b8f2856df8f",
+      "size_bytes": 463808
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/helper/initial/ray05-01.json",
+      "sha256": "2eca51adb764586cf9a82eb80ccb291093c7c79075e5a6e110698c46723f48b2",
+      "size_bytes": 462228
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/helper/initial/stress8-00.json",
+      "sha256": "3846aed823866761ad9966a2eccf57e44799b98e89da9e587323e6f069298430",
+      "size_bytes": 59519
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/helper/initial/stress8-01.json",
+      "sha256": "7a23b83388f5c63cc89576617486a33667d859fbeb93c0721bcbf908fa3d0a21",
+      "size_bytes": 59469
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/helper/initial/stress8-02.json",
+      "sha256": "b5a002f681f766c037bae429a452e233330867cbbfafef77ed5da52e6bbcb3ba",
+      "size_bytes": 59538
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/helper/initial/stress8-03.json",
+      "sha256": "630266f374075f9ee11431dc4d96e2cf3f203a008db9bb00625cc43d5ad82923",
+      "size_bytes": 59372
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/helper/initial/summary.json",
+      "sha256": "54c3f27fc587e178bd970f3d34eadd1481979ec9b908b0c6d205148e42173288",
+      "size_bytes": 3198
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/helper/initial/triad_weak_helper.py",
+      "sha256": "85fc0251563cdf74c40c9c52717d0891f11f9a050f5526d934f7db30c0904be0",
+      "size_bytes": 14584
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/helper/ray05-00.json",
+      "sha256": "646a63988cc52af0246237dd26c5dc66e44590136721db6704c4fa1f8e9a4874",
+      "size_bytes": 464172
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/helper/ray05-01.json",
+      "sha256": "4e1d437653288722a5ce57d76a3416f8f1ee55f234f4942618cfbc9c42200300",
+      "size_bytes": 462591
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/helper/source-identities.json",
+      "sha256": "29c16f54a178b5f9611c92066acea2f578a203e23cf0ef11620572278d4f170f",
+      "size_bytes": 439
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/helper/stress8-00.json",
+      "sha256": "d74d3fdcd8f6977df384408d88a5a3d25f2a292adfc9d7ea967a36d9b675991f",
+      "size_bytes": 895908
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/helper/stress8-01.json",
+      "sha256": "5af482323df6bf2304d0d8054daf909d5359d6db801c7a268474ac63c78c72f7",
+      "size_bytes": 895748
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/helper/stress8-02.json",
+      "sha256": "f23cef88fec46b02f0e0a70ce43f5bbef468922573c8da892016c826dd28bb4a",
+      "size_bytes": 895501
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/helper/stress8-03.json",
+      "sha256": "64227944f0061c7351d21f3c9400008f729bf283cd7d93f2d75d2023bdfa7d2a",
+      "size_bytes": 895606
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/helper/summary.json",
+      "sha256": "e48299ec5397a37e1e43aab64029697a392ff3c107855dc10e025cce518de527",
+      "size_bytes": 4028
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/helper/tests.log",
+      "sha256": "1069ca04e9ffc4ef32cee8cff0126de657439e9faab7276877cd8e7f8a753f5c",
+      "size_bytes": 105
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/README.md",
+      "sha256": "cdb055f152e3c561fb1ede8bc7cfbc589b01a08f1d2bc2995e3807ff2faaa69f",
+      "size_bytes": 4950
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/compact.json",
+      "sha256": "c9a4f18a66f040d8f114edc94a84dc30ed03b2865f4ece51bc59c98b0ad2c5e0",
+      "size_bytes": 7916
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/independent-summary.json",
+      "sha256": "618eb8bb16b81eef9b530152657294d84b79f0d4a10068f27f1d16d90ec4f3bd",
+      "size_bytes": 39421
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/paired-development.json",
+      "sha256": "a4f642718cf71fec2f92c9b5ecc810efcc8c76a4ab8efd1a032ad0b567453d05",
+      "size_bytes": 5774
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/protocol.json",
+      "sha256": "fbce243a9cab9cf5fae3e8e33a13c0a5b455da0715ba793702ae9a28efd49ddb",
+      "size_bytes": 32503
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/public-base-generation.json",
+      "sha256": "7e7fa5e5146944228d6efb9694a1e9f0dae3c24a02f89c495349129d980b8b09",
+      "size_bytes": 1265
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/public-base-generation.log",
+      "sha256": "a682448e90e2c13a2b89fa9b4fc8c68dfa9e50bee5a69e47f32293cd70f2158f",
+      "size_bytes": 171
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/public-base/evaluator-truth.json",
+      "sha256": "2fd1de939521f0a566a2e4befbf218c5b3ac5bdeeea1d22cbafa971bc5257240",
+      "size_bytes": 2151
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/public-base/manifest.json",
+      "sha256": "9968548873ac330cfcd618ca1ea9f9a502f3ae9867a9da0feb0e4c2189e9f8ee",
+      "size_bytes": 12117
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/run-summary.json",
+      "sha256": "a0fbb49d4c0933188541549b503b014155741beec69f8f04e35f48d59a306a7b",
+      "size_bytes": 30607
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/run.log",
+      "sha256": "03d1961b58aba6933bf12de9bc7d0d830a40b40938aeb7b7e94dd7048961c03b",
+      "size_bytes": 84
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/run.py",
+      "sha256": "5e2b574ab41c39269fda6574bb689d8ac6638f16866dedd0887508727a8cf86e",
+      "size_bytes": 7056
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-helper-null-00/capture/evaluator-truth.json",
+      "sha256": "5104f8e045a6ed8f70ecc6a7242663cbbcdb242910e68d1137504f5008d20a63",
+      "size_bytes": 2078
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-helper-null-00/capture/manifest.json",
+      "sha256": "0395df65b0f0b89e0f82523d6256a75d4b2903735a68ed351f6f6ccee29094ae",
+      "size_bytes": 12112
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-helper-null-00/generation.log",
+      "sha256": "cde83d1de91aac3a0fb0427a326ad1d8c3be8c43b8b1edff2acbf8eb881e0939",
+      "size_bytes": 208
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-helper-null-00/outcome.json",
+      "sha256": "155d60e833d14815fa33b101bfb7aa72c90ce9b1fff6acd2809201ee1d5f3fd6",
+      "size_bytes": 2168
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-helper-null-00/receipt.json",
+      "sha256": "d1fe30ca995fc4e8b5ca9e476134724a2abf72a4098281f645d195d282f3f666",
+      "size_bytes": 18918
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-helper-null-00/receiver-result.json",
+      "sha256": "90f8d1ea9ca87990d132f44dbf8843b7f875c77ec57ce3f8e9391deb89c818af",
+      "size_bytes": 1086568
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-helper-null-01/capture/evaluator-truth.json",
+      "sha256": "09f6ed156c52039de53b21ba6a2d273b00f288344329f3d02b0807d16cd44714",
+      "size_bytes": 2075
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-helper-null-01/capture/manifest.json",
+      "sha256": "81a219153d6413a356906370b8a840ce69cb260c6b9bd18199bcc9ee345a1e3c",
+      "size_bytes": 12102
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-helper-null-01/generation.log",
+      "sha256": "2f12666bd776498f6e34a56b6c95884f98e918aed86b44e89e6826b47dd403b3",
+      "size_bytes": 208
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-helper-null-01/outcome.json",
+      "sha256": "2db25ffd5b84cb7d79bc53738f810e0b482b0c8910f2b17048d519b425a68baa",
+      "size_bytes": 2117
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-helper-null-01/receipt.json",
+      "sha256": "a950994fc1e3d63fbaeea1846e086cbfd846133f6c37702d0a6bbafc8c40239f",
+      "size_bytes": 18926
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-helper-null-01/receiver-result.json",
+      "sha256": "5fa423f9ea64cab80ded2141beffa8a942700e3aa38bc2524b89671f94113eef",
+      "size_bytes": 67607
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-helper-null-02/capture/evaluator-truth.json",
+      "sha256": "9e2018c271fde4444fc9e4bf2051d40bec46d3040d636b7c07869f96ca14f773",
+      "size_bytes": 2063
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-helper-null-02/capture/manifest.json",
+      "sha256": "988cf42de01f54a5f48b0464735cbdf1f7f057e5305f8220e643cdae770a6a0c",
+      "size_bytes": 12102
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-helper-null-02/generation.log",
+      "sha256": "f5e1962963dc32a23e68b644087b96ba798581c19d2ca6d721a1fad42b8dcf64",
+      "size_bytes": 208
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-helper-null-02/outcome.json",
+      "sha256": "a41d3d035e7b37a38cd799e4ab55f298ecff3b33ddcbd2fcc735d8b1b412ad62",
+      "size_bytes": 2181
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-helper-null-02/receipt.json",
+      "sha256": "d588f963cb8f6a39f740cd8fad343d2feda959dbbf9fb04357c464b56410b451",
+      "size_bytes": 18928
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-helper-null-02/receiver-result.json",
+      "sha256": "d1e95cd42d8c5e2d419e735c22e9c757a655f2fadecf3ce9047611bf4f727cad",
+      "size_bytes": 2103867
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-signal-00/capture/evaluator-truth.json",
+      "sha256": "023b0b1fef0d406fe7f59a404f1e1d7b959c5cd18bc5e987317e50cef45a66c1",
+      "size_bytes": 2149
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-signal-00/capture/manifest.json",
+      "sha256": "6d94db47408a47a1f008559d9620ce42011fe7844d706173f2e64102af0f6507",
+      "size_bytes": 12111
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-signal-00/generation.log",
+      "sha256": "7a53c6adfa17db7bc2ccd1169e1a01c0208934c7b6136d590a3ee38ac8fdbc80",
+      "size_bytes": 203
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-signal-00/outcome.json",
+      "sha256": "bf81ee75d49bc34def2e7ae1de37b92f95ecba80d34736f13619782a56740450",
+      "size_bytes": 2150
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-signal-00/receipt.json",
+      "sha256": "9103b2f93659581f91054ddb9f86352adeb7c5f20d248408cd348078a09631ff",
+      "size_bytes": 18891
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-signal-00/receiver-result.json",
+      "sha256": "0a8f46243d16a1cc521adcf964e5e10dc7ba6cc58310e599c27c138d06d5fe34",
+      "size_bytes": 1597401
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-signal-01/capture/evaluator-truth.json",
+      "sha256": "d2e03b2973c1771d201ec7173f94ea300db5efa0795a2dee3c6eef0e67324582",
+      "size_bytes": 2128
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-signal-01/capture/manifest.json",
+      "sha256": "561e5bbd8b5c2cfc88371bacfb55586c0cc4fb6bdc9f2cc6313658c2efe9d97d",
+      "size_bytes": 12101
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-signal-01/generation.log",
+      "sha256": "d11f682bb99c7b597a18b548204d535fbfdda458dd184a5f8d5aa09dc2592cd4",
+      "size_bytes": 203
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-signal-01/outcome.json",
+      "sha256": "41da98887d0170f3762e78021434c059a0498cc88a35091d2dc9d35bc30967b1",
+      "size_bytes": 2167
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-signal-01/receipt.json",
+      "sha256": "6c39f8a7f6e294c4d5c3fb5827f485288b5d8889d945b36519b77e935db2cddb",
+      "size_bytes": 18888
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-signal-01/receiver-result.json",
+      "sha256": "eb8478a87fe760e3b82075b170068c49e55e0011242a39100c18a8b9db4de935",
+      "size_bytes": 2105789
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-signal-02/capture/evaluator-truth.json",
+      "sha256": "b59b9479e9052c2f17117ffadd21512415b18c9c6e3117fe7b822bb8951aab9f",
+      "size_bytes": 2145
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-signal-02/capture/manifest.json",
+      "sha256": "340bc9a1305c1f8b3d57f20ad47a59f9fdfc1bfb34ef67e9d51a34348a044609",
+      "size_bytes": 12107
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-signal-02/generation.log",
+      "sha256": "938d69aa4a5ffba6a6dfe777e9cb1392f85db01ff57f859ec68f520815c60e8f",
+      "size_bytes": 203
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-signal-02/outcome.json",
+      "sha256": "a6b4cd4cf2d02c28d69eef424095b0c0ad53206e767a5a662ff0c69cc20bcdc6",
+      "size_bytes": 2168
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-signal-02/receipt.json",
+      "sha256": "c14a351f5eda8bc2e8f236cdf847d4d69bd80fab254d9b2b4b723572b0accd33",
+      "size_bytes": 18907
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-signal-02/receiver-result.json",
+      "sha256": "c3506521b052af7387e10417d0ec10d5ad34bfd0d2d910c2f017d4037bccbb65",
+      "size_bytes": 1595851
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-signal-03/capture/evaluator-truth.json",
+      "sha256": "dc6494ff29724dc4601af84a9b53ee5d6cf0ed6a848f4d6e405a6e93e53a22a7",
+      "size_bytes": 2141
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-signal-03/capture/manifest.json",
+      "sha256": "791b501616359aad31697c440909b05384037ceb523a0c2b5f6759e5de06f5f3",
+      "size_bytes": 12101
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-signal-03/generation.log",
+      "sha256": "b2b80095b71a36f47e3e99dc965d10056ee6497d587242850c403e8214f6f600",
+      "size_bytes": 203
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-signal-03/outcome.json",
+      "sha256": "6b4550fbefc27b068ccabead56aaaf74ad3f990b8b9b540e10bfa7868ccced00",
+      "size_bytes": 2163
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-signal-03/receipt.json",
+      "sha256": "61602e8024baa8aa4bb3ab56808cd2289c9a08df57a811cd03779973d4eca3d1",
+      "size_bytes": 18906
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-signal-03/receiver-result.json",
+      "sha256": "7ba33d0882716fc71f764e4504029fb6f348e0cd490fdf513654b0dbb2087b8d",
+      "size_bytes": 1088457
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-signal-04/capture/evaluator-truth.json",
+      "sha256": "f39ca00e52065f0b692a31fd1a0b8be851cb938c0eeea218b18af0253905cb67",
+      "size_bytes": 2138
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-signal-04/capture/manifest.json",
+      "sha256": "0ff3c8aa491cc2ac1ebc3fc717ae9014e33d304676fc50a542dff20f7f36380d",
+      "size_bytes": 12099
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-signal-04/generation.log",
+      "sha256": "d7e9dca56a0755ec2c3972c21897b3068e32252019dedee7ddd91a5dbe47be99",
+      "size_bytes": 203
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-signal-04/outcome.json",
+      "sha256": "5eeee2c9fa8e409b0dfc99b80ae583618a9882782df395589fd132cb23f1d31d",
+      "size_bytes": 2166
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-signal-04/receipt.json",
+      "sha256": "ac0c3c3c9ae83716b8c0b61094ec5f63e14e3ab4d2425cd9216e976c52afdb56",
+      "size_bytes": 18901
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-signal-04/receiver-result.json",
+      "sha256": "7efff9c63f81f58bacfdce821bbcdf7a4e5eb94eadcc31b48731e5946a11501b",
+      "size_bytes": 1089387
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-signal-05/capture/evaluator-truth.json",
+      "sha256": "6a0511561e920acebebc9ee29e2086833affdbb7969aacd1d4c58188ac28434c",
+      "size_bytes": 2141
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-signal-05/capture/manifest.json",
+      "sha256": "77e7db12062ded7769044861b17dd717406ca89564ad4b1ece8262085a8ce107",
+      "size_bytes": 12111
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-signal-05/generation.log",
+      "sha256": "143eb4f6833858fba73e31783ce70a6a1dea516fcf48ed24d90ed4280f401b80",
+      "size_bytes": 203
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-signal-05/outcome.json",
+      "sha256": "2da87d74478442fedff3dd49b533bbbdddb41bef2a0a114853ff8a7aa9cb846d",
+      "size_bytes": 2166
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-signal-05/receipt.json",
+      "sha256": "21a1441ba933c55fb98775d489c77b34ea79799f2fb6878c4f591322fc061af1",
+      "size_bytes": 18914
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/independent-moving-signal-05/receiver-result.json",
+      "sha256": "11724f77ced4ca4f7ef4c05cc8d92a8060afb1f8d8f1cc5ae5f4eb8899e7ba43",
+      "size_bytes": 1595399
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/paired-moving-signal-04/capture/evaluator-truth.json",
+      "sha256": "a6a9166dece97da528031e7a9a7116a5676c8752bbdb0f12b35e77da3c180601",
+      "size_bytes": 2140
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/paired-moving-signal-04/capture/manifest.json",
+      "sha256": "100aff5ffa38ae86b6f647eb9bc75662c29076ba7bd4c2fea7583be7b506f7a0",
+      "size_bytes": 12111
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/paired-moving-signal-04/generation.log",
+      "sha256": "a1d7044b72d1473f6ceb691edb5e5a8e2f755599d8c7382d0885d31c6185a08d",
+      "size_bytes": 198
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/paired-moving-signal-04/outcome.json",
+      "sha256": "a505f97eac8ba967506fd50b72bba847c0c13d01037304092eb9e2f0df998b33",
+      "size_bytes": 2161
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/paired-moving-signal-04/receipt.json",
+      "sha256": "c31c6dcbd5f39e37a69c0e255bf6892c5a32351c16d7a3a6c119997878764978",
+      "size_bytes": 18904
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/paired-moving-signal-04/receiver-result.json",
+      "sha256": "2b0f6bb2f81acc358d8812387b2c35dc749a68f2390090230ab165f48622821b",
+      "size_bytes": 1090784
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/paired-moving-signal-05/capture/evaluator-truth.json",
+      "sha256": "a9c551874fd469b7175fe504d4f4a3e2833596d78687179bb88dfe4843b80d77",
+      "size_bytes": 2128
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/paired-moving-signal-05/capture/manifest.json",
+      "sha256": "465e9530aebb747c663575a32567af462562c2b46dd46ddb032cb9d3dfdda7ba",
+      "size_bytes": 12107
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/paired-moving-signal-05/generation.log",
+      "sha256": "7ae8332fe5bcc3142145432032408dc4f017cda0e6faf3e717270dcf1e1b6e93",
+      "size_bytes": 198
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/paired-moving-signal-05/outcome.json",
+      "sha256": "e54e51804b54b0b0d4c13168cad47ba6f0f15dbdfedf182748661f0858a5904e",
+      "size_bytes": 2162
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/paired-moving-signal-05/receipt.json",
+      "sha256": "93894479d70356774abcc31b2358eff277a90b8d2b051f9b5cbb516d45b858ce",
+      "size_bytes": 18893
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent-longer/trials/paired-moving-signal-05/receiver-result.json",
+      "sha256": "f02d337b6600ea97bad5df6db120e13881fddb7c4c6dda34e7cfad83434326aa",
+      "size_bytes": 2609045
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/README.md",
+      "sha256": "12cba047ce17ccca1e533c33b23afb72fee0245e74bcc6711aa1215056502e86",
+      "size_bytes": 4667
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/compact.json",
+      "sha256": "cd2e046f2756c0ff74f96bd57d406f5bf13b040303fdd52828298383c2935928",
+      "size_bytes": 4915
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/protocol.json",
+      "sha256": "af2fe40889c8f2660732f23b8bc3a9b989ac6bfc6b38f0aa8160fdb0fba3f309",
+      "size_bytes": 50659
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/run.log",
+      "sha256": "cfa05fa088e895017f7b0dbfd2fe1e89f1aa566270ffe8a0847a3e4826d95390",
+      "size_bytes": 131
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/summary.json",
+      "sha256": "cca9a66e7e5198b8100e5438b9aecd42d66805e9cc3ddd2f07134858bd79eba6",
+      "size_bytes": 137346
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-helper-null-00/capture/evaluator-truth.json",
+      "sha256": "104fab34167d3c1488aabfe1ddf695d2ec542c9618b2ce01487581229b0c24a4",
+      "size_bytes": 2054
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-helper-null-00/capture/manifest.json",
+      "sha256": "754365547ee7d564d43db8884e7336e07bc3b3f76f33fc9102f251e139aee0e3",
+      "size_bytes": 12113
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-helper-null-00/generation.log",
+      "sha256": "a90e1c40bc06a4d8be24d10b7b1d99d3ed18953dd86245bf8d816fd765cc85a6",
+      "size_bytes": 189
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-helper-null-00/outcome.json",
+      "sha256": "655d9550160b09f5bcce4f303bd00c01f855de1c677a9812140a753735c354e6",
+      "size_bytes": 2169
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-helper-null-00/receipt.json",
+      "sha256": "7cecab6aa8be2058bc3de98a459131eda84782c5e21acf4eb78b6cd62b1e2ac4",
+      "size_bytes": 18862
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-helper-null-00/receiver-result.json",
+      "sha256": "ba97cf28dacfa5f130327a7eb946fe681c044105e22441a119b7a80a5547f14f",
+      "size_bytes": 2105605
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-helper-null-01/capture/evaluator-truth.json",
+      "sha256": "79af363f9ac26a352dfce4ed1efee70a9d491499d81246676b2f5e0d64fe941a",
+      "size_bytes": 2059
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-helper-null-01/capture/manifest.json",
+      "sha256": "49196d4204c8fc6cee93da43cc223f4592da6e19a5db47acaea744462275867c",
+      "size_bytes": 12106
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-helper-null-01/generation.log",
+      "sha256": "eef51382ab3c20c154a82880b9de27d0f1d75a5a75d5bc4b21d880564adfaa46",
+      "size_bytes": 189
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-helper-null-01/outcome.json",
+      "sha256": "df5c596362271a89a7d4035a576c99bec1bea1331d55c2971492ecd9883e5c0f",
+      "size_bytes": 2154
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-helper-null-01/receipt.json",
+      "sha256": "54d1d3b1d71a473501568f938fd5628d394a40ea6ef32bd8679b0ef5cc5b87bb",
+      "size_bytes": 18853
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-helper-null-01/receiver-result.json",
+      "sha256": "2f58a5ce6cd6be07387c1d649c1888256da536570e38357523d8928752bdd116",
+      "size_bytes": 2101272
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-helper-null-02/capture/evaluator-truth.json",
+      "sha256": "3fb2d1ea9444903cbb34d3eee991c8d1cc50c7b5ac318b1daaecef9c23083eed",
+      "size_bytes": 2062
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-helper-null-02/capture/manifest.json",
+      "sha256": "00c3e17767142eebcc1b8410714c8482ae37d9fa219cbbde54b6c193b54122b7",
+      "size_bytes": 12106
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-helper-null-02/generation.log",
+      "sha256": "7da6f3d7cc70449bfd016411bede91355122fe826258c395942a2f120c8464e3",
+      "size_bytes": 189
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-helper-null-02/outcome.json",
+      "sha256": "1e2ab334b324631b58cc2e8caf80cc10db6b43c6a9169c94481690434d506dae",
+      "size_bytes": 2157
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-helper-null-02/receipt.json",
+      "sha256": "c31ad76ab046198ee91c1ff858850da8c4176f8550245e38438cf7e86da39059",
+      "size_bytes": 18866
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-helper-null-02/receiver-result.json",
+      "sha256": "2e625fd16a693c9a3ea746b7f6ba78db6fbd28603831a633dcca21897018cb68",
+      "size_bytes": 1595935
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-helper-null-03/capture/evaluator-truth.json",
+      "sha256": "160543c0ed6fd3fa294fdc03a819281c6fc409a4c74041ca9e142f6891a828ae",
+      "size_bytes": 2061
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-helper-null-03/capture/manifest.json",
+      "sha256": "3bdee6553dc83d1b3ea938a190c9408a298da74f55ecf323eecd60b769bf8523",
+      "size_bytes": 12113
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-helper-null-03/generation.log",
+      "sha256": "5f11d551efcdb8dfac41b3fc08c2389bc4737974c44c6e45c9486517b7942a90",
+      "size_bytes": 189
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-helper-null-03/outcome.json",
+      "sha256": "5782e3603986164a7375cafe0bf3cab9179bed8c87b5fe5ee55481e3b7e497e8",
+      "size_bytes": 2166
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-helper-null-03/receipt.json",
+      "sha256": "dbded6cbe49b7c55d43438821359160f06fe8d07a7cfabd7cd3f33147b680b8e",
+      "size_bytes": 18864
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-helper-null-03/receiver-result.json",
+      "sha256": "ce905a94cd603de4c96e97665a651cc34635c517d9a8d4ab647d18fc3e4952ec",
+      "size_bytes": 2103207
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-helper-null-04/capture/evaluator-truth.json",
+      "sha256": "7e58de2e2a44bcb3c5560cce289da7181534501ed1b640489b0720cf167c1b8e",
+      "size_bytes": 2059
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-helper-null-04/capture/manifest.json",
+      "sha256": "9632224147422b37e8c4ca5217a7c376bf0462a9f6d63aa40390967c604bc97e",
+      "size_bytes": 12109
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-helper-null-04/generation.log",
+      "sha256": "5335bddaa9faf2fa37847861b5c9dfb6cb92290c9d050198cbfd9a9efc9359da",
+      "size_bytes": 189
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-helper-null-04/outcome.json",
+      "sha256": "e60b62256035ad5bc269531aabcc673c75247daf12216cb9c0cdceec06e008a4",
+      "size_bytes": 2171
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-helper-null-04/receipt.json",
+      "sha256": "2f678062aa74c0da1f777ea1ca03250f9ccdc3c8c82191c46ef3cdf8c09a69d6",
+      "size_bytes": 18862
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-helper-null-04/receiver-result.json",
+      "sha256": "58141345242d48d4a9b70d1b7b8ee404314b2fab144ad00338d7cf29ff331131",
+      "size_bytes": 1600981
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-helper-null-05/capture/evaluator-truth.json",
+      "sha256": "44360a5cac094b9ba0c12eec8c24bc8647a53316c1bc0c017e19b1d2af6e299c",
+      "size_bytes": 2071
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-helper-null-05/capture/manifest.json",
+      "sha256": "8a04e93e3d552b2a9d0634af763ec61841f27d5f9694a6d95a61004a44610109",
+      "size_bytes": 12106
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-helper-null-05/generation.log",
+      "sha256": "4344192f95fe149200837201316d6d0af028811e367ff6f97f5a17e739bff2e5",
+      "size_bytes": 189
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-helper-null-05/outcome.json",
+      "sha256": "186284cc423ed812831a08e879527f53b077fe52b0ae65222b947839fd692b80",
+      "size_bytes": 2156
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-helper-null-05/receipt.json",
+      "sha256": "f42f6d1e5cec2450da1d1fb6734b49d44908eea6ae0699ce577fdc9cde94dad4",
+      "size_bytes": 18861
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-helper-null-05/receiver-result.json",
+      "sha256": "ee161645c3f419764ef54df1b47853f2459e9b985bec048113f8fb5a002d2cab",
+      "size_bytes": 1089815
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-noise-00/capture/evaluator-truth.json",
+      "sha256": "45feb4f774f71321f3ffceeb83d3b03adc40607a67daeafd06c20bd56699fa1a",
+      "size_bytes": 1994
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-noise-00/capture/manifest.json",
+      "sha256": "d4441324f7b0d259f928541407a70891bab11dc1153a5323cd21d52b703d9f27",
+      "size_bytes": 12107
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-noise-00/generation.log",
+      "sha256": "a09fb66ec9cd37a9cead51336aef915d938845f1a790b0f0fff3781e1894cc23",
+      "size_bytes": 183
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-noise-00/outcome.json",
+      "sha256": "d84e73b59b213a98a3256663c3113bdea785259fb1770ba3577e986cea1f65a1",
+      "size_bytes": 2061
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-noise-00/receipt.json",
+      "sha256": "bb01fb6df455f90e8dcaa9bebe448090ff3d7ac8d7678da65c65368994a01bbf",
+      "size_bytes": 18854
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-noise-00/receiver-result.json",
+      "sha256": "2c0b007f3288437728c5172ef5cb075c8552c21ae93db946894b8da4b0e044bc",
+      "size_bytes": 26857
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-signal-00/capture/evaluator-truth.json",
+      "sha256": "7704dd38a77775aa8276e9fec23f8a05353456e8addf3ee494518f8013ff6cfc",
+      "size_bytes": 2128
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-signal-00/capture/manifest.json",
+      "sha256": "6f001ff30e2623b8e9dff200d99075973f11b05f068450c7b2e567440d6f1347",
+      "size_bytes": 12112
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-signal-00/generation.log",
+      "sha256": "cbd7a4b46b1ea557a45eab88cd72be995272ca9df7fba94716d25f84a434ba90",
+      "size_bytes": 184
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-signal-00/outcome.json",
+      "sha256": "8a056f07257b2150276723f0bd6fd887cf8567c2af8f32c6befc9a866754a6b9",
+      "size_bytes": 2139
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-signal-00/receipt.json",
+      "sha256": "be7c1762233faa61576e7ff9830baf2755985f52a8ced7aa1ba212da6703b172",
+      "size_bytes": 18854
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-signal-00/receiver-result.json",
+      "sha256": "d07703f57949abb5615cdf261d0e3ebd0d3d1ec05f4d464e1fda572c18fe73a2",
+      "size_bytes": 1599163
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-signal-01/capture/evaluator-truth.json",
+      "sha256": "017c3b59b8895b837b7cb3619827407d69d3163abad08180ff4795c5e9cfef60",
+      "size_bytes": 2127
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-signal-01/capture/manifest.json",
+      "sha256": "187fbbcf759d89a098aa23cf691435cf5fdc952a64d5debd9c5d4625fde0ca03",
+      "size_bytes": 12101
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-signal-01/generation.log",
+      "sha256": "1a232005f50524b6178b4125c88763f419f17b7d98d85c633254fc3994ea8e59",
+      "size_bytes": 184
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-signal-01/outcome.json",
+      "sha256": "3ca6e38cf4001b68d974ec9a1e58556fd9822cc14a89f7a0aaf4ad6c76c41c05",
+      "size_bytes": 2159
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-signal-01/receipt.json",
+      "sha256": "8b8a7908d2ac761517cec8d79d36808244acb11a321405894c3dce3dec5bf6df",
+      "size_bytes": 18853
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-signal-01/receiver-result.json",
+      "sha256": "1504ff5e9108b1fabc9339a58dea2c3fe09374d988afea725249e2e0d9d312fa",
+      "size_bytes": 1090270
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-signal-02/capture/evaluator-truth.json",
+      "sha256": "cd56e532c2c4e11338edecfe3db778b1a2a58ac179f7b655464389f3cc238f39",
+      "size_bytes": 2132
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-signal-02/capture/manifest.json",
+      "sha256": "1e4254971dae8c31a08be0979eede98029975e8b37c296e95ccf4f252e8205a3",
+      "size_bytes": 12112
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-signal-02/generation.log",
+      "sha256": "baac9f9deb0c7e79badfabe34a5c4858c28cbe8eea9d4e1ecaa67dacfb1f947e",
+      "size_bytes": 184
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-signal-02/outcome.json",
+      "sha256": "8dc38f85eeee31c9c99a0d341260ba2bd4bed319148d317303974b3bc239bf5c",
+      "size_bytes": 2155
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-signal-02/receipt.json",
+      "sha256": "2cbe194dcd4fa6d7895268a4de48f762a93a70568ce1229298d61c39021090b0",
+      "size_bytes": 18850
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-signal-02/receiver-result.json",
+      "sha256": "a26f350aa0dda2fddf7558d8981e7a3fb00ee3cfdab37746ec97f115a0ec5c4a",
+      "size_bytes": 1597841
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-signal-03/capture/evaluator-truth.json",
+      "sha256": "430bccfaa9aafd68a0d060482a06a1390fd4d499a1550304d98162a41e5aae4f",
+      "size_bytes": 2145
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-signal-03/capture/manifest.json",
+      "sha256": "7590e87da06e08cd7df0383755285ae9b5342b1fcd3b7e9e21cdde02b63bfa1a",
+      "size_bytes": 12097
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-signal-03/generation.log",
+      "sha256": "d604cb5719af5f86c795e68e21c2d9912ac3bbee26ba2c52a6f3a0c59f1e98d6",
+      "size_bytes": 184
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-signal-03/outcome.json",
+      "sha256": "5b7af1c33c5714076463310ff7541a57237664cd274700b96f58f1e691649855",
+      "size_bytes": 2158
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-signal-03/receipt.json",
+      "sha256": "1934d51911413116afaa77199566b6eb406bf8dfc0bcb4396803c1a5ee1c454e",
+      "size_bytes": 18856
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-signal-03/receiver-result.json",
+      "sha256": "303f9e568a4a45be0e225f671012efa7995df176a2a4d27614ea238b54b1d910",
+      "size_bytes": 1089437
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-signal-04/capture/evaluator-truth.json",
+      "sha256": "256a2c985ce04f032765362dbbbf65533009d592434e8a51882dd266ef827544",
+      "size_bytes": 2142
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-signal-04/capture/manifest.json",
+      "sha256": "55fe7221a936ba9c31371f928bd55edd03e3b62990d44948fa0b56dce9cea391",
+      "size_bytes": 12112
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-signal-04/generation.log",
+      "sha256": "456ccf34edcf41376ae841616fb121808663958b27d773cf2d2bf1a33204c763",
+      "size_bytes": 184
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-signal-04/outcome.json",
+      "sha256": "e076c776f4e966ee2698901bc663ddc0f5575e88b131f0df8dcdae44d8a4a26b",
+      "size_bytes": 2154
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-signal-04/receipt.json",
+      "sha256": "b48fad8a873b4e2b4a5b4d07dacfd2df70ab8780601c3af94ba23776e4d197a3",
+      "size_bytes": 18854
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-signal-04/receiver-result.json",
+      "sha256": "73a52138ae41e6796e62a113d963a3861c8b4141a3fc48276764faf2ca5f44b6",
+      "size_bytes": 1090370
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-signal-05/capture/evaluator-truth.json",
+      "sha256": "89018e6c0405bcbda38e90fc3e83bc666f221b967f2f5c31def1d37f773486e2",
+      "size_bytes": 2126
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-signal-05/capture/manifest.json",
+      "sha256": "3c6967636a837006b509090473224f039c32cc1bfa595117863e5cbc11197e52",
+      "size_bytes": 12108
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-signal-05/generation.log",
+      "sha256": "5b93cb1b48b5f2eefbcc9f74ec32c3fc159d3fecee218c69cc266f463a5422b9",
+      "size_bytes": 184
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-signal-05/outcome.json",
+      "sha256": "d129c68fa5e7305330d87e789ff8d1e0fb4c721950d74238578b66e10ca13d2b",
+      "size_bytes": 2155
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-signal-05/receipt.json",
+      "sha256": "2e84813042077c989c9463a11c9353f797d517e869f2b699c3a5e69c7e659d1c",
+      "size_bytes": 18851
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/moving-signal-05/receiver-result.json",
+      "sha256": "eaa2884b8bdcc87d33975c83adf99264f8b031673b61369937d89f0756c2efa7",
+      "size_bytes": 2608444
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-helper-null-00/capture/evaluator-truth.json",
+      "sha256": "455e1f6af239a5e34ed44d98b4c7b8de30621cf7a21be76f5e0c0e3498239b5b",
+      "size_bytes": 2076
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-helper-null-00/capture/manifest.json",
+      "sha256": "a2749cea52252a5460fca28b70b907a5bd9754dee92852af4621e8fabd46c238",
+      "size_bytes": 11979
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-helper-null-00/generation.log",
+      "sha256": "3c098cf48dd1ea12826aa562793cd4d613a50a604cfd44612da9666e05d7be49",
+      "size_bytes": 193
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-helper-null-00/outcome.json",
+      "sha256": "c19e2340ac79d7481294831a1e4d4fecff4e69ae8147fac7e096498718c6d158",
+      "size_bytes": 2173
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-helper-null-00/receipt.json",
+      "sha256": "8a332a2bb614dc3dd695a3a1294ec38c1e906a984a81beda524a45d1d23e2f13",
+      "size_bytes": 18803
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-helper-null-00/receiver-result.json",
+      "sha256": "f27623d5804498176799b22d6d8bc42d8021aa0849e30a3bb063a15130957578",
+      "size_bytes": 2048254
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-helper-null-01/capture/evaluator-truth.json",
+      "sha256": "f551c4427e97f11a80352e5bc2ad0b82797a12e5bc8d6d692f12769fdcc11b6f",
+      "size_bytes": 2075
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-helper-null-01/capture/manifest.json",
+      "sha256": "203771bf7f83744d8acd35f0d71129d430a72411c62ed0fc1513b327e73a65d6",
+      "size_bytes": 11979
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-helper-null-01/generation.log",
+      "sha256": "7620ef7a95928fa3e87edc993b92b2e6bd96f554167ae91a6d7e4ff09a9aad22",
+      "size_bytes": 193
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-helper-null-01/outcome.json",
+      "sha256": "d5c62df41f8f3b2037ab64f846a21dbe035c43f3154fe0ed0afa5dc0cff74845",
+      "size_bytes": 2157
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-helper-null-01/receipt.json",
+      "sha256": "6e83f3ab4cbb9c7dfe6ff1df3f283b2caeb307b1e37400638d5bf835e8176074",
+      "size_bytes": 18797
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-helper-null-01/receiver-result.json",
+      "sha256": "0bb4eb4e2d704eea9629b948c2a820c0b680ee81eed195228569141c0a44b55a",
+      "size_bytes": 2050173
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-helper-null-02/capture/evaluator-truth.json",
+      "sha256": "8405f9540dd9fe38025c39476d08d856a7831bbfaa6d75aa39c24b9ed56bbb97",
+      "size_bytes": 2057
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-helper-null-02/capture/manifest.json",
+      "sha256": "dc506b48121b1185d2b557a2414dc06652ef1051bc1bb402da800f4b805f43f4",
+      "size_bytes": 11975
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-helper-null-02/generation.log",
+      "sha256": "d58aad448052ecce9de8a0a4f36a5514ce34893533f70e5fe081921d1cff7104",
+      "size_bytes": 193
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-helper-null-02/outcome.json",
+      "sha256": "93e2318c8ba0d0e6645f445abbd39d8e34b3e350d34beb98071cd98a4ab5469f",
+      "size_bytes": 2177
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-helper-null-02/receipt.json",
+      "sha256": "6075735d1714105ff873d732da3ecf280fd066b7433ba4015f4744f134ef8b60",
+      "size_bytes": 18805
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-helper-null-02/receiver-result.json",
+      "sha256": "4c4fffb8b2b3de29fc3ac4e24e7baa8956282c98f4f60d417f9109b943c78b4d",
+      "size_bytes": 2038459
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-helper-null-03/capture/evaluator-truth.json",
+      "sha256": "cb1e5bb68072a872e0bf1feba6efd8ceec415bc09bd8a9300ca18b14bdf4eb90",
+      "size_bytes": 2062
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-helper-null-03/capture/manifest.json",
+      "sha256": "3f25642fa782834fcf0cc1bba1a80e9517eff02a0d4355b5f95ffad3eeb580f5",
+      "size_bytes": 11979
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-helper-null-03/generation.log",
+      "sha256": "12cff359e464c5a23586a270dacee114aa03424933dc59736e58a3dcf048797b",
+      "size_bytes": 193
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-helper-null-03/outcome.json",
+      "sha256": "0a71297c490a2323830b0d0272961cd0c848dd776958b02908885d9dc6a85cbd",
+      "size_bytes": 2176
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-helper-null-03/receipt.json",
+      "sha256": "7b28094dc41b45c3c9caac196f7c0a34275bbf047a2813ed1fa026ba89700e01",
+      "size_bytes": 18791
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-helper-null-03/receiver-result.json",
+      "sha256": "b1e8f57d26f239f8f32a2919f00d141244ccede4c810744acc39a8b285b8db97",
+      "size_bytes": 2050031
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-helper-null-04/capture/evaluator-truth.json",
+      "sha256": "91c121690e2e75852b7ffe7c631b87d5d472c520daa38f955608000a31acd158",
+      "size_bytes": 2071
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-helper-null-04/capture/manifest.json",
+      "sha256": "c8606902a0f1b06df617129db3996bdebafdbcfe4ec6327e16f9d0154edc208d",
+      "size_bytes": 11979
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-helper-null-04/generation.log",
+      "sha256": "31f8f17ffcff089115d2b58ba0ae1830695752e0b4f4ff53fa52c6b34c0e53f4",
+      "size_bytes": 193
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-helper-null-04/outcome.json",
+      "sha256": "bdc2e626a8bcf649bfe52bcbda7350e671175280935ca7363a8d0eed07fdff5b",
+      "size_bytes": 2160
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-helper-null-04/receipt.json",
+      "sha256": "3723df9901a0ce6e49c9895185750145dd5a6b051e97d518a37f87f21141f68a",
+      "size_bytes": 18797
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-helper-null-04/receiver-result.json",
+      "sha256": "43f0026464db593683b2a464bea69a9c03c9a5c4ac934eecf4b2314fd44dc2c4",
+      "size_bytes": 2040798
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-helper-null-05/capture/evaluator-truth.json",
+      "sha256": "0b2beb281ecd2c5e21ccf3bfba8b6636113cf7e9c01dd81ffb69e185b6b0eba0",
+      "size_bytes": 2076
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-helper-null-05/capture/manifest.json",
+      "sha256": "864beaca7e176d1aa348cab43d68b5ef513c8a6bba139bf1275b5ca1677580d2",
+      "size_bytes": 11975
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-helper-null-05/generation.log",
+      "sha256": "012baa7aff7cd8818d7b3d6dd96799a271c551433faf1b61943c2daeeb003520",
+      "size_bytes": 193
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-helper-null-05/outcome.json",
+      "sha256": "d28f376cb4947c5d86acad0ddef3e4684d8827893ddb9eb071709d1b184c3d37",
+      "size_bytes": 2177
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-helper-null-05/receipt.json",
+      "sha256": "f8d402db560e4661c285a1b491efa7408d70d52f2fe6a255cd9d7755421ed4c5",
+      "size_bytes": 18800
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-helper-null-05/receiver-result.json",
+      "sha256": "574a9b7ed066ec44a9402c2bfe1f56bdfdf2d4f6d4369a38047ad22f01783b78",
+      "size_bytes": 2039877
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-noise-00/capture/evaluator-truth.json",
+      "sha256": "ad41fd820790e2542c576faa25b9b0e5bfa93327800d1a26ebabd590984b8353",
+      "size_bytes": 1991
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-noise-00/capture/manifest.json",
+      "sha256": "157213e618bafa995fe89e617c5e25946997539b179121341e58d54ce82744e8",
+      "size_bytes": 11966
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-noise-00/generation.log",
+      "sha256": "4ad653a9cef04bfbf8caaf239a2e8d85b5674ca0cfcf6167ae109d6ce5471567",
+      "size_bytes": 187
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-noise-00/outcome.json",
+      "sha256": "a2fc14cd6a6844f2d04d552ce09291cc14d82708dee4734533624338cc4ab1fb",
+      "size_bytes": 2067
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-noise-00/receipt.json",
+      "sha256": "eb4db2048a25628a497650470f5a8a125a1ce55f73ad13f0241adfbf4b6f1544",
+      "size_bytes": 18795
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-noise-00/receiver-result.json",
+      "sha256": "e13ab871c29c86f31221f61d884d9337faee71f0dddc1e1103b20880d11b9e97",
+      "size_bytes": 26860
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-signal-00/capture/evaluator-truth.json",
+      "sha256": "46b7294faf1a2e8f071d7745e7118fe3bd9793bd6b1032fcefcefe437ffb57f2",
+      "size_bytes": 2129
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-signal-00/capture/manifest.json",
+      "sha256": "4fb089c57ae295f11673631266df66b3265c24a637332715a1c596f62597580b",
+      "size_bytes": 11978
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-signal-00/generation.log",
+      "sha256": "dabd90e7c3e7875530c22a8ec6f8920eca060d6a4485760fab034e10d787bb96",
+      "size_bytes": 188
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-signal-00/outcome.json",
+      "sha256": "c75c5aaf095ecc3b8471b5fe5a6f015f612a7d1bc7d2293a976123e23362d1ee",
+      "size_bytes": 2163
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-signal-00/receipt.json",
+      "sha256": "0439932eebc0845c96a2f03050c9ea2fc90c52ca69ea6b0e17cc37a8bedb6fa3",
+      "size_bytes": 18786
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-signal-00/receiver-result.json",
+      "sha256": "1702f9ee1cf8d7d7be018cf488f035c0f02827179c6e3381b086a954367ae48f",
+      "size_bytes": 2038052
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-signal-01/capture/evaluator-truth.json",
+      "sha256": "860369faf3292eabf8e0b09b79c1c0cbdcc275bfc2d1e92a000be7d9c614b452",
+      "size_bytes": 2130
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-signal-01/capture/manifest.json",
+      "sha256": "2c5d258dbbe14776272ad6cb128ecf2ac8bcdb48e6742432a6c73d62ffb8368c",
+      "size_bytes": 11978
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-signal-01/generation.log",
+      "sha256": "a6e9e154cb5385afe20cc3d0340e5f6d9233f814f4996a12ef7f1ce1f0164193",
+      "size_bytes": 188
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-signal-01/outcome.json",
+      "sha256": "391a5a7b4d5b5156fd7400bf63ae83dc43f2af6045fb3e1e94d8ca89a0e87eb0",
+      "size_bytes": 2165
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-signal-01/receipt.json",
+      "sha256": "2c44074b2ee2445102ec9a8e95d3a18e27b92e794f116dfa553cf7357dab8a91",
+      "size_bytes": 18771
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-signal-01/receiver-result.json",
+      "sha256": "7363c5a5e2141a3e6b4fe0fe9e8c43cdf564cdbf8192e3e6ecbc1f83da570e2d",
+      "size_bytes": 2051016
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-signal-02/capture/evaluator-truth.json",
+      "sha256": "c07259aa38775e9a00683d3c0dd0ec678a96b9204ceef3ce6e13eaf38aa8f1da",
+      "size_bytes": 2129
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-signal-02/capture/manifest.json",
+      "sha256": "775a293de08752dd75d093319c1dfac8bfcae4042696fdda78ee3972b216941d",
+      "size_bytes": 11974
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-signal-02/generation.log",
+      "sha256": "b05bfb315a77f697b204c02a5af0175651f03c61e5f70784873c77b472c14913",
+      "size_bytes": 188
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-signal-02/outcome.json",
+      "sha256": "a717a16f562ab52d9a97de46977e63a390fed7edc0c63c20dffe2b1823fb5f2f",
+      "size_bytes": 2163
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-signal-02/receipt.json",
+      "sha256": "0f838278ff6c3009971039ece839778b7cb47e677e4795c06e3875063af9d530",
+      "size_bytes": 18773
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-signal-02/receiver-result.json",
+      "sha256": "6bbe981c2fc045315bc8fc06f4521f71aec05b2a7ed901b42a45e2f5129e7013",
+      "size_bytes": 2038055
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-signal-03/capture/evaluator-truth.json",
+      "sha256": "51f3912e1d0645e44fb1426cb3b10a6faaaf6c0736df209888fb9d3c6780d0cd",
+      "size_bytes": 2145
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-signal-03/capture/manifest.json",
+      "sha256": "d5acaecb86c07d82e4cb78f3e9c33d3c638b9ea60ed03fc430ed7433fb077901",
+      "size_bytes": 11978
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-signal-03/generation.log",
+      "sha256": "960da97c300c3885e7c5d09253e0625d036a52c2454a42b0097c56cc80c2495f",
+      "size_bytes": 188
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-signal-03/outcome.json",
+      "sha256": "1678602d01c9bd0af4a681cc4ab468349362fbcb64c138faf29dbed1abcde2fa",
+      "size_bytes": 2165
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-signal-03/receipt.json",
+      "sha256": "5acfde47f5a5172e8cf804b8e083d580765391bfba88ff31040498ef2ae73ea1",
+      "size_bytes": 18778
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-signal-03/receiver-result.json",
+      "sha256": "00c877b407383d73d63249c5ee8496445a485a7ba7ff0bd8a5319079bf4a7946",
+      "size_bytes": 2041373
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-signal-04/capture/evaluator-truth.json",
+      "sha256": "ff023d4b72bb3925380ea4e734a1094c68d20f4bc68d814708bbce8ba7e05f96",
+      "size_bytes": 2146
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-signal-04/capture/manifest.json",
+      "sha256": "1f3724c876969a673e0df7daf94f87893c2772e43dc5d08fabf868a8aca892ca",
+      "size_bytes": 11978
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-signal-04/generation.log",
+      "sha256": "8e0e7ee03088510af024c701f52ac65b57e6254173cc7ea6b501001ac2d149ff",
+      "size_bytes": 188
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-signal-04/outcome.json",
+      "sha256": "5b1d04cbc124f52881dc3f72c6dda0479348bcdce3008605c17f8f57c9eeeeb9",
+      "size_bytes": 2150
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-signal-04/receipt.json",
+      "sha256": "b64fffdce0c1d02c7dd3aaa86a8671344d70570256ff53c521bfb7a8f2bf56d0",
+      "size_bytes": 18791
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-signal-04/receiver-result.json",
+      "sha256": "fbbc50a5c32d4fd4c2abffebe04dd3d982f2dbc1ce37f59e2f78a64ec125b702",
+      "size_bytes": 2036425
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-signal-05/capture/evaluator-truth.json",
+      "sha256": "fb4d0120242612aca65495c2dbad1000f046134b0ee3ad54aeb619309b408d8d",
+      "size_bytes": 2131
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-signal-05/capture/manifest.json",
+      "sha256": "e651c246dbe8f064c0a4fe77ef6fd5782c3eff5a9542287166c560fab08191d4",
+      "size_bytes": 11978
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-signal-05/generation.log",
+      "sha256": "5a815907dcd02ab06ea905662ee7ece9cf1ffbaf6f4388632888809946531b6f",
+      "size_bytes": 188
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-signal-05/outcome.json",
+      "sha256": "e6e5e306f2baccd9c23a2a288986f371c48c12ad6bdf77f2c0795eb3969f7c69",
+      "size_bytes": 2150
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-signal-05/receipt.json",
+      "sha256": "e0c4ea37a10093d664a15aba5ffa219fc951640ddea898d88e322f023530a4b3",
+      "size_bytes": 18782
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/persistent-signal-05/receiver-result.json",
+      "sha256": "fa0ad6aa2271490377ca6de1b881d4bd31988522738484292777fcac713644db",
+      "size_bytes": 2039102
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-helper-null-00/capture/evaluator-truth.json",
+      "sha256": "dda15519d96066f0a767fb7d8890a09948433803bf5c656533ed8ed1c71bbc9c",
+      "size_bytes": 2073
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-helper-null-00/capture/manifest.json",
+      "sha256": "60fcf52223b8e45c6ca38410c1d1b7bbdf1a660088cf0ba70f5f7e4315540c02",
+      "size_bytes": 11979
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-helper-null-00/generation.log",
+      "sha256": "6e5f4a91819e74812c4769fa61a762c1164612fe3878d9a9282310ccbf13e87b",
+      "size_bytes": 191
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-helper-null-00/outcome.json",
+      "sha256": "fab2c5db3488c8f2f9f08d78d8df5277ce2f1e0ed0c4a248a62429f622c921e8",
+      "size_bytes": 2172
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-helper-null-00/receipt.json",
+      "sha256": "7be8889e59e9447d83860422be20f5dbd9be5d1b89cbe72532a88c14e007e487",
+      "size_bytes": 18795
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-helper-null-00/receiver-result.json",
+      "sha256": "39bf209867bda123b08aeb6361d918c60b8e4494919b918e8d7291a9aea615c0",
+      "size_bytes": 1088706
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-helper-null-01/capture/evaluator-truth.json",
+      "sha256": "cd4e5e820705cd7644d7fae647b833ca134f88797c7147140a2562a0b5434b50",
+      "size_bytes": 2060
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-helper-null-01/capture/manifest.json",
+      "sha256": "5fc71697a9c6ea55080c3808d1f65db30133b1e86cb2c90034a0ffa7e4f09239",
+      "size_bytes": 11983
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-helper-null-01/generation.log",
+      "sha256": "2b2acc33bf219020316ff2f968380963c1e20ec57f3adbea7668c2447b2f84b2",
+      "size_bytes": 191
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-helper-null-01/outcome.json",
+      "sha256": "28556709fe127343b40bf20201f2a372932f38ad0ea6ffbb3adf0af012f2ec48",
+      "size_bytes": 2171
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-helper-null-01/receipt.json",
+      "sha256": "04699931c4f66c82b31e0961e41f14b7e1df212b24269bd0d0a4289a5d623988",
+      "size_bytes": 18798
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-helper-null-01/receiver-result.json",
+      "sha256": "684e1b6f6805b5fc19a44942d5370e01147df55560d30e9fb291ccd49ffaf025",
+      "size_bytes": 2105551
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-helper-null-02/capture/evaluator-truth.json",
+      "sha256": "37d42245881a18fbcc5273f6ec6229f0b13255a083d470c86ce73c9915b8788b",
+      "size_bytes": 2075
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-helper-null-02/capture/manifest.json",
+      "sha256": "f06dad46429cf0b0ef0dfe7874072058f67e11c5bdd946e06bf1dd9e570fed26",
+      "size_bytes": 11972
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-helper-null-02/generation.log",
+      "sha256": "3186919cb9ce84055b0558d05cc9b95ac1ae62ce3e28f33b9a6747c098e4f832",
+      "size_bytes": 191
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-helper-null-02/outcome.json",
+      "sha256": "4f21c34cc7997b5488c45723422ad3f33bfcfd7a1735f5ffb63bb8df39249949",
+      "size_bytes": 2174
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-helper-null-02/receipt.json",
+      "sha256": "b5b4fd7b66f7e9f19fccfd2bde2ecdfa9ae9a56c79b3b118a747765ba423fb19",
+      "size_bytes": 18796
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-helper-null-02/receiver-result.json",
+      "sha256": "98c1e0a9724abbdaf34d8e5385a9f150978344e9322bec141fc29f78fba2a3dd",
+      "size_bytes": 1089375
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-helper-null-03/capture/evaluator-truth.json",
+      "sha256": "65b3c1d15ea22cfafae07b358584ee0e12a08e5b2a7d147bfb4e15a7608fb722",
+      "size_bytes": 2069
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-helper-null-03/capture/manifest.json",
+      "sha256": "aebd4adf812d839f926c12983fc6b1b3bf724973a935f3894f19387f46b858ee",
+      "size_bytes": 11973
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-helper-null-03/generation.log",
+      "sha256": "abc31a042c68a44b196a2cddd0e9464e07df17ff8ef8c05b1d4a932d94d7febe",
+      "size_bytes": 191
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-helper-null-03/outcome.json",
+      "sha256": "71edc4c6a06d6bc02326759842fdfaf2a3a747d7381568c037bf1b693f3c249b",
+      "size_bytes": 2155
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-helper-null-03/receipt.json",
+      "sha256": "7f2b9edb455f95d4e27cf8cea3542b20961bbaed10fe062c03076a12462b84f8",
+      "size_bytes": 18800
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-helper-null-03/receiver-result.json",
+      "sha256": "96e95594ddd7149235fb36fca96358913a9ef54fe801f68280ccd5d7adae1919",
+      "size_bytes": 1089144
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-helper-null-04/capture/evaluator-truth.json",
+      "sha256": "8b0587acacf7b539b32fad668a3ea826ab3754466ae6abb1242b733371a2c9b8",
+      "size_bytes": 2074
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-helper-null-04/capture/manifest.json",
+      "sha256": "825648e6e76209d345c0aca9809935756f06dbe9dbd5d045413029221c51c89b",
+      "size_bytes": 11979
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-helper-null-04/generation.log",
+      "sha256": "f0432a2721e4271c78f0ac4d1d6f68df46bfe28f6d2e44b5480f43210b16a5d8",
+      "size_bytes": 191
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-helper-null-04/outcome.json",
+      "sha256": "5c64ff9ddd931b66b6040915391f5d0cd226b882c6ccb52b41003855abca7a04",
+      "size_bytes": 2173
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-helper-null-04/receipt.json",
+      "sha256": "f98febec27505497490ed4d5618b52dbf7b418c967e96d7c43c458095d308843",
+      "size_bytes": 18801
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-helper-null-04/receiver-result.json",
+      "sha256": "89703562209c60c39107691e9a36d3b65874f71a9fe5f2b6cf563362268897b0",
+      "size_bytes": 1011109
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-helper-null-05/capture/evaluator-truth.json",
+      "sha256": "e67ca0fc040d031bd7489b6e2c7fcfbba5304249d9c691101ccdfe52a42c2bb9",
+      "size_bytes": 2061
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-helper-null-05/capture/manifest.json",
+      "sha256": "7acce89ef42c965f0a4c4628d65ce6ad63d4ce5811278ab81ede192b83cde2e3",
+      "size_bytes": 11983
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-helper-null-05/generation.log",
+      "sha256": "b9660cf473889b6a57e838b6558e62552df3f99c51643a52381bb9ea53669a6a",
+      "size_bytes": 191
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-helper-null-05/outcome.json",
+      "sha256": "da2f016489974d68d77e3942def0e0a21e94a344646c37500d18b2852daaa5fe",
+      "size_bytes": 2175
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-helper-null-05/receipt.json",
+      "sha256": "19f5c6d416e27740b7d191edb9d4922fe0a289c4cb23e2125862b7c7eb764558",
+      "size_bytes": 18793
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-helper-null-05/receiver-result.json",
+      "sha256": "42831e65f95ac14dd220efdfc6913c9ecec09b94762cba2b07f9af51d804d064",
+      "size_bytes": 1088228
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-noise-00/capture/evaluator-truth.json",
+      "sha256": "9f8e11b9b6e5265e5dfe4c9cb18e88e100574788e8a1ae2a50200763828b75fe",
+      "size_bytes": 1988
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-noise-00/capture/manifest.json",
+      "sha256": "9889757539cffd1c2127c8c4000c5880ae81813d042ef00cfb6a72b3cc77f377",
+      "size_bytes": 11984
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-noise-00/generation.log",
+      "sha256": "8ce506777db68fb22704d780046ed458992cc7ffda3c478c5c31177f519db591",
+      "size_bytes": 185
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-noise-00/outcome.json",
+      "sha256": "498835ac6e6691fc2a935cdfb2c447a5a93c2f88136a1de366013ded5cd4da20",
+      "size_bytes": 2047
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-noise-00/receipt.json",
+      "sha256": "d14d32d31df0384f5f4a0d866c3cf5023156321b16151a050c7e81be44ec24af",
+      "size_bytes": 18789
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-noise-00/receiver-result.json",
+      "sha256": "ac1caa4a8ab1308b99e314b42a50a17a9383c3220f0e2e46f6681c6fdabe20fd",
+      "size_bytes": 32291
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-signal-00/capture/evaluator-truth.json",
+      "sha256": "e3a7a6fcb028420af8b9459a2c9c31c20eeaf561fd97630e0a1fc5950b6a15c7",
+      "size_bytes": 2132
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-signal-00/capture/manifest.json",
+      "sha256": "21f2429ee76a2d4322b825917c948d0012b208aacbc09997530502a5baf2c88e",
+      "size_bytes": 11982
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-signal-00/generation.log",
+      "sha256": "013353f71d4a95d8a459f0d8c7fc7ee07eb5077d67ab75cdd018cde3d7e1cfa9",
+      "size_bytes": 186
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-signal-00/outcome.json",
+      "sha256": "025496f1372c8dea900cd4cf9161b81d73667d044077aa14a4574673d44732d0",
+      "size_bytes": 2144
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-signal-00/receipt.json",
+      "sha256": "09aa67d134f1cd4ee23abdde42dd777759e73f9980a891eabc0e096700edf82e",
+      "size_bytes": 18789
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-signal-00/receiver-result.json",
+      "sha256": "6d71424ce6d9c2f432ea2b08f3ceaf5ffa65d69c7daede3bbcbc582895cfde04",
+      "size_bytes": 2606914
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-signal-01/capture/evaluator-truth.json",
+      "sha256": "15a6f231d0470ac600e3aa0c388fb982d683bb1790642e4853f4a5be6ea065b8",
+      "size_bytes": 2144
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-signal-01/capture/manifest.json",
+      "sha256": "7110622d4bde27ca06f861742b59ff7ede5c8c7931d9a4f6c37a3efdc156f93a",
+      "size_bytes": 11982
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-signal-01/generation.log",
+      "sha256": "69b575cc0f34554ee7bf90961a94f13a63fe8411c1ff3c779c42b57f85a5357f",
+      "size_bytes": 186
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-signal-01/outcome.json",
+      "sha256": "244afab3efc6c0f0159a66a3cd2b4a0f4e20785973d339d2dc1d3da69d1901f2",
+      "size_bytes": 2159
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-signal-01/receipt.json",
+      "sha256": "77c35885e6b3d4495c50948bb9d1153aada7709e02d0d5a8f4abbaccbe2895fd",
+      "size_bytes": 18791
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-signal-01/receiver-result.json",
+      "sha256": "6410a108cd898d446f1bbb248bfdbb16ba4f3f7827f5686290d2a269093020de",
+      "size_bytes": 1088768
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-signal-02/capture/evaluator-truth.json",
+      "sha256": "81418f6ea90f55e3bb897ea07c98b12918ad6c31ef925d05a968770213bdb9ea",
+      "size_bytes": 2142
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-signal-02/capture/manifest.json",
+      "sha256": "d4ee8382501f1d82a087b9f27fdac71a6e725f418161d1ed6b16e9030b8857e4",
+      "size_bytes": 11978
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-signal-02/generation.log",
+      "sha256": "1a127a9e70aea6f74e1cee937b4b08a907dcb54520ab8fe2125d5a8f29ff1d76",
+      "size_bytes": 186
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-signal-02/outcome.json",
+      "sha256": "46ce11ea489b8819a093fd61a09cbfa49644f7ed841e8131a036d2c6e505a777",
+      "size_bytes": 2161
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-signal-02/receipt.json",
+      "sha256": "7adb5d85bbfd377519f9b00f268d0813a9e4f78bf3690b55f555b4a7d60baf80",
+      "size_bytes": 18776
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-signal-02/receiver-result.json",
+      "sha256": "9e52d6579e587c94a9d3ba13f9444e5a1860a6a7d3f2d91fd1608df0f68880a8",
+      "size_bytes": 1007268
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-signal-03/capture/evaluator-truth.json",
+      "sha256": "b863adf0a6adc607a36ae466b4bf38d6b03b79b979a5c11a88e53f21225f15f6",
+      "size_bytes": 2143
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-signal-03/capture/manifest.json",
+      "sha256": "40922ac490b5dcf469dcbfe2c669d67f324f63ae6f88f98c72202584c4af9c23",
+      "size_bytes": 11975
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-signal-03/generation.log",
+      "sha256": "770fde3816ec8ddd6fb163e80788ae389c4d2da92343eda0053d839901f4c895",
+      "size_bytes": 186
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-signal-03/outcome.json",
+      "sha256": "e240c27478cc880dbb9df0ae1ccb0d5a88d873612e605c95e24c6fb512b757a9",
+      "size_bytes": 2159
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-signal-03/receipt.json",
+      "sha256": "b5233a872ede411287dc450d4a22c69da9d34a8bd2059c5f70ed96cb5d61d529",
+      "size_bytes": 18781
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-signal-03/receiver-result.json",
+      "sha256": "29152eb77d8e66e9c72626ee4249f925d37e2d1149d35ecfcd8432028efa3e28",
+      "size_bytes": 1088311
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-signal-04/capture/evaluator-truth.json",
+      "sha256": "a143ea6c9b6d11393cd5d3cddc10a1c254906cfc28b2b91d101af5aa670ffd96",
+      "size_bytes": 2137
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-signal-04/capture/manifest.json",
+      "sha256": "779e7d99c9ca0a58ceb9ea09666ebb977d2236e59d0897400bc88853c6c1dc0a",
+      "size_bytes": 11971
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-signal-04/generation.log",
+      "sha256": "703c4e84333747da175652fd6f58c3a29824635802548301e18d4f58a3734aa9",
+      "size_bytes": 186
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-signal-04/outcome.json",
+      "sha256": "ba84e32a57abfbd53b918e4f60a554df4e5ab8bf43ec6115b9b6b0fcc60929f6",
+      "size_bytes": 2159
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-signal-04/receipt.json",
+      "sha256": "1952e4b29f333c3ceef4666c193d1a92209f5ae3476b4d0975c83ecdae57555a",
+      "size_bytes": 18781
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-signal-04/receiver-result.json",
+      "sha256": "7684fdc7587e84bbef0c11b25c35b7a777f0363cd2045a39fdcb22210b2d17b9",
+      "size_bytes": 1087154
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-signal-05/capture/evaluator-truth.json",
+      "sha256": "ee4e326f26b3d491f147bc53b3c6a854e76f85f62997894c414086930b185396",
+      "size_bytes": 2145
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-signal-05/capture/manifest.json",
+      "sha256": "5b532ad40b906fcd585e489c899855a9546be1e9e5f206524d611c8c15f251cb",
+      "size_bytes": 11982
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-signal-05/generation.log",
+      "sha256": "54a3c2f64222f05a7cb39b2d8cb18879b06ad77cac1077351a8f32b151793443",
+      "size_bytes": 186
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-signal-05/outcome.json",
+      "sha256": "fd4a5b65f242c111db5fe73cb1586eb9d2b61a59aeafb1401cde3d0c72b54257",
+      "size_bytes": 2158
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-signal-05/receipt.json",
+      "sha256": "eb324a7121c2fb630ededf54036d7bcfc32aa23c128a3befe3b0c6ac94fed014",
+      "size_bytes": 18779
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/independent/trials/renewing-signal-05/receiver-result.json",
+      "sha256": "30b0f94841466650406981cc1ad68012bff82cae979f0a2fb4de9434340bbe6c",
+      "size_bytes": 1088883
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/integrated/diagnostic.log",
+      "sha256": "8c21a49b37b75af32dfad67e10d2a4f796c77b10eaaef4c22b673fac9ac6902b",
+      "size_bytes": 3204
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/integrated/ray05-00.json",
+      "sha256": "84492bbebb24d9e52b9eddb93e4dd0519b3a07b647cb7cf7df69f1efcdb9e895",
+      "size_bytes": 494457
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/integrated/run.py",
+      "sha256": "7c4bfe0e91080767c40662a795b776e2369d1ff79e0bc8780bc0f2163b63bf61",
+      "size_bytes": 1447
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/integrated/stress8-00.json",
+      "sha256": "ef6bfd8e2ad69fe9e3fc4a0bec3520355b19547544c0e1a79c44555ec26e5ffc",
+      "size_bytes": 973256
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/longer-uncontended/receipt.json",
+      "sha256": "2b6412c1bbe6dccb75e91ad4d31424117ca6eb8098e14fde1e827b193b7049ad",
+      "size_bytes": 3204
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/longer-uncontended/receiver-result.json",
+      "sha256": "9e0fa26f64cff119266b55b6ff257e4ad29a498d76210ba1e72bbd49d4928005",
+      "size_bytes": 1595356
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/longer-uncontended/result-comparison.json",
+      "sha256": "3996a717877977f2b124fe208ee9ef49e2ed58c5a87b4e44a3af0719f6ed1626",
+      "size_bytes": 196
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/longer-uncontended/run.log",
+      "sha256": "9230cf0000425a63b2799d72574ed94c0802ee76fcec9db18e6ced22d894b6b4",
+      "size_bytes": 2978
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/longer-uncontended/run.py",
+      "sha256": "930f08f67b2daa8a919d2a76c3a4e3450bfd10dd8901e13abd1527fdbecaf097",
+      "size_bytes": 2326
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/segmented/original-inverse-gram.py",
+      "sha256": "14b465af6665b9b5c6ea476b0a346053da9fddbe24483372c3f7e3c410ebef2a",
+      "size_bytes": 15049
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/segmented/original-tests.py",
+      "sha256": "fecc0d601937243a3e1f651d3fbc2cdfff6c672b5769a3260908ce4441c01552",
+      "size_bytes": 7031
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/segmented/tests-owner.log",
+      "sha256": "c73c73481ba84e4daff9191fa040b7ff4b0d91c9604cb71774a0a6b77b6b5dfb",
+      "size_bytes": 105
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/segmented/tests-repair.log",
+      "sha256": "73a02161b64eafc8833d087b67c257312c74a7b2599a01b6a0a923617b19ff65",
+      "size_bytes": 802
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/theory/admission-note.md",
+      "sha256": "1dc602fd5c8d8a6eb66c8177c56de69ff3daadf4222b609240a660009ac28e6d",
+      "size_bytes": 16703
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/theory/benchmarks.json",
+      "sha256": "c395ab2273e9efd56dd3d944078711b47509d2546937bfe6c5d21cac19e6d679",
+      "size_bytes": 5032
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/theory/benchmarks.log",
+      "sha256": "c395ab2273e9efd56dd3d944078711b47509d2546937bfe6c5d21cac19e6d679",
+      "size_bytes": 5032
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/theory/benchmarks.py",
+      "sha256": "dd8c5b4768d6cd51716b281d362cb4ce38a3cbf2df849fe4dbe19a9040449a64",
+      "size_bytes": 3090
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/theory/helper-metrology-formula-check.json",
+      "sha256": "e72fe59be5ae0d1bfb68077b47f5289b9a80086ece98cd9c7528503e65e43ef8",
+      "size_bytes": 398
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/theory/helper-metrology.json",
+      "sha256": "0bf04598a3957c372dd8ab5e5bbf70be8968922af48651effa656beed3aab695",
+      "size_bytes": 53568
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/theory/helper-metrology.log",
+      "sha256": "0fef07bff9c3fb960927a544b4247c5dcd987adf0f4a2d4b8f9adf5d728633d2",
+      "size_bytes": 411
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/theory/helper-metrology.py",
+      "sha256": "325910171f379b66a1b113a80b9fa83c63ae9371499c0f44bdbfafc7143ec8de",
+      "size_bytes": 10974
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/train-generation.log",
+      "sha256": "f4b675c6c68f91f64dcc93f51432cccd0a383ef7516c7dee72e2e658a93ca44c",
+      "size_bytes": 101
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/train-helper-only/evaluator-truth.json",
+      "sha256": "3ae563ac3045727a6928ac3eecc43e18556598f628e22276603e82bcf120ee96",
+      "size_bytes": 2407
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/train-helper-only/manifest.json",
+      "sha256": "7f7b128fee51b322ce6ab29adce49f06c96b4b5a0262eaac76cb5c24bce17520",
+      "size_bytes": 13460
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/train-initial-failures/train-native-0.json",
+      "sha256": "d4ea92dd17bbf97555d4facce53c6011f6d366fc7def1ae9738d1c3ed331fbcd",
+      "size_bytes": 67561
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/train-initial-failures/train-native-1.json",
+      "sha256": "469d14a8b39a499673a64cd7dbf36f08cbe1d38d704cad2a90397994b8d80217",
+      "size_bytes": 26772
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/train-initial-failures/train-native-2.json",
+      "sha256": "4fef2d93c0a95e76dd992a32b1e374dbd2d787e80471d4dbbebdeb3a4ab60e2e",
+      "size_bytes": 26794
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/train-native-0.json",
+      "sha256": "d4ea92dd17bbf97555d4facce53c6011f6d366fc7def1ae9738d1c3ed331fbcd",
+      "size_bytes": 67561
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/train-native-1.json",
+      "sha256": "469d14a8b39a499673a64cd7dbf36f08cbe1d38d704cad2a90397994b8d80217",
+      "size_bytes": 26772
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/train-native-2.json",
+      "sha256": "4fef2d93c0a95e76dd992a32b1e374dbd2d787e80471d4dbbebdeb3a4ab60e2e",
+      "size_bytes": 26794
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/train-native-fixed-0.json",
+      "sha256": "b9d989526df6a67495cf01e400fc596c259b55605b47f04cd061f6cf06a60b41",
+      "size_bytes": 1088468
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/train-native-fixed-1.json",
+      "sha256": "faa4455e23d170f5250a08c1ff30478e3b6a2c3b894e5fd90dfd2671e1bb8546",
+      "size_bytes": 1595804
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/train-native-fixed-2.json",
+      "sha256": "16567a8c6884e9f26acee0eeb27922e23256e8427a5aa4dcad08a395b6fd931d",
+      "size_bytes": 1593875
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/train-native.log",
+      "sha256": "ad25c407e5a49a4ad6622f591c4bd3e6b1f8ff328edc03417a20c28eace602b1",
+      "size_bytes": 675
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/train-noise-long/evaluator-truth.json",
+      "sha256": "ff01b081c3cf4dec8f407e09dd33b6db4c4c3210e88dcbf50992782543246326",
+      "size_bytes": 2289
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/train-noise-long/manifest.json",
+      "sha256": "5fe19f0123bb68c5b7204fb5b4a3849287dc4b616fa6eb9d8c4b55ba9b3628fd",
+      "size_bytes": 14192
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/train-noise/evaluator-truth.json",
+      "sha256": "8c20c7874cf4354456296f5a297396bfadd84ccb8ac12fc8ce1591bb32c5e757",
+      "size_bytes": 2266
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/train-noise/manifest.json",
+      "sha256": "0b5c9a5e3fa8af13cd8c3f1fbfdb13dbfd32550d2ee7817e54061731d14ae41b",
+      "size_bytes": 13429
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/train/evaluator-truth.json",
+      "sha256": "1fa182fdec631158bf61aac46ef58654721d563cd056253f1f0cab4570308c42",
+      "size_bytes": 2525
+    },
+    {
+      "category": "study-output",
+      "path": "weak-stream-evidence/local-evidence/triad-weak-stream/train/manifest.json",
+      "sha256": "96c08f80ab5861ab85d6f38e4a5b4be5ee85c58c60e11dab347ad18c6b00f180",
+      "size_bytes": 13471
+    },
+    {
+      "category": "packaging-tool",
+      "path": "weak-stream-evidence/package_evidence.py",
+      "sha256": "08c1e711d5f021d6e4a2771c2ec537ce98d080ac75250fad8275f7f417d32381",
+      "size_bytes": 23835
+    },
+    {
+      "category": "study-source-or-test",
+      "path": "weak-stream-evidence/source-snapshot/docs/README.md",
+      "sha256": "13a30451beda93ef7c87a8c6ae5295b77b3d4c53f2a527976f683688369f627f",
+      "size_bytes": 12532
+    },
+    {
+      "category": "study-source-or-test",
+      "path": "weak-stream-evidence/source-snapshot/docs/triad-performance-matrix.md",
+      "sha256": "eb9293ceb87ace7f71644cdeeded41243a5631016e8dcb89c631e60f3b5f1f74",
+      "size_bytes": 47077
+    },
+    {
+      "category": "study-source-or-test",
+      "path": "weak-stream-evidence/source-snapshot/docs/triad-realtime.md",
+      "sha256": "a9074b937000a7f3cd25284a5f44c4b77e78d2b23fee214f5f29a0d4c6df6b91",
+      "size_bytes": 9141
+    },
+    {
+      "category": "study-source-or-test",
+      "path": "weak-stream-evidence/source-snapshot/docs/triad-weak-streaming.md",
+      "sha256": "ef724712a632e7741f036dc0db2e146b65d02aa1bf6e4386deb2cfacfde011b0",
+      "size_bytes": 10033
+    },
+    {
+      "category": "study-source-or-test",
+      "path": "weak-stream-evidence/source-snapshot/tests/test_triad_operational_admission.py",
+      "sha256": "121aac6218491225177e37fb6b90f1c88c8e52a6545f3dcf639bc3b022ddf99c",
+      "size_bytes": 3265
+    },
+    {
+      "category": "study-source-or-test",
+      "path": "weak-stream-evidence/source-snapshot/tests/test_triad_segmented_fft.py",
+      "sha256": "31fbf8a3fdf3bbe382bb858207938992d36dab6796366ea988a86fe751e29771",
+      "size_bytes": 7502
+    },
+    {
+      "category": "study-source-or-test",
+      "path": "weak-stream-evidence/source-snapshot/tests/test_triad_stream_frontend.py",
+      "sha256": "701dbc10e0af5ec960aa8f1834574b96550980ac3967c5b91190b2b0d056a0d3",
+      "size_bytes": 7402
+    },
+    {
+      "category": "study-source-or-test",
+      "path": "weak-stream-evidence/source-snapshot/tests/test_triad_stream_run.py",
+      "sha256": "79e7eff79a70efcd8fc9677cba05ebdfd6ec3050dc8f8761aeb82222ae2ba0b6",
+      "size_bytes": 5155
+    },
+    {
+      "category": "study-source-or-test",
+      "path": "weak-stream-evidence/source-snapshot/tests/test_triad_stream_scheduler.py",
+      "sha256": "95fa5eb6596dc017a5399350990d566725e9a490831b458d2036139802f3913e",
+      "size_bytes": 6974
+    },
+    {
+      "category": "study-source-or-test",
+      "path": "weak-stream-evidence/source-snapshot/tests/test_triad_stream_slots.py",
+      "sha256": "a155898751cde1d142cc24c62f9e21d4686cdf89b09aeb442f21321a5ff91c82",
+      "size_bytes": 1976
+    },
+    {
+      "category": "study-source-or-test",
+      "path": "weak-stream-evidence/source-snapshot/tests/test_triad_weak_helper.py",
+      "sha256": "848644d338af2e7b287f48c673dfac358f911f3fdd4fda036f40a96c5e4c12a4",
+      "size_bytes": 7672
+    },
+    {
+      "category": "study-source-or-test",
+      "path": "weak-stream-evidence/source-snapshot/tests/test_triad_weak_receiver.py",
+      "sha256": "144eca8fec574537c81ac8da68b61165112ed54b26640cf286b2f636b228c4aa",
+      "size_bytes": 4167
+    },
+    {
+      "category": "study-source-or-test",
+      "path": "weak-stream-evidence/source-snapshot/tools/triad-helper-export.cpp",
+      "sha256": "543c128412e9d3b31d226a09cfaab7026f1dd504f92c6c3a8ab6d2478226766f",
+      "size_bytes": 90609
+    },
+    {
+      "category": "frozen-receiver-source",
+      "path": "weak-stream-evidence/source-snapshot/tools/triad_dynamic_campaign.py",
+      "sha256": "118b6c53a0bf8f0f6718bd919e3856374f981477885118cb4941f77579c80e1d",
+      "size_bytes": 34092
+    },
+    {
+      "category": "frozen-receiver-source",
+      "path": "weak-stream-evidence/source-snapshot/tools/triad_dynamic_frequency.py",
+      "sha256": "4d6b48b3b39a558769e1d035b46fdf619252245a20be7a4702d12cf524fa9cec",
+      "size_bytes": 21419
+    },
+    {
+      "category": "frozen-receiver-source",
+      "path": "weak-stream-evidence/source-snapshot/tools/triad_dynamic_joint.py",
+      "sha256": "071a435406d43e5d322f4304ae821469f5b3a107134b5e50b5fb15eeab528832",
+      "size_bytes": 35063
+    },
+    {
+      "category": "frozen-receiver-source",
+      "path": "weak-stream-evidence/source-snapshot/tools/triad_dynamic_scan.py",
+      "sha256": "50ed9f86c28a6090123e7efe38c319b851ba00b0562e9a722346ad2a70e510ac",
+      "size_bytes": 17807
+    },
+    {
+      "category": "frozen-receiver-source",
+      "path": "weak-stream-evidence/source-snapshot/tools/triad_dynamic_variants.py",
+      "sha256": "c20d1a7e0dc70629971ca04558a378c1c2222d9d457ebdb3bcc8343aa6eb8e76",
+      "size_bytes": 8886
+    },
+    {
+      "category": "frozen-receiver-source",
+      "path": "weak-stream-evidence/source-snapshot/tools/triad_gaussian_prepared.py",
+      "sha256": "c88afdf459521393958c49d801517d79cd158cbe2291e4a48c3eff6931e42875",
+      "size_bytes": 22456
+    },
+    {
+      "category": "frozen-receiver-source",
+      "path": "weak-stream-evidence/source-snapshot/tools/triad_gaussian_state.py",
+      "sha256": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba",
+      "size_bytes": 13539
+    },
+    {
+      "category": "frozen-receiver-source",
+      "path": "weak-stream-evidence/source-snapshot/tools/triad_helper_receiver.py",
+      "sha256": "7956b27568b325ddb94437702c04d25650ed5cdac745f6e711a16f5c3c0af6e9",
+      "size_bytes": 64040
+    },
+    {
+      "category": "frozen-receiver-source",
+      "path": "weak-stream-evidence/source-snapshot/tools/triad_helper_statistics.py",
+      "sha256": "f2ef5bca92197353881dd1bf90f3f099fd28f77dc24ba82bb1aac2734038bbf8",
+      "size_bytes": 8615
+    },
+    {
+      "category": "frozen-receiver-source",
+      "path": "weak-stream-evidence/source-snapshot/tools/triad_operational_admission.py",
+      "sha256": "c6ce818494e27ebf8ca37fab20931feea6afff8cd59b903a3acdcd7d67ba8165",
+      "size_bytes": 7480
+    },
+    {
+      "category": "frozen-receiver-source",
+      "path": "weak-stream-evidence/source-snapshot/tools/triad_realtime_fft.py",
+      "sha256": "0580ba4e357c3535fc70fb02ef53cd7778b71b4590955149e0c23d3b82d8e1c2",
+      "size_bytes": 22269
+    },
+    {
+      "category": "frozen-receiver-source",
+      "path": "weak-stream-evidence/source-snapshot/tools/triad_realtime_receiver.py",
+      "sha256": "413958f2fe71739b6c6b60656079f69fa5370b75b3ff96109d1109f4507a464e",
+      "size_bytes": 13477
+    },
+    {
+      "category": "frozen-receiver-source",
+      "path": "weak-stream-evidence/source-snapshot/tools/triad_segmented_fft.py",
+      "sha256": "5b62359c9b27c91e1af35c8f3f06bedc6a89e500224aa277f499fda4f85b48aa",
+      "size_bytes": 15802
+    },
+    {
+      "category": "study-source-or-test",
+      "path": "weak-stream-evidence/source-snapshot/tools/triad_stream_frontend.py",
+      "sha256": "2ce6a976f147a7f12848a74ad7b6dae08bcbb146b9cd4ddd50e51782b1f88a0e",
+      "size_bytes": 14090
+    },
+    {
+      "category": "study-source-or-test",
+      "path": "weak-stream-evidence/source-snapshot/tools/triad_stream_run.py",
+      "sha256": "fe26d5bd916a7c2d532aca1045f9fddf97b9c0f16ddb6553a45329a6555272fc",
+      "size_bytes": 20598
+    },
+    {
+      "category": "study-source-or-test",
+      "path": "weak-stream-evidence/source-snapshot/tools/triad_stream_scheduler.py",
+      "sha256": "1a8b025348b2501e41b46abb15dd8d240f98061f22fe0516725d3940073bde95",
+      "size_bytes": 15437
+    },
+    {
+      "category": "study-source-or-test",
+      "path": "weak-stream-evidence/source-snapshot/tools/triad_stream_slots.py",
+      "sha256": "20e5acdb2ae52b14fbcadfef4ec7039a686c8a2d65bb7de326c9e2fb55d1374a",
+      "size_bytes": 3505
+    },
+    {
+      "category": "frozen-receiver-source",
+      "path": "weak-stream-evidence/source-snapshot/tools/triad_weak_helper.py",
+      "sha256": "6fbe2e226378215c36809d3e9990203a02a19a27562694b35f34f1e2cebf4278",
+      "size_bytes": 19689
+    },
+    {
+      "category": "frozen-receiver-source",
+      "path": "weak-stream-evidence/source-snapshot/tools/triad_weak_qualify.py",
+      "sha256": "2d7a8908d28afe767a54eb4b4af48667cc67f32ccef3a48533d76db6682c5fdb",
+      "size_bytes": 23004
+    },
+    {
+      "category": "frozen-receiver-source",
+      "path": "weak-stream-evidence/source-snapshot/tools/triad_weak_receiver.py",
+      "sha256": "869d9816a8ebdba5645ea589fe3ce56d1f64156d8fd31fe2b3bd78770fbba5b2",
+      "size_bytes": 8107
+    },
+    {
+      "category": "internal-manifest",
+      "path": "weak-stream-evidence/package-inventory.json",
+      "sha256": "3e906c5c258dc5840bc4540a5ad05b2e07d97c7999c449a7637e251ef5cf00bc",
+      "size_bytes": 234729
+    }
+  ],
+  "archive_sha256": "dcc95133744d56a3f743066aa680ffbd318cea557b69abb15996b353db9654f3",
+  "archive_size_bytes": 29331161,
+  "environment": {
+    "cpu_model": "AMD Ryzen 5 PRO 5650U with Radeon Graphics",
+    "machine": "x86_64",
+    "platform": "Linux-7.2.6+deb13-amd64-x86_64-with-glibc2.41",
+    "python": "3.13.5 (main, Aug 10 2026, 12:06:59) [GCC 14.2.0]"
+  },
+  "git_head": "c401265714d2769ac660483c96fa69994664c25b",
+  "independent_protocol_sha256": "af2fe40889c8f2660732f23b8bc3a9b989ac6bfc6b38f0aa8160fdb0fba3f309",
+  "internal_inventory_sha256": "3e906c5c258dc5840bc4540a5ad05b2e07d97c7999c449a7637e251ef5cf00bc",
+  "limitation": "Archive preserves machine-readable outputs and source/provenance metadata, but not raw PCM, I/Q captures, templates, or validity arrays. Those inputs are inventoried by path, size and SHA-256 for local reproduction.",
+  "member_count": 456,
+  "native_exporter": {
+    "binary_matches_protocol": true,
+    "build_ninja_sha256": "33aa35cbfc91b7a4b8df5c8727f6d25c715f304c90cfae30f510f3eecfdfc404",
+    "build_profile": "build/dev-cli",
+    "cmake_cache_sha256": "f17b0762cdeea06073d224123968e496dd23f82ebfdec6abb504ab871c9cc453",
+    "current_binary_sha256": "c497ba10d1255f1e56a2976eb4c1be4854ba5f88b2891f0be15110a06ac22242",
+    "current_binary_size_bytes": 6247120,
+    "exporter_cpp_path": "tools/triad-helper-export.cpp",
+    "exporter_cpp_sha256": "543c128412e9d3b31d226a09cfaab7026f1dd504f92c6c3a8ab6d2478226766f",
+    "protocol_binary_path": "/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli/triad_helper_export",
+    "protocol_binary_sha256": "c497ba10d1255f1e56a2976eb4c1be4854ba5f88b2891f0be15110a06ac22242",
+    "provenance_scope": "Reused binary identity; this harness does not assert a fresh source/binary certification."
+  },
+  "omitted_raw_input_bytes": 1054883135,
+  "omitted_raw_input_count": 120,
+  "protocol_id": "4565cdee4f328f91c6452192c0f5ff26ff3e521a24111667b89146b021f720b7",
+  "schema": "triad-weak-stream-artifact-manifest-v1",
+  "source_hashes": {
+    "docs/README.md": "13a30451beda93ef7c87a8c6ae5295b77b3d4c53f2a527976f683688369f627f",
+    "docs/triad-performance-matrix.md": "eb9293ceb87ace7f71644cdeeded41243a5631016e8dcb89c631e60f3b5f1f74",
+    "docs/triad-realtime.md": "a9074b937000a7f3cd25284a5f44c4b77e78d2b23fee214f5f29a0d4c6df6b91",
+    "docs/triad-weak-streaming.md": "ef724712a632e7741f036dc0db2e146b65d02aa1bf6e4386deb2cfacfde011b0",
+    "tests/test_triad_operational_admission.py": "121aac6218491225177e37fb6b90f1c88c8e52a6545f3dcf639bc3b022ddf99c",
+    "tests/test_triad_segmented_fft.py": "31fbf8a3fdf3bbe382bb858207938992d36dab6796366ea988a86fe751e29771",
+    "tests/test_triad_stream_frontend.py": "701dbc10e0af5ec960aa8f1834574b96550980ac3967c5b91190b2b0d056a0d3",
+    "tests/test_triad_stream_run.py": "79e7eff79a70efcd8fc9677cba05ebdfd6ec3050dc8f8761aeb82222ae2ba0b6",
+    "tests/test_triad_stream_scheduler.py": "95fa5eb6596dc017a5399350990d566725e9a490831b458d2036139802f3913e",
+    "tests/test_triad_stream_slots.py": "a155898751cde1d142cc24c62f9e21d4686cdf89b09aeb442f21321a5ff91c82",
+    "tests/test_triad_weak_helper.py": "848644d338af2e7b287f48c673dfac358f911f3fdd4fda036f40a96c5e4c12a4",
+    "tests/test_triad_weak_receiver.py": "144eca8fec574537c81ac8da68b61165112ed54b26640cf286b2f636b228c4aa",
+    "tools/triad-helper-export.cpp": "543c128412e9d3b31d226a09cfaab7026f1dd504f92c6c3a8ab6d2478226766f",
+    "tools/triad_dynamic_campaign.py": "118b6c53a0bf8f0f6718bd919e3856374f981477885118cb4941f77579c80e1d",
+    "tools/triad_dynamic_frequency.py": "4d6b48b3b39a558769e1d035b46fdf619252245a20be7a4702d12cf524fa9cec",
+    "tools/triad_dynamic_joint.py": "071a435406d43e5d322f4304ae821469f5b3a107134b5e50b5fb15eeab528832",
+    "tools/triad_dynamic_scan.py": "50ed9f86c28a6090123e7efe38c319b851ba00b0562e9a722346ad2a70e510ac",
+    "tools/triad_dynamic_variants.py": "c20d1a7e0dc70629971ca04558a378c1c2222d9d457ebdb3bcc8343aa6eb8e76",
+    "tools/triad_gaussian_prepared.py": "c88afdf459521393958c49d801517d79cd158cbe2291e4a48c3eff6931e42875",
+    "tools/triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba",
+    "tools/triad_helper_receiver.py": "7956b27568b325ddb94437702c04d25650ed5cdac745f6e711a16f5c3c0af6e9",
+    "tools/triad_helper_statistics.py": "f2ef5bca92197353881dd1bf90f3f099fd28f77dc24ba82bb1aac2734038bbf8",
+    "tools/triad_operational_admission.py": "c6ce818494e27ebf8ca37fab20931feea6afff8cd59b903a3acdcd7d67ba8165",
+    "tools/triad_realtime_fft.py": "0580ba4e357c3535fc70fb02ef53cd7778b71b4590955149e0c23d3b82d8e1c2",
+    "tools/triad_realtime_receiver.py": "413958f2fe71739b6c6b60656079f69fa5370b75b3ff96109d1109f4507a464e",
+    "tools/triad_segmented_fft.py": "5b62359c9b27c91e1af35c8f3f06bedc6a89e500224aa277f499fda4f85b48aa",
+    "tools/triad_stream_frontend.py": "2ce6a976f147a7f12848a74ad7b6dae08bcbb146b9cd4ddd50e51782b1f88a0e",
+    "tools/triad_stream_run.py": "fe26d5bd916a7c2d532aca1045f9fddf97b9c0f16ddb6553a45329a6555272fc",
+    "tools/triad_stream_scheduler.py": "1a8b025348b2501e41b46abb15dd8d240f98061f22fe0516725d3940073bde95",
+    "tools/triad_stream_slots.py": "20e5acdb2ae52b14fbcadfef4ec7039a686c8a2d65bb7de326c9e2fb55d1374a",
+    "tools/triad_weak_helper.py": "6fbe2e226378215c36809d3e9990203a02a19a27562694b35f34f1e2cebf4278",
+    "tools/triad_weak_qualify.py": "2d7a8908d28afe767a54eb4b4af48667cc67f32ccef3a48533d76db6682c5fdb",
+    "tools/triad_weak_receiver.py": "869d9816a8ebdba5645ea589fe3ce56d1f64156d8fd31fe2b3bd78770fbba5b2"
+  },
+  "source_snapshot_count": 33,
+  "study_output_count": 421
+}
