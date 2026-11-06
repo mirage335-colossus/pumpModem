@@ -1,0 +1,220 @@
+# Multi-day weak-signal tracking qualification
+
+This is an isolated, **scheduled post-acquisition DATA** study. It tests complete
+native encrypted observations under continuing UTC corrections, rather than
+advancing a virtual clock without processing a signal. It does not qualify
+multi-day hardware uptime, blind acquisition, Helper tracking, or arbitrary
+remote trajectories at the normal 1725-Hz audio carrier. The existing live
+clock-follow defaults are unchanged. Start with the
+[continuous audio policy](triad-clock-follow.md) and its distinction between
+known local capture coordinates and unknown transmitter timing.
+
+## Cheap checks first
+
+Do not add the historical campaign below to routine CI or rerun it after an
+unrelated edit. The native protocol test, small covariance references and local
+sample-rate checks are the routine entry points. Use the existing
+[predictive performance workflow](triad-performance.md#required-efficient-regression-workflow)
+for performance changes; a long simulated duration is not itself a sustained
+processor benchmark.
+
+```sh
+./build.sh configure --cli
+cmake --build build/dev-cli --target triad_tracking_export -j2
+python3 tests/test_triad_tracking_export.py build/dev-cli/triad_tracking_export
+# Use the configured study environment containing numpy, scipy and torch:
+python tests/test_triad_multiday_likelihood.py
+python tests/test_triad_multiday_block_mc.py
+python tests/test_triad_multiday_tracker_check.py build/dev-cli/triad_tracking_export
+python tests/test_triad_tracking_reduction.py build/dev-cli/triad_tracking_export
+```
+
+The native test is also registered as `triad_tracking_export` in the isolated
+`triad` CTest label. The scientific Python checks remain explicit dependencies;
+they must not silently pass when their numerical libraries are unavailable.
+The optional whole-channel refinement is an occasional check; see the dated
+record for the exact command. Full qualification commands use
+`tools/triad_multiday_campaign.py --protocol PROTOCOL.json --exporter
+build/dev-cli/triad_tracking_export --output NEW_DIRECTORY`. It rejects an
+existing case directory. It preserves manifests, sampled input hashes, complete
+execution boundaries and compact joint statistics, then releases regenerable
+sample files unless `--retain-samples` is requested.
+
+## Physical and numerical contracts
+
+`triad_tracking_export` uses `PatternSource`, `ContinuousClock` and the shared
+`StreamingChannel`. A one-second controller tick is independent of export Fs.
+The private transmitter receives seeded hourly 50–150-ms corrections, jittered
+by up to 300 seconds, plus ±2-second events every 24 corrections. The wandering
+variant also applies small quarter-hour corrections. Phase catch-up is capped
+at 200 ppm and slewed at 10 ppm/s. Accumulated displacement has no two-second
+lifetime limit. Device frequency error is explicitly zero in these controlled
+experiments; this is not a complete oscillator spectrum.
+
+Before the shared channel, the transmitted complex envelope is
+
+`s(u(t)) exp(j 2 pi f_IF [u(t) - t])`.
+
+Delay, Doppler, frequency-selective modulation and echoes then evolve on
+physical time. The signal is never warped after the channel to impersonate a
+transmitter clock. Channel state and complete tails persist across reads. The
+shared Gaussian random fields generate spread and selective sidebands; one
+whole-waveform dispersive operator preserves overlap between carriers. No
+independent carrier-label gain is substituted. The experiment canonicalizes the
+source's physical origin to eight fine-symbol periods, removing the native
+representation's Fs-dependent two-sample padding from cross-rate comparisons.
+Production source geometry is unchanged and its conservative tail allowance is
+retained.
+
+Fixed transmit gain is one: the maintained source already divides the three
+carrier amplitudes by sqrt(3). No bit or path is normalized to realized energy.
+Nominal C/N0 refers to the source's unit coefficient-power convention; noise
+sample variance is `Fs / 10**(CN0_dBHz/10)` for proper complex white noise.
+Finite shaping, guards and channel modulation change actual energy. Results
+therefore retain both measured `E/N0` and nominal C/N0, requested duration,
+rounded active duration and complete capture duration. At rate 0.001 Hz, a
+short request can become several days because minimum pattern complexity and
+tile placement still apply.
+
+Reduced Fs must contain the timing-induced IF movement and all selected
+channel sidebands. At 1725 Hz, 200 ppm alone produces 0.345 Hz of movement;
+at 0.0005 Hz it produces 1e-7 Hz. The low-IF experiments describe specialized
+complex-baseband hardware, **not an audio cable capable of passing DC**.
+Gaussian spectral allowances are engineering truncation conventions, not hard
+compact support. Validate a changed rate/model with waveform refinement.
+The reduced-rate shared path explicitly excludes unsupported frontends, FHSS,
+white/flicker frequency models and other effects listed in its manifest.
+
+Full Helper pilots at 550/2400 Hz cannot silently be included in a very narrow
+DATA export. Helper is explicitly absent here. Live ASRC also changes noise
+covariance: knowing its sample coordinates alone does not make captured noise
+white. These experiments do not establish physical noise-only admission rates.
+
+## Receiver comparisons and the coherence pitfall
+
+The practical persistent receiver mixes a **fixed public affine clock bank**
+and both independently encrypted patterns. It never receives the private clock
+trace or channel realization. Low-rate/low-IF signals may tolerate remaining
+non-affine motion with little loss; that is measured template tolerance, not
+general adaptive trajectory inference. Fixed initial epoch and arrival are
+post-acquisition assumptions.
+
+`triad_multiday_likelihood.py` retains a bounded joint Gram/correlation workspace
+and reuses the maintained `GaussianStateFilter` with infinite coherence. Cross-
+candidate noise dependence is retained. Strict complex FP32 bulk arithmetic
+uses FP64 outer reductions; TF32 is not silently allowed. The module supports
+CUDA explicitly, but hardware availability and actual acceleration must be
+reported separately. A full Gram permits exact conditional Gaussian Monte Carlo
+for this static linear model; it cannot simulate new channel paths, nonlinear
+frontends, finite-coherence trajectories or adaptive timing paths. Small PSD
+roundoff repairs and their sizes are reported consistently in scoring and draws.
+
+`triad_multiday_tracker_check.py` independently runs the maintained
+`IncrementalReceiver` and `TrackingReceiver` over every sample. Its fixed single
+public timing state deliberately isolates persistence versus channel-prior
+renewal. Optional finite Gaussian coherence is a separate normalized model;
+it is not an exact Brownian phase estimator. The optional dynamic mode also
+exercises real timing-HMM proposal growth and pruning using an exact persistent
+native basis server. Cubic and higher-order interpolation failed at real
+legacy-RRC support discontinuities; the native fallback preserves that waveform.
+Long reset intervals and reciprocal-Fs rounding are reported and must not be
+described as the live four-second configuration.
+
+For an explicit rank-one, independently renewed complex Gaussian channel model,
+let `C` be linear C/N0, `tau` the renewal interval, and `gamma=C*tau`. The
+alternative-to-noise KL divergence per block is
+
+`gamma - log(1+gamma)`, approximately `gamma**2/2` at small gamma.
+
+For equal blocks the total is approximately `C**2*tau*T/2`. This explains why
+discarding coherence every few seconds can fail at extremely low C/N0 even
+when a persistent receiver succeeds. It is a model-specific information loss,
+not a universal propagation bound. Real oscillator spectra require separate
+phase, frequency and drift models; see the
+[NIST frequency stability handbook](https://www.nist.gov/publications/handbook-frequency-stability-analysis).
+
+Even an ideal coherent receiver has finite energy. At −60 dB-Hz and 38 days,
+unit-power useful allocation gives `E/N0=3.2832` (5.16 dB). Under ideal orthogonal
+patterns, known-phase bit selection is about 96.5%; unknown-phase selection is
+about 90.3%. Neither is a presence/admission probability. For a *known signal*
+in complex Gaussian noise and one fixed false-admission allowance of 1e-4,
+99% presence detection needs about 18.27 linear E/N0, or 211.5 days at that C/N0.
+Unknown channel, search and usable-energy loss increase that requirement.
+Use measured waveform distances for actual patterns. The retained known-channel
+likelihood reference uses the conservative Markov gate, not an exactly
+size-calibrated Neyman–Pearson test; its empirical admission counts are not an
+optimal bound. These ideal formulas do not set hard-coded planner constants.
+
+## Admission and reliability scope
+
+The fixed candidate/bit mixture has unit mean under the declared exact noise
+model. Threshold `log(1/alpha)` bounds noise-only admission by alpha at one fixed
+endpoint. The study schedule allows at most one such endpoint per calendar day
+with alpha=1e-4. Other starts, durations or models must divide that budget or
+enter one normalized mixture. Do not multiply the allowance by the number of
+days spent accumulating a bit. Wrong admitted bits, misses, raw selection errors
+and noise-only admissions are separate counts.
+
+Reported 95% Clopper–Pearson intervals are conditional on each represented
+waveform/channel. Thousands of noise draws on one path are not thousands of
+independent channels. Independent keys, clocks and channel seeds provide a small
+external check, not a population-wide 99% reliability guarantee. Numerical
+roundoff is measured, not covered by a claimed exact future mathematical bound.
+
+The [dated qualification record](validation-data/triad-v3/2026-11-06-multiday-tracking/README.md)
+separates complete sampled observations, conditional Monte Carlo, actual
+maintained-receiver checks, theoretical limits and unqualified configurations.
+
+## Measured operating envelope and next implementation work
+
+The 2026-11-06 campaign processed full observations, including all samples and
+channel tails, from 2.11 to 1028 simulated days. At rate 0.001 Hz, IF 0.0005 Hz,
+−60 dB-Hz and a flat constant-phase channel, about 514.56 capture days gave
+4096/4096 correct admissions per bit in the periodic-clock design case and two
+independent wandering-clock/key cases. The public affine bank loses little
+energy in this particular slow waveform; it does not infer an arbitrary timing
+trajectory. A 38-day request rounds to about 40 active days and has insufficient
+energy for high admission probability at the same C/N0.
+
+For continuous Wiener phase diffusion of 0.001 rad/sqrt(s), a persistent finite
+Gaussian-state model and a 128-state phase-only likelihood substantially improve
+on a constant-channel model. On one complete 1028-day capture at −60 dB-Hz,
+finite Gaussian-state reception admitted 4082/4096 and 4076/4096 bit trials
+correctly (95% conditional lower bounds 99.43% and 99.25%). This is one
+clock/phase realization, not a population guarantee. A fixed equal mixture of
+finite, static and phase-only models is the legitimate combined decision; its
+bit-1 lower bound is 98.93%, so that combined rule has not demonstrated 99% at
+95% confidence. The 0.001-rad/sqrt(s) diffusion is not a 0.001-Hz Doppler spread.
+
+`triad_multiday_block_mc.py` retains separate joint sufficient statistics in
+every disjoint sample block and runs the maintained Gaussian and phase filters
+through the entire sequence. It validates these statistics against actual
+sampled-noise streaming reception. Unlike the static whole-Gram shortcut, it
+preserves finite channel evolution. Fixed model mixtures account for model
+alternatives; choosing whichever diagnostic branch passes would need a new
+admission budget. The 4096-trial GPU batch was 27.1 times faster than one CPU
+thread on the same host (7.13 versus 193.40 seconds), with identical decisions.
+This is throughput evidence for the inference batch, not end-to-end live GPU
+qualification or a speedup over all CPU cores. Small batches gained only 1.06x.
+
+Remaining serious limitations are exposed rather than hidden:
+
+- The actual dynamic timing HMM missed the 41-day −50-dB-Hz bit with both
+  8 and 64 states; a persistent receiver admitted the same observation.
+  Larger beams retain more prior path mass, but fresh channel priors still
+  destroy weak coherent evidence. Both beams passed the −30-dB-Hz control.
+- With the shared random Sub9-best channel and Each65 modulation, static
+  whole-window matching loses roughly 39–46 dB. A finite 300-second Gaussian
+  state admitted two complete independent 41-day −35-dB-Hz observations, while
+  their static/reset references missed. That is evidence for the approach,
+  not a −60-dB-Hz turbulent-channel qualification.
+- At 1725-Hz IF, a full two-day constant-frequency search retained only about
+  0.38% of the signal energy under the selected continuing clock motion.
+  Public affine tolerance at low IF cannot qualify high-IF operation.
+
+Future work should preserve channel/phase posteriors along timing hypotheses,
+with a properly normalized likelihood and validated pruning, before extending
+weak live high-IF qualification. Helper-assisted inference, realistic complete
+oscillator spectra and production ASRC noise covariance need separate tests.
+The new harness and native server are isolated research/qualification tools;
+this change does not replace the production live receiver or claim it passed.

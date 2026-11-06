@@ -48,6 +48,11 @@ Keep strict audio timing separate, and distinguish local clock discipline from
 remote waveform tracking and physical-noise qualification. Never hand a private
 TX correction trace to RX and call that practical synchronization. The older
 bounded-DATA map and its source evidence remain a separate diagnostic profile.
+For complete sampled multi-day weak observations, use the
+[multi-day tracking qualification](triad-multiday-tracking.md). Its cheap
+source/channel and covariance checks precede the occasional historical campaign.
+Persistent evidence, renewed channel priors, low-IF timing tolerance, adaptive
+tracking and channel-oracle bounds are different claims; keep them separate.
 
 For isolated performance regressions, first follow the
 [required efficient regression workflow](triad-performance.md#required-efficient-regression-workflow)

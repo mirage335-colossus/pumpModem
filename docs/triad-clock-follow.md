@@ -18,6 +18,10 @@ or imply unchanged sensitivity.
 The [200-ppm tracking qualification](validation-data/triad-v3/2026-11-06-clock-tracking/README.md)
 retains direct/cache comparisons, independent sampled corrections, the default
 mapped cable check and failures encountered during implementation.
+The subsequent [multi-day weak-signal study](triad-multiday-tracking.md) tests
+complete sampled observations and exposes the sensitivity cost of repeatedly
+renewing the channel prior. Its low-IF persistent-bank successes do not qualify
+arbitrary multi-day audio-IF trajectories or physical noise admissions.
 
 The new policy uses the shared native audio resampler. On capture it adjusts
 PCM **before DATA mixing or projection**, so DATA, Helper pilots and auxiliary

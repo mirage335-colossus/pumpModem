@@ -774,6 +774,14 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
   add_executable(triad_long EXCLUDE_FROM_ALL tools/triad-long.cpp)
   target_include_directories(triad_long PRIVATE src)
   target_link_libraries(triad_long PRIVATE triad_experiment)
+  # Complete low-rate DATA observations with continuous UTC-follow/channel state.
+  add_executable(triad_tracking_export EXCLUDE_FROM_ALL tools/triad-tracking-export.cpp)
+  target_link_libraries(triad_tracking_export PRIVATE triad_experiment)
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/triad-tracking-export.cpp")
+  file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/tools/triad-tracking-export.cpp" _triad_tracking_driver_sha)
+  target_compile_definitions(triad_tracking_export PRIVATE
+    DATAPUMP_TRIAD_TRACKING_DRIVER_SHA256="${_triad_tracking_driver_sha}")
   add_executable(triad_pattern_probe EXCLUDE_FROM_ALL tools/triad-pattern-probe.cpp)
   target_link_libraries(triad_pattern_probe PRIVATE triad_experiment)
   # Isolated composite-signal study. Reuse the production Helper transmitter
@@ -1217,6 +1225,10 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
       ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_triad_pattern_probe.py $<TARGET_FILE:triad_pattern_probe>)
     set_tests_properties(triad_pattern_probe PROPERTIES LABELS "triad" TIMEOUT 60)
     add_custom_target(test_triad_pattern_probe DEPENDS triad_pattern_probe)
+    add_test(NAME triad_tracking_export COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_triad_tracking_export.py $<TARGET_FILE:triad_tracking_export>)
+    set_tests_properties(triad_tracking_export PROPERTIES LABELS "triad" TIMEOUT 30)
+    add_custom_target(test_triad_tracking_export DEPENDS triad_tracking_export)
     add_test(NAME triad_control_clock COMMAND ${Python3_EXECUTABLE}
       ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_triad_control_clock.py)
     set_tests_properties(triad_control_clock PROPERTIES LABELS "triad" TIMEOUT 30)

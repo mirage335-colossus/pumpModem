@@ -1,0 +1,23 @@
+{
+  "local": {
+    "cpu": "AMD Ryzen 5 PRO 5650U",
+    "python": "3.13.5 (main, Aug 10 2026, 12:06:59) [GCC 14.2.0]",
+    "platform": "Linux-7.2.6+deb13-amd64-x86_64-with-glibc2.41",
+    "numpy": "2.5.4",
+    "scipy": "1.18.1",
+    "torch": "2.8.0+cpu",
+    "scientific_threads": 1
+  },
+  "gpu_host": {
+    "cpu": "AMD EPYC 9355 32-Core Processor",
+    "gpu": "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+    "gpu_memory_gb": 96,
+    "python_image": "runpod/pytorch:1.5.0-cu1281-torch280-ubuntu2404",
+    "torch": "2.8.0+cu128",
+    "numpy": "2.5.2",
+    "scipy": "1.18.1",
+    "scientific_cpu_comparison_threads": 1,
+    "inference_precision": "strict FP32 bulk, FP64 evidence reductions, TF32 disabled"
+  },
+  "scope": "Technical environment, excludes cloud account/resource/address/billing metadata; singleton benchmark measurements, not CI prediction anchors."
+}

@@ -1,0 +1,128 @@
+{
+  "schema": "triad-multiday-campaign-v1",
+  "frozen_before_campaign": true,
+  "predictions": "sigma.0001 retains long coherence; sigma.001 may need finite-coherence likelihood. Infcoherence alone may fail; no claim these phase spectra cover all oscillators.",
+  "conditional_trials_per_bit": 4096,
+  "conditional_null_trials": 32768,
+  "sampled_trials_per_condition": 4,
+  "cases": [
+    {
+      "name": "phase-38d-0.0001",
+      "export": [
+        "--days",
+        "38",
+        "--rate",
+        ".001",
+        "--sample-rate",
+        "1",
+        "--sample-rate-denominator",
+        "64",
+        "--data-if",
+        "half-rate",
+        "--clock-profile",
+        "periodic",
+        "--seed",
+        "11113",
+        "--key-seed",
+        "101113",
+        "--template-ppm",
+        "0",
+        "--phase-diffusion",
+        "0.0001"
+      ],
+      "cn0": [
+        -60,
+        -50
+      ],
+      "noise_seed": 711113
+    },
+    {
+      "name": "phase-38d-0.001",
+      "export": [
+        "--days",
+        "38",
+        "--rate",
+        ".001",
+        "--sample-rate",
+        "1",
+        "--sample-rate-denominator",
+        "64",
+        "--data-if",
+        "half-rate",
+        "--clock-profile",
+        "periodic",
+        "--seed",
+        "11113",
+        "--key-seed",
+        "101113",
+        "--template-ppm",
+        "0",
+        "--phase-diffusion",
+        "0.001"
+      ],
+      "cn0": [
+        -60,
+        -50
+      ],
+      "noise_seed": 711113
+    },
+    {
+      "name": "phase-512d-0.0001",
+      "export": [
+        "--days",
+        "512",
+        "--rate",
+        ".001",
+        "--sample-rate",
+        "1",
+        "--sample-rate-denominator",
+        "64",
+        "--data-if",
+        "half-rate",
+        "--clock-profile",
+        "periodic",
+        "--seed",
+        "11113",
+        "--key-seed",
+        "101113",
+        "--template-ppm",
+        "0",
+        "--phase-diffusion",
+        "0.0001"
+      ],
+      "cn0": [
+        -60
+      ],
+      "noise_seed": 711113
+    },
+    {
+      "name": "phase-512d-0.001",
+      "export": [
+        "--days",
+        "512",
+        "--rate",
+        ".001",
+        "--sample-rate",
+        "1",
+        "--sample-rate-denominator",
+        "64",
+        "--data-if",
+        "half-rate",
+        "--clock-profile",
+        "periodic",
+        "--seed",
+        "11113",
+        "--key-seed",
+        "101113",
+        "--template-ppm",
+        "0",
+        "--phase-diffusion",
+        "0.001"
+      ],
+      "cn0": [
+        -60
+      ],
+      "noise_seed": 711113
+    }
+  ]
+}

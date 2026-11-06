@@ -1,0 +1,1804 @@
+{
+  "cases": 24,
+  "results": 44,
+  "total_campaign_child_cpu_seconds": 552.583974,
+  "total_campaign_wall_seconds": 554.1192316879751,
+  "records": [
+    {
+      "case": "design-2d-off",
+      "cn0": -35.0,
+      "requested_days": 2.0,
+      "active_days": 2.000013888888889,
+      "capture_days": 2.1118055555555557,
+      "samples": 45615,
+      "rate": 0.01,
+      "clock": "off",
+      "max_rate_ppm": 0,
+      "displacement": 0,
+      "energy": [
+        52.78333791847514,
+        52.791842021173956
+      ],
+      "mismatch_db": [
+        -0.0,
+        -9.64327466553287e-16
+      ],
+      "correct": [
+        4096,
+        4096
+      ],
+      "oracle": [
+        4095,
+        4095
+      ],
+      "trials": 4096,
+      "wrong": [
+        0,
+        0
+      ],
+      "null": 0,
+      "each": 0,
+      "energy_change_db": [],
+      "generation_wall": 0.7043162970803678,
+      "receiver_wall": 1.053432164946571,
+      "receiver_cpu": 1.053317096,
+      "workspace": 17105920
+    },
+    {
+      "case": "design-2d-off",
+      "cn0": -40.0,
+      "requested_days": 2.0,
+      "active_days": 2.000013888888889,
+      "capture_days": 2.1118055555555557,
+      "samples": 45615,
+      "rate": 0.01,
+      "clock": "off",
+      "max_rate_ppm": 0,
+      "displacement": 0,
+      "energy": [
+        16.69155703287125,
+        16.694246266269687
+      ],
+      "mismatch_db": [
+        -0.0,
+        9.643274665532873e-16
+      ],
+      "correct": [
+        3088,
+        3021
+      ],
+      "oracle": [
+        3623,
+        3587
+      ],
+      "trials": 4096,
+      "wrong": [
+        0,
+        0
+      ],
+      "null": 0,
+      "each": 0,
+      "energy_change_db": [],
+      "generation_wall": 0.7043162970803678,
+      "receiver_wall": 1.178911785944365,
+      "receiver_cpu": 1.177666274,
+      "workspace": 17105920
+    },
+    {
+      "case": "design-2d-periodic",
+      "cn0": -35.0,
+      "requested_days": 2.0,
+      "active_days": 2.000013888888889,
+      "capture_days": 2.1122685185185186,
+      "samples": 45625,
+      "rate": 0.01,
+      "clock": "periodic",
+      "max_rate_ppm": 199.99999999999997,
+      "displacement": 5.09302694718474,
+      "energy": [
+        52.78140201499773,
+        52.78983439513931
+      ],
+      "mismatch_db": [
+        0.0017658646816051898,
+        0.0017779358678150516
+      ],
+      "correct": [
+        4096,
+        4096
+      ],
+      "oracle": [
+        4096,
+        4095
+      ],
+      "trials": 4096,
+      "wrong": [
+        0,
+        0
+      ],
+      "null": 0,
+      "each": 0,
+      "energy_change_db": [],
+      "generation_wall": 0.739867037977092,
+      "receiver_wall": 1.1217464429792017,
+      "receiver_cpu": 1.119975883,
+      "workspace": 17105920
+    },
+    {
+      "case": "design-2d-periodic",
+      "cn0": -40.0,
+      "requested_days": 2.0,
+      "active_days": 2.000013888888889,
+      "capture_days": 2.1122685185185186,
+      "samples": 45625,
+      "rate": 0.01,
+      "clock": "periodic",
+      "max_rate_ppm": 199.99999999999997,
+      "displacement": 5.09302694718474,
+      "energy": [
+        16.69094484643937,
+        16.693611399173736
+      ],
+      "mismatch_db": [
+        0.0017658646816076018,
+        0.0017779358678136044
+      ],
+      "correct": [
+        3057,
+        3014
+      ],
+      "oracle": [
+        3619,
+        3574
+      ],
+      "trials": 4096,
+      "wrong": [
+        0,
+        0
+      ],
+      "null": 0,
+      "each": 0,
+      "energy_change_db": [],
+      "generation_wall": 0.739867037977092,
+      "receiver_wall": 1.1296598040498793,
+      "receiver_cpu": 1.1296133410000002,
+      "workspace": 17105920
+    },
+    {
+      "case": "design-38d-off",
+      "cn0": -55.0,
+      "requested_days": 38.0,
+      "active_days": 40.00002777777778,
+      "capture_days": 41.123703703703704,
+      "samples": 55517,
+      "rate": 0.001,
+      "clock": "off",
+      "max_rate_ppm": 0,
+      "displacement": 0,
+      "energy": [
+        10.743076704971514,
+        10.74476486713615
+      ],
+      "mismatch_db": [
+        -9.64327466553287e-16,
+        -0.0
+      ],
+      "correct": [
+        1252,
+        1232
+      ],
+      "oracle": [
+        2363,
+        2332
+      ],
+      "trials": 4096,
+      "wrong": [
+        0,
+        0
+      ],
+      "null": 0,
+      "each": 0,
+      "energy_change_db": [],
+      "generation_wall": 0.9536795440362766,
+      "receiver_wall": 1.4988969760015607,
+      "receiver_cpu": 1.49852908,
+      "workspace": 17105920
+    },
+    {
+      "case": "design-38d-off",
+      "cn0": -60.0,
+      "requested_days": 38.0,
+      "active_days": 40.00002777777778,
+      "capture_days": 41.123703703703704,
+      "samples": 55517,
+      "rate": 0.001,
+      "clock": "off",
+      "max_rate_ppm": 0,
+      "displacement": 0,
+      "energy": [
+        3.397259146560667,
+        3.39779299031067
+      ],
+      "mismatch_db": [
+        -9.64327466553287e-16,
+        -9.64327466553287e-16
+      ],
+      "correct": [
+        12,
+        12
+      ],
+      "oracle": [
+        27,
+        25
+      ],
+      "trials": 4096,
+      "wrong": [
+        0,
+        0
+      ],
+      "null": 0,
+      "each": 0,
+      "energy_change_db": [],
+      "generation_wall": 0.9536795440362766,
+      "receiver_wall": 1.2157203260576352,
+      "receiver_cpu": 1.214052099,
+      "workspace": 17105920
+    },
+    {
+      "case": "design-38d-periodic",
+      "cn0": -55.0,
+      "requested_days": 38.0,
+      "active_days": 40.00002777777778,
+      "capture_days": 41.132592592592594,
+      "samples": 55529,
+      "rate": 0.001,
+      "clock": "periodic",
+      "max_rate_ppm": 199.99999999999997,
+      "displacement": 101.73497708175887,
+      "energy": [
+        10.742761374219974,
+        10.744451426339625
+      ],
+      "mismatch_db": [
+        0.0005959443150632684,
+        0.0005943426733687207
+      ],
+      "correct": [
+        1215,
+        1229
+      ],
+      "oracle": [
+        2359,
+        2344
+      ],
+      "trials": 4096,
+      "wrong": [
+        0,
+        0
+      ],
+      "null": 0,
+      "each": 0,
+      "energy_change_db": [],
+      "generation_wall": 1.7686014421051368,
+      "receiver_wall": 1.1625141369877383,
+      "receiver_cpu": 1.1623903670000002,
+      "workspace": 17105920
+    },
+    {
+      "case": "design-38d-periodic",
+      "cn0": -60.0,
+      "requested_days": 38.0,
+      "active_days": 40.00002777777778,
+      "capture_days": 41.132592592592594,
+      "samples": 55529,
+      "rate": 0.001,
+      "clock": "periodic",
+      "max_rate_ppm": 199.99999999999997,
+      "displacement": 101.73497708175887,
+      "energy": [
+        3.3971594302215586,
+        3.397693871627808
+      ],
+      "mismatch_db": [
+        0.0005959443150651973,
+        0.0005943426733716141
+      ],
+      "correct": [
+        12,
+        9
+      ],
+      "oracle": [
+        26,
+        23
+      ],
+      "trials": 4096,
+      "wrong": [
+        0,
+        0
+      ],
+      "null": 0,
+      "each": 0,
+      "energy_change_db": [],
+      "generation_wall": 1.7686014421051368,
+      "receiver_wall": 1.3658137070015073,
+      "receiver_cpu": 1.365757096,
+      "workspace": 17105920
+    },
+    {
+      "case": "design-512d-off",
+      "cn0": -60.0,
+      "requested_days": 512.0,
+      "active_days": 513.3336898148149,
+      "capture_days": 514.457037037037,
+      "samples": 694517,
+      "rate": 0.001,
+      "clock": "off",
+      "max_rate_ppm": 0,
+      "displacement": 0,
+      "energy": [
+        44.292125193435666,
+        44.29373513093563
+      ],
+      "mismatch_db": [
+        -0.0,
+        -0.0
+      ],
+      "correct": [
+        4096,
+        4095
+      ],
+      "oracle": [
+        4096,
+        4096
+      ],
+      "trials": 4096,
+      "wrong": [
+        0,
+        0
+      ],
+      "null": 0,
+      "each": 0,
+      "energy_change_db": [],
+      "generation_wall": 51.41508770803921,
+      "receiver_wall": 21.673346876050346,
+      "receiver_cpu": 21.583069738,
+      "workspace": 51561472
+    },
+    {
+      "case": "design-512d-periodic",
+      "cn0": -60.0,
+      "requested_days": 512.0,
+      "active_days": 513.3336898148149,
+      "capture_days": 514.56,
+      "samples": 694656,
+      "rate": 0.001,
+      "clock": "periodic",
+      "max_rate_ppm": 199.99999999999997,
+      "displacement": 1301.7027212208195,
+      "energy": [
+        44.290836032516445,
+        44.29244993876642
+      ],
+      "mismatch_db": [
+        0.011949222407462904,
+        0.011899949930318484
+      ],
+      "correct": [
+        4096,
+        4096
+      ],
+      "oracle": [
+        4096,
+        4096
+      ],
+      "trials": 4096,
+      "wrong": [
+        0,
+        0
+      ],
+      "null": 0,
+      "each": 0,
+      "energy_change_db": [],
+      "generation_wall": 61.480487943976186,
+      "receiver_wall": 12.35910745698493,
+      "receiver_cpu": 12.355820048,
+      "workspace": 51561472
+    },
+    {
+      "case": "design-7d-off",
+      "cn0": -40.0,
+      "requested_days": 7.0,
+      "active_days": 7.33338425925926,
+      "capture_days": 7.445185185185185,
+      "samples": 160816,
+      "rate": 0.01,
+      "clock": "off",
+      "max_rate_ppm": 0,
+      "displacement": 0,
+      "energy": [
+        62.77133352661129,
+        62.77578670043934
+      ],
+      "mismatch_db": [
+        1.9286549331065747e-15,
+        -9.64327466553287e-16
+      ],
+      "correct": [
+        4096,
+        4096
+      ],
+      "oracle": [
+        4096,
+        4096
+      ],
+      "trials": 4096,
+      "wrong": [
+        0,
+        0
+      ],
+      "null": 0,
+      "each": 0,
+      "energy_change_db": [],
+      "generation_wall": 2.65012857504189,
+      "receiver_wall": 3.2738002919359133,
+      "receiver_cpu": 3.273420527,
+      "workspace": 17105920
+    },
+    {
+      "case": "design-7d-off",
+      "cn0": -43.0,
+      "requested_days": 7.0,
+      "active_days": 7.33338425925926,
+      "capture_days": 7.445185185185185,
+      "samples": 160816,
+      "rate": 0.01,
+      "clock": "off",
+      "max_rate_ppm": 0,
+      "displacement": 0,
+      "energy": [
+        31.460191001297197,
+        31.462422875168972
+      ],
+      "mismatch_db": [
+        4.821637332766436e-16,
+        -9.64327466553287e-16
+      ],
+      "correct": [
+        4077,
+        4072
+      ],
+      "oracle": [
+        4083,
+        4076
+      ],
+      "trials": 4096,
+      "wrong": [
+        0,
+        0
+      ],
+      "null": 0,
+      "each": 0,
+      "energy_change_db": [],
+      "generation_wall": 2.65012857504189,
+      "receiver_wall": 3.010667855036445,
+      "receiver_cpu": 3.0096709169999993,
+      "workspace": 17105920
+    },
+    {
+      "case": "design-7d-periodic",
+      "cn0": -40.0,
+      "requested_days": 7.0,
+      "active_days": 7.33338425925926,
+      "capture_days": 7.446712962962963,
+      "samples": 160849,
+      "rate": 0.01,
+      "clock": "periodic",
+      "max_rate_ppm": 199.99999999999997,
+      "displacement": 24.030291764279355,
+      "energy": [
+        62.76897858886722,
+        62.773442773437516
+      ],
+      "mismatch_db": [
+        0.03961888452394321,
+        0.03936881389009591
+      ],
+      "correct": [
+        4096,
+        4096
+      ],
+      "oracle": [
+        4096,
+        4096
+      ],
+      "trials": 4096,
+      "wrong": [
+        0,
+        0
+      ],
+      "null": 0,
+      "each": 0,
+      "energy_change_db": [],
+      "generation_wall": 2.8039869790663943,
+      "receiver_wall": 2.9073992129415274,
+      "receiver_cpu": 2.9057392079999995,
+      "workspace": 17105920
+    },
+    {
+      "case": "design-7d-periodic",
+      "cn0": -43.0,
+      "requested_days": 7.0,
+      "active_days": 7.33338425925926,
+      "capture_days": 7.446712962962963,
+      "samples": 160849,
+      "rate": 0.01,
+      "clock": "periodic",
+      "max_rate_ppm": 199.99999999999997,
+      "displacement": 24.030291764279355,
+      "energy": [
+        31.459010736563844,
+        31.461248128879024
+      ],
+      "mismatch_db": [
+        0.039618884523936394,
+        0.03936881389008813
+      ],
+      "correct": [
+        4081,
+        4077
+      ],
+      "oracle": [
+        4086,
+        4082
+      ],
+      "trials": 4096,
+      "wrong": [
+        0,
+        0
+      ],
+      "null": 0,
+      "each": 0,
+      "energy_change_db": [],
+      "generation_wall": 2.8039869790663943,
+      "receiver_wall": 2.9757929201005027,
+      "receiver_cpu": 2.9750702550000003,
+      "workspace": 17105920
+    },
+    {
+      "case": "random-38d-0-off",
+      "cn0": -35.0,
+      "requested_days": 38.0,
+      "active_days": 40.00002777777778,
+      "capture_days": 41.11277777777778,
+      "samples": 444018,
+      "rate": 0.001,
+      "clock": "off",
+      "max_rate_ppm": 0,
+      "displacement": 0,
+      "energy": [
+        1079.7770262173326,
+        1085.4474508929547
+      ],
+      "mismatch_db": [
+        46.011984241798814,
+        38.72529951477273
+      ],
+      "correct": [
+        0,
+        0
+      ],
+      "oracle": [
+        4096,
+        4096
+      ],
+      "trials": 4096,
+      "wrong": [
+        0,
+        0
+      ],
+      "null": 0,
+      "each": 0,
+      "energy_change_db": [],
+      "generation_wall": 8.968750408035703,
+      "receiver_wall": 1.566498887958005,
+      "receiver_cpu": 1.566441437,
+      "workspace": 17105920
+    },
+    {
+      "case": "random-38d-0-off",
+      "cn0": -60.0,
+      "requested_days": 38.0,
+      "active_days": 40.00002777777778,
+      "capture_days": 41.11277777777778,
+      "samples": 444018,
+      "rate": 0.001,
+      "clock": "off",
+      "max_rate_ppm": 0,
+      "displacement": 0,
+      "energy": [
+        3.4145547679701154,
+        3.4324862252455035
+      ],
+      "mismatch_db": [
+        46.01198424179881,
+        38.72529951477273
+      ],
+      "correct": [
+        0,
+        0
+      ],
+      "oracle": [
+        23,
+        30
+      ],
+      "trials": 4096,
+      "wrong": [
+        0,
+        0
+      ],
+      "null": 0,
+      "each": 0,
+      "energy_change_db": [],
+      "generation_wall": 8.968750408035703,
+      "receiver_wall": 1.5220105189364403,
+      "receiver_cpu": 1.52192959,
+      "workspace": 17105920
+    },
+    {
+      "case": "random-38d-0-periodic",
+      "cn0": -35.0,
+      "requested_days": 38.0,
+      "active_days": 40.00002777777778,
+      "capture_days": 41.12101851851852,
+      "samples": 444107,
+      "rate": 0.001,
+      "clock": "periodic",
+      "max_rate_ppm": 199.99999999999997,
+      "displacement": 89.89526776568687,
+      "energy": [
+        1080.4077992668506,
+        1086.0084465410891
+      ],
+      "mismatch_db": [
+        45.77942920893871,
+        38.64582431414182
+      ],
+      "correct": [
+        0,
+        0
+      ],
+      "oracle": [
+        4096,
+        4096
+      ],
+      "trials": 4096,
+      "wrong": [
+        0,
+        0
+      ],
+      "null": 0,
+      "each": 0,
+      "energy_change_db": [],
+      "generation_wall": 9.688049077056348,
+      "receiver_wall": 1.6868430870817974,
+      "receiver_cpu": 1.665433149,
+      "workspace": 17105920
+    },
+    {
+      "case": "random-38d-0-periodic",
+      "cn0": -60.0,
+      "requested_days": 38.0,
+      "active_days": 40.00002777777778,
+      "capture_days": 41.12101851851852,
+      "samples": 444107,
+      "rate": 0.001,
+      "clock": "periodic",
+      "max_rate_ppm": 199.99999999999997,
+      "displacement": 89.89526776568687,
+      "energy": [
+        3.4165494474932454,
+        3.434260249251053
+      ],
+      "mismatch_db": [
+        45.779429208938716,
+        38.64582431414183
+      ],
+      "correct": [
+        0,
+        0
+      ],
+      "oracle": [
+        25,
+        26
+      ],
+      "trials": 4096,
+      "wrong": [
+        0,
+        0
+      ],
+      "null": 0,
+      "each": 0,
+      "energy_change_db": [],
+      "generation_wall": 9.688049077056348,
+      "receiver_wall": 1.441418134025298,
+      "receiver_cpu": 1.4312350269999998,
+      "workspace": 17105920
+    },
+    {
+      "case": "random-38d-0.25-off",
+      "cn0": -35.0,
+      "requested_days": 38.0,
+      "active_days": 40.00002777777778,
+      "capture_days": 41.15,
+      "samples": 444420,
+      "rate": 0.001,
+      "clock": "off",
+      "max_rate_ppm": 0,
+      "displacement": 0,
+      "energy": [
+        1131.471690228008,
+        1133.8400316047557
+      ],
+      "mismatch_db": [
+        45.41919345870013,
+        38.980301016387834
+      ],
+      "correct": [
+        0,
+        0
+      ],
+      "oracle": [
+        4096,
+        4096
+      ],
+      "trials": 4096,
+      "wrong": [
+        0,
+        0
+      ],
+      "null": 0,
+      "each": 0.25,
+      "energy_change_db": [
+        0.20309607594622692,
+        0.18942983112773615
+      ],
+      "generation_wall": 9.980185366002843,
+      "receiver_wall": 1.7779477860312909,
+      "receiver_cpu": 1.777836952,
+      "workspace": 17105920
+    },
+    {
+      "case": "random-38d-0.25-off",
+      "cn0": -60.0,
+      "requested_days": 38.0,
+      "active_days": 40.00002777777778,
+      "capture_days": 41.15,
+      "samples": 444420,
+      "rate": 0.001,
+      "clock": "off",
+      "max_rate_ppm": 0,
+      "displacement": 0,
+      "energy": [
+        3.5780276491209864,
+        3.5855170021483294
+      ],
+      "mismatch_db": [
+        45.41919345870013,
+        38.98030101638784
+      ],
+      "correct": [
+        0,
+        0
+      ],
+      "oracle": [
+        38,
+        33
+      ],
+      "trials": 4096,
+      "wrong": [
+        0,
+        0
+      ],
+      "null": 0,
+      "each": 0.25,
+      "energy_change_db": [
+        0.20309607594622692,
+        0.18942983112773615
+      ],
+      "generation_wall": 9.980185366002843,
+      "receiver_wall": 1.6275211349129677,
+      "receiver_cpu": 1.626289464,
+      "workspace": 17105920
+    },
+    {
+      "case": "random-38d-0.25-periodic",
+      "cn0": -35.0,
+      "requested_days": 38.0,
+      "active_days": 40.00002777777778,
+      "capture_days": 41.15824074074074,
+      "samples": 444509,
+      "rate": 0.001,
+      "clock": "periodic",
+      "max_rate_ppm": 199.99999999999997,
+      "displacement": 89.89526776568687,
+      "energy": [
+        1132.806297361299,
+        1134.841759989745
+      ],
+      "mismatch_db": [
+        45.053149576834564,
+        38.75985299921344
+      ],
+      "correct": [
+        0,
+        0
+      ],
+      "oracle": [
+        4096,
+        4096
+      ],
+      "trials": 4096,
+      "wrong": [
+        0,
+        0
+      ],
+      "null": 0,
+      "each": 0.25,
+      "energy_change_db": [
+        0.20567943115679216,
+        0.19102108005123616
+      ],
+      "generation_wall": 11.512396272970363,
+      "receiver_wall": 1.7048664200119674,
+      "receiver_cpu": 1.704827642,
+      "workspace": 17105920
+    },
+    {
+      "case": "random-38d-0.25-periodic",
+      "cn0": -60.0,
+      "requested_days": 38.0,
+      "active_days": 40.00002777777778,
+      "capture_days": 41.15824074074074,
+      "samples": 444509,
+      "rate": 0.001,
+      "clock": "periodic",
+      "max_rate_ppm": 199.99999999999997,
+      "displacement": 89.89526776568687,
+      "energy": [
+        3.5822480474436915,
+        3.588684745441739
+      ],
+      "mismatch_db": [
+        45.05314957683456,
+        38.75985299921345
+      ],
+      "correct": [
+        0,
+        0
+      ],
+      "oracle": [
+        33,
+        40
+      ],
+      "trials": 4096,
+      "wrong": [
+        0,
+        0
+      ],
+      "null": 0,
+      "each": 0.25,
+      "energy_change_db": [
+        0.20567943115679216,
+        0.19102108005123616
+      ],
+      "generation_wall": 11.512396272970363,
+      "receiver_wall": 1.736233075032942,
+      "receiver_cpu": 1.7134306709999998,
+      "workspace": 17105920
+    },
+    {
+      "case": "random-38d-0.65-off",
+      "cn0": -35.0,
+      "requested_days": 38.0,
+      "active_days": 40.00002777777778,
+      "capture_days": 41.15,
+      "samples": 444420,
+      "rate": 0.001,
+      "clock": "off",
+      "max_rate_ppm": 0,
+      "displacement": 0,
+      "energy": [
+        1402.9515209948631,
+        1402.0011206016584
+      ],
+      "mismatch_db": [
+        44.95378671177214,
+        40.00137732432432
+      ],
+      "correct": [
+        0,
+        0
+      ],
+      "oracle": [
+        4096,
+        4096
+      ],
+      "trials": 4096,
+      "wrong": [
+        0,
+        0
+      ],
+      "null": 0,
+      "each": 0.65,
+      "energy_change_db": [
+        1.1370858139694144,
+        1.1113956142716233
+      ],
+      "generation_wall": 10.71013762196526,
+      "receiver_wall": 1.7679461420048028,
+      "receiver_cpu": 1.7678806280000001,
+      "workspace": 17105920
+    },
+    {
+      "case": "random-38d-0.65-off",
+      "cn0": -60.0,
+      "requested_days": 38.0,
+      "active_days": 40.00002777777778,
+      "capture_days": 41.15,
+      "samples": 444420,
+      "rate": 0.001,
+      "clock": "off",
+      "max_rate_ppm": 0,
+      "displacement": 0,
+      "energy": [
+        4.436522253141302,
+        4.433516823209663
+      ],
+      "mismatch_db": [
+        44.95378671177213,
+        40.001377324324324
+      ],
+      "correct": [
+        0,
+        0
+      ],
+      "oracle": [
+        161,
+        137
+      ],
+      "trials": 4096,
+      "wrong": [
+        0,
+        0
+      ],
+      "null": 0,
+      "each": 0.65,
+      "energy_change_db": [
+        1.1370858139694144,
+        1.1113956142716233
+      ],
+      "generation_wall": 10.71013762196526,
+      "receiver_wall": 1.765928130946122,
+      "receiver_cpu": 1.7658725810000002,
+      "workspace": 17105920
+    },
+    {
+      "case": "random-38d-0.65-periodic",
+      "cn0": -35.0,
+      "requested_days": 38.0,
+      "active_days": 40.00002777777778,
+      "capture_days": 41.15824074074074,
+      "samples": 444509,
+      "rate": 0.001,
+      "clock": "periodic",
+      "max_rate_ppm": 199.99999999999997,
+      "displacement": 89.89526776568687,
+      "energy": [
+        1405.5316662425719,
+        1403.850776390097
+      ],
+      "mismatch_db": [
+        44.401974013119094,
+        39.55611855407101
+      ],
+      "correct": [
+        0,
+        0
+      ],
+      "oracle": [
+        4096,
+        4096
+      ],
+      "trials": 4096,
+      "wrong": [
+        0,
+        0
+      ],
+      "null": 0,
+      "each": 0.65,
+      "energy_change_db": [
+        1.142529212436417,
+        1.1148774639538672
+      ],
+      "generation_wall": 11.201180481933989,
+      "receiver_wall": 1.6120229850057513,
+      "receiver_cpu": 1.608798697,
+      "workspace": 17105920
+    },
+    {
+      "case": "random-38d-0.65-periodic",
+      "cn0": -60.0,
+      "requested_days": 38.0,
+      "active_days": 40.00002777777778,
+      "capture_days": 41.15824074074074,
+      "samples": 444509,
+      "rate": 0.001,
+      "clock": "periodic",
+      "max_rate_ppm": 199.99999999999997,
+      "displacement": 89.89526776568687,
+      "energy": [
+        4.44468138881813,
+        4.439365948388437
+      ],
+      "mismatch_db": [
+        44.401974013119116,
+        39.55611855407102
+      ],
+      "correct": [
+        0,
+        0
+      ],
+      "oracle": [
+        157,
+        134
+      ],
+      "trials": 4096,
+      "wrong": [
+        0,
+        0
+      ],
+      "null": 0,
+      "each": 0.65,
+      "energy_change_db": [
+        1.142529212436417,
+        1.1148774639538672
+      ],
+      "generation_wall": 11.201180481933989,
+      "receiver_wall": 1.6587633070303127,
+      "receiver_cpu": 1.6584208099999997,
+      "workspace": 17105920
+    },
+    {
+      "case": "random-validation-38d-0.25",
+      "cn0": -35.0,
+      "requested_days": 38.0,
+      "active_days": 40.00002777777778,
+      "capture_days": 41.15824074074074,
+      "samples": 444509,
+      "rate": 0.001,
+      "clock": "wandering",
+      "max_rate_ppm": 199.99999999999997,
+      "displacement": 11.783762014656986,
+      "energy": [
+        1127.0543195117284,
+        1137.0237018190294
+      ],
+      "mismatch_db": [
+        44.49940435709179,
+        39.795416334156755
+      ],
+      "correct": [
+        0,
+        0
+      ],
+      "oracle": [
+        4096,
+        4096
+      ],
+      "trials": 4096,
+      "wrong": [
+        0,
+        0
+      ],
+      "null": 0,
+      "each": 0.25,
+      "energy_change_db": [
+        0.22651996595074103,
+        0.23692016245815417
+      ],
+      "generation_wall": 10.49339965195395,
+      "receiver_wall": 1.689343711012043,
+      "receiver_cpu": 1.6892551040000001,
+      "workspace": 17105920
+    },
+    {
+      "case": "random-validation-38d-0.25",
+      "cn0": -60.0,
+      "requested_days": 38.0,
+      "active_days": 40.00002777777778,
+      "capture_days": 41.15824074074074,
+      "samples": 444509,
+      "rate": 0.001,
+      "clock": "wandering",
+      "max_rate_ppm": 199.99999999999997,
+      "displacement": 11.783762014656986,
+      "energy": [
+        3.564058696388211,
+        3.595584651344269
+      ],
+      "mismatch_db": [
+        44.49940435709179,
+        39.795416334156755
+      ],
+      "correct": [
+        0,
+        0
+      ],
+      "oracle": [
+        38,
+        44
+      ],
+      "trials": 4096,
+      "wrong": [
+        0,
+        0
+      ],
+      "null": 0,
+      "each": 0.25,
+      "energy_change_db": [
+        0.22651996595074103,
+        0.23692016245815417
+      ],
+      "generation_wall": 10.49339965195395,
+      "receiver_wall": 1.5745605899719521,
+      "receiver_cpu": 1.574478393,
+      "workspace": 17105920
+    },
+    {
+      "case": "random-validation-38d-0.65",
+      "cn0": -35.0,
+      "requested_days": 38.0,
+      "active_days": 40.00002777777778,
+      "capture_days": 41.15824074074074,
+      "samples": 444509,
+      "rate": 0.001,
+      "clock": "wandering",
+      "max_rate_ppm": 199.99999999999997,
+      "displacement": 11.783762014656986,
+      "energy": [
+        1400.5113172326908,
+        1418.3123527342777
+      ],
+      "mismatch_db": [
+        45.751357012989146,
+        40.26984294713722
+      ],
+      "correct": [
+        0,
+        0
+      ],
+      "oracle": [
+        4096,
+        4096
+      ],
+      "trials": 4096,
+      "wrong": [
+        0,
+        0
+      ],
+      "null": 0,
+      "each": 0.65,
+      "energy_change_db": [
+        1.1699376548832243,
+        1.196943863010335
+      ],
+      "generation_wall": 11.134326654020697,
+      "receiver_wall": 1.4539142010034993,
+      "receiver_cpu": 1.453856569,
+      "workspace": 17105920
+    },
+    {
+      "case": "random-validation-38d-0.65",
+      "cn0": -60.0,
+      "requested_days": 38.0,
+      "active_days": 40.00002777777778,
+      "capture_days": 41.15824074074074,
+      "samples": 444509,
+      "rate": 0.001,
+      "clock": "wandering",
+      "max_rate_ppm": 199.99999999999997,
+      "displacement": 11.783762014656986,
+      "energy": [
+        4.428805651297926,
+        4.4850974681924605
+      ],
+      "mismatch_db": [
+        45.75135701298913,
+        40.269842947137214
+      ],
+      "correct": [
+        0,
+        0
+      ],
+      "oracle": [
+        147,
+        149
+      ],
+      "trials": 4096,
+      "wrong": [
+        0,
+        0
+      ],
+      "null": 0,
+      "each": 0.65,
+      "energy_change_db": [
+        1.1699376548832243,
+        1.196943863010335
+      ],
+      "generation_wall": 11.134326654020697,
+      "receiver_wall": 1.4922403530217707,
+      "receiver_cpu": 1.4920804319999998,
+      "workspace": 17105920
+    },
+    {
+      "case": "validation-2d-wandering-7103",
+      "cn0": -35.0,
+      "requested_days": 2.0,
+      "active_days": 2.000013888888889,
+      "capture_days": 2.1122685185185186,
+      "samples": 45625,
+      "rate": 0.01,
+      "clock": "wandering",
+      "max_rate_ppm": 199.99999999999997,
+      "displacement": 0.8658908690062077,
+      "energy": [
+        52.79238543360234,
+        52.80523959818503
+      ],
+      "mismatch_db": [
+        0.0016852829489734556,
+        0.0017550827000934227
+      ],
+      "correct": [
+        4096,
+        4096
+      ],
+      "oracle": [
+        4096,
+        4096
+      ],
+      "trials": 4096,
+      "wrong": [
+        0,
+        0
+      ],
+      "null": 0,
+      "each": 0,
+      "energy_change_db": [],
+      "generation_wall": 0.7965940459398553,
+      "receiver_wall": 1.069613387924619,
+      "receiver_cpu": 1.069513514,
+      "workspace": 17105920
+    },
+    {
+      "case": "validation-2d-wandering-7103",
+      "cn0": -40.0,
+      "requested_days": 2.0,
+      "active_days": 2.000013888888889,
+      "capture_days": 2.1122685185185186,
+      "samples": 45625,
+      "rate": 0.01,
+      "clock": "wandering",
+      "max_rate_ppm": 199.99999999999997,
+      "displacement": 0.8658908690062077,
+      "energy": [
+        16.69441810836792,
+        16.698482952117924
+      ],
+      "mismatch_db": [
+        0.0016852829489744203,
+        0.0017550827000958344
+      ],
+      "correct": [
+        3067,
+        3035
+      ],
+      "oracle": [
+        3624,
+        3609
+      ],
+      "trials": 4096,
+      "wrong": [
+        0,
+        0
+      ],
+      "null": 0,
+      "each": 0,
+      "energy_change_db": [],
+      "generation_wall": 0.7965940459398553,
+      "receiver_wall": 1.024056651047431,
+      "receiver_cpu": 1.0239773929999998,
+      "workspace": 17105920
+    },
+    {
+      "case": "validation-2d-wandering-8107",
+      "cn0": -35.0,
+      "requested_days": 2.0,
+      "active_days": 2.000013888888889,
+      "capture_days": 2.1122685185185186,
+      "samples": 45625,
+      "rate": 0.01,
+      "clock": "wandering",
+      "max_rate_ppm": 199.99999999999997,
+      "displacement": -4.792954106526608,
+      "energy": [
+        52.79837040949657,
+        52.793190404134975
+      ],
+      "mismatch_db": [
+        0.0016092150980323914,
+        0.0015343966851087613
+      ],
+      "correct": [
+        4096,
+        4096
+      ],
+      "oracle": [
+        4096,
+        4096
+      ],
+      "trials": 4096,
+      "wrong": [
+        0,
+        0
+      ],
+      "null": 0,
+      "each": 0,
+      "energy_change_db": [],
+      "generation_wall": 0.7300735489698127,
+      "receiver_wall": 1.174353176029399,
+      "receiver_cpu": 1.1742131270000002,
+      "workspace": 17105920
+    },
+    {
+      "case": "validation-2d-wandering-8107",
+      "cn0": -40.0,
+      "requested_days": 2.0,
+      "active_days": 2.000013888888889,
+      "capture_days": 2.1122685185185186,
+      "samples": 45625,
+      "rate": 0.01,
+      "clock": "wandering",
+      "max_rate_ppm": 199.99999999999997,
+      "displacement": -4.792954106526608,
+      "energy": [
+        16.696310723924643,
+        16.6946726624012
+      ],
+      "mismatch_db": [
+        0.0016092150980338382,
+        0.0015343966851155142
+      ],
+      "correct": [
+        3029,
+        3059
+      ],
+      "oracle": [
+        3605,
+        3601
+      ],
+      "trials": 4096,
+      "wrong": [
+        0,
+        0
+      ],
+      "null": 0,
+      "each": 0,
+      "energy_change_db": [],
+      "generation_wall": 0.7300735489698127,
+      "receiver_wall": 1.0877586000133306,
+      "receiver_cpu": 1.0876535559999998,
+      "workspace": 17105920
+    },
+    {
+      "case": "validation-38d-wandering-7103",
+      "cn0": -55.0,
+      "requested_days": 38.0,
+      "active_days": 40.00002777777778,
+      "capture_days": 41.132592592592594,
+      "samples": 55529,
+      "rate": 0.001,
+      "clock": "wandering",
+      "max_rate_ppm": 199.99999999999997,
+      "displacement": -3.2219994763474915,
+      "energy": [
+        10.743270794588147,
+        10.74325639140161
+      ],
+      "mismatch_db": [
+        0.0011076815716025373,
+        0.00112502721667511
+      ],
+      "correct": [
+        1291,
+        1272
+      ],
+      "oracle": [
+        2321,
+        2342
+      ],
+      "trials": 4096,
+      "wrong": [
+        0,
+        0
+      ],
+      "null": 0,
+      "each": 0,
+      "energy_change_db": [],
+      "generation_wall": 1.492326898034662,
+      "receiver_wall": 1.2281331210397184,
+      "receiver_cpu": 1.2273004570000001,
+      "workspace": 17105920
+    },
+    {
+      "case": "validation-38d-wandering-7103",
+      "cn0": -60.0,
+      "requested_days": 38.0,
+      "active_days": 40.00002777777778,
+      "capture_days": 41.132592592592594,
+      "samples": 55529,
+      "rate": 0.001,
+      "clock": "wandering",
+      "max_rate_ppm": 199.99999999999997,
+      "displacement": -3.2219994763474915,
+      "energy": [
+        3.3973205230865475,
+        3.397315968399048
+      ],
+      "mismatch_db": [
+        0.0011076815716006083,
+        0.0011250272166770392
+      ],
+      "correct": [
+        13,
+        14
+      ],
+      "oracle": [
+        29,
+        18
+      ],
+      "trials": 4096,
+      "wrong": [
+        0,
+        0
+      ],
+      "null": 0,
+      "each": 0,
+      "energy_change_db": [],
+      "generation_wall": 1.492326898034662,
+      "receiver_wall": 1.292106705950573,
+      "receiver_cpu": 1.2919601500000002,
+      "workspace": 17105920
+    },
+    {
+      "case": "validation-38d-wandering-8107",
+      "cn0": -55.0,
+      "requested_days": 38.0,
+      "active_days": 40.00002777777778,
+      "capture_days": 41.132592592592594,
+      "samples": 55529,
+      "rate": 0.001,
+      "clock": "wandering",
+      "max_rate_ppm": 199.99999999999997,
+      "displacement": -6.141287163181005,
+      "energy": [
+        10.74358368723594,
+        10.74355147153228
+      ],
+      "mismatch_db": [
+        0.0003844251132804612,
+        0.000378200398296753
+      ],
+      "correct": [
+        1233,
+        1201
+      ],
+      "oracle": [
+        2301,
+        2314
+      ],
+      "trials": 4096,
+      "wrong": [
+        0,
+        0
+      ],
+      "null": 0,
+      "each": 0,
+      "energy_change_db": [],
+      "generation_wall": 1.5063191750086844,
+      "receiver_wall": 1.180132773006335,
+      "receiver_cpu": 1.179988937,
+      "workspace": 17105920
+    },
+    {
+      "case": "validation-38d-wandering-8107",
+      "cn0": -60.0,
+      "requested_days": 38.0,
+      "active_days": 40.00002777777778,
+      "capture_days": 41.132592592592594,
+      "samples": 55529,
+      "rate": 0.001,
+      "clock": "wandering",
+      "max_rate_ppm": 199.99999999999997,
+      "displacement": -6.141287163181005,
+      "energy": [
+        3.397419468429564,
+        3.3974092809295655
+      ],
+      "mismatch_db": [
+        0.0003844251132809434,
+        0.0003782003982972351
+      ],
+      "correct": [
+        10,
+        12
+      ],
+      "oracle": [
+        18,
+        24
+      ],
+      "trials": 4096,
+      "wrong": [
+        0,
+        0
+      ],
+      "null": 0,
+      "each": 0,
+      "energy_change_db": [],
+      "generation_wall": 1.5063191750086844,
+      "receiver_wall": 1.2517927420558408,
+      "receiver_cpu": 1.2516565419999999,
+      "workspace": 17105920
+    },
+    {
+      "case": "validation-512d-wandering-7103",
+      "cn0": -60.0,
+      "requested_days": 512.0,
+      "active_days": 513.3336898148149,
+      "capture_days": 514.56,
+      "samples": 694656,
+      "rate": 0.001,
+      "clock": "wandering",
+      "max_rate_ppm": 199.99999999999997,
+      "displacement": 32.4325620042182,
+      "energy": [
+        44.29361581459045,
+        44.293508013809216
+      ],
+      "mismatch_db": [
+        0.010038948091036674,
+        0.010032180034627969
+      ],
+      "correct": [
+        4096,
+        4096
+      ],
+      "oracle": [
+        4096,
+        4096
+      ],
+      "trials": 4096,
+      "wrong": [
+        0,
+        0
+      ],
+      "null": 0,
+      "each": 0,
+      "energy_change_db": [],
+      "generation_wall": 63.45650220103562,
+      "receiver_wall": 15.284002015017904,
+      "receiver_cpu": 15.255764013,
+      "workspace": 51561472
+    },
+    {
+      "case": "validation-512d-wandering-8107",
+      "cn0": -60.0,
+      "requested_days": 512.0,
+      "active_days": 513.3336898148149,
+      "capture_days": 514.56,
+      "samples": 694656,
+      "rate": 0.001,
+      "clock": "wandering",
+      "max_rate_ppm": 199.99999999999997,
+      "displacement": 48.32418430353209,
+      "energy": [
+        44.29294152189635,
+        44.292282588302605
+      ],
+      "mismatch_db": [
+        0.011845281729673097,
+        0.011824757757575037
+      ],
+      "correct": [
+        4094,
+        4094
+      ],
+      "oracle": [
+        4095,
+        4094
+      ],
+      "trials": 4096,
+      "wrong": [
+        0,
+        0
+      ],
+      "null": 0,
+      "each": 0,
+      "energy_change_db": [],
+      "generation_wall": 58.95393736998085,
+      "receiver_wall": 15.902556129964069,
+      "receiver_cpu": 15.900344421999998,
+      "workspace": 51561472
+    },
+    {
+      "case": "validation-7d-wandering-7103",
+      "cn0": -40.0,
+      "requested_days": 7.0,
+      "active_days": 7.33338425925926,
+      "capture_days": 7.446712962962963,
+      "samples": 160849,
+      "rate": 0.01,
+      "clock": "wandering",
+      "max_rate_ppm": 199.99999999999997,
+      "displacement": 7.277107966998187,
+      "energy": [
+        62.77658134155275,
+        62.77357140502927
+      ],
+      "mismatch_db": [
+        0.02550038537457349,
+        0.025541725784209636
+      ],
+      "correct": [
+        4096,
+        4096
+      ],
+      "oracle": [
+        4096,
+        4096
+      ],
+      "trials": 4096,
+      "wrong": [
+        0,
+        0
+      ],
+      "null": 0,
+      "each": 0,
+      "energy_change_db": [],
+      "generation_wall": 2.7745536599541083,
+      "receiver_wall": 3.4378145510563627,
+      "receiver_cpu": 3.437075853,
+      "workspace": 17105920
+    },
+    {
+      "case": "validation-7d-wandering-7103",
+      "cn0": -43.0,
+      "requested_days": 7.0,
+      "active_days": 7.33338425925926,
+      "capture_days": 7.446712962962963,
+      "samples": 160849,
+      "rate": 0.01,
+      "clock": "wandering",
+      "max_rate_ppm": 199.99999999999997,
+      "displacement": 7.277107966998187,
+      "energy": [
+        31.462821139150257,
+        31.46131259739069
+      ],
+      "mismatch_db": [
+        0.025500385374576884,
+        0.02554172578421351
+      ],
+      "correct": [
+        4076,
+        4076
+      ],
+      "oracle": [
+        4083,
+        4087
+      ],
+      "trials": 4096,
+      "wrong": [
+        0,
+        0
+      ],
+      "null": 0,
+      "each": 0,
+      "energy_change_db": [],
+      "generation_wall": 2.7745536599541083,
+      "receiver_wall": 3.486029988969676,
+      "receiver_cpu": 3.485024591,
+      "workspace": 17105920
+    },
+    {
+      "case": "validation-7d-wandering-8107",
+      "cn0": -40.0,
+      "requested_days": 7.0,
+      "active_days": 7.33338425925926,
+      "capture_days": 7.446712962962963,
+      "samples": 160849,
+      "rate": 0.01,
+      "clock": "wandering",
+      "max_rate_ppm": 199.99999999999997,
+      "displacement": -8.942917608242283,
+      "energy": [
+        62.77525275878908,
+        62.76937373046873
+      ],
+      "mismatch_db": [
+        0.035526276840140134,
+        0.03650258940775643
+      ],
+      "correct": [
+        4096,
+        4096
+      ],
+      "oracle": [
+        4096,
+        4096
+      ],
+      "trials": 4096,
+      "wrong": [
+        0,
+        0
+      ],
+      "null": 0,
+      "each": 0,
+      "energy_change_db": [],
+      "generation_wall": 3.025639013038017,
+      "receiver_wall": 3.054781239014119,
+      "receiver_cpu": 3.0544880080000003,
+      "workspace": 17105920
+    },
+    {
+      "case": "validation-7d-wandering-8107",
+      "cn0": -43.0,
+      "requested_days": 7.0,
+      "active_days": 7.33338425925926,
+      "capture_days": 7.446712962962963,
+      "samples": 160849,
+      "rate": 0.01,
+      "clock": "wandering",
+      "max_rate_ppm": 199.99999999999997,
+      "displacement": -8.942917608242283,
+      "energy": [
+        31.462155270430298,
+        31.459208776490023
+      ],
+      "mismatch_db": [
+        0.03552627684013429,
+        0.03650258940775837
+      ],
+      "correct": [
+        4085,
+        4076
+      ],
+      "oracle": [
+        4087,
+        4083
+      ],
+      "trials": 4096,
+      "wrong": [
+        0,
+        0
+      ],
+      "null": 0,
+      "each": 0,
+      "energy_change_db": [],
+      "generation_wall": 3.025639013038017,
+      "receiver_wall": 2.931830551009625,
+      "receiver_cpu": 2.9314332889999997,
+      "workspace": 17105920
+    }
+  ]
+}

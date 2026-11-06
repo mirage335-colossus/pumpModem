@@ -119,6 +119,9 @@ For isolated extremely weak, long-duration three-carrier work, the
 [sub-9-kHz study](validation-data/triad-v3/2026-11-01-sub9/README.md) records
 sampled observations lasting up to 38 days, receiver comparisons and the
 limits of their model-conditional reception and false-admission claims.
+The [multi-day tracking guide](triad-multiday-tracking.md) provides cheap entry
+checks, complete sampled-observation qualification, persistent-versus-reset
+receiver evidence and explicit low-IF, channel and physical-noise limits.
 The maintained [v3 guide](triad-v3.md) also covers reciprocal-integer sample
 clocks, a ten-Julian-year representation/planner ceiling, and the deterministic
 CFO batch receiver. The subsequent [−60 dB-Hz study](validation-data/triad-v3/2026-11-02-minus60/README.md)
