@@ -26,6 +26,9 @@ admission accounting and a bounded streaming audio experiment. It explicitly
 separates Gaussian-null theory from physical Helper/audio qualification.
 For planning weak-receiver DATA observation time and exporting a matching native
 fixture, use the [provisional duration-planning guide](triad-duration-planning.md).
+Its [multi-day forecast checks](validation-data/triad-v3/2026-11-06-long-forecast/README.md)
+verify long integer geometry without waveform generation and report remaining
+frequency/clock search requirements separately from receiver qualification.
 The [cryptographic background-noise feature](triad-background-noise.md) adds an
 optional fresh AES-256 noise floor at the shared final-rate audio output layer
 for native and host/browser backends, with explicit effective-bit, dB and

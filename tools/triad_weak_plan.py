@@ -75,12 +75,27 @@ def _parser():
     p.add_argument('--duration-alternatives', type=int, default=1)
     p.add_argument('--outage-fraction', type=float, default=0.)
     p.add_argument('--retained-fraction', type=float, default=1.)
-    p.add_argument('--max-active-seconds', type=float, default=315576000.)
-    p.add_argument('--seconds', type=float, help='manual active-duration override; rounded up to native tiles')
+    horizon = p.add_mutually_exclusive_group()
+    horizon.add_argument('--max-active-seconds', type=float, default=315576000.)
+    horizon.add_argument('--max-active-days', type=float, help='forecast horizon in days; default ten Julian years')
+    duration = p.add_mutually_exclusive_group()
+    duration.add_argument('--seconds', type=float, help='manual active-duration override; rounded up to native tiles')
+    duration.add_argument('--days', type=float, help='manual active-duration forecast in days; does not authorize long sampled export')
     p.add_argument('--output', type=Path, help='optional new capture directory; omit to write plan only')
     p.add_argument('--report', type=Path, help='plan JSON path (defaults beside output, or ./triad-weak-plan.json)')
     p.add_argument('--templates', action='store_true', help='include the native all-epoch template bank in the export')
     return p
+
+
+def _same_duration(actual, expected):
+    """Permit arithmetic roundoff, never a relative-duration mismatch budget.
+
+    Exact tile counts remain mandatory. Four binary64 ULPs accommodate the
+    native long-double accumulation and Python double product at year spans.
+    """
+    a, b = float(actual), float(expected)
+    return math.isfinite(a) and math.isfinite(b) and math.isclose(a, b,
+        rel_tol=0, abs_tol=max(1e-8, 4*math.ulp(a), 4*math.ulp(b)))
 
 
 def _check_plan_only(native, seconds, planned):
@@ -92,8 +107,14 @@ def _check_plan_only(native, seconds, planned):
     if int(fmt.get('tile_count', -1)) != int(expected_tiles):
         raise ValueError('native selected-duration tile count differs from frozen plan')
     reported = fmt.get('bit_seconds', fmt.get('elapsed_bit_seconds', -1))
-    if not math.isclose(float(reported), float(selected.get('elapsed_data_seconds', seconds)), rel_tol=0, abs_tol=1e-8):
+    if not _same_duration(reported, selected.get('elapsed_data_seconds', seconds)):
         raise ValueError('native selected-duration elapsed bit time differs from frozen calendar')
+    geometry = native.get('geometry', {})
+    if geometry:
+        if geometry['active_tiles'] != expected_tiles:
+            raise ValueError('native integer geometry tile count differs from frozen plan')
+        if not _same_duration(geometry['active_data_seconds'], seconds):
+            raise ValueError('native active DATA time differs from frozen plan')
 
 
 def execute(argv=None):
@@ -104,6 +125,10 @@ def execute(argv=None):
     else:
         wrapper_argv, native_args = argv, []
     args = _parser().parse_args(wrapper_argv)
+    if args.days is not None:
+        args.seconds = args.days*86400.
+    if args.max_active_days is not None:
+        args.max_active_seconds = args.max_active_days*86400.
     if args.output is not None:
         args.output = args.output.expanduser().resolve()
     if args.report is not None:
@@ -151,15 +176,37 @@ def execute(argv=None):
     chosen = planned.get('selected')
     selected_probe = None
     selected_run = None
-    if chosen is not None and float(planned['active_seconds']) <= 3600:
-        selected_probe, selected_run = run_json(
-            [*native_base, '--seconds', format(float(planned['active_seconds']), '.17g'), '--plan-only'], cwd=ROOT)
-        _check_plan_only(selected_probe, planned['active_seconds'], planned)
+    geometry_verified = False
+    geometry_error = None
+    if chosen is not None:
+        command = [*native_base, '--seconds', format(float(planned['active_seconds']), '.17g'), '--plan-only']
+        started = time.perf_counter()
+        try:
+            selected_probe, selected_run = run_json(command, cwd=ROOT)
+            if not selected_probe.get('geometry_feasible'):
+                raise ValueError('native selected geometry unavailable: '+str(selected_probe.get('reason')))
+            _check_plan_only(selected_probe, planned['active_seconds'], planned)
+            geometry_verified = True
+        except (ValueError, RuntimeError, OSError, subprocess.TimeoutExpired) as exc:
+            geometry_error = type(exc).__name__+': '+str(exc)
+            if selected_run is None:
+                selected_run = dict(command=command, elapsed_seconds=time.perf_counter()-started,
+                                    error=geometry_error)
+    planned['native_geometry_verified'] = geometry_verified
+    planned['export_supported'] = bool(planned.get('export_supported') and geometry_verified)
+    availability = dict(duration_forecast_available=chosen is not None,
+        modeled_detection_allocation_met=None if chosen is None else chosen.get('meets_detection_allocation', False),
+        native_geometry_verified=geometry_verified,
+        sampled_export_preflight_available=planned['export_supported'],
+        sampled_export_limit_active_seconds=probe.get('export_constraints', {}).get('maximum_sampled_active_seconds', 3600),
+        receiver_duration_qualified=False,
+        scope='Geometry verification does not generate samples, verify acquisition or qualify reception; sampled preflight retains independent native execution limits.')
     report = dict(schema='triad-weak-plan-export-v1', created_unix_seconds=time.time(),
         duration_plan=planned,
         target_cn0_supplied=args.target_cn0 is not None,
         target_cn0_forecast_source=('native probe physics.data_cn0_db_hz (physical-noise forecast; may include native --cn0 override)'
                                    if args.target_cn0 is None else '--target-cn0'),
+        availability=availability,
         weak_admission_policy=dict(planned['admission_policy']),
         weak_admission_policy_applied=False,
         native=dict(exporter=str(exporter), exporter_sha256=sha256(exporter),
@@ -168,8 +215,9 @@ def execute(argv=None):
                 ROOT / 'tools/triad_weak_plan.py')},
             probe=probe_run, probe_plan=probe,
             selected_duration_probe=selected_run, selected_duration_plan=selected_probe,
-            selected_duration_probe_status=('verified' if selected_probe is not None else
-                'unavailable: native exporter caps plan-only duration at 3600 seconds' if chosen is not None else 'no selected duration')),
+            selected_duration_probe_status=('verified' if geometry_verified else
+                'verification_failed' if chosen is not None else 'no selected duration'),
+            selected_duration_probe_error=geometry_error),
         export=None, report_path=str(report_path))
     report_path.parent.mkdir(parents=True, exist_ok=True)
     with report_path.open('x', encoding='utf-8') as f:
@@ -198,10 +246,10 @@ def execute(argv=None):
         raise ValueError('native exporter completed without manifest.json')
     manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
     fmt = manifest['format']
-    if int(fmt['tile_count']) != int(chosen['tiles']) or not math.isclose(float(fmt['bit_seconds']), float(chosen['elapsed_data_seconds']), rel_tol=0, abs_tol=1e-8):
+    if int(fmt['tile_count']) != int(chosen['tiles']) or not _same_duration(fmt['bit_seconds'], chosen['elapsed_data_seconds']):
         raise ValueError('export manifest duration differs from frozen plan')
     reference_active = manifest.get('power', {}).get('data_reference_active_seconds')
-    if reference_active is not None and not math.isclose(float(reference_active), float(planned['active_seconds']), rel_tol=0, abs_tol=1e-7):
+    if reference_active is not None and not _same_duration(reference_active, planned['active_seconds']):
         raise ValueError('export power reference active duration differs from frozen plan')
     fs = manifest['sample_rate_hz']
     slot = manifest['whole_bit_calendar']['slots'][0]
@@ -235,8 +283,10 @@ def main():
     except (ValueError, OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
         print(f'triad_weak_plan: {exc}', file=sys.stderr)
         return 2
+    active = report['duration_plan']['active_seconds']
     print(json.dumps(dict(report=str(report.get('report_path', 'written')), status=report['duration_plan']['status'],
-                          active_seconds=report['duration_plan']['active_seconds'], exported=report['export'] is not None),
+                          active_seconds=active, active_days=None if active is None else active/86400.,
+                          availability=report['availability'], exported=report['export'] is not None),
                      sort_keys=True))
     return 0
 

@@ -28,19 +28,54 @@ or a qualified false-admission rate.
 The wrapper freezes a plan-only probe, evaluates legal native tiles, then
 requests a second plan-only probe at the chosen duration and checks tile count,
 active energy duration, and elapsed bit calendar against native shaping. Export
-is optional: omit `--output` to write only the report, or provide `--output` to
-export when native geometry is feasible, Helper is enabled, and selected active
-DATA time is at most 3,600 seconds. If export was requested but is unsupported,
-the wrapper exits nonzero and retains the plan report. The exporter limit is
-independent of the mathematical planner's default
-10-Julian-year active-duration search limit. A plan beyond export support stays
-reportable, but cannot be exported through this wrapper. It does not silently
-shorten an infeasible plan.
+is optional: omit `--output` to write only the report. The forecast horizon
+defaults to 10 Julian years and can be set with `--max-active-days` or
+`--max-active-seconds`. When a duration is selected, the native exporter now
+checks its integer geometry with `--plan-only`, regardless of duration. That
+check uses bounded work independent of observation length: it reports tile,
+dwell, coefficient, source-sample and reusable-tile-workspace counts without
+generating waveform samples or templates.
+
+Forecast horizon, checked geometry and sampled execution are separate
+availability results. Native geometry can reject an unrepresentable count; the
+plan still reports the model forecast and records that geometry verification
+failed. `availability.duration_forecast_available` means a candidate duration
+has a forecast; `availability.modeled_detection_allocation_met` separately
+states whether it meets the surrogate detection criterion. A manually requested
+duration can have a valid forecast while failing that criterion. A verified long plan has
+`availability.native_geometry_verified=true`, while
+`availability.sampled_export_preflight_available=false`. Sampled exports and
+power-only calibration remain limited to 3,600 requested active seconds, plus
+their independent sample, byte and calibration limits. If sampled export was
+requested but is unsupported, the wrapper exits nonzero and retains the plan.
+Geometry verification does not establish that the current receiver can search
+or decode a multi-day waveform. The reported source workspace is the native
+reusable-tile bound; it is not total process RSS or an estimate of the complete
+sampled artifact size.
 
 Use `--seconds` for a manual active-duration override. It is rounded up to the
 native tile lattice and still receives a forecast; the report says
 `manual_duration_override` and records whether it meets the modeled detection
 allocation. This option does not assert that the selected tile count is enough.
+Use `--days` for the same manual forecast in days. For example, request a
+38-day candidate forecast without generating a
+waveform:
+
+```sh
+python tools/triad_weak_plan.py --target-cn0 -60 --days 38 \
+  --report local-evidence/weak-38d.json -- \
+  --case hf --sample-rate 6000 --rate 100 --added-symbols 1 \
+  --base-oscillator gpsdo-ocxo --shift-oscillator gpsdo-ocxo \
+  --rf-hz 500000 --timing-policy bounded \
+  --spread-preset none --selective-perturbation off
+```
+
+For automatic selection up to ten years, replace `--days 38` with
+`--max-active-days 3652.5` and omit `--days`. `--target-cn0` remains the nominal
+active DATA C/N₀ used for selection. The configuration above is illustrative;
+the forecast assumes its declared channel and oscillator law persists over the
+entire duration.
+
 The older native manual-duration workflow remains useful for historical studies;
 use the wrapper when an automatic, reportable plan is wanted.
 
@@ -122,6 +157,36 @@ JSON. Native shaping continues to own the exact sample count, UTC/source epoch,
 tile and burst calendar, pulse, ramp, FHSS, and waveform construction. Planning
 does not change tile shaping or source epochs.
 
+## Long-span synchronization and error accounting
+
+Longer integration can demand much finer frequency and clock searches. The plan
+reports the current final grid and separate analytic design references. For a
+hypothetical rectangular coherent integration across elapsed pattern span `T`,
+it reports frequency spacing `1/(4T)`, corresponding to a worst half-bin loss
+of about 0.2244 dB. It also reports the error of the existing frequency grid and
+the number of points such a coherent reference grid would need across the
+declared oscillator bound. A renewing short-block receiver may tolerate a
+coarser frequency grid by combining shorter coherent blocks, with a separate
+sensitivity cost.
+
+The clock diagnostic compares accumulated drift from the current grid with an
+engineering reference of 0.125 fine chips; it reports the associated step and
+point count. This tolerance is an explicit design assumption, not a validated
+waveform-loss bound. Frequency/clock point counts are diagnostics only: they do
+not expand the charged search grid, adjust the modeled duration, or prove that
+the current receiver can execute that search. The report therefore marks long-
+span receiver qualification false.
+
+`alpha_per_day` continues to describe a conditional Gaussian-null bound for
+each 24-hour acquisition schedule. For a multi-day message, the report also
+gives a conservative union bound over the covered 24-hour periods,
+`min(1, covered_days × alpha_per_day)`, without assuming the periods are
+independent. Its explicit assumed accounting horizon allows a Helper lead,
+up to 30 seconds of UTC alignment, pulse halos and an endpoint allowance for
+every bit. This is separate from the approximate contiguous-message time;
+longer listening schedules require their own exposure bound. Neither quantity
+qualifies a physical audio/ADC null.
+
 ## Limits and validation
 
 Selected channel effects may remain outside the likelihood forecast, including
@@ -156,3 +221,6 @@ selection, manifest policy propagation, and operational-policy accounting.
 They are not sampled sensitivity campaigns. The dated measurement and
 qualification record belongs at
 [`validation-data/triad-v3/2026-11-06-duration-planner/README.md`](validation-data/triad-v3/2026-11-06-duration-planner/README.md).
+The [long-forecast record](validation-data/triad-v3/2026-11-06-long-forecast/README.md)
+documents multi-day through ten-year integer-geometry checks and search-resolution
+diagnostics. It does not demonstrate multi-day signal generation or reception.

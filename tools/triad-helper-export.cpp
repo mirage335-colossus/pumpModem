@@ -112,6 +112,8 @@ Options parse(int argc, char** argv) {
                 "  [--whole-bit-count 1..16] [--whole-bit-wait-count 0..1000]\n"
                 "  [--fhss on|off] [--shaping auto|legacy (default: auto)] [--shaping-tail-fraction F]\n"
                 "  [--data-if HZ] [--sample-rate INTEGER_HZ] [--cn0 DB_HZ] [--plan-only]\n"
+                "  --plan-only checks long integer geometry without generating waveform samples or templates.\n"
+                "  Sampled exports and --power-plan-only remain limited to 3600 active seconds.\n"
                 "  [--power-reference whole-active|legacy-window] [--power-plan-only]\n"
                 "  [--base-oscillator ID] [--shift-oscillator ID] [--ramp-seconds POSITIVE]\n"
                 "  [--oscillator-effects on|off] (off is an explicit diagnostic control)\n"
@@ -265,7 +267,10 @@ Options parse(int argc, char** argv) {
         throw std::invalid_argument("timing policy must be case-default, bounded or broad");
     if (o.output.empty() && !o.plan_only && !o.power_plan_only)
         throw std::invalid_argument("--output is required unless a plan-only mode is selected");
-    if (o.seconds <= 0 || o.seconds > 3600) throw std::invalid_argument("seconds must be in (0,3600]");
+    if (!std::isfinite(o.seconds) || o.seconds <= 0)
+        throw std::invalid_argument("seconds must be finite and positive");
+    if (o.seconds > 3600 && (!o.plan_only || o.power_plan_only))
+        throw std::invalid_argument("sampled export and power-plan-only duration must be in (0,3600]; longer durations are available only with --plan-only");
     if (o.data_if_hz < 1725 || o.data_if_hz >= o.sample_rate / 2.)
         throw std::invalid_argument("DATA IF must be at least 1725 Hz and below Nyquist");
     if (o.epoch < 6 || o.epoch > 4294967289ULL)
@@ -524,6 +529,12 @@ void print_plan_json(const Options& o, double data_if_hz,
     const auto& f = selected.format;
     const auto& g = selected.geometry;
     const auto sample_rate = f.sample_rate;
+    // Geometry has already checked full elapsed tile/dwell coordinates using
+    // bounded uint64 calculations. Keep the published counts exact and O(1).
+    const auto physical_tiles = g.tile_count + (g.tile_count - 1) * f.burst_wait_tiles;
+    const auto tile_dwells = static_cast<std::uint64_t>(std::llround(g.tile_seconds / f.dwell_seconds));
+    const auto active_dwells = g.tile_count * tile_dwells;
+    const auto active_seconds = static_cast<double>(g.tile_count * static_cast<long double>(g.tile_seconds));
     const auto nominal = g.occupied_bandwidth_hz;
     const auto gate = std::max(0., selected.spectrum.placement_bandwidth_hz - nominal);
     const auto minimum_data_if = std::max(1725., helper::auxiliary_frequency_hz + 450 +
@@ -551,6 +562,18 @@ void print_plan_json(const Options& o, double data_if_hz,
         << ",\"tile_count\":" << g.tile_count << ",\"elapsed_bit_seconds\":" << g.bit_seconds
         << ",\"fine_coefficients\":" << g.fine_coefficients << ",\"inner_coefficients\":" << g.inner_coefficients
         << ",\"payload_fine_cells_per_tile\":" << g.payload_fine_cells_per_tile << '}'
+        << ",\"geometry\":{\"status\":\"checked-integer-geometry-only\",\"active_tiles\":" << g.tile_count
+        << ",\"physical_tiles_including_waits\":" << physical_tiles
+        << ",\"tile_seconds\":" << g.tile_seconds << ",\"active_data_seconds\":" << active_seconds
+        << ",\"elapsed_data_seconds\":" << g.bit_seconds
+        << ",\"burst_wait_tiles_between_active_tiles\":" << f.burst_wait_tiles
+        << ",\"active_fine_coefficients\":" << g.fine_coefficients
+        << ",\"active_dwells\":" << active_dwells
+        << ",\"elapsed_fine_cells\":" << g.fine_cells << ",\"elapsed_dwells\":" << g.dwells
+        << ",\"padded_source_samples\":" << g.source_samples
+        << ",\"source_calendar_origin_sample\":" << g.calendar_origin_sample
+        << ",\"bounded_source_workspace_bytes\":" << g.source_workspace_bytes
+        << ",\"allocates_samples_or_templates\":false}"
         << ",\"spectral_certificate\":{\"placement_bandwidth_hz\":" << selected.spectrum.placement_bandwidth_hz
         << ",\"measured_bandwidth_hz\":" << selected.spectrum.measured_bandwidth_hz
         << ",\"measured_tail_fraction\":" << selected.spectrum.measured_tail_fraction
@@ -581,6 +604,9 @@ void print_plan_json(const Options& o, double data_if_hz,
     physics_json(std::cout, o, physical, physics, data_if_hz);
     std::cout << ",\"export_constraints\":{\"sample_rate_hz\":" << sample_rate
         << ",\"maximum_export_bytes\":" << maximum_export_bytes << ",\"fixed_helper_lead_seconds\":38"
+        << ",\"maximum_sampled_active_seconds\":3600"
+        << ",\"plan_only_duration_limit\":\"checked uint64 geometry with no sampled-duration cap\""
+        << ",\"whole_active_calibration_sample_limit\":4194304"
         << ",\"pulse_halo_seconds\":" << 8 / g.fine_chip_rate_hz
         << ",\"pulse_halo_fits_lead\":" << boolean(g.calendar_origin_sample <= data_start_seconds * sample_rate)
         << ",\"message_epoch_count\":13}"

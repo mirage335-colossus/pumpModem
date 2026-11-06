@@ -1,0 +1,1120 @@
+{
+  "schema": "triad-long-forecast-qualification-v1",
+  "base_revision": "045458f44a8381fc7ec4a9041071d79476888b3e",
+  "source_sha256": {
+    "CMakeLists.txt": "ccec5e262e443eb994d98b40186f3f800169931ebc8ed98deecad89f23d830f4",
+    "tools/triad-helper-export.cpp": "0e0d42a28286e8953d82f40043a5bf6281dd5ecce29ad2b988ae6bea222fecfd",
+    "tools/triad_duration_model.py": "1d00c706e6ed0ba1716b63c7efe474f487bdd916077c82f44f7ad07da0ff5647",
+    "tools/triad_weak_plan.py": "ada065dc05413a2cc71120245e8bced756d884749641d46d737fb6ec69645c50",
+    "tests/test_triad_helper_plan_long.py": "f51c335b9446ebd355bb2f4503e33ef7122594d214b4ddd6e26526796a095216",
+    "tests/test_triad_duration_model.py": "14e11b44ac89b9447f1d56ec223681f58eeadeb13868e8ff870e192d0a7ef749",
+    "tests/test_triad_weak_plan.py": "7c9b6dc3c76ee37724fc2c7956a4113392049c2a8b22dfdbdd7033a85950d2d1"
+  },
+  "binary_sha256": "b1e9d0e1f30ed896431981186ef7459f42a1989f075101effcaccb15ad3c4f4a",
+  "rows": [
+    {
+      "name": "stable-40",
+      "target_cn0_db_hz": -40,
+      "status": "provisional_model_plan",
+      "active_seconds": 731192.8,
+      "active_days": 8.46287962962963,
+      "elapsed_days": 8.46287962962963,
+      "energy_n0": 73.11928,
+      "detection_lower_bound": 0.9950002169262777,
+      "availability": {
+        "duration_forecast_available": true,
+        "modeled_detection_allocation_met": true,
+        "native_geometry_verified": true,
+        "sampled_export_preflight_available": false,
+        "sampled_export_limit_active_seconds": 3600,
+        "receiver_duration_qualified": false,
+        "scope": "Geometry verification does not generate samples, verify acquisition or qualify reception; sampled preflight retains independent native execution limits."
+      },
+      "native_geometry": {
+        "status": "checked-integer-geometry-only",
+        "active_tiles": 70307,
+        "physical_tiles_including_waits": 70307,
+        "tile_seconds": 10.4,
+        "active_data_seconds": 731192.8,
+        "elapsed_data_seconds": 731192.8,
+        "burst_wait_tiles_between_active_tiles": 0,
+        "active_fine_coefficients": 9913287,
+        "active_dwells": 1827982,
+        "elapsed_fine_cells": 12186547,
+        "elapsed_dwells": 1827982,
+        "padded_source_samples": 4387162565,
+        "source_calendar_origin_sample": 2882,
+        "bounded_source_workspace_bytes": 162224,
+        "allocates_samples_or_templates": false
+      },
+      "full_span_grid_resolution_compatible": false,
+      "full_coherent_design_reference": {
+        "scope": "Hypothetical rectangular matched integration over each listed span; assumes phase remains coherent over that full window.",
+        "frequency_mismatch_loss_budget_db": 0.22440450238215368,
+        "frequency_requirements": [
+          {
+            "coherent_window_seconds": 0.5,
+            "required_step_hz": 0.5,
+            "maximum_rectangular_bin_mismatch_loss_db": 0.22440450238215368,
+            "required_points_across_current_bound": 2
+          },
+          {
+            "coherent_window_seconds": 2.0,
+            "required_step_hz": 0.125,
+            "maximum_rectangular_bin_mismatch_loss_db": 0.22440450238215368,
+            "required_points_across_current_bound": 2
+          },
+          {
+            "coherent_window_seconds": 731192.8,
+            "required_step_hz": 3.4190708661245023e-07,
+            "maximum_rectangular_bin_mismatch_loss_db": 0.22440450238215368,
+            "required_points_across_current_bound": 295
+          }
+        ],
+        "clock_requirement": {
+          "status": "design_reference",
+          "fine_chip_rate_hz": 16.666666666666668,
+          "allowed_nearest_grid_error_fine_chips": 0.125,
+          "required_step_ppm": 0.02051442519674701,
+          "required_points_across_current_bound": 2,
+          "current_step_ppm": 2.500000000125e-05,
+          "current_grid_points": 9,
+          "current_half_step_time_error_seconds": 9.139910000456996e-06,
+          "current_half_step_fine_chips": 0.00015233183334094995,
+          "qualification": "0.125 chip is a design assumption; no shaping or receiver loss bound is qualified."
+        },
+        "limitations": [
+          "A stochastic or renewing channel may not support coherence over the full elapsed span.",
+          "Long-term oscillator/channel trajectory, reacquisition and implementation cost are unqualified.",
+          "Required point counts are analytic estimates; no long receiver arrays were constructed."
+        ]
+      },
+      "conditional_operation_null_bound": 0.0009000000000000001,
+      "null_accounting_horizon_seconds": 731262.16
+    },
+    {
+      "name": "stable-50",
+      "target_cn0_db_hz": -50,
+      "status": "provisional_model_plan",
+      "active_seconds": 7326051.2,
+      "active_days": 84.79225925925927,
+      "elapsed_days": 84.79225925925927,
+      "energy_n0": 73.260512,
+      "detection_lower_bound": 0.9950000542613265,
+      "availability": {
+        "duration_forecast_available": true,
+        "modeled_detection_allocation_met": true,
+        "native_geometry_verified": true,
+        "sampled_export_preflight_available": false,
+        "sampled_export_limit_active_seconds": 3600,
+        "receiver_duration_qualified": false,
+        "scope": "Geometry verification does not generate samples, verify acquisition or qualify reception; sampled preflight retains independent native execution limits."
+      },
+      "native_geometry": {
+        "status": "checked-integer-geometry-only",
+        "active_tiles": 704428,
+        "physical_tiles_including_waits": 704428,
+        "tile_seconds": 10.4,
+        "active_data_seconds": 7326051.2,
+        "elapsed_data_seconds": 7326051.2,
+        "burst_wait_tiles_between_active_tiles": 0,
+        "active_fine_coefficients": 99324348,
+        "active_dwells": 18315128,
+        "elapsed_fine_cells": 122100854,
+        "elapsed_dwells": 18315128,
+        "padded_source_samples": 43956312965,
+        "source_calendar_origin_sample": 2882,
+        "bounded_source_workspace_bytes": 162224,
+        "allocates_samples_or_templates": false
+      },
+      "full_span_grid_resolution_compatible": false,
+      "full_coherent_design_reference": {
+        "scope": "Hypothetical rectangular matched integration over each listed span; assumes phase remains coherent over that full window.",
+        "frequency_mismatch_loss_budget_db": 0.22440450238215368,
+        "frequency_requirements": [
+          {
+            "coherent_window_seconds": 0.5,
+            "required_step_hz": 0.5,
+            "maximum_rectangular_bin_mismatch_loss_db": 0.22440450238215368,
+            "required_points_across_current_bound": 2
+          },
+          {
+            "coherent_window_seconds": 2.0,
+            "required_step_hz": 0.125,
+            "maximum_rectangular_bin_mismatch_loss_db": 0.22440450238215368,
+            "required_points_across_current_bound": 2
+          },
+          {
+            "coherent_window_seconds": 7326051.2,
+            "required_step_hz": 3.412479563342391e-08,
+            "maximum_rectangular_bin_mismatch_loss_db": 0.22440450238215368,
+            "required_points_across_current_bound": 2942
+          }
+        ],
+        "clock_requirement": {
+          "status": "design_reference",
+          "fine_chip_rate_hz": 16.666666666666668,
+          "allowed_nearest_grid_error_fine_chips": 0.125,
+          "required_step_ppm": 0.0020474877380054343,
+          "required_points_across_current_bound": 2,
+          "current_step_ppm": 2.500000000125e-05,
+          "current_grid_points": 9,
+          "current_half_step_time_error_seconds": 9.157564000457878e-05,
+          "current_half_step_fine_chips": 0.0015262606667429798,
+          "qualification": "0.125 chip is a design assumption; no shaping or receiver loss bound is qualified."
+        },
+        "limitations": [
+          "A stochastic or renewing channel may not support coherence over the full elapsed span.",
+          "Long-term oscillator/channel trajectory, reacquisition and implementation cost are unqualified.",
+          "Required point counts are analytic estimates; no long receiver arrays were constructed."
+        ]
+      },
+      "conditional_operation_null_bound": 0.0085,
+      "null_accounting_horizon_seconds": 7326120.5600000005
+    },
+    {
+      "name": "stable-60",
+      "target_cn0_db_hz": -60,
+      "status": "provisional_model_plan",
+      "active_seconds": 74746807.2,
+      "active_days": 865.1250833333334,
+      "elapsed_days": 865.1250833333334,
+      "energy_n0": 74.7468072,
+      "detection_lower_bound": 0.9950000081520463,
+      "availability": {
+        "duration_forecast_available": true,
+        "modeled_detection_allocation_met": true,
+        "native_geometry_verified": true,
+        "sampled_export_preflight_available": false,
+        "sampled_export_limit_active_seconds": 3600,
+        "receiver_duration_qualified": false,
+        "scope": "Geometry verification does not generate samples, verify acquisition or qualify reception; sampled preflight retains independent native execution limits."
+      },
+      "native_geometry": {
+        "status": "checked-integer-geometry-only",
+        "active_tiles": 7187193,
+        "physical_tiles_including_waits": 7187193,
+        "tile_seconds": 10.4,
+        "active_data_seconds": 74746807.2,
+        "elapsed_data_seconds": 74746807.2,
+        "burst_wait_tiles_between_active_tiles": 0,
+        "active_fine_coefficients": 1013394213,
+        "active_dwells": 186867018,
+        "elapsed_fine_cells": 1245780121,
+        "elapsed_dwells": 186867018,
+        "padded_source_samples": 448480848965,
+        "source_calendar_origin_sample": 2882,
+        "bounded_source_workspace_bytes": 162224,
+        "allocates_samples_or_templates": false
+      },
+      "full_span_grid_resolution_compatible": false,
+      "full_coherent_design_reference": {
+        "scope": "Hypothetical rectangular matched integration over each listed span; assumes phase remains coherent over that full window.",
+        "frequency_mismatch_loss_budget_db": 0.22440450238215368,
+        "frequency_requirements": [
+          {
+            "coherent_window_seconds": 0.5,
+            "required_step_hz": 0.5,
+            "maximum_rectangular_bin_mismatch_loss_db": 0.22440450238215368,
+            "required_points_across_current_bound": 2
+          },
+          {
+            "coherent_window_seconds": 2.0,
+            "required_step_hz": 0.125,
+            "maximum_rectangular_bin_mismatch_loss_db": 0.22440450238215368,
+            "required_points_across_current_bound": 2
+          },
+          {
+            "coherent_window_seconds": 74746807.2,
+            "required_step_hz": 3.3446244644413387e-09,
+            "maximum_rectangular_bin_mismatch_loss_db": 0.22440450238215368,
+            "required_points_across_current_bound": 30003
+          }
+        ],
+        "clock_requirement": {
+          "status": "design_reference",
+          "fine_chip_rate_hz": 16.666666666666668,
+          "allowed_nearest_grid_error_fine_chips": 0.125,
+          "required_step_ppm": 0.00020067746786648028,
+          "required_points_across_current_bound": 2,
+          "current_step_ppm": 2.500000000125e-05,
+          "current_grid_points": 9,
+          "current_half_step_time_error_seconds": 0.0009343350900467167,
+          "current_half_step_fine_chips": 0.015572251500778614,
+          "qualification": "0.125 chip is a design assumption; no shaping or receiver loss bound is qualified."
+        },
+        "limitations": [
+          "A stochastic or renewing channel may not support coherence over the full elapsed span.",
+          "Long-term oscillator/channel trajectory, reacquisition and implementation cost are unqualified.",
+          "Required point counts are analytic estimates; no long receiver arrays were constructed."
+        ]
+      },
+      "conditional_operation_null_bound": 0.08660000000000001,
+      "null_accounting_horizon_seconds": 74746876.56
+    },
+    {
+      "name": "hf-16",
+      "target_cn0_db_hz": -16,
+      "status": "provisional_model_plan",
+      "active_seconds": 524853.6000000001,
+      "active_days": 6.074694444444446,
+      "elapsed_days": 6.074694444444446,
+      "energy_n0": 13183.726363689564,
+      "detection_lower_bound": 0.9950001665793211,
+      "availability": {
+        "duration_forecast_available": true,
+        "modeled_detection_allocation_met": true,
+        "native_geometry_verified": true,
+        "sampled_export_preflight_available": false,
+        "sampled_export_limit_active_seconds": 3600,
+        "receiver_duration_qualified": false,
+        "scope": "Geometry verification does not generate samples, verify acquisition or qualify reception; sampled preflight retains independent native execution limits."
+      },
+      "native_geometry": {
+        "status": "checked-integer-geometry-only",
+        "active_tiles": 45246,
+        "physical_tiles_including_waits": 45246,
+        "tile_seconds": 11.600000000000001,
+        "active_data_seconds": 524853.6000000001,
+        "elapsed_data_seconds": 524853.6000000001,
+        "burst_wait_tiles_between_active_tiles": 0,
+        "active_fine_coefficients": 29862360,
+        "active_dwells": 1312134,
+        "elapsed_fine_cells": 31491217,
+        "elapsed_dwells": 1312135,
+        "padded_source_samples": 3149123205,
+        "source_calendar_origin_sample": 802,
+        "bounded_source_workspace_bytes": 254272,
+        "allocates_samples_or_templates": false
+      },
+      "full_span_grid_resolution_compatible": false,
+      "full_coherent_design_reference": {
+        "scope": "Hypothetical rectangular matched integration over each listed span; assumes phase remains coherent over that full window.",
+        "frequency_mismatch_loss_budget_db": 0.22440450238215368,
+        "frequency_requirements": [
+          {
+            "coherent_window_seconds": 0.5,
+            "required_step_hz": 0.5,
+            "maximum_rectangular_bin_mismatch_loss_db": 0.22440450238215368,
+            "required_points_across_current_bound": 364
+          },
+          {
+            "coherent_window_seconds": 2.0,
+            "required_step_hz": 0.125,
+            "maximum_rectangular_bin_mismatch_loss_db": 0.22440450238215368,
+            "required_points_across_current_bound": 1450
+          },
+          {
+            "coherent_window_seconds": 524853.6000000001,
+            "required_step_hz": 4.763233023456445e-07,
+            "maximum_rectangular_bin_mismatch_loss_db": 0.22440450238215368,
+            "required_points_across_current_bound": 380086492
+          }
+        ],
+        "clock_requirement": {
+          "status": "design_reference",
+          "fine_chip_rate_hz": 60.0,
+          "allowed_nearest_grid_error_fine_chips": 0.125,
+          "required_step_ppm": 0.00793872170576074,
+          "required_points_across_current_bound": 75584,
+          "current_step_ppm": 75.00375018750938,
+          "current_grid_points": 9,
+          "current_half_step_time_error_seconds": 19.68299414970749,
+          "current_half_step_fine_chips": 1180.9796489824494,
+          "qualification": "0.125 chip is a design assumption; no shaping or receiver loss bound is qualified."
+        },
+        "limitations": [
+          "A stochastic or renewing channel may not support coherence over the full elapsed span.",
+          "Long-term oscillator/channel trajectory, reacquisition and implementation cost are unqualified.",
+          "Required point counts are analytic estimates; no long receiver arrays were constructed."
+        ]
+      },
+      "conditional_operation_null_bound": 0.0007,
+      "null_accounting_horizon_seconds": 524922.2666666668
+    },
+    {
+      "name": "hf-20",
+      "target_cn0_db_hz": -20,
+      "status": "provisional_model_plan",
+      "active_seconds": 3288518.8000000003,
+      "active_days": 38.061560185185186,
+      "elapsed_days": 38.061560185185186,
+      "energy_n0": 32885.188,
+      "detection_lower_bound": 0.9950001216749468,
+      "availability": {
+        "duration_forecast_available": true,
+        "modeled_detection_allocation_met": true,
+        "native_geometry_verified": true,
+        "sampled_export_preflight_available": false,
+        "sampled_export_limit_active_seconds": 3600,
+        "receiver_duration_qualified": false,
+        "scope": "Geometry verification does not generate samples, verify acquisition or qualify reception; sampled preflight retains independent native execution limits."
+      },
+      "native_geometry": {
+        "status": "checked-integer-geometry-only",
+        "active_tiles": 283493,
+        "physical_tiles_including_waits": 283493,
+        "tile_seconds": 11.600000000000001,
+        "active_data_seconds": 3288518.8000000003,
+        "elapsed_data_seconds": 3288518.8000000003,
+        "burst_wait_tiles_between_active_tiles": 0,
+        "active_fine_coefficients": 187105380,
+        "active_dwells": 8221297,
+        "elapsed_fine_cells": 197311129,
+        "elapsed_dwells": 8221298,
+        "padded_source_samples": 19731114405,
+        "source_calendar_origin_sample": 802,
+        "bounded_source_workspace_bytes": 254272,
+        "allocates_samples_or_templates": false
+      },
+      "full_span_grid_resolution_compatible": false,
+      "full_coherent_design_reference": {
+        "scope": "Hypothetical rectangular matched integration over each listed span; assumes phase remains coherent over that full window.",
+        "frequency_mismatch_loss_budget_db": 0.22440450238215368,
+        "frequency_requirements": [
+          {
+            "coherent_window_seconds": 0.5,
+            "required_step_hz": 0.5,
+            "maximum_rectangular_bin_mismatch_loss_db": 0.22440450238215368,
+            "required_points_across_current_bound": 364
+          },
+          {
+            "coherent_window_seconds": 2.0,
+            "required_step_hz": 0.125,
+            "maximum_rectangular_bin_mismatch_loss_db": 0.22440450238215368,
+            "required_points_across_current_bound": 1450
+          },
+          {
+            "coherent_window_seconds": 3288518.8000000003,
+            "required_step_hz": 7.602206805081971e-08,
+            "maximum_rectangular_bin_mismatch_loss_db": 0.22440450238215368,
+            "required_points_across_current_bound": 2381467079
+          }
+        ],
+        "clock_requirement": {
+          "status": "design_reference",
+          "fine_chip_rate_hz": 60.0,
+          "allowed_nearest_grid_error_fine_chips": 0.125,
+          "required_step_ppm": 0.0012670344675136617,
+          "required_points_across_current_bound": 473572,
+          "current_step_ppm": 75.00375018750938,
+          "current_grid_points": 9,
+          "current_half_step_time_error_seconds": 123.32562128106407,
+          "current_half_step_fine_chips": 7399.537276863844,
+          "qualification": "0.125 chip is a design assumption; no shaping or receiver loss bound is qualified."
+        },
+        "limitations": [
+          "A stochastic or renewing channel may not support coherence over the full elapsed span.",
+          "Long-term oscillator/channel trajectory, reacquisition and implementation cost are unqualified.",
+          "Required point counts are analytic estimates; no long receiver arrays were constructed."
+        ]
+      },
+      "conditional_operation_null_bound": 0.0039000000000000003,
+      "null_accounting_horizon_seconds": 3288587.466666667
+    },
+    {
+      "name": "hf-30-limit",
+      "target_cn0_db_hz": -30,
+      "status": "duration_limit",
+      "active_seconds": null,
+      "active_days": null,
+      "elapsed_days": null,
+      "energy_n0": null,
+      "detection_lower_bound": null,
+      "availability": {
+        "duration_forecast_available": false,
+        "modeled_detection_allocation_met": null,
+        "native_geometry_verified": false,
+        "sampled_export_preflight_available": false,
+        "sampled_export_limit_active_seconds": 3600,
+        "receiver_duration_qualified": false,
+        "scope": "Geometry verification does not generate samples, verify acquisition or qualify reception; sampled preflight retains independent native execution limits."
+      },
+      "native_geometry": null,
+      "full_span_grid_resolution_compatible": null,
+      "full_coherent_design_reference": null,
+      "conditional_operation_null_bound": null,
+      "null_accounting_horizon_seconds": null
+    },
+    {
+      "name": "vlf-30",
+      "target_cn0_db_hz": -30,
+      "status": "provisional_model_plan",
+      "active_seconds": 691204.8,
+      "active_days": 8.000055555555557,
+      "elapsed_days": 8.000055555555557,
+      "energy_n0": 691.2048000000001,
+      "detection_lower_bound": 0.997531976409629,
+      "availability": {
+        "duration_forecast_available": true,
+        "modeled_detection_allocation_met": true,
+        "native_geometry_verified": true,
+        "sampled_export_preflight_available": false,
+        "sampled_export_limit_active_seconds": 3600,
+        "receiver_duration_qualified": false,
+        "scope": "Geometry verification does not generate samples, verify acquisition or qualify reception; sampled preflight retains independent native execution limits."
+      },
+      "native_geometry": {
+        "status": "checked-integer-geometry-only",
+        "active_tiles": 12,
+        "physical_tiles_including_waits": 12,
+        "tile_seconds": 57600.4,
+        "active_data_seconds": 691204.8,
+        "elapsed_data_seconds": 691204.8,
+        "burst_wait_tiles_between_active_tiles": 0,
+        "active_fine_coefficients": 768,
+        "active_dwells": 1728012,
+        "elapsed_fine_cells": 1153,
+        "elapsed_dwells": 1728012,
+        "padded_source_samples": 16819315205,
+        "source_calendar_origin_sample": 115200002,
+        "bounded_source_workspace_bytes": 148672,
+        "allocates_samples_or_templates": false
+      },
+      "full_span_grid_resolution_compatible": false,
+      "full_coherent_design_reference": {
+        "scope": "Hypothetical rectangular matched integration over each listed span; assumes phase remains coherent over that full window.",
+        "frequency_mismatch_loss_budget_db": 0.22440450238215368,
+        "frequency_requirements": [
+          {
+            "coherent_window_seconds": 0.5,
+            "required_step_hz": 0.5,
+            "maximum_rectangular_bin_mismatch_loss_db": 0.22440450238215368,
+            "required_points_across_current_bound": 2
+          },
+          {
+            "coherent_window_seconds": 2.0,
+            "required_step_hz": 0.125,
+            "maximum_rectangular_bin_mismatch_loss_db": 0.22440450238215368,
+            "required_points_across_current_bound": 2
+          },
+          {
+            "coherent_window_seconds": 691204.8,
+            "required_step_hz": 3.6168730309743215e-07,
+            "maximum_rectangular_bin_mismatch_loss_db": 0.22440450238215368,
+            "required_points_across_current_bound": 6
+          }
+        ],
+        "clock_requirement": {
+          "status": "design_reference",
+          "fine_chip_rate_hz": 0.0016666666666666668,
+          "allowed_nearest_grid_error_fine_chips": 0.125,
+          "required_step_ppm": 217.01238185845932,
+          "required_points_across_current_bound": 2,
+          "current_step_ppm": 2.500000000125e-05,
+          "current_grid_points": 9,
+          "current_half_step_time_error_seconds": 8.640060000432005e-06,
+          "current_half_step_fine_chips": 1.440010000072001e-08,
+          "qualification": "0.125 chip is a design assumption; no shaping or receiver loss bound is qualified."
+        },
+        "limitations": [
+          "A stochastic or renewing channel may not support coherence over the full elapsed span.",
+          "Long-term oscillator/channel trajectory, reacquisition and implementation cost are unqualified.",
+          "Required point counts are analytic estimates; no long receiver arrays were constructed."
+        ]
+      },
+      "conditional_operation_null_bound": 0.0009000000000000001,
+      "null_accounting_horizon_seconds": 700873.2000000001
+    },
+    {
+      "name": "vlf-60-limit",
+      "target_cn0_db_hz": -60,
+      "status": "duration_limit",
+      "active_seconds": null,
+      "active_days": null,
+      "elapsed_days": null,
+      "energy_n0": null,
+      "detection_lower_bound": null,
+      "availability": {
+        "duration_forecast_available": false,
+        "modeled_detection_allocation_met": null,
+        "native_geometry_verified": false,
+        "sampled_export_preflight_available": false,
+        "sampled_export_limit_active_seconds": 3600,
+        "receiver_duration_qualified": false,
+        "scope": "Geometry verification does not generate samples, verify acquisition or qualify reception; sampled preflight retains independent native execution limits."
+      },
+      "native_geometry": null,
+      "full_span_grid_resolution_compatible": null,
+      "full_coherent_design_reference": null,
+      "conditional_operation_null_bound": null,
+      "null_accounting_horizon_seconds": null
+    },
+    {
+      "name": "vlf-38days",
+      "target_cn0_db_hz": -60,
+      "status": "manual_duration_override",
+      "active_seconds": 3283222.8000000003,
+      "active_days": 38.000263888888895,
+      "elapsed_days": 38.000263888888895,
+      "energy_n0": 3.2832228000000003,
+      "detection_lower_bound": -0.0,
+      "availability": {
+        "duration_forecast_available": true,
+        "modeled_detection_allocation_met": false,
+        "native_geometry_verified": true,
+        "sampled_export_preflight_available": false,
+        "sampled_export_limit_active_seconds": 3600,
+        "receiver_duration_qualified": false,
+        "scope": "Geometry verification does not generate samples, verify acquisition or qualify reception; sampled preflight retains independent native execution limits."
+      },
+      "native_geometry": {
+        "status": "checked-integer-geometry-only",
+        "active_tiles": 57,
+        "physical_tiles_including_waits": 57,
+        "tile_seconds": 57600.4,
+        "active_data_seconds": 3283222.8000000003,
+        "elapsed_data_seconds": 3283222.8000000003,
+        "burst_wait_tiles_between_active_tiles": 0,
+        "active_fine_coefficients": 3648,
+        "active_dwells": 8208057,
+        "elapsed_fine_cells": 5473,
+        "elapsed_dwells": 8208057,
+        "padded_source_samples": 79027747205,
+        "source_calendar_origin_sample": 115200002,
+        "bounded_source_workspace_bytes": 148672,
+        "allocates_samples_or_templates": false
+      },
+      "full_span_grid_resolution_compatible": false,
+      "full_coherent_design_reference": {
+        "scope": "Hypothetical rectangular matched integration over each listed span; assumes phase remains coherent over that full window.",
+        "frequency_mismatch_loss_budget_db": 0.22440450238215368,
+        "frequency_requirements": [
+          {
+            "coherent_window_seconds": 0.5,
+            "required_step_hz": 0.5,
+            "maximum_rectangular_bin_mismatch_loss_db": 0.22440450238215368,
+            "required_points_across_current_bound": 2
+          },
+          {
+            "coherent_window_seconds": 2.0,
+            "required_step_hz": 0.125,
+            "maximum_rectangular_bin_mismatch_loss_db": 0.22440450238215368,
+            "required_points_across_current_bound": 2
+          },
+          {
+            "coherent_window_seconds": 3283222.8000000003,
+            "required_step_hz": 7.614469538893309e-08,
+            "maximum_rectangular_bin_mismatch_loss_db": 0.22440450238215368,
+            "required_points_across_current_bound": 23
+          }
+        ],
+        "clock_requirement": {
+          "status": "design_reference",
+          "fine_chip_rate_hz": 0.0016666666666666668,
+          "allowed_nearest_grid_error_fine_chips": 0.125,
+          "required_step_ppm": 45.686817233359854,
+          "required_points_across_current_bound": 2,
+          "current_step_ppm": 2.500000000125e-05,
+          "current_grid_points": 9,
+          "current_half_step_time_error_seconds": 4.104028500205202e-05,
+          "current_half_step_fine_chips": 6.840047500342003e-08,
+          "qualification": "0.125 chip is a design assumption; no shaping or receiver loss bound is qualified."
+        },
+        "limitations": [
+          "A stochastic or renewing channel may not support coherence over the full elapsed span.",
+          "Long-term oscillator/channel trajectory, reacquisition and implementation cost are unqualified.",
+          "Required point counts are analytic estimates; no long receiver arrays were constructed."
+        ]
+      },
+      "conditional_operation_null_bound": 0.0039000000000000003,
+      "null_accounting_horizon_seconds": 3292891.2
+    },
+    {
+      "name": "burst-38days",
+      "target_cn0_db_hz": -60,
+      "status": "manual_duration_override",
+      "active_seconds": 3283207.2,
+      "active_days": 38.000083333333336,
+      "elapsed_days": 151.99997222222223,
+      "energy_n0": 3.2832072,
+      "detection_lower_bound": -0.0,
+      "availability": {
+        "duration_forecast_available": true,
+        "modeled_detection_allocation_met": false,
+        "native_geometry_verified": true,
+        "sampled_export_preflight_available": false,
+        "sampled_export_limit_active_seconds": 3600,
+        "receiver_duration_qualified": false,
+        "scope": "Geometry verification does not generate samples, verify acquisition or qualify reception; sampled preflight retains independent native execution limits."
+      },
+      "native_geometry": {
+        "status": "checked-integer-geometry-only",
+        "active_tiles": 315693,
+        "physical_tiles_including_waits": 1262769,
+        "tile_seconds": 10.4,
+        "active_data_seconds": 3283207.2,
+        "elapsed_data_seconds": 13132797.6,
+        "burst_wait_tiles_between_active_tiles": 3,
+        "active_fine_coefficients": 44512713,
+        "active_dwells": 8208018,
+        "elapsed_fine_cells": 218879961,
+        "elapsed_dwells": 32831994,
+        "padded_source_samples": 78796791365,
+        "source_calendar_origin_sample": 2882,
+        "bounded_source_workspace_bytes": 162224,
+        "allocates_samples_or_templates": false
+      },
+      "full_span_grid_resolution_compatible": false,
+      "full_coherent_design_reference": {
+        "scope": "Hypothetical rectangular matched integration over each listed span; assumes phase remains coherent over that full window.",
+        "frequency_mismatch_loss_budget_db": 0.22440450238215368,
+        "frequency_requirements": [
+          {
+            "coherent_window_seconds": 0.5,
+            "required_step_hz": 0.5,
+            "maximum_rectangular_bin_mismatch_loss_db": 0.22440450238215368,
+            "required_points_across_current_bound": 2
+          },
+          {
+            "coherent_window_seconds": 2.0,
+            "required_step_hz": 0.125,
+            "maximum_rectangular_bin_mismatch_loss_db": 0.22440450238215368,
+            "required_points_across_current_bound": 2
+          },
+          {
+            "coherent_window_seconds": 13132797.6,
+            "required_step_hz": 1.9036309521742724e-08,
+            "maximum_rectangular_bin_mismatch_loss_db": 0.22440450238215368,
+            "required_points_across_current_bound": 5273
+          }
+        ],
+        "clock_requirement": {
+          "status": "design_reference",
+          "fine_chip_rate_hz": 16.666666666666668,
+          "allowed_nearest_grid_error_fine_chips": 0.125,
+          "required_step_ppm": 0.0011421785713045635,
+          "required_points_across_current_bound": 2,
+          "current_step_ppm": 2.500000000125e-05,
+          "current_grid_points": 9,
+          "current_half_step_time_error_seconds": 0.000164159970008208,
+          "current_half_step_fine_chips": 0.0027359995001368,
+          "qualification": "0.125 chip is a design assumption; no shaping or receiver loss bound is qualified."
+        },
+        "limitations": [
+          "A stochastic or renewing channel may not support coherence over the full elapsed span.",
+          "Long-term oscillator/channel trajectory, reacquisition and implementation cost are unqualified.",
+          "Required point counts are analytic estimates; no long receiver arrays were constructed."
+        ]
+      },
+      "conditional_operation_null_bound": 0.015300000000000001,
+      "null_accounting_horizon_seconds": 13132866.96
+    },
+    {
+      "name": "spread1000-38days",
+      "target_cn0_db_hz": -60,
+      "status": "manual_duration_override",
+      "active_seconds": 3304085.6,
+      "active_days": 38.24173148148148,
+      "elapsed_days": 38.24173148148148,
+      "energy_n0": 3.3040856,
+      "detection_lower_bound": -0.0,
+      "availability": {
+        "duration_forecast_available": true,
+        "modeled_detection_allocation_met": false,
+        "native_geometry_verified": true,
+        "sampled_export_preflight_available": false,
+        "sampled_export_limit_active_seconds": 3600,
+        "receiver_duration_qualified": false,
+        "scope": "Geometry verification does not generate samples, verify acquisition or qualify reception; sampled preflight retains independent native execution limits."
+      },
+      "native_geometry": {
+        "status": "checked-integer-geometry-only",
+        "active_tiles": 86,
+        "physical_tiles_including_waits": 86,
+        "tile_seconds": 38419.6,
+        "active_data_seconds": 3304085.6,
+        "elapsed_data_seconds": 3304085.6,
+        "burst_wait_tiles_between_active_tiles": 0,
+        "active_fine_coefficients": 5504000,
+        "active_dwells": 8260214,
+        "elapsed_fine_cells": 5506810,
+        "elapsed_dwells": 8260214,
+        "padded_source_samples": 79298284804,
+        "source_calendar_origin_sample": 115202,
+        "bounded_source_workspace_bytes": 11401408,
+        "allocates_samples_or_templates": false
+      },
+      "full_span_grid_resolution_compatible": false,
+      "full_coherent_design_reference": {
+        "scope": "Hypothetical rectangular matched integration over each listed span; assumes phase remains coherent over that full window.",
+        "frequency_mismatch_loss_budget_db": 0.22440450238215368,
+        "frequency_requirements": [
+          {
+            "coherent_window_seconds": 0.5,
+            "required_step_hz": 0.5,
+            "maximum_rectangular_bin_mismatch_loss_db": 0.22440450238215368,
+            "required_points_across_current_bound": 2
+          },
+          {
+            "coherent_window_seconds": 2.0,
+            "required_step_hz": 0.125,
+            "maximum_rectangular_bin_mismatch_loss_db": 0.22440450238215368,
+            "required_points_across_current_bound": 2
+          },
+          {
+            "coherent_window_seconds": 3304085.6,
+            "required_step_hz": 7.566389926459532e-08,
+            "maximum_rectangular_bin_mismatch_loss_db": 0.22440450238215368,
+            "required_points_across_current_bound": 23
+          }
+        ],
+        "clock_requirement": {
+          "status": "design_reference",
+          "fine_chip_rate_hz": 1.6666666666666667,
+          "allowed_nearest_grid_error_fine_chips": 0.125,
+          "required_step_ppm": 0.04539833955875719,
+          "required_points_across_current_bound": 2,
+          "current_step_ppm": 2.500000000125e-05,
+          "current_grid_points": 9,
+          "current_half_step_time_error_seconds": 4.130107000206506e-05,
+          "current_half_step_fine_chips": 6.883511667010844e-05,
+          "qualification": "0.125 chip is a design assumption; no shaping or receiver loss bound is qualified."
+        },
+        "limitations": [
+          "A stochastic or renewing channel may not support coherence over the full elapsed span.",
+          "Long-term oscillator/channel trajectory, reacquisition and implementation cost are unqualified.",
+          "Required point counts are analytic estimates; no long receiver arrays were constructed."
+        ]
+      },
+      "conditional_operation_null_bound": 0.0039000000000000003,
+      "null_accounting_horizon_seconds": 3304163.6
+    },
+    {
+      "name": "ten-years",
+      "target_cn0_db_hz": -60,
+      "status": "manual_duration_override",
+      "active_seconds": 315532807.2,
+      "active_days": 3652.0000833333334,
+      "elapsed_days": 3652.0000833333334,
+      "energy_n0": 315.5328072,
+      "detection_lower_bound": 1.0,
+      "availability": {
+        "duration_forecast_available": true,
+        "modeled_detection_allocation_met": true,
+        "native_geometry_verified": true,
+        "sampled_export_preflight_available": false,
+        "sampled_export_limit_active_seconds": 3600,
+        "receiver_duration_qualified": false,
+        "scope": "Geometry verification does not generate samples, verify acquisition or qualify reception; sampled preflight retains independent native execution limits."
+      },
+      "native_geometry": {
+        "status": "checked-integer-geometry-only",
+        "active_tiles": 30339693,
+        "physical_tiles_including_waits": 30339693,
+        "tile_seconds": 10.4,
+        "active_data_seconds": 315532807.2,
+        "elapsed_data_seconds": 315532807.2,
+        "burst_wait_tiles_between_active_tiles": 0,
+        "active_fine_coefficients": 4277896713,
+        "active_dwells": 788832018,
+        "elapsed_fine_cells": 5258880121,
+        "elapsed_dwells": 788832018,
+        "padded_source_samples": 1893196848965,
+        "source_calendar_origin_sample": 2882,
+        "bounded_source_workspace_bytes": 162224,
+        "allocates_samples_or_templates": false
+      },
+      "full_span_grid_resolution_compatible": false,
+      "full_coherent_design_reference": {
+        "scope": "Hypothetical rectangular matched integration over each listed span; assumes phase remains coherent over that full window.",
+        "frequency_mismatch_loss_budget_db": 0.22440450238215368,
+        "frequency_requirements": [
+          {
+            "coherent_window_seconds": 0.5,
+            "required_step_hz": 0.5,
+            "maximum_rectangular_bin_mismatch_loss_db": 0.22440450238215368,
+            "required_points_across_current_bound": 2
+          },
+          {
+            "coherent_window_seconds": 2.0,
+            "required_step_hz": 0.125,
+            "maximum_rectangular_bin_mismatch_loss_db": 0.22440450238215368,
+            "required_points_across_current_bound": 2
+          },
+          {
+            "coherent_window_seconds": 315532807.2,
+            "required_step_hz": 7.923106386891106e-10,
+            "maximum_rectangular_bin_mismatch_loss_db": 0.22440450238215368,
+            "required_points_across_current_bound": 126650
+          }
+        ],
+        "clock_requirement": {
+          "status": "design_reference",
+          "fine_chip_rate_hz": 16.666666666666668,
+          "allowed_nearest_grid_error_fine_chips": 0.125,
+          "required_step_ppm": 4.753863832134664e-05,
+          "required_points_across_current_bound": 6,
+          "current_step_ppm": 2.500000000125e-05,
+          "current_grid_points": 9,
+          "current_half_step_time_error_seconds": 0.003944160090197208,
+          "current_half_step_fine_chips": 0.0657360015032868,
+          "qualification": "0.125 chip is a design assumption; no shaping or receiver loss bound is qualified."
+        },
+        "limitations": [
+          "A stochastic or renewing channel may not support coherence over the full elapsed span.",
+          "Long-term oscillator/channel trajectory, reacquisition and implementation cost are unqualified.",
+          "Required point counts are analytic estimates; no long receiver arrays were constructed."
+        ]
+      },
+      "conditional_operation_null_bound": 0.3653,
+      "null_accounting_horizon_seconds": 315532876.55999994
+    }
+  ],
+  "focused_tests": {
+    "tests": 46,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "wall_seconds": 2.152837679022923,
+    "modules": [
+      "test_triad_duration_model",
+      "test_triad_weak_plan",
+      "test_triad_operational_admission",
+      "test_triad_weak_receiver"
+    ],
+    "output": "..............................................\n----------------------------------------------------------------------\nRan 46 tests in 0.121s\n\nOK\n"
+  },
+  "native_resources": {
+    "scope": "Separate fresh launcher per case; POSIX child process resource usage, includes executable startup. Single-run engineering observations, not confidence-qualified performance regression.",
+    "rows": [
+      {
+        "requested_active_seconds": 3600,
+        "returncode": 0,
+        "command": [
+          "build/dev-cli/triad_helper_export",
+          "--case",
+          "hf",
+          "--plan-only",
+          "--seconds",
+          "3600",
+          "--sample-rate",
+          "6000",
+          "--rate",
+          "36",
+          "--added-symbols",
+          "10",
+          "--fhss",
+          "off"
+        ],
+        "timing": {
+          "wall_seconds": 0.06535341998096555,
+          "user_cpu_seconds": 0.042034999999999996,
+          "system_cpu_seconds": 0.022928,
+          "max_child_rss_kib": 11788
+        },
+        "geometry": {
+          "status": "checked-integer-geometry-only",
+          "active_tiles": 311,
+          "physical_tiles_including_waits": 311,
+          "tile_seconds": 11.600000000000001,
+          "active_data_seconds": 3607.6000000000004,
+          "elapsed_data_seconds": 3607.6000000000004,
+          "burst_wait_tiles_between_active_tiles": 0,
+          "active_fine_coefficients": 205260,
+          "active_dwells": 9019,
+          "elapsed_fine_cells": 216457,
+          "elapsed_dwells": 9020,
+          "padded_source_samples": 21647205,
+          "source_calendar_origin_sample": 802,
+          "bounded_source_workspace_bytes": 254272,
+          "allocates_samples_or_templates": false
+        },
+        "geometry_feasible": true,
+        "serialized_json_bytes": 5639,
+        "stderr": ""
+      },
+      {
+        "requested_active_seconds": 86400,
+        "returncode": 0,
+        "command": [
+          "build/dev-cli/triad_helper_export",
+          "--case",
+          "hf",
+          "--plan-only",
+          "--seconds",
+          "86400",
+          "--sample-rate",
+          "6000",
+          "--rate",
+          "36",
+          "--added-symbols",
+          "10",
+          "--fhss",
+          "off"
+        ],
+        "timing": {
+          "wall_seconds": 0.06504214700544253,
+          "user_cpu_seconds": 0.060703999999999994,
+          "system_cpu_seconds": 0.004046,
+          "max_child_rss_kib": 11984
+        },
+        "geometry": {
+          "status": "checked-integer-geometry-only",
+          "active_tiles": 7449,
+          "physical_tiles_including_waits": 7449,
+          "tile_seconds": 11.600000000000001,
+          "active_data_seconds": 86408.40000000001,
+          "elapsed_data_seconds": 86408.40000000001,
+          "burst_wait_tiles_between_active_tiles": 0,
+          "active_fine_coefficients": 4916340,
+          "active_dwells": 216021,
+          "elapsed_fine_cells": 5184505,
+          "elapsed_dwells": 216022,
+          "padded_source_samples": 518452005,
+          "source_calendar_origin_sample": 802,
+          "bounded_source_workspace_bytes": 254272,
+          "allocates_samples_or_templates": false
+        },
+        "geometry_feasible": true,
+        "serialized_json_bytes": 5650,
+        "stderr": ""
+      },
+      {
+        "requested_active_seconds": 3283200,
+        "returncode": 0,
+        "command": [
+          "build/dev-cli/triad_helper_export",
+          "--case",
+          "hf",
+          "--plan-only",
+          "--seconds",
+          "3283200",
+          "--sample-rate",
+          "6000",
+          "--rate",
+          "36",
+          "--added-symbols",
+          "10",
+          "--fhss",
+          "off"
+        ],
+        "timing": {
+          "wall_seconds": 0.06900994799798355,
+          "user_cpu_seconds": 0.052423,
+          "system_cpu_seconds": 0.01613,
+          "max_child_rss_kib": 11924
+        },
+        "geometry": {
+          "status": "checked-integer-geometry-only",
+          "active_tiles": 283035,
+          "physical_tiles_including_waits": 283035,
+          "tile_seconds": 11.600000000000001,
+          "active_data_seconds": 3283206.0000000005,
+          "elapsed_data_seconds": 3283206.0000000005,
+          "burst_wait_tiles_between_active_tiles": 0,
+          "active_fine_coefficients": 186803100,
+          "active_dwells": 8208015,
+          "elapsed_fine_cells": 196992361,
+          "elapsed_dwells": 8208016,
+          "padded_source_samples": 19699237605,
+          "source_calendar_origin_sample": 802,
+          "bounded_source_workspace_bytes": 254272,
+          "allocates_samples_or_templates": false
+        },
+        "geometry_feasible": true,
+        "serialized_json_bytes": 5669,
+        "stderr": ""
+      },
+      {
+        "requested_active_seconds": 31536000,
+        "returncode": 0,
+        "command": [
+          "build/dev-cli/triad_helper_export",
+          "--case",
+          "hf",
+          "--plan-only",
+          "--seconds",
+          "31536000",
+          "--sample-rate",
+          "6000",
+          "--rate",
+          "36",
+          "--added-symbols",
+          "10",
+          "--fhss",
+          "off"
+        ],
+        "timing": {
+          "wall_seconds": 0.08007650502258912,
+          "user_cpu_seconds": 0.07151199999999999,
+          "system_cpu_seconds": 0.007944999999999999,
+          "max_child_rss_kib": 12184
+        },
+        "geometry": {
+          "status": "checked-integer-geometry-only",
+          "active_tiles": 2718621,
+          "physical_tiles_including_waits": 2718621,
+          "tile_seconds": 11.600000000000001,
+          "active_data_seconds": 31536003.600000005,
+          "elapsed_data_seconds": 31536003.600000005,
+          "burst_wait_tiles_between_active_tiles": 0,
+          "active_fine_coefficients": 1794289860,
+          "active_dwells": 78840009,
+          "elapsed_fine_cells": 1892160217,
+          "elapsed_dwells": 78840010,
+          "padded_source_samples": 189216023205,
+          "source_calendar_origin_sample": 802,
+          "bounded_source_workspace_bytes": 254272,
+          "allocates_samples_or_templates": false
+        },
+        "geometry_feasible": true,
+        "serialized_json_bytes": 5679,
+        "stderr": ""
+      },
+      {
+        "requested_active_seconds": 315576000,
+        "returncode": 0,
+        "command": [
+          "build/dev-cli/triad_helper_export",
+          "--case",
+          "hf",
+          "--plan-only",
+          "--seconds",
+          "315576000",
+          "--sample-rate",
+          "6000",
+          "--rate",
+          "36",
+          "--added-symbols",
+          "10",
+          "--fhss",
+          "off"
+        ],
+        "timing": {
+          "wall_seconds": 0.07768399402266368,
+          "user_cpu_seconds": 0.054028,
+          "system_cpu_seconds": 0.023155,
+          "max_child_rss_kib": 11756
+        },
+        "geometry": {
+          "status": "checked-integer-geometry-only",
+          "active_tiles": 27204828,
+          "physical_tiles_including_waits": 27204828,
+          "tile_seconds": 11.600000000000001,
+          "active_data_seconds": 315576004.8,
+          "elapsed_data_seconds": 315576004.8,
+          "burst_wait_tiles_between_active_tiles": 0,
+          "active_fine_coefficients": 17955186480,
+          "active_dwells": 788940012,
+          "elapsed_fine_cells": 18934560289,
+          "elapsed_dwells": 788940013,
+          "padded_source_samples": 1893456030405,
+          "source_calendar_origin_sample": 802,
+          "bounded_source_workspace_bytes": 254272,
+          "allocates_samples_or_templates": false
+        },
+        "geometry_feasible": true,
+        "serialized_json_bytes": 5689,
+        "stderr": ""
+      }
+    ]
+  },
+  "qualification": {
+    "native_geometry": true,
+    "multi_day_receiver": false,
+    "physical_null": false,
+    "correct_probability": false
+  },
+  "scope": "Provisional matched-atom forecasts with checked long native geometry; finer synchronization design counts remain separate from the original charged likelihood grid."
+}

@@ -16,6 +16,10 @@ from triad_operational_admission import (DEFAULT_COHERENCES, operational_thresho
                                          public_grid)
 
 _nodes, _weights = np.polynomial.legendre.leggauss(64)
+JULIAN_YEAR_SECONDS = 365.25 * 86400.
+SECONDS_PER_DAY = 86400.
+FREQUENCY_MISMATCH_LOSS_BUDGET_DB = -20*math.log10(math.sin(math.pi/8)/(math.pi/8))
+CLOCK_MISMATCH_FINE_CHIPS = .125
 
 
 def _positive(value, name):
@@ -108,6 +112,133 @@ def deterministic_prediction(energy, rank, threshold):
         log_miss_bound=None if log_miss == -math.inf else log_miss,
         tail_method='noncentral complex-Gamma lower-tail Chernoff',
         tail_scope='Fixed matched basis and fixed energy; no acquisition/model-mismatch guarantee')
+
+
+def long_span_diagnostics(native, grid, *, active_seconds, elapsed_seconds,
+                          message_bits, helper_lead_seconds, pulse_halo_seconds,
+                          alpha_per_day, nominal_cn0_db_hz,
+                          outage_fraction, retained_fraction):
+    """Describe scaling beyond receiver qualification without changing its grid.
+
+    Frequency and clock counts are design comparisons only. They never enter
+    the selected likelihood threshold or imply long-span receiver support.
+    """
+    duration = _positive(float(elapsed_seconds), 'elapsed duration')
+    active = _positive(float(active_seconds), 'active duration')
+    if isinstance(message_bits, bool) or not isinstance(message_bits, int) or message_bits < 1:
+        raise ValueError('positive integer source-bit count required')
+    if not math.isfinite(helper_lead_seconds) or helper_lead_seconds < 0:
+        raise ValueError('finite nonnegative Helper lead required')
+    if not math.isfinite(pulse_halo_seconds) or pulse_halo_seconds < 0:
+        raise ValueError('finite nonnegative pulse halo required')
+    if not math.isfinite(alpha_per_day) or not 0 < alpha_per_day < 1:
+        raise ValueError('alpha per day must be in (0,1)')
+
+    whole_message_seconds = (helper_lead_seconds + message_bits*duration +
+                             2*pulse_halo_seconds + .4)
+    # Separate a contiguous serialization estimate from a conservative assumed
+    # schedule with a fresh Helper lead and UTC-grid wait for every bit. Neither
+    # is an implemented arbitrary-message calendar or unbounded operation.
+    accounting_seconds = message_bits*(duration+helper_lead_seconds+30.+2*pulse_halo_seconds+.4)
+    covered_days = max(1, math.ceil(accounting_seconds / SECONDS_PER_DAY))
+    whole_message_alpha_bound = min(1., covered_days*alpha_per_day)
+
+    # The public admission grid is endpoint-inclusive and expands its frequency
+    # radius outward. Keep these existing points as an audit; do not replace or
+    # feed the much finer design lattice into the present receiver.
+    cfo_bound = float(grid.frequency_bound)
+    current_freq_step = float(grid.frequency_step)
+    current_freq_count = int(grid.counts[2])
+    worst_frequency_error = min(cfo_bound, current_freq_step/2)
+    current_clock_intervals = int(grid.clock_intervals) if grid.clock_bound else 0
+    current_clock_step = (2*float(grid.clock_bound)/current_clock_intervals
+                          if current_clock_intervals else 0.)
+    current_clock_count = current_clock_intervals+1 if current_clock_intervals else 1
+    current_clock_error = current_clock_step/2
+    clock_error_seconds = current_clock_error*duration*1e-6
+
+    fine_rate = native.get('format', {}).get('fine_chip_rate_hz')
+    if fine_rate is None:
+        clock_design = dict(status='unavailable', reason='native fine_chip_rate_hz is absent')
+    else:
+        fine_rate = _positive(float(fine_rate), 'fine-chip rate')
+        clock_design_step = 2*CLOCK_MISMATCH_FINE_CHIPS*1e6/(fine_rate*duration)
+        clock_design_count = (1 if grid.clock_bound == 0 else
+            math.ceil(2*float(grid.clock_bound)/clock_design_step)+1)
+        clock_error_chips = fine_rate*clock_error_seconds
+        clock_design = dict(status='design_reference', fine_chip_rate_hz=fine_rate,
+            allowed_nearest_grid_error_fine_chips=CLOCK_MISMATCH_FINE_CHIPS,
+            required_step_ppm=clock_design_step,
+            required_points_across_current_bound=clock_design_count,
+            current_step_ppm=current_clock_step,
+            current_grid_points=current_clock_count,
+            current_half_step_time_error_seconds=clock_error_seconds,
+            current_half_step_fine_chips=clock_error_chips,
+            qualification='0.125 chip is a design assumption; no shaping or receiver loss bound is qualified.')
+
+    windows = (.5, 2., duration)
+    frequency_design = []
+    for coherent_window in windows:
+        required_step = 1/(4*coherent_window)
+        required_count = (1 if cfo_bound == 0 else
+            math.ceil(2*cfo_bound/required_step)+1)
+        frequency_design.append(dict(coherent_window_seconds=coherent_window,
+            required_step_hz=required_step,
+            maximum_rectangular_bin_mismatch_loss_db=FREQUENCY_MISMATCH_LOSS_BUDGET_DB,
+            required_points_across_current_bound=required_count))
+    full_span_frequency_reference = frequency_design[-1]
+    frequency_resolution_compatible = (worst_frequency_error <=
+        full_span_frequency_reference['required_step_hz']/2)
+    if fine_rate is None:
+        clock_resolution_compatible = None
+    else:
+        clock_resolution_compatible = (clock_error_chips <=
+            CLOCK_MISMATCH_FINE_CHIPS)
+    full_span_grid_resolution_compatible = (None if clock_resolution_compatible is None
+        else bool(frequency_resolution_compatible and clock_resolution_compatible))
+    nominal_energy_n0 = (10**(nominal_cn0_db_hz/10) * active *
+                         (1-outage_fraction) * retained_fraction)
+    return dict(scope='Forecast-duration and search-resolution diagnostics only; no long-span receiver performance is asserted.',
+        selected_active_seconds=active, selected_active_days=active/SECONDS_PER_DAY,
+        selected_active_julian_years=active/JULIAN_YEAR_SECONDS,
+        selected_elapsed_seconds=duration, selected_elapsed_days=duration/SECONDS_PER_DAY,
+        selected_elapsed_julian_years=duration/JULIAN_YEAR_SECONDS,
+        whole_message_elapsed_seconds=whole_message_seconds,
+        whole_message_elapsed_days=whole_message_seconds/SECONDS_PER_DAY,
+        whole_message_elapsed_julian_years=whole_message_seconds/JULIAN_YEAR_SECONDS,
+        whole_message_elapsed_scope='Approximate contiguous serialization with one Helper lead; not a verified multi-bit export calendar.',
+        admission_accounting_horizon_seconds=accounting_seconds,
+        admission_accounting_horizon_scope='Assumed schedule with per-bit Helper lead, up to30s UTC alignment, pulse halos and0.4s endpoint allowance. Longer listening/search schedules require their own exposure bound.',
+        modeled_active_data_energy_n0=nominal_energy_n0,
+        nominal_data_transmit_energy_j=float(native['physics']['data_w'])*active,
+        assumed_outage_fraction=outage_fraction,
+        assumed_retained_energy_fraction=retained_fraction,
+        whole_message_days_charged=covered_days,
+        per_24h_alpha=alpha_per_day,
+        whole_message_conditional_null_union_bound=whole_message_alpha_bound,
+        null_bound_scope='Union over 24-hour periods covering the separately stated assumed accounting horizon, under the configured per-day conditional Gaussian-null bound; no independence assumed. Not a physical-null bound or an unlimited-operation guarantee.',
+        current_receiver_long_span_qualified=False,
+        receiver_search_scope='The charged likelihood grid remains the existing PublicGrid. Long-span frequency/clock requirements below are separate design references and are not added to that grid or its duration forecast.',
+        current_search_grid=dict(candidate_count=int(grid.candidate_count),
+            epochs=len(grid.epochs), arrival_intervals=int(grid.arrival_intervals),
+            frequency_bound_hz=cfo_bound, frequency_step_hz=current_freq_step,
+            frequency_radius=int(grid.frequency_radius),
+            frequency_points=current_freq_count, frequency_worst_half_step_error_hz=worst_frequency_error,
+            full_span_frequency_resolution_meets_design_reference=frequency_resolution_compatible,
+            clock_bound_ppm=float(grid.clock_bound), clock_intervals=current_clock_intervals,
+            clock_step_ppm=current_clock_step, clock_points=current_clock_count,
+            clock_half_step_timing_error_seconds=clock_error_seconds,
+            clock_resolution_meets_design_reference=clock_resolution_compatible),
+        full_span_grid_resolution_compatible=full_span_grid_resolution_compatible,
+        full_span_grid_compatibility_scope='Compares the current grid only with the stated fully coherent frequency and 0.125-chip clock design references; true means resolution compatible, not receiver or channel qualification. False identifies at least one inadequate grid spacing.',
+        full_coherent_design_reference=dict(
+            scope='Hypothetical rectangular matched integration over each listed span; assumes phase remains coherent over that full window.',
+            frequency_mismatch_loss_budget_db=FREQUENCY_MISMATCH_LOSS_BUDGET_DB,
+            frequency_requirements=frequency_design,
+            clock_requirement=clock_design,
+            limitations=['A stochastic or renewing channel may not support coherence over the full elapsed span.',
+                         'Long-term oscillator/channel trajectory, reacquisition and implementation cost are unqualified.',
+                         'Required point counts are analytic estimates; no long receiver arrays were constructed.']))
 
 
 def plan_from_native(native, target_cn0_db_hz, *, correct_probability=.99,
@@ -280,6 +411,11 @@ def plan_from_native(native, target_cn0_db_hz, *, correct_probability=.99,
         export_supported=chosen is not None and chosen['active_seconds']<=3600 and bool(native['geometry_feasible']) and helper_available and placement_available,
         export_support_scope='Preflight availability estimate; native sample/byte/alias limits still apply during export.',
         export_limit_seconds=3600, native_plan=native)
+    result['forecast_horizon'] = dict(configured_max_active_seconds=limit,
+        configured_max_active_days=limit/SECONDS_PER_DAY,
+        configured_max_active_julian_years=limit/JULIAN_YEAR_SECONDS,
+        bounded_tile_evaluations=max_evaluations,
+        scope='Mathematical search horizon only. Native geometry verification, sampled export, and long-span receiver execution are separate limits.')
     if chosen:
         result['calendar'] = dict(active_data_seconds=chosen['active_seconds'],
             elapsed_data_seconds=chosen['elapsed_data_seconds'], helper_lead_seconds=helper_lead,
@@ -287,4 +423,12 @@ def plan_from_native(native, target_cn0_db_hz, *, correct_probability=.99,
             message_seconds_approx=helper_lead+message_bits*chosen['elapsed_data_seconds']+2*halo+.4,
             nominal_data_transmit_energy_j=float(p['data_w'])*chosen['active_seconds'],
             scope='Native tile lattice plus fixed lead, two pulse halos and 0.4s endpoint allowance; use exported calendar for actual time. Message time is a serialization estimate, not implemented message reception.')
+        result['long_span_diagnostics'] = long_span_diagnostics(native, grid,
+            active_seconds=chosen['active_seconds'],
+            elapsed_seconds=chosen['elapsed_data_seconds'], message_bits=message_bits,
+            helper_lead_seconds=helper_lead, pulse_halo_seconds=halo,
+            alpha_per_day=alpha_per_day, nominal_cn0_db_hz=target_cn0_db_hz,
+            outage_fraction=outage_fraction, retained_fraction=retained_fraction)
+    else:
+        result['long_span_diagnostics'] = None
     return result

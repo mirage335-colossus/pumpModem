@@ -129,6 +129,84 @@ class DurationModelTests(unittest.TestCase):
         self.assertGreater(b['full_grid_count'],a['full_grid_count'])
         self.assertGreater(b['origin_shift_allowance_seconds'],a['origin_shift_allowance_seconds'])
 
+    def test_multi_day_and_multi_year_manual_forecasts_stay_bounded(self):
+        horizons = (3600., 86400., 38*86400., 365.25*86400., 10*365.25*86400.-11.6)
+        baseline = plan_from_native(fixture(), 8., manual_seconds=11.6)
+        for seconds in horizons:
+            with self.subTest(seconds=seconds):
+                p = plan_from_native(fixture(), 8., manual_seconds=seconds)
+                d = p['long_span_diagnostics']
+                self.assertEqual(p['status'], 'manual_duration_override')
+                self.assertGreaterEqual(d['selected_active_seconds'], seconds)
+                self.assertEqual(d['current_receiver_long_span_qualified'], False)
+                self.assertEqual(d['current_search_grid']['frequency_step_hz'], .01)
+                self.assertEqual(d['full_coherent_design_reference']['frequency_requirements'][-1]
+                                 ['coherent_window_seconds'],d['selected_elapsed_seconds'])
+                self.assertEqual(d['whole_message_days_charged'],
+                                 math.ceil(d['admission_accounting_horizon_seconds']/86400))
+                self.assertGreaterEqual(d['admission_accounting_horizon_seconds'],d['whole_message_elapsed_seconds'])
+                self.assertEqual(d['whole_message_conditional_null_union_bound'],
+                                 min(1.,d['whole_message_days_charged']*1e-4))
+                self.assertEqual(p['full_grid_count'],baseline['full_grid_count'])
+                self.assertLessEqual(p['evaluation_count'],4)
+                self.assertTrue(math.isfinite(d['modeled_active_data_energy_n0']))
+        longest = plan_from_native(fixture(),8.,manual_seconds=horizons[-1])['long_span_diagnostics']
+        day = plan_from_native(fixture(),8.,manual_seconds=horizons[2])['long_span_diagnostics']
+        self.assertGreater(longest['full_coherent_design_reference']['frequency_requirements'][-1]
+                           ['required_points_across_current_bound'],
+                           day['full_coherent_design_reference']['frequency_requirements'][-1]
+                           ['required_points_across_current_bound'])
+
+    def test_frequency_and_clock_design_counts_are_descriptive_only(self):
+        native=fixture();native['format']['fine_chip_rate_hz']=60.
+        p = plan_from_native(native,8.,manual_seconds=86400.)
+        d = p['long_span_diagnostics']
+        coherent = d['full_coherent_design_reference']['frequency_requirements'][-1]
+        expected_step = 1/(4*d['selected_elapsed_seconds'])
+        self.assertAlmostEqual(coherent['required_step_hz'],expected_step)
+        self.assertGreater(coherent['maximum_rectangular_bin_mismatch_loss_db'],.224)
+        self.assertLess(coherent['maximum_rectangular_bin_mismatch_loss_db'],.225)
+        self.assertEqual(coherent['required_points_across_current_bound'],
+                         math.ceil(2*d['current_search_grid']['frequency_bound_hz']/expected_step)+1)
+        clock=d['full_coherent_design_reference']['clock_requirement']
+        self.assertEqual(clock['status'],'design_reference')
+        self.assertEqual(clock['required_points_across_current_bound'],
+                         math.ceil(2*d['current_search_grid']['clock_bound_ppm'] /
+                                   clock['required_step_ppm'])+1)
+        self.assertIn('not added to that grid',d['receiver_search_scope'])
+        self.assertFalse(d['current_search_grid']['full_span_frequency_resolution_meets_design_reference'])
+        self.assertFalse(d['current_search_grid']['clock_resolution_meets_design_reference'])
+        self.assertFalse(d['full_span_grid_resolution_compatible'])
+        self.assertFalse(p['correct_probability_qualified'])
+        self.assertFalse(p['physical_null_qualified'])
+
+    def test_null_exposure_includes_per_bit_helper_and_alignment_allowances(self):
+        d=plan_from_native(fixture(),8.,manual_seconds=86350.,message_bits=2)['long_span_diagnostics']
+        self.assertEqual(math.ceil(d['whole_message_elapsed_seconds']/86400.),2)
+        self.assertEqual(d['whole_message_days_charged'],3)
+        self.assertAlmostEqual(d['whole_message_conditional_null_union_bound'],3e-4)
+
+    def test_zero_offset_grid_meets_resolution_reference(self):
+        native=fixture();native['format']['fine_chip_rate_hz']=60.
+        native['physics'].update(deterministic_cfo_bound_hz=0.,sample_clock_pair_ppm=0.)
+        d=plan_from_native(native,8.,manual_seconds=86400.)['long_span_diagnostics']
+        self.assertTrue(d['current_search_grid']['full_span_frequency_resolution_meets_design_reference'])
+        self.assertTrue(d['current_search_grid']['clock_resolution_meets_design_reference'])
+        self.assertTrue(d['full_span_grid_resolution_compatible'])
+
+    def test_missing_native_fine_rate_does_not_invent_clock_resolution(self):
+        native=fixture();p=plan_from_native(native,8.,manual_seconds=86400.)
+        clock=p['long_span_diagnostics']['full_coherent_design_reference']['clock_requirement']
+        self.assertEqual(clock['status'],'unavailable')
+        self.assertIn('fine_chip_rate_hz',clock['reason'])
+
+    def test_diagnostic_fields_do_not_change_existing_selected_tiles(self):
+        for cn,expected in ((20.,11.6),(8.,46.4),(5.,92.8)):
+            p=plan_from_native(fixture(),cn)
+            self.assertAlmostEqual(p['active_seconds'],expected)
+            self.assertFalse(p['long_span_diagnostics']['current_receiver_long_span_qualified'])
+            self.assertEqual(p['forecast_horizon']['configured_max_active_seconds'],315576000.)
+
 
 if __name__ == '__main__':
     unittest.main()

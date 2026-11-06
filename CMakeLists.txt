@@ -1175,6 +1175,10 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
       ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_triad_helper_export.py $<TARGET_FILE:triad_helper_export>)
     set_tests_properties(triad_helper_export PROPERTIES LABELS "triad-helper" TIMEOUT 90)
     add_custom_target(test_triad_helper_export DEPENDS triad_helper_export)
+    add_test(NAME triad_helper_plan_long COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_triad_helper_plan_long.py $<TARGET_FILE:triad_helper_export>)
+    set_tests_properties(triad_helper_plan_long PROPERTIES LABELS "triad-helper" TIMEOUT 30)
+    add_custom_target(test_triad_helper_plan_long DEPENDS triad_helper_export)
     if(TARGET triad_audio_capture)
       add_test(NAME triad_audio_capture_guards COMMAND ${CMAKE_COMMAND} -E env
         TRIAD_AUDIO_CAPTURE_BINARY=$<TARGET_FILE:triad_audio_capture> ${Python3_EXECUTABLE}

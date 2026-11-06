@@ -1,6 +1,7 @@
 import json
 import contextlib
 import io
+import math
 from pathlib import Path
 import tempfile
 import unittest
@@ -205,6 +206,64 @@ class WeakPlanCliTests(unittest.TestCase):
                 wrapper.execute(['--exporter', str(self.exporter), '--target-cn0', '8',
                                  '--output', str(output), '--', *self.native])
         run.assert_not_called()
+
+    def test_long_forecasts_reprobe_geometry_without_export(self):
+        for duration in (3600., 86400., 38*86400., 365*86400., 315576000.):
+            with self.subTest(duration=duration):
+                tiles=int(duration/2)
+                plan={**self.plan, 'active_seconds':duration, 'export_supported':False,
+                      'selected':dict(tiles=tiles,active_seconds=duration,elapsed_data_seconds=duration)}
+                def probe(command, *, cwd):
+                    value=self.probe
+                    if float(command[command.index('--seconds')+1])==duration:
+                        value={**self.probe,'format':{**self.probe['format'],
+                            'tile_count':tiles,'elapsed_bit_seconds':duration},
+                            'geometry':dict(active_tiles=tiles,active_data_seconds=duration)}
+                    return value,dict(command=command)
+                with patch.object(wrapper,'run_json',side_effect=probe) as native, \
+                     patch.object(wrapper,'plan_from_native',return_value=plan), \
+                     patch.object(wrapper.subprocess,'run') as export:
+                    r=wrapper.execute(self.args('--target-cn0','-60','--report',str(self.root/f'{duration}.json')))
+                self.assertEqual(native.call_count,2)
+                self.assertTrue(r['availability']['native_geometry_verified'])
+                self.assertFalse(r['availability']['sampled_export_preflight_available'])
+                export.assert_not_called()
+
+    def test_days_units_and_unavailable_geometry_are_preserved(self):
+        report=self.root/'long-failed.json'
+        plan={**self.plan,'active_seconds':38*86400.,'export_supported':False,
+              'selected':dict(tiles=1641600,active_seconds=38*86400.,elapsed_data_seconds=38*86400.)}
+        with patch.object(wrapper,'run_json',side_effect=[(self.probe,{}),
+                ({'geometry_feasible':False,'reason':'coordinate overflow'}, {})]), \
+             patch.object(wrapper,'plan_from_native',return_value=plan) as planner:
+            r=wrapper.execute(self.args('--target-cn0','-60','--days','38',
+                '--max-active-days','10000','--report',str(report)))
+        self.assertEqual(planner.call_args.kwargs['manual_seconds'],38*86400.)
+        self.assertEqual(planner.call_args.kwargs['max_active_seconds'],10000*86400.)
+        self.assertTrue(r['availability']['duration_forecast_available'])
+        self.assertFalse(r['availability']['modeled_detection_allocation_met'])
+        self.assertFalse(r['availability']['native_geometry_verified'])
+        self.assertIn('coordinate overflow',json.loads(report.read_text())['native']['selected_duration_probe_error'])
+
+    def test_selected_probe_process_failure_preserves_forecast(self):
+        report=self.root/'probe-failed.json'
+        with patch.object(wrapper,'run_json',side_effect=[(self.probe,{}),RuntimeError('old exporter refuses long span')]), \
+             patch.object(wrapper,'plan_from_native',return_value=dict(self.plan)):
+            r=wrapper.execute(self.args('--target-cn0','8','--report',str(report)))
+        self.assertEqual(r['native']['selected_duration_probe_status'],'verification_failed')
+        self.assertFalse(r['duration_plan']['export_supported'])
+        self.assertIn('old exporter',r['native']['selected_duration_probe_error'])
+        self.assertTrue(report.is_file())
+
+    def test_long_time_comparison_allows_only_roundoff(self):
+        t=315576000.
+        self.assertTrue(wrapper._same_duration(math.nextafter(t,math.inf),t))
+        self.assertFalse(wrapper._same_duration(t+.001,t))
+        self.assertFalse(wrapper._same_duration(math.nan,t))
+        n={**self.probe,'format':{'tile_count':2,'elapsed_bit_seconds':4.}}
+        wrong={**self.plan,'selected':{**self.plan['selected'],'tiles':3}}
+        with self.assertRaisesRegex(ValueError,'tile count'):
+            wrapper._check_plan_only(n,4.,wrong)
 
 
 if __name__ == '__main__':
