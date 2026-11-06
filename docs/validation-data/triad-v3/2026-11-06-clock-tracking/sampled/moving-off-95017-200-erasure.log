@@ -1,0 +1,10 @@
+Traceback (most recent call last):
+  File "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-tracking-200/sampled/run.py", line 78, in <module>
+    else:r.push(first,values,valid[first:stop])
+         ~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_incremental_receiver.py", line 261, in push
+    self._score_block(start, stop, source[offset:offset+take], mask[offset:offset+take])
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_incremental_receiver.py", line 174, in _score_block
+    raise ValueError("partial erasures with auxiliary DFT projection require a covariance adapter")
+ValueError: partial erasures with auxiliary DFT projection require a covariance adapter

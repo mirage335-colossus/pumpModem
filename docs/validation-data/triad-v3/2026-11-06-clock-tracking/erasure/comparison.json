@@ -1,0 +1,53 @@
+{
+  "status": "exact_all_valid_score_and_block_identity",
+  "before_source_sha256": "0dbe8809f454eb9f5afa2592960590d92d27c223eef75bb1c65dea15c6022034",
+  "after_source_sha256": "a113e42683d05f0f8e8d264e22f14ab8b8fa55ebcd00cd9d3cca67de9deb3c79",
+  "old_reference_sha256": "134e20d040a4957f999baaa80515724b22cd31277e5569d1065e23c4ce2ae98a",
+  "reproducer_sha256": "12f3456ae607f166f9d630093535ebe982737e48047ac9ae829f503e15ce02ab",
+  "supporting_source_sha256": {
+    "triad_incremental_receiver.py": "6452da06af68d835128bdb4a5d6a8309d3802d60d7a21907f3bda92dbba13a45",
+    "triad_timing_forward.py": "0d04869f45db3d66c9c70dcac54d6f0464f676e5b54721f28f07d69239d7bd31",
+    "triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba",
+    "triad_dynamic_joint.py": "071a435406d43e5d322f4304ae821469f5b3a107134b5e50b5fb15eeab528832"
+  },
+  "seed": 73183,
+  "samples": 44,
+  "sample_rate": 16,
+  "segment_samples": 19,
+  "block_samples": 8,
+  "projection": "dft",
+  "arithmetic": "fp64",
+  "mask": "all valid",
+  "timing": "one fixed zero-rate state",
+  "noise_variance": 1.7,
+  "stationary_power": [
+    0.8
+  ],
+  "coherences": [
+    0.6,
+    "infinite"
+  ],
+  "values_sha256": "93fe3e3e83d3e9ab08dc6e274671ad463454ca8c2c7c781e5832e7e6bfcd8577",
+  "basis_sha256": "2a3d9f04785e8d4aa7ec1bebb5b2fee564ab73d9c2757eb9a86d3042ac15750e",
+  "before_scores": [
+    -7.066322984394425,
+    -3.1931385359469284
+  ],
+  "after_scores": [
+    -7.066322984394425,
+    -3.1931385359469284
+  ],
+  "before_blocks": 5,
+  "after_blocks": 5,
+  "before_partial_erasure_failure": "partial erasures with auxiliary DFT projection require a covariance adapter",
+  "score_comparison": "Python float list equality; no tolerance",
+  "cpu_seconds_excluding_imports": 0.31220116200000003,
+  "wall_seconds_excluding_imports": 0.31339760893024504,
+  "environment": {
+    "python": "3.13.5",
+    "numpy": "2.5.4",
+    "torch": "2.8.0+cpu",
+    "torch_threads": 1
+  },
+  "scope": "Preserves the all-valid branch supporting safe reuse of earlier cable evidence; not a new cable or physical-null qualification"
+}

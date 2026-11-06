@@ -1,0 +1,27 @@
+ALSA lib pcm.c:8854:(snd_pcm_set_params) Channels count (1) not available for CAPTURE: Invalid argument
+ALSA lib pcm.c:8868:(snd_pcm_set_params) Rate doesn't match (requested 8000Hz, get 44100Hz)
+ALSA lib pcm.c:8854:(snd_pcm_set_params) Channels count (1) not available for CAPTURE: Invalid argument
+ALSA lib pcm.c:8868:(snd_pcm_set_params) Rate doesn't match (requested 11025Hz, get 44100Hz)
+ALSA lib pcm.c:8854:(snd_pcm_set_params) Channels count (1) not available for CAPTURE: Invalid argument
+ALSA lib pcm.c:8868:(snd_pcm_set_params) Rate doesn't match (requested 16000Hz, get 44100Hz)
+ALSA lib pcm.c:8854:(snd_pcm_set_params) Channels count (1) not available for CAPTURE: Invalid argument
+ALSA lib pcm.c:8868:(snd_pcm_set_params) Rate doesn't match (requested 22050Hz, get 44100Hz)
+ALSA lib pcm.c:8854:(snd_pcm_set_params) Channels count (1) not available for CAPTURE: Invalid argument
+ALSA lib pcm.c:8868:(snd_pcm_set_params) Rate doesn't match (requested 24000Hz, get 44100Hz)
+ALSA lib pcm.c:8854:(snd_pcm_set_params) Channels count (1) not available for CAPTURE: Invalid argument
+ALSA lib pcm.c:8868:(snd_pcm_set_params) Rate doesn't match (requested 32000Hz, get 44100Hz)
+ALSA lib pcm.c:8854:(snd_pcm_set_params) Channels count (1) not available for CAPTURE: Invalid argument
+ALSA lib pcm.c:8868:(snd_pcm_set_params) Rate doesn't match (requested 8000Hz, get 44100Hz)
+ALSA lib pcm.c:8854:(snd_pcm_set_params) Channels count (1) not available for PLAYBACK: Invalid argument
+ALSA lib pcm.c:8868:(snd_pcm_set_params) Rate doesn't match (requested 11025Hz, get 44100Hz)
+ALSA lib pcm.c:8854:(snd_pcm_set_params) Channels count (1) not available for PLAYBACK: Invalid argument
+ALSA lib pcm.c:8868:(snd_pcm_set_params) Rate doesn't match (requested 16000Hz, get 44100Hz)
+ALSA lib pcm.c:8854:(snd_pcm_set_params) Channels count (1) not available for PLAYBACK: Invalid argument
+ALSA lib pcm.c:8868:(snd_pcm_set_params) Rate doesn't match (requested 22050Hz, get 44100Hz)
+ALSA lib pcm.c:8854:(snd_pcm_set_params) Channels count (1) not available for PLAYBACK: Invalid argument
+ALSA lib pcm.c:8868:(snd_pcm_set_params) Rate doesn't match (requested 24000Hz, get 44100Hz)
+ALSA lib pcm.c:8854:(snd_pcm_set_params) Channels count (1) not available for PLAYBACK: Invalid argument
+ALSA lib pcm.c:8868:(snd_pcm_set_params) Rate doesn't match (requested 32000Hz, get 44100Hz)
+ALSA lib pcm.c:8854:(snd_pcm_set_params) Channels count (1) not available for PLAYBACK: Invalid argument
+{"schema":"triad-audio-stream-v1","mode":"play","sample_rate_hz":6000,"requested_frames":439200,"completed_frames":439200,"complete":true,"clipped_samples":0,"process_cpu_seconds":1.43651100000000009338,"wall_seconds":73.2651252210000052401,"queue_bound_frames":12000,"capture_format":"raw","background_noise":{"enabled":true,"sample_rate_hz":44100,"active_samples":3228120,"expected_variance":1.2417634328206379519e-09,"measured_variance":1.24115340098904605285e-09,"peak":6.10370189519943845413e-05},"clock_discipline":{"enabled":true,"reports":1465,"saturated_reports":0,"holdover_reports":3,"peak_absolute_error_seconds":0.000325019048197601467809,"phase_limited_reports":0,"peak_applied_ppm":2,"ready":true,"observations":1462,"rejected":0,"clock_steps":0,"rate_updates":1,"cumulative_clock_step_seconds":0,"q_estimate":1.00000214882836147012,"target_correction":2.14882836138729008124e-06,"applied_correction":1.9999999999999999095e-06,"native_frame":3228120,"logical_seconds":73.2000002000000105501,"origin_utc_seconds":1793990318.74466649769,"estimated_utc_seconds":1793990391.94497925846,"phase_error_seconds":0.000312560788005254719391,"uncertainty_seconds":0.0364920365076745051303,"scope":"estimated full retained audio passband; adjusted capture covariance unqualified; no RF-clock certificate"}}
+{"schema":"triad-audio-stream-v1","mode":"capture","sample_rate_hz":6000,"requested_frames":451200,"completed_frames":451200,"complete":true,"clipped_samples":0,"process_cpu_seconds":2.02540299999999984237,"wall_seconds":75.4796487280000008013,"queue_bound_frames":12000,"capture_format":"mapped-v1","background_noise":{"enabled":false},"clock_discipline":{"enabled":true,"reports":7862,"saturated_reports":0,"holdover_reports":0,"peak_absolute_error_seconds":0.000323363017874424285569,"phase_limited_reports":0,"peak_applied_ppm":2.04555234801530572142,"ready":true,"observations":11094,"rejected":0,"clock_steps":0,"rate_updates":1,"cumulative_clock_step_seconds":0,"q_estimate":1.00000204555653238181,"target_correction":-2.04555234801530576999e-06,"applied_correction":-2.04555234801530576999e-06,"native_frame":3316165.44588239801897,"logical_seconds":75.1965000000000000011,"origin_utc_seconds":1793990317.68719746382,"estimated_utc_seconds":1793990392.88400117029,"phase_error_seconds":0.000303706439712773945683,"uncertainty_seconds":0.0364435019329521422971,"scope":"estimated full retained audio passband; adjusted capture covariance unqualified; no RF-clock certificate"}}

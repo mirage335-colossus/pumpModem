@@ -1,0 +1,35 @@
+{"method": "fixed_mapped", "decision": {"candidate_bit": 0, "log_e": -6.745951624550537, "conditional_model_pass": false, "admitted": false, "admission_scope": "Conditional Gaussian model, fixed bank and endpoint only; neither correctness nor Helper/physical null qualified."}, "receiver_cpu_seconds_including_native_basis": 4.318618186999998, "receiver_wall_seconds": 3.271917156991549}
+{"method": "tracking", "segment": 1, "bit_scores": [0.0, 0.0], "cpu": 0.07077484700000092, "wall": 0.03588241897523403}
+{"method": "tracking", "segment": 2, "bit_scores": [0.0, 0.0], "cpu": 0.16551125800000044, "wall": 0.08618797198869288}
+{"method": "tracking", "segment": 3, "bit_scores": [0.0, 0.0], "cpu": 0.2872655369999997, "wall": 0.15041227196343243}
+{"method": "tracking", "segment": 4, "bit_scores": [0.0, 0.0], "cpu": 0.47437227400000026, "wall": 0.2558768029557541}
+{"method": "tracking", "segment": 5, "bit_scores": [0.0, 0.0], "cpu": 0.6788200880000019, "wall": 0.3907297939294949}
+{"method": "tracking", "segment": 6, "bit_scores": [-0.001204618217653497, -0.001204618217653497], "cpu": 1.0153010370000004, "wall": 0.6396450189640746}
+{"method": "tracking", "segment": 7, "bit_scores": [-0.009096744018464609, -0.009096744018464609], "cpu": 1.318090486000001, "wall": 0.8703468629391864}
+{"method": "tracking", "segment": 8, "bit_scores": [-0.026304384997204, -0.026304384997204], "cpu": 1.6414501570000013, "wall": 1.1156542249955237}
+{"method": "tracking", "segment": 9, "bit_scores": [-0.054364334792104785, -0.054364334792104785], "cpu": 1.9154845080000005, "wall": 1.3256943159503862}
+{"method": "tracking", "segment": 10, "bit_scores": [-0.09583980949015469, -0.09583980949015469], "cpu": 2.1894406020000012, "wall": 1.5349434599047527}
+{"method": "tracking", "segment": 11, "bit_scores": [-0.15115122895909927, -0.15115122895909927], "cpu": 2.4677222500000013, "wall": 1.744591653929092}
+{"method": "tracking", "segment": 12, "bit_scores": [-0.1831197643107747, -2.5291966264931363], "cpu": 3.333454853000001, "wall": 2.535901609924622}
+{"method": "tracking", "segment": 13, "bit_scores": [-1.9955961423293767, -5.840693204213898], "cpu": 4.639479466999999, "wall": 3.7786432579159737}
+{"method": "tracking", "segment": 14, "bit_scores": [-3.9217407736079095, -6.917751669724448], "cpu": 5.936284221999998, "wall": 5.005801900988445}
+{"method": "tracking", "segment": 15, "bit_scores": [-6.222499603988274, -9.821570467153174], "cpu": 7.195272684999999, "wall": 6.1887693559983745}
+{"method": "tracking", "segment": 16, "bit_scores": [-8.052374775264171, -11.595036354273674], "cpu": 8.638765925999998, "wall": 7.567010993952863}
+{"method": "tracking", "segment": 17, "bit_scores": [-10.037955593232477, -14.379775199719596], "cpu": 10.080590168, "wall": 8.927521778969094}
+{"method": "tracking", "segment": 18, "bit_scores": [-12.57182504777983, -17.10612257700087], "cpu": 11.504110087999997, "wall": 10.280428760917857}
+{"method": "tracking", "segment": 19, "bit_scores": [-13.872788392937197, -18.33481175469356], "cpu": 12.952861011, "wall": 11.670788602903485}
+{"method": "tracking", "segment": 20, "bit_scores": [-14.333592790822829, -20.22565781052837], "cpu": 14.307762544, "wall": 12.961823016987182}
+{"method": "tracking", "segment": 21, "bit_scores": [-17.00952695838619, -21.196250178785547], "cpu": 15.493383881, "wall": 14.086200329009444}
+{"method": "tracking", "segment": 22, "bit_scores": [-19.707346939833243, -22.570724578524047], "cpu": 16.883880697000002, "wall": 15.40212325390894}
+{"method": "tracking", "segment": 23, "bit_scores": [-22.117322750678717, -25.446116095708618], "cpu": 18.30273699, "wall": 16.75767536298372}
+{"method": "tracking", "segment": 24, "bit_scores": [-24.28083654891322, -27.612559698836396], "cpu": 19.812437431000003, "wall": 18.18875158589799}
+{"method": "tracking", "segment": 25, "bit_scores": [-26.546563703547008, -28.840167016178274], "cpu": 21.285755912, "wall": 19.591363087994978}
+{"method": "tracking", "segment": 26, "bit_scores": [-28.757183010020444, -30.911094436585046], "cpu": 22.559791167000004, "wall": 20.804464713903144}
+{"method": "tracking", "segment": 27, "bit_scores": [-26.435263125428424, -32.88807440116216], "cpu": 23.917536130000002, "wall": 22.101647792966105}
+{"method": "tracking", "segment": 28, "bit_scores": [-29.34728017975171, -35.15467839947934], "cpu": 25.225609590000005, "wall": 23.345337394974194}
+{"method": "tracking", "segment": 29, "bit_scores": [-32.107228531015146, -37.24442641287161], "cpu": 26.482888072, "wall": 24.535782078979537}
+{"method": "tracking", "segment": 30, "bit_scores": [-32.11483584734835, -37.77533720092468], "cpu": 26.779558093, "wall": 24.76945069397334}
+{"method": "tracking", "segment": 31, "bit_scores": [-32.126483273864764, -39.01703397744075], "cpu": 27.084560002000003, "wall": 25.005326897953637}
+{"method": "tracking", "segment": 32, "bit_scores": [-32.14470113783476, -39.26487391626908], "cpu": 27.348924928000002, "wall": 25.207322317990474}
+{"method": "tracking", "segment": 33, "bit_scores": [-32.168760975671496, -39.64365121834132], "cpu": 27.553543151, "wall": 25.36980677698739}
+{"method": "tracking", "decision": {"candidate_bit": 0, "log_e": -32.86134116898622, "conditional_model_pass": false, "admitted": false, "admission_scope": "Conditional Gaussian model, fixed bank and endpoint only; neither correctness nor Helper/physical null qualified."}, "receiver_cpu_seconds_including_native_basis": 27.554237593000003, "receiver_wall_seconds": 25.370429808972403}

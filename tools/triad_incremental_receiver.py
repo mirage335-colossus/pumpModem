@@ -30,6 +30,12 @@ class IncrementalGaussianReceiver:
     are available for diagnostics only; this class never makes an admission.
     ``finish`` returns complete likelihood evidence only at the declared
     endpoint. Early EOF remains incomplete.
+
+    ``block_center_seconds(start, stop)`` optionally supplies known physical
+    block times for channel evolution after sample-clock conversion. Values
+    must be finite, nonnegative and increasing; a segment-relative time origin
+    avoids loss of precision in long observations. The default uses the
+    original integer logical-sample calendar.
     """
 
     def __init__(self, *, sample_rate, samples, block_samples,
@@ -37,7 +43,8 @@ class IncrementalGaussianReceiver:
                  stationary_power=(.5, .5), coherence_seconds=(.5, math.inf),
                  device="cpu", precision="fp32", memory_limit_bytes=512*1024**2,
                  maximum_candidates=4096, candidate_count=1,
-                 projection_mode="dft", maximum_input_chunk_samples=1_048_576):
+                 projection_mode="dft", maximum_input_chunk_samples=1_048_576,
+                 block_center_seconds=None):
         started = time.perf_counter()
         self.sample_rate = float(sample_rate)
         if not math.isfinite(self.sample_rate) or self.sample_rate <= 0:
@@ -87,6 +94,9 @@ class IncrementalGaussianReceiver:
         if self.memory_limit_bytes <= 0:
             raise MemoryError("positive workspace memory budget required")
         self.maximum_input_chunk_samples = maximum_input_chunk_samples
+        if block_center_seconds is not None and not callable(block_center_seconds):
+            raise TypeError("physical block-center provider must be callable")
+        self.block_center_seconds = block_center_seconds
         self.basis_callback = basis
         # Determine the public block calendar without retaining an O(duration)
         # layout table. A short terminal remainder is merged into its previous
@@ -132,6 +142,7 @@ class IncrementalGaussianReceiver:
         self.pending = np.empty(0, dtype=np.complex64 if precision == "fp32" else np.complex128)
         self.pending_valid = np.empty(0, dtype=np.uint8)
         self.previous_center_twice = None
+        self.previous_physical_center = None
         self.processed_rows = 0
         self.scored_rows = 0
         self.observed_rows = 0
@@ -194,8 +205,16 @@ class IncrementalGaussianReceiver:
             r = (y @ flat.conj().T / self.variance).reshape(3, self.candidates, self.taps)
             gram = torch.as_tensor(gram_np, dtype=self.dtype, device=self.device)
         center_twice = start + stop - 1
-        elapsed = 0. if self.previous_center_twice is None else (
-            (center_twice - self.previous_center_twice) / (2 * self.sample_rate))
+        if self.block_center_seconds is None:
+            elapsed = 0. if self.previous_center_twice is None else (
+                (center_twice - self.previous_center_twice) / (2 * self.sample_rate))
+        else:
+            center = float(self.block_center_seconds(start, stop))
+            if (not math.isfinite(center) or center < 0 or
+                (self.previous_physical_center is not None and center <= self.previous_physical_center)):
+                raise ValueError("physical block centers must be finite, nonnegative and strictly increasing")
+            elapsed = 0. if self.previous_physical_center is None else center-self.previous_physical_center
+            self.previous_physical_center = center
         for runtime in self.runtimes:
             runtime.update(r, gram, elapsed)
         self.previous_center_twice = center_twice
@@ -252,6 +271,20 @@ class IncrementalGaussianReceiver:
         if self.device.type == "cuda":
             torch.cuda.synchronize(self.device)
         self.push_cpu_seconds += time.process_time() - started
+
+    def unmixed_log_evidence(self):
+        """Return [model,H0/bit0/bit1,candidate] scores without any prior.
+
+        Timing-state forward inference needs these columns before the fixed
+        acquisition and model mixtures used by :meth:`progress`. The caller
+        owns those prior weights; adding them here would count them twice.
+        """
+        if not self.block_updates:
+            raise ValueError("no complete likelihood block has been observed")
+        per_model = torch.stack([runtime.scores() for runtime in self.runtimes])
+        if not bool(torch.isfinite(per_model).all()):
+            raise FloatingPointError("incremental likelihood became nonfinite")
+        return per_model.detach().cpu().numpy().copy()
 
     def progress(self):
         """Return diagnostic prefix scores; never an admission decision."""

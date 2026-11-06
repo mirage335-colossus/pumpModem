@@ -56,6 +56,17 @@ struct BackgroundNoiseReport {
 // device PCM and does not change receiver samples.
 // Keep this callback bounded; it cannot consume samples or finish reception.
 using CaptureMonitor = std::function<void(std::span<const float>,std::uint32_t)>;
+// Exact coordinates used by the native converter for the immediately following
+// logical PCM callback. Offsets are relative to an integer native-frame origin
+// so multi-day coordinates do not discard fractional timing in a large double.
+// The borrowed offsets have exactly one entry per PCM sample and expire when
+// the callback returns. A real capture discontinuity starts a new coordinate
+// segment under the existing explicit discontinuity contract.
+struct CaptureSampleMap {
+    std::uint64_t first_output_frame=0, source_frame_origin=0;
+    std::uint32_t native_rate=0;
+    std::span<const double> source_frame_offsets;
+};
 // Report known or uncertain loss of capture continuity before any later PCM.
 // A recoverable device interruption is not observed silence. Never flush the
 // old resampler tail into the next continuous segment. Without an observer,
@@ -78,6 +89,7 @@ struct Options {
     bool exclusive=false;
     CaptureMonitor capture_monitor={};
     CaptureDiscontinuity capture_discontinuity={};
+    std::function<void(const CaptureSampleMap&)> capture_sample_map={};
     // Follow adjusted system seconds without changing the logical PCM/cipher
     // sequence. A provider must report its timing quality separately; estimated
     // timestamps never authorize a GPS-only narrow acquisition window; an
@@ -232,6 +244,10 @@ inline void validate_options_impl(const Options& options) {
        (options.minimum_hardware_rate<64 || options.minimum_hardware_rate>120000000))
         throw Error("minimum hardware audio rate must be zero or 64..120000000 Hz");
     if(options.clock_timing)options.clock_timing->validate();
+    if constexpr(CheckProvider) {
+        if(options.capture_sample_map && !utc_follow_supported())
+            throw Error("exact capture sample mapping is unavailable with the selected audio provider");
+    }
     if(options.continuous_clock) {
         options.continuous_clock->validate();
         if(options.follow_system_clock || options.request_capture_timing || options.estimated_timing)

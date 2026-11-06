@@ -1,0 +1,141 @@
+{
+  "configuration": [
+    "--case",
+    "hf",
+    "--sample-rate",
+    "6000",
+    "--rate",
+    "36",
+    "--added-symbols",
+    "10",
+    "--seconds",
+    "32",
+    "--key-seed",
+    "73005",
+    "--epoch",
+    "1793850000",
+    "--spread-preset",
+    "none",
+    "--selective-perturbation",
+    "off",
+    "--base-oscillator",
+    "gpsdo-ocxo",
+    "--shift-oscillator",
+    "gpsdo-ocxo",
+    "--oscillator-effects",
+    "off",
+    "--arrival-seconds",
+    "0",
+    "--helper",
+    "on"
+  ],
+  "bank": {
+    "coordinates": [
+      [
+        0,
+        0.95,
+        0,
+        0
+      ],
+      [
+        0,
+        0.975,
+        0,
+        0
+      ],
+      [
+        0,
+        1.0,
+        0,
+        0
+      ],
+      [
+        0,
+        1.025,
+        0,
+        0
+      ],
+      [
+        0,
+        1.05,
+        0,
+        0
+      ],
+      [
+        0,
+        1.075,
+        0,
+        0
+      ],
+      [
+        0,
+        1.1,
+        0,
+        0
+      ],
+      [
+        0,
+        1.125,
+        0,
+        0
+      ],
+      [
+        0,
+        1.15,
+        0,
+        0
+      ],
+      [
+        0,
+        1.175,
+        0,
+        0
+      ],
+      [
+        0,
+        1.2,
+        0,
+        0
+      ],
+      [
+        0,
+        1.225,
+        0,
+        0
+      ],
+      [
+        0,
+        1.25,
+        0,
+        0
+      ]
+    ],
+    "taps": [
+      [
+        0,
+        0
+      ]
+    ],
+    "tracking": {
+      "segment_seconds": 4.0,
+      "maximum_states": 64,
+      "maximum_proposals": 256
+    }
+  },
+  "gain": 0.003,
+  "expected_bit_evaluation_only": 0,
+  "source_build_identities": {
+    "build/dev-cli/triad_audio_stream": "0f32e6f7ff26fa2fffb23e21263b98c5ea2f8f9b0cde65f3869bbfedb0d8ef80",
+    "build/dev-cli/triad_helper_export": "76e059e8a17452a5e7955bd01544a8f030bf9b85b55b7437df622fd2142210f4",
+    "tools/triad_continuous.py": "fe02d7a92f7cee433648e0984d85b9b300377b07fba4a8d66230d4293f1460d6",
+    "tools/triad_audio_mapping.py": "795e79020207fd9270f44c5c88b9fa2a033a4352940b975782ee6757f157ea58",
+    "tools/triad_tracking_receiver.py": "0dbe8809f454eb9f5afa2592960590d92d27c223eef75bb1c65dea15c6022034",
+    "tools/triad_timing_forward.py": "0d04869f45db3d66c9c70dcac54d6f0464f676e5b54721f28f07d69239d7bd31",
+    "tools/triad_incremental_receiver.py": "6452da06af68d835128bdb4a5d6a8309d3802d60d7a21907f3bda92dbba13a45",
+    "tools/triad_tracking_basis.py": "96c7795afd1bca45cc51706dea51fd1344e9571a8aad3115620211c9508519d6",
+    "local-evidence/triad-tracking-200/live/live_check.py": "9424321653f2eb973deb229cee20ebe2e4332de4313a1f9252903e9266836ccd"
+  },
+  "audio_clock_flags": "omitted: default auto",
+  "physical_null_qualified": false,
+  "scope": "Functional default full-audio/map/tracking cable check, not marginal sensitivity or multi-day uptime."
+}

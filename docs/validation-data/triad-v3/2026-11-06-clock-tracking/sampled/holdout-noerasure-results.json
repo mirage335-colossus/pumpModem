@@ -1,0 +1,60 @@
+[
+  {
+    "tag": "moving-off-95017-200-noerasure",
+    "summary": [
+      {
+        "method": "fixed_nominal",
+        "decision": {
+          "candidate_bit": 0,
+          "log_e": 56.60108763027227,
+          "conditional_model_pass": true,
+          "admitted": false,
+          "admission_scope": "Conditional Gaussian model, fixed bank and endpoint only; neither correctness nor Helper/physical null qualified."
+        },
+        "receiver_cpu_seconds_including_native_basis": 3.6242360590000002,
+        "receiver_wall_seconds": 2.5941698770038784
+      },
+      {
+        "method": "tracking",
+        "decision": {
+          "candidate_bit": 0,
+          "log_e": 340.88655560223543,
+          "conditional_model_pass": true,
+          "admitted": false,
+          "admission_scope": "Conditional Gaussian model, fixed bank and endpoint only; neither correctness nor Helper/physical null qualified."
+        },
+        "receiver_cpu_seconds_including_native_basis": 22.850428598,
+        "receiver_wall_seconds": 21.192636481951922
+      }
+    ]
+  },
+  {
+    "tag": "moving-on-95017-200-noerasure",
+    "summary": [
+      {
+        "method": "fixed_nominal",
+        "decision": {
+          "candidate_bit": 0,
+          "log_e": 56.59303188732684,
+          "conditional_model_pass": true,
+          "admitted": false,
+          "admission_scope": "Conditional Gaussian model, fixed bank and endpoint only; neither correctness nor Helper/physical null qualified."
+        },
+        "receiver_cpu_seconds_including_native_basis": 4.238377568,
+        "receiver_wall_seconds": 3.0645458329236135
+      },
+      {
+        "method": "tracking",
+        "decision": {
+          "candidate_bit": 0,
+          "log_e": 340.87690389042484,
+          "conditional_model_pass": true,
+          "admitted": false,
+          "admission_scope": "Conditional Gaussian model, fixed bank and endpoint only; neither correctness nor Helper/physical null qualified."
+        },
+        "receiver_cpu_seconds_including_native_basis": 22.574184412999998,
+        "receiver_wall_seconds": 20.91336979100015
+      }
+    ]
+  }
+]

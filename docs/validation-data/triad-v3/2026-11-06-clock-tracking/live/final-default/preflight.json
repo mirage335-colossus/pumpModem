@@ -1,0 +1,101 @@
+{
+  "receiver": {
+    "status": "scored",
+    "complete_observation": true,
+    "admission": null,
+    "bit_scores": [
+      -41.47907330751683,
+      -41.47916789774168
+    ],
+    "timing": {
+      "log_evidence": [
+        -41.47907330751683,
+        -41.47916789774168
+      ],
+      "state_count": 64,
+      "observations": 4,
+      "predictions": 3,
+      "elapsed_seconds": 12.0,
+      "pruning_events": 3,
+      "states_dropped": 284,
+      "retained_initial_path_probability": 0.6405985555555556,
+      "last_retained_evidence_fraction": [
+        0.7956579798220406,
+        0.7956462922411685
+      ],
+      "minimum_retained_evidence_fraction": [
+        0.7956579798220406,
+        0.7956462922411685
+      ],
+      "peak_states": 218,
+      "peak_transition_states": 218,
+      "transition_workspace_state_bound": 10368,
+      "delay_index_min": 0,
+      "delay_index_max": 0,
+      "posterior_map_display": [
+        {
+          "group": 7,
+          "delay_index": 0,
+          "source_offset_seconds": 0.0,
+          "rate_index": 0,
+          "rate_ppm": 0.0,
+          "conditional_retained_probability": 0.025314426333938496
+        },
+        {
+          "group": 3,
+          "delay_index": 0,
+          "source_offset_seconds": 0.0,
+          "rate_index": 0,
+          "rate_ppm": 0.0,
+          "conditional_retained_probability": 0.025315512984074088
+        }
+      ],
+      "probability_scope": "posterior conditional on retained paths; pruning can lose the true path",
+      "evidence_scope": "subprobability path sum; no pruning-mass renormalization or admission decision"
+    },
+    "consumed_samples": 96000,
+    "processed_rows": 96000,
+    "scored_rows": 96000,
+    "observed_rows": 96000,
+    "erased_rows": 0,
+    "blocks": 32,
+    "segments": 4,
+    "pending_rows": 0,
+    "peak_pending_rows": 24000,
+    "working_bytes_estimate": 97961628,
+    "preparation_seconds": 0.0003774290671572089,
+    "push_process_cpu_seconds": 6.907251071999998,
+    "segment_process_cpu_seconds": 6.8998605,
+    "maximum_segment_cpu_seconds": 2.863583178,
+    "maximum_segment_wall_seconds": 2.8863257110351697,
+    "physical_coordinate_mode": "mapped",
+    "mapped_samples": 96000,
+    "channel_model": "Independent Gaussian segment priors; maintained Gaussian evolution within each segment; global bit/coherence choice",
+    "timing_model": "Public piecewise-affine source offset/rate; retained subprobability path sum without pruning renormalization",
+    "noise_scope": "Known logical-row Gaussian null only; physical/ASRC colored-noise covariance remains unqualified"
+  },
+  "template_cache": {
+    "method": "uniform-DATA-cache-cubic-Lagrange-v1",
+    "calls": 88,
+    "interpolated_rows": 7824,
+    "direct_rows": 0,
+    "cache_hits": 42439,
+    "cache_misses": 13,
+    "native_preparation_calls": 13,
+    "native_preparation_samples": 212992,
+    "evictions": 0,
+    "cache_bytes": 3407872,
+    "peak_cache_bytes": 3407872,
+    "cache_limit_bytes": 33554432,
+    "tile_samples": 8192,
+    "dense_factor": 1,
+    "oversampling_ratio": 26.666666666666668,
+    "large_phase_fallback_rows": 0,
+    "interpolation_amplitude_proxy": 4.514772247555273e-06,
+    "fallback_reason": null,
+    "scope": "metadata-selected interpolation; finite-pulse proxy is not a strict spectral/error bound; direct native fallback retained"
+  },
+  "wall_seconds": 7.248849048046395,
+  "python_cpu_seconds": 6.910221385,
+  "child_cpu_seconds": 0.6000000000000001
+}

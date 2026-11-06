@@ -1,0 +1,26 @@
+{
+  "revision":"sampled-clock-tracking-200-extensions-v1",
+  "frozen_before_measurement":true,
+  "parent_protocol":"protocol.json",
+  "source_channel_rx_only":{
+    "native_channel_cn0_db_hz":200,
+    "native_thermal_scope":"Native minimum thermal density is negligible but retained; real reconstruction gives two native noise images in DATA",
+    "ordered_operations":["full maintained native stochastic channel including DATA/Helper/ray/delay/selective state and tails","real IF PCM reconstruction","real white additive noise at nominal8dB-Hz","actual native RX ASRC","known local RX-map downmix","receiver"],
+    "receiver_noise_variance":"Fs / 10^(8/10) + 2*native_complex_noise_variance",
+    "spread_preset":"hf-worst","margin":3,"selective_perturbation":"each-65","channel_evolution":"stochastic","random_doppler_width_hz":30,"delay_excursion_ms":0.001,"delay_knot_seconds":1000,
+    "oscillator_effects":"off explicit diagnostic; not RF-acquisition qualification",
+    "normalization":"No per-realization signal renormalization; record measured source/channel energy and component scope",
+    "clock":"RX-only200ppm; no TX warp after channel",
+    "native_valid_mask":"retain native declared rows, with invalid guard rows discarded; mask never filled with observed zeros"
+  },
+  "long_clock_stress":{
+    "requested_data_seconds":960,"expected_elapsed_observation_seconds":"about1001; use native resolved duration",
+    "nominal_cn0_db_hz":8,"helper":"off","seed":96023,"phase_cap_ppm":200,
+    "tx_events":"Repeat [45:+0.1,55:+2,75:-2,85:-0.1] every180seconds, plus+0.05 at each positive120second boundary",
+    "rx_events":"Repeat [48:-0.1,60:-2,80:+2,95:+0.1] every180seconds, plus-0.04 at each positive150second boundary",
+    "purpose":"Repeated physical clock dynamics and bounded receiver state, not sensitivity-optimal duration nor days-long hardware uptime",
+    "launch_condition":"Forecast from validated short cached receiver predicts below120CPU seconds; otherwise stop for parent coordination",
+    "private_tx_trajectory_to_receiver":false,
+    "public_initial_prior":"group0/delay0/rate0; calibrated start; unchanged sparse model parameters"
+  }
+}

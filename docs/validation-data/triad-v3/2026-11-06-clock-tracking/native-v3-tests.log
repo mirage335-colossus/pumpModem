@@ -1,0 +1,19 @@
+Internal ctest changing into directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli
+Test project /home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli
+    Start 425: triad_clock_follow
+1/5 Test #425: triad_clock_follow ...............   Passed    0.01 sec
+    Start 433: triad_v3_source
+2/5 Test #433: triad_v3_source ..................   Passed    0.12 sec
+    Start 435: triad_v3_channel
+3/5 Test #435: triad_v3_channel .................   Passed   14.51 sec
+    Start 436: triad_v3_receiver
+4/5 Test #436: triad_v3_receiver ................   Passed    0.54 sec
+    Start 544: triad_control_clock
+5/5 Test #544: triad_control_clock ..............   Passed    0.05 sec
+
+100% tests passed, 0 tests failed out of 5
+
+Label Time Summary:
+triad    =  15.23 sec*proc (5 tests)
+
+Total Test time (real) =  15.24 sec

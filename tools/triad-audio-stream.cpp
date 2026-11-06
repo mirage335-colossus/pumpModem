@@ -35,6 +35,7 @@ constexpr std::uint64_t maximum_queue_frames = 192000; // two seconds at 96 kHz
 
 struct Config {
     std::string mode = "play", device = "default", channels = "left";
+    std::string clock_mode = "auto", capture_format = "raw";
     std::uint32_t rate = 48000;
     std::uint64_t frames = 0;
     bool frames_set = false, exclusive = false;
@@ -80,9 +81,10 @@ Config parse(int argc, char** argv) {
         else if (key == "--exclusive") c.exclusive = true;
         else if (key == "--clock-discipline") {
             const std::string mode = next();
-            if (mode != "off" && mode != "continuous") throw std::invalid_argument("clock discipline must be off or continuous");
-            c.continuous_clock = mode == "continuous";
+            if (mode != "auto" && mode != "off" && mode != "continuous") throw std::invalid_argument("clock discipline must be auto, off or continuous");
+            c.clock_mode = mode;
         }
+        else if (key == "--capture-format") c.capture_format = next();
         else if (key == "--clock-max-ppm") c.clock_options.maximum_rate_correction = parse_double(next(), "clock rate") / 1e6;
         else if (key == "--clock-phase-max-ppm") c.clock_options.maximum_phase_correction = parse_double(next(), "clock phase rate") / 1e6;
         else if (key == "--clock-slew-ppm-per-second") c.clock_options.maximum_slew_per_second = parse_double(next(), "clock slew") / 1e6;
@@ -115,8 +117,9 @@ Config parse(int argc, char** argv) {
         } else if (key == "--help") {
             std::cout << "triad-audio-stream --mode play|capture|copy --frames N [--sample-rate HZ] [--device NAME] [--exclusive] [--channels left|right|stereo]\n"
                 "  play: stdin mono float32le -> audio backend; capture: backend -> stdout mono float32le; copy: bounded device-free pipe check.\n"
-                "  --clock-discipline continuous: best-effort whole-audio UTC discipline, repeated corrections; dated native provider required.\n"
-                "  [--clock-max-ppm 1000 --clock-phase-max-ppm 50 --clock-slew-ppm-per-second 10 --clock-phase-seconds 1000]\n"
+                "  --clock-discipline auto|off|continuous: auto (default) follows UTC for play/capture; copy remains off. Dated native provider required.\n"
+                "  [--clock-max-ppm 1000 --clock-phase-max-ppm 200 --clock-slew-ppm-per-second 10 --clock-phase-seconds 1000]\n"
+                "  --capture-format raw|mapped-v1: mapped capture emits bounded TRIADMAP frames with exact local sample coordinates.\n"
                 "  optional TX noise: --background-noise-bits N | --background-noise-obscured-bits N | --background-noise-db D | --background-noise-watts W --background-noise-reference-watts W --background-noise-reference-rms R\n";
             std::exit(0);
         } else throw std::invalid_argument("unknown option: " + key);
@@ -124,6 +127,11 @@ Config parse(int argc, char** argv) {
     if (!c.frames_set) throw std::invalid_argument("--frames is required");
     if (c.mode != "play" && c.mode != "capture" && c.mode != "copy")
         throw std::invalid_argument("--mode must be play, capture or copy");
+    c.continuous_clock = c.clock_mode == "continuous" || (c.clock_mode == "auto" && c.mode != "copy");
+    if (c.capture_format != "raw" && c.capture_format != "mapped-v1")
+        throw std::invalid_argument("capture format must be raw or mapped-v1");
+    if (c.capture_format != "raw" && c.mode != "capture")
+        throw std::invalid_argument("mapped-v1 output requires capture mode");
     if (c.channels != "left" && c.channels != "right" && c.channels != "stereo")
         throw std::invalid_argument("--channels must be left, right or stereo");
     if (c.mode == "capture" && c.channels != "left")
@@ -175,10 +183,46 @@ datapump::audio::ChannelMode channel_mode(const std::string& value) {
     return datapump::audio::ChannelMode::left_mono;
 }
 
+struct CaptureBlock {
+    std::vector<float> pcm;
+    std::vector<double> offsets;
+    std::uint64_t first_output_frame=0, source_frame_origin=0;
+    std::uint32_t native_rate=0;
+};
+
+void append_le(char*& output,std::uint64_t value,std::size_t bytes) {
+    for(std::size_t i=0;i<bytes;++i)*output++=static_cast<char>((value>>(8*i))&255u);
+}
+
+void write_capture_block(std::ostream& output,const CaptureBlock& block,bool mapped) {
+    if(mapped) {
+        if(block.pcm.empty() || block.pcm.size()>block_frames || block.offsets.size()!=block.pcm.size() || !block.native_rate)
+            throw std::runtime_error("invalid mapped capture block");
+        // One bounded write per complete frame, not an ostream operation for
+        // each scalar. No lifetime-growing metadata side queue or second pipe.
+        std::array<char,40+block_frames*12> bytes;
+        char* cursor=bytes.data();std::memcpy(cursor,"TRIADMAP",8);cursor+=8;
+        append_le(cursor,1,4);append_le(cursor,block.pcm.size(),4);
+        append_le(cursor,block.first_output_frame,8);append_le(cursor,block.source_frame_origin,8);
+        append_le(cursor,block.native_rate,4);append_le(cursor,0,4);
+        for(double offset:block.offsets) {
+            if(!std::isfinite(offset) || offset<0)throw std::runtime_error("nonfinite mapped capture coordinate");
+            append_le(cursor,std::bit_cast<std::uint64_t>(offset),8);
+        }
+        for(float sample:block.pcm) {
+            if(!std::isfinite(sample))throw std::runtime_error("nonfinite mapped capture PCM");
+            append_le(cursor,std::bit_cast<std::uint32_t>(sample),4);
+        }
+        output.write(bytes.data(),static_cast<std::streamsize>(cursor-bytes.data()));
+    } else {
+        output.write(reinterpret_cast<const char*>(block.pcm.data()),static_cast<std::streamsize>(block.pcm.size()*sizeof(float)));
+    }
+}
+
 struct Queue {
     std::mutex mutex;
     std::condition_variable changed;
-    std::deque<std::vector<float>> blocks;
+    std::deque<CaptureBlock> blocks;
     std::uint64_t frames = 0, cap = maximum_queue_frames;
     bool done = false, failed = false;
     std::string error;
@@ -248,21 +292,34 @@ int run(const Config& c) {
         Queue queue;
         queue.cap = std::min<std::uint64_t>(maximum_queue_frames,
             std::max<std::uint64_t>(block_frames, static_cast<std::uint64_t>(c.rate) * 2));
+        std::optional<CaptureBlock> pending_map;
+        if(c.capture_format == "mapped-v1") {
+            options.capture_sample_map = [&](const datapump::audio::CaptureSampleMap& map) {
+                if(pending_map || map.source_frame_offsets.empty() || map.source_frame_offsets.size()>block_frames ||
+                    map.first_output_frame!=captured.load(std::memory_order_relaxed) || !map.native_rate)
+                    throw std::runtime_error("capture sample map is missing, oversized or discontinuous");
+                pending_map.emplace();
+                pending_map->first_output_frame=map.first_output_frame;
+                pending_map->source_frame_origin=map.source_frame_origin;
+                pending_map->native_rate=map.native_rate;
+                pending_map->offsets.assign(map.source_frame_offsets.begin(),map.source_frame_offsets.end());
+            };
+        }
         std::thread writer([&] {
             try {
                 for (;;) {
-                    std::vector<float> block;
+                    CaptureBlock block;
                     {
                         std::unique_lock lock(queue.mutex);
                         queue.changed.wait(lock, [&] { return !queue.blocks.empty() || queue.done; });
                         if (queue.blocks.empty() && queue.done) break;
                         block = std::move(queue.blocks.front()); queue.blocks.pop_front();
-                        queue.frames -= block.size();
+                        queue.frames -= block.pcm.size();
                     }
-                    std::cout.write(reinterpret_cast<const char*>(block.data()), static_cast<std::streamsize>(block.size() * sizeof(float)));
+                    write_capture_block(std::cout,block,c.capture_format == "mapped-v1");
                     std::cout.flush();
                     if (!std::cout) throw std::runtime_error("capture output pipe failed");
-                    completed.fetch_add(block.size(), std::memory_order_relaxed);
+                    completed.fetch_add(block.pcm.size(), std::memory_order_relaxed);
                 }
             } catch (const std::exception& e) {
                 std::lock_guard lock(queue.mutex); queue.error = e.what(); queue.failed = true; queue.changed.notify_all();
@@ -273,8 +330,14 @@ int run(const Config& c) {
             const auto left = done >= c.frames ? 0 : c.frames - done;
             const auto n = static_cast<std::size_t>(std::min<std::uint64_t>(left, input.size()));
             if (!n) return false;
-            std::vector<float> block(input.begin(), input.begin() + static_cast<std::ptrdiff_t>(n));
-            for (float v : block) if (std::abs(v) >= .999f) clipped.fetch_add(1, std::memory_order_relaxed);
+            CaptureBlock block;
+            if(c.capture_format == "mapped-v1") {
+                if(!pending_map || pending_map->offsets.size()!=input.size())
+                    throw std::runtime_error("capture PCM has no matching exact sample map");
+                block=std::move(*pending_map);pending_map.reset();block.offsets.resize(n);
+            }
+            block.pcm.assign(input.begin(), input.begin() + static_cast<std::ptrdiff_t>(n));
+            for (float v : block.pcm) if (std::abs(v) >= .999f) clipped.fetch_add(1, std::memory_order_relaxed);
             std::lock_guard lock(queue.mutex);
             if (queue.failed || queue.frames + n > queue.cap) {
                 queue.failed = true; queue.error = "capture pipe queue exceeded its two-second bound";
@@ -283,7 +346,7 @@ int run(const Config& c) {
             queue.frames += n; queue.blocks.push_back(std::move(block));
             captured.fetch_add(n, std::memory_order_relaxed);
             queue.changed.notify_all();
-            return true;
+            return done+n<c.frames;
         };
         try {
             datapump::audio::capture(c.rate, c.device, callback, {}, {}, options);
@@ -305,6 +368,7 @@ int run(const Config& c) {
         << ",\"completed_frames\":" << completed.load() << ",\"complete\":true,\"clipped_samples\":" << clipped.load()
         << ",\"process_cpu_seconds\":" << cpu << ",\"wall_seconds\":" << wall
         << ",\"queue_bound_frames\":" << (c.mode == "copy" ? 0 : std::min<std::uint64_t>(maximum_queue_frames, std::max<std::uint64_t>(block_frames, static_cast<std::uint64_t>(c.rate) * 2)))
+        << ",\"capture_format\":\"" << c.capture_format << "\""
         << ",\"background_noise\":{";
     if (!noise_report || !noise_report->enabled) std::cerr << "\"enabled\":false";
     else std::cerr << "\"enabled\":true,\"sample_rate_hz\":" << noise_report->sample_rate_hz

@@ -735,6 +735,11 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
   add_executable(test_triad_v3_source EXCLUDE_FROM_ALL tests/test_triad_v3_source.cpp)
   target_include_directories(test_triad_v3_source PRIVATE src)
   target_link_libraries(test_triad_v3_source PRIVATE triad_experiment)
+  add_executable(test_triad_mapped_basis EXCLUDE_FROM_ALL tests/test_triad_mapped_basis.cpp)
+  target_include_directories(test_triad_mapped_basis PRIVATE src)
+  target_link_libraries(test_triad_mapped_basis PRIVATE triad_experiment)
+  add_test(NAME triad_mapped_basis COMMAND test_triad_mapped_basis)
+  set_tests_properties(triad_mapped_basis PROPERTIES LABELS "triad" TIMEOUT 30)
   add_executable(test_triad_clock_follow EXCLUDE_FROM_ALL tests/test_triad_clock_follow.cpp)
   target_include_directories(test_triad_clock_follow PRIVATE include)
   if(DATAPUMP_SANITIZERS AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
@@ -1329,7 +1334,7 @@ if(NOT DATAPUMP_BUILD_WASM)
       if(_target STREQUAL "background_noise" OR _target STREQUAL "test_background_noise" OR _target STREQUAL "test_audio_output" OR
           _target STREQUAL "test_triad_modem" OR _target STREQUAL "test_triad_v2" OR
           _target STREQUAL "test_triad_statistics" OR _target STREQUAL "test_triad_v3_source" OR _target STREQUAL "test_triad_shaping" OR
-          _target STREQUAL "test_triad_clock_follow" OR _target STREQUAL "test_continuous_clock" OR
+          _target STREQUAL "test_triad_clock_follow" OR _target STREQUAL "test_continuous_clock" OR _target STREQUAL "test_triad_mapped_basis" OR
           _target STREQUAL "test_triad_v3_channel" OR _target STREQUAL "test_triad_v3_receiver" OR
           _target STREQUAL "triad_study" OR _target STREQUAL "triad_examples" OR
           _target STREQUAL "triad_long" OR _target STREQUAL "triad_pattern_probe" OR _target STREQUAL "triad_audio_capture" OR _target STREQUAL "triad_audio_stream" OR

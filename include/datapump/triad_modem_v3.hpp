@@ -405,6 +405,22 @@ struct ReceiverReport {
 void shaped_basis(PatternSource&, const Candidate&, double sample_rate,
                   std::uint64_t first_sample, std::size_t rows,
                   std::span<Complex> column_major_output);
+// The same public shaped basis on an explicitly known, nonuniform observation
+// map. Each physical observation index is first_sample + sample_offsets[row];
+// offsets are binary64, nonnegative, strictly increasing and <=1048576 samples.
+// Keeping the integer origin separate avoids converting a multi-day index to
+// binary64. The remaining calculations use long double, not arbitrary precision.
+// With audio_center_hz !=0, also apply exp(i*2*pi*center*(source_time-time))
+// independently for each delayed path, where source_time is the candidate's
+// clock-scaled time after arrival/path delay. This models whole-audio retiming;
+// the ordinary shaped basis already contains the three relative carrier phases.
+// A center above Nyquist is allowed for a narrow complex representation; this
+// API does not certify that an ADC/DAC captured that physical passband.
+void shaped_basis_mapped(PatternSource&, const Candidate&, double sample_rate,
+                         std::uint64_t first_sample,
+                         std::span<const double> sample_offsets,
+                         std::span<Complex> column_major_output,
+                         double audio_center_hz = 0);
 class StreamingReceiver {
 public:
     StreamingReceiver(const ReceiverConfig&, const Crypto&);

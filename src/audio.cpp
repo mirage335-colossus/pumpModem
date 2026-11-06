@@ -161,6 +161,25 @@ class CaptureSink {
     const Options* options_=nullptr;
     std::optional<ContinuousClock> continuous_clock_;
     std::uint64_t produced_=0;
+    std::vector<double> sample_map_;
+    std::uint64_t sample_map_origin_=0;
+    std::optional<long double> previous_mapped_frame_;
+    void install_sample_map() {
+        if(!options_ || !options_->capture_sample_map)return;
+        sample_map_.reserve(output_.size());
+        converter_->set_output_transform([this](float sample,long double seconds,std::uint32_t) {
+            const auto frame=seconds*hardware_;
+            if(!std::isfinite(frame) || frame<0 ||
+               frame>=static_cast<long double>(std::numeric_limits<std::uint64_t>::max()) ||
+               (previous_mapped_frame_ && frame<=*previous_mapped_frame_) || sample_map_.size()>=output_.size())
+                throw Error("invalid exact capture sample coordinate");
+            if(sample_map_.empty())sample_map_origin_=static_cast<std::uint64_t>(std::floor(frame));
+            const auto offset=static_cast<double>(frame-sample_map_origin_);
+            if(!std::isfinite(offset) || offset<0)throw Error("invalid relative capture sample coordinate");
+            sample_map_.push_back(offset);previous_mapped_frame_=frame;
+            return sample; // Read-only observation; preserve the actual PCM.
+        });
+    }
 public:
     CaptureSink(std::uint32_t logical,std::uint32_t hardware,const CaptureCallback& next,std::stop_token stop,const Options* options=nullptr)
         :next_(next),stop_(stop),logical_(logical),hardware_(hardware),
@@ -170,8 +189,9 @@ public:
          strict_timing_(options && options->follow_system_clock),options_(options) {
         if(options && options->continuous_clock)
             continuous_clock_.emplace(hardware,true,*options->continuous_clock);
+        install_sample_map();
     }
-    std::size_t workspace_bytes() const {return sizeof(*this)+converter_->workspace_bytes()+output_.capacity()*sizeof(float);}
+    std::size_t workspace_bytes() const {return sizeof(*this)+converter_->workspace_bytes()+output_.capacity()*sizeof(float)+sample_map_.capacity()*sizeof(double);}
     CaptureTransportRecipe capture_transport()const noexcept {
         return capture_continuous_?converter_->capture_transport():CaptureTransportRecipe{};
     }
@@ -207,6 +227,7 @@ public:
         // no doubled filter workspace and no fabricated EOF/absence samples.
         capture_continuous_=false;converter_.emplace(hardware_,logical_,continuous_clock_.has_value());
         produced_=0;
+        sample_map_.clear();previous_mapped_frame_.reset();install_sample_map();
         if(continuous_clock_)continuous_clock_.emplace(hardware_,true,*options_->continuous_clock);
         timing_published_=false;
     }
@@ -261,12 +282,17 @@ public:
                 converter_->set_rate_correction(discipline->target_correction,
                     options_->continuous_clock->maximum_slew_per_second);
             }
+            sample_map_.clear();
             const auto progress=converter_->process(input.subspan(consumed),output_);
             consumed+=progress.consumed;
             if(progress.produced) {
                 if(discipline)options_->continuous_clock_report(*discipline);
                 if(progress.produced>std::numeric_limits<std::uint64_t>::max()-produced_)
                     throw Error("capture corrected sample counter overflow");
+                if(options_ && options_->capture_sample_map) {
+                    if(sample_map_.size()!=progress.produced)throw Error("capture PCM/sample-map size mismatch");
+                    options_->capture_sample_map({produced_,sample_map_origin_,hardware_,sample_map_});
+                }
                 produced_+=progress.produced;
                 if(timed_ && options_->capture_timing) {
                     options_->capture_timing(*predicted);

@@ -44,14 +44,16 @@ from capture truth.
 
 ## Duration and power limits
 
-The opt-in [continuous audio clock policy](triad-clock-follow.md), selected with
-`--follow-system-clock continuous`, gently adjusts the complete native audio
+The default live [continuous audio clock policy](triad-clock-follow.md)
+(`--follow-system-clock auto`) gently adjusts the complete native audio
 stream before DATA mixing on capture, and the composed waveform on playback.
 Dated device frames support repeated UTC corrections and continuing drift
 without a lifetime ±2-second displacement cap. It preserves the source epoch
-and logical sequence; strict audio following remains separate. This does not
-supply remote nonlinear clock tracking or a qualified physical noise covariance:
-physical admission remains withheld. The older `bounded-data` profile remains
+and logical sequence; strict audio following remains separate. Live capture now
+uses exact local ADC coordinates and bounded remote delay/rate inference. Its
+initial bank and dynamics remain explicit assumptions; it does not supply a
+qualified physical noise covariance, so admission remains withheld.
+The older `bounded-data` profile remains
 available with its original slow-DATA-only limits.
 
 There is no general 3,600-second cap on source or channel duration. A plan-only
@@ -80,9 +82,11 @@ do not prune them using simulator truth.
 
 ## Receiver scope and admission
 
-The first incremental Gaussian receiver is a scheduled-bank experiment. It
-does not yet implement general blind multi-day acquisition or continuous
-multi-day clock, frequency, and Helper tracking. A pilot estimate from the
+The fixed incremental receiver is a scheduled-bank experiment. The timing
+receiver adds evolving delay/rate states with segment channel priors; see
+[its controls and limits](triad-clock-follow.md#receiver-timing-inference).
+Neither supplies general blind multi-day acquisition or multi-day Helper tracking.
+A pilot estimate from the
 38-second lead alone is not a validated frequency bound for a bit lasting days.
 The caller must supply the public timing, frequency, clock, epoch, delay/Doppler
 and power hypotheses. Every used hypothesis retains its original fixed-bank
@@ -104,9 +108,11 @@ unqualified. Missing capability metadata fails closed.
 Simulation also rejects a receiver noise-variance override smaller than the
 known native thermal variance; a smaller assumed noise floor would invalidate
 the conditional false-admission argument.
-The raw-row projection supports arbitrary erasures. The DFT projection supports
-whole missing blocks; a partially missing DFT block is explicitly rejected until
-its colored-noise covariance is implemented. GPU execution of this incremental
+The raw-row projection supports arbitrary erasures. The fixed receiver's DFT
+projection supports whole missing blocks and rejects partial blocks. The timing
+receiver conservatively expands partial erasures to its actual complete DFT
+blocks, reporting additional discarded rows separately; this does not implement
+a colored-noise covariance adapter. GPU execution of this incremental
 adapter has not been qualified.
 
 ## Basic command shape

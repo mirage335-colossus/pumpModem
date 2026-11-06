@@ -1,0 +1,10 @@
+{
+  "source_sha256": "0dbe8809f454eb9f5afa2592960590d92d27c223eef75bb1c65dea15c6022034",
+  "all_valid_bit_scores": [
+    -7.066322984394425,
+    -3.1931385359469284
+  ],
+  "all_valid_blocks": 5,
+  "original_partial_erasure_failure": "partial erasures with auxiliary DFT projection require a covariance adapter",
+  "seed": 73183
+}

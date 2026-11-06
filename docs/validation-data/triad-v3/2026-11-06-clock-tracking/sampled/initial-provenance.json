@@ -1,0 +1,14 @@
+{
+  "git_head": "ad49bcbaa07dedff05945024a4240517de6eea84",
+  "files": {
+    "local-evidence/triad-tracking-200/sampled/run.py": "91be93537c984e9bd2d04bc046cb3a678f11de1812d25137a4229ad0f5ca89ef",
+    "local-evidence/triad-tracking-200/sampled/warp.cpp": "54d8562c5253cfee7eb64a7606eebd82ea4350331bb5ed1ae8ffc4f79f775721",
+    "local-evidence/triad-tracking-200/sampled/warp": "c8609256f170fa555a76b8e7f6bb94f4b95c8094820f50a5ad8ca0430ff94897",
+    "local-evidence/triad-tracking-200/sampled/protocol.json": "53c9b948288006df16fd6619559036af3bb5e40ab2f5fb0e6fc652781c55090f"
+  },
+  "scope": "Private native Resampler probe and frozen protocol; production hashes captured at experiment initialization in each results.json",
+  "commands": [
+    "c++ -std=c++20 -O2 -Iinclude local-evidence/triad-tracking-200/sampled/warp.cpp src/resampler.cpp -o local-evidence/triad-tracking-200/sampled/warp",
+    "OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=2 /tmp/triad-weak-env/bin/python local-evidence/triad-tracking-200/sampled/run.py --tag rxonly-first --rx-events --cap 200"
+  ]
+}

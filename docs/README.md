@@ -41,8 +41,10 @@ for the finite-window weak receiver.
 For repeated GPS-driven clock corrections and continuing drift, see the
 [continuous full-audio clock-discipline guide](triad-clock-follow.md), including
 its receiver-tracking limits and inexpensive qualification checks.
-It provides opt-in slow-DATA source steering and sampled evidence, and explicitly
-separates this from general multi-day clock discipline and Helper timing tracking.
+Live triad TX/RX follows clock updates by default with a 200-ppm phase catch-up
+cap. Exact local ADC coordinates and bounded remote delay/rate inference improve
+reception through corrections. Physical-noise qualification, general blind
+acquisition and multi-day Helper tracking remain separate limits.
 The [cryptographic background-noise feature](triad-background-noise.md) adds an
 optional fresh AES-256 noise floor at the shared final-rate audio output layer
 for native and host/browser backends, with explicit effective-bit, dB and

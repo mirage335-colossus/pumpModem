@@ -35,7 +35,7 @@ void directions_and_steps() {
     near((1+a.target_correction)*(1+b.target_correction), 1, 2e-16L, "TX/RX rates are not inverse");
     check(a.phase_correction_limited && b.phase_correction_limited && !a.saturated && !b.saturated,
           "phase limiting was confused with total converter saturation");
-    near(a.target_correction,50e-6L,1e-15L,"UTC catch-up ignored gentle phase limit");
+    near(a.target_correction,200e-6L,1e-15L,"UTC catch-up ignored default phase limit");
     near(a.q_estimate,1,1e-15,"UTC step poisoned device-rate estimate");
     check(a.clock_steps == 1, "clock step not reported");
     tx.observe(timestamp(120,120,-2));
@@ -68,27 +68,39 @@ void rate_and_shared_slew() {
 
 unsigned gentle_phase_recovery() {
     unsigned slowest=0;
+    constexpr unsigned final_seconds=5*3600+60;
+    constexpr long double phase_cap=200e-6L, time_constant=1000.L;
+    constexpr long double uncertainty=.000101L, recovery_error=.001L;
+    // Below cap*tau + uncertainty the controller transitions from a bounded
+    // linear catch-up to proportional convergence. Include the time lost
+    // while the applied correction slews from zero to its cap; the one-second
+    // midpoint converter model below can differ from this continuum result.
+    const auto predicted=(2-uncertainty-phase_cap*time_constant)/phase_cap +
+        time_constant*std::log(phase_cap*time_constant/(recovery_error-uncertainty)) +
+        phase_cap/(2e-5L);
     for (const bool capture : {false,true}) for (const int sign : {-1,1}) {
         ContinuousClock clock(rate,capture);
         long double logical=0;
         double applied=0;
         unsigned recovered=0;
-        for (unsigned i=0;i<=14*3600+60;++i) {
+        for (unsigned i=0;i<=final_seconds;++i) {
             clock.observe(timestamp(i,i,i>=60 ? 2.L*sign : 0.L));
             const auto r=clock.update(static_cast<long double>(i)*rate,logical,applied);
             check(!r.saturated,"gentle phase catch-up saturated full device-rate range");
             const auto canonical_rate=capture ? 1.L/(1.L+r.target_correction)-1.L : r.target_correction;
-            check(std::abs(canonical_rate)<=50e-6L+1e-15L,"phase catch-up exceeded 50ppm default");
-            if (i==3660) check(std::abs(r.phase_error_seconds)>1.8,"two-second UTC step caught up implausibly fast");
-            if (i==36060) check(std::abs(r.phase_error_seconds)>.19 && std::abs(r.phase_error_seconds)<.21,
-                                "ten-hour phase residual disagrees with bounded catch-up rate");
+            check(std::abs(canonical_rate)<=phase_cap+1e-15L,"phase catch-up exceeded 200ppm default");
+            if (i==3660) check(std::abs(r.phase_error_seconds)>1.27 && std::abs(r.phase_error_seconds)<1.29,
+                                "one-hour phase residual disagrees with bounded catch-up rate");
+            if (i==10860) check(std::abs(r.phase_error_seconds)>.032 && std::abs(r.phase_error_seconds)<.035,
+                                "three-hour phase residual disagrees with proportional convergence");
             if (i>60 && !recovered && std::abs(r.phase_error_seconds)<.001) recovered=i-60;
-            if (i==14*3600+60) check(std::abs(r.phase_error_seconds)<.001,"isolated UTC step did not eventually settle");
+            if (i==final_seconds) check(std::abs(r.phase_error_seconds)<recovery_error,"isolated UTC step did not eventually settle");
             const auto next=applied+std::clamp(r.target_correction-applied,-1e-5,1e-5);
             logical+=capture ? 1.L/(1.L+.5*(applied+next)) : 1.L+.5*(applied+next);
             applied=next;
         }
-        check(recovered>=40000 && recovered<14*3600,"recovery time violates gentle-rate expectation");
+        check(recovered && std::abs(static_cast<long double>(recovered)-predicted)<60,
+              "recovery time disagrees with bounded-phase/proportional model");
         slowest=std::max(slowest,recovered);
     }
     return slowest;
@@ -220,7 +232,8 @@ void uncertainty_and_unsustainable_updates() {
         const auto next=applied+std::clamp(r.target_correction-applied,-1e-5,1e-5);
         logical+=1.L+.5*(applied+next);applied=next;
     }
-    check(r.phase_correction_limited && !r.saturated && r.phase_error_seconds>99,
+    const auto maximum_catchup=ContinuousClockOptions{}.maximum_phase_correction*10000;
+    check(r.phase_correction_limited && !r.saturated && r.phase_error_seconds>=100-maximum_catchup-.001,
           "unsustainable reference rate falsely reported tracking or full-rate saturation");
     check(r.clock_steps>=999,"overload reset prior correction history");
 }

@@ -1330,6 +1330,9 @@ int run(const Options& o) {
         std::cout.exceptions(std::ios::badbit | std::ios::failbit);
         print_plan_json(o, data_if_hz, selected_shaping, helper_options, physical, physics);
         std::cout << "{\"schema\":\"triad-stream-source-v1\",\"sample_rate_hz\":" << sample_rate
+            << ",\"carrier_spacing_hz\":" << g.carrier_spacing_hz
+            << ",\"fine_symbol_rate_hz\":" << g.fine_chip_rate_hz
+            << ",\"nominal_triplet_bandwidth_hz\":" << g.occupied_bandwidth_hz
             << ",\"emitted_samples\":" << composite_samples << ",\"capture_samples\":" << config.minimum_capture_samples
             << ",\"simulation_channel_constructed\":" << boolean(static_cast<bool>(channel))
             << ",\"total_samples\":" << total << ",\"data_offset_samples\":" << data_offset
@@ -1350,6 +1353,7 @@ int run(const Options& o) {
             << ",\"helper_high_hz\":" << plan.frequency_hz
             << ",\"helper_low_hz\":" << plan.low_frequency_hz
             << ",\"maximum_rows\":" << maximum_rows << ",\"maximum_columns\":" << maximum_columns
+            << ",\"mapped_basis_supported\":true,\"mapped_basis_maximum_offset_samples\":1048576"
             << ",\"workspace_budget_bytes\":" << stream_budget << ",\"fixed_workspace_bytes\":" << fixed_bytes
             << ",\"stream_kind\":"; json_string(std::cout, o.stream_kind);
         std::cout << ",\"key_source\":"; json_string(std::cout, o.key_file.empty() ? "explicit-test-fixture-seed" : "raw-key-file");
@@ -1427,9 +1431,16 @@ int run(const Options& o) {
                     << ",\"offset_seconds\":" << static_cast<double>(state.offset_seconds)
                     << ",\"rate_scale\":" << static_cast<double>(state.rate_scale)
                     << ",\"scope\":\"bounded DATA coordinate only; fixed epoch and uniform audio-center NCO\"}\n" << std::flush;
-            } else if (name == "basis") {
-                std::string first_text, count_text, columns_text;
+            } else if (name == "basis" || name == "basis-map") {
+                const bool mapped = name == "basis-map";
+                std::string first_text, count_text, columns_text, center_text;
                 if (!(command >> first_text >> count_text >> columns_text)) throw std::invalid_argument("basis requires FIRST COUNT N");
+                double center_hz = 0;
+                if (mapped) {
+                    if (!(command >> center_text)) throw std::invalid_argument("basis-map requires FIRST COUNT N IF_HZ");
+                    center_hz = real(center_text, "basis audio center");
+                    if (center_hz < 0 || center_hz > 120e6) throw std::invalid_argument("mapped basis audio center outside[0,120MHz]");
+                }
                 no_extra(command);
                 const auto first = integer(first_text, "basis first");
                 const auto rows64 = integer(count_text, "basis count");
@@ -1460,31 +1471,50 @@ int run(const Options& o) {
                     requests.push_back(candidate);
                 }
                 const auto output_bytes = columns * rows * sizeof(Complex);
+                const auto map_bytes = mapped ? rows * sizeof(double) : 0;
                 // write_complex packs one further binary64 buffer. Include both.
-                if (fixed_bytes + template_bytes + 2 * output_bytes > stream_budget)
+                if (fixed_bytes + template_bytes + 2 * output_bytes + map_bytes > stream_budget)
                     throw std::runtime_error("basis batch exceeds64MiB workspace budget");
+                std::vector<double> offsets;
+                if (mapped) {
+                    offsets.resize(rows);
+                    // The exporter has already rejected a non-little-endian
+                    // host. Candidate lines consume their newline; the next
+                    // bytes are exactly COUNT binary64 little-endian offsets.
+                    std::cin.read(reinterpret_cast<char*>(offsets.data()), static_cast<std::streamsize>(map_bytes));
+                    if (!std::cin) throw std::runtime_error("mapped basis stream ended inside coordinate payload");
+                    double previous = -1;
+                    for (const auto offset : offsets) {
+                        if (!std::isfinite(offset) || offset < 0 || offset > 1048576 || offset <= previous ||
+                            static_cast<long double>(offset) > static_cast<long double>(UINT64_MAX - first))
+                            throw std::invalid_argument("mapped basis coordinates outside bounded increasing extent");
+                        previous = offset;
+                    }
+                }
                 std::vector<Complex> output(columns * rows);
                 for (std::size_t c = 0; c < columns; ++c) {
                     const auto& candidate = requests[c];
                     const auto address = std::make_pair(static_cast<int>(candidate.epoch_offset_seconds), static_cast<unsigned>(candidate.source_bit));
                     auto found = templates.find(address);
                     if (found == templates.end()) {
-                        if (templates.size() >= 26 || fixed_bytes + template_bytes + 2 * output_bytes + g.source_workspace_bytes > stream_budget)
+                        if (templates.size() >= 26 || fixed_bytes + template_bytes + 2 * output_bytes + map_bytes + g.source_workspace_bytes > stream_budget)
                             throw std::runtime_error("template cache exceeds64MiB workspace budget");
                         auto format = candidate_format;
                         format.epoch = static_cast<std::uint64_t>(static_cast<std::int64_t>(format.epoch) + candidate.epoch_offset_seconds);
                         auto source = std::make_unique<PatternSource>(format, key, candidate.source_bit);
                         template_bytes += source->working_bytes();
-                        if (fixed_bytes + template_bytes + 2 * output_bytes > stream_budget)
+                        if (fixed_bytes + template_bytes + 2 * output_bytes + map_bytes > stream_budget)
                             throw std::runtime_error("template cache actual workspace exceeds64MiB budget");
                         found = templates.emplace(address, std::move(source)).first;
                     }
                     const auto destination = std::span(output).subspan(c * rows, rows);
-                    shaped_basis(*found->second, candidate, sample_rate, first, rows, destination);
+                    if (mapped) shaped_basis_mapped(*found->second, candidate, sample_rate, first, offsets, destination, center_hz);
+                    else shaped_basis(*found->second, candidate, sample_rate, first, rows, destination);
                     for (auto& value : destination) value *= data_gain;
                 }
                 std::cout << "{\"count\":" << rows << ",\"first_sample\":" << first
-                    << ",\"columns\":" << columns << ",\"workspace_bytes\":" << fixed_bytes + template_bytes + 2 * output_bytes << "}\n";
+                    << ",\"columns\":" << columns << ",\"workspace_bytes\":" << fixed_bytes + template_bytes + 2 * output_bytes + map_bytes
+                    << ",\"mapped\":" << boolean(mapped) << "}\n";
                 write_complex(std::cout, output);
                 std::cout.flush();
             } else throw std::invalid_argument("unknown stream command");

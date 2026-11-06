@@ -1,0 +1,19 @@
+{
+  "revision": "sampled-clock-tracking-200-v1",
+  "frozen_before_measurement": true,
+  "source": {"gui_rate_hz":36,"added_symbols":10,"sample_rate_hz":6000,"data_if_hz":1725,"requested_seconds":60,"expected_total_seconds":108,"epoch":1793850000,"encryption":true},
+  "design_seeds":[94001,94002],"independent_holdout_seed":95017,
+  "cn0_db_hz":8,"phase_caps_ppm":[50,200],"helper":["off","on"],
+  "clock_events":{"tx":[[45,0.1],[55,2],[75,-2],[85,-0.1]],"rx":[[48,-0.1],[60,-2],[80,2],[95,0.1]]},
+  "public_receiver":{"initial_coordinates":[[0,0,0,0]],"initial_residual_delay_rate":[0,0],"initial_scope":"Calibrated arrival/CFO/rate at first segment midpoint; not blind acquisition", "delay_step":"1/(4*resolved nominal_triplet_bandwidth_hz)","rate_step_ppm":50,"maximum_acceleration_ppm_per_second":20,"maximum_states":64,"maximum_proposals":256,"segment_seconds":4,"block_seconds":0.5,"coherence_seconds":[0.5,2,"inf"],"required_bands_hz":[[-160,160]],"precision":"fp32"},
+  "comparisons":["fixed nominal bank/downmix", "fixed timing with actual local RX sample map", "public timing HMM with actual local RX sample map"],
+  "calibrated_start_only":true,"private_tx_map_given_to_receiver":false,
+  "flat_fixture_order":"native emitted full Helper/DATA -> real IF PCM -> native TX ASRC -> paired real white noise -> native RX ASRC -> known RX map downmix -> receiver",
+  "channel_fixture_order":"native shared stochastic Helper/DATA sampled channel including native thermal noise -> real IF PCM -> RX ASRC only -> known RX map downmix -> receiver",
+  "channel_fixture":{"spread_preset":"hf-worst","margin":3,"selective_perturbation":"each-65","channel_evolution":"stochastic","random_doppler_width_hz":30,"delay_excursion_ms":0.001,"delay_knot_seconds":1000,"oscillator_effects":"off; timing study control, not full RF uncertainty qualification"},
+  "outage":{"physical_start_seconds":67,"physical_stop_seconds":69,"representation":"valid mask; retained observed values are not replaced by zeros"},
+  "admission":"Always withheld. ASRC colored noise, real PCM image and Helper null remain unqualified. Candidate and log-threshold22 gates are diagnostic only, not reliability estimates.",
+  "resource_limit":{"threads":2,"first_ladder_cpu_seconds":300,"cheap_failure_stop":true},
+  "source_tail_seconds":2,"receiver_tail_seconds":1,
+  "expansion":"Only after first RX-only and independent TX/RX 200-ppm diagnostic meets throughput/no-serious-failure check; no retry-until-pass. 50ppm paired control and helper/holdout/channel expansion require available budget."
+}

@@ -1,0 +1,319 @@
+{
+  "schema": "triad-clock-tracking-cable-v1",
+  "identities": {
+    "build/dev-cli/triad_audio_stream": "0f32e6f7ff26fa2fffb23e21263b98c5ea2f8f9b0cde65f3869bbfedb0d8ef80",
+    "build/dev-cli/triad_helper_export": "76e059e8a17452a5e7955bd01544a8f030bf9b85b55b7437df622fd2142210f4",
+    "tools/triad_continuous.py": "fe02d7a92f7cee433648e0984d85b9b300377b07fba4a8d66230d4293f1460d6",
+    "tools/triad_audio_mapping.py": "795e79020207fd9270f44c5c88b9fa2a033a4352940b975782ee6757f157ea58",
+    "tools/triad_tracking_receiver.py": "0dbe8809f454eb9f5afa2592960590d92d27c223eef75bb1c65dea15c6022034",
+    "tools/triad_timing_forward.py": "0d04869f45db3d66c9c70dcac54d6f0464f676e5b54721f28f07d69239d7bd31",
+    "tools/triad_incremental_receiver.py": "6452da06af68d835128bdb4a5d6a8309d3802d60d7a21907f3bda92dbba13a45",
+    "tools/triad_tracking_basis.py": "96c7795afd1bca45cc51706dea51fd1344e9571a8aad3115620211c9508519d6",
+    "local-evidence/triad-tracking-200/live/live_check.py": "9424321653f2eb973deb229cee20ebe2e4332de4313a1f9252903e9266836ccd"
+  },
+  "configuration": [
+    "--case",
+    "hf",
+    "--sample-rate",
+    "6000",
+    "--rate",
+    "36",
+    "--added-symbols",
+    "10",
+    "--seconds",
+    "32",
+    "--key-seed",
+    "73005",
+    "--epoch",
+    "1793850000",
+    "--spread-preset",
+    "none",
+    "--selective-perturbation",
+    "off",
+    "--base-oscillator",
+    "gpsdo-ocxo",
+    "--shift-oscillator",
+    "gpsdo-ocxo",
+    "--oscillator-effects",
+    "off",
+    "--arrival-seconds",
+    "0",
+    "--helper",
+    "on"
+  ],
+  "bank": {
+    "coordinates": [
+      [
+        0,
+        0.95,
+        0,
+        0
+      ],
+      [
+        0,
+        0.975,
+        0,
+        0
+      ],
+      [
+        0,
+        1.0,
+        0,
+        0
+      ],
+      [
+        0,
+        1.025,
+        0,
+        0
+      ],
+      [
+        0,
+        1.05,
+        0,
+        0
+      ],
+      [
+        0,
+        1.075,
+        0,
+        0
+      ],
+      [
+        0,
+        1.1,
+        0,
+        0
+      ],
+      [
+        0,
+        1.125,
+        0,
+        0
+      ],
+      [
+        0,
+        1.15,
+        0,
+        0
+      ],
+      [
+        0,
+        1.175,
+        0,
+        0
+      ],
+      [
+        0,
+        1.2,
+        0,
+        0
+      ],
+      [
+        0,
+        1.225,
+        0,
+        0
+      ],
+      [
+        0,
+        1.25,
+        0,
+        0
+      ]
+    ],
+    "taps": [
+      [
+        0,
+        0
+      ]
+    ],
+    "tracking": {
+      "segment_seconds": 4.0,
+      "maximum_states": 64,
+      "maximum_proposals": 256
+    }
+  },
+  "source": {
+    "schema": "triad-stream-source-v1",
+    "sample_rate_hz": 6000,
+    "carrier_spacing_hz": 75,
+    "fine_symbol_rate_hz": 60,
+    "nominal_triplet_bandwidth_hz": 225,
+    "emitted_samples": 439200,
+    "capture_samples": 577496,
+    "simulation_channel_constructed": false,
+    "total_samples": 439200,
+    "data_offset_samples": 227198,
+    "source_samples": 210405,
+    "capture_lead_seconds": 0,
+    "noise_variance": 0,
+    "template_data_gain": 1.0003906369365028,
+    "data_if_hz": 1725,
+    "epoch": 1793850000,
+    "pattern_revision": "independent-apsk-v2",
+    "added_amplitude_depth": 0.25,
+    "helper_enabled": true,
+    "clock_follow_bounded": false,
+    "clock_follow_limit_seconds": 0,
+    "clock_follow_endpoint_padding_seconds": 0,
+    "clock_follow_basis": "nominal affine; remote corrections are not supplied to receiver",
+    "conditional_gaussian_null_supported": false,
+    "helper_high_hz": 2400,
+    "helper_low_hz": 550,
+    "maximum_rows": 16384,
+    "maximum_columns": 128,
+    "mapped_basis_supported": true,
+    "mapped_basis_maximum_offset_samples": 1048576,
+    "workspace_budget_bytes": 67108864,
+    "fixed_workspace_bytes": 1049688,
+    "stream_kind": "emitted",
+    "key_source": "explicit-test-fixture-seed",
+    "power": {
+      "data_power_reference_policy": "bounded-tiles",
+      "pattern_revision": "independent-apsk-v2",
+      "added_amplitude_depth": 0.25,
+      "data_power_reference_version": 2,
+      "data_reference_bit": 0,
+      "data_reference_integration_method": "bounded-keyed-tile-quadrature-v1",
+      "data_reference_complete_sampled_source": false,
+      "data_reference_active_seconds": 34.800000000000004,
+      "data_reference_mean_norm": 0.9992191836803185,
+      "data_reference_nodes": 6144,
+      "data_reference_refinement_relative_difference": 0,
+      "data_reference_refinement_tolerance": 0.001,
+      "data_reference_sampled_tiles": 3,
+      "data_reference_tile_relative_standard_error": 0.012144916195582394,
+      "data_reference_statistical_error_is_bound": false,
+      "post_plan_data_calibration_gain": 1.0007564772846822,
+      "template_data_gain": 1.0003906369365028,
+      "data_reference_scope": "fixed public bit0; at most16 stratified keyed tiles with2048 fractional nodes each; active-time mean omits finite outer halo; between-tile standard error is diagnostic, not a confidence bound or integration guarantee; one unchanged gain for the entire stream"
+    },
+    "basis_scope": "Public DATA pattern only; arrival is absolute seconds in the requested observation coordinate. Fixed key/epoch per session; all three carriers retained.",
+    "scope": "Bounded pull source, not a receiver or real-time guarantee. Emitted kind has no channel or thermal noise. Physical null and full-duration power accuracy require qualification."
+  },
+  "receiver": {
+    "status": "scored",
+    "complete_observation": true,
+    "admission": null,
+    "bit_scores": [
+      94235.98073482762,
+      1785.0568116879235
+    ],
+    "timing": {
+      "log_evidence": [
+        94235.98073482762,
+        1785.0568116879235
+      ],
+      "state_count": 64,
+      "observations": 19,
+      "predictions": 18,
+      "elapsed_seconds": 71.59999771300437,
+      "pruning_events": 18,
+      "states_dropped": 1500,
+      "retained_initial_path_probability": 0.0006266741657360861,
+      "last_retained_evidence_fraction": [
+        1.0,
+        1.0
+      ],
+      "minimum_retained_evidence_fraction": [
+        0.783396999456041,
+        1.9210294721848788e-22
+      ],
+      "peak_states": 218,
+      "peak_transition_states": 218,
+      "transition_workspace_state_bound": 10368,
+      "delay_index_min": -8,
+      "delay_index_max": -2,
+      "posterior_map_display": [
+        {
+          "group": 4,
+          "delay_index": -5,
+          "source_offset_seconds": -0.005555555555555556,
+          "rate_index": 0,
+          "rate_ppm": 0.0,
+          "conditional_retained_probability": 1.0
+        },
+        {
+          "group": 4,
+          "delay_index": -5,
+          "source_offset_seconds": -0.005555555555555556,
+          "rate_index": 2,
+          "rate_ppm": 100.0,
+          "conditional_retained_probability": 0.7714165121538807
+        }
+      ],
+      "probability_scope": "posterior conditional on retained paths; pruning can lose the true path",
+      "evidence_scope": "subprobability path sum; no pruning-mass renormalization or admission decision"
+    },
+    "consumed_samples": 451200,
+    "processed_rows": 451200,
+    "scored_rows": 451200,
+    "observed_rows": 451200,
+    "erased_rows": 0,
+    "blocks": 150,
+    "segments": 19,
+    "pending_rows": 0,
+    "peak_pending_rows": 24000,
+    "working_bytes_estimate": 97961628,
+    "preparation_seconds": 0.00019734003581106663,
+    "push_process_cpu_seconds": 18.01153126800002,
+    "segment_process_cpu_seconds": 17.966005321999994,
+    "maximum_segment_cpu_seconds": 2.035729828999999,
+    "maximum_segment_wall_seconds": 2.1605846969177946,
+    "physical_coordinate_mode": "mapped",
+    "mapped_samples": 451200,
+    "channel_model": "Independent Gaussian segment priors; maintained Gaussian evolution within each segment; global bit/coherence choice",
+    "timing_model": "Public piecewise-affine source offset/rate; retained subprobability path sum without pruning renormalization",
+    "noise_scope": "Known logical-row Gaussian null only; physical/ASRC colored-noise covariance remains unqualified"
+  },
+  "frames_sent": 439200,
+  "frames_received": 451200,
+  "peak_capture": 0.023984884843230247,
+  "errors": [],
+  "wall_seconds": 76.27180499304086,
+  "template_cache": {
+    "method": "uniform-DATA-cache-cubic-Lagrange-v1",
+    "calls": 436,
+    "interpolated_rows": 16524,
+    "direct_rows": 0,
+    "cache_hits": 88946,
+    "cache_misses": 26,
+    "native_preparation_calls": 26,
+    "native_preparation_samples": 420810,
+    "evictions": 0,
+    "cache_bytes": 6815744,
+    "peak_cache_bytes": 6815744,
+    "cache_limit_bytes": 33554432,
+    "tile_samples": 8192,
+    "dense_factor": 1,
+    "oversampling_ratio": 26.666666666666668,
+    "interpolation_amplitude_proxy": 4.514772247555273e-06,
+    "fallback_reason": null,
+    "scope": "metadata-selected interpolation; finite-pulse proxy is not a strict spectral/error bound; direct native fallback retained"
+  },
+  "python_cpu_seconds": 18.927972607,
+  "child_cpu_seconds": 5.670864,
+  "native_mapping": {
+    "first_origin": 0,
+    "last_origin": 3307499,
+    "last_offset": 8813.448286985327,
+    "native_rate": 44100,
+    "packets": 7898
+  },
+  "physical_null_qualified": false,
+  "operational_admission": false,
+  "expected_bit_evaluation_only": 0,
+  "scope": "Default full-audio clock/map/tracking cable check with public historical latency bank; no host-clock injection or inference of true TX warp; not a marginal or multi-day qualification.",
+  "identities_end": {
+    "build/dev-cli/triad_audio_stream": "0f32e6f7ff26fa2fffb23e21263b98c5ea2f8f9b0cde65f3869bbfedb0d8ef80",
+    "build/dev-cli/triad_helper_export": "76e059e8a17452a5e7955bd01544a8f030bf9b85b55b7437df622fd2142210f4",
+    "tools/triad_continuous.py": "5ca8498b6cfe13830783b02857ce18538b51c1fa749a4b8c261d03d0ce2f288f",
+    "tools/triad_audio_mapping.py": "795e79020207fd9270f44c5c88b9fa2a033a4352940b975782ee6757f157ea58",
+    "tools/triad_tracking_receiver.py": "0dbe8809f454eb9f5afa2592960590d92d27c223eef75bb1c65dea15c6022034",
+    "tools/triad_timing_forward.py": "0d04869f45db3d66c9c70dcac54d6f0464f676e5b54721f28f07d69239d7bd31",
+    "tools/triad_incremental_receiver.py": "6452da06af68d835128bdb4a5d6a8309d3802d60d7a21907f3bda92dbba13a45",
+    "tools/triad_tracking_basis.py": "76b74881b5d63f9f090fc6bc51d0fe7a427651ba74d70476327426c75ddbae09",
+    "local-evidence/triad-tracking-200/live/live_check.py": "9424321653f2eb973deb229cee20ebe2e4332de4313a1f9252903e9266836ccd"
+  }
+}

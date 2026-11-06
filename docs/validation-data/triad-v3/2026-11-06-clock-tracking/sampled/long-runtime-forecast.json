@@ -1,0 +1,32 @@
+{
+  "frozen_before_measurement": true,
+  "anchors": [
+    {
+      "name": "moving-off-94001-200",
+      "source_result_sha256": "6ca1421282172111811bbcc11c817577fddd1e632c2e58f25a7c15919dbe6e10",
+      "active_seconds": 69.60000000000001,
+      "receiver_cpu_seconds": 25.632872026,
+      "preparation_cpu_seconds": 1.7337473789999998,
+      "native_preparation_samples": 838410,
+      "peak_states": 109
+    },
+    {
+      "name": "moving-off-94002-200",
+      "source_result_sha256": "e48b381b41ab573e4425cb7ccc897e684e1d195d36a49e29eeb5154066d6bbea",
+      "active_seconds": 69.60000000000001,
+      "receiver_cpu_seconds": 23.875539984000003,
+      "preparation_cpu_seconds": 1.4216406080000001,
+      "native_preparation_samples": 838410,
+      "peak_states": 103
+    }
+  ],
+  "target_requested_data_seconds": 960,
+  "planned_resolved_active_seconds": 962.8,
+  "expected_elapsed_seconds": 1001,
+  "receiver_method": "tracking only; short paired fixed-bank controls already retained",
+  "predictor": "Scale maximum observed Helperoff200ppm CPU seconds per active second to resolved960s target tiles; add scaled source/preparation cost. No thermal/work-regime confidence guarantee.",
+  "receiver_cpu_prediction_seconds": 354.58806302633326,
+  "preparation_cpu_prediction_seconds": 23.983505409499994,
+  "launch_cpu_limit_seconds": 400,
+  "remaining_uncertainty": "LRU eviction regime must be validated by owner before run; timing-state occupancy can change. CPU budget stops rather than reruns. Await parent clearance after live timing."
+}

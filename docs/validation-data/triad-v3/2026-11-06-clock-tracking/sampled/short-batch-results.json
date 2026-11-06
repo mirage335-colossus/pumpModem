@@ -1,0 +1,358 @@
+{
+  "cases": [
+    {
+      "case": {
+        "tag": "moving-off-94001-50",
+        "helper": "off",
+        "seed": 94001,
+        "cap": 50
+      },
+      "returncode": 0,
+      "command": [
+        "/tmp/triad-weak-env/bin/python",
+        "local-evidence/triad-tracking-200/sampled/run.py",
+        "--tag",
+        "moving-off-94001-50",
+        "--helper",
+        "off",
+        "--seed",
+        "94001",
+        "--cap",
+        "50",
+        "--tx-events",
+        "--rx-events",
+        "--methods",
+        "fixed_nominal,tracking"
+      ],
+      "summary": [
+        {
+          "method": "fixed_nominal",
+          "decision": {
+            "candidate_bit": 0,
+            "log_e": 91.58497565935096,
+            "conditional_model_pass": true,
+            "admitted": false,
+            "admission_scope": "Conditional Gaussian model, fixed bank and endpoint only; neither correctness nor Helper/physical null qualified."
+          },
+          "cpu_seconds": 3.759854405,
+          "wall_seconds": 2.693813847959973,
+          "erased_rows": 0
+        },
+        {
+          "method": "tracking",
+          "decision": {
+            "candidate_bit": 0,
+            "log_e": 309.6367512770212,
+            "conditional_model_pass": true,
+            "admitted": false,
+            "admission_scope": "Conditional Gaussian model, fixed bank and endpoint only; neither correctness nor Helper/physical null qualified."
+          },
+          "cpu_seconds": 24.068905383999997,
+          "wall_seconds": 22.39594608906191,
+          "erased_rows": 0
+        }
+      ],
+      "conditional_diagnostic_success": true
+    },
+    {
+      "case": {
+        "tag": "moving-off-94001-200",
+        "helper": "off",
+        "seed": 94001,
+        "cap": 200
+      },
+      "returncode": 0,
+      "command": [
+        "/tmp/triad-weak-env/bin/python",
+        "local-evidence/triad-tracking-200/sampled/run.py",
+        "--tag",
+        "moving-off-94001-200",
+        "--helper",
+        "off",
+        "--seed",
+        "94001",
+        "--cap",
+        "200",
+        "--tx-events",
+        "--rx-events",
+        "--methods",
+        "fixed_nominal,tracking"
+      ],
+      "summary": [
+        {
+          "method": "fixed_nominal",
+          "decision": {
+            "candidate_bit": 0,
+            "log_e": 64.3069179483154,
+            "conditional_model_pass": true,
+            "admitted": false,
+            "admission_scope": "Conditional Gaussian model, fixed bank and endpoint only; neither correctness nor Helper/physical null qualified."
+          },
+          "cpu_seconds": 5.302578754999999,
+          "wall_seconds": 3.798437073943205,
+          "erased_rows": 0
+        },
+        {
+          "method": "tracking",
+          "decision": {
+            "candidate_bit": 0,
+            "log_e": 364.4798311604732,
+            "conditional_model_pass": true,
+            "admitted": false,
+            "admission_scope": "Conditional Gaussian model, fixed bank and endpoint only; neither correctness nor Helper/physical null qualified."
+          },
+          "cpu_seconds": 25.632872026,
+          "wall_seconds": 23.839766943012364,
+          "erased_rows": 0
+        }
+      ],
+      "conditional_diagnostic_success": true
+    },
+    {
+      "case": {
+        "tag": "moving-on-94001-50",
+        "helper": "on",
+        "seed": 94001,
+        "cap": 50
+      },
+      "returncode": 0,
+      "command": [
+        "/tmp/triad-weak-env/bin/python",
+        "local-evidence/triad-tracking-200/sampled/run.py",
+        "--tag",
+        "moving-on-94001-50",
+        "--helper",
+        "on",
+        "--seed",
+        "94001",
+        "--cap",
+        "50",
+        "--tx-events",
+        "--rx-events",
+        "--methods",
+        "fixed_nominal,tracking"
+      ],
+      "summary": [
+        {
+          "method": "fixed_nominal",
+          "decision": {
+            "candidate_bit": 0,
+            "log_e": 91.53040314509263,
+            "conditional_model_pass": true,
+            "admitted": false,
+            "admission_scope": "Conditional Gaussian model, fixed bank and endpoint only; neither correctness nor Helper/physical null qualified."
+          },
+          "cpu_seconds": 4.781734702,
+          "wall_seconds": 3.4417815329506993,
+          "erased_rows": 0
+        },
+        {
+          "method": "tracking",
+          "decision": {
+            "candidate_bit": 0,
+            "log_e": 309.6234524168267,
+            "conditional_model_pass": true,
+            "admitted": false,
+            "admission_scope": "Conditional Gaussian model, fixed bank and endpoint only; neither correctness nor Helper/physical null qualified."
+          },
+          "cpu_seconds": 28.615381299,
+          "wall_seconds": 26.60010754095856,
+          "erased_rows": 0
+        }
+      ],
+      "conditional_diagnostic_success": true
+    },
+    {
+      "case": {
+        "tag": "moving-on-94001-200",
+        "helper": "on",
+        "seed": 94001,
+        "cap": 200
+      },
+      "returncode": 0,
+      "command": [
+        "/tmp/triad-weak-env/bin/python",
+        "local-evidence/triad-tracking-200/sampled/run.py",
+        "--tag",
+        "moving-on-94001-200",
+        "--helper",
+        "on",
+        "--seed",
+        "94001",
+        "--cap",
+        "200",
+        "--tx-events",
+        "--rx-events",
+        "--methods",
+        "fixed_nominal,tracking"
+      ],
+      "summary": [
+        {
+          "method": "fixed_nominal",
+          "decision": {
+            "candidate_bit": 0,
+            "log_e": 64.27224453867461,
+            "conditional_model_pass": true,
+            "admitted": false,
+            "admission_scope": "Conditional Gaussian model, fixed bank and endpoint only; neither correctness nor Helper/physical null qualified."
+          },
+          "cpu_seconds": 4.329027042,
+          "wall_seconds": 3.131668242975138,
+          "erased_rows": 0
+        },
+        {
+          "method": "tracking",
+          "decision": {
+            "candidate_bit": 0,
+            "log_e": 364.45727325742234,
+            "conditional_model_pass": true,
+            "admitted": false,
+            "admission_scope": "Conditional Gaussian model, fixed bank and endpoint only; neither correctness nor Helper/physical null qualified."
+          },
+          "cpu_seconds": 22.488590367000004,
+          "wall_seconds": 20.856234167004004,
+          "erased_rows": 0
+        }
+      ],
+      "conditional_diagnostic_success": true
+    },
+    {
+      "case": {
+        "tag": "moving-off-94002-200",
+        "helper": "off",
+        "seed": 94002,
+        "cap": 200
+      },
+      "returncode": 0,
+      "command": [
+        "/tmp/triad-weak-env/bin/python",
+        "local-evidence/triad-tracking-200/sampled/run.py",
+        "--tag",
+        "moving-off-94002-200",
+        "--helper",
+        "off",
+        "--seed",
+        "94002",
+        "--cap",
+        "200",
+        "--tx-events",
+        "--rx-events",
+        "--methods",
+        "fixed_nominal,tracking"
+      ],
+      "summary": [
+        {
+          "method": "fixed_nominal",
+          "decision": {
+            "candidate_bit": 0,
+            "log_e": 27.577947793217426,
+            "conditional_model_pass": true,
+            "admitted": false,
+            "admission_scope": "Conditional Gaussian model, fixed bank and endpoint only; neither correctness nor Helper/physical null qualified."
+          },
+          "cpu_seconds": 3.7259328660000004,
+          "wall_seconds": 2.6735398051096126,
+          "erased_rows": 0
+        },
+        {
+          "method": "tracking",
+          "decision": {
+            "candidate_bit": 0,
+            "log_e": 349.602310597903,
+            "conditional_model_pass": true,
+            "admitted": false,
+            "admission_scope": "Conditional Gaussian model, fixed bank and endpoint only; neither correctness nor Helper/physical null qualified."
+          },
+          "cpu_seconds": 23.875539984000003,
+          "wall_seconds": 22.214491992956027,
+          "erased_rows": 0
+        }
+      ],
+      "conditional_diagnostic_success": true
+    },
+    {
+      "case": {
+        "tag": "moving-on-94002-200",
+        "helper": "on",
+        "seed": 94002,
+        "cap": 200
+      },
+      "returncode": 0,
+      "command": [
+        "/tmp/triad-weak-env/bin/python",
+        "local-evidence/triad-tracking-200/sampled/run.py",
+        "--tag",
+        "moving-on-94002-200",
+        "--helper",
+        "on",
+        "--seed",
+        "94002",
+        "--cap",
+        "200",
+        "--tx-events",
+        "--rx-events",
+        "--methods",
+        "fixed_nominal,tracking"
+      ],
+      "summary": [
+        {
+          "method": "fixed_nominal",
+          "decision": {
+            "candidate_bit": 0,
+            "log_e": 27.53365687890003,
+            "conditional_model_pass": true,
+            "admitted": false,
+            "admission_scope": "Conditional Gaussian model, fixed bank and endpoint only; neither correctness nor Helper/physical null qualified."
+          },
+          "cpu_seconds": 3.6826383089999997,
+          "wall_seconds": 2.640634826035239,
+          "erased_rows": 0
+        },
+        {
+          "method": "tracking",
+          "decision": {
+            "candidate_bit": 0,
+            "log_e": 349.4771229372734,
+            "conditional_model_pass": true,
+            "admitted": false,
+            "admission_scope": "Conditional Gaussian model, fixed bank and endpoint only; neither correctness nor Helper/physical null qualified."
+          },
+          "cpu_seconds": 25.032177526,
+          "wall_seconds": 23.381612092955038,
+          "erased_rows": 0
+        }
+      ],
+      "conditional_diagnostic_success": true
+    },
+    {
+      "case": {
+        "tag": "moving-off-95017-200-erasure",
+        "helper": "off",
+        "seed": 95017,
+        "cap": 200,
+        "erase": true
+      },
+      "returncode": 1,
+      "command": [
+        "/tmp/triad-weak-env/bin/python",
+        "local-evidence/triad-tracking-200/sampled/run.py",
+        "--tag",
+        "moving-off-95017-200-erasure",
+        "--helper",
+        "off",
+        "--seed",
+        "95017",
+        "--cap",
+        "200",
+        "--tx-events",
+        "--rx-events",
+        "--methods",
+        "fixed_nominal,tracking",
+        "--erase"
+      ]
+    }
+  ],
+  "child_cpu_seconds": 202.095054,
+  "wall_seconds": 183.5514449639013,
+  "complete": false
+}

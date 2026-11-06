@@ -1,0 +1,68 @@
+[
+  {
+    "tag": "moving-off-94001-200-fixedmapped",
+    "summary": {
+      "method": "fixed_mapped",
+      "decision": {
+        "candidate_bit": 0,
+        "log_e": 87.36214108502753,
+        "conditional_model_pass": true,
+        "admitted": false,
+        "admission_scope": "Conditional Gaussian model, fixed bank and endpoint only; neither correctness nor Helper/physical null qualified."
+      },
+      "receiver_cpu_seconds_including_native_basis": 3.5051394359999994,
+      "receiver_wall_seconds": 2.7468506440054625
+    },
+    "erasure": {
+      "erased_rows": 0,
+      "requested_invalid_rows": null,
+      "processed_requested_invalid_rows": null,
+      "additional_discarded_rows": null,
+      "expanded_erasure_blocks": null
+    }
+  },
+  {
+    "tag": "moving-off-95017-200-erasure-repaired",
+    "summary": {
+      "method": "tracking",
+      "decision": {
+        "candidate_bit": 0,
+        "log_e": 328.79773048861665,
+        "conditional_model_pass": true,
+        "admitted": false,
+        "admission_scope": "Conditional Gaussian model, fixed bank and endpoint only; neither correctness nor Helper/physical null qualified."
+      },
+      "receiver_cpu_seconds_including_native_basis": 21.315653014000002,
+      "receiver_wall_seconds": 19.820601794985123
+    },
+    "erasure": {
+      "erased_rows": 15000,
+      "requested_invalid_rows": 11998,
+      "processed_requested_invalid_rows": 11998,
+      "additional_discarded_rows": 3002,
+      "expanded_erasure_blocks": 2
+    }
+  },
+  {
+    "tag": "moving-on-95017-200-erasure-repaired",
+    "summary": {
+      "method": "tracking",
+      "decision": {
+        "candidate_bit": 0,
+        "log_e": 328.78320256298895,
+        "conditional_model_pass": true,
+        "admitted": false,
+        "admission_scope": "Conditional Gaussian model, fixed bank and endpoint only; neither correctness nor Helper/physical null qualified."
+      },
+      "receiver_cpu_seconds_including_native_basis": 22.827171155000002,
+      "receiver_wall_seconds": 21.1868290490238
+    },
+    "erasure": {
+      "erased_rows": 15000,
+      "requested_invalid_rows": 11998,
+      "processed_requested_invalid_rows": 11998,
+      "additional_discarded_rows": 3002,
+      "expanded_erasure_blocks": 2
+    }
+  }
+]

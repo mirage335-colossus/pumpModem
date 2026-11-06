@@ -1563,7 +1563,7 @@ void continuous_clock_runtime() {
         if(t<7)return -.15L;
         return -.04L;
     };
-    struct Result {std::vector<float> pcm;std::vector<a::ClockDisciplineReport> reports;};
+    struct Result {std::vector<float> pcm;std::vector<a::ClockDisciplineReport> reports;std::vector<long double> mapped_frames;};
     const auto run=[&](bool capture,bool corrections) {
         f::reset();f::state.available={"default"};f::state.supported_rates={rate};
         f::state.write_limit=137;f::state.read_limit=199;
@@ -1581,6 +1581,19 @@ void continuous_clock_runtime() {
                 a::TimingQuality::bounded,601};
         };
         options.continuous_clock_report=[&](const auto& report){result.reports.push_back(report);};
+        if(capture)options.capture_sample_map=[&](const a::CaptureSampleMap& map) {
+            check(map.native_rate==rate && map.first_output_frame==result.mapped_frames.size() &&
+                !map.source_frame_offsets.empty() && map.source_frame_offsets.size()<=4096 &&
+                map.source_frame_offsets.front()>=0 && map.source_frame_offsets.front()<1,
+                "exact capture map lost its integer origin, rate, or logical frame sequence");
+            for(const auto offset:map.source_frame_offsets) {
+                const auto frame=static_cast<long double>(map.source_frame_origin)+offset;
+                check(std::isfinite(offset) && offset>=0 &&
+                    (result.mapped_frames.empty() || frame>result.mapped_frames.back()),
+                    "exact capture source map became nonfinite or nonmonotone");
+                result.mapped_frames.push_back(frame);
+            }
+        };
         const auto format=[&](const a::StreamFormat& value) {
             ++formats;check(value.hardware_rate==rate && value.logical_rate==rate &&
                 value.usable_passband_hz<=.43*rate,"continuous equal-rate stream bypassed its adjustable filter");
@@ -1590,6 +1603,8 @@ void continuous_clock_runtime() {
         if(capture) {
             a::capture(rate,"default",[&](auto samples) {
                 check(!result.reports.empty(),"continuous capture delivered PCM before discipline telemetry");
+                check(result.mapped_frames.size()==result.pcm.size()+samples.size(),
+                    "exact capture map was not paired with its immediately following PCM block");
                 for(const auto sample:samples)check(std::isfinite(sample),"continuous capture produced nonfinite PCM");
                 result.pcm.insert(result.pcm.end(),samples.begin(),samples.end());
                 return result.pcm.size()<total;
@@ -1670,7 +1685,10 @@ void continuous_clock_runtime() {
                     source_time(r,static_cast<long double>(last-first)/rate))));
             }
             for(std::size_t i=first;i<last;++i) {
-                const auto t=source_time(r,static_cast<long double>(i-first)/rate);last_source=t;++mapped;
+                const auto predicted_time=source_time(r,static_cast<long double>(i-first)/rate);
+                const auto t=capture?result.mapped_frames[i]/rate:predicted_time;
+                if(capture)map_error=std::max(map_error,static_cast<double>(rate*std::abs(t-predicted_time)));
+                last_source=t;++mapped;
                 // Finite FIR zero extension is intentional at the source ends.
                 // Keep every interior sample, including either side of all UTC
                 // updates; do not discard the difficult clock-step boundaries.
@@ -1738,6 +1756,42 @@ void continuous_clock_runtime() {
             changed+=std::abs(ordinary.pcm[i]-corrected.pcm[i]);
         check(changed>1,"clock reports changed but the full-band native PCM was not resampled");
     }
+}
+void capture_sample_map_runtime() {
+    for(const auto rates:std::array<std::pair<unsigned,unsigned>,3>{{{8000,8000},{6000,48000},{48000,8000}}}) {
+        const auto logical=rates.first,hardware=rates.second;
+        f::reset();f::state.available={"default"};f::state.supported_rates={hardware};f::state.read_limit=197;
+        f::state.sample=[](std::size_t n,unsigned rate) {
+            return static_cast<std::int16_t>(5000*std::sin(2*std::numbers::pi*173*static_cast<double>(n)/rate));
+        };
+        std::uint64_t mapped=0,delivered=0;unsigned maps=0;
+        std::vector<long double> coordinates;
+        a::Options options;
+        options.capture_sample_map=[&](const a::CaptureSampleMap& map) {
+            check(map.first_output_frame==mapped && map.native_rate==hardware && !map.source_frame_offsets.empty(),
+                "fixed/multistage capture map lost its source rate or output frontier");
+            coordinates.clear();
+            for(const auto offset:map.source_frame_offsets) {
+                const auto frame=static_cast<long double>(map.source_frame_origin)+offset;
+                const auto expected=static_cast<long double>(mapped)*hardware/logical;
+                check(std::abs(frame-expected)<1e-8L,"fixed/multistage capture map reported a nominal rather than actual source coordinate");
+                coordinates.push_back(frame);++mapped;
+            }
+            ++maps;
+        };
+        a::capture(logical,"default",[&](auto samples) {
+            check(mapped==delivered+samples.size() && coordinates.size()==samples.size(),
+                "fixed/multistage exact sample map was not atomic with PCM");
+            delivered+=samples.size();return delivered<logical/4;
+        },{},{},options);
+        check(maps>2 && mapped==delivered && delivered>=logical/4 && !f::state.live,
+            "fixed/multistage capture mapping failed to complete its bounded stream");
+    }
+    f::reset();f::state.available={"default"};f::state.supported_rates={8000};
+    a::Options options;unsigned pcm=0;
+    options.capture_sample_map=[](const auto&){throw datapump::Error("map observer failed");};
+    rejects([&]{a::capture(8000,"default",[&](auto){++pcm;return false;},{},{},options);});
+    check(!pcm && !f::state.live,"PCM escaped after its mapping observer failed");
 }
 void continuous_clock_invalid_and_discontinuous() {
     constexpr unsigned rate=8000;
@@ -3378,7 +3432,7 @@ int main(int argc,char** argv){try{
         std::cout<<"Nonblocking drain completion and failure checks passed\n";return 0;
     }
     if(argc==2 && std::string(argv[1])=="--continuous-clock") {
-        continuous_clock_runtime();continuous_clock_invalid_and_discontinuous();
+        continuous_clock_runtime();capture_sample_map_runtime();continuous_clock_invalid_and_discontinuous();
         std::cout<<"Continuous full-baseband clock discipline passed\n";return 0;
     }
     full_rate_background_noise_output();
@@ -3526,7 +3580,7 @@ int main(int argc,char** argv){try{
     native_prepared_delay_readiness();
     bounded_timing_preflight_and_post_start_failure();
     passive_capture_timing_preserves_pcm();passive_capture_timing_loss();passive_capture_discontinuity_and_cancel();
-    continuous_clock_runtime();continuous_clock_invalid_and_discontinuous();
+    continuous_clock_runtime();capture_sample_map_runtime();continuous_clock_invalid_and_discontinuous();
     capture_timing_fallback_preserves_pcm();
     capture_uncertainty_downgrade_preserves_filter();
     timed_drain();terminal_nonblocking_drain();

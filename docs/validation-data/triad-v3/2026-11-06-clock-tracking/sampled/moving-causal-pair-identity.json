@@ -1,0 +1,9 @@
+{
+  "waveform_sha256_equal": true,
+  "rx_map_sha256_equal": true,
+  "tx_report_equal": true,
+  "rx_report_equal": true,
+  "seed_equal": true,
+  "noise_scope": "Same deterministic RNG seed, variance, input length, order; no private TX map in either receiver",
+  "source_waveform_sha256": "79381b6031c447a81a9bfed626532f82e11b2393276a41efdac45b2d16f5cb42"
+}

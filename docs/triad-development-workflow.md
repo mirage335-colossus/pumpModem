@@ -39,6 +39,11 @@ real-time and physical multi-day limits remain explicitly unqualified.
 For repeated GPS-driven clock corrections and device drift, start with the
 [continuous full-audio policy](triad-clock-follow.md). Use its injected-clock
 controller and actual native-resampler checks before a short cable experiment.
+It is now the default isolated live policy, with 200-ppm phase catch-up. Use the
+tiny timing-forward, mapped-coordinate and tracking-receiver references first;
+use the native cache comparison when template generation changes. Do not repeat
+multi-day state tests as real-time waits or rerun cable campaigns for unchanged
+branches. Exact local capture maps and remote timing inference are distinct.
 Keep strict audio timing separate, and distinguish local clock discipline from
 remote waveform tracking and physical-noise qualification. Never hand a private
 TX correction trace to RX and call that practical synchronization. The older

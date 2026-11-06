@@ -1,0 +1,36 @@
+Traceback (most recent call last):
+  File "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-tracking-200/live/live_check.py", line 148, in <module>
+    if __name__=='__main__':main()
+                            ~~~~^^
+  File "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-tracking-200/live/live_check.py", line 76, in main
+    probe.push(first,np.zeros(1500,np.complex64),physical_origin=50*fs+first,
+    ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+               physical_offsets=np.arange(1500,dtype=np.float64))
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_tracking_receiver.py", line 269, in push
+    self._score_segment(rows)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_tracking_receiver.py", line 205, in _score_segment
+    receiver.push(0, self._values[:rows], self._valid[:rows])
+    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_incremental_receiver.py", line 268, in push
+    self._score_block(start, stop, self.pending, self.pending_valid)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_incremental_receiver.py", line 191, in _score_block
+    raw_basis = np.asarray(self.basis_callback(start, stop), dtype=np.complex128)
+                           ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_tracking_receiver.py", line 194, in render
+    basis = np.asarray(self.basis_provider(states, anchor_seconds,
+                       ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+        first+lo, first+hi, origin, offsets[lo:hi]), dtype=np.complex128)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_continuous.py", line 283, in render
+    data[col:col+128, lo:hi] = source.basis_mapped(int(physical_origin)+shift,
+                               ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        positions[lo:hi]-shift, rows[col:col+128], audio_center_hz)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_continuous.py", line 168, in basis_mapped
+    response = self._header()
+  File "/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_continuous.py", line 114, in _header
+    line = self.process.stdout.readline(1 << 20)
+KeyboardInterrupt

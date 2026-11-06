@@ -1,0 +1,76 @@
+[
+  {
+    "tag": "channel-rx-stable-94001-200",
+    "returncode": 0,
+    "source_energy": {
+      "complex_full_waveform_energy_seconds": 89.29083491620108,
+      "mean_complex_power": 0.681243670061629,
+      "scope": "Complete emitted or channel DATA+Helper including native thermal noise; no per-realization normalization; not DATA-only when Helper on",
+      "whole_window_in_band_energy_seconds": 80.60911328011412,
+      "in_band_energy_scope": "Whole-window Fourier\u00b1160Hz, before IF reconstruction/ASRC; not exactly the receiver block projection"
+    },
+    "summary": [
+      {
+        "method": "fixed_mapped",
+        "decision": {
+          "candidate_bit": 0,
+          "log_e": -6.745951624550537,
+          "conditional_model_pass": false,
+          "admitted": false,
+          "admission_scope": "Conditional Gaussian model, fixed bank and endpoint only; neither correctness nor Helper/physical null qualified."
+        },
+        "receiver_cpu_seconds_including_native_basis": 4.318618186999998,
+        "receiver_wall_seconds": 3.271917156991549
+      },
+      {
+        "method": "tracking",
+        "decision": {
+          "candidate_bit": 0,
+          "log_e": -32.86134116898622,
+          "conditional_model_pass": false,
+          "admitted": false,
+          "admission_scope": "Conditional Gaussian model, fixed bank and endpoint only; neither correctness nor Helper/physical null qualified."
+        },
+        "receiver_cpu_seconds_including_native_basis": 27.554237593000003,
+        "receiver_wall_seconds": 25.370429808972403
+      }
+    ]
+  },
+  {
+    "tag": "channel-rx-moving-94001-200",
+    "returncode": 0,
+    "source_energy": {
+      "complex_full_waveform_energy_seconds": 89.29083491620108,
+      "mean_complex_power": 0.681243670061629,
+      "scope": "Complete emitted or channel DATA+Helper including native thermal noise; no per-realization normalization; not DATA-only when Helper on",
+      "whole_window_in_band_energy_seconds": 80.60911328011412,
+      "in_band_energy_scope": "Whole-window Fourier\u00b1160Hz, before IF reconstruction/ASRC; not exactly the receiver block projection"
+    },
+    "summary": [
+      {
+        "method": "fixed_mapped",
+        "decision": {
+          "candidate_bit": 0,
+          "log_e": -6.744954199599998,
+          "conditional_model_pass": false,
+          "admitted": false,
+          "admission_scope": "Conditional Gaussian model, fixed bank and endpoint only; neither correctness nor Helper/physical null qualified."
+        },
+        "receiver_cpu_seconds_including_native_basis": 3.8093141360000002,
+        "receiver_wall_seconds": 2.9235919640632346
+      },
+      {
+        "method": "tracking",
+        "decision": {
+          "candidate_bit": 0,
+          "log_e": -33.75579025890805,
+          "conditional_model_pass": false,
+          "admitted": false,
+          "admission_scope": "Conditional Gaussian model, fixed bank and endpoint only; neither correctness nor Helper/physical null qualified."
+        },
+        "receiver_cpu_seconds_including_native_basis": 26.107520127,
+        "receiver_wall_seconds": 24.176671525929123
+      }
+    ]
+  }
+]

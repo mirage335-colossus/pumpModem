@@ -10,11 +10,54 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'tools'))
 from triad_continuous import (carrier_phase, endpoint_decision, read_exact,
                               receiver_noise_variance, validate_stream_identity, BoundedClockControl, execute, parser,
-                              disciplined_capture_extent)
+                              disciplined_capture_extent, make_timing_forward, tracking_source_basis)
+from triad_timing_forward import TimingState
 from triad_control_clock import ControlClock, ClockReading
 
 
 class ContinuousTests(unittest.TestCase):
+    def test_default_live_clock_and_public_tracking_policy(self):
+        options = parser().parse_args(['--report', '/tmp/unused-triad-clock-report'])
+        self.assertEqual(options.follow_system_clock, 'auto')
+        self.assertEqual(options.receiver, 'auto')
+        self.assertEqual(options.clock_phase_max_ppm, 200)
+        bank = dict(coordinates=[[0, 0, 0, 0]])
+        forward, seconds = make_timing_forward(bank, dict(nominal_triplet_bandwidth_hz=225), 3)
+        self.assertEqual(forward.states, (TimingState(0, 0, 0),))
+        self.assertEqual(seconds, 4)
+        self.assertAlmostEqual(forward.delay_step_seconds, 1/900)
+        for config in ([], dict(initial_rate_indices=2), dict(segment_seconds='4'),
+                       dict(segment_seconds=.1), dict(secret_tx_trace=True)):
+            with self.assertRaises(ValueError):
+                make_timing_forward(dict(bank, tracking=config), dict(nominal_triplet_bandwidth_hz=225), 3)
+
+    def test_mapped_basis_composes_local_coordinates_remote_rate_and_if_once(self):
+        calls = []
+        class Source:
+            def basis_mapped(self, origin, offsets, rows, center):
+                calls.append((origin, offsets.copy(), rows, center))
+                return np.ones((len(rows), len(offsets)), complex)
+        class Forward:
+            rate_step_ppm = 50
+            delay_step_seconds = .001
+        clock, arrival, frequency, center, anchor = 75., .7, 1.5, 1725., 20.
+        render = tracking_source_basis(Source(), [[0, arrival, frequency, clock]], [[.01, .2]],
+            38., Forward(), center, template_backend='direct')
+        result = render([TimingState(0, 31, -4)], anchor, 0, 3, 100000,
+            np.array([.25, 1.2501, 2.2502]))
+        self.assertEqual(result.shape, (3, 1, 1, 3))
+        self.assertTrue(np.all(result[0] == 0))
+        origin, offsets, rows, fc = calls[0]
+        self.assertEqual((origin, fc), (100000, center))
+        b, epoch, mapped_arrival, cfo, ppm, delay, doppler = rows[0]
+        t = (origin+offsets)/6000
+        base, velocity = 1+clock*1e-6, -200e-6
+        actual_source = (t-mapped_arrival-delay)*(1+ppm*1e-6)
+        expected_source = base*(t-arrival-38.)+.031+velocity*(t-anchor)-delay*(base+velocity)
+        np.testing.assert_allclose(actual_source, expected_source, atol=2e-14, rtol=0)
+        # Baseband clock already contributes to the old acquisition CFO.
+        self.assertAlmostEqual(cfo+center*(base-1), frequency)
+
     def test_full_audio_capture_endpoint_covers_both_clocks_and_public_delays(self):
         frames = 1_000_000*6000
         result = disciplined_capture_extent(frames, 6000, .001, [[0, 0, 0, 0]], [[0, 0]])

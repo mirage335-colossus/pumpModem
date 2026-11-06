@@ -1,0 +1,97 @@
+{
+  "protocol": {
+    "revision": "cached-basis-independent-qualification-v1",
+    "frozen_before_measurement": true,
+    "design_seed": 94001,
+    "helper": "off",
+    "physical_window_start_seconds": [
+      37.8,
+      40,
+      51.1,
+      67,
+      98,
+      107.4
+    ],
+    "window_samples": 3000,
+    "physical_map": "original native RX-only200ppm map",
+    "states": "Cartesian residual delay indices[-12,0,9] and rate indices[-4,0,4] with public1/900s and50ppm grids",
+    "criteria": {
+      "relative_l2_error": 1e-05,
+      "normalized_maximum_complex_error": 0.0001,
+      "completed_rxonly_log_e_difference": 0.01
+    },
+    "comparison": "Independent direct native mapped basis against bounded cache; all three carriers/phase and both encrypted alternatives",
+    "scope": "Configuration-specific interpolation and paired likelihood qualification, not universal cache error bound"
+  },
+  "identities": {
+    "tools/triad_tracking_basis.py": "76b74881b5d63f9f090fc6bc51d0fe7a427651ba74d70476327426c75ddbae09",
+    "tools/triad_continuous.py": "5ca8498b6cfe13830783b02857ce18538b51c1fa749a4b8c261d03d0ce2f288f",
+    "build/dev-cli/triad_helper_export": "76e059e8a17452a5e7955bd01544a8f030bf9b85b55b7437df622fd2142210f4"
+  },
+  "windows": [
+    {
+      "start_seconds": 37.8,
+      "relative_l2_error": 3.206907485403635e-06,
+      "normalized_maximum_complex_error": 9.516628098685603e-06,
+      "direct_wall_seconds": 0.06952786794863641,
+      "cache_wall_seconds": 0.04030807898379862
+    },
+    {
+      "start_seconds": 40,
+      "relative_l2_error": 2.7940500453294293e-06,
+      "normalized_maximum_complex_error": 7.853668004523825e-06,
+      "direct_wall_seconds": 0.11743024201132357,
+      "cache_wall_seconds": 0.04443106893450022
+    },
+    {
+      "start_seconds": 51.1,
+      "relative_l2_error": 3.102840749638921e-06,
+      "normalized_maximum_complex_error": 8.689812872340598e-06,
+      "direct_wall_seconds": 0.11745593999512494,
+      "cache_wall_seconds": 0.07943540997803211
+    },
+    {
+      "start_seconds": 67,
+      "relative_l2_error": 3.4344817230698097e-06,
+      "normalized_maximum_complex_error": 1.0666847723064791e-05,
+      "direct_wall_seconds": 0.11673389305360615,
+      "cache_wall_seconds": 0.044001061003655195
+    },
+    {
+      "start_seconds": 98,
+      "relative_l2_error": 3.4597614711791665e-06,
+      "normalized_maximum_complex_error": 1.0995546904479693e-05,
+      "direct_wall_seconds": 0.1176870649214834,
+      "cache_wall_seconds": 0.044189724954776466
+    },
+    {
+      "start_seconds": 107.4,
+      "relative_l2_error": 4.401077395440176e-06,
+      "normalized_maximum_complex_error": 1.0241208745951267e-05,
+      "direct_wall_seconds": 0.04521483194548637,
+      "cache_wall_seconds": 0.04438880004454404
+    }
+  ],
+  "cache": {
+    "method": "uniform-DATA-cache-cubic-Lagrange-v1",
+    "calls": 6,
+    "interpolated_rows": 108,
+    "direct_rows": 0,
+    "cache_hits": 568,
+    "cache_misses": 8,
+    "native_preparation_calls": 8,
+    "native_preparation_samples": 117514,
+    "evictions": 0,
+    "cache_bytes": 2097152,
+    "peak_cache_bytes": 2097152,
+    "cache_limit_bytes": 33554432,
+    "tile_samples": 8192,
+    "dense_factor": 1,
+    "oversampling_ratio": 26.666666666666668,
+    "large_phase_fallback_rows": 0,
+    "interpolation_amplitude_proxy": 4.514772247555273e-06,
+    "fallback_reason": null,
+    "scope": "metadata-selected interpolation; finite-pulse proxy is not a strict spectral/error bound; direct native fallback retained"
+  },
+  "passed": true
+}

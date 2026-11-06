@@ -1,0 +1,3163 @@
+{
+  "protocol_sha256": "53c9b948288006df16fd6619559036af3bb5e40ab2f5fb0e6fc652781c55090f",
+  "arguments": {
+    "seed": 94001,
+    "helper": "off",
+    "cap": 200,
+    "tx_events": false,
+    "rx_events": true,
+    "channel": true,
+    "erase": false,
+    "methods": "fixed_mapped,tracking",
+    "cpu_limit": 90.0,
+    "seconds": 60,
+    "cn0": 8,
+    "long_events": false,
+    "tag": "channel-rx-moving-94001-200"
+  },
+  "results": [
+    {
+      "method": "fixed_mapped",
+      "receiver": {
+        "status": "scored",
+        "complete_observation": true,
+        "admission": null,
+        "bit_scores": [
+          -6.716619551327486,
+          -6.774115170624273
+        ],
+        "model_bit_scores": [
+          [
+            -81.75784170286352,
+            -93.41093542803719
+          ],
+          [
+            -57.55601591402956,
+            -64.71442319339258
+          ],
+          [
+            -5.6180072626593756,
+            -5.675502881956163
+          ]
+        ],
+        "hypothesis_log_evidence": [
+          [
+            0.0,
+            -81.75784170286352,
+            -93.41093542803719
+          ],
+          [
+            0.0,
+            -57.55601591402956,
+            -64.71442319339258
+          ],
+          [
+            0.0,
+            -5.6180072626593756,
+            -5.675502881956163
+          ]
+        ],
+        "consumed_samples": 786422,
+        "processed_rows": 786422,
+        "scored_rows": 786422,
+        "observed_rows": 786422,
+        "erased_rows": 0,
+        "blocks": 262,
+        "pending_rows": 0,
+        "working_bytes_estimate": 494496,
+        "push_process_cpu_seconds": 1.8172844949999976,
+        "basis_cache": {
+          "method": "uniform-DATA-cache-cubic-Lagrange-v1",
+          "calls": 262,
+          "interpolated_rows": 282,
+          "direct_rows": 0,
+          "cache_hits": 1484,
+          "cache_misses": 52,
+          "native_preparation_calls": 52,
+          "native_preparation_samples": 838410,
+          "evictions": 0,
+          "cache_bytes": 13631488,
+          "peak_cache_bytes": 13631488,
+          "cache_limit_bytes": 33554432,
+          "tile_samples": 8192,
+          "dense_factor": 1,
+          "oversampling_ratio": 26.666666666666668,
+          "large_phase_fallback_rows": 0,
+          "interpolation_amplitude_proxy": 4.514772247555273e-06,
+          "fallback_reason": null,
+          "scope": "metadata-selected interpolation; finite-pulse proxy is not a strict spectral/error bound; direct native fallback retained"
+        }
+      },
+      "decision": {
+        "candidate_bit": 0,
+        "log_e": -6.744954199599998,
+        "conditional_model_pass": false,
+        "admitted": false,
+        "admission_scope": "Conditional Gaussian model, fixed bank and endpoint only; neither correctness nor Helper/physical null qualified."
+      },
+      "receiver_cpu_seconds_including_native_basis": 3.8093141360000002,
+      "receiver_wall_seconds": 2.9235919640632346,
+      "traces": []
+    },
+    {
+      "method": "tracking",
+      "receiver": {
+        "status": "scored",
+        "complete_observation": true,
+        "admission": null,
+        "bit_scores": [
+          -33.06491811859838,
+          -39.14953791712029
+        ],
+        "timing": {
+          "log_evidence": [
+            -33.06491811859838,
+            -39.14953791712029
+          ],
+          "state_count": 64,
+          "observations": 33,
+          "predictions": 32,
+          "elapsed_seconds": 127.54160991918363,
+          "pruning_events": 28,
+          "states_dropped": 1262,
+          "retained_initial_path_probability": 0.005154890495056488,
+          "last_retained_evidence_fraction": [
+            0.9546277138304715,
+            0.7961787018640045
+          ],
+          "minimum_retained_evidence_fraction": [
+            0.9223493299542121,
+            0.3903398200610003
+          ],
+          "peak_states": 124,
+          "peak_transition_states": 124,
+          "transition_workspace_state_bound": 10368,
+          "delay_index_min": -15,
+          "delay_index_max": 9,
+          "posterior_map_display": [
+            {
+              "group": 0,
+              "delay_index": 5,
+              "source_offset_seconds": 0.005555555555555556,
+              "rate_index": 6,
+              "rate_ppm": 300.0,
+              "conditional_retained_probability": 0.07917058828421633
+            },
+            {
+              "group": 0,
+              "delay_index": 2,
+              "source_offset_seconds": 0.0022222222222222222,
+              "rate_index": 3,
+              "rate_ppm": 150.0,
+              "conditional_retained_probability": 0.06671064438141659
+            }
+          ],
+          "probability_scope": "posterior conditional on retained paths; pruning can lose the true path",
+          "evidence_scope": "subprobability path sum; no pruning-mass renormalization or admission decision"
+        },
+        "consumed_samples": 786422,
+        "processed_rows": 786422,
+        "scored_rows": 786422,
+        "observed_rows": 786422,
+        "erased_rows": 0,
+        "blocks": 262,
+        "segments": 33,
+        "requested_invalid_rows": 0,
+        "processed_requested_invalid_rows": 0,
+        "additional_discarded_rows": 0,
+        "expanded_erasure_blocks": 0,
+        "erasure_policy": "Discard complete DFT likelihood blocks intersecting invalid rows; at most two extra edge blocks per contiguous outage",
+        "pending_rows": 0,
+        "peak_pending_rows": 24000,
+        "working_bytes_estimate": 98275896,
+        "preparation_seconds": 0.00015011290088295937,
+        "push_process_cpu_seconds": 24.062177051999992,
+        "segment_process_cpu_seconds": 24.008538970000007,
+        "maximum_segment_cpu_seconds": 1.3238053790000013,
+        "maximum_segment_wall_seconds": 1.3821061090566218,
+        "physical_coordinate_mode": "mapped",
+        "mapped_samples": 786422,
+        "channel_model": "Independent Gaussian segment priors; maintained Gaussian evolution within each segment; global bit/coherence choice",
+        "timing_model": "Public piecewise-affine source offset/rate; retained subprobability path sum without pruning renormalization",
+        "noise_scope": "Known logical-row Gaussian null only; physical/ASRC colored-noise covariance remains unqualified",
+        "basis_cache": {
+          "method": "uniform-DATA-cache-cubic-Lagrange-v1",
+          "calls": 484,
+          "interpolated_rows": 31360,
+          "direct_rows": 0,
+          "cache_hits": 170766,
+          "cache_misses": 52,
+          "native_preparation_calls": 52,
+          "native_preparation_samples": 838410,
+          "evictions": 0,
+          "cache_bytes": 13631488,
+          "peak_cache_bytes": 13631488,
+          "cache_limit_bytes": 33554432,
+          "tile_samples": 8192,
+          "dense_factor": 1,
+          "oversampling_ratio": 26.666666666666668,
+          "large_phase_fallback_rows": 0,
+          "interpolation_amplitude_proxy": 4.514772247555273e-06,
+          "fallback_reason": null,
+          "scope": "metadata-selected interpolation; finite-pulse proxy is not a strict spectral/error bound; direct native fallback retained"
+        }
+      },
+      "decision": {
+        "candidate_bit": 0,
+        "log_e": -33.75579025890805,
+        "conditional_model_pass": false,
+        "admitted": false,
+        "admission_scope": "Conditional Gaussian model, fixed bank and endpoint only; neither correctness nor Helper/physical null qualified."
+      },
+      "receiver_cpu_seconds_including_native_basis": 26.107520127,
+      "receiver_wall_seconds": 24.176671525929123,
+      "traces": [
+        {
+          "status": "prefix_diagnostic",
+          "complete_observation": false,
+          "admission": null,
+          "bit_scores": [
+            0.0,
+            0.0
+          ],
+          "timing": {
+            "log_evidence": [
+              0.0,
+              0.0
+            ],
+            "state_count": 1,
+            "observations": 1,
+            "predictions": 0,
+            "elapsed_seconds": 0.0,
+            "pruning_events": 0,
+            "states_dropped": 0,
+            "retained_initial_path_probability": 1.0,
+            "last_retained_evidence_fraction": [
+              1.0,
+              1.0
+            ],
+            "minimum_retained_evidence_fraction": [
+              1.0,
+              1.0
+            ],
+            "peak_states": 1,
+            "peak_transition_states": 1,
+            "transition_workspace_state_bound": 10368,
+            "delay_index_min": 0,
+            "delay_index_max": 0,
+            "posterior_map_display": [
+              {
+                "group": 0,
+                "delay_index": 0,
+                "source_offset_seconds": 0.0,
+                "rate_index": 0,
+                "rate_ppm": 0.0,
+                "conditional_retained_probability": 1.0
+              },
+              {
+                "group": 0,
+                "delay_index": 0,
+                "source_offset_seconds": 0.0,
+                "rate_index": 0,
+                "rate_ppm": 0.0,
+                "conditional_retained_probability": 1.0
+              }
+            ],
+            "probability_scope": "posterior conditional on retained paths; pruning can lose the true path",
+            "evidence_scope": "subprobability path sum; no pruning-mass renormalization or admission decision"
+          },
+          "consumed_samples": 24000,
+          "processed_rows": 24000,
+          "scored_rows": 24000,
+          "observed_rows": 24000,
+          "erased_rows": 0,
+          "blocks": 8,
+          "segments": 1,
+          "requested_invalid_rows": 0,
+          "processed_requested_invalid_rows": 0,
+          "additional_discarded_rows": 0,
+          "expanded_erasure_blocks": 0,
+          "erasure_policy": "Discard complete DFT likelihood blocks intersecting invalid rows; at most two extra edge blocks per contiguous outage",
+          "pending_rows": 0,
+          "peak_pending_rows": 24000,
+          "working_bytes_estimate": 98275896,
+          "preparation_seconds": 0.00015011290088295937,
+          "push_process_cpu_seconds": 0.03701801899999957,
+          "segment_process_cpu_seconds": 0.03208040200000006,
+          "maximum_segment_cpu_seconds": 0.03208040200000006,
+          "maximum_segment_wall_seconds": 0.016468790941871703,
+          "physical_coordinate_mode": "mapped",
+          "mapped_samples": 24000,
+          "channel_model": "Independent Gaussian segment priors; maintained Gaussian evolution within each segment; global bit/coherence choice",
+          "timing_model": "Public piecewise-affine source offset/rate; retained subprobability path sum without pruning renormalization",
+          "noise_scope": "Known logical-row Gaussian null only; physical/ASRC colored-noise covariance remains unqualified"
+        },
+        {
+          "status": "prefix_diagnostic",
+          "complete_observation": false,
+          "admission": null,
+          "bit_scores": [
+            0.0,
+            0.0
+          ],
+          "timing": {
+            "log_evidence": [
+              0.0,
+              0.0
+            ],
+            "state_count": 5,
+            "observations": 2,
+            "predictions": 1,
+            "elapsed_seconds": 4.0,
+            "pruning_events": 0,
+            "states_dropped": 0,
+            "retained_initial_path_probability": 1.0,
+            "last_retained_evidence_fraction": [
+              1.0,
+              1.0
+            ],
+            "minimum_retained_evidence_fraction": [
+              1.0,
+              1.0
+            ],
+            "peak_states": 5,
+            "peak_transition_states": 5,
+            "transition_workspace_state_bound": 10368,
+            "delay_index_min": -1,
+            "delay_index_max": 1,
+            "posterior_map_display": [
+              {
+                "group": 0,
+                "delay_index": 0,
+                "source_offset_seconds": 0.0,
+                "rate_index": 0,
+                "rate_ppm": 0.0,
+                "conditional_retained_probability": 0.3333333333333333
+              },
+              {
+                "group": 0,
+                "delay_index": 0,
+                "source_offset_seconds": 0.0,
+                "rate_index": 0,
+                "rate_ppm": 0.0,
+                "conditional_retained_probability": 0.3333333333333333
+              }
+            ],
+            "probability_scope": "posterior conditional on retained paths; pruning can lose the true path",
+            "evidence_scope": "subprobability path sum; no pruning-mass renormalization or admission decision"
+          },
+          "consumed_samples": 48000,
+          "processed_rows": 48000,
+          "scored_rows": 48000,
+          "observed_rows": 48000,
+          "erased_rows": 0,
+          "blocks": 16,
+          "segments": 2,
+          "requested_invalid_rows": 0,
+          "processed_requested_invalid_rows": 0,
+          "additional_discarded_rows": 0,
+          "expanded_erasure_blocks": 0,
+          "erasure_policy": "Discard complete DFT likelihood blocks intersecting invalid rows; at most two extra edge blocks per contiguous outage",
+          "pending_rows": 0,
+          "peak_pending_rows": 24000,
+          "working_bytes_estimate": 98275896,
+          "preparation_seconds": 0.00015011290088295937,
+          "push_process_cpu_seconds": 0.08235851299999997,
+          "segment_process_cpu_seconds": 0.07658749300000034,
+          "maximum_segment_cpu_seconds": 0.044507091000000276,
+          "maximum_segment_wall_seconds": 0.020622320007532835,
+          "physical_coordinate_mode": "mapped",
+          "mapped_samples": 48000,
+          "channel_model": "Independent Gaussian segment priors; maintained Gaussian evolution within each segment; global bit/coherence choice",
+          "timing_model": "Public piecewise-affine source offset/rate; retained subprobability path sum without pruning renormalization",
+          "noise_scope": "Known logical-row Gaussian null only; physical/ASRC colored-noise covariance remains unqualified"
+        },
+        {
+          "status": "prefix_diagnostic",
+          "complete_observation": false,
+          "admission": null,
+          "bit_scores": [
+            0.0,
+            0.0
+          ],
+          "timing": {
+            "log_evidence": [
+              0.0,
+              0.0
+            ],
+            "state_count": 17,
+            "observations": 3,
+            "predictions": 2,
+            "elapsed_seconds": 8.0,
+            "pruning_events": 0,
+            "states_dropped": 0,
+            "retained_initial_path_probability": 0.9999999999999999,
+            "last_retained_evidence_fraction": [
+              1.0,
+              1.0
+            ],
+            "minimum_retained_evidence_fraction": [
+              1.0,
+              1.0
+            ],
+            "peak_states": 17,
+            "peak_transition_states": 17,
+            "transition_workspace_state_bound": 10368,
+            "delay_index_min": -2,
+            "delay_index_max": 2,
+            "posterior_map_display": [
+              {
+                "group": 0,
+                "delay_index": 0,
+                "source_offset_seconds": 0.0,
+                "rate_index": 0,
+                "rate_ppm": 0.0,
+                "conditional_retained_probability": 0.2951333333333334
+              },
+              {
+                "group": 0,
+                "delay_index": 0,
+                "source_offset_seconds": 0.0,
+                "rate_index": 0,
+                "rate_ppm": 0.0,
+                "conditional_retained_probability": 0.2951333333333334
+              }
+            ],
+            "probability_scope": "posterior conditional on retained paths; pruning can lose the true path",
+            "evidence_scope": "subprobability path sum; no pruning-mass renormalization or admission decision"
+          },
+          "consumed_samples": 72000,
+          "processed_rows": 72000,
+          "scored_rows": 72000,
+          "observed_rows": 72000,
+          "erased_rows": 0,
+          "blocks": 24,
+          "segments": 3,
+          "requested_invalid_rows": 0,
+          "processed_requested_invalid_rows": 0,
+          "additional_discarded_rows": 0,
+          "expanded_erasure_blocks": 0,
+          "erasure_policy": "Discard complete DFT likelihood blocks intersecting invalid rows; at most two extra edge blocks per contiguous outage",
+          "pending_rows": 0,
+          "peak_pending_rows": 24000,
+          "working_bytes_estimate": 98275896,
+          "preparation_seconds": 0.00015011290088295937,
+          "push_process_cpu_seconds": 0.14475290199999913,
+          "segment_process_cpu_seconds": 0.13819781200000003,
+          "maximum_segment_cpu_seconds": 0.06161031899999969,
+          "maximum_segment_wall_seconds": 0.03079262003302574,
+          "physical_coordinate_mode": "mapped",
+          "mapped_samples": 72000,
+          "channel_model": "Independent Gaussian segment priors; maintained Gaussian evolution within each segment; global bit/coherence choice",
+          "timing_model": "Public piecewise-affine source offset/rate; retained subprobability path sum without pruning renormalization",
+          "noise_scope": "Known logical-row Gaussian null only; physical/ASRC colored-noise covariance remains unqualified"
+        },
+        {
+          "status": "prefix_diagnostic",
+          "complete_observation": false,
+          "admission": null,
+          "bit_scores": [
+            0.0,
+            0.0
+          ],
+          "timing": {
+            "log_evidence": [
+              0.0,
+              0.0
+            ],
+            "state_count": 35,
+            "observations": 4,
+            "predictions": 3,
+            "elapsed_seconds": 12.0,
+            "pruning_events": 0,
+            "states_dropped": 0,
+            "retained_initial_path_probability": 0.9999999999999998,
+            "last_retained_evidence_fraction": [
+              1.0,
+              1.0
+            ],
+            "minimum_retained_evidence_fraction": [
+              1.0,
+              1.0
+            ],
+            "peak_states": 35,
+            "peak_transition_states": 35,
+            "transition_workspace_state_bound": 10368,
+            "delay_index_min": -3,
+            "delay_index_max": 3,
+            "posterior_map_display": [
+              {
+                "group": 0,
+                "delay_index": 0,
+                "source_offset_seconds": 0.0,
+                "rate_index": 0,
+                "rate_ppm": 0.0,
+                "conditional_retained_probability": 0.210017925925926
+              },
+              {
+                "group": 0,
+                "delay_index": 0,
+                "source_offset_seconds": 0.0,
+                "rate_index": 0,
+                "rate_ppm": 0.0,
+                "conditional_retained_probability": 0.210017925925926
+              }
+            ],
+            "probability_scope": "posterior conditional on retained paths; pruning can lose the true path",
+            "evidence_scope": "subprobability path sum; no pruning-mass renormalization or admission decision"
+          },
+          "consumed_samples": 96000,
+          "processed_rows": 96000,
+          "scored_rows": 96000,
+          "observed_rows": 96000,
+          "erased_rows": 0,
+          "blocks": 32,
+          "segments": 4,
+          "requested_invalid_rows": 0,
+          "processed_requested_invalid_rows": 0,
+          "additional_discarded_rows": 0,
+          "expanded_erasure_blocks": 0,
+          "erasure_policy": "Discard complete DFT likelihood blocks intersecting invalid rows; at most two extra edge blocks per contiguous outage",
+          "pending_rows": 0,
+          "peak_pending_rows": 24000,
+          "working_bytes_estimate": 98275896,
+          "preparation_seconds": 0.00015011290088295937,
+          "push_process_cpu_seconds": 0.24357977699999855,
+          "segment_process_cpu_seconds": 0.2362174119999998,
+          "maximum_segment_cpu_seconds": 0.09801959999999976,
+          "maximum_segment_wall_seconds": 0.050226255087181926,
+          "physical_coordinate_mode": "mapped",
+          "mapped_samples": 96000,
+          "channel_model": "Independent Gaussian segment priors; maintained Gaussian evolution within each segment; global bit/coherence choice",
+          "timing_model": "Public piecewise-affine source offset/rate; retained subprobability path sum without pruning renormalization",
+          "noise_scope": "Known logical-row Gaussian null only; physical/ASRC colored-noise covariance remains unqualified"
+        },
+        {
+          "status": "prefix_diagnostic",
+          "complete_observation": false,
+          "admission": null,
+          "bit_scores": [
+            0.0,
+            0.0
+          ],
+          "timing": {
+            "log_evidence": [
+              0.0,
+              0.0
+            ],
+            "state_count": 59,
+            "observations": 5,
+            "predictions": 4,
+            "elapsed_seconds": 16.0,
+            "pruning_events": 0,
+            "states_dropped": 0,
+            "retained_initial_path_probability": 0.9999999999999998,
+            "last_retained_evidence_fraction": [
+              1.0,
+              1.0
+            ],
+            "minimum_retained_evidence_fraction": [
+              1.0,
+              1.0
+            ],
+            "peak_states": 59,
+            "peak_transition_states": 59,
+            "transition_workspace_state_bound": 10368,
+            "delay_index_min": -4,
+            "delay_index_max": 4,
+            "posterior_map_display": [
+              {
+                "group": 0,
+                "delay_index": 0,
+                "source_offset_seconds": 0.0,
+                "rate_index": 0,
+                "rate_ppm": 0.0,
+                "conditional_retained_probability": 0.16639230123456794
+              },
+              {
+                "group": 0,
+                "delay_index": 0,
+                "source_offset_seconds": 0.0,
+                "rate_index": 0,
+                "rate_ppm": 0.0,
+                "conditional_retained_probability": 0.16639230123456794
+              }
+            ],
+            "probability_scope": "posterior conditional on retained paths; pruning can lose the true path",
+            "evidence_scope": "subprobability path sum; no pruning-mass renormalization or admission decision"
+          },
+          "consumed_samples": 120000,
+          "processed_rows": 120000,
+          "scored_rows": 120000,
+          "observed_rows": 120000,
+          "erased_rows": 0,
+          "blocks": 40,
+          "segments": 5,
+          "requested_invalid_rows": 0,
+          "processed_requested_invalid_rows": 0,
+          "additional_discarded_rows": 0,
+          "expanded_erasure_blocks": 0,
+          "erasure_policy": "Discard complete DFT likelihood blocks intersecting invalid rows; at most two extra edge blocks per contiguous outage",
+          "pending_rows": 0,
+          "peak_pending_rows": 24000,
+          "working_bytes_estimate": 98275896,
+          "preparation_seconds": 0.00015011290088295937,
+          "push_process_cpu_seconds": 0.3922454209999984,
+          "segment_process_cpu_seconds": 0.3840338029999999,
+          "maximum_segment_cpu_seconds": 0.1478163910000001,
+          "maximum_segment_wall_seconds": 0.09703910304233432,
+          "physical_coordinate_mode": "mapped",
+          "mapped_samples": 120000,
+          "channel_model": "Independent Gaussian segment priors; maintained Gaussian evolution within each segment; global bit/coherence choice",
+          "timing_model": "Public piecewise-affine source offset/rate; retained subprobability path sum without pruning renormalization",
+          "noise_scope": "Known logical-row Gaussian null only; physical/ASRC colored-noise covariance remains unqualified"
+        },
+        {
+          "status": "prefix_diagnostic",
+          "complete_observation": false,
+          "admission": null,
+          "bit_scores": [
+            -0.001204618217653497,
+            -0.001204618217653497
+          ],
+          "timing": {
+            "log_evidence": [
+              -0.001204618217653497,
+              -0.001204618217653497
+            ],
+            "state_count": 64,
+            "observations": 6,
+            "predictions": 5,
+            "elapsed_seconds": 20.0,
+            "pruning_events": 1,
+            "states_dropped": 25,
+            "retained_initial_path_probability": 0.9987961070436212,
+            "last_retained_evidence_fraction": [
+              0.9987961070436219,
+              0.9987961070436219
+            ],
+            "minimum_retained_evidence_fraction": [
+              0.9987961070436219,
+              0.9987961070436219
+            ],
+            "peak_states": 89,
+            "peak_transition_states": 89,
+            "transition_workspace_state_bound": 10368,
+            "delay_index_min": -4,
+            "delay_index_max": 4,
+            "posterior_map_display": [
+              {
+                "group": 0,
+                "delay_index": 0,
+                "source_offset_seconds": 0.0,
+                "rate_index": 0,
+                "rate_ppm": 0.0,
+                "conditional_retained_probability": 0.13057980684550904
+              },
+              {
+                "group": 0,
+                "delay_index": 0,
+                "source_offset_seconds": 0.0,
+                "rate_index": 0,
+                "rate_ppm": 0.0,
+                "conditional_retained_probability": 0.13057980684550904
+              }
+            ],
+            "probability_scope": "posterior conditional on retained paths; pruning can lose the true path",
+            "evidence_scope": "subprobability path sum; no pruning-mass renormalization or admission decision"
+          },
+          "consumed_samples": 144000,
+          "processed_rows": 144000,
+          "scored_rows": 144000,
+          "observed_rows": 144000,
+          "erased_rows": 0,
+          "blocks": 48,
+          "segments": 6,
+          "requested_invalid_rows": 0,
+          "processed_requested_invalid_rows": 0,
+          "additional_discarded_rows": 0,
+          "expanded_erasure_blocks": 0,
+          "erasure_policy": "Discard complete DFT likelihood blocks intersecting invalid rows; at most two extra edge blocks per contiguous outage",
+          "pending_rows": 0,
+          "peak_pending_rows": 24000,
+          "working_bytes_estimate": 98275896,
+          "preparation_seconds": 0.00015011290088295937,
+          "push_process_cpu_seconds": 0.6219270749999977,
+          "segment_process_cpu_seconds": 0.6128442240000003,
+          "maximum_segment_cpu_seconds": 0.22881042100000037,
+          "maximum_segment_wall_seconds": 0.17717048001941293,
+          "physical_coordinate_mode": "mapped",
+          "mapped_samples": 144000,
+          "channel_model": "Independent Gaussian segment priors; maintained Gaussian evolution within each segment; global bit/coherence choice",
+          "timing_model": "Public piecewise-affine source offset/rate; retained subprobability path sum without pruning renormalization",
+          "noise_scope": "Known logical-row Gaussian null only; physical/ASRC colored-noise covariance remains unqualified"
+        },
+        {
+          "status": "prefix_diagnostic",
+          "complete_observation": false,
+          "admission": null,
+          "bit_scores": [
+            -0.009096744018464609,
+            -0.009096744018464609
+          ],
+          "timing": {
+            "log_evidence": [
+              -0.009096744018464609,
+              -0.009096744018464609
+            ],
+            "state_count": 64,
+            "observations": 7,
+            "predictions": 6,
+            "elapsed_seconds": 24.0,
+            "pruning_events": 2,
+            "states_dropped": 57,
+            "retained_initial_path_probability": 0.9909445061818049,
+            "last_retained_evidence_fraction": [
+              0.9921389352577108,
+              0.9921389352577108
+            ],
+            "minimum_retained_evidence_fraction": [
+              0.9921389352577108,
+              0.9921389352577108
+            ],
+            "peak_states": 96,
+            "peak_transition_states": 96,
+            "transition_workspace_state_bound": 10368,
+            "delay_index_min": -5,
+            "delay_index_max": 5,
+            "posterior_map_display": [
+              {
+                "group": 0,
+                "delay_index": 0,
+                "source_offset_seconds": 0.0,
+                "rate_index": 0,
+                "rate_ppm": 0.0,
+                "conditional_retained_probability": 0.10504688692328615
+              },
+              {
+                "group": 0,
+                "delay_index": 0,
+                "source_offset_seconds": 0.0,
+                "rate_index": 0,
+                "rate_ppm": 0.0,
+                "conditional_retained_probability": 0.10504688692328615
+              }
+            ],
+            "probability_scope": "posterior conditional on retained paths; pruning can lose the true path",
+            "evidence_scope": "subprobability path sum; no pruning-mass renormalization or admission decision"
+          },
+          "consumed_samples": 168000,
+          "processed_rows": 168000,
+          "scored_rows": 168000,
+          "observed_rows": 168000,
+          "erased_rows": 0,
+          "blocks": 56,
+          "segments": 7,
+          "requested_invalid_rows": 0,
+          "processed_requested_invalid_rows": 0,
+          "additional_discarded_rows": 0,
+          "expanded_erasure_blocks": 0,
+          "erasure_policy": "Discard complete DFT likelihood blocks intersecting invalid rows; at most two extra edge blocks per contiguous outage",
+          "pending_rows": 0,
+          "peak_pending_rows": 24000,
+          "working_bytes_estimate": 98275896,
+          "preparation_seconds": 0.00015011290088295937,
+          "push_process_cpu_seconds": 0.8675836079999968,
+          "segment_process_cpu_seconds": 0.8535375379999999,
+          "maximum_segment_cpu_seconds": 0.2406933139999996,
+          "maximum_segment_wall_seconds": 0.18435079895425588,
+          "physical_coordinate_mode": "mapped",
+          "mapped_samples": 168000,
+          "channel_model": "Independent Gaussian segment priors; maintained Gaussian evolution within each segment; global bit/coherence choice",
+          "timing_model": "Public piecewise-affine source offset/rate; retained subprobability path sum without pruning renormalization",
+          "noise_scope": "Known logical-row Gaussian null only; physical/ASRC colored-noise covariance remains unqualified"
+        },
+        {
+          "status": "prefix_diagnostic",
+          "complete_observation": false,
+          "admission": null,
+          "bit_scores": [
+            -0.026304384997204,
+            -0.026304384997204
+          ],
+          "timing": {
+            "log_evidence": [
+              -0.026304384997204,
+              -0.026304384997204
+            ],
+            "state_count": 64,
+            "observations": 8,
+            "predictions": 7,
+            "elapsed_seconds": 28.0,
+            "pruning_events": 3,
+            "states_dropped": 94,
+            "retained_initial_path_probability": 0.9740385617568263,
+            "last_retained_evidence_fraction": [
+              0.9829395649105337,
+              0.9829395649105337
+            ],
+            "minimum_retained_evidence_fraction": [
+              0.9829395649105337,
+              0.9829395649105337
+            ],
+            "peak_states": 101,
+            "peak_transition_states": 101,
+            "transition_workspace_state_bound": 10368,
+            "delay_index_min": -5,
+            "delay_index_max": 5,
+            "posterior_map_display": [
+              {
+                "group": 0,
+                "delay_index": 0,
+                "source_offset_seconds": 0.0,
+                "rate_index": 0,
+                "rate_ppm": 0.0,
+                "conditional_retained_probability": 0.08588386346413925
+              },
+              {
+                "group": 0,
+                "delay_index": 0,
+                "source_offset_seconds": 0.0,
+                "rate_index": 0,
+                "rate_ppm": 0.0,
+                "conditional_retained_probability": 0.08588386346413925
+              }
+            ],
+            "probability_scope": "posterior conditional on retained paths; pruning can lose the true path",
+            "evidence_scope": "subprobability path sum; no pruning-mass renormalization or admission decision"
+          },
+          "consumed_samples": 192000,
+          "processed_rows": 192000,
+          "scored_rows": 192000,
+          "observed_rows": 192000,
+          "erased_rows": 0,
+          "blocks": 64,
+          "segments": 8,
+          "requested_invalid_rows": 0,
+          "processed_requested_invalid_rows": 0,
+          "additional_discarded_rows": 0,
+          "expanded_erasure_blocks": 0,
+          "erasure_policy": "Discard complete DFT likelihood blocks intersecting invalid rows; at most two extra edge blocks per contiguous outage",
+          "pending_rows": 0,
+          "peak_pending_rows": 24000,
+          "working_bytes_estimate": 98275896,
+          "preparation_seconds": 0.00015011290088295937,
+          "push_process_cpu_seconds": 1.1268482179999966,
+          "segment_process_cpu_seconds": 1.1119659709999996,
+          "maximum_segment_cpu_seconds": 0.25842843299999974,
+          "maximum_segment_wall_seconds": 0.20196213794406503,
+          "physical_coordinate_mode": "mapped",
+          "mapped_samples": 192000,
+          "channel_model": "Independent Gaussian segment priors; maintained Gaussian evolution within each segment; global bit/coherence choice",
+          "timing_model": "Public piecewise-affine source offset/rate; retained subprobability path sum without pruning renormalization",
+          "noise_scope": "Known logical-row Gaussian null only; physical/ASRC colored-noise covariance remains unqualified"
+        },
+        {
+          "status": "prefix_diagnostic",
+          "complete_observation": false,
+          "admission": null,
+          "bit_scores": [
+            -0.054364334792104785,
+            -0.054364334792104785
+          ],
+          "timing": {
+            "log_evidence": [
+              -0.054364334792104785,
+              -0.054364334792104785
+            ],
+            "state_count": 64,
+            "observations": 9,
+            "predictions": 8,
+            "elapsed_seconds": 32.0,
+            "pruning_events": 4,
+            "states_dropped": 130,
+            "retained_initial_path_probability": 0.9470869868955992,
+            "last_retained_evidence_fraction": [
+              0.9723300740654304,
+              0.9723300740654304
+            ],
+            "minimum_retained_evidence_fraction": [
+              0.9723300740654304,
+              0.9723300740654304
+            ],
+            "peak_states": 101,
+            "peak_transition_states": 101,
+            "transition_workspace_state_bound": 10368,
+            "delay_index_min": -5,
+            "delay_index_max": 5,
+            "posterior_map_display": [
+              {
+                "group": 0,
+                "delay_index": 0,
+                "source_offset_seconds": 0.0,
+                "rate_index": 0,
+                "rate_ppm": 0.0,
+                "conditional_retained_probability": 0.07168644584315345
+              },
+              {
+                "group": 0,
+                "delay_index": 0,
+                "source_offset_seconds": 0.0,
+                "rate_index": 0,
+                "rate_ppm": 0.0,
+                "conditional_retained_probability": 0.07168644584315345
+              }
+            ],
+            "probability_scope": "posterior conditional on retained paths; pruning can lose the true path",
+            "evidence_scope": "subprobability path sum; no pruning-mass renormalization or admission decision"
+          },
+          "consumed_samples": 216000,
+          "processed_rows": 216000,
+          "scored_rows": 216000,
+          "observed_rows": 216000,
+          "erased_rows": 0,
+          "blocks": 72,
+          "segments": 9,
+          "requested_invalid_rows": 0,
+          "processed_requested_invalid_rows": 0,
+          "additional_discarded_rows": 0,
+          "expanded_erasure_blocks": 0,
+          "erasure_policy": "Discard complete DFT likelihood blocks intersecting invalid rows; at most two extra edge blocks per contiguous outage",
+          "pending_rows": 0,
+          "peak_pending_rows": 24000,
+          "working_bytes_estimate": 98275896,
+          "preparation_seconds": 0.00015011290088295937,
+          "push_process_cpu_seconds": 1.3686492509999963,
+          "segment_process_cpu_seconds": 1.3529322570000004,
+          "maximum_segment_cpu_seconds": 0.25842843299999974,
+          "maximum_segment_wall_seconds": 0.20196213794406503,
+          "physical_coordinate_mode": "mapped",
+          "mapped_samples": 216000,
+          "channel_model": "Independent Gaussian segment priors; maintained Gaussian evolution within each segment; global bit/coherence choice",
+          "timing_model": "Public piecewise-affine source offset/rate; retained subprobability path sum without pruning renormalization",
+          "noise_scope": "Known logical-row Gaussian null only; physical/ASRC colored-noise covariance remains unqualified"
+        },
+        {
+          "status": "prefix_diagnostic",
+          "complete_observation": false,
+          "admission": null,
+          "bit_scores": [
+            -0.09583980949015469,
+            -0.09583980949015469
+          ],
+          "timing": {
+            "log_evidence": [
+              -0.09583980949015469,
+              -0.09583980949015469
+            ],
+            "state_count": 64,
+            "observations": 10,
+            "predictions": 9,
+            "elapsed_seconds": 36.0,
+            "pruning_events": 5,
+            "states_dropped": 166,
+            "retained_initial_path_probability": 0.908609555039286,
+            "last_retained_evidence_fraction": [
+              0.9593728639621201,
+              0.9593728639621201
+            ],
+            "minimum_retained_evidence_fraction": [
+              0.9593728639621201,
+              0.9593728639621201
+            ],
+            "peak_states": 101,
+            "peak_transition_states": 101,
+            "transition_workspace_state_bound": 10368,
+            "delay_index_min": -6,
+            "delay_index_max": 5,
+            "posterior_map_display": [
+              {
+                "group": 0,
+                "delay_index": 0,
+                "source_offset_seconds": 0.0,
+                "rate_index": 0,
+                "rate_ppm": 0.0,
+                "conditional_retained_probability": 0.061176002953778376
+              },
+              {
+                "group": 0,
+                "delay_index": 0,
+                "source_offset_seconds": 0.0,
+                "rate_index": 0,
+                "rate_ppm": 0.0,
+                "conditional_retained_probability": 0.061176002953778376
+              }
+            ],
+            "probability_scope": "posterior conditional on retained paths; pruning can lose the true path",
+            "evidence_scope": "subprobability path sum; no pruning-mass renormalization or admission decision"
+          },
+          "consumed_samples": 240000,
+          "processed_rows": 240000,
+          "scored_rows": 240000,
+          "observed_rows": 240000,
+          "erased_rows": 0,
+          "blocks": 80,
+          "segments": 10,
+          "requested_invalid_rows": 0,
+          "processed_requested_invalid_rows": 0,
+          "additional_discarded_rows": 0,
+          "expanded_erasure_blocks": 0,
+          "erasure_policy": "Discard complete DFT likelihood blocks intersecting invalid rows; at most two extra edge blocks per contiguous outage",
+          "pending_rows": 0,
+          "peak_pending_rows": 24000,
+          "working_bytes_estimate": 98275896,
+          "preparation_seconds": 0.00015011290088295937,
+          "push_process_cpu_seconds": 1.6221942119999957,
+          "segment_process_cpu_seconds": 1.6056563490000006,
+          "maximum_segment_cpu_seconds": 0.25842843299999974,
+          "maximum_segment_wall_seconds": 0.20196213794406503,
+          "physical_coordinate_mode": "mapped",
+          "mapped_samples": 240000,
+          "channel_model": "Independent Gaussian segment priors; maintained Gaussian evolution within each segment; global bit/coherence choice",
+          "timing_model": "Public piecewise-affine source offset/rate; retained subprobability path sum without pruning renormalization",
+          "noise_scope": "Known logical-row Gaussian null only; physical/ASRC colored-noise covariance remains unqualified"
+        },
+        {
+          "status": "prefix_diagnostic",
+          "complete_observation": false,
+          "admission": null,
+          "bit_scores": [
+            -0.15115122895909927,
+            -0.15115122895909927
+          ],
+          "timing": {
+            "log_evidence": [
+              -0.15115122895909927,
+              -0.15115122895909927
+            ],
+            "state_count": 64,
+            "observations": 11,
+            "predictions": 10,
+            "elapsed_seconds": 40.0,
+            "pruning_events": 6,
+            "states_dropped": 204,
+            "retained_initial_path_probability": 0.8597176746187014,
+            "last_retained_evidence_fraction": [
+              0.9461904399426322,
+              0.9461904399426322
+            ],
+            "minimum_retained_evidence_fraction": [
+              0.9461904399426322,
+              0.9461904399426322
+            ],
+            "peak_states": 102,
+            "peak_transition_states": 102,
+            "transition_workspace_state_bound": 10368,
+            "delay_index_min": -6,
+            "delay_index_max": 6,
+            "posterior_map_display": [
+              {
+                "group": 0,
+                "delay_index": 0,
+                "source_offset_seconds": 0.0,
+                "rate_index": 0,
+                "rate_ppm": 0.0,
+                "conditional_retained_probability": 0.05341887076912099
+              },
+              {
+                "group": 0,
+                "delay_index": 0,
+                "source_offset_seconds": 0.0,
+                "rate_index": 0,
+                "rate_ppm": 0.0,
+                "conditional_retained_probability": 0.05341887076912099
+              }
+            ],
+            "probability_scope": "posterior conditional on retained paths; pruning can lose the true path",
+            "evidence_scope": "subprobability path sum; no pruning-mass renormalization or admission decision"
+          },
+          "consumed_samples": 264000,
+          "processed_rows": 264000,
+          "scored_rows": 264000,
+          "observed_rows": 264000,
+          "erased_rows": 0,
+          "blocks": 88,
+          "segments": 11,
+          "requested_invalid_rows": 0,
+          "processed_requested_invalid_rows": 0,
+          "additional_discarded_rows": 0,
+          "expanded_erasure_blocks": 0,
+          "erasure_policy": "Discard complete DFT likelihood blocks intersecting invalid rows; at most two extra edge blocks per contiguous outage",
+          "pending_rows": 0,
+          "peak_pending_rows": 24000,
+          "working_bytes_estimate": 98275896,
+          "preparation_seconds": 0.00015011290088295937,
+          "push_process_cpu_seconds": 1.8784010279999954,
+          "segment_process_cpu_seconds": 1.8609498100000006,
+          "maximum_segment_cpu_seconds": 0.25842843299999974,
+          "maximum_segment_wall_seconds": 0.20196213794406503,
+          "physical_coordinate_mode": "mapped",
+          "mapped_samples": 264000,
+          "channel_model": "Independent Gaussian segment priors; maintained Gaussian evolution within each segment; global bit/coherence choice",
+          "timing_model": "Public piecewise-affine source offset/rate; retained subprobability path sum without pruning renormalization",
+          "noise_scope": "Known logical-row Gaussian null only; physical/ASRC colored-noise covariance remains unqualified"
+        },
+        {
+          "status": "prefix_diagnostic",
+          "complete_observation": false,
+          "admission": null,
+          "bit_scores": [
+            -0.1831197643107747,
+            -2.5291966264931363
+          ],
+          "timing": {
+            "log_evidence": [
+              -0.1831197643107747,
+              -2.5291966264931363
+            ],
+            "state_count": 64,
+            "observations": 12,
+            "predictions": 11,
+            "elapsed_seconds": 44.0,
+            "pruning_events": 7,
+            "states_dropped": 244,
+            "retained_initial_path_probability": 0.7822599045541222,
+            "last_retained_evidence_fraction": [
+              0.9865773961665087,
+              0.8789981070221686
+            ],
+            "minimum_retained_evidence_fraction": [
+              0.9461904399426322,
+              0.8789981070221686
+            ],
+            "peak_states": 104,
+            "peak_transition_states": 104,
+            "transition_workspace_state_bound": 10368,
+            "delay_index_min": -6,
+            "delay_index_max": 6,
+            "posterior_map_display": [
+              {
+                "group": 0,
+                "delay_index": -3,
+                "source_offset_seconds": -0.003333333333333333,
+                "rate_index": -1,
+                "rate_ppm": -50.0,
+                "conditional_retained_probability": 0.1256550970939373
+              },
+              {
+                "group": 0,
+                "delay_index": 2,
+                "source_offset_seconds": 0.0022222222222222222,
+                "rate_index": 2,
+                "rate_ppm": 100.0,
+                "conditional_retained_probability": 0.06054577773299028
+              }
+            ],
+            "probability_scope": "posterior conditional on retained paths; pruning can lose the true path",
+            "evidence_scope": "subprobability path sum; no pruning-mass renormalization or admission decision"
+          },
+          "consumed_samples": 288000,
+          "processed_rows": 288000,
+          "scored_rows": 288000,
+          "observed_rows": 288000,
+          "erased_rows": 0,
+          "blocks": 96,
+          "segments": 12,
+          "requested_invalid_rows": 0,
+          "processed_requested_invalid_rows": 0,
+          "additional_discarded_rows": 0,
+          "expanded_erasure_blocks": 0,
+          "erasure_policy": "Discard complete DFT likelihood blocks intersecting invalid rows; at most two extra edge blocks per contiguous outage",
+          "pending_rows": 0,
+          "peak_pending_rows": 24000,
+          "working_bytes_estimate": 98275896,
+          "preparation_seconds": 0.00015011290088295937,
+          "push_process_cpu_seconds": 2.599437399999995,
+          "segment_process_cpu_seconds": 2.5811999580000005,
+          "maximum_segment_cpu_seconds": 0.7202501479999999,
+          "maximum_segment_wall_seconds": 0.7358367900596932,
+          "physical_coordinate_mode": "mapped",
+          "mapped_samples": 288000,
+          "channel_model": "Independent Gaussian segment priors; maintained Gaussian evolution within each segment; global bit/coherence choice",
+          "timing_model": "Public piecewise-affine source offset/rate; retained subprobability path sum without pruning renormalization",
+          "noise_scope": "Known logical-row Gaussian null only; physical/ASRC colored-noise covariance remains unqualified"
+        },
+        {
+          "status": "prefix_diagnostic",
+          "complete_observation": false,
+          "admission": null,
+          "bit_scores": [
+            -1.9683084953717345,
+            -5.843088031415871
+          ],
+          "timing": {
+            "log_evidence": [
+              -1.9683084953717345,
+              -5.843088031415871
+            ],
+            "state_count": 64,
+            "observations": 13,
+            "predictions": 12,
+            "elapsed_seconds": 48.000039996666736,
+            "pruning_events": 8,
+            "states_dropped": 284,
+            "retained_initial_path_probability": 0.6713293689589068,
+            "last_retained_evidence_fraction": [
+              0.9965857336190137,
+              0.8522393134289683
+            ],
+            "minimum_retained_evidence_fraction": [
+              0.9461904399426322,
+              0.8522393134289683
+            ],
+            "peak_states": 104,
+            "peak_transition_states": 104,
+            "transition_workspace_state_bound": 10368,
+            "delay_index_min": -7,
+            "delay_index_max": 4,
+            "posterior_map_display": [
+              {
+                "group": 0,
+                "delay_index": -5,
+                "source_offset_seconds": -0.005555555555555556,
+                "rate_index": -2,
+                "rate_ppm": -100.0,
+                "conditional_retained_probability": 0.2544748145947829
+              },
+              {
+                "group": 0,
+                "delay_index": 3,
+                "source_offset_seconds": 0.003333333333333333,
+                "rate_index": 3,
+                "rate_ppm": 150.0,
+                "conditional_retained_probability": 0.05870343902978545
+              }
+            ],
+            "probability_scope": "posterior conditional on retained paths; pruning can lose the true path",
+            "evidence_scope": "subprobability path sum; no pruning-mass renormalization or admission decision"
+          },
+          "consumed_samples": 312000,
+          "processed_rows": 312000,
+          "scored_rows": 312000,
+          "observed_rows": 312000,
+          "erased_rows": 0,
+          "blocks": 104,
+          "segments": 13,
+          "requested_invalid_rows": 0,
+          "processed_requested_invalid_rows": 0,
+          "additional_discarded_rows": 0,
+          "expanded_erasure_blocks": 0,
+          "erasure_policy": "Discard complete DFT likelihood blocks intersecting invalid rows; at most two extra edge blocks per contiguous outage",
+          "pending_rows": 0,
+          "peak_pending_rows": 24000,
+          "working_bytes_estimate": 98275896,
+          "preparation_seconds": 0.00015011290088295937,
+          "push_process_cpu_seconds": 3.6914268759999933,
+          "segment_process_cpu_seconds": 3.6721825660000005,
+          "maximum_segment_cpu_seconds": 1.090982608,
+          "maximum_segment_wall_seconds": 1.1455673109740019,
+          "physical_coordinate_mode": "mapped",
+          "mapped_samples": 312000,
+          "channel_model": "Independent Gaussian segment priors; maintained Gaussian evolution within each segment; global bit/coherence choice",
+          "timing_model": "Public piecewise-affine source offset/rate; retained subprobability path sum without pruning renormalization",
+          "noise_scope": "Known logical-row Gaussian null only; physical/ASRC colored-noise covariance remains unqualified"
+        },
+        {
+          "status": "prefix_diagnostic",
+          "complete_observation": false,
+          "admission": null,
+          "bit_scores": [
+            -3.8873313256320237,
+            -6.937018494850377
+          ],
+          "timing": {
+            "log_evidence": [
+              -3.8873313256320237,
+              -6.937018494850377
+            ],
+            "state_count": 64,
+            "observations": 14,
+            "predictions": 13,
+            "elapsed_seconds": 52.000199993333396,
+            "pruning_events": 9,
+            "states_dropped": 323,
+            "retained_initial_path_probability": 0.5274858062254248,
+            "last_retained_evidence_fraction": [
+              0.9964103465870157,
+              0.9309810274690808
+            ],
+            "minimum_retained_evidence_fraction": [
+              0.9461904399426322,
+              0.8522393134289683
+            ],
+            "peak_states": 104,
+            "peak_transition_states": 104,
+            "transition_workspace_state_bound": 10368,
+            "delay_index_min": -8,
+            "delay_index_max": 3,
+            "posterior_map_display": [
+              {
+                "group": 0,
+                "delay_index": -5,
+                "source_offset_seconds": -0.005555555555555556,
+                "rate_index": -1,
+                "rate_ppm": -50.0,
+                "conditional_retained_probability": 0.11531360565981498
+              },
+              {
+                "group": 0,
+                "delay_index": 1,
+                "source_offset_seconds": 0.0011111111111111111,
+                "rate_index": -1,
+                "rate_ppm": -50.0,
+                "conditional_retained_probability": 0.15227388428014332
+              }
+            ],
+            "probability_scope": "posterior conditional on retained paths; pruning can lose the true path",
+            "evidence_scope": "subprobability path sum; no pruning-mass renormalization or admission decision"
+          },
+          "consumed_samples": 336000,
+          "processed_rows": 336000,
+          "scored_rows": 336000,
+          "observed_rows": 336000,
+          "erased_rows": 0,
+          "blocks": 112,
+          "segments": 14,
+          "requested_invalid_rows": 0,
+          "processed_requested_invalid_rows": 0,
+          "additional_discarded_rows": 0,
+          "expanded_erasure_blocks": 0,
+          "erasure_policy": "Discard complete DFT likelihood blocks intersecting invalid rows; at most two extra edge blocks per contiguous outage",
+          "pending_rows": 0,
+          "peak_pending_rows": 24000,
+          "working_bytes_estimate": 98275896,
+          "preparation_seconds": 0.00015011290088295937,
+          "push_process_cpu_seconds": 4.847104899999993,
+          "segment_process_cpu_seconds": 4.826844625000001,
+          "maximum_segment_cpu_seconds": 1.1546620590000005,
+          "maximum_segment_wall_seconds": 1.2145124189555645,
+          "physical_coordinate_mode": "mapped",
+          "mapped_samples": 336000,
+          "channel_model": "Independent Gaussian segment priors; maintained Gaussian evolution within each segment; global bit/coherence choice",
+          "timing_model": "Public piecewise-affine source offset/rate; retained subprobability path sum without pruning renormalization",
+          "noise_scope": "Known logical-row Gaussian null only; physical/ASRC colored-noise covariance remains unqualified"
+        },
+        {
+          "status": "prefix_diagnostic",
+          "complete_observation": false,
+          "admission": null,
+          "bit_scores": [
+            -6.183712771799831,
+            -9.823182836513666
+          ],
+          "timing": {
+            "log_evidence": [
+              -6.183712771799831,
+              -9.823182836513666
+            ],
+            "state_count": 64,
+            "observations": 15,
+            "predictions": 14,
+            "elapsed_seconds": 56.00050938753814,
+            "pruning_events": 10,
+            "states_dropped": 362,
+            "retained_initial_path_probability": 0.45751451164871204,
+            "last_retained_evidence_fraction": [
+              0.9907821547298312,
+              0.870671528164898
+            ],
+            "minimum_retained_evidence_fraction": [
+              0.9461904399426322,
+              0.8522393134289683
+            ],
+            "peak_states": 104,
+            "peak_transition_states": 104,
+            "transition_workspace_state_bound": 10368,
+            "delay_index_min": -9,
+            "delay_index_max": 3,
+            "posterior_map_display": [
+              {
+                "group": 0,
+                "delay_index": -7,
+                "source_offset_seconds": -0.0077777777777777776,
+                "rate_index": -3,
+                "rate_ppm": -150.0,
+                "conditional_retained_probability": 0.12343416546532429
+              },
+              {
+                "group": 0,
+                "delay_index": 2,
+                "source_offset_seconds": 0.0022222222222222222,
+                "rate_index": 0,
+                "rate_ppm": 0.0,
+                "conditional_retained_probability": 0.07707022911805494
+              }
+            ],
+            "probability_scope": "posterior conditional on retained paths; pruning can lose the true path",
+            "evidence_scope": "subprobability path sum; no pruning-mass renormalization or admission decision"
+          },
+          "consumed_samples": 360000,
+          "processed_rows": 360000,
+          "scored_rows": 360000,
+          "observed_rows": 360000,
+          "erased_rows": 0,
+          "blocks": 120,
+          "segments": 15,
+          "requested_invalid_rows": 0,
+          "processed_requested_invalid_rows": 0,
+          "additional_discarded_rows": 0,
+          "expanded_erasure_blocks": 0,
+          "erasure_policy": "Discard complete DFT likelihood blocks intersecting invalid rows; at most two extra edge blocks per contiguous outage",
+          "pending_rows": 0,
+          "peak_pending_rows": 24000,
+          "working_bytes_estimate": 98275896,
+          "preparation_seconds": 0.00015011290088295937,
+          "push_process_cpu_seconds": 6.02000215699999,
+          "segment_process_cpu_seconds": 5.997424366000001,
+          "maximum_segment_cpu_seconds": 1.1705797409999992,
+          "maximum_segment_wall_seconds": 1.2292155009927228,
+          "physical_coordinate_mode": "mapped",
+          "mapped_samples": 360000,
+          "channel_model": "Independent Gaussian segment priors; maintained Gaussian evolution within each segment; global bit/coherence choice",
+          "timing_model": "Public piecewise-affine source offset/rate; retained subprobability path sum without pruning renormalization",
+          "noise_scope": "Known logical-row Gaussian null only; physical/ASRC colored-noise covariance remains unqualified"
+        },
+        {
+          "status": "prefix_diagnostic",
+          "complete_observation": false,
+          "admission": null,
+          "bit_scores": [
+            -8.01627599687799,
+            -11.653393466219129
+          ],
+          "timing": {
+            "log_evidence": [
+              -8.01627599687799,
+              -11.653393466219129
+            ],
+            "state_count": 64,
+            "observations": 16,
+            "predictions": 15,
+            "elapsed_seconds": 60.00093739008657,
+            "pruning_events": 11,
+            "states_dropped": 405,
+            "retained_initial_path_probability": 0.3551038998118433,
+            "last_retained_evidence_fraction": [
+              0.9802484236819944,
+              0.8300758824034519
+            ],
+            "minimum_retained_evidence_fraction": [
+              0.9461904399426322,
+              0.8300758824034519
+            ],
+            "peak_states": 107,
+            "peak_transition_states": 107,
+            "transition_workspace_state_bound": 10368,
+            "delay_index_min": -10,
+            "delay_index_max": 3,
+            "posterior_map_display": [
+              {
+                "group": 0,
+                "delay_index": -4,
+                "source_offset_seconds": -0.0044444444444444444,
+                "rate_index": -1,
+                "rate_ppm": -50.0,
+                "conditional_retained_probability": 0.0792470240878168
+              },
+              {
+                "group": 0,
+                "delay_index": 2,
+                "source_offset_seconds": 0.0022222222222222222,
+                "rate_index": 0,
+                "rate_ppm": 0.0,
+                "conditional_retained_probability": 0.16140376055292105
+              }
+            ],
+            "probability_scope": "posterior conditional on retained paths; pruning can lose the true path",
+            "evidence_scope": "subprobability path sum; no pruning-mass renormalization or admission decision"
+          },
+          "consumed_samples": 384000,
+          "processed_rows": 384000,
+          "scored_rows": 384000,
+          "observed_rows": 384000,
+          "erased_rows": 0,
+          "blocks": 128,
+          "segments": 16,
+          "requested_invalid_rows": 0,
+          "processed_requested_invalid_rows": 0,
+          "additional_discarded_rows": 0,
+          "expanded_erasure_blocks": 0,
+          "erasure_policy": "Discard complete DFT likelihood blocks intersecting invalid rows; at most two extra edge blocks per contiguous outage",
+          "pending_rows": 0,
+          "peak_pending_rows": 24000,
+          "working_bytes_estimate": 98275896,
+          "preparation_seconds": 0.00015011290088295937,
+          "push_process_cpu_seconds": 7.20814365499999,
+          "segment_process_cpu_seconds": 7.184704900000002,
+          "maximum_segment_cpu_seconds": 1.187280534000001,
+          "maximum_segment_wall_seconds": 1.2386613499838859,
+          "physical_coordinate_mode": "mapped",
+          "mapped_samples": 384000,
+          "channel_model": "Independent Gaussian segment priors; maintained Gaussian evolution within each segment; global bit/coherence choice",
+          "timing_model": "Public piecewise-affine source offset/rate; retained subprobability path sum without pruning renormalization",
+          "noise_scope": "Known logical-row Gaussian null only; physical/ASRC colored-noise covariance remains unqualified"
+        },
+        {
+          "status": "prefix_diagnostic",
+          "complete_observation": false,
+          "admission": null,
+          "bit_scores": [
+            -9.96342850475206,
+            -14.478163758460557
+          ],
+          "timing": {
+            "log_evidence": [
+              -9.96342850475206,
+              -14.478163758460557
+            ],
+            "state_count": 64,
+            "observations": 17,
+            "predictions": 16,
+            "elapsed_seconds": 64.0014946068895,
+            "pruning_events": 12,
+            "states_dropped": 449,
+            "retained_initial_path_probability": 0.25545566444567036,
+            "last_retained_evidence_fraction": [
+              0.9708956833969266,
+              0.699619608129182
+            ],
+            "minimum_retained_evidence_fraction": [
+              0.9461904399426322,
+              0.699619608129182
+            ],
+            "peak_states": 108,
+            "peak_transition_states": 108,
+            "transition_workspace_state_bound": 10368,
+            "delay_index_min": -10,
+            "delay_index_max": 4,
+            "posterior_map_display": [
+              {
+                "group": 0,
+                "delay_index": -7,
+                "source_offset_seconds": -0.0077777777777777776,
+                "rate_index": -5,
+                "rate_ppm": -250.0,
+                "conditional_retained_probability": 0.0835331241519307
+              },
+              {
+                "group": 0,
+                "delay_index": 2,
+                "source_offset_seconds": 0.0022222222222222222,
+                "rate_index": 1,
+                "rate_ppm": 50.0,
+                "conditional_retained_probability": 0.13612740901851494
+              }
+            ],
+            "probability_scope": "posterior conditional on retained paths; pruning can lose the true path",
+            "evidence_scope": "subprobability path sum; no pruning-mass renormalization or admission decision"
+          },
+          "consumed_samples": 408000,
+          "processed_rows": 408000,
+          "scored_rows": 408000,
+          "observed_rows": 408000,
+          "erased_rows": 0,
+          "blocks": 136,
+          "segments": 17,
+          "requested_invalid_rows": 0,
+          "processed_requested_invalid_rows": 0,
+          "additional_discarded_rows": 0,
+          "expanded_erasure_blocks": 0,
+          "erasure_policy": "Discard complete DFT likelihood blocks intersecting invalid rows; at most two extra edge blocks per contiguous outage",
+          "pending_rows": 0,
+          "peak_pending_rows": 24000,
+          "working_bytes_estimate": 98275896,
+          "preparation_seconds": 0.00015011290088295937,
+          "push_process_cpu_seconds": 8.34179514199999,
+          "segment_process_cpu_seconds": 8.317365487000002,
+          "maximum_segment_cpu_seconds": 1.187280534000001,
+          "maximum_segment_wall_seconds": 1.2386613499838859,
+          "physical_coordinate_mode": "mapped",
+          "mapped_samples": 408000,
+          "channel_model": "Independent Gaussian segment priors; maintained Gaussian evolution within each segment; global bit/coherence choice",
+          "timing_model": "Public piecewise-affine source offset/rate; retained subprobability path sum without pruning renormalization",
+          "noise_scope": "Known logical-row Gaussian null only; physical/ASRC colored-noise covariance remains unqualified"
+        },
+        {
+          "status": "prefix_diagnostic",
+          "complete_observation": false,
+          "admission": null,
+          "bit_scores": [
+            -12.56962537811393,
+            -17.170483730509066
+          ],
+          "timing": {
+            "log_evidence": [
+              -12.56962537811393,
+              -17.170483730509066
+            ],
+            "state_count": 64,
+            "observations": 18,
+            "predictions": 17,
+            "elapsed_seconds": 68.00220254676702,
+            "pruning_events": 13,
+            "states_dropped": 496,
+            "retained_initial_path_probability": 0.20275335800054,
+            "last_retained_evidence_fraction": [
+              0.9543234678655432,
+              0.7130973390173893
+            ],
+            "minimum_retained_evidence_fraction": [
+              0.9461904399426322,
+              0.699619608129182
+            ],
+            "peak_states": 111,
+            "peak_transition_states": 111,
+            "transition_workspace_state_bound": 10368,
+            "delay_index_min": -10,
+            "delay_index_max": 5,
+            "posterior_map_display": [
+              {
+                "group": 0,
+                "delay_index": -3,
+                "source_offset_seconds": -0.003333333333333333,
+                "rate_index": 1,
+                "rate_ppm": 50.0,
+                "conditional_retained_probability": 0.05685260316724947
+              },
+              {
+                "group": 0,
+                "delay_index": -5,
+                "source_offset_seconds": -0.005555555555555556,
+                "rate_index": -4,
+                "rate_ppm": -200.0,
+                "conditional_retained_probability": 0.12182064565002486
+              }
+            ],
+            "probability_scope": "posterior conditional on retained paths; pruning can lose the true path",
+            "evidence_scope": "subprobability path sum; no pruning-mass renormalization or admission decision"
+          },
+          "consumed_samples": 432000,
+          "processed_rows": 432000,
+          "scored_rows": 432000,
+          "observed_rows": 432000,
+          "erased_rows": 0,
+          "blocks": 144,
+          "segments": 18,
+          "requested_invalid_rows": 0,
+          "processed_requested_invalid_rows": 0,
+          "additional_discarded_rows": 0,
+          "expanded_erasure_blocks": 0,
+          "erasure_policy": "Discard complete DFT likelihood blocks intersecting invalid rows; at most two extra edge blocks per contiguous outage",
+          "pending_rows": 0,
+          "peak_pending_rows": 24000,
+          "working_bytes_estimate": 98275896,
+          "preparation_seconds": 0.00015011290088295937,
+          "push_process_cpu_seconds": 9.491393309999989,
+          "segment_process_cpu_seconds": 9.466127506000003,
+          "maximum_segment_cpu_seconds": 1.187280534000001,
+          "maximum_segment_wall_seconds": 1.2386613499838859,
+          "physical_coordinate_mode": "mapped",
+          "mapped_samples": 432000,
+          "channel_model": "Independent Gaussian segment priors; maintained Gaussian evolution within each segment; global bit/coherence choice",
+          "timing_model": "Public piecewise-affine source offset/rate; retained subprobability path sum without pruning renormalization",
+          "noise_scope": "Known logical-row Gaussian null only; physical/ASRC colored-noise covariance remains unqualified"
+        },
+        {
+          "status": "prefix_diagnostic",
+          "complete_observation": false,
+          "admission": null,
+          "bit_scores": [
+            -14.085399703869033,
+            -18.27523289951972
+          ],
+          "timing": {
+            "log_evidence": [
+              -14.085399703869033,
+              -18.27523289951972
+            ],
+            "state_count": 64,
+            "observations": 19,
+            "predictions": 18,
+            "elapsed_seconds": 72.00299195832042,
+            "pruning_events": 14,
+            "states_dropped": 546,
+            "retained_initial_path_probability": 0.1639582186386034,
+            "last_retained_evidence_fraction": [
+              0.9785545922429069,
+              0.8579250601312602
+            ],
+            "minimum_retained_evidence_fraction": [
+              0.9461904399426322,
+              0.699619608129182
+            ],
+            "peak_states": 114,
+            "peak_transition_states": 114,
+            "transition_workspace_state_bound": 10368,
+            "delay_index_min": -10,
+            "delay_index_max": 4,
+            "posterior_map_display": [
+              {
+                "group": 0,
+                "delay_index": 2,
+                "source_offset_seconds": 0.0022222222222222222,
+                "rate_index": 3,
+                "rate_ppm": 150.0,
+                "conditional_retained_probability": 0.10148817354087473
+              },
+              {
+                "group": 0,
+                "delay_index": -6,
+                "source_offset_seconds": -0.006666666666666666,
+                "rate_index": -2,
+                "rate_ppm": -100.0,
+                "conditional_retained_probability": 0.2776219338587483
+              }
+            ],
+            "probability_scope": "posterior conditional on retained paths; pruning can lose the true path",
+            "evidence_scope": "subprobability path sum; no pruning-mass renormalization or admission decision"
+          },
+          "consumed_samples": 456000,
+          "processed_rows": 456000,
+          "scored_rows": 456000,
+          "observed_rows": 456000,
+          "erased_rows": 0,
+          "blocks": 152,
+          "segments": 19,
+          "requested_invalid_rows": 0,
+          "processed_requested_invalid_rows": 0,
+          "additional_discarded_rows": 0,
+          "expanded_erasure_blocks": 0,
+          "erasure_policy": "Discard complete DFT likelihood blocks intersecting invalid rows; at most two extra edge blocks per contiguous outage",
+          "pending_rows": 0,
+          "peak_pending_rows": 24000,
+          "working_bytes_estimate": 98275896,
+          "preparation_seconds": 0.00015011290088295937,
+          "push_process_cpu_seconds": 10.816075784999988,
+          "segment_process_cpu_seconds": 10.789932885000004,
+          "maximum_segment_cpu_seconds": 1.3238053790000013,
+          "maximum_segment_wall_seconds": 1.3821061090566218,
+          "physical_coordinate_mode": "mapped",
+          "mapped_samples": 456000,
+          "channel_model": "Independent Gaussian segment priors; maintained Gaussian evolution within each segment; global bit/coherence choice",
+          "timing_model": "Public piecewise-affine source offset/rate; retained subprobability path sum without pruning renormalization",
+          "noise_scope": "Known logical-row Gaussian null only; physical/ASRC colored-noise covariance remains unqualified"
+        },
+        {
+          "status": "prefix_diagnostic",
+          "complete_observation": false,
+          "admission": null,
+          "bit_scores": [
+            -14.602090917918717,
+            -20.26203353758575
+          ],
+          "timing": {
+            "log_evidence": [
+              -14.602090917918717,
+              -20.26203353758575
+            ],
+            "state_count": 64,
+            "observations": 20,
+            "predictions": 19,
+            "elapsed_seconds": 76.00379211835244,
+            "pruning_events": 15,
+            "states_dropped": 597,
+            "retained_initial_path_probability": 0.13705920243234931,
+            "last_retained_evidence_fraction": [
+              0.9898496875930831,
+              0.8214760726003772
+            ],
+            "minimum_retained_evidence_fraction": [
+              0.9461904399426322,
+              0.699619608129182
+            ],
+            "peak_states": 115,
+            "peak_transition_states": 115,
+            "transition_workspace_state_bound": 10368,
+            "delay_index_min": -10,
+            "delay_index_max": 5,
+            "posterior_map_display": [
+              {
+                "group": 0,
+                "delay_index": -8,
+                "source_offset_seconds": -0.008888888888888889,
+                "rate_index": -1,
+                "rate_ppm": -50.0,
+                "conditional_retained_probability": 0.1610169100861953
+              },
+              {
+                "group": 0,
+                "delay_index": -5,
+                "source_offset_seconds": -0.005555555555555556,
+                "rate_index": -1,
+                "rate_ppm": -50.0,
+                "conditional_retained_probability": 0.2201868477701016
+              }
+            ],
+            "probability_scope": "posterior conditional on retained paths; pruning can lose the true path",
+            "evidence_scope": "subprobability path sum; no pruning-mass renormalization or admission decision"
+          },
+          "consumed_samples": 480000,
+          "processed_rows": 480000,
+          "scored_rows": 480000,
+          "observed_rows": 480000,
+          "erased_rows": 0,
+          "blocks": 160,
+          "segments": 20,
+          "requested_invalid_rows": 0,
+          "processed_requested_invalid_rows": 0,
+          "additional_discarded_rows": 0,
+          "expanded_erasure_blocks": 0,
+          "erasure_policy": "Discard complete DFT likelihood blocks intersecting invalid rows; at most two extra edge blocks per contiguous outage",
+          "pending_rows": 0,
+          "peak_pending_rows": 24000,
+          "working_bytes_estimate": 98275896,
+          "preparation_seconds": 0.00015011290088295937,
+          "push_process_cpu_seconds": 12.079649888999988,
+          "segment_process_cpu_seconds": 12.052509509000004,
+          "maximum_segment_cpu_seconds": 1.3238053790000013,
+          "maximum_segment_wall_seconds": 1.3821061090566218,
+          "physical_coordinate_mode": "mapped",
+          "mapped_samples": 480000,
+          "channel_model": "Independent Gaussian segment priors; maintained Gaussian evolution within each segment; global bit/coherence choice",
+          "timing_model": "Public piecewise-affine source offset/rate; retained subprobability path sum without pruning renormalization",
+          "noise_scope": "Known logical-row Gaussian null only; physical/ASRC colored-noise covariance remains unqualified"
+        },
+        {
+          "status": "prefix_diagnostic",
+          "complete_observation": false,
+          "admission": null,
+          "bit_scores": [
+            -17.234760023262552,
+            -21.005193295788025
+          ],
+          "timing": {
+            "log_evidence": [
+              -17.234760023262552,
+              -21.005193295788025
+            ],
+            "state_count": 64,
+            "observations": 21,
+            "predictions": 20,
+            "elapsed_seconds": 80.00455228171771,
+            "pruning_events": 16,
+            "states_dropped": 644,
+            "retained_initial_path_probability": 0.10404712458459647,
+            "last_retained_evidence_fraction": [
+              0.9746610628923906,
+              0.9615376827459217
+            ],
+            "minimum_retained_evidence_fraction": [
+              0.9461904399426322,
+              0.699619608129182
+            ],
+            "peak_states": 115,
+            "peak_transition_states": 115,
+            "transition_workspace_state_bound": 10368,
+            "delay_index_min": -10,
+            "delay_index_max": 5,
+            "posterior_map_display": [
+              {
+                "group": 0,
+                "delay_index": -8,
+                "source_offset_seconds": -0.008888888888888889,
+                "rate_index": 0,
+                "rate_ppm": 0.0,
+                "conditional_retained_probability": 0.08358931333394644
+              },
+              {
+                "group": 0,
+                "delay_index": -5,
+                "source_offset_seconds": -0.005555555555555556,
+                "rate_index": -1,
+                "rate_ppm": -50.0,
+                "conditional_retained_probability": 0.24268391008305076
+              }
+            ],
+            "probability_scope": "posterior conditional on retained paths; pruning can lose the true path",
+            "evidence_scope": "subprobability path sum; no pruning-mass renormalization or admission decision"
+          },
+          "consumed_samples": 504000,
+          "processed_rows": 504000,
+          "scored_rows": 504000,
+          "observed_rows": 504000,
+          "erased_rows": 0,
+          "blocks": 168,
+          "segments": 21,
+          "requested_invalid_rows": 0,
+          "processed_requested_invalid_rows": 0,
+          "additional_discarded_rows": 0,
+          "expanded_erasure_blocks": 0,
+          "erasure_policy": "Discard complete DFT likelihood blocks intersecting invalid rows; at most two extra edge blocks per contiguous outage",
+          "pending_rows": 0,
+          "peak_pending_rows": 24000,
+          "working_bytes_estimate": 98275896,
+          "preparation_seconds": 0.00015011290088295937,
+          "push_process_cpu_seconds": 13.351559233999991,
+          "segment_process_cpu_seconds": 13.323557932000005,
+          "maximum_segment_cpu_seconds": 1.3238053790000013,
+          "maximum_segment_wall_seconds": 1.3821061090566218,
+          "physical_coordinate_mode": "mapped",
+          "mapped_samples": 504000,
+          "channel_model": "Independent Gaussian segment priors; maintained Gaussian evolution within each segment; global bit/coherence choice",
+          "timing_model": "Public piecewise-affine source offset/rate; retained subprobability path sum without pruning renormalization",
+          "noise_scope": "Known logical-row Gaussian null only; physical/ASRC colored-noise covariance remains unqualified"
+        },
+        {
+          "status": "prefix_diagnostic",
+          "complete_observation": false,
+          "admission": null,
+          "bit_scores": [
+            -19.95942259262215,
+            -22.51459633018199
+          ],
+          "timing": {
+            "log_evidence": [
+              -19.95942259262215,
+              -22.51459633018199
+            ],
+            "state_count": 64,
+            "observations": 22,
+            "predictions": 21,
+            "elapsed_seconds": 84.00519244508304,
+            "pruning_events": 17,
+            "states_dropped": 690,
+            "retained_initial_path_probability": 0.08820445714639068,
+            "last_retained_evidence_fraction": [
+              0.9401158010407621,
+              0.956192186953681
+            ],
+            "minimum_retained_evidence_fraction": [
+              0.9401158010407621,
+              0.699619608129182
+            ],
+            "peak_states": 115,
+            "peak_transition_states": 115,
+            "transition_workspace_state_bound": 10368,
+            "delay_index_min": -10,
+            "delay_index_max": 6,
+            "posterior_map_display": [
+              {
+                "group": 0,
+                "delay_index": -8,
+                "source_offset_seconds": -0.008888888888888889,
+                "rate_index": -1,
+                "rate_ppm": -50.0,
+                "conditional_retained_probability": 0.05961202057910326
+              },
+              {
+                "group": 0,
+                "delay_index": -6,
+                "source_offset_seconds": -0.006666666666666666,
+                "rate_index": -3,
+                "rate_ppm": -150.0,
+                "conditional_retained_probability": 0.28111107870562335
+              }
+            ],
+            "probability_scope": "posterior conditional on retained paths; pruning can lose the true path",
+            "evidence_scope": "subprobability path sum; no pruning-mass renormalization or admission decision"
+          },
+          "consumed_samples": 528000,
+          "processed_rows": 528000,
+          "scored_rows": 528000,
+          "observed_rows": 528000,
+          "erased_rows": 0,
+          "blocks": 176,
+          "segments": 22,
+          "requested_invalid_rows": 0,
+          "processed_requested_invalid_rows": 0,
+          "additional_discarded_rows": 0,
+          "expanded_erasure_blocks": 0,
+          "erasure_policy": "Discard complete DFT likelihood blocks intersecting invalid rows; at most two extra edge blocks per contiguous outage",
+          "pending_rows": 0,
+          "peak_pending_rows": 24000,
+          "working_bytes_estimate": 98275896,
+          "preparation_seconds": 0.00015011290088295937,
+          "push_process_cpu_seconds": 14.498790726999994,
+          "segment_process_cpu_seconds": 14.469849521000006,
+          "maximum_segment_cpu_seconds": 1.3238053790000013,
+          "maximum_segment_wall_seconds": 1.3821061090566218,
+          "physical_coordinate_mode": "mapped",
+          "mapped_samples": 528000,
+          "channel_model": "Independent Gaussian segment priors; maintained Gaussian evolution within each segment; global bit/coherence choice",
+          "timing_model": "Public piecewise-affine source offset/rate; retained subprobability path sum without pruning renormalization",
+          "noise_scope": "Known logical-row Gaussian null only; physical/ASRC colored-noise covariance remains unqualified"
+        },
+        {
+          "status": "prefix_diagnostic",
+          "complete_observation": false,
+          "admission": null,
+          "bit_scores": [
+            -22.252903516498726,
+            -25.30460744556899
+          ],
+          "timing": {
+            "log_evidence": [
+              -22.252903516498726,
+              -25.30460744556899
+            ],
+            "state_count": 64,
+            "observations": 23,
+            "predictions": 22,
+            "elapsed_seconds": 88.00567760881366,
+            "pruning_events": 18,
+            "states_dropped": 736,
+            "retained_initial_path_probability": 0.07282772237084681,
+            "last_retained_evidence_fraction": [
+              0.9361538092042577,
+              0.8496394318168905
+            ],
+            "minimum_retained_evidence_fraction": [
+              0.9361538092042577,
+              0.699619608129182
+            ],
+            "peak_states": 115,
+            "peak_transition_states": 115,
+            "transition_workspace_state_bound": 10368,
+            "delay_index_min": -10,
+            "delay_index_max": 7,
+            "posterior_map_display": [
+              {
+                "group": 0,
+                "delay_index": -9,
+                "source_offset_seconds": -0.01,
+                "rate_index": 1,
+                "rate_ppm": 50.0,
+                "conditional_retained_probability": 0.11961098549748356
+              },
+              {
+                "group": 0,
+                "delay_index": -6,
+                "source_offset_seconds": -0.006666666666666666,
+                "rate_index": -2,
+                "rate_ppm": -100.0,
+                "conditional_retained_probability": 0.1316217583515814
+              }
+            ],
+            "probability_scope": "posterior conditional on retained paths; pruning can lose the true path",
+            "evidence_scope": "subprobability path sum; no pruning-mass renormalization or admission decision"
+          },
+          "consumed_samples": 552000,
+          "processed_rows": 552000,
+          "scored_rows": 552000,
+          "observed_rows": 552000,
+          "erased_rows": 0,
+          "blocks": 184,
+          "segments": 23,
+          "requested_invalid_rows": 0,
+          "processed_requested_invalid_rows": 0,
+          "additional_discarded_rows": 0,
+          "expanded_erasure_blocks": 0,
+          "erasure_policy": "Discard complete DFT likelihood blocks intersecting invalid rows; at most two extra edge blocks per contiguous outage",
+          "pending_rows": 0,
+          "peak_pending_rows": 24000,
+          "working_bytes_estimate": 98275896,
+          "preparation_seconds": 0.00015011290088295937,
+          "push_process_cpu_seconds": 15.694215418999997,
+          "segment_process_cpu_seconds": 15.660345759000007,
+          "maximum_segment_cpu_seconds": 1.3238053790000013,
+          "maximum_segment_wall_seconds": 1.3821061090566218,
+          "physical_coordinate_mode": "mapped",
+          "mapped_samples": 552000,
+          "channel_model": "Independent Gaussian segment priors; maintained Gaussian evolution within each segment; global bit/coherence choice",
+          "timing_model": "Public piecewise-affine source offset/rate; retained subprobability path sum without pruning renormalization",
+          "noise_scope": "Known logical-row Gaussian null only; physical/ASRC colored-noise covariance remains unqualified"
+        },
+        {
+          "status": "prefix_diagnostic",
+          "complete_observation": false,
+          "admission": null,
+          "bit_scores": [
+            -24.363202497859767,
+            -27.47375558694401
+          ],
+          "timing": {
+            "log_evidence": [
+              -24.363202497859767,
+              -27.47375558694401
+            ],
+            "state_count": 64,
+            "observations": 24,
+            "predictions": 23,
+            "elapsed_seconds": 92.00606807486332,
+            "pruning_events": 19,
+            "states_dropped": 786,
+            "retained_initial_path_probability": 0.04893603688675588,
+            "last_retained_evidence_fraction": [
+              0.9298548822160688,
+              0.7884755515949635
+            ],
+            "minimum_retained_evidence_fraction": [
+              0.9298548822160688,
+              0.699619608129182
+            ],
+            "peak_states": 115,
+            "peak_transition_states": 115,
+            "transition_workspace_state_bound": 10368,
+            "delay_index_min": -11,
+            "delay_index_max": 7,
+            "posterior_map_display": [
+              {
+                "group": 0,
+                "delay_index": -9,
+                "source_offset_seconds": -0.01,
+                "rate_index": -3,
+                "rate_ppm": -150.0,
+                "conditional_retained_probability": 0.08729006122079352
+              },
+              {
+                "group": 0,
+                "delay_index": -6,
+                "source_offset_seconds": -0.006666666666666666,
+                "rate_index": -4,
+                "rate_ppm": -200.0,
+                "conditional_retained_probability": 0.2297348615979086
+              }
+            ],
+            "probability_scope": "posterior conditional on retained paths; pruning can lose the true path",
+            "evidence_scope": "subprobability path sum; no pruning-mass renormalization or admission decision"
+          },
+          "consumed_samples": 576000,
+          "processed_rows": 576000,
+          "scored_rows": 576000,
+          "observed_rows": 576000,
+          "erased_rows": 0,
+          "blocks": 192,
+          "segments": 24,
+          "requested_invalid_rows": 0,
+          "processed_requested_invalid_rows": 0,
+          "additional_discarded_rows": 0,
+          "expanded_erasure_blocks": 0,
+          "erasure_policy": "Discard complete DFT likelihood blocks intersecting invalid rows; at most two extra edge blocks per contiguous outage",
+          "pending_rows": 0,
+          "peak_pending_rows": 24000,
+          "working_bytes_estimate": 98275896,
+          "preparation_seconds": 0.00015011290088295937,
+          "push_process_cpu_seconds": 16.892806289999996,
+          "segment_process_cpu_seconds": 16.85811367600001,
+          "maximum_segment_cpu_seconds": 1.3238053790000013,
+          "maximum_segment_wall_seconds": 1.3821061090566218,
+          "physical_coordinate_mode": "mapped",
+          "mapped_samples": 576000,
+          "channel_model": "Independent Gaussian segment priors; maintained Gaussian evolution within each segment; global bit/coherence choice",
+          "timing_model": "Public piecewise-affine source offset/rate; retained subprobability path sum without pruning renormalization",
+          "noise_scope": "Known logical-row Gaussian null only; physical/ASRC colored-noise covariance remains unqualified"
+        },
+        {
+          "status": "prefix_diagnostic",
+          "complete_observation": false,
+          "admission": null,
+          "bit_scores": [
+            -26.783660996632996,
+            -28.422284581027874
+          ],
+          "timing": {
+            "log_evidence": [
+              -26.783660996632996,
+              -28.422284581027874
+            ],
+            "state_count": 64,
+            "observations": 25,
+            "predictions": 24,
+            "elapsed_seconds": 96.00638113757306,
+            "pruning_events": 20,
+            "states_dropped": 844,
+            "retained_initial_path_probability": 0.03876855816364864,
+            "last_retained_evidence_fraction": [
+              0.9223493299542121,
+              0.9296108190132041
+            ],
+            "minimum_retained_evidence_fraction": [
+              0.9223493299542121,
+              0.699619608129182
+            ],
+            "peak_states": 122,
+            "peak_transition_states": 122,
+            "transition_workspace_state_bound": 10368,
+            "delay_index_min": -12,
+            "delay_index_max": 8,
+            "posterior_map_display": [
+              {
+                "group": 0,
+                "delay_index": -3,
+                "source_offset_seconds": -0.003333333333333333,
+                "rate_index": 4,
+                "rate_ppm": 200.0,
+                "conditional_retained_probability": 0.08450482838714522
+              },
+              {
+                "group": 0,
+                "delay_index": -4,
+                "source_offset_seconds": -0.0044444444444444444,
+                "rate_index": 2,
+                "rate_ppm": 100.0,
+                "conditional_retained_probability": 0.32381646246897233
+              }
+            ],
+            "probability_scope": "posterior conditional on retained paths; pruning can lose the true path",
+            "evidence_scope": "subprobability path sum; no pruning-mass renormalization or admission decision"
+          },
+          "consumed_samples": 600000,
+          "processed_rows": 600000,
+          "scored_rows": 600000,
+          "observed_rows": 600000,
+          "erased_rows": 0,
+          "blocks": 200,
+          "segments": 25,
+          "requested_invalid_rows": 0,
+          "processed_requested_invalid_rows": 0,
+          "additional_discarded_rows": 0,
+          "expanded_erasure_blocks": 0,
+          "erasure_policy": "Discard complete DFT likelihood blocks intersecting invalid rows; at most two extra edge blocks per contiguous outage",
+          "pending_rows": 0,
+          "peak_pending_rows": 24000,
+          "working_bytes_estimate": 98275896,
+          "preparation_seconds": 0.00015011290088295937,
+          "push_process_cpu_seconds": 18.133871860999992,
+          "segment_process_cpu_seconds": 18.09547192400001,
+          "maximum_segment_cpu_seconds": 1.3238053790000013,
+          "maximum_segment_wall_seconds": 1.3821061090566218,
+          "physical_coordinate_mode": "mapped",
+          "mapped_samples": 600000,
+          "channel_model": "Independent Gaussian segment priors; maintained Gaussian evolution within each segment; global bit/coherence choice",
+          "timing_model": "Public piecewise-affine source offset/rate; retained subprobability path sum without pruning renormalization",
+          "noise_scope": "Known logical-row Gaussian null only; physical/ASRC colored-noise covariance remains unqualified"
+        },
+        {
+          "status": "prefix_diagnostic",
+          "complete_observation": false,
+          "admission": null,
+          "bit_scores": [
+            -28.877820553952745,
+            -30.67046187777066
+          ],
+          "timing": {
+            "log_evidence": [
+              -28.877820553952745,
+              -30.67046187777066
+            ],
+            "state_count": 64,
+            "observations": 26,
+            "predictions": 25,
+            "elapsed_seconds": 100.00655649238246,
+            "pruning_events": 21,
+            "states_dropped": 898,
+            "retained_initial_path_probability": 0.034453569057701736,
+            "last_retained_evidence_fraction": [
+              0.94928813515896,
+              0.9690772090286603
+            ],
+            "minimum_retained_evidence_fraction": [
+              0.9223493299542121,
+              0.699619608129182
+            ],
+            "peak_states": 122,
+            "peak_transition_states": 122,
+            "transition_workspace_state_bound": 10368,
+            "delay_index_min": -13,
+            "delay_index_max": 0,
+            "posterior_map_display": [
+              {
+                "group": 0,
+                "delay_index": -4,
+                "source_offset_seconds": -0.0044444444444444444,
+                "rate_index": 0,
+                "rate_ppm": 0.0,
+                "conditional_retained_probability": 0.21236753835344943
+              },
+              {
+                "group": 0,
+                "delay_index": -9,
+                "source_offset_seconds": -0.01,
+                "rate_index": -1,
+                "rate_ppm": -50.0,
+                "conditional_retained_probability": 0.13442649487788866
+              }
+            ],
+            "probability_scope": "posterior conditional on retained paths; pruning can lose the true path",
+            "evidence_scope": "subprobability path sum; no pruning-mass renormalization or admission decision"
+          },
+          "consumed_samples": 624000,
+          "processed_rows": 624000,
+          "scored_rows": 624000,
+          "observed_rows": 624000,
+          "erased_rows": 0,
+          "blocks": 208,
+          "segments": 26,
+          "requested_invalid_rows": 0,
+          "processed_requested_invalid_rows": 0,
+          "additional_discarded_rows": 0,
+          "expanded_erasure_blocks": 0,
+          "erasure_policy": "Discard complete DFT likelihood blocks intersecting invalid rows; at most two extra edge blocks per contiguous outage",
+          "pending_rows": 0,
+          "peak_pending_rows": 24000,
+          "working_bytes_estimate": 98275896,
+          "preparation_seconds": 0.00015011290088295937,
+          "push_process_cpu_seconds": 19.36579925999999,
+          "segment_process_cpu_seconds": 19.322465586000007,
+          "maximum_segment_cpu_seconds": 1.3238053790000013,
+          "maximum_segment_wall_seconds": 1.3821061090566218,
+          "physical_coordinate_mode": "mapped",
+          "mapped_samples": 624000,
+          "channel_model": "Independent Gaussian segment priors; maintained Gaussian evolution within each segment; global bit/coherence choice",
+          "timing_model": "Public piecewise-affine source offset/rate; retained subprobability path sum without pruning renormalization",
+          "noise_scope": "Known logical-row Gaussian null only; physical/ASRC colored-noise covariance remains unqualified"
+        },
+        {
+          "status": "prefix_diagnostic",
+          "complete_observation": false,
+          "admission": null,
+          "bit_scores": [
+            -27.29932050215015,
+            -32.652303802082464
+          ],
+          "timing": {
+            "log_evidence": [
+              -27.29932050215015,
+              -32.652303802082464
+            ],
+            "state_count": 64,
+            "observations": 27,
+            "predictions": 26,
+            "elapsed_seconds": 104.00659371915323,
+            "pruning_events": 22,
+            "states_dropped": 950,
+            "retained_initial_path_probability": 0.026301975920103027,
+            "last_retained_evidence_fraction": [
+              0.9990243811858193,
+              0.957423911888352
+            ],
+            "minimum_retained_evidence_fraction": [
+              0.9223493299542121,
+              0.699619608129182
+            ],
+            "peak_states": 122,
+            "peak_transition_states": 122,
+            "transition_workspace_state_bound": 10368,
+            "delay_index_min": -13,
+            "delay_index_max": 1,
+            "posterior_map_display": [
+              {
+                "group": 0,
+                "delay_index": -1,
+                "source_offset_seconds": -0.0011111111111111111,
+                "rate_index": 6,
+                "rate_ppm": 300.0,
+                "conditional_retained_probability": 0.4509389727695498
+              },
+              {
+                "group": 0,
+                "delay_index": -3,
+                "source_offset_seconds": -0.003333333333333333,
+                "rate_index": 2,
+                "rate_ppm": 100.0,
+                "conditional_retained_probability": 0.17105962997289248
+              }
+            ],
+            "probability_scope": "posterior conditional on retained paths; pruning can lose the true path",
+            "evidence_scope": "subprobability path sum; no pruning-mass renormalization or admission decision"
+          },
+          "consumed_samples": 648000,
+          "processed_rows": 648000,
+          "scored_rows": 648000,
+          "observed_rows": 648000,
+          "erased_rows": 0,
+          "blocks": 216,
+          "segments": 27,
+          "requested_invalid_rows": 0,
+          "processed_requested_invalid_rows": 0,
+          "additional_discarded_rows": 0,
+          "expanded_erasure_blocks": 0,
+          "erasure_policy": "Discard complete DFT likelihood blocks intersecting invalid rows; at most two extra edge blocks per contiguous outage",
+          "pending_rows": 0,
+          "peak_pending_rows": 24000,
+          "working_bytes_estimate": 98275896,
+          "preparation_seconds": 0.00015011290088295937,
+          "push_process_cpu_seconds": 20.543849387999984,
+          "segment_process_cpu_seconds": 20.49966205300001,
+          "maximum_segment_cpu_seconds": 1.3238053790000013,
+          "maximum_segment_wall_seconds": 1.3821061090566218,
+          "physical_coordinate_mode": "mapped",
+          "mapped_samples": 648000,
+          "channel_model": "Independent Gaussian segment priors; maintained Gaussian evolution within each segment; global bit/coherence choice",
+          "timing_model": "Public piecewise-affine source offset/rate; retained subprobability path sum without pruning renormalization",
+          "noise_scope": "Known logical-row Gaussian null only; physical/ASRC colored-noise covariance remains unqualified"
+        },
+        {
+          "status": "prefix_diagnostic",
+          "complete_observation": false,
+          "admission": null,
+          "bit_scores": [
+            -30.23158853735142,
+            -34.809811342771
+          ],
+          "timing": {
+            "log_evidence": [
+              -30.23158853735142,
+              -34.809811342771
+            ],
+            "state_count": 64,
+            "observations": 28,
+            "predictions": 27,
+            "elapsed_seconds": 108.00657015079017,
+            "pruning_events": 23,
+            "states_dropped": 999,
+            "retained_initial_path_probability": 0.020072953765921178,
+            "last_retained_evidence_fraction": [
+              0.9968074733536568,
+              0.8973887761951027
+            ],
+            "minimum_retained_evidence_fraction": [
+              0.9223493299542121,
+              0.699619608129182
+            ],
+            "peak_states": 122,
+            "peak_transition_states": 122,
+            "transition_workspace_state_bound": 10368,
+            "delay_index_min": -14,
+            "delay_index_max": 2,
+            "posterior_map_display": [
+              {
+                "group": 0,
+                "delay_index": 0,
+                "source_offset_seconds": 0.0,
+                "rate_index": 5,
+                "rate_ppm": 250.0,
+                "conditional_retained_probability": 0.2521077049926124
+              },
+              {
+                "group": 0,
+                "delay_index": -2,
+                "source_offset_seconds": -0.0022222222222222222,
+                "rate_index": 2,
+                "rate_ppm": 100.0,
+                "conditional_retained_probability": 0.22855505593963535
+              }
+            ],
+            "probability_scope": "posterior conditional on retained paths; pruning can lose the true path",
+            "evidence_scope": "subprobability path sum; no pruning-mass renormalization or admission decision"
+          },
+          "consumed_samples": 672000,
+          "processed_rows": 672000,
+          "scored_rows": 672000,
+          "observed_rows": 672000,
+          "erased_rows": 0,
+          "blocks": 224,
+          "segments": 28,
+          "requested_invalid_rows": 0,
+          "processed_requested_invalid_rows": 0,
+          "additional_discarded_rows": 0,
+          "expanded_erasure_blocks": 0,
+          "erasure_policy": "Discard complete DFT likelihood blocks intersecting invalid rows; at most two extra edge blocks per contiguous outage",
+          "pending_rows": 0,
+          "peak_pending_rows": 24000,
+          "working_bytes_estimate": 98275896,
+          "preparation_seconds": 0.00015011290088295937,
+          "push_process_cpu_seconds": 21.710438394999986,
+          "segment_process_cpu_seconds": 21.665368896000007,
+          "maximum_segment_cpu_seconds": 1.3238053790000013,
+          "maximum_segment_wall_seconds": 1.3821061090566218,
+          "physical_coordinate_mode": "mapped",
+          "mapped_samples": 672000,
+          "channel_model": "Independent Gaussian segment priors; maintained Gaussian evolution within each segment; global bit/coherence choice",
+          "timing_model": "Public piecewise-affine source offset/rate; retained subprobability path sum without pruning renormalization",
+          "noise_scope": "Known logical-row Gaussian null only; physical/ASRC colored-noise covariance remains unqualified"
+        },
+        {
+          "status": "prefix_diagnostic",
+          "complete_observation": false,
+          "admission": null,
+          "bit_scores": [
+            -32.939974339536654,
+            -36.71208556271615
+          ],
+          "timing": {
+            "log_evidence": [
+              -32.939974339536654,
+              -36.71208556271615
+            ],
+            "state_count": 64,
+            "observations": 29,
+            "predictions": 28,
+            "elapsed_seconds": 112.00654396610587,
+            "pruning_events": 24,
+            "states_dropped": 1051,
+            "retained_initial_path_probability": 0.014747501407872158,
+            "last_retained_evidence_fraction": [
+              0.9887698886274167,
+              0.8489808364492397
+            ],
+            "minimum_retained_evidence_fraction": [
+              0.9223493299542121,
+              0.699619608129182
+            ],
+            "peak_states": 122,
+            "peak_transition_states": 122,
+            "transition_workspace_state_bound": 10368,
+            "delay_index_min": -15,
+            "delay_index_max": 4,
+            "posterior_map_display": [
+              {
+                "group": 0,
+                "delay_index": 1,
+                "source_offset_seconds": 0.0011111111111111111,
+                "rate_index": 6,
+                "rate_ppm": 300.0,
+                "conditional_retained_probability": 0.1780768808804932
+              },
+              {
+                "group": 0,
+                "delay_index": -4,
+                "source_offset_seconds": -0.0044444444444444444,
+                "rate_index": 1,
+                "rate_ppm": 50.0,
+                "conditional_retained_probability": 0.15718201847925692
+              }
+            ],
+            "probability_scope": "posterior conditional on retained paths; pruning can lose the true path",
+            "evidence_scope": "subprobability path sum; no pruning-mass renormalization or admission decision"
+          },
+          "consumed_samples": 696000,
+          "processed_rows": 696000,
+          "scored_rows": 696000,
+          "observed_rows": 696000,
+          "erased_rows": 0,
+          "blocks": 232,
+          "segments": 29,
+          "requested_invalid_rows": 0,
+          "processed_requested_invalid_rows": 0,
+          "additional_discarded_rows": 0,
+          "expanded_erasure_blocks": 0,
+          "erasure_policy": "Discard complete DFT likelihood blocks intersecting invalid rows; at most two extra edge blocks per contiguous outage",
+          "pending_rows": 0,
+          "peak_pending_rows": 24000,
+          "working_bytes_estimate": 98275896,
+          "preparation_seconds": 0.00015011290088295937,
+          "push_process_cpu_seconds": 22.928021709999985,
+          "segment_process_cpu_seconds": 22.878027994000007,
+          "maximum_segment_cpu_seconds": 1.3238053790000013,
+          "maximum_segment_wall_seconds": 1.3821061090566218,
+          "physical_coordinate_mode": "mapped",
+          "mapped_samples": 696000,
+          "channel_model": "Independent Gaussian segment priors; maintained Gaussian evolution within each segment; global bit/coherence choice",
+          "timing_model": "Public piecewise-affine source offset/rate; retained subprobability path sum without pruning renormalization",
+          "noise_scope": "Known logical-row Gaussian null only; physical/ASRC colored-noise covariance remains unqualified"
+        },
+        {
+          "status": "prefix_diagnostic",
+          "complete_observation": false,
+          "admission": null,
+          "bit_scores": [
+            -32.961260226394806,
+            -37.087511672672285
+          ],
+          "timing": {
+            "log_evidence": [
+              -32.961260226394806,
+              -37.087511672672285
+            ],
+            "state_count": 64,
+            "observations": 30,
+            "predictions": 29,
+            "elapsed_seconds": 116.00651788595238,
+            "pruning_events": 25,
+            "states_dropped": 1111,
+            "retained_initial_path_probability": 0.011279463138125181,
+            "last_retained_evidence_fraction": [
+              0.9789390587488402,
+              0.6869964803731236
+            ],
+            "minimum_retained_evidence_fraction": [
+              0.9223493299542121,
+              0.6869964803731236
+            ],
+            "peak_states": 124,
+            "peak_transition_states": 124,
+            "transition_workspace_state_bound": 10368,
+            "delay_index_min": -15,
+            "delay_index_max": 5,
+            "posterior_map_display": [
+              {
+                "group": 0,
+                "delay_index": 2,
+                "source_offset_seconds": 0.0022222222222222222,
+                "rate_index": 6,
+                "rate_ppm": 300.0,
+                "conditional_retained_probability": 0.1337097636390484
+              },
+              {
+                "group": 0,
+                "delay_index": -3,
+                "source_offset_seconds": -0.003333333333333333,
+                "rate_index": 1,
+                "rate_ppm": 50.0,
+                "conditional_retained_probability": 0.12872295775562564
+              }
+            ],
+            "probability_scope": "posterior conditional on retained paths; pruning can lose the true path",
+            "evidence_scope": "subprobability path sum; no pruning-mass renormalization or admission decision"
+          },
+          "consumed_samples": 720000,
+          "processed_rows": 720000,
+          "scored_rows": 720000,
+          "observed_rows": 720000,
+          "erased_rows": 0,
+          "blocks": 240,
+          "segments": 30,
+          "requested_invalid_rows": 0,
+          "processed_requested_invalid_rows": 0,
+          "additional_discarded_rows": 0,
+          "expanded_erasure_blocks": 0,
+          "erasure_policy": "Discard complete DFT likelihood blocks intersecting invalid rows; at most two extra edge blocks per contiguous outage",
+          "pending_rows": 0,
+          "peak_pending_rows": 24000,
+          "working_bytes_estimate": 98275896,
+          "preparation_seconds": 0.00015011290088295937,
+          "push_process_cpu_seconds": 23.21837781699999,
+          "segment_process_cpu_seconds": 23.167417157000006,
+          "maximum_segment_cpu_seconds": 1.3238053790000013,
+          "maximum_segment_wall_seconds": 1.3821061090566218,
+          "physical_coordinate_mode": "mapped",
+          "mapped_samples": 720000,
+          "channel_model": "Independent Gaussian segment priors; maintained Gaussian evolution within each segment; global bit/coherence choice",
+          "timing_model": "Public piecewise-affine source offset/rate; retained subprobability path sum without pruning renormalization",
+          "noise_scope": "Known logical-row Gaussian null only; physical/ASRC colored-noise covariance remains unqualified"
+        },
+        {
+          "status": "prefix_diagnostic",
+          "complete_observation": false,
+          "admission": null,
+          "bit_scores": [
+            -32.98624586440662,
+            -38.02824925843164
+          ],
+          "timing": {
+            "log_evidence": [
+              -32.98624586440662,
+              -38.02824925843164
+            ],
+            "state_count": 64,
+            "observations": 31,
+            "predictions": 30,
+            "elapsed_seconds": 120.00649190991238,
+            "pruning_events": 26,
+            "states_dropped": 1165,
+            "retained_initial_path_probability": 0.007937537533530834,
+            "last_retained_evidence_fraction": [
+              0.9753239195183552,
+              0.3903398200610003
+            ],
+            "minimum_retained_evidence_fraction": [
+              0.9223493299542121,
+              0.3903398200610003
+            ],
+            "peak_states": 124,
+            "peak_transition_states": 124,
+            "transition_workspace_state_bound": 10368,
+            "delay_index_min": -15,
+            "delay_index_max": 6,
+            "posterior_map_display": [
+              {
+                "group": 0,
+                "delay_index": 3,
+                "source_offset_seconds": 0.003333333333333333,
+                "rate_index": 6,
+                "rate_ppm": 300.0,
+                "conditional_retained_probability": 0.10982253074366753
+              },
+              {
+                "group": 0,
+                "delay_index": -3,
+                "source_offset_seconds": -0.003333333333333333,
+                "rate_index": 1,
+                "rate_ppm": 50.0,
+                "conditional_retained_probability": 0.269584120576393
+              }
+            ],
+            "probability_scope": "posterior conditional on retained paths; pruning can lose the true path",
+            "evidence_scope": "subprobability path sum; no pruning-mass renormalization or admission decision"
+          },
+          "consumed_samples": 744000,
+          "processed_rows": 744000,
+          "scored_rows": 744000,
+          "observed_rows": 744000,
+          "erased_rows": 0,
+          "blocks": 248,
+          "segments": 31,
+          "requested_invalid_rows": 0,
+          "processed_requested_invalid_rows": 0,
+          "additional_discarded_rows": 0,
+          "expanded_erasure_blocks": 0,
+          "erasure_policy": "Discard complete DFT likelihood blocks intersecting invalid rows; at most two extra edge blocks per contiguous outage",
+          "pending_rows": 0,
+          "peak_pending_rows": 24000,
+          "working_bytes_estimate": 98275896,
+          "preparation_seconds": 0.00015011290088295937,
+          "push_process_cpu_seconds": 23.50441908299999,
+          "segment_process_cpu_seconds": 23.45256206000001,
+          "maximum_segment_cpu_seconds": 1.3238053790000013,
+          "maximum_segment_wall_seconds": 1.3821061090566218,
+          "physical_coordinate_mode": "mapped",
+          "mapped_samples": 744000,
+          "channel_model": "Independent Gaussian segment priors; maintained Gaussian evolution within each segment; global bit/coherence choice",
+          "timing_model": "Public piecewise-affine source offset/rate; retained subprobability path sum without pruning renormalization",
+          "noise_scope": "Known logical-row Gaussian null only; physical/ASRC colored-noise covariance remains unqualified"
+        },
+        {
+          "status": "prefix_diagnostic",
+          "complete_observation": false,
+          "admission": null,
+          "bit_scores": [
+            -33.01848427564435,
+            -38.92160629861537
+          ],
+          "timing": {
+            "log_evidence": [
+              -33.01848427564435,
+              -38.92160629861537
+            ],
+            "state_count": 64,
+            "observations": 32,
+            "predictions": 31,
+            "elapsed_seconds": 124.00646603757028,
+            "pruning_events": 27,
+            "states_dropped": 1217,
+            "retained_initial_path_probability": 0.006588530400447922,
+            "last_retained_evidence_fraction": [
+              0.9682757067489467,
+              0.4092794762888923
+            ],
+            "minimum_retained_evidence_fraction": [
+              0.9223493299542121,
+              0.3903398200610003
+            ],
+            "peak_states": 124,
+            "peak_transition_states": 124,
+            "transition_workspace_state_bound": 10368,
+            "delay_index_min": -15,
+            "delay_index_max": 7,
+            "posterior_map_display": [
+              {
+                "group": 0,
+                "delay_index": 4,
+                "source_offset_seconds": 0.0044444444444444444,
+                "rate_index": 5,
+                "rate_ppm": 250.0,
+                "conditional_retained_probability": 0.09151449261214871
+              },
+              {
+                "group": 0,
+                "delay_index": 1,
+                "source_offset_seconds": 0.0011111111111111111,
+                "rate_index": 3,
+                "rate_ppm": 150.0,
+                "conditional_retained_probability": 0.0872195454399733
+              }
+            ],
+            "probability_scope": "posterior conditional on retained paths; pruning can lose the true path",
+            "evidence_scope": "subprobability path sum; no pruning-mass renormalization or admission decision"
+          },
+          "consumed_samples": 768000,
+          "processed_rows": 768000,
+          "scored_rows": 768000,
+          "observed_rows": 768000,
+          "erased_rows": 0,
+          "blocks": 256,
+          "segments": 32,
+          "requested_invalid_rows": 0,
+          "processed_requested_invalid_rows": 0,
+          "additional_discarded_rows": 0,
+          "expanded_erasure_blocks": 0,
+          "erasure_policy": "Discard complete DFT likelihood blocks intersecting invalid rows; at most two extra edge blocks per contiguous outage",
+          "pending_rows": 0,
+          "peak_pending_rows": 24000,
+          "working_bytes_estimate": 98275896,
+          "preparation_seconds": 0.00015011290088295937,
+          "push_process_cpu_seconds": 23.817974283999988,
+          "segment_process_cpu_seconds": 23.765174193000007,
+          "maximum_segment_cpu_seconds": 1.3238053790000013,
+          "maximum_segment_wall_seconds": 1.3821061090566218,
+          "physical_coordinate_mode": "mapped",
+          "mapped_samples": 768000,
+          "channel_model": "Independent Gaussian segment priors; maintained Gaussian evolution within each segment; global bit/coherence choice",
+          "timing_model": "Public piecewise-affine source offset/rate; retained subprobability path sum without pruning renormalization",
+          "noise_scope": "Known logical-row Gaussian null only; physical/ASRC colored-noise covariance remains unqualified"
+        },
+        {
+          "status": "prefix_diagnostic",
+          "complete_observation": false,
+          "admission": null,
+          "bit_scores": [
+            -33.06491811859838,
+            -39.14953791712029
+          ],
+          "timing": {
+            "log_evidence": [
+              -33.06491811859838,
+              -39.14953791712029
+            ],
+            "state_count": 64,
+            "observations": 33,
+            "predictions": 32,
+            "elapsed_seconds": 127.54160991918363,
+            "pruning_events": 28,
+            "states_dropped": 1262,
+            "retained_initial_path_probability": 0.005154890495056488,
+            "last_retained_evidence_fraction": [
+              0.9546277138304715,
+              0.7961787018640045
+            ],
+            "minimum_retained_evidence_fraction": [
+              0.9223493299542121,
+              0.3903398200610003
+            ],
+            "peak_states": 124,
+            "peak_transition_states": 124,
+            "transition_workspace_state_bound": 10368,
+            "delay_index_min": -15,
+            "delay_index_max": 9,
+            "posterior_map_display": [
+              {
+                "group": 0,
+                "delay_index": 5,
+                "source_offset_seconds": 0.005555555555555556,
+                "rate_index": 6,
+                "rate_ppm": 300.0,
+                "conditional_retained_probability": 0.07917058828421633
+              },
+              {
+                "group": 0,
+                "delay_index": 2,
+                "source_offset_seconds": 0.0022222222222222222,
+                "rate_index": 3,
+                "rate_ppm": 150.0,
+                "conditional_retained_probability": 0.06671064438141659
+              }
+            ],
+            "probability_scope": "posterior conditional on retained paths; pruning can lose the true path",
+            "evidence_scope": "subprobability path sum; no pruning-mass renormalization or admission decision"
+          },
+          "consumed_samples": 786422,
+          "processed_rows": 786422,
+          "scored_rows": 786422,
+          "observed_rows": 786422,
+          "erased_rows": 0,
+          "blocks": 262,
+          "segments": 33,
+          "requested_invalid_rows": 0,
+          "processed_requested_invalid_rows": 0,
+          "additional_discarded_rows": 0,
+          "expanded_erasure_blocks": 0,
+          "erasure_policy": "Discard complete DFT likelihood blocks intersecting invalid rows; at most two extra edge blocks per contiguous outage",
+          "pending_rows": 0,
+          "peak_pending_rows": 24000,
+          "working_bytes_estimate": 98275896,
+          "preparation_seconds": 0.00015011290088295937,
+          "push_process_cpu_seconds": 24.062177051999992,
+          "segment_process_cpu_seconds": 24.008538970000007,
+          "maximum_segment_cpu_seconds": 1.3238053790000013,
+          "maximum_segment_wall_seconds": 1.3821061090566218,
+          "physical_coordinate_mode": "mapped",
+          "mapped_samples": 786422,
+          "channel_model": "Independent Gaussian segment priors; maintained Gaussian evolution within each segment; global bit/coherence choice",
+          "timing_model": "Public piecewise-affine source offset/rate; retained subprobability path sum without pruning renormalization",
+          "noise_scope": "Known logical-row Gaussian null only; physical/ASRC colored-noise covariance remains unqualified"
+        }
+      ]
+    }
+  ],
+  "identities": {
+    "build/dev-cli/triad_helper_export": "76e059e8a17452a5e7955bd01544a8f030bf9b85b55b7437df622fd2142210f4",
+    "include/datapump/continuous_clock.hpp": "727cf65f485a99cf5a534106c97005e3339a073cdbe66ebf07d7d68694b70484",
+    "src/resampler.cpp": "ce70f6da7ea4d361d47012d111f87176811c89ded069f12c05d2290212d389a3",
+    "tools/triad_continuous.py": "5ca8498b6cfe13830783b02857ce18538b51c1fa749a4b8c261d03d0ce2f288f",
+    "tools/triad_tracking_receiver.py": "a113e42683d05f0f8e8d264e22f14ab8b8fa55ebcd00cd9d3cca67de9deb3c79",
+    "tools/triad_timing_forward.py": "0d04869f45db3d66c9c70dcac54d6f0464f676e5b54721f28f07d69239d7bd31",
+    "tools/triad_incremental_receiver.py": "6452da06af68d835128bdb4a5d6a8309d3802d60d7a21907f3bda92dbba13a45",
+    "tools/triad_audio_mapping.py": "795e79020207fd9270f44c5c88b9fa2a033a4352940b975782ee6757f157ea58",
+    "tools/triad_tracking_basis.py": "76b74881b5d63f9f090fc6bc51d0fe7a427651ba74d70476327426c75ddbae09",
+    "local-evidence/triad-tracking-200/sampled/run.py": "ecdad42ce3ec1994584987c1e2410e567587427e6d006b44abedd98ad64bc147",
+    "local-evidence/triad-tracking-200/sampled/warp.cpp": "414b07f87a9b2fe336799e0eaeaf2eccf76fc2414881af57e02c762c446fc71f",
+    "local-evidence/triad-tracking-200/sampled/warp": "6639d99460216ec91d1aff6b7fce93d24d6a1d7cdfde701ec00d9e249542c7fd"
+  },
+  "source_args": [
+    "--case",
+    "hf",
+    "--sample-rate",
+    "6000",
+    "--rate",
+    "36",
+    "--added-symbols",
+    "10",
+    "--seconds",
+    "60",
+    "--key-seed",
+    "94001",
+    "--epoch",
+    "1793850000",
+    "--base-oscillator",
+    "gpsdo-ocxo",
+    "--shift-oscillator",
+    "gpsdo-ocxo",
+    "--oscillator-effects",
+    "off",
+    "--arrival-seconds",
+    "0",
+    "--helper",
+    "off",
+    "--seed",
+    "94001",
+    "--spread-preset",
+    "hf-worst",
+    "--selective-perturbation",
+    "each-65",
+    "--margin",
+    "3",
+    "--channel-evolution",
+    "stochastic",
+    "--random-doppler-width-hz",
+    "30",
+    "--delay-excursion-ms",
+    "0.001",
+    "--delay-knot-seconds",
+    "1000",
+    "--cn0",
+    "200"
+  ],
+  "source_descriptor": {
+    "schema": "triad-stream-source-v1",
+    "sample_rate_hz": 6000,
+    "carrier_spacing_hz": 75,
+    "fine_symbol_rate_hz": 60,
+    "nominal_triplet_bandwidth_hz": 225,
+    "emitted_samples": 648000,
+    "capture_samples": 786422,
+    "simulation_channel_constructed": true,
+    "total_samples": 786422,
+    "data_offset_samples": 227198,
+    "source_samples": 419205,
+    "capture_lead_seconds": 8,
+    "noise_variance": 6e-17,
+    "template_data_gain": 1.0027602298004303,
+    "data_if_hz": 1725,
+    "epoch": 1793850000,
+    "pattern_revision": "independent-apsk-v2",
+    "added_amplitude_depth": 0.25,
+    "helper_enabled": false,
+    "clock_follow_bounded": false,
+    "clock_follow_limit_seconds": 0,
+    "clock_follow_endpoint_padding_seconds": 0,
+    "clock_follow_basis": "nominal affine; remote corrections are not supplied to receiver",
+    "conditional_gaussian_null_supported": true,
+    "helper_high_hz": 2400,
+    "helper_low_hz": 550,
+    "maximum_rows": 16384,
+    "maximum_columns": 128,
+    "mapped_basis_supported": true,
+    "mapped_basis_maximum_offset_samples": 1048576,
+    "workspace_budget_bytes": 67108864,
+    "fixed_workspace_bytes": 1354224,
+    "stream_kind": "channel",
+    "key_source": "explicit-test-fixture-seed",
+    "power": {
+      "data_power_reference_policy": "bounded-tiles",
+      "pattern_revision": "independent-apsk-v2",
+      "added_amplitude_depth": 0.25,
+      "data_power_reference_version": 2,
+      "data_reference_bit": 0,
+      "data_reference_integration_method": "bounded-keyed-tile-quadrature-v1",
+      "data_reference_complete_sampled_source": false,
+      "data_reference_active_seconds": 69.60000000000001,
+      "data_reference_mean_norm": 0.9945023131747577,
+      "data_reference_nodes": 12288,
+      "data_reference_refinement_relative_difference": 0,
+      "data_reference_refinement_tolerance": 0.001,
+      "data_reference_sampled_tiles": 6,
+      "data_reference_tile_relative_standard_error": 0.0038810307806955127,
+      "data_reference_statistical_error_is_bound": false,
+      "post_plan_data_calibration_gain": 1.003065619467987,
+      "template_data_gain": 1.0027602298004303,
+      "data_reference_scope": "fixed public bit0; at most16 stratified keyed tiles with2048 fractional nodes each; active-time mean omits finite outer halo; between-tile standard error is diagnostic, not a confidence bound or integration guarantee; one unchanged gain for the entire stream"
+    },
+    "basis_scope": "Public DATA pattern only; arrival is absolute seconds in the requested observation coordinate. Fixed key/epoch per session; all three carriers retained.",
+    "scope": "Bounded pull source, not a receiver or real-time guarantee. Emitted kind has no channel or thermal noise. Physical null and full-duration power accuracy require qualification."
+  },
+  "source_plan": {
+    "schema": "triad-helper-shaping-plan-v1",
+    "geometry_feasible": true,
+    "scenario": "hf",
+    "shaping": "auto",
+    "format": {
+      "inner_rate_hz": 36,
+      "pattern_revision": "independent-apsk-v2",
+      "added_amplitude_depth": 0.25,
+      "added_symbols": 10,
+      "fine_chip_rate_hz": 60,
+      "occupied_bandwidth_hz": 225,
+      "fhss": false,
+      "center_aligned": false,
+      "quiet_seconds": 0,
+      "ramp_seconds": 0.02,
+      "margin_seconds": 0.005,
+      "pulse_shape": "rrc-025-span8-c2-tail2",
+      "burst_wait_tiles": 0,
+      "tile_seconds": 11.600000000000001,
+      "tile_count": 6,
+      "elapsed_bit_seconds": 69.60000000000001,
+      "fine_coefficients": 3960,
+      "inner_coefficients": 396,
+      "payload_fine_cells_per_tile": 660
+    },
+    "geometry": {
+      "status": "checked-integer-geometry-only",
+      "active_tiles": 6,
+      "physical_tiles_including_waits": 6,
+      "tile_seconds": 11.600000000000001,
+      "active_data_seconds": 69.60000000000001,
+      "elapsed_data_seconds": 69.60000000000001,
+      "burst_wait_tiles_between_active_tiles": 0,
+      "active_fine_coefficients": 3960,
+      "active_dwells": 174,
+      "elapsed_fine_cells": 4177,
+      "elapsed_dwells": 175,
+      "padded_source_samples": 419205,
+      "source_calendar_origin_sample": 802,
+      "bounded_source_workspace_bytes": 254272,
+      "allocates_samples_or_templates": false
+    },
+    "spectral_certificate": {
+      "placement_bandwidth_hz": 225,
+      "measured_bandwidth_hz": 219.375,
+      "measured_tail_fraction": 1.1835300091559296e-05,
+      "requested_tail_fraction": 0.001,
+      "coarse_width_hz": 219.375,
+      "refined_width_hz": 219.375,
+      "phase_refinement_width_hz": 219.375,
+      "phase_refinement_error_hz": 0,
+      "sampling_refinement_error_hz": 0,
+      "frequency_bin_hz": 0.46875,
+      "far_outside_energy_fraction": 7.049441432851744e-16,
+      "normalized_pulse_energy": 1.000000000000004,
+      "phase_samples": 1,
+      "fft_size": 32768,
+      "kernel_ffts": 74,
+      "total_kernel_ffts": 74,
+      "phase_refinement_attempts": 1,
+      "converged": true,
+      "method": "independent-zero-mean-coefficient finite-kernel energy spectrum; pulse/gate FFT with endpoint corrections",
+      "limitation": "Expected emitted DATA energy, not compact support or a worst-key/channel bound. Residual tails remain emitted; receiver filtering/channel tails are unchanged. Sampling and phase-quadrature checks are engineering diagnostics."
+    },
+    "helper_placement": {
+      "requested_data_if_hz": 1725,
+      "minimum_data_if_hz_from_fixed_low_tones": 1725,
+      "effective_gate_bandwidth_hz": 0,
+      "planned_high_hz": 2400,
+      "feasible_at_requested_if": true,
+      "unavailable_reason": null
+    },
+    "physics": {
+      "rf_hz": 30000000,
+      "data_if_hz": 1725,
+      "base_oscillator": "gpsdo-ocxo",
+      "shift_oscillator": "gpsdo-ocxo",
+      "oscillator_effects": false,
+      "requested_base_relative_pair_ppm_bound": 0.0001,
+      "requested_rf_relative_pair_ppm_bound": 0.0001,
+      "shift_active": true,
+      "shared_shift_clock": false,
+      "base_relative_pair_ppm_bound": 0,
+      "rf_relative_pair_ppm_bound": 0,
+      "sample_clock_pair_ppm": 0,
+      "deterministic_cfo_bound_hz": 0,
+      "relative_phase_diffusion_rad_sqrt_s": 0,
+      "spread_preset": "hf-worst",
+      "spread_margin": 3,
+      "spread_delay_ms": 21,
+      "spread_doppler_hz": 90,
+      "requested_selective_perturbation": "each-65",
+      "selective_slow_depth": 0.65,
+      "selective_fast_depth": 0.65,
+      "selective_modulation_rate_hz": 90,
+      "selective_enabled": true,
+      "requested_channel_evolution": "stochastic",
+      "channel_evolution": "fixed-time-gaussian-v1",
+      "random_doppler_width_hz": 30,
+      "random_doppler_width_definition": "B=2sigma of each ray Gaussian spectrum; independent of ray center separation",
+      "selective_coefficient_law": "gaussian-erf-v1",
+      "selective_depth_definition": "bounded peak excursion; each component has uniform marginal and RMS depth/sqrt(3)",
+      "delay_excursion_seconds": 1e-06,
+      "delay_knot_seconds": 1000,
+      "maximum_excess_delay_seconds": 0.021001000000000002,
+      "maximum_delay_slope": 3.75e-09,
+      "nominal_delay_motion_phase_bound_hz": 0.11250646874999999,
+      "delay_motion_doppler_bound_hz": 0.11251771875,
+      "delay_motion_doppler_bound_scope": "nominal carrier plus entire source Nyquist interval; includes envelope time-warp as well as propagation phase",
+      "nominal_propagation_reference_hz": 30001725,
+      "random_ray_total_bandwidth_allowance_hz": 180,
+      "random_selective_total_bandwidth_allowance_hz": 1800,
+      "random_sampling_policy": "fixed physical-time knots at16*B; variance-normalized cubic interpolation; stationary indexed innovations independent of receiver sample rate and chunk boundaries",
+      "random_spectral_allowance_scope": "engineering spectral-tail allowance, not compact support or a physical measurement; delay-motion Doppler is additional and is counted once",
+      "timing_policy": "case-default",
+      "arrival_prior_seconds": [
+        -7.035,
+        7.035
+      ],
+      "capture_lead_seconds": 8,
+      "capture_trail_seconds": 8,
+      "message_epoch_count": 13,
+      "data_w": 4,
+      "requested_helper_w": 40,
+      "effective_helper_w": 40,
+      "helper_ratio_limit_db": 90,
+      "helper_power_limited": false,
+      "physical_data_cn0_db_hz": 20.020599913279625,
+      "data_cn0_db_hz": 200,
+      "effective_helper_cn0_db_hz": 210,
+      "cn0_scope": "nominal active DATA reference and effective production Helper/DATA power ratio; actual finite-calendar component energies are reported separately"
+    },
+    "export_constraints": {
+      "sample_rate_hz": 6000,
+      "maximum_export_bytes": 2147483648,
+      "fixed_helper_lead_seconds": 38,
+      "maximum_sampled_active_seconds": null,
+      "sampled_duration_constraint": "No time cap; sampled export byte budget and chosen power-reference work budget remain enforced.",
+      "plan_only_duration_limit": "checked uint64 geometry with no sampled-duration cap",
+      "power_reference_policy": "bounded-tiles",
+      "stream_supported": true,
+      "whole_active_calibration_sample_limit": 4194304,
+      "pulse_halo_seconds": 0.13333333333333333,
+      "pulse_halo_fits_lead": true,
+      "message_epoch_count": 13
+    },
+    "planner": {
+      "fallback": false,
+      "reason": "validated bounded spectral candidate",
+      "candidate_count": 2,
+      "total_kernel_ffts": 148
+    },
+    "limitations": [
+      "This is a key-independent expected-energy shaping certificate, not a worst-case encrypted pattern or sampled channel bound.",
+      "The selected sampler and explicit export budget reject unsupported geometries; planner-only results do not imply receiver availability.",
+      "Source capture still retains the conservative 2/ramp envelope bound and complete physical channel tails."
+    ]
+  },
+  "extension_protocol_sha256": "55ec958b9ef8d168d63e328ce542cba510914849f01b58499c0f32d71c878936",
+  "tx": {
+    "applied": false,
+    "reason": "RX-only, channel precedes RX ASRC; no TX warp after propagation"
+  },
+  "rx": {
+    "capture": true,
+    "events": true,
+    "phase_cap_ppm": 199.99999999999997,
+    "input_samples": 798422,
+    "output_samples": 798384,
+    "mapped_samples": 798384,
+    "final_map_advance_seconds": 0.006421,
+    "peak_applied_ppm": 200.0400080016003,
+    "peak_error_seconds": 2.099301208392717,
+    "steps": 4
+  },
+  "source_waveform_sha256": "faf4f7574811e7d4b7d2c2e7f8a824a669b7788c25892b306ca0e464098ddf2a",
+  "preparation_cpu_seconds": 3.7949785890000003,
+  "preparation_wall_seconds": 3.944311202969402,
+  "source_energy": {
+    "complex_full_waveform_energy_seconds": 89.29083491620108,
+    "mean_complex_power": 0.681243670061629,
+    "scope": "Complete emitted or channel DATA+Helper including native thermal noise; no per-realization normalization; not DATA-only when Helper on",
+    "whole_window_in_band_energy_seconds": 80.60911328011412,
+    "in_band_energy_scope": "Whole-window Fourier\u00b1160Hz, before IF reconstruction/ASRC; not exactly the receiver block projection"
+  },
+  "channel_pair_protocol_sha256": "85d3ceee3030acd67eebb106600c3e6068d00bcf12bc42256b95c25aa8ff820c",
+  "total_cpu_seconds": 33.797480874,
+  "total_wall_seconds": 31.128982460009865
+}

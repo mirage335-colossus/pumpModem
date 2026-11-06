@@ -1,0 +1,32 @@
+{
+  "native_ctest_groups": [
+    {
+      "cases": 5,
+      "wall_seconds": 7.27,
+      "scope": "mapped basis, clock, ALSA clock/map, native source protocol, audio stream CLI"
+    },
+    {
+      "cases": 4,
+      "wall_seconds": 24.55,
+      "log": "shared-tests.log"
+    },
+    {
+      "cases": 5,
+      "wall_seconds": 15.24,
+      "log": "native-v3-tests.log"
+    }
+  ],
+  "python": {
+    "frontend": 10,
+    "mapping": 4,
+    "timing_forward": 9,
+    "tracking_receiver": 12,
+    "incremental": 6,
+    "cache": 6
+  },
+  "native_cache_command": "OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 python tests/test_triad_tracking_basis.py build/dev-cli/triad_helper_export",
+  "native_cache_wall_seconds": 4.395,
+  "native_cache_source_sha256": "76b74881b5d63f9f090fc6bc51d0fe7a427651ba74d70476327426c75ddbae09",
+  "discovery_note": "python-tracking-tests.log has one expected native-fixture skip because discovery has no binary argument; the separate six-case native cache command above passed.",
+  "scope": "Focused applicable native, Python and shared audio checks. No claim of full ordinary regression, sanitizer/release certification or GPU coverage."
+}

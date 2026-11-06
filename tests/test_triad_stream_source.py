@@ -66,6 +66,16 @@ class Source:
         values = complex_values(data)
         return header, [values[i*count:(i+1)*count] for i in range(len(candidates))]
 
+    def basis_map(self, first, offsets, candidates, audio_center=0):
+        count = len(offsets)
+        rows = '\n'.join(' '.join(map(str, row)) for row in candidates)
+        self.process.stdin.write((f'basis-map {first} {count} {len(candidates)} {audio_center}\n'+rows+'\n').encode())
+        self.process.stdin.write(struct.pack('<'+'d'*count, *offsets))
+        self.process.stdin.flush()
+        header = self.line()
+        values = complex_values(exact(self.process.stdout, 16*count*len(candidates)))
+        return header, [values[i*count:(i+1)*count] for i in range(len(candidates))]
+
     def close(self):
         if self.process.poll() is not None:
             return None
@@ -92,6 +102,22 @@ class Source:
 
 @unittest.skipIf(BINARY is None, 'native binary path required')
 class PullSourceTests(unittest.TestCase):
+    def test_mapped_basis_protocol_preserves_uniform_and_fractional_calendar(self):
+        with Source(['--stream-kind', 'emitted']) as source:
+            d = source.descriptor
+            self.assertTrue(d['mapped_basis_supported'])
+            self.assertGreater(d['nominal_triplet_bandwidth_hz'], 0)
+            first = d['data_offset_samples'] + 12000
+            rows = [[b, 0, d['data_offset_samples']/6000, 0, 0, 0, 0] for b in (0, 1)]
+            _, regular = source.basis(first, 19, rows)
+            _, mapped = source.basis_map(first, list(range(19)), rows)
+            self.assertEqual(regular, mapped)
+            offsets = [i*1.0002+.125 for i in range(19)]
+            _, whole = source.basis_map(first, offsets, rows, 1725)
+            _, left = source.basis_map(first, offsets[:7], rows, 1725)
+            _, right = source.basis_map(first+7, [x-7 for x in offsets[7:]], rows, 1725)
+            self.assertEqual(whole, [a+b for a, b in zip(left, right)])
+
     def test_clock_follow_is_explicit_bounded_and_retains_nominal_basis(self):
         args = ['--stream-kind', 'emitted', '--rate', '.0036', '--seconds', '1000000',
                 '--clock-follow-bounded']

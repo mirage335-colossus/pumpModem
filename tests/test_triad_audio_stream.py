@@ -42,8 +42,24 @@ class AudioStreamTests(unittest.TestCase):
             self.assertEqual(result.stdout, b'')
         # A total bound equal to the default phase cap is valid; decimal ppm
         # conversion must not put it one floating-point ULP below that cap.
-        result = self.run_copy(b'', 0, '--clock-max-ppm', '50')
+        result = self.run_copy(b'', 0, '--clock-max-ppm', '200')
         self.assertEqual(result.returncode, 0, result.stderr.decode())
+
+    def test_mapped_capture_format_is_explicit_and_device_free_modes_stay_raw(self):
+        for mode, value in (('copy','mapped-v1'),('play','mapped-v1'),('capture','unknown')):
+            result=subprocess.run([self.binary,'--mode',mode,'--frames','0','--capture-format',value],
+                capture_output=True,timeout=5)
+            self.assertNotEqual(result.returncode,0)
+            self.assertEqual(result.stdout,b'')
+        result=self.run_copy(b'',0,'--clock-discipline','auto')
+        self.assertEqual(result.returncode,0,result.stderr.decode())
+        receipt=json.loads(result.stderr)
+        self.assertFalse(receipt['clock_discipline']['enabled'])
+        self.assertEqual(receipt['capture_format'],'raw')
+        help_result=subprocess.run([self.binary,'--help'],capture_output=True,timeout=5)
+        self.assertEqual(help_result.returncode,0)
+        self.assertIn(b'auto (default) follows UTC for play/capture',help_result.stdout)
+        self.assertIn(b'--clock-phase-max-ppm 200',help_result.stdout)
 
     def test_short_stream_does_not_claim_completion(self):
         payload = struct.pack("<2f", .25, -.5)

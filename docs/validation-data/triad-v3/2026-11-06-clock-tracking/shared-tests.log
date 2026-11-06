@@ -1,0 +1,17 @@
+Internal ctest changing into directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli
+Test project /home/user/___quick/p/_cur/dataPump/pumpModem/build/dev-cli
+    Start 238: resampler
+1/4 Test #238: resampler ........................   Passed    1.45 sec
+    Start 532: alsa_audio_contract
+2/4 Test #532: alsa_audio_contract ..............   Passed   20.55 sec
+    Start 533: alsa_interleave_playback
+3/4 Test #533: alsa_interleave_playback .........   Passed    1.96 sec
+    Start 535: windows_audio_contract
+4/4 Test #535: windows_audio_contract ...........   Passed    0.58 sec
+
+100% tests passed, 0 tests failed out of 4
+
+Label Time Summary:
+regular    =  24.54 sec*proc (4 tests)
+
+Total Test time (real) =  24.55 sec

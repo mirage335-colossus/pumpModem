@@ -16,8 +16,9 @@ namespace datapump::audio {
 struct ContinuousClockOptions {
     double maximum_rate_correction = .001;
     // Correct measured ADC/DAC rate error through the full rate domain, but
-    // catch up UTC phase gently: 2 seconds at 50ppm needs at least 11.1 hours.
-    double maximum_phase_correction = 50e-6;
+    // catch up UTC phase separately: 2 seconds at 200ppm needs at least
+    // 2.78 hours before slew and proportional convergence are accounted for.
+    double maximum_phase_correction = 200e-6;
     double maximum_slew_per_second = 1e-5;
     double phase_time_constant_seconds = 1000;
     double rate_window_seconds = 60;
