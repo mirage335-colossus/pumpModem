@@ -4,6 +4,7 @@
 #include "datapump/triad_modem_v3.hpp"
 #include "datapump/triad_shaping.hpp"
 #include "datapump/triad_helper_burst.hpp"
+#include "datapump/triad_clock_follow.hpp"
 #include "datapump/tuning.hpp"
 #include "diagnostic_iq_noise_options.hpp"
 
@@ -54,6 +55,7 @@ struct Options {
     bool explicit_power_reference = false;
     bool stream_server = false, explicit_key_seed = false, explicit_epoch = false, now = false;
     std::string stream_kind = "channel";
+    bool clock_follow_bounded = false;
     std::filesystem::path key_file;
     std::string helper_components = "full";
     std::string channel_evolution = "legacy";
@@ -137,6 +139,7 @@ Options parse(int argc, char** argv) {
                 "  [--power-reference whole-active|legacy-window|bounded-tiles] [--power-plan-only]\n"
                 "  [--stream-server --stream-kind emitted|channel --key-file RAW_32_BYTE_KEY | --key-seed TEST_SEED]\n"
                 "  [--now] Streaming defaults to the current epoch and bounded-tiles calibration.\n"
+                "  [--clock-follow-bounded] Opt-in slow DATA-only emitted stream; accepts clock TARGET_SECONDS.\n"
                 "  [--base-oscillator ID] [--shift-oscillator ID] [--ramp-seconds POSITIVE]\n"
                 "  [--oscillator-effects on|off] (off is an explicit diagnostic control)\n"
                 "  [--rf-hz HZ] [--spread-preset ID] [--margin FACTOR]\n"
@@ -161,6 +164,7 @@ Options parse(int argc, char** argv) {
         else if (arg == "--key-file") o.key_file = std::string(next());
         else if (arg == "--stream-server") o.stream_server = true;
         else if (arg == "--stream-kind") o.stream_kind = next();
+        else if (arg == "--clock-follow-bounded") o.clock_follow_bounded = true;
         else if (arg == "--now") o.now = true;
         else if (arg == "--diagnostic-iq-noise-bits" || arg == "--diagnostic-iq-noise-obscured-bits" ||
                  arg == "--diagnostic-iq-noise-db" || arg == "--diagnostic-iq-noise-watts" ||
@@ -980,6 +984,11 @@ int run(const Options& o) {
     const auto f = selected_shaping.format;
     const auto g = selected_shaping.geometry;
     const auto sample_rate = f.sample_rate;
+    if (o.clock_follow_bounded && (!o.stream_server || o.stream_kind != "emitted" ||
+        o.helper || !o.data || f.fhss || f.burst_wait_tiles || o.whole_bit_calendar ||
+        f.pattern_revision != PatternRevision::IndependentApskV2 ||
+        g.fine_chip_rate_hz > .001 * (1 + 16 * std::numeric_limits<double>::epsilon())))
+        throw std::invalid_argument("bounded clock following requires an emitted independent-apsk-v2 DATA-only stream, fine rate<=0.001Hz, no FHSS, Helper or burst calendar");
     // Exactly 400 ms for the accepted integer multiple-of-five sample clocks.
     const std::uint64_t dwell_samples = 2ULL * sample_rate / 5;
     // Keep the complete finite-envelope source bound until sampled validation
@@ -992,18 +1001,26 @@ int run(const Options& o) {
     const auto key = selected_key(o);
     PatternSource reference_source(f, key, 0);
     PatternSource data_source(f, key, static_cast<std::uint8_t>(o.bit));
-    const auto lead_samples = static_cast<std::uint64_t>(std::llround(data_start_seconds * sample_rate));
+    const auto lead_samples = std::max(static_cast<std::uint64_t>(std::llround(data_start_seconds * sample_rate)),
+        o.clock_follow_bounded ? g.calendar_origin_sample : std::uint64_t{0});
     if (!o.whole_bit_calendar && g.calendar_origin_sample > lead_samples)
         throw std::runtime_error("DATA pulse padding exceeds the fixed Helper lead");
     // Power planning retains its public historical preview coordinate. The
     // opt-in emitted calendar below instead places the entire DATA support
     // after a fresh38-second Helper lead.
-    const auto preview_data_offset = static_cast<long double>(lead_samples) - g.calendar_origin_sample;
+    const auto preview_data_offset = static_cast<long double>(data_start_seconds) * sample_rate - g.calendar_origin_sample;
     auto data_offset = o.whole_bit_calendar ? std::uint64_t{0} : lead_samples - g.calendar_origin_sample;
     if (g.source_samples > UINT64_MAX - data_offset - dwell_samples)
         throw std::runtime_error("composite source extent overflow");
     const auto data_end = data_offset + g.source_samples;
     auto composite_samples = ((data_end + dwell_samples - 1) / dwell_samples) * dwell_samples;
+    // Public worst-case endpoint: negative clock correction must not truncate
+    // the keyed source or its pulse tails. No duration-sized allocation.
+    if (o.clock_follow_bounded) {
+        if (composite_samples > UINT64_MAX - 2ULL * sample_rate)
+            throw std::runtime_error("clock-follow source extent overflow");
+        composite_samples += 2ULL * sample_rate;
+    }
     std::vector<HelperBurstSlot> whole_slots;
     std::optional<HelperBurstPlan> burst_plan;
     const HelperBurstCoordinate calendar_origin{f.epoch, 0};
@@ -1227,8 +1244,11 @@ int run(const Options& o) {
     emitted.working_bytes = data_source.working_bytes() + sizeof(generator);
     for (const auto& source : whole_sources) emitted.working_bytes += source->working_bytes();
     std::size_t whole_slot_index = 0;
+    SourceClockFollower source_clock;
     emitted.sample_at = [&](std::uint64_t n) {
         const auto seconds = static_cast<long double>(n) / sample_rate;
+        const auto data_sample = o.clock_follow_bounded ?
+            static_cast<long double>(n) + source_clock.sample(seconds).offset_seconds * sample_rate : static_cast<long double>(n);
         Complex raw_data;
         long double active_helper_begin = 0, active_helper_end = helper_end;
         bool helper_active = o.helper;
@@ -1243,8 +1263,12 @@ int run(const Options& o) {
             active_helper_begin = burst_plan->relative_seconds(calendar_origin, slot.helper_begin);
             active_helper_end = burst_plan->relative_seconds(calendar_origin, slot.helper_end);
             helper_active = o.helper && seconds >= active_helper_begin && seconds < active_helper_end;
-        } else if (o.data && n >= data_offset && n - data_offset < g.source_samples)
-            raw_data = data_source.sample_at(static_cast<long double>(n - data_offset));
+        } else if (o.data) {
+            if (!o.clock_follow_bounded && n >= data_offset && n - data_offset < g.source_samples)
+                raw_data = data_source.sample_at(static_cast<long double>(n - data_offset));
+            else if (o.clock_follow_bounded && data_sample >= data_offset && data_sample - data_offset < g.source_samples)
+                raw_data = data_source.sample_at(data_sample - data_offset);
+        }
         const auto up = rotation(data_if_hz, seconds);
         const auto data = raw_data * data_gain;
         const auto helper_input = o.power_reference == "legacy-window" ? raw_data : raw_data * data_calibration_gain;
@@ -1317,6 +1341,10 @@ int run(const Options& o) {
             << ",\"pattern_revision\":\"" << pattern_revision_name(f.pattern_revision)
             << "\",\"added_amplitude_depth\":" << f.added_amplitude_depth
             << ",\"helper_enabled\":" << boolean(o.helper)
+            << ",\"clock_follow_bounded\":" << boolean(o.clock_follow_bounded)
+            << ",\"clock_follow_limit_seconds\":" << (o.clock_follow_bounded ? 2 : 0)
+            << ",\"clock_follow_endpoint_padding_seconds\":" << (o.clock_follow_bounded ? 2 : 0)
+            << ",\"clock_follow_basis\":\"nominal affine; remote corrections are not supplied to receiver\""
             << ",\"conditional_gaussian_null_supported\":"
             << boolean(o.stream_kind == "channel" && !o.helper && !o.diagnostic_iq_noise.enabled())
             << ",\"helper_high_hz\":" << plan.frequency_hz
@@ -1386,6 +1414,19 @@ int run(const Options& o) {
                 write_complex(std::cout, std::span(samples).first(count));
                 std::cout.write(reinterpret_cast<const char*>(valid.data()), static_cast<std::streamsize>(count));
                 std::cout.flush();
+            } else if (name == "clock") {
+                std::string target_text;
+                if (!(command >> target_text)) throw std::invalid_argument("clock requires absolute TARGET_SECONDS relative to stream origin");
+                no_extra(command);
+                const auto target = real(target_text, "clock target");
+                const bool accepted = o.clock_follow_bounded && std::abs(target) <= 2;
+                if (accepted) source_clock.update(static_cast<long double>(cursor) / sample_rate, target);
+                const auto state = source_clock.sample(static_cast<long double>(cursor) / sample_rate);
+                std::cout << "{\"accepted\":" << boolean(accepted)
+                    << ",\"target_seconds\":" << target << ",\"first_unrendered_sample\":" << cursor
+                    << ",\"offset_seconds\":" << static_cast<double>(state.offset_seconds)
+                    << ",\"rate_scale\":" << static_cast<double>(state.rate_scale)
+                    << ",\"scope\":\"bounded DATA coordinate only; fixed epoch and uniform audio-center NCO\"}\n" << std::flush;
             } else if (name == "basis") {
                 std::string first_text, count_text, columns_text;
                 if (!(command >> first_text >> count_text >> columns_text)) throw std::invalid_argument("basis requires FIRST COUNT N");

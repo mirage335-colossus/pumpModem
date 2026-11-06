@@ -735,6 +735,14 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
   add_executable(test_triad_v3_source EXCLUDE_FROM_ALL tests/test_triad_v3_source.cpp)
   target_include_directories(test_triad_v3_source PRIVATE src)
   target_link_libraries(test_triad_v3_source PRIVATE triad_experiment)
+  add_executable(test_triad_clock_follow EXCLUDE_FROM_ALL tests/test_triad_clock_follow.cpp)
+  target_include_directories(test_triad_clock_follow PRIVATE include)
+  if(DATAPUMP_SANITIZERS AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(test_triad_clock_follow PRIVATE -O1 -fsanitize=address,undefined -fno-omit-frame-pointer)
+    target_link_options(test_triad_clock_follow PRIVATE -fsanitize=address,undefined)
+  endif()
+  add_test(NAME triad_clock_follow COMMAND test_triad_clock_follow)
+  set_tests_properties(triad_clock_follow PROPERTIES LABELS "triad" TIMEOUT 30)
   add_executable(test_triad_shaping EXCLUDE_FROM_ALL tests/test_triad_shaping.cpp)
   target_include_directories(test_triad_shaping PRIVATE src)
   target_link_libraries(test_triad_shaping PRIVATE triad_experiment)
@@ -1194,6 +1202,9 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
       ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_triad_pattern_probe.py $<TARGET_FILE:triad_pattern_probe>)
     set_tests_properties(triad_pattern_probe PROPERTIES LABELS "triad" TIMEOUT 60)
     add_custom_target(test_triad_pattern_probe DEPENDS triad_pattern_probe)
+    add_test(NAME triad_control_clock COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_triad_control_clock.py)
+    set_tests_properties(triad_control_clock PROPERTIES LABELS "triad" TIMEOUT 30)
     if(TARGET triad_audio_stream)
       add_test(NAME triad_audio_stream COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_triad_audio_stream.py $<TARGET_FILE:triad_audio_stream>)
@@ -1308,6 +1319,7 @@ if(NOT DATAPUMP_BUILD_WASM)
       if(_target STREQUAL "background_noise" OR _target STREQUAL "test_background_noise" OR _target STREQUAL "test_audio_output" OR
           _target STREQUAL "test_triad_modem" OR _target STREQUAL "test_triad_v2" OR
           _target STREQUAL "test_triad_statistics" OR _target STREQUAL "test_triad_v3_source" OR _target STREQUAL "test_triad_shaping" OR
+          _target STREQUAL "test_triad_clock_follow" OR
           _target STREQUAL "test_triad_v3_channel" OR _target STREQUAL "test_triad_v3_receiver" OR
           _target STREQUAL "triad_study" OR _target STREQUAL "triad_examples" OR
           _target STREQUAL "triad_long" OR _target STREQUAL "triad_pattern_probe" OR _target STREQUAL "triad_audio_capture" OR _target STREQUAL "triad_audio_stream" OR

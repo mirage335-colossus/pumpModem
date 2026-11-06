@@ -44,6 +44,12 @@ from capture truth.
 
 ## Duration and power limits
 
+The opt-in [bounded clock-step profile](triad-clock-follow.md) handles ±2 seconds
+of total source displacement for very slow, ungated DATA without changing its
+epoch or the final audio-center oscillator. An independent RX uses the same
+public profile and nominal templates. General cumulative clock drift, NTP
+slewing, Helper and higher-rate timing tracking remain outside that profile.
+
 There is no general 3,600-second cap on source or channel duration. A plan-only
 query can check long integer geometry without generating samples. File exports
 remain subject to the explicit 2 GiB artifact limit and other geometry/sample

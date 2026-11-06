@@ -1,0 +1,27 @@
+{
+  "base_commit": "bd94faa756753c3a29e35ca9136d60dca09959c7",
+  "source_changes": "uncommitted clock-follow implementation; per-file SHA256 below",
+  "files": {
+    "include/datapump/triad_clock_follow.hpp": "34d84d46ade7c8f4f0aa2242f921163ec070b823d9195a2bbe5c0cea793083fb",
+    "tools/triad-helper-export.cpp": "5ef5221c2c08655b9c05a8d57658e8a42a2511a0a275ab42d68aeaac37b0bbf3",
+    "tools/triad-pattern-probe.cpp": "f98a075421fc00657d2d0cc77fed89846ba0cabcf41a2217ce542c91d9cf5a0b",
+    "tools/triad_continuous.py": "adec9844aa0faecd7d0504f3018ddcd9108703bbd77b60bf81ae826abb8749ea",
+    "tools/triad_control_clock.py": "700828858640b37ded8ec9b77882d310d80c39685df4674a190ed3cffdd14dc2",
+    "tools/triad_clock_diagnostic.py": "e01c850bb3ab7df154e03c451a0b3ca96b715a107f3f62975f52895e01816bbf",
+    "tools/triad_incremental_receiver.py": "9c4ea5cf318ba8cb1fa3ff469b1f7a9f762961acb51964d4a762b64160ee1d15",
+    "tools/triad_gaussian_state.py": "679035e50b27fe919644775460ef25670d95433c8886b39b4474f7f95ecfe7ba",
+    "build/dev-cli/triad_pattern_probe": "03f8d9d044009f9378f4121b2e4807724891d361fb8fedb698db924deaeef5dd",
+    "build/dev-cli/triad_helper_export": "fd933331fa739976a2bc2da6575579626f50e77764549afd2559ea6258ebbeb5",
+    "CMakeLists.txt": "61bbc590034d5403c478185ce9643461b33075fdbb588d807cadf345083f1d6c",
+    "cmake/TestGroups.cmake": "fdf27e23d88f825a1a2f04818a3d942f2e652bf1b4c3dbc9cc1fe0b62acccbcb",
+    "tests/test_triad_clock_follow.cpp": "23c3995a5ed23a8d12148217e285dbb19913651cb7f438572f49497fb0ea44b0",
+    "tests/test_triad_continuous.py": "b96e009803cbc1d843e2b091dc639137ffa2d9815eaf91079e54d7bd259a20ad",
+    "tests/test_triad_stream_source.py": "21ab3fd1b22b7c84e8a342f486b181779113e517de133352ab8627f13770e90a",
+    "tests/test_triad_pattern_probe.py": "d8fe66321b55edc51f417d86aa4fcc91072f0396679019edbb38967106b8c178",
+    "tests/test_triad_control_clock.py": "847d6f92d2baf7b91a92f069153923942ef3b4516720996026c9702a5fbc10af",
+    "tests/test_triad_clock_diagnostic.py": "a36139a065dd42e242883be05fef1976639d11b3bbec79bf3cc64956e5c15beb"
+  },
+  "reference_cpu": "AMD Ryzen 5 PRO 5650U; receiver experiment one thread",
+  "observations": "native source windows, injected clock steps; host system clock not altered; no hardware/GPU campaign",
+  "final_integration_note": "Exporter default-path integer subtraction was restored after probe/receiver measurements. Probe and sampled-receiver inputs are unchanged; pull-stream regression rerun for the final exporter."
+}

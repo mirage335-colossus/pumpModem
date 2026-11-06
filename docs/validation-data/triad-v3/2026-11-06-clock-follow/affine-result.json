@@ -1,0 +1,140 @@
+{
+  "schema": "triad-clock-affine-window-v1",
+  "scope": "Oracle-assisted representational diagnostic, not acquisition. One finite800-second source window, cropped4seconds at both ends. No channel, noise, timing-search calibration, whole-bit or long-term tracking claim.",
+  "sample_rate_hz": 500,
+  "original_window_seconds": 800.0,
+  "measured_window_seconds": 792.0,
+  "physical_calendar_start_seconds": 105004.0,
+  "fine_rate_hz": 60,
+  "crop_per_edge_seconds": 4,
+  "nominal_source_format": {
+    "pattern_revision": "independent-apsk-v2",
+    "added_amplitude_depth": 0.25,
+    "inner_rate_hz": 36,
+    "added_symbols": 10,
+    "added_interleave": true,
+    "sample_rate": 500,
+    "sample_rate_denominator": 1,
+    "requested_bit_seconds": 200000,
+    "minimum_inner_coefficients": 64,
+    "fhss": false,
+    "fhss_center_aligned": false,
+    "dwell_seconds": 0.4,
+    "quiet_seconds": 0,
+    "ramp_seconds": 0.02,
+    "margin_seconds": 0.005,
+    "burst_wait_tiles": 0,
+    "pulse_shape": "rrc-025-span8-c2-tail2"
+  },
+  "clock_trace": {
+    "enabled": true,
+    "law": "bounded-source-quintic-v1",
+    "target_offset_seconds": 2,
+    "correction_at_calendar_seconds": 100000,
+    "transition_duration_seconds": 12500,
+    "maximum_absolute_offset_seconds": 2,
+    "maximum_rate_correction_ppm": 300,
+    "maximum_acceleration_ppm_per_second": 0.2,
+    "observed_offset_seconds": [
+      0.63488,
+      0.8654652406105912
+    ],
+    "observed_rate_scale": [
+      1.00027648,
+      1.000296897634652
+    ],
+    "scope": "source-time diagnostic; no OS clock or live tracking; all DATA source coordinates including ramps/gates are warped; final audio-center NCO is absent and unchanged; coefficients and epoch remain original; no receiver qualification"
+  },
+  "interpolation": "8x polyphase Kaiser(beta8.6) then linear fractional lookup; checked against independently native-rendered warped samples",
+  "fitting": "Three local Nelder-Mead fits initialized by least-squares affine fit to PRIVATE exact TX trajectory;8192 deterministic fitting rows; losses evaluated on all396000 cropped rows. Constant complex gain eliminated analytically.",
+  "initial_trajectory_affine_offset_seconds": 0.7487956030191388,
+  "initial_trajectory_affine_rate_ppm": 288.55041142121433,
+  "bits": [
+    {
+      "bit": 0,
+      "nominal": {
+        "squared_overlap": 2.039004198601184e-05,
+        "common_complex_gain_mismatch_loss_db": 46.90581879946505,
+        "template_energy": 396012.63762128213,
+        "actual_warped_energy": 396011.27254741744,
+        "actual_over_template_energy_db": -1.4970357314319255e-05
+      },
+      "affine": {
+        "squared_overlap": 0.9442699052264519,
+        "common_complex_gain_mismatch_loss_db": 0.24903851468514732,
+        "template_energy": 395358.40733449603,
+        "actual_warped_energy": 396011.27254741744,
+        "actual_over_template_energy_db": 0.0071656984322411715
+      },
+      "exact_warp_interpolation": {
+        "squared_overlap": 0.9999992596531481,
+        "common_complex_gain_mismatch_loss_db": 3.2152867151125806e-06,
+        "template_energy": 395358.09602558916,
+        "actual_warped_energy": 396011.27254741744,
+        "actual_over_template_energy_db": 0.007169118108948496
+      },
+      "affine_offset_at_window_midpoint_seconds": 0.7487893922292919,
+      "affine_rate_ppm": 288.55156654613694,
+      "exact_minus_affine_shift_rms_seconds": 0.0005998221855900743,
+      "exact_minus_affine_shift_maximum_seconds": 0.001462954194990651,
+      "normalized_interpolation_sample_error": 0.00119181308448146,
+      "fit_function_evaluations": 386,
+      "all_local_optimizations_converged": true
+    },
+    {
+      "bit": 1,
+      "nominal": {
+        "squared_overlap": 6.525854604069472e-06,
+        "common_complex_gain_mismatch_loss_db": 51.85362606514087,
+        "template_energy": 395997.5946418076,
+        "actual_warped_energy": 396001.0148035517,
+        "actual_over_template_energy_db": 3.750909042000227e-05
+      },
+      "affine": {
+        "squared_overlap": 0.9443450058399196,
+        "common_complex_gain_mismatch_loss_db": 0.24869312101232754,
+        "template_energy": 395348.74580037023,
+        "actual_warped_energy": 396001.0148035517,
+        "actual_over_template_energy_db": 0.007159334773375517
+      },
+      "exact_warp_interpolation": {
+        "squared_overlap": 0.9999992653961725,
+        "common_complex_gain_mismatch_loss_db": 3.190345058701281e-06,
+        "template_energy": 395349.4566867914,
+        "actual_warped_energy": 396001.0148035517,
+        "actual_over_template_energy_db": 0.007151525623209435
+      },
+      "affine_offset_at_window_midpoint_seconds": 0.7487996219712825,
+      "affine_rate_ppm": 288.5494874957046,
+      "exact_minus_affine_shift_rms_seconds": 0.0005998034738695797,
+      "exact_minus_affine_shift_maximum_seconds": 0.0014519011511079372,
+      "normalized_interpolation_sample_error": 0.001188001014157594,
+      "fit_function_evaluations": 406,
+      "all_local_optimizations_converged": true
+    }
+  ],
+  "identities": [
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-clock-follow/affine-diagnostic.py",
+      "sha256": "919c5936f54670113ba0eefafea7f2dc68253d4319bf8a4526cf86182d0c7e07"
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-clock-follow/hf-base-74003/manifest.json",
+      "sha256": "6da56825e3670184e8f1b233f12e8720f1040bba2b35fb1418ffba069840d563"
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-clock-follow/hf-plus-74003/manifest.json",
+      "sha256": "d48bea67954a09e24bc4ac089a19d73a214c837ea9858f39ab1736be5d7a8c12"
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-clock-follow/hf-base-74003/composite.c128",
+      "sha256": "859d11c7447be050cfc2b81c2d65ae4be13b6f5ef115e848f7789735befd6ba6"
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-clock-follow/hf-plus-74003/composite.c128",
+      "sha256": "9874af2d611ef2ffd8c9bf7659362fbc494607360e74490c00ebaf8318f645e0"
+    }
+  ],
+  "wall_seconds": 0.6924530660035089,
+  "process_cpu_seconds": 0.6916285249999999
+}

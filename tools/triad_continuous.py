@@ -147,6 +147,11 @@ class NativeStream:
         return np.frombuffer(read_exact(self.process.stdout, len(rows)*count*16),
             dtype='<c16').reshape(len(rows), count)
 
+    def clock_target(self, seconds):
+        if not math.isfinite(seconds):
+            raise ValueError('finite clock correction required')
+        return self._request(f'clock {seconds:.17g}\n')
+
     def close(self):
         process = getattr(self, 'process', None)
         if process is None:
@@ -199,6 +204,51 @@ def source_basis(source, coordinates, taps, offset):
     return render
 
 
+class BoundedClockControl:
+    """OS corrections steer only the explicitly eligible DATA source.
+
+    Control observations are not DAC timestamps or estimates of remote clock
+    motion. Never change the epoch or give this private TX trace to the RX bank.
+    """
+    def __init__(self, clock):
+        self.clock = clock
+        if not clock.available:
+            raise ValueError('system clock association unavailable at stream start')
+        self.origin = clock.snapshot
+        self.last_target = 0.
+        self.report = dict(updates=0, outside_envelope=0, unavailable_polls=0,
+                           last_target_seconds=0., last_response=None, status='following')
+
+    def _status(self, value):
+        if value != self.report['status']:
+            print(f'triad_continuous: bounded clock-step following: {value}; '
+                  'the established source trajectory and epoch are retained', file=sys.stderr)
+            self.report['status'] = value
+
+    def poll(self, source):
+        snapshot = self.clock.poll()
+        if snapshot is None:
+            self.report['unavailable_polls'] += 1
+            self._status('clock association unavailable')
+            return
+        target = (snapshot.offset_ns-self.origin.offset_ns)/1e9
+        uncertainty = (snapshot.uncertainty_ns+self.origin.uncertainty_ns)/1e9
+        if abs(target) > 2+uncertainty:
+            self.report['outside_envelope'] += 1
+            self._status('correction outside original +/-2-second envelope')
+            return  # Keep the continuous established trajectory; never ratchet.
+        self._status('following')
+        target = max(-2., min(2., target))
+        if abs(target-self.last_target) < max(.001, uncertainty):
+            return  # Clock-read jitter must not continually requeue the servo.
+        response = source.clock_target(target)
+        if not response.get('accepted'):
+            raise RuntimeError('native source rejected eligible clock correction')
+        self.last_target = target
+        self.report.update(updates=self.report['updates']+1,
+                           last_target_seconds=target, last_response=response)
+
+
 def parser():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--mode', choices=('simulate', 'transmit', 'receive'), default='simulate')
@@ -218,6 +268,8 @@ def parser():
     p.add_argument('--device', default='default')
     p.add_argument('--fixed-gain', type=float, default=.002)
     p.add_argument('--audio-arguments', default='[]', help='JSON array of extra native audio options (e.g. full-rate background noise)')
+    p.add_argument('--follow-system-clock', choices=('off', 'bounded-data'), default='off',
+        help='bounded slow DATA calendar; TX follows +/-2s corrections, RX keeps nominal physical-time templates; no Helper/FHSS/burst')
     return p
 
 
@@ -235,6 +287,8 @@ def execute(argv=None):
     if a.limit_seconds is not None and (not math.isfinite(a.limit_seconds) or a.limit_seconds <= 0):
         raise ValueError('positive finite prefix duration required')
     if a.mode != 'transmit' and a.bank is None: raise ValueError('reception requires --bank')
+    if a.follow_system_clock != 'off' and a.mode == 'simulate':
+        raise ValueError('bounded clock profile currently supports emitted TX/RX; use the injected native probe for simulated correction traces')
     if a.mode == 'receive' and (a.noise_variance is None or a.noise_variance <= 0):
         raise ValueError('physical reception requires a declared conservative --noise-variance')
     audio_arguments = json.loads(a.audio_arguments)
@@ -255,6 +309,13 @@ def execute(argv=None):
     child_before = resource.getrusage(resource.RUSAGE_CHILDREN)
     started, cpu = time.perf_counter(), time.process_time()
     source = audio = None
+    clock_control = None
+    if a.follow_system_clock == 'bounded-data':
+        native_args += ['--clock-follow-bounded']
+        result['identities'].append(file_identity(ROOT/'tools/triad_control_clock.py'))
+        if a.mode == 'transmit':
+            from triad_control_clock import ControlClock
+            clock_control = BoundedClockControl(ControlClock())
     log_path = a.report.with_suffix('.stderr.log')
     with log_path.open('x') as log:
         try:
@@ -262,6 +323,11 @@ def execute(argv=None):
                 kind='channel' if a.mode == 'simulate' else 'emitted', log=log)
             d = source.descriptor; fs = int(d['sample_rate_hz']); total = int(d['total_samples'])
             result.update(source=d, plan=source.plan, command=source.command)
+            if a.follow_system_clock == 'bounded-data':
+                result['clock_profile'] = dict(name='bounded-data',
+                    local_corrections_steer_source=a.mode == 'transmit',
+                    receiver_uses_private_transmitter_trace=False,
+                    receiver_time='physical sample index; nominal affine bank unchanged')
             block_samples = max(1, round(a.block_seconds*fs))
             if 2*block_samples > 16384: raise ValueError('merged final block exceeds native bounded basis request')
             requested = total if a.limit_seconds is None else min(total, math.ceil(a.limit_seconds*fs))
@@ -308,6 +374,8 @@ def execute(argv=None):
             result['preparation_wall_seconds'] = time.perf_counter()-started
             while first < requested:
                 n = min(a.chunk_samples, requested-first)
+                if clock_control is not None:
+                    clock_control.poll(source)
                 if a.mode == 'receive':
                     pcm = np.frombuffer(read_exact(audio.stdout, n*4), dtype='<f4')
                     phase = carrier_phase(first, n, float(d['data_if_hz']), fs)
@@ -343,6 +411,10 @@ def execute(argv=None):
             result.update(status='failed', error=type(error).__name__+': '+str(error))
             raise
         finally:
+            if clock_control is not None:
+                result['system_clock_follow'] = dict(clock_control.report,
+                    association=clock_control.clock.report(),
+                    scope='Bounded slow DATA source coordinate; fixed epoch, physical audio NCO and nominal receiver basis. No remote timing inference.')
             if audio is not None and audio.poll() is None:
                 audio.terminate()
                 try: audio.wait(timeout=3)

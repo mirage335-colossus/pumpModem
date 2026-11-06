@@ -1,5 +1,6 @@
 #include "datapump/triad_modem_v3.hpp"
 #include "datapump/triad_shaping.hpp"
+#include "datapump/triad_clock_follow.hpp"
 
 #include <algorithm>
 #include <array>
@@ -31,6 +32,9 @@ struct Options {
     std::filesystem::path output;
     double window_seconds = 16;
     std::optional<double> start_seconds;
+    std::optional<double> clock_correction_seconds;
+    std::optional<double> clock_correction_at_seconds;
+    std::optional<double> clock_correction_duration_seconds;
     std::uint64_t seed = 73001;
     bool auto_shaping = true;
     Options() {
@@ -82,6 +86,8 @@ Options parse(int argc, char** argv) {
                 "[--pattern-revision legacy-v1|independent-apsk-v2 --added-amplitude-depth D]\n"
                 "[--fhss on|off --burst-wait N --interleave on|off --shaping auto|legacy]\n"
                 "[--quiet-seconds N --ramp-seconds N --margin-seconds N]\n"
+                "[--clock-correction-seconds SIGNED_OFFSET --clock-correction-at-seconds N]\n"
+                "[--clock-correction-duration-seconds N] (bounded source-time diagnostic only)\n"
                 "At most500000 sampled rows and4096 consecutive unshaped coefficient rows.\n";
             std::exit(0);
         }
@@ -95,6 +101,9 @@ Options parse(int argc, char** argv) {
         else if (arg == "--seconds") o.format.bit_seconds = number(value);
         else if (arg == "--window-seconds") o.window_seconds = number(value);
         else if (arg == "--start-seconds") o.start_seconds = number(value);
+        else if (arg == "--clock-correction-seconds") o.clock_correction_seconds = number(value);
+        else if (arg == "--clock-correction-at-seconds") o.clock_correction_at_seconds = number(value);
+        else if (arg == "--clock-correction-duration-seconds") o.clock_correction_duration_seconds = number(value);
         else if (arg == "--seed") o.seed = integer(value);
         else if (arg == "--epoch") o.format.epoch = integer(value);
         else if (arg == "--symbol-ordinal") o.format.symbol_ordinal = integer(value);
@@ -120,6 +129,8 @@ Options parse(int argc, char** argv) {
     require(o.window_seconds > 0, "window duration must be positive");
     require(o.format.added_amplitude_depth > 0 && o.format.added_amplitude_depth < 1,
             "Added amplitude depth must be strictly between0 and1");
+    require(o.clock_correction_seconds || (!o.clock_correction_at_seconds && !o.clock_correction_duration_seconds),
+            "clock timing options require --clock-correction-seconds");
     return o;
 }
 
@@ -159,6 +170,13 @@ void run(const Options& o) {
     }
     const auto g = geometry(f);
     const auto fs = effective_sample_rate(f);
+    const auto correction_at = static_cast<long double>(o.clock_correction_at_seconds.value_or(0));
+    const auto correction = static_cast<long double>(o.clock_correction_seconds.value_or(0));
+    SourceClockFollower checked_clock;
+    const auto correction_duration = o.clock_correction_duration_seconds ?
+        static_cast<long double>(*o.clock_correction_duration_seconds) : checked_clock.minimum_duration(correction);
+    if (o.clock_correction_seconds)
+        checked_clock.update(correction_at, correction, o.clock_correction_duration_seconds);
     const auto desired_rows = std::ceil(static_cast<long double>(o.window_seconds) * fs);
     require(std::isfinite(desired_rows) && desired_rows >= 1 && desired_rows <= maximum_rows,
             "probe window exceeds500000 sampled-row budget");
@@ -198,12 +216,36 @@ void run(const Options& o) {
     std::vector<double> gate(chunk_rows);
     std::array<std::vector<Complex>, 3> carrier;
     for (auto& column : carrier) column.resize(chunk_rows);
+    long double minimum_clock_offset = std::numeric_limits<long double>::infinity();
+    long double maximum_clock_offset = -std::numeric_limits<long double>::infinity();
+    long double minimum_clock_rate = std::numeric_limits<long double>::infinity();
+    long double maximum_clock_rate = -std::numeric_limits<long double>::infinity();
     for (unsigned bit = 0; bit < 2; ++bit) {
         PatternSource source(f, key, static_cast<std::uint8_t>(bit));
+        SourceClockFollower clock;
+        bool correction_applied = false;
         for (std::uint64_t done = 0; done < rows;) {
             const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(chunk_rows, rows-done));
             for (std::size_t j = 0; j < count; ++j) {
-                const auto sample = static_cast<long double>(first+done+j);
+                auto sample = static_cast<long double>(first+done+j);
+                const auto physical_time = (sample-g.calendar_origin_sample)/fs;
+                SourceClockFollower::Sample timing{physical_time, 0, 1, 0};
+                if (o.clock_correction_seconds) {
+                    if (!correction_applied && physical_time >= correction_at) {
+                        clock.update(correction_at, correction, o.clock_correction_duration_seconds);
+                        correction_applied = true;
+                    }
+                    timing = clock.sample(physical_time);
+                    // Keep the integer physical origin; do not subtract/re-add
+                    // a large epoch or round the sub-sample time correction.
+                    sample += timing.offset_seconds*fs;
+                }
+                if (bit == 0) {
+                    minimum_clock_offset = std::min(minimum_clock_offset, timing.offset_seconds);
+                    maximum_clock_offset = std::max(maximum_clock_offset, timing.offset_seconds);
+                    minimum_clock_rate = std::min(minimum_clock_rate, timing.rate_scale);
+                    maximum_clock_rate = std::max(maximum_clock_rate, timing.rate_scale);
+                }
                 const auto cells = source.carrier_samples_at(sample);
                 for (unsigned c = 0; c < 3; ++c) carrier[c][j] = cells[c];
                 // Keep the exact public renderer as the composite reference.
@@ -271,6 +313,15 @@ void run(const Options& o) {
         << ",\"tile_seconds\":" << g.tile_seconds << ",\"tile_count\":" << g.tile_count
         << ",\"source_workspace_bytes\":" << g.source_workspace_bytes << "}"
         << ",\"shaping_policy\":\"" << (o.auto_shaping ? "auto" : "legacy") << "\""
+        << ",\"clock_follow\":{\"enabled\":" << (o.clock_correction_seconds ? "true" : "false")
+        << ",\"law\":\"bounded-source-quintic-v1\",\"target_offset_seconds\":" << static_cast<double>(correction)
+        << ",\"correction_at_calendar_seconds\":" << static_cast<double>(correction_at)
+        << ",\"transition_duration_seconds\":" << static_cast<double>(correction_duration)
+        << ",\"maximum_absolute_offset_seconds\":2,\"maximum_rate_correction_ppm\":300"
+        << ",\"maximum_acceleration_ppm_per_second\":0.2"
+        << ",\"observed_offset_seconds\":[" << static_cast<double>(minimum_clock_offset) << ',' << static_cast<double>(maximum_clock_offset) << ']'
+        << ",\"observed_rate_scale\":[" << static_cast<double>(minimum_clock_rate) << ',' << static_cast<double>(maximum_clock_rate) << ']'
+        << ",\"scope\":\"source-time diagnostic; no OS clock or live tracking; all DATA source coordinates including ramps/gates are warped; final audio-center NCO is absent and unchanged; coefficients and epoch remain original; no receiver qualification\"}"
         << ",\"shaping_fallback\":" << (plan && plan->fallback ? "true" : "false")
         << ",\"artifact_bytes\":" << output_bytes
         << ",\"preparation_wall_seconds\":" << std::chrono::duration<double>(prepared-wall_start).count()

@@ -1,0 +1,1034 @@
+{
+  "schema": "triad-clock-diagnostic-v1",
+  "rows": 400000,
+  "sample_rate_hz": 500,
+  "window_seconds": 800,
+  "first_calendar_seconds": 105000,
+  "fine_rate_hz": 60,
+  "carrier_spacing_hz": 75,
+  "nominal_trace": {
+    "enabled": false,
+    "law": "bounded-source-quintic-v1",
+    "target_offset_seconds": 0,
+    "correction_at_calendar_seconds": 0,
+    "transition_duration_seconds": 0,
+    "maximum_absolute_offset_seconds": 2,
+    "maximum_rate_correction_ppm": 300,
+    "maximum_acceleration_ppm_per_second": 0.2,
+    "observed_offset_seconds": [
+      0,
+      0
+    ],
+    "observed_rate_scale": [
+      1,
+      1
+    ],
+    "scope": "source-time diagnostic; no OS clock or live tracking; all DATA source coordinates including ramps/gates are warped; final audio-center NCO is absent and unchanged; coefficients and epoch remain original; no receiver qualification"
+  },
+  "warped_trace": {
+    "enabled": true,
+    "law": "bounded-source-quintic-v1",
+    "target_offset_seconds": 2,
+    "correction_at_calendar_seconds": 100000,
+    "transition_duration_seconds": 12500,
+    "maximum_absolute_offset_seconds": 2,
+    "maximum_rate_correction_ppm": 300,
+    "maximum_acceleration_ppm_per_second": 0.2,
+    "observed_offset_seconds": [
+      0.63488,
+      0.8654652406105912
+    ],
+    "observed_rate_scale": [
+      1.00027648,
+      1.000296897634652
+    ],
+    "scope": "source-time diagnostic; no OS clock or live tracking; all DATA source coordinates including ramps/gates are warped; final audio-center NCO is absent and unchanged; coefficients and epoch remain original; no receiver qualification"
+  },
+  "bits": [
+    {
+      "bit": 0,
+      "nominal_sample_energy": 400013.12011211633,
+      "warped_sample_energy": 400011.0630220935,
+      "actual_energy_change_db": -2.2333896013137754e-05,
+      "squared_overlap_after_common_complex_gain": 1.764040104642626e-05,
+      "shape_mismatch_loss_db": 47.53491545606124,
+      "loss_is_infinite": false,
+      "wrong_nominal_codeword_squared_overlap": 1.3538636401115882e-05,
+      "noiseless_correct_minus_wrong_overlap": 4.101764645310377e-06,
+      "nominal_codeword_squared_overlap": 9.958220504631716e-05,
+      "oracle_codeword_squared_overlap": 9.948833298061115e-05
+    },
+    {
+      "bit": 1,
+      "nominal_sample_energy": 399997.8458804889,
+      "warped_sample_energy": 399998.7419592354,
+      "actual_energy_change_db": 9.729092870059739e-06,
+      "squared_overlap_after_common_complex_gain": 6.650287683684019e-06,
+      "shape_mismatch_loss_db": 51.77159567218084,
+      "loss_is_infinite": false,
+      "wrong_nominal_codeword_squared_overlap": 4.242701946450091e-06,
+      "noiseless_correct_minus_wrong_overlap": 2.4075857372339275e-06,
+      "nominal_codeword_squared_overlap": 9.958220504631716e-05,
+      "oracle_codeword_squared_overlap": 9.948833298061115e-05
+    }
+  ],
+  "input_identities": [
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-clock-follow/hf-base-74003/manifest.json",
+      "sha256": "6da56825e3670184e8f1b233f12e8720f1040bba2b35fb1418ffba069840d563"
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-clock-follow/hf-base-74003/composite.c128",
+      "sha256": "859d11c7447be050cfc2b81c2d65ae4be13b6f5ef115e848f7789735befd6ba6"
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-clock-follow/hf-plus-74003/manifest.json",
+      "sha256": "d48bea67954a09e24bc4ac089a19d73a214c837ea9858f39ab1736be5d7a8c12"
+    },
+    {
+      "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/local-evidence/triad-clock-follow/hf-plus-74003/composite.c128",
+      "sha256": "9874af2d611ef2ffd8c9bf7659362fbc494607360e74490c00ebaf8318f645e0"
+    }
+  ],
+  "tool_identity": {
+    "path": "/home/user/___quick/p/_cur/dataPump/pumpModem/tools/triad_clock_diagnostic.py",
+    "sha256": "e01c850bb3ab7df154e03c451a0b3ca96b715a107f3f62975f52895e01816bbf"
+  },
+  "channel": {
+    "spread": "none",
+    "additional_selectivity": "off",
+    "oscillator_effects": "off"
+  },
+  "scope": "Actual sampled source windows. Unknown common complex gain is fitted; timing/clock alternatives and physical channel are not. Window overlap is not a full-message or long-term synchronization guarantee.",
+  "awgn": {
+    "schema": "triad-clock-window-awgn-v1",
+    "seed": 84003,
+    "trials_per_bit": 65536,
+    "nominal_noise_variance": 1.0,
+    "threshold": 9.903487552536127,
+    "alpha_per_two_codeword_bank": 0.0001,
+    "null_bound": "P(max of two unit-template noise powers >= log(2/alpha)) <= alpha by union bound; no independence assumed",
+    "noise_only": {
+      "nominal_receiver": {
+        "count": 8,
+        "trials": 65536,
+        "fraction": 0.0001220703125,
+        "confidence": 0.95,
+        "interval": [
+          5.270272255279128e-05,
+          0.0002405129333802731
+        ],
+        "interval_scope": "marginal exact binomial, two-sided"
+      },
+      "oracle_receiver": {
+        "count": 6,
+        "trials": 65536,
+        "fraction": 9.1552734375e-05,
+        "confidence": 0.95,
+        "interval": [
+          3.359895722937365e-05,
+          0.00019926102685990834
+        ],
+        "interval_scope": "marginal exact binomial, two-sided"
+      }
+    },
+    "numerical_gram_rank": 4,
+    "cases": [
+      {
+        "nominal_en0_db": 10.0,
+        "bits": [
+          {
+            "bit": 0,
+            "actual_warped_en0_db": 9.999977666103987,
+            "nominal_source_nominal_receiver": {
+              "correct_admissions": {
+                "count": 36281,
+                "trials": 65536,
+                "fraction": 0.5536041259765625,
+                "confidence": 0.95,
+                "interval": [
+                  0.5497882011835571,
+                  0.5574153035873066
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              },
+              "wrong_admissions": {
+                "count": 3,
+                "trials": 65536,
+                "fraction": 4.57763671875e-05,
+                "confidence": 0.95,
+                "interval": [
+                  9.44028691119673e-06,
+                  0.0001337720841996877
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              },
+              "misses": {
+                "count": 29252,
+                "trials": 65536,
+                "fraction": 0.44635009765625,
+                "confidence": 0.95,
+                "interval": [
+                  0.4425389598783787,
+                  0.45016598667046326
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              }
+            },
+            "warped_source_nominal_receiver": {
+              "correct_admissions": {
+                "count": 2,
+                "trials": 65536,
+                "fraction": 3.0517578125e-05,
+                "confidence": 0.95,
+                "interval": [
+                  3.6958416578455473e-06,
+                  0.00011023559095328574
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              },
+              "wrong_admissions": {
+                "count": 6,
+                "trials": 65536,
+                "fraction": 9.1552734375e-05,
+                "confidence": 0.95,
+                "interval": [
+                  3.359895722937365e-05,
+                  0.00019926102685990834
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              },
+              "misses": {
+                "count": 65528,
+                "trials": 65536,
+                "fraction": 0.9998779296875,
+                "confidence": 0.95,
+                "interval": [
+                  0.9997594870666198,
+                  0.9999472972774472
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              }
+            },
+            "warped_source_oracle_receiver": {
+              "correct_admissions": {
+                "count": 36245,
+                "trials": 65536,
+                "fraction": 0.5530548095703125,
+                "confidence": 0.95,
+                "interval": [
+                  0.5492384579779281,
+                  0.5568664626293798
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              },
+              "wrong_admissions": {
+                "count": 1,
+                "trials": 65536,
+                "fraction": 1.52587890625e-05,
+                "confidence": 0.95,
+                "interval": [
+                  3.863190169359472e-07,
+                  8.501356601246325e-05
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              },
+              "misses": {
+                "count": 29290,
+                "trials": 65536,
+                "fraction": 0.446929931640625,
+                "confidence": 0.95,
+                "interval": [
+                  0.443118291724991,
+                  0.450746271440935
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              }
+            }
+          },
+          {
+            "bit": 1,
+            "actual_warped_en0_db": 10.00000972909287,
+            "nominal_source_nominal_receiver": {
+              "correct_admissions": {
+                "count": 36279,
+                "trials": 65536,
+                "fraction": 0.5535736083984375,
+                "confidence": 0.95,
+                "interval": [
+                  0.549757659771041,
+                  0.5573848125462932
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              },
+              "wrong_admissions": {
+                "count": 3,
+                "trials": 65536,
+                "fraction": 4.57763671875e-05,
+                "confidence": 0.95,
+                "interval": [
+                  9.44028691119673e-06,
+                  0.0001337720841996877
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              },
+              "misses": {
+                "count": 29254,
+                "trials": 65536,
+                "fraction": 0.446380615234375,
+                "confidence": 0.95,
+                "interval": [
+                  0.4425694508976278,
+                  0.45019652810474364
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              }
+            },
+            "warped_source_nominal_receiver": {
+              "correct_admissions": {
+                "count": 6,
+                "trials": 65536,
+                "fraction": 9.1552734375e-05,
+                "confidence": 0.95,
+                "interval": [
+                  3.359895722937365e-05,
+                  0.00019926102685990834
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              },
+              "wrong_admissions": {
+                "count": 2,
+                "trials": 65536,
+                "fraction": 3.0517578125e-05,
+                "confidence": 0.95,
+                "interval": [
+                  3.6958416578455473e-06,
+                  0.00011023559095328574
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              },
+              "misses": {
+                "count": 65528,
+                "trials": 65536,
+                "fraction": 0.9998779296875,
+                "confidence": 0.95,
+                "interval": [
+                  0.9997594870666198,
+                  0.9999472972774472
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              }
+            },
+            "warped_source_oracle_receiver": {
+              "correct_admissions": {
+                "count": 36477,
+                "trials": 65536,
+                "fraction": 0.5565948486328125,
+                "confidence": 0.95,
+                "interval": [
+                  0.5527813300412081,
+                  0.5604033551748515
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              },
+              "wrong_admissions": {
+                "count": 2,
+                "trials": 65536,
+                "fraction": 3.0517578125e-05,
+                "confidence": 0.95,
+                "interval": [
+                  3.6958416578455473e-06,
+                  0.00011023559095328574
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              },
+              "misses": {
+                "count": 29057,
+                "trials": 65536,
+                "fraction": 0.4433746337890625,
+                "confidence": 0.95,
+                "interval": [
+                  0.43956615522200765,
+                  0.44718812710841777
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "nominal_en0_db": 12.0,
+        "bits": [
+          {
+            "bit": 0,
+            "actual_warped_en0_db": 11.999977666103987,
+            "nominal_source_nominal_receiver": {
+              "correct_admissions": {
+                "count": 59012,
+                "trials": 65536,
+                "fraction": 0.90045166015625,
+                "confidence": 0.95,
+                "interval": [
+                  0.8981340549018162,
+                  0.9027337394431822
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              },
+              "wrong_admissions": {
+                "count": 2,
+                "trials": 65536,
+                "fraction": 3.0517578125e-05,
+                "confidence": 0.95,
+                "interval": [
+                  3.6958416578455473e-06,
+                  0.00011023559095328574
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              },
+              "misses": {
+                "count": 6522,
+                "trials": 65536,
+                "fraction": 0.099517822265625,
+                "confidence": 0.95,
+                "interval": [
+                  0.09723605686665683,
+                  0.10183511636068394
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              }
+            },
+            "warped_source_nominal_receiver": {
+              "correct_admissions": {
+                "count": 3,
+                "trials": 65536,
+                "fraction": 4.57763671875e-05,
+                "confidence": 0.95,
+                "interval": [
+                  9.44028691119673e-06,
+                  0.0001337720841996877
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              },
+              "wrong_admissions": {
+                "count": 6,
+                "trials": 65536,
+                "fraction": 9.1552734375e-05,
+                "confidence": 0.95,
+                "interval": [
+                  3.359895722937365e-05,
+                  0.00019926102685990834
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              },
+              "misses": {
+                "count": 65527,
+                "trials": 65536,
+                "fraction": 0.9998626708984375,
+                "confidence": 0.95,
+                "interval": [
+                  0.9997393226679373,
+                  0.9999372025287947
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              }
+            },
+            "warped_source_oracle_receiver": {
+              "correct_admissions": {
+                "count": 58946,
+                "trials": 65536,
+                "fraction": 0.899444580078125,
+                "confidence": 0.95,
+                "interval": [
+                  0.8971167436579071,
+                  0.9017369805667586
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              },
+              "wrong_admissions": {
+                "count": 0,
+                "trials": 65536,
+                "fraction": 0.0,
+                "confidence": 0.95,
+                "interval": [
+                  0.0,
+                  5.6286249336939024e-05
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              },
+              "misses": {
+                "count": 6590,
+                "trials": 65536,
+                "fraction": 0.100555419921875,
+                "confidence": 0.95,
+                "interval": [
+                  0.09826301943324142,
+                  0.102883256342093
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              }
+            }
+          },
+          {
+            "bit": 1,
+            "actual_warped_en0_db": 12.00000972909287,
+            "nominal_source_nominal_receiver": {
+              "correct_admissions": {
+                "count": 59011,
+                "trials": 65536,
+                "fraction": 0.9004364013671875,
+                "confidence": 0.95,
+                "interval": [
+                  0.8981186405579711,
+                  0.9027186375731918
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              },
+              "wrong_admissions": {
+                "count": 2,
+                "trials": 65536,
+                "fraction": 3.0517578125e-05,
+                "confidence": 0.95,
+                "interval": [
+                  3.6958416578455473e-06,
+                  0.00011023559095328574
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              },
+              "misses": {
+                "count": 6523,
+                "trials": 65536,
+                "fraction": 0.0995330810546875,
+                "confidence": 0.95,
+                "interval": [
+                  0.09725115870343289,
+                  0.10185053073773663
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              }
+            },
+            "warped_source_nominal_receiver": {
+              "correct_admissions": {
+                "count": 6,
+                "trials": 65536,
+                "fraction": 9.1552734375e-05,
+                "confidence": 0.95,
+                "interval": [
+                  3.359895722937365e-05,
+                  0.00019926102685990834
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              },
+              "wrong_admissions": {
+                "count": 2,
+                "trials": 65536,
+                "fraction": 3.0517578125e-05,
+                "confidence": 0.95,
+                "interval": [
+                  3.6958416578455473e-06,
+                  0.00011023559095328574
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              },
+              "misses": {
+                "count": 65528,
+                "trials": 65536,
+                "fraction": 0.9998779296875,
+                "confidence": 0.95,
+                "interval": [
+                  0.9997594870666198,
+                  0.9999472972774472
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              }
+            },
+            "warped_source_oracle_receiver": {
+              "correct_admissions": {
+                "count": 59002,
+                "trials": 65536,
+                "fraction": 0.900299072265625,
+                "confidence": 0.95,
+                "interval": [
+                  0.8979799122098996,
+                  0.9025827199965919
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              },
+              "wrong_admissions": {
+                "count": 0,
+                "trials": 65536,
+                "fraction": 0.0,
+                "confidence": 0.95,
+                "interval": [
+                  0.0,
+                  5.6286249336939024e-05
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              },
+              "misses": {
+                "count": 6534,
+                "trials": 65536,
+                "fraction": 0.099700927734375,
+                "confidence": 0.95,
+                "interval": [
+                  0.09741728000340807,
+                  0.10202008779010044
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "nominal_en0_db": 14.0,
+        "bits": [
+          {
+            "bit": 0,
+            "actual_warped_en0_db": 13.999977666103987,
+            "nominal_source_nominal_receiver": {
+              "correct_admissions": {
+                "count": 65302,
+                "trials": 65536,
+                "fraction": 0.996429443359375,
+                "confidence": 0.95,
+                "interval": [
+                  0.9959424379203285,
+                  0.9968716387892776
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              },
+              "wrong_admissions": {
+                "count": 1,
+                "trials": 65536,
+                "fraction": 1.52587890625e-05,
+                "confidence": 0.95,
+                "interval": [
+                  3.863190169359472e-07,
+                  8.501356601246325e-05
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              },
+              "misses": {
+                "count": 233,
+                "trials": 65536,
+                "fraction": 0.0035552978515625,
+                "confidence": 0.95,
+                "interval": [
+                  0.0031140767616282855,
+                  0.004041332362588873
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              }
+            },
+            "warped_source_nominal_receiver": {
+              "correct_admissions": {
+                "count": 3,
+                "trials": 65536,
+                "fraction": 4.57763671875e-05,
+                "confidence": 0.95,
+                "interval": [
+                  9.44028691119673e-06,
+                  0.0001337720841996877
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              },
+              "wrong_admissions": {
+                "count": 6,
+                "trials": 65536,
+                "fraction": 9.1552734375e-05,
+                "confidence": 0.95,
+                "interval": [
+                  3.359895722937365e-05,
+                  0.00019926102685990834
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              },
+              "misses": {
+                "count": 65527,
+                "trials": 65536,
+                "fraction": 0.9998626708984375,
+                "confidence": 0.95,
+                "interval": [
+                  0.9997393226679373,
+                  0.9999372025287947
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              }
+            },
+            "warped_source_oracle_receiver": {
+              "correct_admissions": {
+                "count": 65320,
+                "trials": 65536,
+                "fraction": 0.9967041015625,
+                "confidence": 0.95,
+                "interval": [
+                  0.9962349059939751,
+                  0.997128423567568
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              },
+              "wrong_admissions": {
+                "count": 0,
+                "trials": 65536,
+                "fraction": 0.0,
+                "confidence": 0.95,
+                "interval": [
+                  0.0,
+                  5.6286249336939024e-05
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              },
+              "misses": {
+                "count": 216,
+                "trials": 65536,
+                "fraction": 0.0032958984375,
+                "confidence": 0.95,
+                "interval": [
+                  0.002871576432431918,
+                  0.0037650940060248456
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              }
+            }
+          },
+          {
+            "bit": 1,
+            "actual_warped_en0_db": 14.00000972909287,
+            "nominal_source_nominal_receiver": {
+              "correct_admissions": {
+                "count": 65320,
+                "trials": 65536,
+                "fraction": 0.9967041015625,
+                "confidence": 0.95,
+                "interval": [
+                  0.9962349059939751,
+                  0.997128423567568
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              },
+              "wrong_admissions": {
+                "count": 0,
+                "trials": 65536,
+                "fraction": 0.0,
+                "confidence": 0.95,
+                "interval": [
+                  0.0,
+                  5.6286249336939024e-05
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              },
+              "misses": {
+                "count": 216,
+                "trials": 65536,
+                "fraction": 0.0032958984375,
+                "confidence": 0.95,
+                "interval": [
+                  0.002871576432431918,
+                  0.0037650940060248456
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              }
+            },
+            "warped_source_nominal_receiver": {
+              "correct_admissions": {
+                "count": 6,
+                "trials": 65536,
+                "fraction": 9.1552734375e-05,
+                "confidence": 0.95,
+                "interval": [
+                  3.359895722937365e-05,
+                  0.00019926102685990834
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              },
+              "wrong_admissions": {
+                "count": 2,
+                "trials": 65536,
+                "fraction": 3.0517578125e-05,
+                "confidence": 0.95,
+                "interval": [
+                  3.6958416578455473e-06,
+                  0.00011023559095328574
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              },
+              "misses": {
+                "count": 65528,
+                "trials": 65536,
+                "fraction": 0.9998779296875,
+                "confidence": 0.95,
+                "interval": [
+                  0.9997594870666198,
+                  0.9999472972774472
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              }
+            },
+            "warped_source_oracle_receiver": {
+              "correct_admissions": {
+                "count": 65337,
+                "trials": 65536,
+                "fraction": 0.9969635009765625,
+                "confidence": 0.95,
+                "interval": [
+                  0.9965118258410749,
+                  0.9973702377879691
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              },
+              "wrong_admissions": {
+                "count": 0,
+                "trials": 65536,
+                "fraction": 0.0,
+                "confidence": 0.95,
+                "interval": [
+                  0.0,
+                  5.6286249336939024e-05
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              },
+              "misses": {
+                "count": 199,
+                "trials": 65536,
+                "fraction": 0.0030364990234375,
+                "confidence": 0.95,
+                "interval": [
+                  0.002629762212030951,
+                  0.003488174158925054
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "nominal_en0_db": 16.0,
+        "bits": [
+          {
+            "bit": 0,
+            "actual_warped_en0_db": 15.999977666103987,
+            "nominal_source_nominal_receiver": {
+              "correct_admissions": {
+                "count": 65536,
+                "trials": 65536,
+                "fraction": 1.0,
+                "confidence": 0.95,
+                "interval": [
+                  0.999943713750663,
+                  1.0
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              },
+              "wrong_admissions": {
+                "count": 0,
+                "trials": 65536,
+                "fraction": 0.0,
+                "confidence": 0.95,
+                "interval": [
+                  0.0,
+                  5.6286249336939024e-05
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              },
+              "misses": {
+                "count": 0,
+                "trials": 65536,
+                "fraction": 0.0,
+                "confidence": 0.95,
+                "interval": [
+                  0.0,
+                  5.6286249336939024e-05
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              }
+            },
+            "warped_source_nominal_receiver": {
+              "correct_admissions": {
+                "count": 3,
+                "trials": 65536,
+                "fraction": 4.57763671875e-05,
+                "confidence": 0.95,
+                "interval": [
+                  9.44028691119673e-06,
+                  0.0001337720841996877
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              },
+              "wrong_admissions": {
+                "count": 6,
+                "trials": 65536,
+                "fraction": 9.1552734375e-05,
+                "confidence": 0.95,
+                "interval": [
+                  3.359895722937365e-05,
+                  0.00019926102685990834
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              },
+              "misses": {
+                "count": 65527,
+                "trials": 65536,
+                "fraction": 0.9998626708984375,
+                "confidence": 0.95,
+                "interval": [
+                  0.9997393226679373,
+                  0.9999372025287947
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              }
+            },
+            "warped_source_oracle_receiver": {
+              "correct_admissions": {
+                "count": 65536,
+                "trials": 65536,
+                "fraction": 1.0,
+                "confidence": 0.95,
+                "interval": [
+                  0.999943713750663,
+                  1.0
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              },
+              "wrong_admissions": {
+                "count": 0,
+                "trials": 65536,
+                "fraction": 0.0,
+                "confidence": 0.95,
+                "interval": [
+                  0.0,
+                  5.6286249336939024e-05
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              },
+              "misses": {
+                "count": 0,
+                "trials": 65536,
+                "fraction": 0.0,
+                "confidence": 0.95,
+                "interval": [
+                  0.0,
+                  5.6286249336939024e-05
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              }
+            }
+          },
+          {
+            "bit": 1,
+            "actual_warped_en0_db": 16.00000972909287,
+            "nominal_source_nominal_receiver": {
+              "correct_admissions": {
+                "count": 65535,
+                "trials": 65536,
+                "fraction": 0.9999847412109375,
+                "confidence": 0.95,
+                "interval": [
+                  0.9999149864339876,
+                  0.9999996136809831
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              },
+              "wrong_admissions": {
+                "count": 0,
+                "trials": 65536,
+                "fraction": 0.0,
+                "confidence": 0.95,
+                "interval": [
+                  0.0,
+                  5.6286249336939024e-05
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              },
+              "misses": {
+                "count": 1,
+                "trials": 65536,
+                "fraction": 1.52587890625e-05,
+                "confidence": 0.95,
+                "interval": [
+                  3.863190169359472e-07,
+                  8.501356601246325e-05
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              }
+            },
+            "warped_source_nominal_receiver": {
+              "correct_admissions": {
+                "count": 6,
+                "trials": 65536,
+                "fraction": 9.1552734375e-05,
+                "confidence": 0.95,
+                "interval": [
+                  3.359895722937365e-05,
+                  0.00019926102685990834
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              },
+              "wrong_admissions": {
+                "count": 2,
+                "trials": 65536,
+                "fraction": 3.0517578125e-05,
+                "confidence": 0.95,
+                "interval": [
+                  3.6958416578455473e-06,
+                  0.00011023559095328574
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              },
+              "misses": {
+                "count": 65528,
+                "trials": 65536,
+                "fraction": 0.9998779296875,
+                "confidence": 0.95,
+                "interval": [
+                  0.9997594870666198,
+                  0.9999472972774472
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              }
+            },
+            "warped_source_oracle_receiver": {
+              "correct_admissions": {
+                "count": 65536,
+                "trials": 65536,
+                "fraction": 1.0,
+                "confidence": 0.95,
+                "interval": [
+                  0.999943713750663,
+                  1.0
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              },
+              "wrong_admissions": {
+                "count": 0,
+                "trials": 65536,
+                "fraction": 0.0,
+                "confidence": 0.95,
+                "interval": [
+                  0.0,
+                  5.6286249336939024e-05
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              },
+              "misses": {
+                "count": 0,
+                "trials": 65536,
+                "fraction": 0.0,
+                "confidence": 0.95,
+                "interval": [
+                  0.0,
+                  5.6286249336939024e-05
+                ],
+                "interval_scope": "marginal exact binomial, two-sided"
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "scope": "Flat AWGN, known noise variance, fixed alignment, constant unknown complex gain; source-window diagnostic only. Oracle receives the private warp. No channel, search, operational continuous null or maintained-receiver qualification.",
+    "energy_policy": "Fixed amplitude chosen from each nominal source window, not the complete message bit; warped energy is not renormalized.",
+    "dependence": "Common correlated noise used for all cases, levels and both bits; confidence intervals are marginal, not independent or simultaneous."
+  }
+}

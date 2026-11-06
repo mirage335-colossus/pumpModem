@@ -8,10 +8,36 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'tools'))
 from triad_continuous import (carrier_phase, endpoint_decision, read_exact,
-                              receiver_noise_variance, validate_stream_identity)
+                              receiver_noise_variance, validate_stream_identity, BoundedClockControl)
+from triad_control_clock import ControlClock, ClockReading
 
 
 class ContinuousTests(unittest.TestCase):
+    def test_clock_follow_uses_original_envelope_without_changing_receiver_bank(self):
+        now = [10000000000]
+        offset = [1700000000000000000]
+        clock = ControlClock(reference_now=lambda: now[0], reader=lambda:
+            ClockReading(now[0]+offset[0], now[0], now[0]))
+        control = BoundedClockControl(clock)
+        class Source:
+            targets = []
+            def clock_target(self, target):
+                self.targets.append(target)
+                return {'accepted': True}
+        source = Source()
+        def update(delta):
+            now[0] += 1000000000
+            offset[0] += delta
+            control.poll(source)
+        update(2_000_000_000)
+        update(1_000_000_000)  # individually small, but outside original envelope
+        update(-2_000_000_000)
+        update(-2_000_000_000)
+        update(10)  # paired-read jitter is not another waveform correction
+        self.assertEqual(source.targets, [2., 1., -1.])
+        self.assertEqual(control.report['outside_envelope'], 1)
+        self.assertEqual(control.origin.offset_ns, 1700000000000000000)
+
     def test_live_stream_requires_matching_explicit_pattern_identity(self):
         for revision in ('legacy-v1', 'independent-apsk-v2'):
             identity = dict(pattern_revision=revision, added_amplitude_depth=.25)

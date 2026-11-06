@@ -92,6 +92,46 @@ class Source:
 
 @unittest.skipIf(BINARY is None, 'native binary path required')
 class PullSourceTests(unittest.TestCase):
+    def test_clock_follow_is_explicit_bounded_and_retains_nominal_basis(self):
+        args = ['--stream-kind', 'emitted', '--rate', '.0036', '--seconds', '1000000',
+                '--clock-follow-bounded']
+        with Source(args) as source:
+            d = source.descriptor
+            self.assertTrue(d['clock_follow_bounded'])
+            self.assertEqual(d['clock_follow_endpoint_padding_seconds'], 2)
+            epoch = d['epoch']
+            r = source.command('clock 2')
+            self.assertTrue(r['accepted'])
+            self.assertEqual(r['offset_seconds'], 0)
+            source.next(4096)
+            r = source.command('clock -1')
+            self.assertTrue(r['accepted'])
+            self.assertGreaterEqual(r['rate_scale'], 1)
+            self.assertFalse(source.command('clock 2.1')['accepted'])
+            self.assertEqual(d['epoch'], epoch)
+            # An independently started RX gets the public calendar and nominal
+            # templates, without being told the private TX correction trace.
+            sample = d['data_offset_samples'] + 100000 * 6000
+            candidates = [(0, 0, d['data_offset_samples']/6000, 0, 0, 0, 0)]
+            _, rows = source.basis(sample, 8, candidates)
+            self.assertEqual(len(rows[0]), 8)
+            with Source(args) as receiver:
+                for field in ('epoch', 'total_samples', 'data_offset_samples', 'source_samples'):
+                    self.assertEqual(receiver.descriptor[field], d[field])
+                _, independent = receiver.basis(sample, 8, candidates)
+                self.assertEqual(rows, independent)
+        with Source(['--stream-kind', 'emitted']) as source:
+            self.assertFalse(source.command('clock 1')['accepted'])
+
+    def test_clock_follow_rejects_unqualified_regimes(self):
+        for extra in ([], ['--helper','on'], ['--fhss','on'], ['--burst-wait-tiles','3']):
+            args = [] if not extra else ['--rate','.0036','--seconds','1000000',*extra]
+            p = subprocess.run([str(BINARY), *COMMON, '--stream-server', '--stream-kind','emitted',
+                '--clock-follow-bounded', *args], input=b'quit\n', capture_output=True, timeout=10)
+            self.assertNotEqual(p.returncode, 0)
+            self.assertTrue(b'bounded clock following requires' in p.stderr or
+                            b'center-aligned FHSS requires' in p.stderr)
+
     def test_pattern_identity_propagates_and_unknown_choices_fail(self):
         actual = []
         for revision, depth in (('independent-apsk-v2', .25), ('legacy-v1', .4)):

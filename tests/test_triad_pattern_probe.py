@@ -57,6 +57,18 @@ class PatternProbeTests(unittest.TestCase):
                     self.assertGreater(min(abs(z) for z in value), 0)
             self.assertNotEqual(x[:n], x[n:])
 
+    def test_zero_clock_update_preserves_exact_samples_at_long_coordinates(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            parent = Path(tmp)
+            args = ['--rate', '.006', '--added', '1', '--sample-rate', '1',
+                    '--sample-rate-denominator', '8', '--seconds', '100000000',
+                    '--window-seconds', '160', '--start-seconds', '50000000']
+            self.probe(parent/'plain', *args)
+            self.probe(parent/'zero', *args, '--clock-correction-seconds', '0',
+                       '--clock-correction-at-seconds', '1')
+            for name in ('composite.c128', 'carrier_envelopes.c128', 'coefficients.c128', 'envelope.f64'):
+                self.assertEqual((parent/'plain'/name).read_bytes(), (parent/'zero'/name).read_bytes())
+
     def test_window_replay_is_independent_of_export_chunk_and_revision_is_explicit(self):
         with tempfile.TemporaryDirectory() as tmp:
             parent = Path(tmp)
